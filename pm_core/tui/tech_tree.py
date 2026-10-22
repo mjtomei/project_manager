@@ -20,6 +20,7 @@ from rich.text import Text
 from rich.cells import cell_len
 from rich.console import RenderableType
 
+from pm_core.autostart_state import pending_spec_phase
 from pm_core.tui import item_message, perf
 from pm_core.tui.tree_layout import compute_tree_layout, SORT_FIELDS, SORT_FIELD_KEYS
 
@@ -611,20 +612,37 @@ class PRNode(Widget):
                     marker_offset = 2 + len(status_text) + 1
                     loop_style = "bold cyan"
                     status_text += f" {spinner}"
+        spec_marker = None
+        if pr.get("spec_pending"):
+            # A spec awaiting approval (V) pauses the step: it outranks the
+            # loop / idle markers — a running QA planner's spinner would
+            # otherwise hide that QA is waiting on it.  "S impl" / "S qa"
+            # names the step that waits.
+            status_text = f"{icon} {status}"
+            phase = pending_spec_phase(pr)
+            spec_marker = f"S {phase}" if phase in ("impl", "qa") else "S"
         ret_offset, ret_style = -1, ""
         if status in ("in_progress", "in_review", "qa"):
             # Sent back by sign-off: show the return verdict until the
             # PR's next sign-off decision (same marker as `pm pr list`),
-            # alongside the rework's own spinner / loop marker.
+            # alongside the rework's own spinner / loop / spec marker.
             ret_verdict = display_signoff_verdict(pr)
             if ret_verdict in SIGNOFF_VERDICT_ICONS:
                 ret_offset = 2 + len(status_text) + 1
                 ret_style = SIGNOFF_VERDICT_STYLES.get(ret_verdict, "bold blue")
                 status_text += f" {SIGNOFF_VERDICT_ICONS[ret_verdict]}"
-        if pr.get("spec_pending") and not loop_marker:
+        if spec_marker:
             marker_offset = 2 + len(status_text) + 1
             loop_style = "bold yellow"
-            status_text += " S"
+            status_text += f" {spec_marker}"
+        if cell_len(status_text) > NODE_W - 4:
+            # Too wide for the box (e.g. "◎ in_progress ⇤ S impl"): drop the
+            # status icon, which repeats the status word, rather than push
+            # the right border off the box.
+            cut = len(icon) + 1
+            status_text = status_text[cut:]
+            marker_offset -= cut if marker_offset >= 0 else 0
+            ret_offset -= cut if ret_offset >= 0 else 0
         machine = pr.get("agent_machine")
         if machine:
             avail = NODE_W - 4 - cell_len(status_text) - 1
@@ -668,7 +686,8 @@ class PRNode(Widget):
                 style_grid[1][target_dx] = f"bold magenta {bg_style}".strip()
 
         if marker_offset >= 0 and loop_style:
-            marker_len = len(loop_marker) if loop_marker else 1
+            marker_len = (len(spec_marker) if spec_marker
+                          else len(loop_marker) if loop_marker else 1)
             for dx in range(marker_offset, marker_offset + marker_len):
                 if 0 <= dx < NODE_W:
                     style_grid[3][dx] = f"{loop_style} {bg_style}".strip()
@@ -756,6 +775,7 @@ class TechTree(Widget):
         self._node_widgets: dict[str, PRNode] = {}
         self._label_widgets: dict[str, PlanLabel] = {}
         self._plan_groups: list[PlanGroup] = []      # for viewport culling
+        self._retiring: set[Widget] = set()           # replaced, removal pending
         self._neighbors: dict[str, dict[str, str | None]] = {}
         self._layout_sig: tuple | None = None
         self._cached_layout = None
@@ -887,6 +907,7 @@ class TechTree(Widget):
                 pr.get("plan"),
                 pr.get("gh_pr_number"),
                 bool(pr.get("spec_pending")),
+                pending_spec_phase(pr),
                 pr.get("agent_machine"),
                 bool(pr.get("workdir")),
                 (pr.get("signoff") or {}).get("verdict"),
@@ -1007,7 +1028,11 @@ class TechTree(Widget):
         if not self.is_mounted:
             return
 
-        self.remove_children()
+        # The old widgets stay on screen until their replacements are mounted
+        # (see _mount_replacing); removing them first painted an empty tree
+        # for a frame on every rebuild, e.g. each auto-start target change.
+        old_children = [c for c in self.children if c not in self._retiring]
+        self._retiring.update(old_children)
         self._node_widgets = {}
         self._label_widgets = {}
         self._plan_groups = []
@@ -1024,7 +1049,8 @@ class TechTree(Widget):
             self.styles.width = "100%"
             self.styles.height = "100%"
             from textual.widgets import Static
-            self.mount(Static(Text(msg, style="dim")))
+            self._mount_replacing([Static(Text(msg, style="dim"))],
+                                  old_children)
             return
 
         width, height = self._content_size()
@@ -1143,9 +1169,30 @@ class TechTree(Widget):
                 self._label_widgets[virtual_id] = label
                 new_widgets.append(label)
 
-        self.mount_all(new_widgets)
+        self._mount_replacing(new_widgets, old_children)
         # Cull bands outside the viewport once the new widgets are laid out.
         self.call_after_refresh(self._cull_offscreen_bands)
+
+    def _mount_replacing(self, new_widgets: list[Widget],
+                         old_children: list[Widget]) -> None:
+        """Mount *new_widgets*, then remove *old_children* in one repaint.
+
+        Textual paints a widget only once its Mount has run, but hides a
+        pruned one at once, so the swap waits for the mount with repaints
+        suspended: the screen goes straight from the old tree to the new one.
+        """
+        await_mount = self.mount_all(new_widgets)
+
+        async def swap() -> None:
+            try:
+                with self.app.batch_update():
+                    await await_mount
+                    if old_children:
+                        await self.remove_children(old_children)
+            finally:
+                self._retiring.difference_update(old_children)
+
+        self.call_next(swap)
 
     def _cull_offscreen_bands(self, *args) -> None:
         """Show only plan bands intersecting the viewport (+ a margin).

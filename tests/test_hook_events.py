@@ -16,6 +16,8 @@ import pytest
 def tmp_hooks_home(tmp_path, monkeypatch):
     """Point HOME at a tmp dir so ~/.pm/hooks and ~/.claude isolate per test."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    # Inside a pm container PM_HOST_HOME overrides HOME for the installer.
+    monkeypatch.delenv("PM_HOST_HOME", raising=False)
     # Some code uses Path.home() which reads $HOME on POSIX
     yield tmp_path
 

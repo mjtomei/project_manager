@@ -18,7 +18,7 @@ from textual.widgets import Static
 from pm_core.pane_idle import PaneIdleTracker
 from pm_core.tui.tech_tree import (
     TechTree, PRNode, PlanGroup, EdgeCanvas,
-    compute_neighbors, _node_y, NODE_H, SORT_FIELD_KEYS,
+    compute_neighbors, _node_y, NODE_H, NODE_W, SORT_FIELD_KEYS,
 )
 
 
@@ -286,6 +286,28 @@ async def test_auto_start_toggle_rebuilds_for_marker():
         await pilot.pause()
         after = [id(n) for n in app.query(PRNode)]
         assert before != after  # rebuilt so the ◎ marker can render
+
+
+@async_test
+async def test_rebuild_keeps_old_nodes_until_new_ones_mount():
+    # A rebuild (here: an auto-start target change) must never leave a frame
+    # with no paintable nodes: the old nodes stay until their replacements
+    # have mounted, then go in the same repaint, leaving one node per PR.
+    app = _TreeApp([_pr("pr-a"), _pr("pr-b", depends_on=["pr-a"])])
+    async with app.run_test(size=(120, 40)) as pilot:
+        tree = app.query_one(TechTree)
+        before = {id(n) for n in app.query(PRNode)}
+        app._auto_start = True
+        app._auto_start_targets = {"pr-b": {}}
+        tree.update_prs([_pr("pr-a"), _pr("pr-b", depends_on=["pr-a"])])
+        shown = [n for n in app.query(PRNode)
+                 if n.is_mounted and not n._pruning]
+        assert {id(n) for n in shown} == before
+        await pilot.pause()
+        after = list(app.query(PRNode))
+        assert sorted(n.pr_id for n in after) == ["pr-a", "pr-b"]
+        assert not before & {id(n) for n in after}
+        assert not tree._retiring
 
 
 def test_recompute_before_mount_does_not_mark_built():
@@ -582,3 +604,41 @@ async def test_return_marker_shown_alongside_running_rework_markers():
         await pilot.pause()
         row = _status_row(app, "pr-a")
         assert "⟳2" in row and "⇤" in row
+
+
+def _style_at(text, offset):
+    return " ".join(str(s.style) for s in text.spans
+                    if s.start <= offset < s.end)
+
+
+@async_test
+async def test_return_marker_kept_next_to_pending_spec_marker():
+    """A spec held for approval resets the loop/idle markers, but a PR sent
+    back by sign-off keeps its return icon beside ``S impl`` / ``S qa``,
+    each in its own style."""
+    impl_ret = {"verdict": "SIGNOFF_IMPL", "hop": "impl", "reviewed_head": "a"}
+    qa_ret = {"verdict": "SIGNOFF_REQA", "hop": "qa", "reviewed_head": "b"}
+    prs = [
+        _pr("pr-a", status="in_progress", workdir="/w",
+            signoff_return=impl_ret, spec_pending={"phase": "impl"}),
+        _pr("pr-b", status="qa", workdir="/w",
+            signoff_return=qa_ret, spec_pending={"phase": "qa"}),
+    ]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(160, 40)) as pilot:
+        await pilot.pause()
+        for pid, icon, marker, icon_style in (
+                ("pr-a", "⇤", "S impl", "bold yellow"),
+                ("pr-b", "↻", "S qa", "bold magenta")):
+            node = next(n for n in app.query(PRNode) if n.pr_id == pid)
+            text = node.render()
+            row = text.plain.splitlines()[3]
+            assert f"{icon} {marker}" in row, row
+            # "◎ in_progress ⇤ S impl" is wider than the box: the row
+            # still ends in the box's right border.
+            assert len(row) == NODE_W and row[-1] in "│║", row
+            base = sum(len(l) + 1 for l in text.plain.splitlines()[:3])
+            col = row.index(f"{icon} {marker}")
+            assert icon_style in _style_at(text, base + col)
+            for k in range(len(marker)):
+                assert "bold yellow" in _style_at(text, base + col + 2 + k)

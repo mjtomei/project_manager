@@ -373,6 +373,18 @@ def locked_update(
     return data
 
 
+@contextmanager
+def locked_read(root: Path, timeout: float = LOCK_TIMEOUT_SECONDS):
+    """Hold the project.yaml lock and yield fresh data without saving.
+
+    For a check-then-act that must not interleave with writers (e.g. only
+    notify an agent while an approval still stands).  Keep the work short:
+    every other writer waits on the lock meanwhile.
+    """
+    with _lock(root, timeout):
+        yield load(root)
+
+
 class WriteQueue:
     """Coalescing write queue for project.yaml mutations.
 

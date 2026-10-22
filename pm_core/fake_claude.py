@@ -439,7 +439,16 @@ def _hold_open(hold: float | None, session_id: str | None = None) -> None:
                 except (KeyboardInterrupt, OSError):
                     pass
                 return
-            if ready:
+            if not ready:
+                continue
+            # Input is the user's next turn (e.g. a spec-approval notice
+            # typed into the pane): a real session keeps running, so consume
+            # it and stay open; only EOF (the pane closing) ends the session.
+            try:
+                data = os.read(sys.stdin.fileno(), 4096)
+            except (OSError, ValueError):
+                return
+            if not data:
                 return
 
 

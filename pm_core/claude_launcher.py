@@ -761,6 +761,30 @@ def _claude_project_dir(cwd: str) -> Path:
     return Path.home() / ".claude" / "projects" / mangled
 
 
+def _write_prompt_file(prompt: str, session_id: str | None,
+                       cwd: str | None, write_dir: str | None) -> Path | None:
+    """Write *prompt* to ``<host dir>/pm/prompts/pm_prompt_<id>.txt``.
+
+    The file lands under *write_dir* (or *cwd*); the returned path is the
+    one the launched command sees, rooted at *cwd* when given.  Returns
+    None when there is no usable host directory or the write fails.
+    """
+    host_dir = Path(write_dir) if write_dir else (Path(cwd) if cwd else None)
+    if not host_dir:
+        return None
+    try:
+        if not host_dir.is_dir():
+            return None
+        prompts_subdir = host_dir / "pm" / "prompts"
+        prompts_subdir.mkdir(parents=True, exist_ok=True)
+        fname = f"pm_prompt_{session_id or uuid.uuid4()}.txt"
+        (prompts_subdir / fname).write_text(prompt)
+    except Exception:
+        return None
+    ref_base = Path(cwd) if cwd else host_dir
+    return ref_base / "pm" / "prompts" / fname
+
+
 def build_claude_shell_cmd(
     prompt: str | None = None,
     session_id: str | None = None,
@@ -842,6 +866,13 @@ def build_claude_shell_cmd(
                                       session_type=session_type,
                                       session_tag=session_tag)
         cmd = env_prefix + shlex.quote(_FAKE_CLAUDE_BIN) + " " + " ".join(shlex.quote(a) for a in fake_args)
+        if prompt and not resume:
+            # The fake ignores the prompt, but write the same prompt file a
+            # real launch would (and remove it when the fake exits) so tests
+            # and QA can read what the session was launched with.
+            _prompt_ref = _write_prompt_file(prompt, session_id, cwd, write_dir)
+            if _prompt_ref is not None:
+                cmd += f"; rm -f {shlex.quote(str(_prompt_ref))}"
         log_shell_command(cmd, prefix="claude")
         return cmd
     else:
@@ -884,24 +915,12 @@ def build_claude_shell_cmd(
         # cleanup ``rm -f`` at the end of the shell pipeline doesn't always
         # run (claude killed by container teardown skips trailing commands),
         # so leftovers accumulate.
-        _host_dir = Path(write_dir) if write_dir else (Path(cwd) if cwd else None)
-        _prompt_written = False
-        if _host_dir:
-            try:
-                if _host_dir.is_dir():
-                    _prompts_subdir = _host_dir / "pm" / "prompts"
-                    _prompts_subdir.mkdir(parents=True, exist_ok=True)
-                    _fname = f"pm_prompt_{session_id or uuid.uuid4()}.txt"
-                    (_prompts_subdir / _fname).write_text(prompt)
-                    _ref_base = Path(cwd) if cwd else _host_dir
-                    _prompt_ref = _ref_base / "pm" / "prompts" / _fname
-                    # Delete the temp file after claude reads it via $(cat ...).
-                    # The semicolon ensures cleanup runs whether claude succeeds or fails.
-                    cmd += f' "$(cat {_prompt_ref})"; rm -f {shlex.quote(str(_prompt_ref))}'
-                    _prompt_written = True
-            except Exception:
-                pass
-        if not _prompt_written:
+        _prompt_ref = _write_prompt_file(prompt, session_id, cwd, write_dir)
+        if _prompt_ref is not None:
+            # Delete the temp file after claude reads it via $(cat ...).
+            # The semicolon ensures cleanup runs whether claude succeeds or fails.
+            cmd += f' "$(cat {_prompt_ref})"; rm -f {shlex.quote(str(_prompt_ref))}'
+        else:
             escaped = prompt.replace("'", "'\\''")
             cmd += f" '{escaped}'"
 

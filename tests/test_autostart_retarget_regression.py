@@ -77,3 +77,68 @@ def test_second_O_keeps_first_pr_advancing(tmp_path):
     # a throwaway Claude session.
     assert all("--no-window" in c for c in cmds)
     assert app._stop_before_merge == {"pr-a", "pr-b"}
+
+
+class _IdleTracker:
+    """The real tracker's idle edge: ``became_idle`` fires once per idle."""
+
+    def __init__(self, idle_keys):
+        self.idle = set(idle_keys)
+        self.notified = set()
+
+    def is_tracked(self, key):
+        return True
+
+    def is_gone(self, key):
+        return False
+
+    def poll(self, key):
+        return key in self.idle
+
+    def became_idle(self, key):
+        if key in self.idle and key not in self.notified:
+            self.notified.add(key)
+            return True
+        return False
+
+    def tracked_keys(self):
+        return []
+
+
+def test_impl_idle_while_out_of_scope_advances_once_back_in_scope(tmp_path):
+    """Target removed while its prerequisite's impl goes idle, then re-added.
+
+    Pre-fix the poll consumed the one-shot idle edge while the PR was out
+    of scope and ``_auto_review_idle_prs`` dropped it, so after the re-add
+    the PR sat at "impl idle; review transition pending" forever.
+    """
+    prs = [{"id": "pr-p", "status": "in_progress", "depends_on": [],
+            "workdir": "/w/p"},
+           {"id": "pr-t", "status": "pending", "depends_on": ["pr-p"]}]
+    app = _App(prs, tmp_path)
+    app._session_name = "s"
+    app._pending_merge_prs = set()
+    app._pane_idle_tracker = _IdleTracker({"pr-p"})
+    auto_start.add_targets(app, ["pr-t"])
+    auto_start.remove_targets(app, ["pr-t"])
+
+    reviewed = []
+
+    def poll():
+        with patch.object(review_loop_ui, "_find_impl_pane",
+                          return_value="%1"), \
+             patch.object(review_loop_ui, "_prune_untracked_trust"), \
+             patch.object(auto_start, "hold_spec_if_due"), \
+             patch.object(review_loop_ui, "_auto_review_idle_prs",
+                          lambda _app, idle: reviewed.extend(
+                              p for p, _ in idle)):
+            review_loop_ui._poll_impl_idle(app)
+
+    poll()  # pr-p's impl goes idle with no target needing it
+    assert reviewed == []
+
+    auto_start.add_targets(app, ["pr-t"])
+    poll()
+    assert reviewed == ["pr-p"]
+    poll()  # still one transition per idle
+    assert reviewed == ["pr-p"]

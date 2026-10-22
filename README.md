@@ -251,6 +251,7 @@ merges. With `skip_qa`, sign-off follows the review PASS.
 pm autostart add pr-abc123 pr-def456   # add targets (default: stop before merge)
 pm autostart add 42 --auto-merge       # merge automatically (sign-off gate still applies)
 pm autostart add pr-final --wait-for-merge  # whole chain, every merge manual
+pm autostart add pr-final --review-specs    # approve every impl and QA spec first
 pm autostart remove pr-abc123          # stop scheduling it; running windows are kept
 pm autostart status --json             # what every target and dependency is doing
 ```
@@ -279,6 +280,25 @@ policy. Removing the wait target, or re-adding it with `--auto-merge` /
 `released merge hold: …`). Re-adding without a flag keeps the policy; giving
 two policy flags is rejected without changing anything. The policy survives a
 merge-triggered TUI restart.
+
+To approve each spec before the chain continues, add `--review-specs` (it
+composes with any merge policy, e.g.
+`pm autostart add pr-final --review-specs --wait-for-merge`). The target and
+every transitive prerequisite are paused twice. The first pause is after the
+implementation spec, before implementation work counts as done or a pending
+PR with an existing spec starts. The second is after the QA spec, before any
+QA scenario launches. Approve or edit a waiting spec with `V` in the TUI or
+`pm pr spec-approve <pr>`. Emptying the spec there rejects it: the spec is
+regenerated and stays paused. Approval tells the waiting session to continue.
+The tree marks a waiting PR `S impl` / `S qa`, the PR Actions popup tags the
+waiting step `[spec review]`, and `pm autostart status` (text and `--json`)
+and the `a` popup give the spec file and the approval command. Approval is per
+phase, so a QA re-run or a sign-off bounce does not ask again, and phases that
+already finished are not revisited. A shared prerequisite needs review if any
+active target asks for it. `--no-review-specs` or removing the target turns
+review off, but a spec already waiting still needs approval. The global
+`spec-mode` and per-PR `review_spec` settings are never changed; an auto-started
+PR that is already in review mode through them gets the same pauses.
 
 Press `a` in the TUI for a live runs popup (same data as `pm autostart status`):
 phase, running/waiting/paused/failed state with a reason, review iteration or QA

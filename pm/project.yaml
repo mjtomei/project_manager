@@ -13023,11 +13023,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-01T21:55:42.232512+00:00'
-  updated_at: '2026-05-01T21:55:42.232512+00:00'
+  updated_at: '2026-10-21T17:00:56.885557+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-12b594c
+    text: 'QA pr-3ae2fc3 S9 (2026-10-21): variant inside one TUI. Auto-start launches
+      P (dep of the only target T), then `pm autostart remove T` before the idle tracker
+      registers P (~4 s), then re-add T. _disable drops the run id, so re-enable creates
+      a new autostart-* run dir with no impl-P.jsonl symlink (pm pr start --background
+      no-ops on the live window). P is never tracked: status says "implementing" forever
+      and P never reaches review (capture in /pm-captures/scenarios/9/offon-orphan
+      on pr-3ae2fc3). Fix idea: on register ValueError, fall back to claude_launcher.pane_transcript_path(pane,
+      workdir), as _watch_untracked_trust already does. The tracked same-run case
+      (remove/re-add while another target keeps auto-start ON) was fixed in 76bc4ba3.'
+    created_at: '2026-10-21T17:00:56Z'
+    last_edited: '2026-10-21T17:00:56Z'
 - id: pr-10fd776
   plan: plan-ambient
   title: TTS audio surface — pm tts (folded in from plan-ff4f1a7)
@@ -28328,7 +28340,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:42.844845+00:00'
-  updated_at: '2026-10-13T07:18:49.936939+00:00'
+  updated_at: '2026-10-21T20:00:21.533400+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -28341,6 +28353,15 @@ prs:
       it.'
     created_at: '2026-10-13T07:18:49Z'
     last_edited: '2026-10-13T07:18:49Z'
+  - id: note-f9194e8
+    text: 'Repro from pr-3ae2fc3 QA S21 (2026-10-21): PRs added mid-session to an
+      auto-start closure (local backend) hit "PR X is not committed on master yet.
+      Run pm push" in pm pr start; after pm push + merge the run stayed "queued —
+      ready; starts on next scheduler pass" for 4+ min with no further pass (project.yaml
+      unchanged by the merge). Removing and re-adding the targets started them at
+      once.'
+    created_at: '2026-10-21T20:00:21Z'
+    last_edited: '2026-10-21T20:00:21Z'
 - id: pr-f094946
   plan: bugs
   title: 'Bug: auto-started QA loop selects its new window, pulling attached clients
@@ -30367,7 +30388,396 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T14:05:49.183704+00:00'
-  updated_at: '2026-10-21T14:05:49.183704+00:00'
+  updated_at: '2026-10-22T16:30:25.142196+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-1cd73fc
+    text: 'User request (added after the description): the PR Actions popup (prefix+P
+      picker, cli/session.py _build_picker_lines) must show a spec-review indicator
+      next to the step waiting on review — start row for a pending impl spec, qa row
+      for a pending QA spec.'
+    created_at: '2026-10-21T14:21:00Z'
+    last_edited: '2026-10-21T14:21:00Z'
+  - id: note-565cd44
+    text: 'QA S6 (concurrency): stale TUI log line fixed in 0b295cf6. Approving a
+      mid-impl spec now logs "<id> spec approved — continuing". QA spec text says
+      the re-add with --no-review-specs prints "unchanged:", but the impl prints "options_changed:"
+      as the design spec defines. status --json has no "ok": true key (pre-existing
+      schema). Use `pm tui restart --breadcrumb` (not Ctrl+R) to keep targets across
+      a restart.'
+    created_at: '2026-10-21T15:27:53Z'
+    last_edited: '2026-10-21T15:27:53Z'
+  - id: note-d18cf0c
+    text: 'QA S2: fixed e0ddd6b6 (approved local spec was shadowed by the fresh clone
+      committed copy on pm pr start → seed_workdir_specs) and 8260d774 (pm pr spec
+      --regenerate never refreshed the TUI, so an in_progress review-specs PR was
+      not re-held until manual reload). Filed pr-2935ce2: notify send_keys lost when
+      the agent pane is in copy/view mode.'
+    created_at: '2026-10-21T15:40:23Z'
+    last_edited: '2026-10-21T15:40:23Z'
+  - id: note-7c0b760
+    text: 'QA S5: picker "No PR windows open." for a windowless impl-spec pause fixed
+      in 2dd1cba3 (_picker_nav_pr_ids). For re-QA specs: the interactive Scenario
+      0 window also consumes the fake qa_scenario cursor, so use ["NEEDS_WORK","NEEDS_WORK","PASS"]
+      for one NEEDS_WORK run; give each throwaway project a unique PR title (runtime_state
+      is keyed by PR id only, filed pr-6176ec6).'
+    created_at: '2026-10-21T15:41:21Z'
+    last_edited: '2026-10-21T15:41:21Z'
+  - id: note-0590fe8
+    text: 'S3 refiner: CLI `pm autostart add Y --review-specs --no-review-specs` is
+      not rejected (click boolean flag pair = last wins -> Y added without review-specs);
+      only the TUI command-bar handler returns conflicting_flags. R4 needs a CLI-side
+      check (e.g. separate --review-specs/--no-review-specs is_flag options + conflicting_flags
+      _Fail). Auto-start targets survive restart only via the breadcrumb (`pm tui
+      restart --breadcrumb` / merge restart); plain Ctrl+R or session relaunch starts
+      auto-start OFF by design.'
+    created_at: '2026-10-21T15:14:49Z'
+    last_edited: '2026-10-21T15:14:49Z'
+  - id: note-71de1af
+    text: 'QA S3 (a0622d82): CLI `pm autostart add X --review-specs --no-review-specs`
+      now fails with conflicting_flags like the command bar (was: click flag pair,
+      last wins). Incidental test-infra fix 94e75297: fake-claude held sessions exited
+      on ANY typed input, so `pm pr spec-approve` notifying the waiting impl pane
+      killed the fake and auto-start relaunched a fresh impl session; now input is
+      consumed and only EOF exits. Recorder gotcha: name recorder grouped sessions
+      $S~N; a foreign grouped name hijacks the TUI pidfile after restart (filed as
+      bug).'
+    created_at: '2026-10-21T15:43:02Z'
+    last_edited: '2026-10-21T15:43:02Z'
+  - id: note-acd933e
+    text: 'QA S11 (concurrency): fixed 48dc0e55 — racing pm pr spec-approve with pm
+      pr spec --regenerate left P3 re-held while its pane said "approved" (and a reverse
+      order could record approval of unseen text). Now approve_spec records only the
+      pending record+text the reviewer saw, generate_spec writes under the lock and
+      an approval landing mid-regeneration wins (regenerate/reject exit 1 "approved
+      while it was being regenerated"), and the approval message is sent under the
+      lock only while the approval stands; a losing concurrent approver prints "No
+      pending spec review for X.". Scenario fake config {"_all":{}} idles impl in
+      ~5 s, so add "impl": {"delay": 60} to play the agent; run unit tests with /usr/bin
+      before ~/.local/bin (test_local_merge_sync fails on the git proxy).'
+    created_at: '2026-10-21T16:48:19Z'
+    last_edited: '2026-10-21T16:48:19Z'
+  - id: note-495d078
+    text: 'QA S7 (1581f2a6): end-to-end review-specs chain PASS, no edits: impl pause
+      survives 4 min idle + pm tui restart --breadcrumb (same window/pid, generated_at
+      unchanged), edited impl/QA approvals, QA spec holds scenarios past QA_PLAN_END,
+      wait-for-merge sign-off hold, g merge -> B pauses. The V spec-review pane exits
+      right after approving, so its output only shows up in a recorder cast.'
+    created_at: '2026-10-21T16:53:46Z'
+    last_edited: '2026-10-21T16:53:46Z'
+  - id: note-50e8204
+    text: 'QA S9 (76bc4ba3, incidental, pre-existing on master): _poll_impl_idle consumed
+      the one-shot idle edge for out-of-scope PRs, so a prerequisite whose impl went
+      idle while its target was removed sat at "impl idle; review transition pending"
+      forever after the re-add. The edge is now consumed only for in-scope PRs; regression
+      test is in tests/test_autostart_retarget_regression.py. The OFF→ON (new run
+      dir) variant is noted on pr-41be77d. All six S9 stories held. tests/test_local_merge_sync.py
+      fails under the container ~/.local/bin/git proxy and passes with /usr/bin/git
+      first on PATH.'
+    created_at: '2026-10-21T17:00:57Z'
+    last_edited: '2026-10-21T17:00:57Z'
+  - id: note-c3700f5
+    text: 'S10 refiner: approving an EMPTY pending QA spec (pm pr spec-approve → "Spec
+      content is empty — nothing to review.") releases the planner gate and notifies
+      the planner, but the post-planning spec check (qa_loop "QA spec missing ...
+      after planning") then ends QA INPUT_REQUIRED "QA spec was not generated during
+      planning" since get_spec treats an empty workdir qa.md as missing. Scenarios
+      do not launch against an empty spec; that is the expected non-hanging outcome.
+      Story 1 here goes through review→start_qa, so the qa-<id> planner + -s0 windows
+      DO open during the QA pause (only -s1+ are withheld), unlike S5 where the pause
+      preceded the QA launch.'
+    created_at: '2026-10-21T16:29:19Z'
+    last_edited: '2026-10-21T16:29:19Z'
+  - id: note-4986f45
+    text: 'QA S16 (9556b85b): all approve-vs-regenerate rounds (both orders), the
+      P2 double approval and the 3-loop + approve + breadcrumb-restart story held
+      live on 1f2db8f1. One fix: a prompt-mode `pm pr spec --regenerate` of a held
+      spec clears spec_pending, and the TUI reload logged "<id> spec approved — continuing"
+      (never approved) before re-holding. on_state_loaded now gets the pending phase
+      and logs "spec regenerated — not approved" unless spec_approved has it. Driver
+      gotcha: shells source ids.env at rc time, so re-source after adding PRs mid-run.'
+    created_at: '2026-10-21T18:13:08Z'
+    last_edited: '2026-10-21T18:13:08Z'
+  - id: note-f955992
+    text: 'QA S12 (9cd7a9da): full chain + default chain held on every surface. Fixed:
+      the QA spec gate during planning was checked only per 15 s planner idle-wait
+      (qa.md held 14 s late); under spec review the wait is now _POLL_INTERVAL (5
+      s). Setup gotcha: the TUI opens the V spec-review pane in the grouped client
+      session $S~1, so set EDITOR/VISUAL with tmux set-environment -g (or on $S~1),
+      not only -t $S, or sensible-editor fails and the pane closes without approving.
+      Impl hold latency is up to 5 s (every 5th poll tick), not ~1 s.'
+    created_at: '2026-10-21T18:16:07Z'
+    last_edited: '2026-10-21T18:16:07Z'
+  - id: note-ae13d01
+    text: 'S15 refiner: an empty qa.md is never held for review (get_spec treats an
+      empty file as missing, so needs_spec_approval is False and spec-approve says
+      "No pending spec review"). The empty-approval story must hold a NON-empty QA
+      spec first and only then empty the workdir qa.md before approving. skip_qa story:
+      add "signoff": {"verdicts": ["SIGNOFF_MERGE"]} so P reaches the stop-before-merge
+      hold.'
+    created_at: '2026-10-21T17:47:47Z'
+    last_edited: '2026-10-21T17:47:47Z'
+  - id: note-5066d0b
+    text: 'QA S15 PASS on 1f2db8f1, no edits: empty QA-spec approval -> INPUT_REQUIRED
+      in 1 s, no relaunch over 75 s; NEEDS_WORK re-QA (qa-<id>-s2) never re-paused;
+      skip_qa target only paused on impl and reached "stop-before-merge — press g".
+      Recording gotcha: first-time QA window select moves the attached client to qa-<id>
+      right at the QA spec pause, so press prefix 0 in the recorded client to show
+      the TUI log-bar pause line.'
+    created_at: '2026-10-21T18:04:42Z'
+    last_edited: '2026-10-21T18:04:42Z'
+  - id: note-9faf64d
+    text: 'Review i3: command-bar `pr start <id>` now adds --review-spec like s/auto-start
+      (pr_view._with_review_spec). Remaining gap: the PR Actions picker start row
+      runs `pm pr start` as a plain CLI command, so its agent gets the normal spec
+      prompt and does not wait. The gate still holds the spec (S impl) and blocks
+      the review transition until approval.'
+    created_at: '2026-10-21T18:54:34Z'
+    last_edited: '2026-10-21T18:54:34Z'
+  - id: note-f739f23
+    text: 'Review i4: filed pr-74c4182 for the picker start row / shell pm pr start
+      gap (plain spec prompt for a review-specs PR; gate still holds S impl). QA spec-approval
+      wait now uses _POLL_INTERVAL.'
+    created_at: '2026-10-21T18:59:06Z'
+    last_edited: '2026-10-21T18:59:06Z'
+  - id: note-f5b178f
+    text: 'Review i5 (incidental, pre-existing on master): tests/test_hook_events.py::test_installer_writes_standalone_receiver
+      failed inside pm containers because the tmp_hooks_home fixture set HOME but
+      left PM_HOST_HOME, which hook_install._host_home prefers; the fixture now unsets
+      it. Full suite 3314 pass.'
+    created_at: '2026-10-21T19:04:28Z'
+    last_edited: '2026-10-21T19:04:28Z'
+  - id: note-770db51
+    text: 'S18 refiner: the PR Actions picker cannot reach a pending, windowless PR
+      (_picker_nav_pr_ids lists only PRs with windows, spec pauses or the home PR),
+      so its start row cannot start R3. S18 uses a shell `pm pr start` for R3 instead,
+      which falls under the same pr-74c4182 gap. Command-bar `pr start` and shell
+      `pm pr start` pass no --transcript, so _poll_impl_idle never registers those
+      panes (register raises ValueError and the loop continues before hold_spec_if_due).
+      Their impl specs are held only on the next check_and_start pass (sync_spec_reviews),
+      and they never auto-advance to review on idle; only `s` (which passes --transcript)
+      is held per tick. S18 checks the per-PR hold latency for this.'
+    created_at: '2026-10-21T19:29:05Z'
+    last_edited: '2026-10-21T19:29:05Z'
+  - id: note-33c1595
+    text: 'QA S18 (b590cd17): command-bar `pr start` / shell `pm pr start` of a review-specs
+      closure member were never held on the impl spec their agent wrote (no --transcript
+      → _poll_impl_idle skipped them before hold_spec_if_due; R2 sat "implementing"
+      5m50s until an unrelated restart pass). The hold now runs before pane registration;
+      post-fix holds 2.9/5.1/4.9 s for s / command bar / shell. Incidental test-infra
+      809be0bf: fake-claude launches now write pm/prompts/pm_prompt_<id>.txt (removed
+      on exit) so QA can read the launch prompt. Picker without fzf has no h/l: open
+      prefix+P from the PR window to see its row.'
+    created_at: '2026-10-21T19:56:12Z'
+    last_edited: '2026-10-21T19:56:12Z'
+  - id: note-c3044d5
+    text: 'QA S21 (4aa3c398, incidental, pre-existing on master): TechTree._rebuild
+      removed every node before mounting the new ones, so each rebuild (every auto-start
+      target add/remove) painted an empty tree for a frame; under add/remove churn
+      21/120 capture-pane samples and 16/62 pm tui view samples showed no PR boxes.
+      Old nodes now stay until the new ones mount, swapped under batch_update; post-fix
+      0/120 blank. Stories 1-5 all held (approve vs regenerate both orders, double
+      approve, QA-spec watcher approve, restart+approve+spec-mode). Gotcha: PRs added
+      mid-session need pm push + git merge before auto-start can start them, and the
+      failed start is not retried (pr-b977417) - re-add the targets.'
+    created_at: '2026-10-21T20:00:22Z'
+    last_edited: '2026-10-21T20:00:22Z'
+  - id: note-46fb5e1
+    text: 'QA S26 PASS on 885870ae, no edits: 648+916 churn calls (target add/remove/options
+      + spec-mode flips) across a breadcrumb restart all replied rc=0; holds 0.02-0.21
+      s after write and never lost; double approve, approve-vs-regenerate both orders,
+      V vs remove T1, QA-spec approve+remove+restart and re-add/approve of B all held.
+      Note: a post-breadcrumb auto-start reruns QA for an approved target and kills
+      the planner pane that got the approval notice (the new run launches -s1 fine).'
+    created_at: '2026-10-21T21:34:33Z'
+    last_edited: '2026-10-21T21:34:33Z'
+  - id: note-7675c95
+    text: 'Sign-off 2026-10-21 → SIGNOFF_MERGE at 13a9175d. Last app-code commit 68d9aa47
+      (review 996c i6) == QA r5 885870ae (S22–S26 all PASS); full suite 3322 pass;
+      merges cleanly onto master (only pm/project.yaml in both). Report: $CAP/report.html
+      (14 delivered behaviours, each with timestamped video chapters). Non-blocking
+      known gaps: pr-74c4182 (shell/picker pm pr start uses plain spec prompt; hold
+      still applies), pr-2935ce2 (approval notice lost in copy mode).'
+    created_at: '2026-10-21T22:31:00Z'
+    last_edited: '2026-10-21T22:31:00Z'
+  - id: note-8d5b870
+    text: 'Sign-off 2026-10-22 → SIGNOFF_IMPL (forced: base conflict). HEAD 13a9175d
+      vs master@337d1266 (pr-ac10f03 sign-off-return machinery landed) conflicts in
+      pm/project.yaml, autostart_state.py (build_status docstring), tui/review_loop_ui.py
+      (_poll_impl_idle idle-edge: keep BOTH the in-scope `managed` guard from 76bc4ba3
+      AND base return_awaiting("impl") → mark_active), tui/tech_tree.py (PRNode marker
+      row: the PR spec_pending branch resets status_text, which would drop base return-verdict
+      icon ⇤/↩/↻; keep both and add a widget test). Also reconcile non-conflicting
+      semantic overlap: auto_start.sync-spec QA rule (_spec_phase_due ~L202) calls
+      recorded_qa_verdict(pr_id) without pr; base now passes pr so pre-return verdicts
+      are ignored, so pass pr there. check_and_start runs sync_spec_reviews/spec_pending
+      skip before the base return-launch claim + fresh relaunch; confirm a spec-paused
+      in_progress PR with an open IMPL return is not stranded (claim recheck timer).
+      The rest of the app code was signed off as MERGE-quality on 2026-10-21 (S22–S26
+      PASS at 885870ae == HEAD app code, 3322 tests). After reconciling, run the full
+      suite with /usr/bin first on PATH. Review then needs to cover the merged hunks,
+      and QA needs to re-run the tree marker (S impl next to a return icon) and impl-idle
+      → review transition on the integrated code. Report: $CAP/report.html.'
+    created_at: '2026-10-22T14:12:16Z'
+    last_edited: '2026-10-22T14:12:16Z'
+  - id: note-973f4f5
+    text: 'QA S27 PASS on 48bc4016 (integrated master@337d1266), no edits: impl/QA
+      spec holds 3.2/3.6 s, 3+ min idle hold, V edit-approve -> review in 3 s, QA
+      reject+regenerate stays held, approve -> qa-s1 0.6 s, sign-off integration up_to_date
+      + SIGNOFF_MERGE held 67 s by wait-for-merge, g -> B window 0.5 s and B re-paused;
+      default chain had no spec markers/labels anywhere. Driver gotcha: start `pm
+      session` from a --rcfile/--norc shell; an interactive ~/.bashrc shell puts ~/.local/bin
+      (git proxy) first and pm session forwards that PATH, so the sign-off integration
+      fetch fails and MERGE is coerced to BLOCKED.'
+    created_at: '2026-10-22T15:11:34Z'
+    last_edited: '2026-10-22T15:11:34Z'
+  - id: note-68e3db2
+    text: 'QA S28 (returns on review-specs PRs) on 85a74f08, no app edits: all Thens
+      held in run 5 (/pm-captures/scenarios/28/{p5,q5,r5}): IMPL/REQA/REVIEW returns
+      on approved specs relaunch once with no spec pause; regenerated impl spec held
+      1.1 s -> "in_progress ⇤ S impl" (border intact), 15 idle-but-spec_pending resets,
+      approve keeps the window -> review; regenerated QA spec during a ↻ return held
+      2.7 s, 36 plan-deferred polls, scenarios only after approval; pre-return QA
+      PASS not counted (no QA already ended PASS line). Setup failure (first attempt):
+      container PID 1 (sleep infinity) never reaps, and a sampler running $(... <
+      <(...)) every 0.5 s leaked 1929 zombies to the 2048 PID cap; host tmux under
+      a subreaper (scripts/reaper.py) + bounded pipe-only samplers. Gotchas: re-QA
+      scenario windows are -s2/-s3 not -s1; tmux 3.2a has no #{window_created} (compare
+      @window ids); fake impl makes no commits, so sign-off integration is in_base
+      and MERGE is coerced to BLOCKED; commit in the PR workdir first.'
+    created_at: '2026-10-22T16:30:11Z'
+    last_edited: '2026-10-22T16:30:25Z'
+  - id: note-dc05f70
+    text: 'S29 refine (2026-10-22): a SIGNOFF_IMPL hop writes signoff_return.launch_claim
+      in the same update as the transition (build_return_record). If the hop''s own
+      `pm pr start --fresh` is refused because the impl spec is pending, nothing releases
+      that claim. So an approval within 180 s of the hop makes the TUI log "rework
+      launch already claimed, skipping", and the rework launches on the re-check about
+      185 s after that pass. The paused scheduler/CLI never re-claim (spec_pending
+      is checked before claim_return_launch). Reproduce the pending-at-hop state with
+      `pm set spec-mode review` plus `pm pr spec P impl --regenerate` while P is in
+      sign_off; restore with `pm set spec-mode prompt`. Auto-start targets live in
+      the TUI (`pm autostart list`), not in project.yaml.'
+    created_at: '2026-10-22T14:31:53Z'
+    last_edited: '2026-10-22T14:31:53Z'
+  - id: note-52b6125
+    text: 'QA S29 (26603a96): returned+spec-paused PR held through breadcrumb restart
+      (claim never renewed, no start attempts 4+ min), approval -> exactly one --fresh
+      rework (TUI or CLI tick), 3 approvers + restart + 1969 churn calls all held.
+      Fixed: tree row "◎ in_progress ⇤ S impl" was 22 cells in the 20-cell box and
+      clipped the right border; the icon is dropped when the row overflows (widget
+      test asserts the border). Observation (not exercised, matches the S29 story
+      1 wording): with no other scheduler event, an approval before the hop claim
+      expires launches on _recheck_after_claim = skip time + 185 s, not hop + 185
+      s (S29 story 3 launched at hop + 180 s only because target churn drove passes).'
+    created_at: '2026-10-22T14:55:35Z'
+    last_edited: '2026-10-22T14:55:35Z'
+- id: pr-2935ce2
+  plan: bugs
+  title: 'Bug: tmux.send_keys messages are swallowed when the target pane is in copy/view
+    mode'
+  branch: pm/pr-2935ce2-bug-tmux-send-keys-messages-are-swallowed-when-the
+  status: pending
+  depends_on: []
+  description: 'pm_core/tmux.py send_keys (and every caller: spec_gen.notify_spec_approved,
+    qa_loop follow-ups, verdict reminders) sends literal text + Enter with no #{pane_in_mode}
+    check. If the agent pane is in copy-mode (user scrolled back) or view-mode (tmux
+    shows run-shell output there, e.g. a failed prefix+P popup), the keystrokes are
+    run as copy-mode commands and the message never reaches Claude, while the sender
+    still reports success (pm pr spec-approve prints "Notified the waiting session.").
+    Repro (pr-3ae2fc3 QA S2): pane %6 in view-mode → pm pr spec-approve <id> → pane
+    shows nothing; tmux display -p -t %6 "#{pane_in_mode}" = 1. Fix idea: send-keys
+    -X cancel when pane_in_mode=1 before sending.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T15:40:17.074279+00:00'
+  updated_at: '2026-10-21T15:40:17.074279+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6176ec6
+  plan: bugs
+  title: 'Bug: runtime_state keyed only by PR id leaks a finished QA verdict into
+    another project with a same-titled PR'
+  branch: pm/pr-6176ec6-bug-runtime-state-keyed-only-by-pr-id-leaks-a-fini
+  status: pending
+  depends_on: []
+  description: 'pm_core/runtime_state.py stores ~/.pm/runtime/{pr_id}.json with no
+    project key, and PR ids derive from the title, so two projects with a PR titled
+    "Feature V" share pr-5ae769c. Repro (found in pr-3ae2fc3 QA scenario 5): project
+    A: pr add "Feature V", run autostart through QA PASS. Project B (fresh dir): pr
+    add "Feature V", pr start, pr edit --status qa, pm autostart add <id> → auto_start.recorded_qa_verdict()
+    reads A''s qa {state: done, verdict: PASS} and _auto_start_qa_loops skips QA;
+    signoff_ui.advance_all hands it straight to sign-off ("Auto-start: <id> → sign-off")
+    without ever running QA. Same leak likely affects the picker badges (_format_action_status)
+    and review-loop records. Fix: namespace runtime files by project root/tag, or
+    store the project root in the record and ignore mismatches.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T15:41:20.902710+00:00'
+  updated_at: '2026-10-21T15:41:20.902710+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-095c51d
+  plan: bugs
+  title: 'Bug: TUI re-keys its pidfile/cmd-queue to a foreign grouped tmux session
+    after Ctrl+R, so pm autostart CLI times out'
+  branch: pm/pr-095c51d-bug-tui-re-keys-its-pidfile-cmd-queue-to-a-foreign
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/app.py _reload_pidfile/_session_name: the TUI keys tui-<session>.pid
+    and .cmd-queue by its resolved tmux session name, stripping only the pm "~N" group
+    suffix. Repro (pr-3ae2fc3 QA S3): with the pm session running, create a grouped
+    session with a non-pm name (`tmux new-session -d -t pm-foo -s recview`) and attach
+    a client to it, then `pm tui restart --breadcrumb`. The restarted TUI (same pid)
+    writes ~/.pm/tui-recview.pid and drains tui-recview.cmd-queue, while `pm autostart
+    list/status/add` keep appending to tui-pm-foo.cmd-queue and signal the pid: every
+    CLI call fails with "owner_timeout ... did not reply within 10s". The debug frames
+    file also moves to recview-frames.json, and launches risk using the wrong session
+    tag (fake-claude config / real Claude). Fix idea: resolve the canonical name via
+    #{session_group} (or the session that owns the pane at first launch) rather than
+    the most-recently-active session holding pane %0.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T15:43:01.895129+00:00'
+  updated_at: '2026-10-21T15:43:01.895129+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-74c4182
+  plan: bugs
+  title: 'Bug: PR Actions picker start row / plain pm pr start of a review-specs auto-start
+    PR uses the normal spec prompt'
+  branch: pm/pr-74c4182-bug-pr-actions-picker-start-row-plain-pm-pr-start-
+  status: pending
+  depends_on: []
+  description: 'After pr-3ae2fc3, the TUI s key, command-bar `pr start`, and auto-start
+    launches add the hidden `--review-spec` flag when auto-start spec review covers
+    a PR, so the agent writes the impl spec in review mode and waits for pm-recorded
+    approval. The PR Actions picker start row (cli/session.py _ALL_ACTIONS "pr start
+    {pr_id}") and a shell `pm pr start` cannot see the TUI-held auto-start targets,
+    so they launch with the plain prompt: the agent writes the spec and proceeds to
+    implement before approval. The gate still marks the spec pending (S impl) and
+    blocks the review transition, so nothing advances unapproved, but implementation
+    work starts early. Repro: pm autostart add X --review-specs, kill the X window
+    before its impl spec exists, start X from prefix+P start row. Fix idea: have pm
+    pr start ask the TUI owner (autostart status IPC, runs[].review_specs) when inside
+    a pm session and --review-spec was not passed, guarding against the TUI-synchronous
+    caller deadlock; or persist review-specs scope to runtime state the CLI can read.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-21T18:58:58.777083+00:00'
+  updated_at: '2026-10-21T18:58:58.777083+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

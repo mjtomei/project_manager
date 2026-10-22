@@ -217,10 +217,21 @@ class QALoopState:
     # planning.  Non-empty forces the overall verdict to NEEDS_WORK so the
     # change gets reviewed before sign-off.
     planner_code_changes: list[str] = field(default_factory=list)
+    # Auto-start spec review applies (set/refreshed by the TUI): the planner
+    # writes the QA spec in review mode and scenario launch waits until it
+    # is approved (``spec_pending`` cleared via pm pr spec-approve / V).
+    spec_review: bool = False
+    # True while this run is paused on the QA spec's approval.
+    spec_review_pending: bool = False
+    # The planner was launched with the wait-for-pm-approval spec prompt:
+    # its QA spec is held even if spec_review is cleared mid-planning.
+    planner_spec_gate: bool = False
     # Error message for status display (e.g. missing spec, no scenarios)
     _error: str = ""
     # Set by qa_loop_ui after the completion callback has run once
     _ui_complete_notified: bool = False
+    # Last spec_review_pending the TUI acted on (qa_loop_ui._on_qa_update)
+    _ui_spec_review_pending: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -3492,6 +3503,86 @@ def _verify_single_scenario(
 # Core orchestration
 # ---------------------------------------------------------------------------
 
+def _spec_review_applies(state: QALoopState) -> bool:
+    return state.spec_review or state.planner_spec_gate
+
+
+def _qa_spec_gate(state: QALoopState, pm_root: Path,
+                  pr: dict | None = None) -> bool:
+    """True while scenario launch must wait for the QA spec's approval.
+
+    Blocked by a pending QA spec (whoever set it — removing the auto-start
+    option never releases one), or, under auto-start spec review, by a
+    present but never-approved QA spec, which this marks pending.  *pr* is
+    the caller's freshly loaded entry (loaded here when omitted).
+    """
+    from pm_core import spec_gen, store
+    if pr is None:
+        try:
+            pr = store.get_pr(store.load(pm_root), state.pr_id) or {}
+        except Exception:
+            _log.debug("QA spec gate: load failed", exc_info=True)
+            return state.spec_review_pending
+    if spec_gen.get_pending_spec_phase(pr) == "qa":
+        return True
+    if _spec_review_applies(state) and spec_gen.needs_spec_approval(pr, "qa"):
+        try:
+            spec_gen.mark_spec_pending(pm_root, state.pr_id, "qa")
+        except Exception:
+            _log.warning("QA spec gate: could not mark %s pending",
+                         state.pr_id, exc_info=True)
+        return True
+    return False
+
+
+def _qa_spec_text(pr_id: str, pm_root: Path) -> str | None:
+    from pm_core import store
+    try:
+        return _get_qa_spec(store.get_pr(store.load(pm_root), pr_id) or {},
+                            "qa")
+    except Exception:
+        return None
+
+
+def _set_spec_review_pending(state: QALoopState, pending: bool,
+                             notify: Callable[[], None]) -> None:
+    if state.spec_review_pending == pending:
+        return
+    state.spec_review_pending = pending
+    if pending:
+        state.latest_output = (
+            "QA spec awaiting approval (V / pm pr spec-approve "
+            f"{state.pr_id}) — scenarios launch after approval")
+    else:
+        state.latest_output = "QA spec approved — continuing QA"
+    _log.info("QA %s: spec review %s", state.pr_id,
+              "pending" if pending else "approved")
+    notify()
+
+
+def _wait_for_qa_spec_approval(state: QALoopState, pm_root: Path,
+                               notify: Callable[[], None],
+                               interval: float = _POLL_INTERVAL) -> bool:
+    """Block until the QA spec is approved.  False when stopped/merged."""
+    from pm_core import store
+    while True:
+        try:
+            live = store.get_pr(store.load(pm_root), state.pr_id) or {}
+        except Exception:
+            _log.debug("QA spec wait: load failed", exc_info=True)
+            live = None
+        if not _qa_spec_gate(state, pm_root, live):
+            break
+        _set_spec_review_pending(state, True, notify)
+        if state.stop_requested:
+            return False
+        if ((live or {}).get("status") or "") in ("merged", "closed"):
+            return False
+        time.sleep(interval)
+    _set_spec_review_pending(state, False, notify)
+    return True
+
+
 def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
     """Split the qa_status.py dashboard next to the planner pane."""
     from pm_core import tmux as tmux_mod, pane_layout
@@ -3628,9 +3719,11 @@ def run_qa_sync(
         _notify()
 
         scenario_start = _next_scenario_offset(state.pr_id, state.loop_id) + 1
+        state.planner_spec_gate = state.spec_review
         planner_prompt = prompt_gen.generate_qa_planner_prompt(
             data, state.pr_id, session,
             scenario_start=scenario_start,
+            review_gate=state.spec_review,
         )
         import uuid as _uuid
         planner_session_id = str(_uuid.uuid4())
@@ -3749,6 +3842,11 @@ def run_qa_sync(
 
         plan_found = False
         plan_problem = ""
+        # A complete plan read while the QA spec awaits approval: consumed
+        # once approved if the spec is unchanged, else the planner (told
+        # to re-plan by the approval message) must emit a fresh one.
+        deferred_plan = None
+        deferred_spec: str | None = None
         deadline = time.monotonic() + _PLANNER_TIMEOUT
         poll_start = time.monotonic()
         from pm_core import hook_events as _hook_events
@@ -3787,11 +3885,45 @@ def run_qa_sync(
                 state.running = False
                 return state
 
+            # Spec review: waiting on a human must not time the planner
+            # out; an approval releases a deferred plan.
+            if _spec_review_applies(state) or state.spec_review_pending:
+                if _qa_spec_gate(state, pm_root, _live):
+                    _set_spec_review_pending(state, True, _notify)
+                    deadline = max(deadline,
+                                   time.monotonic() + _PLANNER_TIMEOUT)
+                elif state.spec_review_pending:
+                    _set_spec_review_pending(state, False, _notify)
+                    if deferred_plan is not None:
+                        if _qa_spec_text(pr_id, pm_root) == deferred_spec:
+                            _log.info("planner poll: QA spec approved "
+                                      "unchanged — consuming deferred plan")
+                            state.plan_output = deferred_plan.text
+                            state.scenarios = deferred_plan.scenarios
+                            plan_found = True
+                            break
+                        _log.info("planner poll: QA spec edited at "
+                                  "approval — waiting for a new plan")
+                        state.latest_output = (
+                            "QA spec approved with edits — waiting for the "
+                            "planner to re-plan")
+                        _notify()
+                        deferred_plan = None
+                        # Only an idle turn after the re-plan request can
+                        # hold the new plan; an earlier one re-reads the
+                        # pre-edit plan.
+                        _hook_baseline = time.time()
+
             _remaining = max(0.0, deadline - time.monotonic())
+            # Under spec review, re-check the gate at the poll cadence so
+            # a QA spec written mid-planning is held within seconds.
+            _wait = (_POLL_INTERVAL
+                     if _spec_review_applies(state) or state.spec_review_pending
+                     else 15.0)
             ev = _hook_events.wait_for_event(
                 planner_session_id,
                 event_types={"idle_prompt"},
-                timeout=min(15.0, _remaining),
+                timeout=min(_wait, _remaining),
                 newer_than=_hook_baseline,
                 stop_check=lambda: state.stop_requested,
             )
@@ -3810,6 +3942,14 @@ def run_qa_sync(
                 _capture_planner_pane if elapsed >= _PLANNER_GRACE else None,
                 pm_root, scenario_start,
             )
+            if plan.scenarios and _qa_spec_gate(state, pm_root):
+                _log.info("planner poll: plan deferred — QA spec awaiting "
+                          "approval")
+                deferred_plan = plan
+                deferred_spec = _qa_spec_text(pr_id, pm_root)
+                _set_spec_review_pending(state, True, _notify)
+                deadline = max(deadline, time.monotonic() + _PLANNER_TIMEOUT)
+                continue
             if plan.scenarios:
                 _log.info("planner poll: accepted %d scenario(s) from %s "
                           "(%d chars, elapsed=%.0fs)", len(plan.scenarios),
@@ -3855,6 +3995,14 @@ def run_qa_sync(
             _notify()
             state.running = False
             return state
+
+        if (not plan_found and deferred_plan is not None
+                and not state.stop_requested):
+            # Planner pane gone while its plan waited for the spec's
+            # approval: that plan is all there is (gated again below).
+            state.plan_output = deferred_plan.text
+            state.scenarios = deferred_plan.scenarios
+            plan_found = True
 
         if not plan_found and not state.stop_requested:
             # Planner exited or timed out: one last gated read.
@@ -3951,6 +4099,15 @@ def run_qa_sync(
         _notify()
         state.running = False
         return state  # Do not launch scenarios without a QA spec
+
+    # --- Spec review gate: scenarios launch only after the QA spec is
+    # approved (a plan read on planner exit must not skip the pause). ---
+    if state.scenarios and not state._error:
+        if not _wait_for_qa_spec_approval(state, pm_root, _notify):
+            _log.info("QA %s stopped while its spec awaited approval",
+                      state.pr_id)
+            state.running = False
+            return state
 
     # --- Phase 1.25: Planner handoff ---
     # Scenario clones start from the PR workdir's branch head but pull from

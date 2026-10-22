@@ -18,6 +18,12 @@ status resolve the effective hold through :func:`merge_hold` /
 :func:`policy_for` (``autostart_state.merge_holds``) — absent means
 auto-merge.
 
+Spec review: a target added with ``review_specs`` (``--review-specs``)
+pauses itself and its closure for human approval of the implementation
+spec and of the QA spec (:func:`spec_review_required`,
+:func:`sync_spec_reviews`).  The pause is the PR's ``spec_pending`` record
+— the same one ``pm pr spec-approve`` / ``V`` clear.
+
 Controls: ``O`` (add selected, stop-before-merge), ``A`` (toggle selected as
 an auto-merge target), the command bar ``autostart …`` verbs, and the CLI
 ``pm autostart add/remove/clear/list/status`` which reaches this module via
@@ -37,7 +43,8 @@ from pm_core.paths import configure_logger, pm_home
 from pm_core import store, graph
 from pm_core import autostart_state
 from pm_core.autostart_state import (
-    POLICY_AUTO, POLICY_STOP, POLICY_WAIT, REPLY_DIR, WAIT_KEY,
+    NO_REVIEW_FLAG, POLICY_AUTO, POLICY_STOP, POLICY_WAIT, REPLY_DIR,
+    REVIEW_FLAG, REVIEW_KEY, WAIT_KEY,
 )
 from pm_core.tui._shell import _run_shell_async
 
@@ -53,7 +60,7 @@ CONFIRM_HOLD_SECONDS = 3.0
 
 def is_enabled(app) -> bool:
     """Check if auto-start mode is active."""
-    return bool(app._auto_start)
+    return bool(getattr(app, "_auto_start", False))
 
 
 def _targets(app) -> dict:
@@ -126,6 +133,126 @@ def target_policy(app, pr_id: str) -> str:
     ``stop_before_merge`` / ``auto_merge``)."""
     return autostart_state.target_policy(
         pr_id, _targets(app).get(pr_id), _stop_set(app))
+
+
+_UNSET = object()
+
+
+def spec_review_checker(app, prs: list[dict] | None = None,
+                        managed=_UNSET):
+    """A ``pr_id -> bool`` predicate for :func:`spec_review_required`.
+
+    The scope and the review closures are computed once, so a pass over
+    many PRs (scheduler, poll tick) doesn't recompute them per PR.
+    *managed* is a :func:`managed_ids` result the caller already has.
+    """
+    if not is_enabled(app):
+        return lambda pr_id: False
+    if prs is None:
+        prs = (app._data or {}).get("prs") or []
+    if managed is _UNSET:
+        managed = managed_ids(app, prs)
+    holds = autostart_state.spec_review_holds(prs, _targets(app))
+    by_id = {p.get("id"): p for p in prs}
+    from pm_core import spec_gen
+    global_mode = spec_gen.get_spec_mode()
+
+    def required(pr_id: str) -> bool:
+        if managed is not None and pr_id not in managed:
+            return False
+        if pr_id in holds:
+            return True
+        pr = by_id.get(pr_id)
+        return bool(pr) and spec_gen.pr_spec_mode(
+            pr, global_mode=global_mode) == "review"
+    return required
+
+
+def spec_review_required(app, pr_id: str, prs: list[dict] | None = None) -> bool:
+    """Whether auto-start must pause *pr_id* for spec approval.
+
+    True for an in-scope PR covered by a ``review_specs`` target, or whose
+    own effective spec mode is ``review`` (per-PR ``review_spec`` / global
+    ``spec-mode``) — without the gate such an agent, idle while it waits
+    for approval, would be taken for finished implementation.
+    """
+    return spec_review_checker(app, prs)(pr_id)
+
+
+def _spec_phase_due(app, pr: dict) -> str | None:
+    """The spec phase an in-scope PR is about to act on, if its spec is
+    already present and still needs approval — else None.
+
+    Completed phases are never revisited: the impl spec only matters while
+    the PR is pending/in_progress, the QA spec only until this QA run has
+    finished planning (a run past planning, or one whose verdict is
+    recorded, is left alone).
+    """
+    from pm_core import spec_gen
+    status = pr.get("status")
+    if status in ("pending", "in_progress"):
+        phase = "impl"
+    elif status == "qa":
+        if ((app._data or {}).get("project") or {}).get("skip_qa"):
+            return None
+        loop = (getattr(app, "_qa_loops", None) or {}).get(pr["id"])
+        if loop is not None and (loop.latest_verdict
+                                 or not getattr(loop, "planning_phase", True)):
+            return None
+        if loop is None and recorded_qa_verdict(pr["id"], pr) in QA_HOLD_VERDICTS:
+            return None
+        phase = "qa"
+    else:
+        return None
+    return phase if spec_gen.needs_spec_approval(pr, phase) else None
+
+
+def hold_spec_if_due(app, pr: dict, prs: list[dict] | None = None,
+                     required: bool | None = None) -> bool:
+    """Mark *pr*'s present-but-unapproved spec pending when auto-start's
+    spec review applies (*required*: a precomputed
+    :func:`spec_review_required`), or when its implementation agent was
+    launched to wait for pm approval (``spec_gen.IMPL_GATE_KEY``) — that
+    agent waits even after the option stops applying.  Returns True when
+    it set ``spec_pending``."""
+    if not app._root or pr.get("spec_pending"):
+        return False
+    from pm_core import spec_gen
+    if not (pr.get("status") == "in_progress"
+            and pr.get(spec_gen.IMPL_GATE_KEY)):
+        if required is None:
+            required = spec_review_required(app, pr["id"], prs)
+        if not required:
+            return False
+    phase = _spec_phase_due(app, pr)
+    if not phase:
+        return False
+    try:
+        marked = spec_gen.mark_spec_pending(app._root, pr["id"], phase, pr=pr)
+    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        _log.warning("auto_start: could not hold %s spec of %s: %s",
+                     phase, pr["id"], e)
+        return False
+    if marked:
+        label = autostart_state.SPEC_PHASE_LABELS.get(phase, phase)
+        _log.info("auto_start: %s spec of %s held for review", phase, pr["id"])
+        app.log_message(f"Auto-start: {pr['id']} {label} spec awaiting "
+                        f"approval (V / pm pr spec-approve {pr['id']})",
+                        force=True)
+        app._update_display()
+    return marked
+
+
+def sync_spec_reviews(app, prs: list[dict] | None = None) -> None:
+    """Hold every in-scope PR whose next spec step needs approval."""
+    if not is_enabled(app) or not app._root:
+        return
+    if prs is None:
+        prs = (app._data or {}).get("prs") or []
+    required = spec_review_checker(app, prs)
+    for pr in prs:
+        if pr.get("id") and pr.get("status") in ("pending", "in_progress", "qa"):
+            hold_spec_if_due(app, pr, prs, required=required(pr["id"]))
 
 
 def _launching(app) -> set:
@@ -483,7 +610,8 @@ def _resolve_ids(app, ids: list[str]) -> tuple[list[dict], list[str]]:
 
 def add_targets(app, ids: list[str], policy: str | None = None,
                 default_policy: str | None = POLICY_STOP,
-                source: str = "command", confirm: str | None = None) -> dict:
+                source: str = "command", confirm: str | None = None,
+                review_specs: bool | None = None) -> dict:
     """Add targets (additive, idempotent, all-or-nothing validation).
 
     *policy*: ``stop_before_merge`` / ``auto_merge`` / ``wait_for_merge``
@@ -494,6 +622,11 @@ def add_targets(app, ids: list[str], policy: str | None = None,
     never touched.  The policy is in place before the scheduler pass this
     queues, so a wait target's dependencies are held before any starts.
     Never touches other targets and never enables all-mode.
+
+    *review_specs*: True/False sets/clears the target's spec-review
+    option (``--review-specs`` / ``--no-review-specs``); None keeps it
+    (new targets: off).  Clearing it never approves a spec that is
+    already pending.
 
     *confirm* replaces the "targets +=" log-line confirmation (e.g. the
     ``O`` key's "Auto-sequence armed …"); it gets the same hold.
@@ -529,8 +662,14 @@ def add_targets(app, ids: list[str], policy: str | None = None,
         if is_new:
             targets[pr_id] = autostart_state.make_target_record(source)
         previous = target_policy(app, pr_id)
-        effective = policy or (default_policy if is_new else None)
         rec = targets[pr_id]
+        prev_review = autostart_state.is_review_target(rec)
+        if review_specs is True:
+            rec[REVIEW_KEY] = True
+        elif review_specs is False:
+            rec.pop(REVIEW_KEY, None)
+        cur_review = autostart_state.is_review_target(rec)
+        effective = policy or (default_policy if is_new else None)
         if effective == POLICY_WAIT:
             rec[WAIT_KEY] = True
             sbm.discard(pr_id)
@@ -547,24 +686,39 @@ def add_targets(app, ids: list[str], policy: str | None = None,
             # Re-add with a flag that flips the policy: report the change
             # rather than "unchanged" (which reads as a refusal).
             action = "policy_changed"
+        elif cur_review != prev_review:
+            action = "options_changed"
         else:
             action = "unchanged"
         change = {"pr_id": pr_id, "action": action, "policy": current}
         if action == "policy_changed":
             change["previous_policy"] = previous
+        # Only reported when in use, so default changes keep their shape.
+        if cur_review or cur_review != prev_review:
+            change["review_specs"] = cur_review
+        if not is_new and cur_review != prev_review:
+            change["previous_review_specs"] = prev_review
         changes.append(change)
-        _log.info("auto_start: target %s %s policy=%s source=%s", pr_id,
-                  "added" if is_new else "re-armed", current, source)
+        _log.info("auto_start: target %s %s policy=%s review_specs=%s "
+                  "source=%s", pr_id, "added" if is_new else "re-armed",
+                  current, cur_review, source)
     _sync_enabled(app)
     released = sorted(held_before - set(merge_holds(app)))
     if released:
         _log.info("auto_start: released merge holds on %s", released)
+    refresh_qa_spec_review(app)
 
     def _label(c: dict) -> str:
+        rv = ["review-specs"] if c.get("review_specs") else []
         if c["action"] == "policy_changed":
-            return f"{c['pr_id']} (now {c['policy'].replace('_', '-')})"
-        pol = {POLICY_STOP: " (stop)",
-               POLICY_WAIT: " (wait-for-merge + deps)"}.get(c["policy"], "")
+            now = [c["policy"].replace("_", "-")] + rv
+            return f"{c['pr_id']} (now {', '.join(now)})"
+        if c["action"] == "options_changed":
+            return f"{c['pr_id']} (now {', '.join(rv) or 'no review-specs'})"
+        opts = {POLICY_STOP: ["stop"],
+                POLICY_WAIT: ["wait-for-merge + deps"]}.get(c["policy"], [])
+        opts = opts + rv
+        pol = f" ({', '.join(opts)})" if opts else ""
         already = " (already a target)" if c["action"] == "unchanged" else ""
         return f"{c['pr_id']}{pol}{already}"
     summary = ", ".join(_label(c) for c in changes)
@@ -615,6 +769,7 @@ def remove_targets(app, ids: list[str]) -> dict:
               ids, removed, list(targets))
     _sync_enabled(app)
     released = sorted(held_before - set(merge_holds(app)))
+    refresh_qa_spec_review(app)
     # hold: a racing ``g`` merge's spinner frames would overwrite this
     # within 0.1s (QA s18), like "targets +=" above.
     if removed:
@@ -703,8 +858,26 @@ async def auto_sequence_for_pr(app, pr_id: str) -> None:
         app.log_message(f"Auto-sequence: {result['message']}")
 
 
+def refresh_qa_spec_review(app) -> None:
+    """Push the current spec-review requirement into the running QA loops
+    (read by the QA thread's scenario-launch gate).  Called on target
+    changes and every QA poll tick (restart, spec-mode changes).  Finished
+    loops linger for their verdicts; skipping them keeps an idle tick from
+    recomputing the closures."""
+    loops = [(pr_id, state) for pr_id, state
+             in list((getattr(app, "_qa_loops", None) or {}).items())
+             if getattr(state, "running", False)]
+    if not loops:
+        return
+    required = spec_review_checker(app)
+    for pr_id, state in loops:
+        if hasattr(state, "spec_review"):
+            state.spec_review = required(pr_id)
+
+
 def on_state_loaded(app, old_statuses: dict,
-                    old_deps: dict | None = None) -> None:
+                    old_deps: dict | None = None,
+                    old_spec: dict | None = None) -> None:
     """Kick a scheduler pass when a reload shows an in-scope PR newly
     merged/closed (manual ``g``, CLI merge, another session), or an
     in-scope PR's ``depends_on`` changed (``pm pr edit --depends-on``).
@@ -714,6 +887,9 @@ def on_state_loaded(app, old_statuses: dict,
     target in the set and its dependents unstarted until some other event.
     Likewise a graph edit that pulls a ready prerequisite into a target's
     closure would leave it "ready; starts on next scheduler pass" forever.
+    And a spec approval (``pm pr spec-approve`` / ``V`` clears
+    ``spec_pending``; *old_spec* maps pr id → its pending phase) must
+    start the PR or QA run that was waiting on it.
     """
     if not old_statuses or not is_enabled(app):
         return
@@ -727,15 +903,50 @@ def on_state_loaded(app, old_statuses: dict,
         p["id"] for p in prs
         if p.get("id") in old_deps
         and list(p.get("depends_on") or []) != old_deps[p["id"]]]
-    if not newly and not regraphed:
+    # spec_pending is cleared by an approval or by a regeneration that
+    # needs no review (``pm pr spec --regenerate`` / reject in prompt
+    # mode); only the former records spec_approved for the pending phase.
+    cleared = [] if old_spec is None else [
+        p for p in prs
+        if old_spec.get(p.get("id")) and not p.get("spec_pending")]
+    approved = [p["id"] for p in cleared
+                if _approved_since(p, old_spec[p["id"]])]
+    regenerated = [p["id"] for p in cleared if p["id"] not in approved]
+    if not newly and not regraphed and not cleared:
         return
     managed = managed_ids(app, prs)
-    if managed is not None and not any(i in managed
-                                       for i in newly + regraphed):
+    if managed is not None and not any(
+            i in managed for i in newly + regraphed + approved + regenerated):
         return
     _log.info("auto_start: reload saw %s merged/closed, %s deps changed, "
-              "scheduling pass", newly, regraphed)
+              "%s spec approved, %s spec regenerated, scheduling pass",
+              newly, regraphed, approved, regenerated)
+    # Replace the forced "spec awaiting approval" line: a PR approved
+    # mid-implementation just resumes in its pane, so no "starting" line
+    # would follow to supersede it.  A regenerated spec was not approved;
+    # the pass re-holds it if review still applies.
+    shown = [i for i in approved if managed is None or i in managed]
+    if shown:
+        app.log_message(f"Auto-start: {', '.join(shown)} spec approved — "
+                        f"continuing", force=True)
+    shown = [i for i in regenerated if managed is None or i in managed]
+    if shown:
+        app.log_message(f"Auto-start: {', '.join(shown)} spec regenerated — "
+                        f"not approved", force=True)
     app.run_worker(check_and_start(app))
+
+
+def _approved_since(pr: dict, old_pending) -> bool:
+    """Whether *pr*'s cleared spec_pending was cleared by an approval.
+
+    *old_pending* is the pending phase before the reload (``True`` when
+    only its presence is known).  A phaseless record can't have been
+    approved (``approve_spec`` ignores it), and an older approval of
+    another phase must not read as this one's.
+    """
+    from pm_core import spec_gen
+    return (isinstance(old_pending, str)
+            and spec_gen.is_spec_approved(pr, old_pending))
 
 
 def _prune_completed_targets(app, prs: list[dict]) -> None:
@@ -805,6 +1016,9 @@ async def check_and_start(app) -> None:
             {pr["id"] for pr in (app._data.get("prs") or [])} - merged
         )
 
+    # Hold already-present, unapproved specs before anything starts.
+    sync_spec_reviews(app, prs)
+
     # Collect PRs that should be started: pending with all deps merged,
     # plus in_progress PRs (whose window may have been killed).
     ready = graph.ready_prs(prs)
@@ -830,6 +1044,11 @@ async def check_and_start(app) -> None:
             continue
         if pr_id in launching:
             _log.info("auto_start: %s launch already in flight, skipping", pr_id)
+            continue
+        if pr.get("spec_pending"):
+            # Waiting for approval (pm pr start refuses any pending spec);
+            # an in_progress agent waiting on it keeps its window.
+            _log.debug("auto_start: %s spec pending, not starting", pr_id)
             continue
         launching.add(pr_id)
         if pr.get("status") == "pending":
@@ -1000,6 +1219,11 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
             _log.debug("auto_start: %s QA already ended %s, not relaunching",
                        pr_id, recorded)
             continue
+        # An already-present QA spec awaiting approval: the run (and its
+        # scenario launch) waits for approval, which re-runs this pass.
+        if autostart_state.pending_spec_phase(pr) == "qa":
+            _log.debug("auto_start: %s QA spec pending, not starting QA", pr_id)
+            continue
         # Skip if no workdir
         if not pr.get("workdir"):
             continue
@@ -1063,6 +1287,9 @@ async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:
     cmd = [sys.executable, "-m", "pm_core.wrapper", "pr", "start", "--background"]
     if fresh:
         cmd.append("--fresh")
+    if spec_review_required(app, pr_id):
+        # Review-mode spec prompt that waits for pm-recorded approval.
+        cmd.append("--review-spec")
     tdir = get_transcript_dir(app)
     if tdir:
         cmd.extend(["--transcript", str(tdir / f"impl-{pr_id}.jsonl")])
@@ -1161,6 +1388,22 @@ def collect_status_inputs(app) -> dict:
                 signoff_info[pr_id]["stale_reason"] = \
                     _signoff.stale_reason(rec)
 
+    from pm_core import spec_gen
+    spec_reviews: dict[str, dict] = {}
+    review_modes: set[str] = set()
+    global_mode = spec_gen.get_spec_mode()
+    for pr in prs:
+        pr_id = pr.get("id")
+        if not pr_id or not scoped(pr_id):
+            continue
+        phase = autostart_state.pending_spec_phase(pr)
+        if phase:
+            loc = spec_gen.spec_location(pr, phase)
+            spec_reviews[pr_id] = {"path": str(loc) if loc else None}
+        if enabled and spec_gen.pr_spec_mode(
+                pr, global_mode=global_mode) == "review":
+            review_modes.add(pr_id)
+
     project = (app._data or {}).get("project") or {}
     return {
         "prs": prs,
@@ -1179,6 +1422,8 @@ def collect_status_inputs(app) -> dict:
         "windows": windows,
         "signoff": signoff_info,
         "skip_qa": bool(project.get("skip_qa")),
+        "spec_reviews": spec_reviews,
+        "spec_review_modes": review_modes,
     }
 
 
@@ -1192,7 +1437,8 @@ def build_status(app) -> dict:
 # ---------------------------------------------------------------------------
 
 USAGE = ("autostart add PR_ID... [--stop-before-merge|--auto-merge|"
-         "--wait-for-merge] | remove PR_ID... | list | status | clear | all")
+         "--wait-for-merge] [--review-specs|--no-review-specs] | "
+         "remove PR_ID... | list | status | clear | all")
 
 # Flag → policy (the inverse of ``autostart_state.POLICY_FLAGS``).
 _FLAG_POLICIES = {flag: p for p, flag in autostart_state.POLICY_FLAGS.items()}
@@ -1232,10 +1478,13 @@ def handle_command(app, args: list[str]) -> dict:
     backlog).  Flags: ``--stop-before-merge`` / ``--auto-merge`` /
     ``--wait-for-merge`` (``add`` only; at most one distinct policy — a
     contradiction rejects the whole command before any change),
+    ``--review-specs`` / ``--no-review-specs`` (``add`` only; composes with
+    a policy, the two contradict each other),
     ``--reply ID`` (CLI: write the JSON reply file).  Returns the result.
     """
     reply_id = None
     policies: list[str] = []
+    review_flags: list[str] = []
     rest: list[str] = []
     it = iter(args)
     for tok in it:
@@ -1244,6 +1493,9 @@ def handle_command(app, args: list[str]) -> dict:
         elif tok in _FLAG_POLICIES:
             if _FLAG_POLICIES[tok] not in policies:
                 policies.append(_FLAG_POLICIES[tok])
+        elif tok in (REVIEW_FLAG, NO_REVIEW_FLAG):
+            if tok not in review_flags:
+                review_flags.append(tok)
         else:
             rest.append(tok)
     verb = rest[0] if rest else ""
@@ -1258,14 +1510,20 @@ def handle_command(app, args: list[str]) -> dict:
                       + ", ".join(autostart_state.POLICY_FLAGS[p]
                                   for p in policies),
                       "changes": []}
-        elif policies and verb not in ("add", "target"):
+        elif len(review_flags) > 1:
+            result = {"ok": False, "error": "conflicting_flags",
+                      "message": f"conflicting flags: {REVIEW_FLAG}, "
+                      f"{NO_REVIEW_FLAG}", "changes": []}
+        elif (policies or review_flags) and verb not in ("add", "target"):
             result = {"ok": False, "error": "usage",
-                      "message": f"merge policy flags only apply to add; "
+                      "message": f"target option flags only apply to add; "
                       f"usage: {USAGE}", "changes": []}
         else:
+            review = ({REVIEW_FLAG: True, NO_REVIEW_FLAG: False}
+                      [review_flags[0]] if review_flags else None)
             result, open_popup = _dispatch(
                 app, verb, ids, policies[0] if policies else None, source,
-                bool(reply_id))
+                bool(reply_id), review)
     except Exception as e:
         # Never leave a CLI caller waiting for a reply that will not come
         # (it would misreport the failure as owner_timeout).
@@ -1293,7 +1551,8 @@ def handle_command(app, args: list[str]) -> dict:
 
 
 def _dispatch(app, verb: str, ids: list[str], policy: str | None,
-              source: str, has_reply: bool) -> tuple[dict, bool]:
+              source: str, has_reply: bool,
+              review_specs: bool | None = None) -> tuple[dict, bool]:
     """Apply one ``autostart`` verb; returns ``(result, open_popup)``."""
     open_popup = False
     if verb == "":
@@ -1309,7 +1568,8 @@ def _dispatch(app, verb: str, ids: list[str], policy: str | None,
                       "message": f"no PR ids given; usage: {USAGE}",
                       "changes": []}
         else:
-            result = add_targets(app, ids, policy=policy, source=source)
+            result = add_targets(app, ids, policy=policy, source=source,
+                                 review_specs=review_specs)
     elif verb in ("remove", "rm"):
         result = remove_targets(app, ids)
     elif verb in ("clear", "off"):
@@ -1336,9 +1596,13 @@ def _list_summary(app) -> str:
         return "Auto-start: off (no targets)"
     if is_all_mode(app):
         return "Auto-start: all ready PRs (backlog mode)"
-    marks = {POLICY_STOP: " (stop)", POLICY_WAIT: " (wait-for-merge)"}
-    parts = [f"{t}{marks.get(target_policy(app, t), '')}"
-             for t in get_targets(app)]
+    marks = {POLICY_STOP: "stop", POLICY_WAIT: "wait-for-merge"}
+    parts = []
+    for t in get_targets(app):
+        opts = [marks[p] for p in (target_policy(app, t),) if p in marks]
+        if autostart_state.is_review_target(_targets(app).get(t)):
+            opts.append("review-specs")
+        parts.append(f"{t} ({', '.join(opts)})" if opts else t)
     return f"Auto-start targets: {', '.join(parts)}"
 
 

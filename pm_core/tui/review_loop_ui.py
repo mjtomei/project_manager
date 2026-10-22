@@ -931,6 +931,9 @@ def _poll_impl_idle(app) -> None:
     active_pr_ids: set[str] = set()
     newly_idle: list[tuple[str, dict]] = []  # (pr_id, pr) pairs
     untracked_seen: set[str] = set()
+    # Computed once per tick rather than per PR below.
+    managed = _auto_start.managed_ids(app)
+    spec_review_required = _auto_start.spec_review_checker(app, managed=managed)
 
     for pr in (app._data.get("prs") or []):
         pr_id = pr.get("id", "")
@@ -947,6 +950,16 @@ def _poll_impl_idle(app) -> None:
 
         active_pr_ids.add(pr_id)
         window_name = _pr_display_id(pr)
+
+        # Auto-start spec review: hold the impl spec the session just
+        # wrote (inline Step 0) for approval as soon as it appears, so
+        # the agent waiting on it is never taken for finished work below.
+        # Done before pane registration: a manual launch without
+        # ``--transcript`` (command-bar or shell ``pm pr start``) is never
+        # registered, and its spec must still be held this tick.
+        if status == "in_progress":
+            _auto_start.hold_spec_if_due(
+                app, pr, required=spec_review_required(pr_id))
 
         # Lazy pane resolution: register if not yet tracked or pane gone.
         # Hook-driven tracking requires the transcript path launched by
@@ -972,8 +985,13 @@ def _poll_impl_idle(app) -> None:
 
         tracker.poll(pr_id)
 
-        # Detect newly-idle in_progress PRs for auto-review
-        if status == "in_progress" and tracker.became_idle(pr_id):
+        # Detect newly-idle in_progress PRs for auto-review.  The idle edge
+        # is consumed only for PRs auto-start acts on: an impl that went
+        # idle while out of scope (its target removed, or auto-start off)
+        # must still advance once it is brought back into scope.
+        if (status == "in_progress"
+                and (managed is None or pr_id in managed)
+                and tracker.became_idle(pr_id)):
             from pm_core.signoff import return_awaiting
             if return_awaiting(pr) == "impl":
                 # Sign-off sent it back but the rework session has not

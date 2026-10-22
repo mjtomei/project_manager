@@ -751,7 +751,7 @@ class AutoRunsScreen(ModalScreen):
 
     def _render_rows(self) -> None:
         from rich.text import Text
-        from pm_core.autostart_state import policy_labels
+        from pm_core.autostart_state import policy_labels, review_labels
         st = self._status
         mode = st.get("mode", "off")
         title = "Auto-start runs"
@@ -792,6 +792,10 @@ class AutoRunsScreen(ModalScreen):
             # only a hold — a stop mark or the wait target(s) holding it.
             for label, kind in policy_labels(row):
                 line.append(f" [{label}]", style=self._POLICY_STYLES[kind])
+            for label in review_labels(row):
+                line.append(f" [{label}]",
+                            style=("bold yellow" if label.startswith("spec review")
+                                   else "cyan"))
             state = r.get("state") or "?"
             line.append(f"  {state.upper()}",
                         style=self._STATE_STYLES.get(state, ""))
@@ -807,6 +811,9 @@ class AutoRunsScreen(ModalScreen):
             detail.append((r.get("title") or "")[:60], style="italic")
             if r.get("reason"):
                 detail.append(f" — {r['reason']}", style="dim")
+            spec = r.get("spec_review") or {}
+            if spec.get("path"):
+                detail.append(f" · {spec['path']}", style="dim yellow")
             if row.get("also"):
                 detail.append(f" (also needed by {', '.join(row['also'])})",
                               style="dim yellow")

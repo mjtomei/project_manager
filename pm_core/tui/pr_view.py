@@ -138,6 +138,11 @@ def start_pr(app, companion: bool = False) -> None:
         cmd_parts.append("--fresh")
     if companion:
         cmd_parts.append("--companion")
+    from pm_core.tui import auto_start as _auto_start
+    if _auto_start.spec_review_required(app, pr_id):
+        # Same review-mode spec prompt as an auto-start launch: the
+        # scheduler holds this PR's impl spec for approval either way.
+        cmd_parts.append("--review-spec")
     # Pass --transcript so the resulting Claude session writes a hook
     # transcript symlink that ``_poll_impl_idle`` can register in the
     # PaneIdleTracker.  Without it a manually-started PR is never tracked,
@@ -146,7 +151,6 @@ def start_pr(app, companion: bool = False) -> None:
     # both use the canonical ``impl-{pr_id}.jsonl`` name.  (Auto-advance on
     # idle stays gated on auto-start being enabled, so this only animates
     # the marker — it does not force a manual start to auto-review.)
-    from pm_core.tui import auto_start as _auto_start
     try:
         tdir = _auto_start.get_transcript_dir(app)
     except Exception:
@@ -786,6 +790,7 @@ def handle_command_submitted(app, cmd: str) -> None:
         if cmd.startswith("pr start"):
             pr_id = parts[-1] if len(parts) >= 3 else "PR"
             working_message = f"Starting {pr_id}"
+            cmd = _with_review_spec(app, cmd, parts)
         elif cmd.startswith("pr review"):
             pr_id = parts[-1] if len(parts) >= 3 else "PR"
             working_message = f"Reviewing {pr_id}"
@@ -795,6 +800,34 @@ def handle_command_submitted(app, cmd: str) -> None:
         app.query_one("#plans-pane", PlansPane).focus()
     else:
         app.query_one("#tech-tree", TechTree).focus()
+
+
+# ``pm pr start`` options that take a value (the PR id is the positional).
+_PR_START_VALUE_OPTS = ("--workdir", "--transcript")
+
+
+def _with_review_spec(app, cmd: str, parts: list[str]) -> str:
+    """Add ``--review-spec`` to a typed ``pr start <id>`` when auto-start
+    spec review covers the PR, so the agent gets the same wait-for-approval
+    spec prompt as ``s`` / an auto-start launch."""
+    if parts[:2] != ["pr", "start"] or "--review-spec" in parts:
+        return cmd
+    raw = None
+    it = iter(parts[2:])
+    for tok in it:
+        if tok in _PR_START_VALUE_OPTS:
+            next(it, None)
+        elif not tok.startswith("-"):
+            raw = tok
+            break
+    if raw is None:
+        return cmd
+    from pm_core.cli.helpers import _resolve_pr_id
+    from pm_core.tui import auto_start as _auto_start
+    pr = _resolve_pr_id(app._data or {}, raw)
+    if pr and _auto_start.spec_review_required(app, pr["id"]):
+        return f"pr start --review-spec {shlex.join(parts[2:])}"
+    return cmd
 
 
 def run_command(app, cmd: str, working_message: str | None = None,

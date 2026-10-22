@@ -608,10 +608,18 @@ def pr_spec(pr_id: str, phase: str | None, regenerate: bool):
         click.echo(existing)
         return
 
-    spec_text, needs_review = spec_gen.generate_spec(
-        data, pr_id, phase, root=root, force=regenerate,
-    )
+    try:
+        spec_text, needs_review = spec_gen.generate_spec(
+            data, pr_id, phase, root=root, force=regenerate,
+        )
+    except spec_gen.SpecApprovedMeanwhile as e:
+        click.echo(f"{e} Re-run with --regenerate to replace it.", err=True)
+        raise SystemExit(1)
     if spec_text:
+        # generate_spec drops the phase's approval record (and may set
+        # spec_pending); the TUI must reload so a review-specs target
+        # re-holds the step instead of acting on its stale approval.
+        trigger_tui_refresh()
         click.echo(spec_text)
         if needs_review:
             click.echo(f"\n[spec flagged for review — run `pm pr spec-approve {pr_id}`]", err=True)
@@ -663,7 +671,10 @@ def pr_spec_approve(pr_id: str):
     spec_text = spec_gen.get_spec(pr_entry, phase) or ""
     if not spec_text:
         click.echo(f"Spec content is empty — nothing to review.", err=True)
-        spec_gen.approve_spec(data, pr_id, root=root)
+        if spec_gen.approve_spec(data, pr_id, root=root, reviewed_text=""):
+            # A gate-held agent still waits for the approval message.
+            spec_gen.notify_spec_approved_if_current(root, pr_id, phase, "")
+        trigger_tui_refresh()
         return
 
     header_lines = [
@@ -687,7 +698,12 @@ def pr_spec_approve(pr_id: str):
                 "Spec rejected. Describe what to change (leave blank to regenerate as-is)",
                 default="",
             )
-            spec_gen.reject_spec(data, pr_id, feedback=feedback or None, root=root)
+            try:
+                spec_gen.reject_spec(data, pr_id, feedback=feedback or None,
+                                     root=root)
+            except spec_gen.SpecApprovedMeanwhile as e:
+                click.echo(f"{e} The rejection was not applied.", err=True)
+                raise SystemExit(1)
             # Reload to see whether spec_pending is still set after regen.
             # In prompt mode without ambiguity flags, generate_spec clears it.
             data = store.load(root)
@@ -702,13 +718,38 @@ def pr_spec_approve(pr_id: str):
                 )
             trigger_tui_refresh()
             return
-        spec_gen.approve_spec(data, pr_id, root=root, edited_text=edited_content)
-        click.echo(f"Spec approved for {phase} phase.")
+        approved = spec_gen.approve_spec(data, pr_id, root=root,
+                                         edited_text=edited_content,
+                                         reviewed_text=spec_text)
+        approved_text = edited_content
+        done_msg = f"Spec approved for {phase} phase."
+        edited_flag = edited_content != spec_text.strip()
     else:
         # Editor returned None = no changes, approve as-is
-        spec_gen.approve_spec(data, pr_id, root=root)
-        click.echo(f"Spec approved (unchanged) for {phase} phase.")
+        approved = spec_gen.approve_spec(data, pr_id, root=root,
+                                         reviewed_text=spec_text)
+        approved_text = spec_text
+        done_msg = f"Spec approved (unchanged) for {phase} phase."
+        edited_flag = False
 
+    if not approved:
+        # Approved, regenerated or rejected by someone else meanwhile.
+        fresh = store.get_pr(store.load(root), pr_id) or pr_entry
+        if (not spec_gen.has_pending_spec(fresh)
+                and (spec_gen.get_spec(fresh, phase) or "") == spec_text):
+            click.echo(f"No pending spec review for {_pr_display_id(fresh)}.")
+            return
+        click.echo(f"The {phase} spec for {_pr_display_id(fresh)} changed while "
+                   f"you were reviewing it; not approved. Review it again with: "
+                   f"pm pr spec-approve {pr_id}", err=True)
+        raise SystemExit(1)
+    click.echo(done_msg)
+
+    # Resume the agent waiting on this spec (inline Step 0 in review mode).
+    if spec_gen.notify_spec_approved_if_current(root, pr_id, phase,
+                                                approved_text,
+                                                edited=edited_flag):
+        click.echo("Notified the waiting session.")
     trigger_tui_refresh()
 
 
@@ -722,7 +763,12 @@ def pr_spec_approve(pr_id: str):
               help="Path to save Claude transcript symlink (used by auto-start)")
 @click.option("--companion", is_flag=True, default=False,
               help="Open a companion shell pane in the PR workdir")
-def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, transcript: str | None, companion: bool):
+@click.option("--review-spec", "review_spec", is_flag=True, default=False,
+              hidden=True,
+              help="Write the impl spec in review mode and wait for "
+                   "pm-recorded approval (used by auto-start spec review)")
+def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, transcript: str | None, companion: bool,
+             review_spec: bool = False):
     """Start working on a PR: clone, branch, print prompt.
 
     If PR_ID is omitted, uses the active PR if it's pending/ready, or
@@ -866,6 +912,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             )
         raise SystemExit(1)
 
+    fresh_clone = False
     if workdir:
         work_path = Path(workdir).resolve()
     else:
@@ -874,6 +921,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         if existing_workdir and Path(existing_workdir).exists():
             work_path = Path(existing_workdir)
         else:
+            fresh_clone = True
             # Need to clone first, then figure out the final path
             # Clone to a temp location under the project dir
             project_dir = _workdirs_dir(data)
@@ -924,6 +972,11 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         click.echo(f"Checking out branch {branch}...")
         git_ops.checkout_branch(work_path, branch, create=True)
 
+    if fresh_clone:
+        # A spec approved/edited before the workdir existed lives only in
+        # the local pm/specs; the clone's committed copy would shadow it.
+        spec_gen.seed_workdir_specs(root, pr_id, work_path)
+
     # For GitHub backend: push branch and create draft PR if not already set
     backend_name = data["project"].get("backend", "vanilla")
     gh_pr_info = None
@@ -962,6 +1015,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         _record_status_timestamp(pr, "in_progress")
         pr["agent_machine"] = machine
         pr["workdir"] = work_path_str
+        if spec_gen.launch_waits_for_impl_approval(pr, review_spec):
+            pr[spec_gen.IMPL_GATE_KEY] = True
+        else:
+            pr.pop(spec_gen.IMPL_GATE_KEY, None)
         if gh_pr_info:
             pr["gh_pr"] = gh_pr_info["url"]
             pr["gh_pr_number"] = gh_pr_info["number"]
@@ -975,7 +1032,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {machine}")
     click.echo(f"Work directory: {work_path}")
 
-    prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
+    prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session,
+                                        review_gate=review_spec)
 
     # Resolve model/provider for this implementation session
     from pm_core.model_config import resolve_model_and_provider, get_pr_model_override

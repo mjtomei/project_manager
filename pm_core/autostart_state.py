@@ -39,6 +39,17 @@ POLICY_FLAGS = {POLICY_STOP: "--stop-before-merge",
                 POLICY_AUTO: "--auto-merge",
                 POLICY_WAIT: "--wait-for-merge"}
 
+# Target option (not a merge policy, composes with any): pause the target
+# and its whole dependency closure for human approval of the
+# implementation spec and of the QA spec.  Stored on the target record like
+# ``WAIT_KEY``; the requirement is derived per call
+# (:func:`spec_review_holds`), never written to the PRs.
+REVIEW_KEY = "review_specs"
+REVIEW_FLAG = "--review-specs"
+NO_REVIEW_FLAG = "--no-review-specs"
+
+SPEC_PHASE_LABELS = {"impl": "impl", "qa": "QA"}
+
 PHASES = ("pending", "implementation", "review", "qa", "sign_off", "merge", "done")
 STATES = ("queued", "running", "waiting", "paused", "failed", "completed")
 
@@ -148,6 +159,49 @@ def merge_holds(prs: list[dict], targets: dict, stop) -> dict[str, dict]:
             h = holds.setdefault(pr_id, {"explicit": False, "targets": []})
             h["targets"].append(t)
     return holds
+
+
+def is_review_target(record) -> bool:
+    return isinstance(record, dict) and bool(record.get(REVIEW_KEY))
+
+
+def spec_review_holds(prs: list[dict], targets: dict) -> dict[str, list[str]]:
+    """Every PR whose specs need approval → the review targets requiring it.
+
+    Union of the closures (target included) of the active targets with
+    ``review_specs``; a shared prerequisite lists every such target.
+    Merged/closed PRs are skipped.  Like :func:`merge_holds`, derived from
+    the current graph on every call, so removing a target releases only
+    what it required (a spec already pending stays pending — that is
+    ``spec_pending`` on the PR, not this).
+    """
+    status = {pr["id"]: pr.get("status") for pr in prs}
+    out: dict[str, list[str]] = {}
+    for t, rec in (targets or {}).items():
+        if not is_review_target(rec):
+            continue
+        for pr_id in sorted(closure(prs, t)):
+            if status.get(pr_id) in TERMINAL_STATUSES:
+                continue
+            out.setdefault(pr_id, []).append(t)
+    return out
+
+
+def pending_spec_phase(pr: dict) -> str | None:
+    """Phase (``impl``/``qa``) of the PR's spec awaiting approval."""
+    pending = pr.get("spec_pending")
+    if isinstance(pending, dict):
+        return pending.get("phase") or None
+    return None
+
+
+def spec_review_reason(pr_id: str, phase: str | None) -> str:
+    label = SPEC_PHASE_LABELS.get(phase or "", phase or "")
+    reason = (f"{label} spec awaiting approval — V or "
+              f"pm pr spec-approve {pr_id}").lstrip()
+    if phase == "qa":
+        reason += " (scenarios launch after approval)"
+    return reason
 
 
 def effective_policy(pr_id: str, holds: dict) -> str:
@@ -296,6 +350,13 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
     if status == "closed":
         return "done", "completed", "closed"
 
+    # A spec awaiting approval pauses the phase whatever else is live (a
+    # QA planner still running must not read as "planning scenarios").
+    # (A pending PR's impl spec gates its start: pm pr start refuses.)
+    if pr.get("spec_pending"):
+        return phase, "waiting", spec_review_reason(pr_id,
+                                                     pending_spec_phase(pr))
+
     # Merge overlays — the merge step is live regardless of registry status.
     if pr_id in (inp.get("merge_input_required") or set()):
         return "merge", "waiting", "merge INPUT_REQUIRED — answer in merge window"
@@ -327,8 +388,6 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
         return "pending", "queued", "ready; starts on next scheduler pass"
 
     if status == "in_progress":
-        if pr.get("spec_pending"):
-            return phase, "waiting", "spec generation awaiting input"
         if pr_id in (inp.get("launching") or set()):
             return phase, "running", "launching implementation"
         if not win_live("implementation"):
@@ -426,7 +485,10 @@ def build_status(inp: dict) -> dict:
     ``stop_before_merge``, ``review_loops``, ``qa_loops``, ``pending_merge``,
     ``merge_input_required``, ``launching``,
     ``impl_idle``, ``windows`` (``{name: id}``), ``signoff``
-    (``{pr_id: {verdict, fresh, stale_reason?}}``), ``skip_qa``, ``generated_at``.
+    (``{pr_id: {verdict, fresh, stale_reason?}}``), ``skip_qa``,
+    ``spec_review_modes`` (pr ids whose own ``review_spec``/global mode
+    requires review), ``generated_at``.  Pending-spec paths come from
+    ``spec_reviews`` (``{pr_id: {path}}``).
     """
     prs = inp.get("prs") or []
     pr_map = {p["id"]: p for p in prs if p.get("id")}
@@ -437,6 +499,9 @@ def build_status(inp: dict) -> dict:
     windows = inp.get("windows") or {}
     # Only active targets hold their closures (off → explicit marks only).
     holds = merge_holds(prs, targets if enabled else {}, stop)
+    review_by = spec_review_holds(prs, targets if enabled else {})
+    review_modes = set(inp.get("spec_review_modes") or ())
+    spec_reviews = inp.get("spec_reviews") or {}
 
     if not enabled:
         mode = "off"
@@ -455,6 +520,17 @@ def build_status(inp: dict) -> dict:
         review = (inp.get("review_loops") or {}).get(pr_id)
         qa = (inp.get("qa_loops") or {}).get(pr_id)
         signoff = (inp.get("signoff") or {}).get(pr_id)
+        spec = None
+        pending = pr.get("spec_pending")
+        if pending:
+            spec = {
+                "phase": pending_spec_phase(pr),
+                "path": (spec_reviews.get(pr_id) or {}).get("path"),
+                "generated_at": (pending.get("generated_at")
+                                 if isinstance(pending, dict) else None),
+                "approve": f"pm pr spec-approve {pr_id}",
+                "key": "V",
+            }
         return {
             "pr_id": pr_id,
             "display_id": _display_id(pr),
@@ -469,6 +545,9 @@ def build_status(inp: dict) -> dict:
             "policy": effective_policy(pr_id, holds),
             "held_by": list((holds.get(pr_id) or {}).get("targets") or []),
             "explicit_hold": bool((holds.get(pr_id) or {}).get("explicit")),
+            "review_specs": bool(review_by.get(pr_id)) or pr_id in review_modes,
+            "review_specs_by": list(review_by.get(pr_id) or []),
+            "spec_review": spec,
             "window": ({"name": win["name"], "id": win["id"]} if win else None),
             "review": ({
                 "iteration": review.get("iteration") or 0,
@@ -536,6 +615,7 @@ def build_status(inp: dict) -> dict:
             "policy": target_policy(t, rec, stop),
             "effective_policy": effective_policy(t, holds),
             "held_by": list((holds.get(t) or {}).get("targets") or []),
+            "review_specs": is_review_target(rec),
             "added_at": rec.get("added_at"),
             "source": rec.get("source"),
             "state": run["state"] if run else ("failed" if pr is None else "completed"),
@@ -607,7 +687,8 @@ def status_rows(status: dict) -> list[dict]:
         }
         rows.append({"pr_id": tid, "depth": 0, "kind": "target", "run": run,
                      "also": [], "progress": _progress(run),
-                     "policy": t.get("policy")})
+                     "policy": t.get("policy"),
+                     "review_specs": bool(t.get("review_specs"))})
         for dep in t.get("pending") or []:
             r = runs.get(dep)
             if not r:
@@ -646,6 +727,31 @@ def policy_labels(row: dict) -> list[tuple[str, str]]:
     return out
 
 
+def review_labels(row: dict) -> list[str]:
+    """Spec-review labels for a status row (shared by ``format_text`` and
+    the runs popup): ``review-specs`` on a target that asks for it,
+    ``review-specs ← T`` on a PR another target's option covers,
+    ``review-spec`` for a PR in review mode on its own (``review_spec`` /
+    global spec-mode), and ``spec review: impl|QA`` while one is pending.
+    """
+    run = row.get("run") or {}
+    pr_id = run.get("pr_id") or row.get("pr_id")
+    by = list(run.get("review_specs_by") or [])
+    out: list[str] = []
+    if pr_id in by or (row.get("kind") == "target" and row.get("review_specs")):
+        out.append("review-specs")
+    others = [t for t in by if t != pr_id]
+    if others:
+        out.append("review-specs ← " + ", ".join(others))
+    if not out and run.get("review_specs"):
+        out.append("review-spec")
+    spec = run.get("spec_review")
+    if spec:
+        out.append("spec review: "
+                   + SPEC_PHASE_LABELS.get(spec.get("phase") or "", "?"))
+    return out
+
+
 def format_text(status: dict) -> str:
     """Human-readable rendering of a status dict (CLI ``status`` output)."""
     mode = status.get("mode")
@@ -670,13 +776,16 @@ def format_text(status: dict) -> str:
             mark = ""
         # The default policy goes unlabelled in text (only holds show).
         labels = [lbl for lbl, _ in policy_labels(row) if lbl != "auto-merge"]
+        labels += review_labels(row)
         pol = f" [{'; '.join(labels)}]" if labels else ""
         prog = f" {row['progress']}" if row.get("progress") else ""
         win = f"  win={r['window']['name']}" if r.get("window") else ""
         also = f"  also needed by {', '.join(row['also'])}" if row.get("also") else ""
+        spec = r.get("spec_review") or {}
+        spec_s = f"  spec={spec['path']}" if spec.get("path") else ""
         lines.append(
             f"{indent}{mark}{r['pr_id']}{pol} {r.get('state')}/{r.get('phase')}"
-            f"{prog} — {r.get('reason') or ''}{win}{also}")
+            f"{prog} — {r.get('reason') or ''}{win}{spec_s}{also}")
         title = r.get("title") or ""
         if title:
             lines.append(f"{indent}    {title[:70]}")

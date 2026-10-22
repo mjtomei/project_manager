@@ -645,6 +645,11 @@ class ProjectManagerApp(App):
                         for p in (self._data or {}).get("prs") or []}
         old_deps = {p.get("id"): list(p.get("depends_on") or [])
                     for p in (self._data or {}).get("prs") or []}
+        # pr id → pending spec phase (True if pending without one)
+        from pm_core.autostart_state import pending_spec_phase
+        old_spec = {p.get("id"): (pending_spec_phase(p)
+                                  or bool(p.get("spec_pending")))
+                    for p in (self._data or {}).get("prs") or []}
         try:
             # Only search for root on first load; reuse existing root for refreshes
             if self._root is None:
@@ -655,11 +660,13 @@ class ProjectManagerApp(App):
                        self._root, len(self._data.get("prs") or []))
             self._update_display()
             # A merge done outside the auto-merge path (``g``, CLI, another
-            # session) or a ``pm pr edit --depends-on`` is only seen here;
-            # let the scheduler prune completed targets and start
-            # newly-unblocked or newly-in-scope PRs.
+            # session), a ``pm pr edit --depends-on`` or a spec approval
+            # (``pm pr spec-approve``) is only seen here; let the scheduler
+            # prune completed targets and start newly-unblocked, newly-in-
+            # scope or newly-approved PRs.
             from pm_core.tui import auto_start as _auto_start
-            _auto_start.on_state_loaded(self, old_statuses, old_deps)
+            _auto_start.on_state_loaded(self, old_statuses, old_deps,
+                                        old_spec)
         except FileNotFoundError:
             _log.warning("no project.yaml found")
             self._root = None
