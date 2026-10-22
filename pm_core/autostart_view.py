@@ -78,6 +78,8 @@ Line = list[Seg]
 
 SEP: Seg = (" · ", "sep")
 
+_WS = str.maketrans("\t\n\r\v\f", "     ")
+
 
 def clamp_width(width: int | None) -> int:
     if not width or width <= 0:
@@ -93,6 +95,9 @@ def _tokens(segs: list[Seg]) -> list[tuple[str, str, bool]]:
     """Split segments into ``(text, role, is_space)`` word/space tokens."""
     out: list[tuple[str, str, bool]] = []
     for text, role in segs:
+        # A multi-line reason (a QA error traceback) or a tab would break
+        # the hanging indent and the cell count: lay it out as spaces.
+        text = text.translate(_WS)
         if not text:
             continue
         if role == "sep":

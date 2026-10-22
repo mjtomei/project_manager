@@ -224,6 +224,18 @@ class TestWidth:
         assert first.startswith("  └ ")
         assert rest and all(ln.startswith("      ") for ln in rest)
 
+    def test_multiline_reason_keeps_the_indent(self):
+        inp = mixed_inputs()
+        inp["qa_loops"]["pr-2e3f4a5"] = {
+            "running": False, "error": "Traceback:\n  boom\tline"}
+        text = st.format_text(st.build_status(inp), 60)
+        assert "\t" not in text
+        block = _row_block(text, "└ #235")
+        assert "QA error: Traceback: boom line" in " ".join(block.split())
+        first, *rest = block.splitlines()
+        assert rest and all(ln.startswith("      ") for ln in rest)
+        assert all(cell_len(ln) <= 60 for ln in text.splitlines())
+
     def test_header_wraps(self):
         head = _text(60).split("◎")[0].splitlines()
         assert len(head) > 1 and all(cell_len(ln) <= 60 for ln in head)
