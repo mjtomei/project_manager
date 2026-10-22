@@ -278,7 +278,7 @@ attempt rows uninterpreted (omitted when absent).
   fails (e.g. read-only history dir).
 - I2. Attempt ids must be unique across processes and restarts
   (`secrets.token_hex(6)`); restarts never reuse an attempt.
-- I3. Reading tolerates torn/garbage lines (skip), unknown kinds, and
+- I3. Reading tolerates torn/garbage lines (skip; a non-UTF-8 byte spoils only its own line), unknown kinds, and
   events for unknown attempts (shown as orphan phase/ends are ignored).
 - I4. Liveness check: the TUI restarts in place with `exec` (Ctrl+R),
   keeping its pid and start time, so pid checks alone would call a
