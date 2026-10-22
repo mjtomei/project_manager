@@ -87,10 +87,12 @@ pr-f5b7eef had `gh_pr_number: 193` at 37a927cd (status in_review) and the
 field is absent in the current project.yaml.  `int` vs `str`
 gh_pr_number doesn't matter (`f"#{gh}"` gives the same string).
 
-Fix: resolve a window id to a PR by display id, else local `pr["id"]`,
-else (`#N`) by `str(gh_pr_number) == N` (whitespace-stripped).  Canonicalize
-home_pr to the PR's current display id.  `_pr_has_open_window` checks
-window names built from both the display id and the local id.
+Fix: resolve a window id to a PR by display id, else via the existing
+`helpers._resolve_pr_id` (local `pr["id"]`, or `#N` against an int
+`gh_pr_number`; a string `gh_pr_number` is already covered by the
+display-id match).  Canonicalize home_pr to the PR's current display id.
+`_build_nav_entries`' open-window check matches window names built from
+both the display id and the local id.
 
 ## Implicit requirements
 

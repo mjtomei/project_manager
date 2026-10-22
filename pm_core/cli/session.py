@@ -1098,10 +1098,11 @@ def _find_pr_for_window_id(prs: list[dict], window_pr_id: str) -> dict | None:
     Windows are named by ``_pr_display_id`` at creation time, so the name
     can drift from the current display id when ``gh_pr_number`` is added
     (window ``pr-abc``, display ``#12``) or lost (window ``#12``, display
-    ``pr-abc``) afterwards.  Match the display id first, then the local id,
-    then a ``#N`` name against ``gh_pr_number``.
+    ``pr-abc``) afterwards.  Match the display id first (which also covers
+    a ``gh_pr_number`` stored as a string), then fall back to
+    ``_resolve_pr_id`` (local id, or ``#N`` against ``gh_pr_number``).
     """
-    from pm_core.cli.helpers import _pr_display_id
+    from pm_core.cli.helpers import _pr_display_id, _resolve_pr_id
 
     wid = (window_pr_id or "").strip()
     if not wid:
@@ -1109,16 +1110,7 @@ def _find_pr_for_window_id(prs: list[dict], window_pr_id: str) -> dict | None:
     for p in prs:
         if _pr_display_id(p) == wid:
             return p
-    for p in prs:
-        if p.get("id") == wid:
-            return p
-    if wid.startswith("#"):
-        num = wid[1:]
-        for p in prs:
-            gh = p.get("gh_pr_number")
-            if gh is not None and str(gh).strip() == num:
-                return p
-    return None
+    return _resolve_pr_id({"prs": prs}, wid)
 
 
 def _build_nav_entries(
@@ -1844,8 +1836,9 @@ def popup_picker_cmd(session: str, window_name: str):
 
     if not nav_pr_ids:
         click.echo("PR Actions (prefix+P)")
-        click.echo("No active PR windows open." if not home_pr
-                   else "Switch to a PR window to use this picker.")
+        # home_pr is always in the list when set, so only a non-PR
+        # window with no active PR windows gets here.
+        click.echo("No active PR windows open.")
         _pause_and_exit(0)
 
     try:

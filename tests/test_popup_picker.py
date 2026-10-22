@@ -591,6 +591,15 @@ class TestPopupPickerNoActions:
         run_cmd.assert_called_once()
         assert "pr-r" in run_cmd.call_args.args[0]
 
+    def test_only_merged_windows_from_non_pr_window(self, tmp_path, monkeypatch, capsys):
+        """Only merged PRs have windows and the popup is opened from a
+        non-PR window: nothing to navigate to, so say so without fzf."""
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, self.PRS[:1], ["tui", "#238"], "tui", [])
+        assert fzf.calls == []
+        assert "No active PR windows open." in capsys.readouterr().out
+        run_cmd.assert_not_called()
+
     def test_merged_home_pr_shows_notice_and_navigates(self, tmp_path, monkeypatch):
         """Opened from merged #238's own window: show it with a scoped
         notice, keep nav keys working, and allow actions on the next PR."""
