@@ -1544,6 +1544,21 @@ class TestReconciliation:
         assert "review=done LGTM" in text
         assert "review-loop=running (last KILLED)" in text
 
+    def test_runtime_line_keeps_done_state_of_open_idle_pane(
+            self, clock, monkeypatch):
+        """A plain review's pane stays open and idle after its verdict;
+        the runtime line still reads done NEEDS_WORK, not idle."""
+        from pm_core import hook_events
+        monkeypatch.setattr(hook_events, "read_event", lambda sid: {
+            "event_type": "idle_prompt", "timestamp": clock.t})
+        rs.set_action_state(PR, "review", "done", verdict="NEEDS_WORK",
+                            session_id="sess-r", pane_id="%8")
+        rs.set_action_state(PR, "start", "running", session_id="sess-s")
+        text = "\n".join(hq.render_text(hq.build_history(PR, now=clock.t)))
+        assert "review=done NEEDS_WORK" in text
+        assert "(last NEEDS_WORK)" not in text
+        assert "start=idle" in text
+
 
 # ---------------------------------------------------------------------------
 # CLI + pane

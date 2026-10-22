@@ -604,8 +604,14 @@ def _runtime_tracked_attempts(pr_id: str) -> set[str]:
 def _runtime_actions(pr_id: str) -> dict:
     try:
         out = {}
-        for action in _rs.get_pr_actions(pr_id):
+        for action, raw in _rs.get_pr_actions(pr_id).items():
             entry = _rs.derive_action_status(pr_id, action)
+            if entry and isinstance(raw, dict) and raw.get("state") \
+                    and raw["state"] not in _rs.IN_FLIGHT_STATES:
+                # A finished entry keeps its own state: the hook state of
+                # its still-open pane would relabel "done NEEDS_WORK" as
+                # "idle (last NEEDS_WORK)".
+                entry = dict(entry, state=raw["state"])
             if entry:
                 out[action] = {k: v for k, v in entry.items()
                                if k in ("state", "verdict", "iteration",
