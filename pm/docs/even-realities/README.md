@@ -7,7 +7,7 @@ Open **[index.html](index.html)** to review. It holds 54 glasses screenshots fro
 | [proposal.md](proposal.md) | Required behavior: read → discuss in the right session → revise → approve the exact version → unattended PM; full session access including each QA scenario's refiner, worker and verifier; status, history, holds; busy, error and reconnect |
 | [constraints.md](constraints.md) | G2 display, input, update, voice, lifecycle and companion constraints, each with a source and a verified/assumed label |
 | [session-inventory.md](session-inventory.md) | Every session the PM actions panel and related windows expose, and how the glasses reach each one |
-| [open-questions.md](open-questions.md) | Questions for pr-e5873d7 (PM picker sharing) and pr-9374887 (Pageborne sharing), plus hardware items for pr-1e0772a |
+| [open-questions.md](open-questions.md) | Questions for pr-e5873d7 (PM picker sharing) and pr-9374887 (Pageborne sharing), plus validation questions for pr-1e0772a |
 | [pageborne-snapshot.md](pageborne-snapshot.md) | Provenance of the Pageborne source reviewed (HEAD `4d769f60`, not committed) and the conventions adopted from it |
 | [mockup/](mockup/README.md) | Runnable mockup, journey script, constraint checker and simulator capture |
 

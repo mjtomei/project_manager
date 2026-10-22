@@ -90,6 +90,6 @@ Answer each question from the actual code. Do not read the order or wording here
 
 ## For the implementation PR (pr-1e0772a)
 
-- Hardware validation listed in [constraints](constraints.md#needs-hardware-validation-not-established-here).
-- The live journey: a document changed during review, reconnection, review and manual merge holds, history, and repeated inputs against real PM state.
-- The exact cross-repository revisions and setup (PM, Pageborne, Even Terminal or any bridge) needed to reproduce it.
+1. **Hardware validation.** Which of the items listed in [constraints](constraints.md#needs-hardware-validation-not-established-here) hold on G2 glasses and the R1 ring, and which of them change the design?
+2. **The live journey.** Does the journey hold against real PM state: a document changed during review, reconnection, review and manual merge holds, history, and repeated inputs?
+3. **Reproduction.** Which exact cross-repository revisions and setup (PM, Pageborne, Even Terminal or any bridge) does someone need to reproduce it?
