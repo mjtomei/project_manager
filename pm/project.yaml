@@ -31077,6 +31077,81 @@ prs:
       with a dir (pr-c8482a8). Scripts: /pm-captures/scenarios/1/scripts.'
     created_at: '2026-10-22T17:03:16Z'
     last_edited: '2026-10-22T17:03:16Z'
+  - id: note-9eb2bf8
+    text: 'Impl a0680277: shared layout in pm_core/autostart_view.py (CLI format_text
+      + AutoRunsScreen). Status JSON adds attention/attention_label/short_reason/blockers
+      (reason unchanged). Mixed demo fixture: tests/autostart_mixed_fixture.py (4
+      targets, wait chain, shared dep exception, IR, impl+QA spec review, manual merge).
+      CLI: pm autostart status --width N --color/--no-color. Tests: tests/test_autostart_view.py.
+      Full suite: only known env failures (markdown module, test_hook_events).'
+    created_at: '2026-10-22T15:16:34Z'
+    last_edited: '2026-10-22T15:16:34Z'
+  - id: note-c973760
+    text: 'S5 refine: in backlog (all) mode build_status lists only active PRs and
+      pending PRs whose deps are ALL merged, so blocked rows (and blocker hold text
+      / (closed)/(missing)) never appear there; flat-mode hold annotations show as
+      row labels ([stop-before-merge], [wait-for-merge ← X]). Closed/missing blockers
+      are tested in targets mode (pm pr edit --status closed; pm pr close X leaves
+      dependents on a missing id).'
+    created_at: '2026-10-22T15:51:33Z'
+    last_edited: '2026-10-22T15:51:33Z'
+  - id: note-2cbd1f3
+    text: 'QA S3 refine (2026-10-22): (1) fake-claude cannot hold a review INPUT_REQUIRED
+      open; it re-emits idle every 2s, so the loop coerces it to NEEDS_WORK in <=2s.
+      Use a recorded QA INPUT_REQUIRED instead (qa_scenario INPUT_REQUIRED): red INPUT_REQUIRED
+      "see the QA note; press t / z t to re-run QA". Clear it by setting qa_scenario
+      to PASS and pressing z t. (2) The QA loop ends INPUT_REQUIRED when no QA spec
+      exists after planning, so seed one with `pm pr spec <id> qa` from a test-session
+      pane (spec-mode prompt) before QA. (3) Red IMPL SPEC REVIEW needs a pending
+      spec on an in_progress PR. With `pm set spec-mode review`, run `pm pr spec <id>
+      impl` while a fake impl delay keeps it in_progress; prompt mode never pends
+      with the fake (no AMBIGUITY_FLAG). (4) The image has no vi/vim/nano, so V runs
+      `pm pr spec-approve` and needs an editor: `sudo apt-get install -y vim-tiny`,
+      or export EDITOR=true before the first tmux server. (5) Start pm session with
+      PATH=/usr/local/bin:/usr/bin:/bin:$PATH so local merges use real git, not the
+      ~/.local/bin proxy. Commit pm/ to master before autostart.'
+    created_at: '2026-10-22T15:56:24Z'
+    last_edited: '2026-10-22T15:56:24Z'
+  - id: note-e754553
+    text: 'QA S5 (8ef055ad) PASS. Spec errors: `pm autostart add --wait/--stop` do
+      not exist (use --wait-for-merge/--stop-before-merge); CLI default policy is
+      stop-before-merge, not auto-merge. Backlog header also shows "· run <id>" carried
+      over from the earlier targets run (master prints run= too). No-pm-push projects
+      never launch (pr-b977417).'
+    created_at: '2026-10-22T16:02:32Z'
+    last_edited: '2026-10-22T16:02:32Z'
+  - id: note-8d08b2c
+    text: 'S2 refine (48ceac05): mixed fixture recipe works live in ~3 min: QA INPUT_REQUIRED
+      via fake QA (skip-qa off) on a lone target first, then `pm project set skip-qa
+      on` + other targets; spec_pending bootstrapped in project.yaml; sign-off coerces
+      SIGNOFF_MERGE→BLOCKED (fake impl makes no commits) until a commit lands in the
+      PR workdir, then it auto re-runs → MANUAL MERGE. Start pm session with PATH=/usr/bin
+      before ~/.local/bin (git proxy breaks integration fetch) but keep ~/.local/bin
+      (fake-claude). Observed: in pm default tmux (TERM=screen) popup attention labels
+      render SGR 1;37;45 (Textual theme red #F4005F → magenta) and WAITING 91, while
+      CLI in same pane emits 1;37;41 / 33. Footer hint wraps at 70 cols with a leading
+      "·".'
+    created_at: '2026-10-22T16:08:37Z'
+    last_edited: '2026-10-22T16:08:37Z'
+  - id: note-6fd33e8
+    text: 'QA S2 NEEDS_WORK→fixed 747328d8: popup used Textual theme ANSI colours,
+      so in TERM=screen labels were 1;37;45 (magenta) and WAITING 91 (red); POPUP_STYLES
+      now explicit RGB rounding to CLI 1;37;41/33/1;31. All 4 triples held post-fix
+      (j/k order, scroll, f notice, resize 70/140, close keys). Minor open: static
+      footer hint wraps with leading "·" at 70 cols. Enter focus switches the attached
+      grouped session ($S~1), not detached $S.'
+    created_at: '2026-10-22T16:22:17Z'
+    last_edited: '2026-10-22T16:22:17Z'
+  - id: note-ccd665b
+    text: 'QA S3 (2026-10-22): all 6 triples held live. Popup fixes: colours 747328d8
+      (S-other, same as mine) + selection reverse→gray bar f104b62f (reverse inverted
+      the red label on the selected attention row). Traps: fake impl makes no commit
+      → sign-off coerced BLOCKED (commit in PR workdir, autostart re-runs sign-off);
+      vi :wq in V prints "Spec approved" not "(unchanged)" (pre-existing click.edit
+      mtime); pending impl spec only reached the popup after main-view r. Captures
+      /pm-captures/scenarios/3.'
+    created_at: '2026-10-22T16:31:02Z'
+    last_edited: '2026-10-22T16:31:02Z'
 - id: pr-c8482a8
   plan: bugs
   title: 'fake-claude cannot hold a review INPUT_REQUIRED: 2 s idle_prompt refresh
