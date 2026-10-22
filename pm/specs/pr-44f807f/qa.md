@@ -125,6 +125,7 @@ links, the genre fixture's claim not holding in pm.
   the new file. Concurrent regeneration must now produce zero crashes (the earlier ~1-in-40
   "not enough values to unpack" crash is a regression if seen), a final `rubric.md` identical to
   committed, and no leftover `.rubric.md.*` temp files; the file mode of `rubric.md` is kept.
+  (The mode is whatever the clone gave it: 644 under umask 022, not necessarily 664.)
 - *Interrupted `--write-doc` (6324448d, c56b4403).* The temp file is named
   `.rubric.md.<pid>.<tid>` before it is created, so Ctrl-C (SIGINT) at any point must leave no
   temp file and `rubric.md` either the old or new content (a 0-byte leftover is a regression).
@@ -144,3 +145,13 @@ links, the genre fixture's claim not holding in pm.
 - *Live judge models.* Not required; a hand-written reply exercises `validate_judgment`. If a
   Claude CLI happens to be available, feeding one rendered prompt to it is optional extra
   evidence, never a pass/fail gate.
+- *Master merge (48266e09, master@337d1266).* Nothing under `experiments/plan-writing/` or
+  `tests/test_doc_rubric.py` changed since c56b4403/542cde34; the merge brought master's
+  `pm_core` changes (`cli/pr.py`, `store.py`, sign-off/integration) and a revised
+  `pm/plans/plan-doc-eval.md` that adds PM implementation/QA spec cases and cross-lab/open-model
+  judge panels. Re-run R11 (`pm plan load` of the genre fixture) and R12 (`pm pr note list` for
+  `pr-8df6472`) against the merged pm. Spec cases are scored on the whole-document track with the
+  spec's phase inputs as the brief; the existing dimensions (requirement_coverage,
+  rationale_and_alternatives, risks_and_open_questions, verifiability) cover them, so rendering a
+  real pm spec pair as `whole_document` must work without rubric changes. A spec-specific
+  required-section list for `template_section_presence` is left to pr-8df6472, not a defect.
