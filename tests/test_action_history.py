@@ -414,8 +414,9 @@ class TestRuntimeCapture:
             review_loop_ui, "_find_impl_pane",
             lambda session, name: (window["pane"]
                                    if name == f"review-{PR}" else None))
+        # Like the real watch, keep the pane in this tick's seen set.
         monkeypatch.setattr(review_loop_ui, "_watch_untracked_trust",
-                            lambda *a: None)
+                            lambda app, pane, workdir, seen: seen.add(pane))
         app = SimpleNamespace(
             _session_name="sess", _pane_idle_tracker=PaneIdleTracker(),
             _data={"prs": [{"id": PR, "status": "in_review"}]},
@@ -671,6 +672,21 @@ class TestRuntimeCapture:
         monkeypatch.setattr("pm_core.claude_launcher.session_id_from_transcript",
                             lambda t: loop_sid)
         assert check(app, "%1", "review-pr-001.jsonl") is False
+
+    def test_foreign_review_pane_cache_pruned_with_pane(self, monkeypatch):
+        from pm_core.tui import review_loop_ui
+        monkeypatch.setattr(
+            "pm_core.tmux.pane_start_command",
+            lambda pane: "claude --session-id 11111111-2222-3333-4444-555555555555")
+        monkeypatch.setattr("pm_core.claude_launcher.session_id_from_transcript",
+                            lambda t: "66666666-7777-8888-9999-aaaaaaaaaaaa")
+        app = SimpleNamespace()
+        assert review_loop_ui._transcript_is_another_session(
+            app, "%1", "review-pr-001.jsonl") is True
+        review_loop_ui._prune_untracked_trust(app, {"%1"})
+        assert "%1" in app._foreign_review_panes  # still on screen
+        review_loop_ui._prune_untracked_trust(app, set())
+        assert app._foreign_review_panes == {}
 
     def test_journal_failure_leaves_runtime_unchanged(self, tmp_path,
                                                      monkeypatch):

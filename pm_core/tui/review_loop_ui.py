@@ -941,12 +941,17 @@ def _watch_untracked_trust(app, pane_id: str, workdir: str | None,
 
 
 def _prune_untracked_trust(app, seen: set[str]) -> None:
-    """Drop orphan trust watches for panes that are gone or now tracked."""
+    """Drop orphan trust watches (and cached foreign-session verdicts) for
+    panes that are gone or now tracked."""
     watches = getattr(app, "_untracked_trust_watches", None) or {}
     for pane_id in list(watches):
         if pane_id not in seen:
             watches.pop(pane_id, None)
             app._untracked_trust_reported.discard(pane_id)
+    foreign = getattr(app, "_foreign_review_panes", None) or {}
+    for pane_id in list(foreign):
+        if pane_id not in seen:
+            foreign.pop(pane_id, None)
 
 
 def _transcript_is_another_session(app, pane_id: str,
