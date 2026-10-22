@@ -30682,6 +30682,35 @@ prs:
       2 or the bound reads unknown. Captures /pm-captures/scenarios/42.'
     created_at: '2026-10-22T16:26:45Z'
     last_edited: '2026-10-22T16:26:45Z'
+  - id: note-86817d4
+    text: 'S43 refine (05913801; S39 never launched): two-HOME + S34 single-run IR
+      combined. In S34 the X restarts came about 44 s and 128 s after t, and QA ended
+      about 191 s after t. So YB''s review uses [NEEDS_WORK d60, PASS d60] started
+      with t, and YC''s background QA is started (third auto-sequence -> ''advanced:
+      qa'') just before t, so both are live across both X restarts. A 20 s YB loop
+      would finish before restart 2. Do YC''s prep (spec + auto-sequence x2 + review
+      PASS) under a prep config, then set Y''s main config, which resets the shared
+      review cursor. X''s qa_scenario sequence is [filler PASS d40, PASS d40, PASS
+      d40, PASS d40, INPUT_REQUIRED d20] (Scenario 0 takes slot 0). Run pm pr edit
+      XQ --status in_review before t. Match the debug-log triggers in X''s ~/.pm/debug/<X
+      tag>.log and the window name qa-<XQ>-sN. YC''s CLI-opened start row may read
+      ''swept on tui-mount'' (the owner CLI is dead); that is not a QA interruption.'
+    created_at: '2026-10-22T15:38:52Z'
+    last_edited: '2026-10-22T15:38:52Z'
+  - id: note-9b7eaf0
+    text: 'QA S43 (2026-10-22) PASS on 05913801, no edits: two projects in one HOME.
+      X TUI QA (cap 2) got a plain pm tui restart 2.0 s after the s1 relaunch and
+      --breadcrumb 1.3 s after "Launched scenario 3", while Y ran a /review-loop YB
+      and a qa-run-bg YC. YB had one loop done PASS (NW/PASS) with all 16 journal
+      lines from the Y pid, no sweep; YC was never interrupted or resumed, done PASS;
+      no cross-project Resuming or windows. XQ: >44s interrupted, then (resumed) >1m23s
+      interrupted, then resumed done IR with only s3; one done per scenario; grace
+      lost→re-armed, then elapsed→re-armed; IR hold agrees in text/JSON/badge/pager;
+      latency 0.069→0.081 s with no step at restarts. Obs: finished qa-<pr>-sN windows
+      stay open, so raw window count hits 3 under cap 2 (only 2 live workers). Captures
+      /pm-captures/scenarios/43.'
+    created_at: '2026-10-22T16:01:42Z'
+    last_edited: '2026-10-22T16:01:42Z'
 - id: pr-72c8695
   plan: tui-ux
   title: Mobile PR actions pane with shared dispatch and app session links
