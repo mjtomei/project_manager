@@ -54,10 +54,10 @@ The user-facing surfaces are:
 ### Browser preview: status, history, holds and connectivity
 - **R21** Given PRs and status, when the user opens #216 history, then PR-owned timers show their owner and what fires next ("unknown" where applicable), plus recent attempts.
 - **R22** Given #211 (manual merge hold), when the user opens history, then the hold shows "no countdown".
-- **R23** Given the #211 merge confirmation, which names HEAD and base, when the head moves (simulated) and the user confirms, then the merge is refused as PM's decision, the hold stays, and #211 is not merged.
+- **R23** Given the #211 merge confirmation, which names HEAD and base, when the head moves (simulated) and the user confirms, then the merge is refused as PM's decision, the hold stays, and #211 is not merged. Afterwards #211 shows its sign-off as stale/rerunning at the new HEAD, no longer offers "Merge now…" with the old signed hash, and its history records the refusal (review i1). "Merge now…" is offered only for a non-stale MERGE verdict (i8).
 - **R24** Given a document is open, when the connection drops (simulated), then a "Reconnecting to PM · data N old" banner appears and reading continues.
 - **R25** Given the connection is down, when the user sends speech (or types on the phone), then "Not sent: PM unreachable · nothing queued" appears.
-- **R26** Given reconnect, then "Reconnected · same place · nothing resent" appears. The view is unchanged and no earlier refused message appears in the transcript.
+- **R26** Given reconnect, then "Reconnected · same place · nothing resent" appears. The view is unchanged and no earlier refused message appears in the transcript. A refused voice draft stays in its review panel (and refused typed text stays in the phone field) so the user can explicitly Send it after reconnect; it is never sent automatically (review i19, QA s3).
 - **R27** Given the root view, when the user presses back, then the footer explains that a double tap opens the system exit dialog. The app does not exit or crash.
 - **R28** Given the plan review (plan-sync v4), when the user starts approval, then the confirmation labels it PROPOSED. If the plan changes (v5) before confirming, confirming yields "Not approved" with What changed showing #218.
 
@@ -105,11 +105,17 @@ The user-facing surfaces are:
 - **E2** Given a voice review, when the user releases with no utterance queued, then the draft says "(no speech recognized)". Cancel or back says "Cancelled · nothing sent". Speak again re-listens.
 - **E3** Given the "impl publishes spec v3" button is pressed repeatedly, when there are no scripted revisions left, then nothing crashes and the version stays v3.
 - **E4** Given the user is on the confirm-approval screen for a version, when a revision is published before confirming, then confirming does not approve and offers What changed.
-- **E5** Given a disconnect during a voice review, when Send is chosen, then the send is refused, not queued. After reconnect it is not resent.
+- **E5** Given a disconnect during a voice review, when Send is chosen, then the send is refused, not queued, and the draft stays in the review panel. After reconnect it is not resent automatically; an explicit Send then delivers it exactly once.
 - **E6** Given the OS menu is used from deep inside a session tree, when "Needs you" is chosen, then the stack resets to the root and back from there behaves as root back.
-- **E7** Given two preview tabs and director POSTs, then both apply the same simulated events in order. A late-opened tab replays the queue from the start.
-- **E8** Given port 5180 is already held by `npm run serve`, when `npm run capture` is run, then it fails clearly or uses the override ports. It must not silently drive the user's running preview.
+- **E7** Given two preview tabs and director POSTs, then both apply the same simulated events in order. A tab opened or reloaded later starts from fresh fixture state and skips events already queued (it does not replay them; QA s3 fix). Demo buttons apply only to the tab they are clicked in.
+- **E8** Given port 5180 is already held by `npm run serve`, when `npm run capture` is run without `MOCKUP_PORT`/`SIMULATOR_PORT` overrides, then it fails clearly. It must not silently drive the user's running preview (capture's own server would hit EADDRINUSE while the simulator and director POSTs reach the user's server). With overrides it runs alongside the preview.
 - **E9** Given `npm run check` while the preview runs, then check is independent: it uses no ports and does not modify files.
+
+- **E10** Given a confirmation (Merge now…, Approve v…, Start…) or an actions list is showing, when the user picks an OS menu item, then the confirmation is dropped with "Cancelled · nothing changed" and Back from the chosen list never lands on it (i13). Choosing the menu item for the list already shown is a no-op (i7).
+- **E11** Given a document or session already open further back in the stack, when the user reopens it by another route (status → Read spec, All sessions → impl, Discuss), then the existing view is brought forward at the same page/scroll; no second copy is stacked (i14, i17). Actions that navigate elsewhere close the actions list first (i9).
+- **E12** Given a session that is not running (ended #215 impl, a queued scenario), when the user holds to speak or types on the phone, then it is refused up front ("not running · Tap: actions to start it"); ended QA-loop sessions show "Ended · only the QA loop launches it" and offer no Start (i10, i12, i15). A message to a still-starting session is shown as queued and survives the start (i4, i16).
+- **E13** Given the user reached a session via the menu from an unrelated document, when they send a message, then it carries no reading context from that document; only the doc's linked or same-PR session gets it (i2).
+- **E14** Given the phone compose field has a half-typed message, when an agent reply or director event re-renders the companion, then the draft and focus are kept (i5).
 
 ## 4. Pass/fail criteria
 - **Pass** requires all of the following:
@@ -134,3 +140,4 @@ The user-facing surfaces are:
 - Hardware behavior (real G2/R1, Bluetooth, WebView suspension) is explicitly out of scope; it is deferred to pr-1e0772a.
 - "report.html should link it": PM's QA finalize step writes report.html. QA verifies that the gallery exists in the PR captures dir and is openable, and that report.html (if one exists) links it.
 - Layout and gestures are a candidate, not a requirement. QA checks behavior (identity, versions, no duplicates, explicit confirms), not exact rows or keys.
+- Spec refreshed 2026-10-22 after QA s3 and review 450f i1–i19: E7 (late tab no longer replays), E8 (port collision expectation made concrete), R23/R26/E5 (stale sign-off after merge refusal; refused drafts kept for explicit resend) updated; E10–E14 added for the review-loop fixes (menu cancels confirms, no stacked duplicates, not-running refusals, context scoping, phone draft kept).
