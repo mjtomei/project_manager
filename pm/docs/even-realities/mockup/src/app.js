@@ -140,12 +140,12 @@ export class App {
     }
   }
 
-  openSession(id, how = 'open') {
+  openSession(id) {
     const s = this.pm.session(id);
     if (s.state === 'none' || s.state === 'starting') return this.confirmStart(s);
     // A queued QA scenario has no window yet; PM launches it when a slot frees.
     if (s.state === 'queued') { this.say(`${this.sessionName(s)} queued · PM launches it when a slot frees`); return; }
-    this.push({ type: 'session', id, scroll: 0, opened: s.state === 'ended' ? 'ended' : how });
+    this.push({ type: 'session', id, scroll: 0 });
     if (s.state !== 'ended') this.say(`Opened existing ${s.pane} · nothing launched`);
   }
 
@@ -191,7 +191,7 @@ export class App {
         const d = pm.doc(v.docId), latest = pm.latest(v.docId), shown = pm.version(v.docId, v.version);
         const s = pm.session(d.session);
         const out = [];
-        out.push(it(`Discuss in ${this.sessionName(s)}`, stateCell(s), () => { this.pop(); this.openSession(s.id, 'discuss'); }));
+        out.push(it(`Discuss in ${this.sessionName(s)}`, stateCell(s), () => { this.pop(); this.openSession(s.id); }));
         out.push(it('Request changes (speak)', null, () => { this.pop(); this.startListening('changes'); }));
         if (latest.n !== shown.n) out.push(it(`What changed v${shown.n} → v${latest.n}`, null, () => { this.pop(); this.whatChanged(v.docId, shown.n, latest.n); }));
         if (d.pending) {
