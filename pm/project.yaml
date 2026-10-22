@@ -4090,7 +4090,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-02T23:28:28.300859+00:00'
-  updated_at: '2026-10-22T00:11:01.035858+00:00'
+  updated_at: '2026-10-22T03:55:45.201965+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4106,6 +4106,15 @@ prs:
       call so pm pr history countdowns match the real timeout.'
     created_at: '2026-10-22T00:11:00Z'
     last_edited: '2026-10-22T00:11:00Z'
+  - id: note-7463a75
+    text: 'pr-8020495 journals loop timers for pm pr history with durations taken
+      from the same module constants the loops use: review_loop._VERDICT_GRACE_PERIOD
+      (_run_claude_review arm_timer), qa_loop._VERDICT_GRACE_PERIOD (_poll_tmux_verdicts
+      _arm_grace), qa_loop._PLANNER_TIMEOUT (qa-planner-deadline arm_timer), signoff_ui.RELAUNCH_BACKOFF_SECONDS.
+      When these become project settings, pass the resolved setting to those arm_timer
+      calls too, or history will show the wrong due/remaining time.'
+    created_at: '2026-10-22T03:55:45Z'
+    last_edited: '2026-10-22T03:55:45Z'
 - id: pr-442e51c
   plan: bugs
   title: Fix tmux commands targeting one session disconnecting other sessions

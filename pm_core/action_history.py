@@ -230,12 +230,16 @@ _HEARTBEAT_S = 1.0
 
 
 def _heartbeat(fd: int) -> None:
+    # Event.wait, not time.sleep: tests patch time.sleep (often to advance
+    # a fake clock), and a background thread calling it would advance that
+    # clock at random moments or spin on a no-op mock.
+    tick = threading.Event()
     while _owner_lock_fd == fd:
         try:
             os.utime(fd)
         except OSError:
             return
-        time.sleep(_HEARTBEAT_S)
+        tick.wait(_HEARTBEAT_S)
 
 
 def _hold_owner_lock(instance: str) -> None:
@@ -623,8 +627,7 @@ class ScenarioObserver:
                         phase(self.pr_id, attempt, "queued",
                               "waiting for a concurrency slot")
                     if status == "verifying":
-                        phase(self.pr_id, self._open[idx]["attempt"],
-                              "verifying")
+                        phase(self.pr_id, attempt, "verifying")
                 elif (status == "done" and not first
                       and idx not in self._had_attempt):
                     # Settled without ever being observed running (e.g.

@@ -1083,6 +1083,18 @@ class TestReconciliation:
             time.sleep(0.05)
         assert ah.owner_last_alive(tok) > first
 
+    def test_owner_heartbeat_ignores_patched_sleep(self, monkeypatch):
+        # Tests patch time.sleep (e.g. to advance a FakeClock); the
+        # heartbeat thread must not call it, or it advances that clock at
+        # random moments between a test's journal events.
+        monkeypatch.setattr(ah, "_HEARTBEAT_S", 0.01)
+        monkeypatch.setattr(ah, "_owner_cache", None)
+        monkeypatch.setattr(ah, "_owner_lock_fd", None)
+        ah.owner_token()
+        with patch("time.sleep") as fake_sleep:
+            threading.Event().wait(0.1)
+        assert fake_sleep.call_count == 0
+
     def test_owner_exit_marker_bounds_interrupted_attempts(self, clock):
         # TUI Ctrl+R mid-QA: the scenarios' last own event is their start,
         # but they ran until the exec; its marker bounds them (">Ns").
