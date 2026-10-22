@@ -215,6 +215,16 @@ class TestWidth:
         assert "owner pm-project_manager-c5a1006b" in text
         assert "⧉ review-#233" in text
 
+    @pytest.mark.parametrize("width", range(30, 100))
+    def test_separators_never_start_or_end_a_line(self, width):
+        # A " · " at a break is swallowed: the break itself separates.
+        inp = mixed_inputs()
+        inp["targets"], inp["all_mode"] = {}, True  # header wraps at 99
+        for status in (mixed_status(), st.build_status(inp)):
+            for ln in st.format_text(status, width=width).splitlines():
+                assert not ln.strip().startswith("·"), ln
+                assert not ln.rstrip().endswith("·"), ln
+
     def test_wide_characters_counted_by_cells(self):
         inp = mixed_inputs()
         for p in inp["prs"]:

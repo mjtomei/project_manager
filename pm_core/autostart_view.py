@@ -40,6 +40,7 @@ MIN_WIDTH = 30
 ROLE_STYLES = {
     "header": "bold",
     "secondary": "dim",
+    "sep": "dim",  # " · " between items; dropped where a line breaks
     "meta": "dim",  # one secondary label (window, run, owner): kept whole
     "id": "bold",
     "id2": "dim",
@@ -75,6 +76,8 @@ _PHASE_TOKENS = {"pending": "pending", "implementation": "impl",
 Seg = tuple[str, str]
 Line = list[Seg]
 
+SEP: Seg = (" · ", "sep")
+
 
 def clamp_width(width: int | None) -> int:
     if not width or width <= 0:
@@ -91,6 +94,9 @@ def _tokens(segs: list[Seg]) -> list[tuple[str, str, bool]]:
     out: list[tuple[str, str, bool]] = []
     for text, role in segs:
         if not text:
+            continue
+        if role == "sep":
+            out.append((text, role, True))
             continue
         if role in _ATOMIC:
             lead = len(text) - len(text.lstrip(" "))
@@ -128,7 +134,8 @@ def _split_cells(text: str, width: int) -> tuple[str, str]:
 def wrap(segs: list[Seg], width: int, indent: str) -> list[Line]:
     """Greedy word-wrap *segs* to *width* cells; continuation lines start
     with *indent* (role ``""``).  Leading spaces of *segs* are kept on the
-    first line (the row's own indent); spaces at a break are dropped."""
+    first line (the row's own indent); spaces and separators (role
+    ``sep``) at a break are dropped — the break itself separates."""
     width = max(width, cell_len(indent) + 8)
     lines: list[Line] = [[]]
     used = 0
@@ -146,7 +153,7 @@ def wrap(segs: list[Seg], width: int, indent: str) -> list[Line]:
         nonlocal used
         # Drop trailing spaces from the line being closed.
         line = lines[-1]
-        while line and not line[-1][0].strip():
+        while line and (not line[-1][0].strip() or line[-1][1] == "sep"):
             line.pop()
         if line and line[-1][0] != line[-1][0].rstrip():
             line[-1] = (line[-1][0].rstrip(), line[-1][1])
@@ -155,14 +162,19 @@ def wrap(segs: list[Seg], width: int, indent: str) -> list[Line]:
         put(indent, "")
 
     started = False  # anything but leading space placed yet
+    must_break = False  # a separator did not fit: the next item wraps
     for text, role, space in _tokens(segs):
         if space:
             if not started or used + cell_len(text) <= width:
                 put(text, role)
+            elif role == "sep":
+                must_break = True
             continue  # a break swallows the space
         w = cell_len(text)
-        if used + w > width and used > cell_len(indent) and started:
+        if ((must_break or used + w > width) and used > cell_len(indent)
+                and started):
             newline()
+        must_break = False
         while used + cell_len(text) > width:
             room = width - used
             if room < cell_len(text[0]):
@@ -176,7 +188,7 @@ def wrap(segs: list[Seg], width: int, indent: str) -> list[Line]:
             put(text, role)
         started = True
     last = lines[-1]
-    while last and not last[-1][0].strip():
+    while last and (not last[-1][0].strip() or last[-1][1] == "sep"):
         last.pop()
     return [ln for ln in lines if ln]
 
@@ -277,7 +289,7 @@ def row_lines(row: dict, width: int, *, grouped: bool = True,
 
     def add(text: str, role: str) -> None:
         if detail:
-            detail.append((" · ", "secondary"))
+            detail.append(SEP)
         detail.append((text, role))
 
     reason = reason_text(run, grouped)
@@ -310,14 +322,14 @@ def header_lines(status: dict, width: int,
     need = needs_human(status) if mode != "off" else []
     if need:
         ids = ", ".join(str(r.get("display_id") or r["pr_id"]) for r in need)
-        segs += [(" · ", "secondary"),
+        segs += [SEP,
                  (f"⚠ {len(need)} need{'s' if len(need) == 1 else ''} you: "
                   f"{ids}", "attention_text")]
     if status.get("run_id"):
-        segs += [(" · ", "secondary"), (f"run {status['run_id']}", "meta")]
+        segs += [SEP, (f"run {status['run_id']}", "meta")]
     owner = (status.get("owner") or {}).get("session")
     if owner:
-        segs += [(" · ", "secondary"), (f"owner {owner}", "meta")]
+        segs += [SEP, (f"owner {owner}", "meta")]
     return wrap(segs, width, "  ")
 
 

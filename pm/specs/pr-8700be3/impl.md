@@ -86,7 +86,8 @@ R4 — Width and wrapping.
   (fallback to the app width estimate before layout), minus the 2-column
   selection gutter, re-rendered on resize.  The popup header (no selection
   gutter) also stays within 99 columns.  Single secondary labels (`⧉ window`,
-  `run X`, `owner X`) wrap as a whole rather than mid-label.
+  `run X`, `owner X`) wrap as a whole rather than mid-label; a ` · `
+  separator falling at a break is dropped (no line starts or ends with `·`).
 
 R5 — Shared presentation; colors.
 - New pure module `pm_core/autostart_view.py` (no Textual imports): row

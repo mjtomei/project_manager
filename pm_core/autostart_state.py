@@ -299,10 +299,9 @@ def _awaiting_signoff(pr_id: str, inp: dict, holds: dict,
             _info(short="awaiting sign-off (hand-off on next scheduler pass)"))
 
 
-def _spec_phase_label(pr: dict) -> str:
-    pending = pr.get("spec_pending")
-    phase = pending.get("phase") if isinstance(pending, dict) else None
-    return {"impl": "implementation", "qa": "QA"}.get(phase or "", "")
+# spec_pending phase → (reason prefix, attention label).
+_SPEC_REVIEW = {"impl": ("implementation ", "IMPL SPEC REVIEW"),
+                "qa": ("QA ", "QA SPEC REVIEW")}
 
 
 def _derive(pr: dict, inp: dict, pr_map: dict,
@@ -370,11 +369,11 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
         return "pending", "queued", "ready; starts on next scheduler pass", plain
 
     if pr.get("spec_pending") and status in ("in_progress", "in_review", "qa"):
-        what = _spec_phase_label(pr)
-        label = {"implementation": "IMPL SPEC REVIEW",
-                 "QA": "QA SPEC REVIEW"}.get(what, "SPEC REVIEW")
-        return (phase, "waiting",
-                f"{what + ' ' if what else ''}spec awaiting review — press V",
+        pending = pr["spec_pending"]
+        what, label = _SPEC_REVIEW.get(
+            pending.get("phase") if isinstance(pending, dict) else None,
+            ("", "SPEC REVIEW"))
+        return (phase, "waiting", f"{what}spec awaiting review — press V",
                 _info("spec_review", "approve or edit the spec — press V",
                       label=label))
 
