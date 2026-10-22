@@ -15879,7 +15879,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-22T14:41:46.590392+00:00'
+  updated_at: '2026-10-22T14:58:46.258896+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15918,6 +15918,18 @@ prs:
       PRs merged mid-run by editing status in project.yaml. Merge hold stays manual.'
     created_at: '2026-10-22T14:41:46Z'
     last_edited: '2026-10-22T14:41:46Z'
+  - id: note-fc80fdd
+    text: 'QA S4 refiner (2026-10-22): container has NO fzf preinstalled. Install
+      the GitHub release binary (fzf 0.56.3 linux_arm64/amd64 to /usr/local/bin; apt
+      candidate is old 0.29). For the no-fzf story, move /usr/local/bin/fzf aside
+      (the prefix+P popup shell takes PATH from the tmux server, so a per-shell PATH
+      strip does not reach it), then restore it. A "#193" window for a PR with no
+      gh_pr_number is deterministically unresolvable (tests: test_gh_number_lost_is_unresolvable),
+      so expect "Could not load actions for #193." Check that the popup runs the clone:
+      the pm log "popup-picker invoked ... module=" line must show the clone path,
+      not /opt/pm-src.'
+    created_at: '2026-10-22T14:58:46Z'
+    last_edited: '2026-10-22T14:58:46Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
@@ -30978,6 +30990,33 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T14:04:42.745914+00:00'
   updated_at: '2026-10-22T14:04:42.745914+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-00d5023
+  plan: bugs
+  title: 'Bug: picker/pr start ignore a PR window still named by its pre-gh_pr_number
+    local id (no [open], start opens a duplicate)'
+  branch: pm/pr-00d5023-bug-picker-pr-start-ignore-a-pr-window-still-named
+  status: pending
+  depends_on: []
+  description: 'Found in pr-49ce773 QA scenario 4 (2026-10-22). Local project, PR
+    Z=pr-281823f with gh_pr_number 12 whose only window is still named pr-281823f
+    (created before the number was set). prefix+P from that window resolves Z correctly
+    as "#12" (pr-49ce773 drift matching), but the start row has no [open] tag (Live
+    Y with a matching window shows "start [open]"). pm_core/cli/pr.py pr start fast
+    path looks up tmux_mod.find_window_by_name(session, _pr_display_id(pr)) i.e. "#12"
+    only, so start would create a second "#12" window instead of switching to pr-281823f.
+    Expected: [open] tagging and pr start window reuse accept the same drift aliases
+    (local id / old #N) the picker window matcher uses, or rename the stale window.
+    Runtime-observed: missing [open]; duplicate-window part inferred from code, not
+    run.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T15:04:10.979207+00:00'
+  updated_at: '2026-10-22T15:04:10.979207+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
