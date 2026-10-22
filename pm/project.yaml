@@ -30008,7 +30008,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T21:39:27.758092+00:00'
-  updated_at: '2026-10-22T15:57:38.104381+00:00'
+  updated_at: '2026-10-22T16:00:25.797310+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30188,6 +30188,15 @@ prs:
       Proposal "Stay oriented" row updated; /pm-captures/even-realities synced.'
     created_at: '2026-10-22T15:57:38Z'
     last_edited: '2026-10-22T15:57:38Z'
+  - id: note-d7274a0
+    text: 'Review 450f i18: confirming Start for a session PM had started while the
+      confirmation was showing (e.g. #215 sign-off) toasted "Starting sign-off (undefined)
+      · not opened twice" — SimPM.start returns already:running and the confirm now
+      opens the running session instead. check.mjs +rule (fails on old code); 186
+      journey frames unchanged, no recapture. Proposal B16-B19 row updated; /pm-captures/even-realities
+      synced.'
+    created_at: '2026-10-22T16:00:25Z'
+    last_edited: '2026-10-22T16:00:25Z'
 - id: pr-9374887
   plan: tui-ux
   title: 'Even Realities document review: Pageborne sharing after mockup review'
