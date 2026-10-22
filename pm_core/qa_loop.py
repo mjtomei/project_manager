@@ -1594,11 +1594,16 @@ def _await_route(state: QALoopState, check, what: str) -> bool:
             time.sleep(0.5)
 
 
+# Reason for a scenario whose launch was stopped during its route wait.
+# Such a scenario has no window and must stay unverdicted.
+_ROUTE_WAIT_STOPPED_REASON = "stopped while waiting for the work route"
+
+
 def _note_route_wait_stopped(state: QALoopState, scenario: "QAScenario") -> None:
     """Record why a scenario never launched: QA stopped during its
     route wait (no verdict is recorded)."""
     state.scenario_verdict_reasons.setdefault(
-        scenario.index, "stopped while waiting for the work route")
+        scenario.index, _ROUTE_WAIT_STOPPED_REASON)
 
 
 def _route_gate(state: QALoopState, pr_data: dict, data: dict,
@@ -2953,10 +2958,13 @@ def _poll_tmux_verdicts(
                                      "Queued scenario launch")
 
     # Scenarios that failed to create a window get INPUT_REQUIRED immediately
-    # (but skip queued scenarios — they don't have windows yet by design)
+    # (but skip queued scenarios — they don't have windows yet by design —
+    # and scenarios stopped during their route wait, which get no verdict)
     has_failed_creation = False
     for scenario in state.scenarios:
-        if not scenario.window_name and scenario.index not in _queued_indices:
+        if (not scenario.window_name and scenario.index not in _queued_indices
+                and state.scenario_verdict_reasons.get(scenario.index)
+                != _ROUTE_WAIT_STOPPED_REASON):
             _log.warning("Scenario %d has no window — marking INPUT_REQUIRED",
                          scenario.index)
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED

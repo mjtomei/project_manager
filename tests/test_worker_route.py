@@ -694,6 +694,24 @@ class TestPollLoopRouteGating:
         assert len(relaunches) == 1
         assert state.scenario_verdicts[1] == "PASS"
 
+    def test_stop_during_route_wait_leaves_scenario_unverdicted(self, tmp_path):
+        """A scenario stopped in its initial route wait has no window; the
+        launch-failed INPUT_REQUIRED marking must not give it a verdict."""
+        from pm_core import qa_loop
+        waited = qa_loop.QAScenario(index=1, title="w", focus="f")
+        failed = qa_loop.QAScenario(index=2, title="x", focus="f")
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        state.scenarios = [waited, failed]
+        state.stop_requested = True
+        qa_loop._note_route_wait_stopped(state, waited)
+        with patch("pm_core.qa_loop.time.sleep"):
+            self._poll(state, tmp_path, [_status(False)])
+        assert 1 not in state.scenario_verdicts
+        assert state.scenario_verdict_reasons[1] == (
+            "stopped while waiting for the work route")
+        # a genuine launch failure is still marked
+        assert state.scenario_verdicts[2] == "INPUT_REQUIRED"
+
     def test_queued_scenario_stays_queued_while_route_down(self, tmp_path):
         from pm_core import qa_loop
         queued = qa_loop.QAScenario(index=2, title="q", focus="f")
