@@ -15883,7 +15883,29 @@ prs:
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-40057f4
+    text: 'Additional user-reported navigation crash (2026-10-22): after moving to
+      a different PR from the one already merged, the merged PR (#238 / pr-ac10f03)
+      still appears in the picker, and navigating away from that merged entry crashes/exits
+      the picker. Cover this transition as well as the previously reported failure
+      when the popup initially opens on a merged/no-action PR. No traceback or exact
+      cause has been established for this additional report.
+
+
+      Include the fix in this PR and update the implementation/QA specs. Reproduce
+      with a live PR and a merged PR whose old windows remain: open from the live
+      PR, inspect the available PRs, and exercise navigation to/from any retained
+      merged entry and back to the live PR; also open from the merged PR''s own window
+      and navigate away. Preserve the existing requested behavior: merged/closed PRs
+      are excluded from ordinary navigation unless they are the home PR; when shown
+      as home they have no executable actions, and navigation away remains usable.
+      Exercise both directions, wraparound/home navigation, and a PR becoming merged
+      while the picker is open so filtering/reloading cannot leave stale indices or
+      actions. A merged or empty-action entry must never crash or force the picker
+      to exit, and other live PRs must remain reachable.'
+    created_at: '2026-10-22T14:30:02Z'
+    last_edited: '2026-10-22T14:30:02Z'
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
