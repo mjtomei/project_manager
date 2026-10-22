@@ -31565,6 +31565,18 @@ prs:
       %i); fake-claude list shorthand for qa_scenario is rejected (use {"verdicts":[...]}).'
     created_at: '2026-10-22T21:15:00Z'
     last_edited: '2026-10-22T21:15:00Z'
+  - id: note-cc5706e
+    text: 'S1 concretizer (2026-10-22): route refresh cooldown (_last_refresh) is
+      per-process, so back-to-back `pm provider test` CLI runs each re-run refresh_command;
+      the "no second refresh (cooldown)" Then is only observable inside one long-lived
+      process (QA loop/TUI), not via the CLI, so it was dropped from S1. Live probe
+      in a review container needs a scratch HOME (host ~/.claude is bind-mounted rw)
+      with PM_HOST_HOME unset, pm hooks installed by `pm session`, and a dummy apiKeyHelper
+      in the scratch settings.json (probe unsets ANTHROPIC_API_KEY; otherwise "Not
+      logged in"). Host smoke /pm-captures/host-work-route-smoke-20261022T195845Z
+      source hashes match 81cebf17.'
+    created_at: '2026-10-22T20:02:41Z'
+    last_edited: '2026-10-22T20:02:41Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
@@ -31646,6 +31658,27 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T21:03:52.814027+00:00'
   updated_at: '2026-10-22T21:03:52.814027+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c175444
+  plan: bugs
+  title: 'Bug: pm model show table misaligns the qa_verification row'
+  branch: pm/pr-c175444-bug-pm-model-show-table-misaligns-the-qa-verificat
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/model.py:31-42 formats the session-type column as {st:14s}
+    but ''qa_verification'' is 15 chars, so its model/effort cells sit one column
+    right of every other row in ''Effective config per session type''. Pre-existing
+    on master (not in pr-592e4bd diff). Repro: pm model show in any project. Fix:
+    size the column from max(len(st)) (also the override/Routes sections). Seen in
+    pr-592e4bd QA s1 /pm-captures/scenarios/1/t3-model-routes.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T20:11:29.998628+00:00'
+  updated_at: '2026-10-22T20:11:29.998628+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
