@@ -101,14 +101,16 @@ def focus_or_start_qa(app, pr_id: str) -> None:
 
     # No existing window — start a new QA session.  qa_loop will
     # consume any suppress_switch flag at its window-creation step.
-    start_qa(app, pr_id)
+    start_qa(app, pr_id, focus=True)
 
 
-def start_qa(app, pr_id: str) -> None:
+def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
     """Start a QA session for a PR.
 
     Creates QALoopState, starts background QA thread.
     Called by auto-start and internal callers (fresh_start, loop start).
+    *focus* selects the new QA window; only user-initiated starts pass it,
+    so scheduler-driven starts don't pull attached clients off the TUI.
     """
     if not app._root:
         app.log_message("No project root")
@@ -150,7 +152,7 @@ def start_qa(app, pr_id: str) -> None:
         app._load_state()
         _log.info("start_qa: transitioned %s to qa status", pr_id)
 
-    state = QALoopState(pr_id=pr_id)
+    state = QALoopState(pr_id=pr_id, focus_on_create=focus)
 
     def on_update(s: QALoopState):
         # Schedule UI update on the main thread
@@ -203,7 +205,7 @@ def fresh_start_qa(app, pr_id: str) -> None:
     # Start fresh — run_qa_sync will clean up old windows after capturing
     # which sessions were watching them (for proper session switching).
     app.log_message(f"Fresh QA start for {pr_id}...")
-    start_qa(app, pr_id)
+    start_qa(app, pr_id, focus=True)
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +252,7 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     }
 
     # Start a new QA loop
-    state = QALoopState(pr_id=pr_id)
+    state = QALoopState(pr_id=pr_id, focus_on_create=True)
 
     def on_update(s: QALoopState):
         app.call_from_thread(_on_qa_update, app, s)

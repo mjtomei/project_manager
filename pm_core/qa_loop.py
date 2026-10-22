@@ -217,6 +217,10 @@ class QALoopState:
     # planning.  Non-empty forces the overall verdict to NEEDS_WORK so the
     # change gets reviewed before sign-off.
     planner_code_changes: list[str] = field(default_factory=list)
+    # Select the new qa-<pr> window on first-time creation.  Only
+    # user-initiated starts (t / z t / zz t) set this; scheduler-driven
+    # starts leave attached clients where they are.
+    focus_on_create: bool = False
     # Error message for status display (e.g. missing spec, no scenarios)
     _error: str = ""
     # Set by qa_loop_ui after the completion callback has run once
@@ -3716,10 +3720,12 @@ def run_qa_sync(
         if sessions_on_qa:
             tmux_mod.switch_sessions_to_window(
                 sessions_on_qa, session, window_name)
-        elif not existing_win:
-            # First-time creation — select the window so user sees it,
-            # unless the popup spinner was dismissed (q/Esc) and the
-            # user explicitly asked to keep focus where they were.
+        elif not existing_win and state.focus_on_create:
+            # First-time creation of a user-initiated run — select the
+            # window so user sees it, unless the popup spinner was
+            # dismissed (q/Esc) and the user explicitly asked to keep
+            # focus where they were.  Background starts skip this (and
+            # leave the suppress flag for the user start it belongs to).
             from pm_core import runtime_state as _rs
             if not _rs.consume_suppress_switch(state.pr_id, "qa"):
                 tmux_mod.select_window(session, window_name)

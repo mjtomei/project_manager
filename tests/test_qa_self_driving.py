@@ -353,7 +353,7 @@ class TestFreshStartZT:
             fresh_start_qa(app, "pr-001")
 
         # Old state should be popped before start_qa is called
-        mock_start.assert_called_once_with(app, "pr-001")
+        mock_start.assert_called_once_with(app, "pr-001", focus=True)
 
     def test_fresh_start_when_not_running(self, tmp_path):
         """z t works even when no QA is running — starts fresh."""
@@ -364,7 +364,7 @@ class TestFreshStartZT:
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
             fresh_start_qa(app, "pr-001")
 
-        mock_start.assert_called_once_with(app, "pr-001")
+        mock_start.assert_called_once_with(app, "pr-001", focus=True)
 
     def test_fresh_start_clears_self_driving_state(self, tmp_path):
         """Step 10: z t clears self-driving registration so the fresh QA is one-shot."""
@@ -396,7 +396,7 @@ class TestFreshStartZT:
 
         loops_snapshot = []
 
-        def capture_start(a, pr_id):
+        def capture_start(a, pr_id, **kw):
             # Capture the state of _qa_loops at the time start_qa is called
             loops_snapshot.append(dict(a._qa_loops))
 
