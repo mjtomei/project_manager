@@ -181,527 +181,88 @@ a tools-disabled `claude -p` through the route, reporting requested models
   `poll_for_verdict` callbacks.
 
 ## 5. Validation status
-- Unit/regression: `tests/test_worker_route.py` (provider env, launcher
-  boundary, role isolation incl. s0/planner/verifier/finalize/review,
-  preflight, bridge delayed-stream + shadow-pm_core regressions, gate
-  waits/queued/retry/stall/resume, CLI).
-- Sandbox e2e (fake router recording model + auth presence, real
-  `claude` 2.1.308): host `pm provider test --live` OK — only
-  `work/claude-opus-5-5` requested, transcript + Stop hook. Real nested
-  podman `--network slirp4netns`: unmounted container cannot reach the
-  router and is refused with the restart remedy; mounted container passes
-  the in-container ensure and a live probe (also after the host bridge was
-  restarted), with a shadow `pm_core` at `/workspace`.
-- Real work account, host (supervisor, isolated provider
-  `pm249-work-smoke`; production provider/model config unchanged):
-  - `/pm-captures/host-work-route-smoke-20261022T184915Z/` — host probe
-    PASS (requested `work/claude-opus-5-5`, transcript
-    `~/.claude/projects/-tmp-pm-route-probe-…/<sid>.jsonl` with
-    `claude-opus-5-5`, Stop hook). Container preflight FAILED there: run
-    from the main checkout, `python -m pm_core.route_bridge` imported the
-    checkout's pm_core (no route_bridge) — bug 2 below.
-  - `/pm-captures/host-work-route-smoke-20261022T185245Z/` — run from the
-    main checkout (`cwd /home/matt/claude-work/project-manager`) on source
-    hashes matching commit dbf8878b (both fixes): real slirp4netns QA-style
-    container PASS — container route OK via the bridge socket, requested
-    `work/claude-opus-5-5`, transcript `~/.claude/projects/-workspace/<sid>.jsonl`
-    with `claude-opus-5-5`, Stop hook.
-  - Independent host 12 s idle-stream repro: closed at 10.02 s before the
-    fix, both chunks delivered after (host files
-    `~/.local/state/pm-pr-shepherd/249-bridge-timeout-{repro,postfix}.json`).
-  - b7712d21 (after these runs) only adds the forwarder exit-on-dir-gone
-    and `container_name ⇒ container` in `check_route`; QA re-exercises it.
-  - Final implementation 75f0dde6 (includes b7712d21 and the env-by-name
-    container fix), real work account, production config unchanged:
-    `/pm-captures/host-work-route-smoke-20261022T190834Z/{result.json,diagnostic.log}`
-    — real slirp4netns QA-style container PASS (requested
-    `work/claude-opus-5-5`, transcript `~/.claude/projects/-workspace/<sid>.jsonl`
-    with `claude-opus-5-5`, Stop hook); host + container pair PASS at
-    `/pm-captures/host-work-route-smoke-20261022T190309Z/`, whose
-    `router-tail.txt` shows the router sending the `work/` prefix to
-    `anthropic-work`.
-  - Review loop 99cf i1 (no behaviour change): router launch parts
-    (ensure prefix / env / executable) shared between
-    `build_claude_shell_cmd` and the live probe via
-    `worker_route.launch_parts`; `worker_route.ROUTED_SESSION_TYPES`
-    replaces the stale `WORKER_SESSION_TYPE`, and remedies name both routed
-    types.
-  - Review loop 99cf i2: two queued-launch bugs (found by review 1 and
-    while assessing it), fixed in scope. (a) A route failure between
-    `_launch_next_queued`'s queue check and the in-launch gate entered the
-    blocking `_await_route` inside `_poll_tmux_verdicts`, stalling every
-    other scenario's verdicts, retries and stop until the route came back;
-    queued gates are now non-blocking (defer → restore → requeue).
-    (b) A queue deferred on the route was only retried on another verdict
-    event, so with nothing else running it never launched after the route
-    recovered; the loop now retries the queue every tick. Regressions
-    (mutation-checked): `TestPollLoopRouteGating::
-    test_route_failure_after_queue_check_requeues_without_blocking`,
-    `test_queued_launch_gate_does_not_create_windows`,
-    `test_queued_scenario_launches_once_route_recovers`. Not route-specific
-    and left to pr-1ab9075 (#247, note added there): a queued launch still
-    polls its refiner synchronously inside the verdict loop, so a long or
-    stalled queued refiner blocks it as before this PR.
-  - Review loop 99cf i3: `claude_launcher._resolve_provider` (the
-    `launch_claude*` subprocess paths) also drops a router provider's
-    `unset_env_vars` from the child env, matching the shell command's
-    `env -u` (regression `TestResolveProvider`).
-  - Review loop 99cf i4: the bridge dir is created through
-    `worker_route._secure_bridge_dir`, which refuses anything but a real
-    directory owned by the user (lstat). This matters for the shared
-    `/tmp/pm-route-<uid>-<hash>` fallback: a planted symlink must not
-    redirect the container bind mount, and `container_mounts` now returns
-    no mount rather than an unsafe one (the gate then reports it).
-    Regression `TestBridge::test_symlinked_bridge_dir_is_refused`
-    (mutation-checked).
 
-### Bugs found by live validation, with regressions
-1. *Stream cut off after 10 s* — the bridge's connect timeout stayed on the
-   upstream socket during splicing. Fix: `route_bridge._connect_tcp` /
-   `_connect_unix` use `CONNECT_TIMEOUT` for setup only, then
-   `settimeout(None)`. Regressions:
-   `TestBridge::test_stream_survives_pause_longer_than_connect_timeout`
-   (fails with the timeout left in place — checked by mutation) and
-   `TestBridge::test_unix_side_has_no_stream_timeout`.
-2. *Shadow pm_core* — `python -m pm_core.route_bridge` resolved pm_core from
-   the cwd (host main checkout; `/workspace` in containers) despite
-   PYTHONPATH. Fix: run the stdlib-only file in isolated mode,
-   `python3 -I <pm-src>/pm_core/route_bridge.py` (host:
-   `worker_route.bridge_host_argv`, cwd `/`; container:
-   `container_ensure_cmd`, `/opt/pm-src`). Regressions:
-   `TestBridge::test_host_bridge_and_container_forwarder_end_to_end`
-   (host bridge + ensure from a cwd and PYTHONPATH holding a pm_core that
-   raises on import; fails with `-m` — checked by mutation) and
-   `TestBuildShellCmd::test_container_cmd_ensures_bridge_first`.
-3. *Container env values in logs/errors* (found in the sandbox smoke) —
-   `create_container` passed host env vars as `-e NAME=value`
-   (`_CLAUDE_ENV_VARS`, which include API keys/tokens, and
-   `ContainerConfig.env`), and `_run_runtime` writes the full argv to the
-   pm.container debug log on every call, to the error log on failure and
-   into the raised `CalledProcessError`. Fixed in scope (this PR's
-   "no credentials in logs/captures" acceptance): variables are passed by
-   name (`-e NAME`) and their values through the runtime's process
-   environment (`_run_runtime(env=…)`); verified with real podman (values
-   arrive in the container, absent from its create argv). Regressions:
-   `tests/test_container.py::TestCreateContainer::test_passes_env_vars` and
-   `test_failed_create_does_not_expose_env_values` (fails on the old form —
-   checked by mutation). pm.container log files written before this fix
-   may still contain such values; they are not rewritten.
-4. *Live probe: transcript missed, still "Live OK"* (supervisor, final
-   reviewed-head host smoke `host-work-route-smoke-20261022T194946Z`,
-   `transcript-lookup-finding.json`; probe cwd `/tmp/pm-route-probe-020ea4s_`).
-   Real Claude mangles every non-alphanumeric cwd character to `-`; pm's
-   `claude_launcher._claude_project_dir` (pre-existing, master) mapped only
-   `/` and `.`, so the probe looked in `…020ea4s_/` while Claude wrote
-   `…020ea4s-/`, and `live_probe` then passed vacuously (empty transcript
-   model list) without the transcript. Fix: `_claude_project_dir` and
-   fake-claude's mirror use `re.sub(r"[^a-zA-Z0-9]", "-", cwd)`;
-   `live_probe` falls back to `~/.claude/projects/*/<sid>.jsonl` and fails
-   with `missing evidence: …` (expected paths named) when the transcript,
-   its model or the pm hook event is absent. Regressions (mutation-checked):
-   `TestLiveProbe::test_underscore_cwd_finds_transcript`,
-   `test_missing_transcript_is_a_failure`,
-   `test_missing_hook_event_is_a_failure`,
-   `test_cli_reports_missing_evidence`,
-   `test_transcript_path_matches_claude_mangling`.
-5. *Stop during route wait recorded a verdict* (QA s3, 0b1edfca) —
-   `_poll_tmux_verdicts` marked every windowless scenario INPUT_REQUIRED
-   ("worker window never created") and wrote its verdict.md, including
-   scenarios stopped inside `_await_route`. Fix: skip scenarios whose
-   reason is `_ROUTE_WAIT_STOPPED_REASON`. Regression
-   `TestPollLoopRouteGating::test_stop_during_route_wait_leaves_scenario_unverdicted`
-   (fails on 81cebf17). Captures `/pm-captures/scenarios/3/story3`.
-6. *Recovery nudge typed but never submitted* (QA s4, c5d7d64f, real
-   Claude vs a stub router) — `_RouteStallWatch.tick` sent the nudge as
-   one text+Enter burst, which Claude took as a paste. Fix: two follow-up
-   Enters 1 s apart. Regression asserts `[NUDGE, "", ""]`
-   (mutation-checked). Captures `/pm-captures/scenarios/4`.
+Full history (items 1–26, review-loop entries, live smokes, regressions
+and capture paths) is kept verbatim in
+[impl-validation-history.md](impl-validation-history.md). Every rule
+below still holds; look there for the reasoning and evidence.
 
-### Post-81cebf17 live rerun
-`/pm-captures/host-work-route-smoke-20261022T195845Z/result.json`
-(19:59Z, real work account, production config unchanged): host probe from
-a forced-underscore cwd (`/tmp/pm-route-probe-under-score-…`) and a real
-rootless slirp4netns container probe both PASS — requested
-`work/claude-opus-5-5`, transcript with `claude-opus-5-5`, Stop hook. Its
-source hashes for worker_route.py, route_bridge.py, cli/provider.py and
-container.py match review head 1c92c9cb (0b1edfca/c5d7d64f touch only
-qa_loop.py and tests).
+**Current evidence.** Regressions are in `tests/test_worker_route.py`
+plus the files named per item. The real work account, with production
+config unchanged, passed on the final implementation 75f0dde6
+(`/pm-captures/host-work-route-smoke-20261022T190834Z/`: slirp4netns
+container; host + container `…190309Z/`). After 81cebf17 it passed on the
+host from an underscore cwd and in a container
+(`…195845Z/result.json`). Live QA S1–S33 is in
+`/pm-captures/scenarios/<N>/` (REPORT.md). The latest full suite is
+recorded with item 27.
 
-Review loop 03db i1: added
-`TestBridge::test_host_bridge_exits_when_socket_removed_or_replaced`
-(host bridge exit on socket removal / replacement by a newer bridge was
-untested; both cases fail with the exit check disabled). The inode-only
-identity check is sound: the old bridge's open listener pins its socket
-inode, so a replacement socket cannot reuse the number.
-
-### QA S9/S10 fixes (pre-existing on master, fixed in scope)
-7. *Push proxy shadowed by a project pm_core* (dbb88ea8) —
-   `_start_proxy_subprocess` ran `python -m pm_core.push_proxy` from the
-   caller's cwd; now cwd `/` with pm's own root first on PYTHONPATH.
-   Regression `test_proxy_subprocess_ignores_shadow_pm_core_in_cwd`.
-8. *Dashboard dropped / mislabelled queued scenarios* (b97c0e3d) — both
-   launch paths pass the full scenario list and queued indices
-   (`_status_queued`).
-9. *TUI resume picked a stale snapshot* (60574f28, aea1fb8a; ordering
-   corrected in review loop acdb i1/i2) — one candidate per PR, the newest
-   *run*, ordered by the run's first scenario index (runs of a PR number on
-   from earlier runs' launched scenarios; the highest index is wrong
-   because queued scenarios get no workdir, so an older run's queued tail
-   can exceed a newer run's numbers — old 1-6 at cap 2, new 3-5), then
-   unfinished, then mtime. mtime alone is wrong
-   both ways: a stopped run's late write, or an older orphan beside a run
-   that completed while the TUI was down (the orphan was revived and the
-   completed run's snapshot dropped unprocessed). Superseded snapshots,
-   finished or not, are dropped unless an in-memory loop or a live process
-   elsewhere drives them, so a later restart cannot revive them.
-   Regressions in `tests/test_qa_resume.py` (the two acdb i1 cases fail on
-   aea1fb8a; `test_newer_run_with_fewer_scenarios_outranks_queued_tail`
-   fails on 2dfd9768).  Review loop acdb i3: a run whose planner produced
-   no scenarios still reaches the poll tail and writes a snapshot with
-   `scenarios: []`, which ordered as 0, below an older orphan, so the
-   orphan was revived and the newer run's INPUT_REQUIRED completion
-   dropped.  The snapshot now carries the run's `scenario_start` (the
-   index the planner was given, past every earlier run's launched
-   scenarios), used when it has no scenarios. Regression
-   `test_newer_run_without_scenarios_outranks_older_orphan` (fails on
-   bb198e46).
-
-Review loop acdb i4: a queued *container* launch deferred at the refiner
-or worker route gate left its container running; the relaunch re-cloned
-`s-N/repo` (rmtree + clone) and `create_container` reused the running
-container by name, whose `/workspace` bind mount still pointed at the
-deleted clone. `_drop_deferred_launch` (was `_drop_deferred_window`) now
-also removes that container (and its push proxy). Regression
-`TestPollLoopRouteGating::test_deferred_container_launch_removes_its_container`
-(both gates; fails without the fix).
-
-### QA S11/S12 fixes (fixed in scope)
-10. *Stopped loop gated a dead worker on the route* (1b6e2c68) — after
-    `z t` the stopped loop's next poll ran the relaunch route check (exec
-    into the dying container) and surfaced "relaunch deferred" or burned a
-    retry backoff; it now breaks before the gate when stop is requested.
-    Regression `TestPollLoopRouteGating::test_stopped_run_does_not_gate_or_defer_dead_worker`.
-11. *Repeat deferral not resurfaced; API-error turn never resumed*
-    (7c401141) — `_RouteStallWatch.remember()` clears the surface dedupe on
-    a healthy status, so a second outage with the same message is shown
-    again. A routed session whose turn ended on a Claude Code API error
-    (`isApiErrorMessage`, `verdict_transcript.latest_api_error`) while the
-    route already answers again is resumed with the same nudge, once per
-    error record and at most `MAX_ERROR_RESUMES` (3) per watch.
-12. *Superseded snapshot revived* (ea78b9d1) — `z t` clears the stopped
-    run's `qa_resume.json` at once, and `_write_resume_file` clears instead
-    of writing once `stop_requested` is set (a stopped run is never
-    resumed; its completion is processed in memory).
-13. *NUL in the push-proxy reuse log line* (c23a2021, pre-existing).
-
-Review loop 8a99 i1 (on 7c401141): (a) the API-error resume applied to
-every worker, since unrouted workers also get a watch whose status is
-always ok; a main-account worker's API error (usage limit, bad request)
-was nudged up to 3 times with "work route 'None' answers again". It now
-applies only when the status names a route. (b) The watch is keyed by
-scenario index and outlived a window-death relaunch, so the new worker
-session inherited the dead session's spent error budget and its
-`stalled_pane` (a later tick announced "recovered — resumed" for the dead
-pane). Intended behaviour is per worker session: a successful relaunch
-drops the scenario's watch. Regressions (mutation-checked):
-`TestPollLoopRouteGating::test_api_error_on_unrouted_session_is_not_resumed`,
-`test_relaunched_worker_gets_a_fresh_route_watch`.
-
-Review loop 8a99 i2 (race left open by ea78b9d1, raised by the shepherd):
-`_write_resume_file` checked `stop_requested` and then built, wrote and
-renamed the snapshot, while `fresh_start_qa` set `stop_requested` and
-cleared the file from the TUI thread. A write already past its check could
-rename `qa_resume.json` back after the clear. The stopped loop only clears
-it again at its final write, after the finalizer (pr-f8acf21), or never if
-the thread dies, so a restart in that window revived the superseded run
-while the new run was still planning. Fix: `QALoopState._resume_lock`.
-`qa_loop.supersede_run` (now used by `z t`) sets the stop flag and clears
-the file under the lock, and the writer rechecks the stop flag and renames
-under the same lock (when stopped it drops its tmp file and clears). Deterministic
-regressions (both fail when the rename goes back to unlocked; logs
-`/pm-captures/review-8a99-i2/`):
-`test_supersede_during_snapshot_write_leaves_no_snapshot` (supersede
-between check and rename) and `test_supersede_waits_for_an_in_flight_rename`
-(write paused at rename; supersede blocks, then clears).
-
-Review loop 590d i1 (on 7b765217): the four "send, then two Enters"
-copies became `qa_loop._send_submitted` (a failed message send raises,
-failed trailing Enters are logged and ignored). A failed verdict-format
-reminder is logged and no longer crashes the QA thread; the dead-pane
-handling relaunches the worker on the next tick.
-
-Review loop 590d i2 (pre-existing pane races, fixed in scope at the
-shepherd's request; logs `/pm-captures/review-590d-i2/`):
-- *Flagged-verification follow-up to a worker pane that died after its
-  liveness check*: the send error went up out of `_poll_tmux_verdicts`
-  and the run ended as "QA thread crashed" (ERROR). The worker panes kept
-  running with nothing supervising them and nothing was finalized. Now
-  the scenario is settled like a window that was already gone:
-  INPUT_REQUIRED, "window gone during PASS verification…".
-- *Re-verification into a verifier pane that died after its liveness
-  check*: this used to be "verification thread crashed", which flagged
-  the worker and made it re-run. Now the check runs in a fresh verifier
-  pane, the same as when the pane was already gone.
-- *Verifier pane dying during the re-verification wait*:
-  `loop_shared.wait_for_follow_up_verdict` only checked that the window
-  still had a pane. The worker pane shares that window, so the wait (no
-  time limit, by design) never ended and finalize was blocked. i1's
-  tolerant Enters sent the race above down this path. The wait now takes
-  `pane_id=` and the verifier passes its own pane. Review and watcher
-  callers are unchanged.
-Regressions (mutation-checked; with the wait mutation the unbounded test
-hung until a timeout killed it, so it now fails fast):
-`TestPollLoopRouteGating::test_flagged_followup_to_a_vanished_pane_is_input_required`,
-`TestVerifySingleScenario::test_reverify_into_a_vanished_verifier_starts_a_new_one`,
-`test_reverify_waits_on_the_verifier_pane`,
-`test_follow_up_wait_ends_when_its_pane_dies`.
-Still open and filed separately: a verifier that dies mid-check counts
-as FLAGGED ("verifier pane disappeared"), so the worker re-runs, and
-repeated deaths turn a PASS into NEEDS_WORK.
-
-### QA5/S15/S16 fixes (reviewed in review loop b62f i1)
-14. *"Resumed" claimed for a dead pane* (5432f736) —
-    `_RouteStallWatch._resume` announces a resume only after the nudge
-    is typed; otherwise it logs "pane gone — not resumed" and the
-    dead-pane relaunch takes over.
-15. *Flag follow-up / dead worker taken for the refiner* (32961096) — in
-    host mode the scenario window's first pane is the still-live
-    refiner. A recorded worker `pane_id` that died is kept (not cleared)
-    and never replaced by the first-pane fallback, so the follow-up is
-    not typed into the refiner and the dead worker is still relaunched.
-    A snapshot from before this fix (`pane_id` null) still falls back:
-    pr-d1d0139.
-16. *Relaunch bound to the refiner* (296c08a7) — `new_window_get_pane`
-    returns the pane tmux reports for the created window (`-P -F`), not a
-    by-name lookup, and `_relaunch_scenario_window` splits the new worker
-    into the surviving scenario window (fresh window only when it is
-    gone), so one window per scenario remains.
-17. *Shared push proxy start races* (75649ae4, b62f i1) — the
-    check-then-spawn in `start_push_proxy` runs under a per-key lock, so
-    parallel scenario container creates spawn one proxy and keep both
-    refs. Review b62f i1: `stop_push_proxy` takes the same lock, so a
-    start racing the last container's stop cannot reuse the proxy being
-    killed (regression
-    `TestSharedProxy::test_start_during_last_stop_spawns_a_new_proxy`,
-    fails without the lock). Review b62f i2: the proxy daemon only checked
-    that its socket *path* existed, so after a stop and an immediate start
-    of the PR's proxy the old daemon kept running (orphan, bound to an
-    unlinked socket), and its exit cleanup unlinked the path whatever was
-    there, which could delete the newer proxy's socket. `PushProxy` now
-    records its socket inode, exits when the path is removed *or replaced*
-    (`owns_socket`, as `route_bridge` does) and unlinks only its own socket
-    (regressions `TestPushProxyLifecycle::
-    test_replaced_daemon_exits_and_keeps_the_new_socket` (real daemon) and
-    `test_stop_of_a_replaced_proxy_leaves_the_new_socket`, each fails with
-    its half reverted; logs `/pm-captures/review-b62f-i2/`).
-
-### QA S17 fix (reviewed in review loop ab29 i1)
-18. *Worker split into a closed refiner window logged as a launch*
-    (a2ff954c, pre-existing on master, host and container) — PR cleanup
-    (TUI `Y`) during a stopping run closed the refiner's window; the
-    worker split then raised, `qa_loop` logged a traceback, and
-    "Launched scenario N" was still logged because `window_name` is set
-    while the refiner runs. `_split_worker_pane` now returns `None` on
-    failure (plain warning when the refiner pane is gone, traceback
-    otherwise) and both launch paths count only a created worker pane as
-    a launch. Regressions `TestPollLoopRouteGating::
-    test_worker_split_after_window_closed_is_not_a_launch[container|tmux]`
-    and `test_worker_split_failure_with_live_refiner_keeps_traceback`
-    (fail with the fix reverted). The relaunch path
-    (`_relaunch_scenario_window`) already handles a vanished window in
-    its own `try`. Review loop ab29 i2: a split failure with the refiner
-    pane still alive left `window_name` set and no `pane_id`, so the poll
-    loop's first-pane fallback took the refiner for the worker (and could
-    remind it into a verdict for a scenario that never ran). The refiner
-    pane (refinement is done; QA exec panes don't remove the container)
-    is now closed, so the scenario takes the dead-worker path: route-gated
-    relaunch with retries. Real-tmux regression
-    `test_worker_split_failure_with_live_refiner_keeps_traceback` (fails
-    without the kill).
-
-### QA S20 fix (reviewed in review loop 6c6f i1)
-19. *Closed refiner gated on the route; split error unnamed* (2314f1a8) —
-    (a) TUI `Y` during a stopping container run closed the refiners'
-    windows and removed their containers; the worker route gate then
-    checked the container being removed and surfaced "worker waiting —
-    work route … unavailable … Remedy: …". Both launch paths now check
-    the refiner pane first (`_refiner_gone`): a closed refiner skips the
-    gate and takes the dead-worker path, whose relaunch stays
-    route-gated. (b) `tmux._run` raises `TmuxCommandError` (a
-    `CalledProcessError` subclass, so existing handlers are unchanged)
-    whose message ends with tmux's stderr, so a refused split's
-    traceback names the reason ("no space for new pane"). Regressions
-    `TestPollLoopRouteGating::test_closed_refiner_window_skips_the_worker_route_gate[container|tmux]`
-    (fails with the check disabled, rechecked in 6c6f i1) and
-    `test_split_failure_traceback_names_the_tmux_error` (real tmux).
-
-### QA S21/S22 fixes (reviewed in review loop 3ce6 i1)
-20. *Finalize skipped with PASS verification off* (ee3d0644, pre-existing
-    since 09760b7e) — with `qa-verify-pass` off no PASS is ever added to
-    `verified_scenarios`, so `_run_qa_finalize_pane`'s unverified-PASS gate
-    skipped the finalizer on every all-PASS run (`finalize=None`). The gate
-    now applies only while verification is enabled. Regression
-    `tests/test_qa_finalize_wiring.py::test_run_qa_finalize_pane_runs_unverified_pass_when_verification_off`
-    (fails with the fix reverted, rechecked in 3ce6 i1). Review loop 3ce6
-    i2: the gate uses `qa-verify-pass` as the verdict poll read it
-    (`QALoopState.verify_pass_enabled`), not a fresh read at finalize, so
-    turning verification on mid-run cannot skip finalize again (regression
-    `test_run_qa_finalize_pane_gate_uses_the_poll_loops_setting`,
-    mutation-checked; logs `/pm-captures/review-3ce6-i2/`).
-21. *Stopped run spawned a finalizer into the new run's window* (2ff602fc,
-    pre-existing on master) — after `z t` over a mid-turn run the stopped
-    loop still reached `_run_qa_finalize_pane`, found the *new* run's QA
-    window by name and split a finalizer at pane 0, which the new run then
-    took for its planner; the stray finalizer ran unsupervised (its poll
-    is abandoned at once on stop). A stopped run (`zz t` or superseded)
-    now spawns no finalizer; before the fix its finalizer never got
-    supervised either, so nothing a stopped run could finish is lost.
-    Regression `test_run_qa_finalize_pane_spawns_nothing_when_stopped`
-    (fails with the fix reverted, rechecked in 3ce6 i1). Unchanged and
-    pre-existing: a stop that arrives *during* the finalizer poll leaves
-    that pane running in the stopped run's own window until the next run's
-    `_cleanup_stale_scenario_windows` kills the window (like the scenario
-    panes, pr-1139060).
-
-### QA S24 fix (reviewed in review loop 433b i1)
-22. *First QA run's completion waited for the background sync*
-    (89414241) — only the shared poll timer (`poll_qa_state`) processes a
-    finished run, and the TUI started it only when an active PR had a
-    workdir. `start_qa`, `zz t` and the restart resume now ensure the
-    timer. Review loop 433b i1: the timer's stop check still used
-    `s.running`, so on the completion tick (running already False) it
-    stopped before the second tick, which records the runtime_state
-    verdict and drops the `_qa_loops` entry (a lingering entry with a
-    verdict also holds back auto-start). The timer now runs while a QA
-    loop is running *or* has an unprocessed verdict
-    (`review_loop_ui._qa_needs_poll`). Regression
-    `TestQAPollTimer::test_timer_outlives_running_until_completion_is_processed`
-    (fails with the fix reverted; logs `/pm-captures/review-433b-i1/`).
-
-### QA S26/S28 fixes ((a), (b) reviewed in review loop 1298 i1/i2; (c) from QA S28, reviewed in review loop 4f28 i1)
-23. *TUI lagged after a QA completion* (all pre-existing on master).
-    (a) f57c500c: after a NEEDS_WORK verdict `_on_qa_complete` moved the
-    PR from qa to in_review and reloaded `app._data`, but did not repaint.
-    The tech tree kept showing qa until the 300 s background sync. It now
-    calls `app._update_display()` after a successful reload. Regression
-    `test_needs_work_repaints_tree_with_reloaded_status`.
-    (b) 991addf9 + 0697e450 (1298 i1): the zz t "QA PASS for <pr> (N/M
-    consecutive) — restarting QA" line was replaced in the same frame by
-    start_qa's messages and never painted. It now uses
-    `hold=CONFIRM_HOLD_SECONDS` and also `force=True`, like the other held
-    confirmations, because without force a sticky line from another PR
-    still drops it. Regression `test_restart_message_holds_the_log_line`
-    (asserts hold and force).
-    (c) 1098813c (S28): after a zz t NEEDS_WORK, "QA NEEDS_WORK for <pr> —
-    returning to review" was replaced in the same frame by the
-    self-driving review loop's sticky "Review loop started" and never
-    painted (absent from the raw TUI pane output and the cast; only in
-    `L`). It now uses `force=True, hold=CONFIRM_HOLD_SECONDS`, like (b).
-    Live post-fix, the cast shows the line for 3.00 s, with the box
-    showing in_review 0.04 s after it appears. Regression
-    `test_needs_work_message_holds_the_log_line` (asserts hold and force;
-    fails with the fix reverted). The plain-t NEEDS_WORK path was
-    already painted, because nothing followed it in that frame.
-    Spec 8ae55361 (QA persists `prs[].workdir` via `_ensure_workdir`, so
-    only a PR's first run with no cached workdir discriminates the
-    item 22 timer fixes) was checked against the code in 1298 i1.
-
-### QA S29 (two PRs, RQ31; reviewed in review loop 4f28 i1)
-24. (a) *Product fix* 9cc2fb6b (pre-existing on master): a finished
-    review loop's tree badge (`⟳N✓`, `⟳N⏸`, …) masked the PR's live QA
-    marker. B, with a stopped loop, read "● qa ⟳1⏸" with no spinner while
-    its QA workers were mid-turn. b290ebcb fixed the same masking for
-    sign_off. While the PR is in qa with active or waiting QA panes, the
-    live QA spinner / ⏸ now wins. The badge returns once QA is idle, and a
-    running review loop still wins. 4 regressions in
-    `tests/test_tech_tree_widgets.py`. Open review question: the idle
-    fallback is kept on purpose (historical summary, cf. pr-97614ed). After
-    QA PASS, "● qa ⟳1⏸" can still be read as a current input gate. The
-    live gate is `⏸N` plus a spinner, so only the `⟳` prefix tells them
-    apart. Review 4f28 i1 decision: keep the idle badge in qa. pr-97614ed
-    (pending bug) already treats "● qa ⟳2✓" as the expected finished-loop
-    summary in qa, and sign_off differs because it has its own marker that
-    the badge hid. The `⟳` ambiguity is pre-existing and out of scope.
-    Review 4f28 i1 also moved the precedence into `_get_loop_marker(qa_live=)`
-    next to the sign_off rule, so the override only drops a finished loop's
-    badge (a merge `⏸M` marker is no longer cleared with it) and the extra
-    `_review_loop_running` lookup is gone. Regression
-    `test_merge_input_marker_survives_live_qa` (status qa, QA active and
-    waiting, `⏸M` set; fails on the 9cc2fb6b blanket clearing). *Known
-    limitation, kept on purpose*: once QA is idle (e.g. after QA PASS) the
-    finished loop's historical badge returns, so "● qa ⟳1⏸" can still be
-    misread as a current input gate.
-    (b) *Test-fixture support only, no product behaviour change*
-    9a7f9b13 + 1d51bcef: fake-claude refreshes `idle_prompt` every 2 s
-    while held open. A review loop waiting on INPUT_REQUIRED took each
-    refresh as a follow-up turn and relaunched (19 iterations live). Real
-    Claude 2.1.309 panes emitted one idle per turn (17 min idle, no
-    re-emit). The new opt-in per-entry key `idle_once_after` (`--idle-once-after`)
-    emits a single idle that many seconds after the output. It is wired
-    through `_fake_claude_args`, the click CLI and the standalone
-    `bin/fake-claude` entrypoint the launcher execs (the argparse wiring
-    was missed in 9a7f9b13 and added in 1d51bcef). Default behaviour is
-    unchanged. Tests include a bounded subprocess run of
-    `bin/fake-claude`. An `after_turn` hardening of
-    `wait_for_follow_up_verdict` was tried and withdrawn as unneeded for
-    real Claude (patch kept in the S29 captures).
-    (c) *Known limitation, NOT fixed here*: the review loop's
-    INPUT_REQUIRED wait checks `find_claude_pane(session, window)`
-    (`panes[0][0]`). When the Claude pane exits, the review diff pane
-    keeps the wait alive, so Ctrl+C / `/exit` in the review pane never
-    ends the loop (no KILLED, ⏸ stays). The native stop `z d` works.
-    This is in scope for pr-89296d3 (note-18c906b, with repro and
-    candidate patch).
-25. *Disabling auto-start froze live transcripts* (pre-existing on master,
-    23df1ff1; found by QA S31). `A` removing the last target runs
-    `auto_start._disable` → `_finalize_all_transcripts`, which replaced
-    every transcript symlink in the run dir with a copy. That included a
-    post-merge repo-update window waiting on INPUT_REQUIRED, so its later
-    MERGED never reached the copy the idle tracker reads: the TUI kept
-    "merge_verdict: INPUT_REQUIRED detected" every 5 s, and ⏸M and the
-    window stayed. Now `_live_read_transcripts` keeps the symlinks a reader
-    still polls: live idle-tracker entries, a running review loop's current
-    iteration file, and impl / merge / non-loop review transcripts whose
-    session runs in a live pane (`tmux.live_pane_start_commands`, which
-    covers windows not registered yet). Everything else is archived as
-    before, including a finished sign-off whose pane is still open: its
-    driver steps only auto-start-driven PRs. Tests:
-    tests/test_autostart_transcript_finalize.py (real tmux; 6 mutations
-    each caught). Future-only: copies frozen earlier are not repaired, and
-    a restarted TUI never registers an older merge window. Both are filed
-    as pr-237d610. Evidence: /pm-captures/scenarios/31 (pre-fix/story3,
-    post-fix*, REPORT.md).
-
-### QA S30 (one PR + A2, RQ32; reviewed in review loop 03a7 i1)
-26. *Superseded run's tracker keys kept the QA spinner forever*
-    (94f36a18, pre-existing on master; it also hid the 24(a) idle badge).
-    `z t` over a run with mid-turn scenario panes (and a zz t restart)
-    replaces the PR's `_qa_loops` entry before the completion path
-    unregisters that run's `qa:<pr>:s<N>` keys, and `poll_qa_state` only
-    polls the current run's scenarios. The old keys stayed "active" in the
-    idle tracker. Seen live: after the new run's QA PASS, A read
-    "● qa ◐" (spinning) for more than 2 min instead of "● qa ⟳1⏸", and
-    the runtime mirror kept the dead panes. `poll_qa_state` now unregisters
-    a PR's `qa:` keys that are not the current run's scenarios. While the
-    fresh run is still planning this clears the qa runtime action. The
-    picker then shows `qa [open]` with no state badge, the same as a run
-    whose panes have not registered, instead of `[working]`/`[idle]` from
-    the old run's dead panes. Other PRs' keys and the current run's panes
-    are kept (verified live on A2, S30 post-fix/picker-planning-A2-win).
-    3 regressions in `tests/test_tech_tree_qa_spinner.py`, all failing with
-    the fix reverted. Residue the fix does not clean up: qa panes already
-    left in `~/.pm/runtime/<pr>.json` by a pre-fix TUI (or a TUI killed
-    mid-run) survive a TUI restart under a `done` entry and are merged into
-    the next run's entry by `_runtime_mirror_register`. The picker shows
-    them as `[working]` until that run completes. Pre-existing and left
-    out of scope; filed as pr-b2db183 with the S30 repro and evidence.
-    Review loop 03a7 i1 (items 25 and 26 sound, no product change):
-    `test_pruned_planning_run_reads_like_a_first_run_in_the_picker` failed
-    in full-suite order (" [idle]" for " [working]"). `tests/test_hook_events.py`
-    reloads `hook_events` under a temp HOME and never restored its
-    module-level `_HOOKS_BASE`, so later tests read that test's idle event
-    for the shared fixture session id. The fixture now restores the paths,
-    and the picker test points hook events at its own tmp dir.
+**Rules fixed during validation (index).** Commits in parentheses.
+- Live smokes 1–4. The bridge stream has no timeout after connect
+  (`CONNECT_TIMEOUT` is for setup only). The bridge runs as
+  `python3 -I <pm-src>/pm_core/route_bridge.py` and never with `-m`,
+  because a project pm_core would shadow it. Container env vars are
+  passed as `-e NAME`, with values only in the runtime's process env.
+  `_claude_project_dir` mangles every non-alphanumeric cwd character to
+  `-`. `live_probe` fails with `missing evidence: …` (81cebf17).
+- 5. A scenario stopped during a route wait stays unverdicted (0b1edfca).
+- 6, 11, 14. Route nudges and the verdict reminder are submitted (text,
+  then two Enters, `_send_submitted`; c5d7d64f, 7b765217). A repeat
+  deferral is shown again. A routed API-error turn is resumed once the
+  route answers, once per error record, max 3 per worker session. That
+  applies to routed sessions only, and a relaunch gets a fresh watch
+  (7c401141, 8a99 i1). A resume is announced only after the nudge is
+  typed (5432f736).
+- 99cf i1–i4. Shared `worker_route.launch_parts`. Queued gates never
+  block the verdict loop (defer → restore → requeue, queue retried each
+  tick). `_resolve_provider` drops a router provider's unset vars. The
+  bridge dir must be a real directory the user owns (lstat).
+- acdb i4. A queued container launch deferred at a gate removes its
+  container and proxy (`_drop_deferred_launch`).
+- 7, 17. The push proxy runs with cwd `/`. Shared proxy start and stop
+  hold a per-key lock. The daemon exits when its socket is removed or
+  replaced and unlinks only its own socket (dbb88ea8, 75649ae4, 8a3d3412,
+  130e8ab9).
+- 8. The dashboard keeps queued scenarios (`_status_queued`, b97c0e3d).
+- 9, 12, 8a99 i2. Resume picks one snapshot per PR. That is the newest
+  run, ordered by first scenario index (or `scenario_start` when it has
+  no scenarios), then unfinished, then mtime. Superseded snapshots are
+  dropped. `z t` (`supersede_run`) clears the stopped run's snapshot under
+  `_resume_lock`, and a stopped loop never rewrites it (60574f28,
+  aea1fb8a, ea78b9d1). Scenario numbering follows launched indices.
+- 10, 19. A stopped loop does not route-gate dead workers (1b6e2c68). A
+  closed refiner skips the worker gate (`_refiner_gone`). tmux errors
+  carry stderr (`TmuxCommandError`, 2314f1a8).
+- 13. No NUL in the proxy reuse log line (c23a2021).
+- 590d i1–i2. A worker pane that dies before a flagged follow-up gives
+  INPUT_REQUIRED (window gone). A dead verifier is replaced, and the
+  follow-up wait watches its own `pane_id`. Filed: a verifier death
+  counts as FLAGGED (pr-04dfffb).
+- 15, 16, 18. A recorded dead worker `pane_id` is kept, with no
+  first-pane fallback (32961096; pre-fix snapshots: pr-d1d0139). The
+  relaunch uses the pane tmux reports and splits into the surviving
+  window (296c08a7). Only a created worker pane counts as a launch. A
+  split failure with a live refiner closes the refiner and takes the
+  dead-worker path (a2ff954c, ded27fcd).
+- 20, 21. With verification off, finalize runs. The gate uses the poll
+  loop's `qa-verify-pass` (ee3d0644, 3ce6 i2). A stopped or superseded
+  run spawns no finalizer (2ff602fc). A stop during the finalizer poll
+  leaves that pane until the next cleanup (pr-1139060).
+- 22. The TUI poll timer runs while a QA loop runs or has an
+  unprocessed verdict (`_qa_needs_poll`; 89414241, fb7af748). Only a
+  PR's first run with no cached workdir discriminates this (8ae55361).
+- 23. After NEEDS_WORK the tree repaints (f57c500c). The zz t restart
+  and NEEDS_WORK lines use `force=True, hold=CONFIRM_HOLD_SECONDS`
+  (991addf9, 0697e450, 1098813c).
+- 24. A live QA marker beats a finished review-loop badge
+  (`_get_loop_marker(qa_live=)`), and `⏸M` survives (9cc2fb6b, 84662f7f).
+  Kept on purpose: the idle `⟳N⏸` badge returns after QA. fake-claude
+  `idle_once_after` is fixture-only. Known limitation: Ctrl+C in a review
+  pane does not end an INPUT_REQUIRED wait (pr-89296d3, note-18c906b).
+- 25. Turning auto-start off keeps transcripts that a reader still polls
+  as symlinks (23df1ff1, c97aaf9c). Frozen older copies: pr-237d610.
+- 26. `poll_qa_state` drops a PR's `qa:` keys that are not in the
+  current run (94f36a18). Runtime-mirror residue: pr-b2db183.
 
 ### S33 follow-up: typed turn after idle (review loop d0d0 i1)
 27. *An idle pane never read as working again when the user typed a new
@@ -717,11 +278,29 @@ repeated deaths turn a PASS into NEEDS_WORK.
       the user's. Merging is hook-level for every pm event: user hooks are
       kept in place (also user Notification hooks on other matchers, which
       the old wholesale list replacement dropped on every rewrite), only
-      pm's own hooks (current or legacy `-m pm_core.hook_receiver`) are
-      replaced, and an event whose pm hooks already match is not touched,
-      so a user hook added after pm's entry causes no rewrite. A user hook
-      sharing an entry with pm's on a managed matcher is now reported as a
-      conflict instead of being kept silently.
+      pm's own hooks are replaced, and an event whose pm hooks already
+      match is not touched, so a user hook added after pm's entry causes
+      no rewrite. A user hook sharing an entry with pm's on a managed
+      matcher is now reported as a conflict instead of being kept
+      silently.
+    - Ownership (review loop a183 i1, shepherd finding on af19cfcf): a
+      hook is pm's only when its whole command is a receiver invocation,
+      either `python3 <receiver path> <event>` or the legacy
+      `<python> -m pm_core.hook_receiver <event>`, with `<event>` one of
+      pm's four. af19cfcf matched any command *containing* the receiver
+      path or `pm_core.hook_receiver`. So it deleted a user logger such as
+      `echo 'pm_core.hook_receiver observed' >> log`, and a mixed shell
+      command such as `python3 <receiver> user_prompt && notify-send`, on
+      the next rewrite. Such commands are now the user's: they are kept
+      on `UserPromptSubmit`, and on a managed matcher they are a conflict
+      that pm refuses and leaves in place. Regressions in
+      `tests/test_hook_events.py`:
+      `test_hook_is_pm_rejects_commands_that_only_mention_the_receiver`,
+      `test_installer_keeps_user_prompt_hooks_that_mention_the_receiver`
+      and `test_installer_refuses_mixed_user_command_on_a_managed_matcher`
+      fail with the substring matcher. `test_hook_is_pm_recognises_receiver_invocations`
+      covers both pm forms for all four events. Full suite 3525 passed (env -u PM_HOST_HOME, /usr/bin first). Logs:
+      `/pm-captures/review-a183-i1/`.
     - The receiver stores only its fixed fields (never `prompt`) and
       prints nothing (a `UserPromptSubmit` hook's stdout is added to the
       prompt).
