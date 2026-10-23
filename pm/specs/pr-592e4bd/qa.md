@@ -370,6 +370,38 @@ env-by-name).
   `_merge_input_required_prs` are TUI-process memory, so a TUI restart
   drops finished badges and `⏸M` (expected).
 
+- **RQ33** Given a PR whose QA run has scenario panes mid-turn (or a
+  `zz t` pass that restarts QA), When the run is replaced in the TUI (a
+  fresh start `z t`, or the self-driving restart), Then the replaced
+  run's scenario panes stop counting for the PR's node and picker: while
+  the new run is planning the picker's qa row reads `qa [open]` with no
+  `[working]`/`[idle]` badge from the old run's dead panes, and once the
+  new run finishes (e.g. QA PASS) the node stops spinning within a poll
+  tick or two and shows the idle state (`● qa`, or the finished loop
+  badge `● qa ⟳1⏸` of RQ32 / item 24(a)), not a spinner kept until a
+  TUI restart. The new run's own panes still spin while they work.
+  Another PR's QA panes and markers are never dropped by this
+  (94f36a18, found in S30; impl.md §5 item 26). Observation only, filed
+  as pr-b2db183: qa panes already left in `~/.pm/runtime/<pr>.json` by a
+  killed TUI survive a restart and show `[working]` in the next run's
+  picker row until that run completes.
+- **RQ34** Given auto-start on with a transcript run directory, When
+  auto-start turns off (the user turns it off, removes its last target,
+  or the last target completes and auto-start reports "all targets
+  complete — auto-start OFF"), Then sessions that are still live keep
+  being read: a merge window waiting on INPUT_REQUIRED (`⏸M`) still has
+  its later MERGED detected (`⏸M` clears, "✓ Merged", PR merged), a
+  running review loop still sees its iteration verdict, and an impl or
+  review pane still has its idle/active state tracked. Their transcript
+  files in the run directory stay links to Claude's live transcript (pm
+  log "transcript: … is still read live — not finalized"); finished
+  sessions, including an idle sign-off whose pane is still open, are
+  archived as regular files as before. QA runs of other PRs in the same
+  TUI (their routed workers, verdicts and markers) are unaffected
+  (c97aaf9c, found in S31; impl.md §5 item 25). Out of scope, filed as
+  pr-237d610: copies frozen by an earlier pm, and a merge window left by
+  an earlier TUI process, are not repaired.
+
 ## 2. Setup
 
 - Install pm from this PR's clone (`./install.sh --local` or venv per
@@ -714,6 +746,30 @@ env-by-name).
     Known items stay observations: pr-97614ed, pr-89296d3 note-18c906b
     (Ctrl+C in a review pane never ends an INPUT_REQUIRED wait; use
     `z d`), pr-0f85376, pr-1139060.
+  - Thirteenth pass (S32+), delta-only. S30/S31 held RQ32 and ended
+    NEEDS_WORK only for their own fixes: 94f36a18 (`poll_qa_state` drops
+    a replaced run's `qa:<pr>:s*` tracker keys; RQ33) and c97aaf9c
+    (`_finalize_all_transcripts` keeps transcripts a reader still polls
+    when auto-start turns off; RQ34). Review 03a7 i1 found both sound;
+    c3d3f978 is test-only. Each fix was replayed live only by the
+    scenario that found it, so fresh live verification is needed only
+    for RQ33 and RQ34, in host mode (neither depends on the mode). Keep
+    refiners and workers routed real Claude on the stub router, held per
+    (PR, scenario, role) from the control file, so mid-turn and finish
+    times are controlled. For RQ34 the `⏸M` path follows the S31 recipe
+    (vanilla project with a `file://` origin, auto-start target, fake
+    review/QA PASS and a sign-off that merges, the main checkout diverged
+    by an unpushed commit so the fast-forward fails and the `merge-<id>`
+    window opens with its transcript; the merge prompt is real Claude on
+    the main stub, answering INPUT_REQUIRED first and MERGED after the
+    user replies). Auto-start is turned off before the MERGED reply.
+    Check transcript files in the auto-start run directory with
+    `ls -l`/`stat` (symlink vs regular file) before and after the turn
+    off. Read markers and log lines from the TUI pane capture and the
+    .cast, and from `L`/pm logs. Reuse the S30/S31 harness and write to
+    new capture dirs. Scratch TUI session only; no production settings or
+    model changes. Known items stay observations: pr-b2db183, pr-237d610,
+    pr-97614ed, pr-89296d3 note-18c906b, pr-0f85376, pr-1139060.
 
 ## 3. Edge cases
 
