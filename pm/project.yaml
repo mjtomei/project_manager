@@ -31557,7 +31557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T11:07:52.069282+00:00'
+  updated_at: '2026-10-23T11:45:45.721174+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32123,6 +32123,22 @@ prs:
       so the finalize gate may skip with finalize=None.'
     created_at: '2026-10-23T11:07:52Z'
     last_edited: '2026-10-23T11:07:52Z'
+  - id: note-a8fbbb1
+    text: 'QA S24 (2026-10-23, RQ28 host, real Claude refiners/workers on router stub;
+      captures /pm-captures/scenarios/24, REPORT.md): every finalize-gate Then held.
+      Verify off -> FINALIZE_DONE with no verifier. Switch on mid-run: A kept "disabled"
+      and finalized, B started after the switch verified both PASS before finalize.
+      Switch off mid-run: C kept verifying. Off -> on + TUI restart: the resumed run
+      re-verified the earlier unverified s5 PASS, then FINALIZE_DONE, so the QA9 possible
+      finalize=None gap did not reproduce. Router saw only work/ refiner/worker requests,
+      no secrets. CODE CHANGE 89414241 needs normal re-review: a PR first QA run (no
+      workdir yet) never started the TUI shared poll timer, so "QA PASS for <pr> -
+      press i to sign off" (completion handling, lifecycle transition, qa_resume cleanup)
+      waited for the 300 s background sync (95 s late live). start_qa, zz t and restart
+      resume now ensure the timer. 3 mutation-checked regressions, full suite 3476
+      passed.'
+    created_at: '2026-10-23T11:45:45Z'
+    last_edited: '2026-10-23T11:45:45Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
