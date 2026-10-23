@@ -166,14 +166,44 @@ def _desired_hooks() -> dict:
     }
 
 
+# Event arguments pm has ever passed to its receiver.
+_RECEIVER_EVENTS = frozenset(
+    ("idle_prompt", "permission_prompt", "Stop", "user_prompt"))
+
+
+def _is_python(arg: str) -> bool:
+    name = os.path.basename(arg)
+    return name.startswith("python") and all(
+        c.isdigit() or c == "." for c in name[len("python"):])
+
+
 def _hook_is_pm(hook) -> bool:
-    if not isinstance(hook, dict):
+    """True only for a hook that is exactly a pm receiver invocation.
+
+    pm replaces its own hooks on upgrade, so a false positive would
+    delete a user hook.  Only the two forms pm has written count:
+    ``python3 <receiver path> <event>`` and the legacy
+    ``<python> -m pm_core.hook_receiver <event>``.  A user command that
+    merely mentions the receiver, or runs it as part of a larger shell
+    command, belongs to the user.
+    """
+    if not isinstance(hook, dict) or hook.get("type", "command") != "command":
         return False
-    cmd = hook.get("command", "") or ""
-    # Current format references the standalone receiver path.
-    # Also recognise the legacy ``-m pm_core.hook_receiver`` form so
-    # installs upgrading from the old command get rewritten cleanly.
-    return str(_receiver_path()) in cmd or "pm_core.hook_receiver" in cmd
+    try:
+        argv = shlex.split(hook.get("command", "") or "")
+    except ValueError:
+        return False
+    if len(argv) == 3:
+        python, receiver, event = argv
+        if receiver != str(_receiver_path()):
+            return False
+    elif len(argv) == 4:
+        python, flag, module, event = argv
+        if (flag, module) != ("-m", "pm_core.hook_receiver"):
+            return False
+    else:
+        return False
+    return _is_python(python) and event in _RECEIVER_EVENTS
 
 
 def _pm_hook_keys(entries) -> list[tuple]:

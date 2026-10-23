@@ -476,3 +476,62 @@ def test_installer_refuses_user_hook_sharing_an_entry_with_pm(tmp_hooks_home):
                    {"type": "command", "command": "user-idle"}]}]})
     with pytest.raises(HookConflictError, match="user-idle"):
         ensure_hooks_installed(path)
+
+
+def _receiver_mentions(receiver):
+    """User commands that mention pm's receiver without being pm's hook."""
+    return [
+        "echo 'pm_core.hook_receiver observed' >> /tmp/user-hook.log",
+        f"python3 {receiver} user_prompt && notify-send typed",
+        f"cat {receiver} > /dev/null",
+        "python3 -m pm_core.hook_receiver user_prompt; my-audit",
+        f"python3 {receiver} not_a_pm_event",
+    ]
+
+
+@pytest.mark.parametrize("cmd_form", ["current", "legacy-venv", "legacy-python3"])
+@pytest.mark.parametrize("event", ["idle_prompt", "permission_prompt", "Stop",
+                                   "user_prompt"])
+def test_hook_is_pm_recognises_receiver_invocations(tmp_hooks_home, cmd_form, event):
+    from pm_core.hook_install import _hook_command_for, _hook_is_pm
+    cmd = {"current": _hook_command_for(event),
+           "legacy-venv": f"/opt/pm/venv/bin/python -m pm_core.hook_receiver {event}",
+           "legacy-python3": f"python3 -m pm_core.hook_receiver {event}"}[cmd_form]
+    assert _hook_is_pm({"type": "command", "command": cmd})
+
+
+def test_hook_is_pm_rejects_commands_that_only_mention_the_receiver(tmp_hooks_home):
+    from pm_core.hook_install import _hook_is_pm, _receiver_path
+    for cmd in _receiver_mentions(_receiver_path()) + ["python3 'unbalanced"]:
+        assert not _hook_is_pm({"type": "command", "command": cmd}), cmd
+
+
+def test_installer_keeps_user_prompt_hooks_that_mention_the_receiver(tmp_hooks_home):
+    """Upgrade must not delete an independent user hook (a logger, or a
+    shell command that also runs the receiver) as if it were pm's."""
+    from pm_core.hook_install import (
+        _hook_command_for, _hook_is_pm, _receiver_path, ensure_hooks_installed)
+    user_entries = [{"hooks": [{"type": "command", "command": c}]}
+                    for c in _receiver_mentions(_receiver_path())]
+    path = _settings(tmp_hooks_home, {"UserPromptSubmit": user_entries})
+    assert ensure_hooks_installed(path) is True
+    ups = json.loads(path.read_text())["hooks"]["UserPromptSubmit"]
+    assert ups[:len(user_entries)] == user_entries
+    pm = [h["command"] for e in ups for h in e["hooks"] if _hook_is_pm(h)]
+    assert pm == [_hook_command_for("user_prompt")]
+    assert ensure_hooks_installed(path) is False
+
+
+def test_installer_refuses_mixed_user_command_on_a_managed_matcher(tmp_hooks_home):
+    """A user idle_prompt command that also runs the receiver is the
+    user's: refused as a conflict and left in place, not replaced."""
+    from pm_core.hook_install import (
+        HookConflictError, _receiver_path, ensure_hooks_installed)
+    mixed = f"python3 {_receiver_path()} idle_prompt && notify-send idle"
+    path = _settings(tmp_hooks_home, {"Notification": [
+        {"matcher": "idle_prompt",
+         "hooks": [{"type": "command", "command": mixed}]}]})
+    before = path.read_text()
+    with pytest.raises(HookConflictError, match="notify-send idle"):
+        ensure_hooks_installed(path)
+    assert path.read_text() == before
