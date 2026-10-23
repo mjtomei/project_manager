@@ -634,6 +634,15 @@ def _status(ok):
                                     "start the router")))
 
 
+def _api_error_record(uid):
+    """A transcript record as Claude Code writes it when a request still
+    fails after its own retries and the turn ends on the error."""
+    return {"type": "assistant", "uuid": uid, "isApiErrorMessage": True,
+            "error": "server_error", "message": {"model": "<synthetic>",
+            "content": [{"type": "text",
+                         "text": "API Error: Connection dropped (ECONNRESET)"}]}}
+
+
 class TestAwaitRoute:
     def test_waits_then_launches(self):
         from pm_core import qa_loop
@@ -1019,6 +1028,87 @@ class TestPollLoopRouteGating:
         # followed by the Enters that submit it.
         assert sent == [qa_loop._RouteStallWatch.NUDGE, "", ""]
         assert state.scenario_verdicts[1] == "PASS"
+
+    def test_api_error_turn_on_recovered_route_is_resumed_once(self, tmp_path):
+        """The outage ends between Claude giving up (API error ends the
+        turn) and its idle notification a minute later: the route already
+        answers, and the worker is resumed anyway -- once per error."""
+        from pm_core import qa_loop
+        tr = tmp_path / "t.jsonl"
+        tr.write_text(json.dumps({"type": "user", "message": {"content": "go"}})
+                      + "\n" + json.dumps(_api_error_record("e1")) + "\n")
+        sc = qa_loop.QAScenario(index=1, title="t", focus="f")
+        sc.window_name, sc.session_id, sc.pane_id = "w1", "sid-1", "%5"
+        sc.transcript_path = str(tr)
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        state.scenarios = [sc]
+        t0 = time.time() + 1e4
+        events = iter([{"event_type": "idle_prompt", "timestamp": t0}] * 3
+                      + [{"event_type": "idle_prompt", "timestamp": t0 + 5}] * 3
+                      + [{"event_type": "idle_prompt", "timestamp": t0 + 9}] * 50)
+        verdicts = iter([None, None, "PASS"])
+        sent = []
+        with patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
+             patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                   return_value=None), \
+             patch("pm_core.hook_events.read_event",
+                   side_effect=lambda sid: next(events)), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   side_effect=lambda *a: next(verdicts)), \
+             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
+                   return_value=""), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys",
+                   side_effect=lambda p, m: sent.append(m)):
+            self._poll(state, tmp_path, [_status(True)])
+        # The second idle still ends on the same error record: no re-nudge.
+        assert sent == [qa_loop._RouteStallWatch.NUDGE, "", ""]
+        assert state.scenario_verdicts[1] == "PASS"
+
+    def test_healthy_route_idle_without_api_error_is_not_resumed(self, tmp_path):
+        from pm_core import qa_loop
+        tr = tmp_path / "t.jsonl"
+        tr.write_text(json.dumps({"type": "assistant", "message": {
+            "content": [{"type": "text", "text": "still working"}]}}) + "\n")
+        watch = qa_loop._RouteStallWatch(
+            qa_loop.QALoopState(pr_id="pr-1"), lambda: _status(True), "w")
+        with patch("pm_core.tmux.send_keys") as send:
+            assert not watch.on_idle_without_verdict("%5", str(tr))
+            assert not watch.on_idle_without_verdict("%5", None)
+        send.assert_not_called()
+
+    def test_api_error_resumes_are_capped(self, tmp_path):
+        from pm_core import qa_loop
+        tr = tmp_path / "t.jsonl"
+        watch = qa_loop._RouteStallWatch(
+            qa_loop.QALoopState(pr_id="pr-1"), lambda: _status(True), "w")
+        results = []
+        with patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys"):
+            for i in range(qa_loop._RouteStallWatch.MAX_ERROR_RESUMES + 2):
+                tr.write_text(json.dumps(_api_error_record(f"e{i}")) + "\n")
+                results.append(watch.on_idle_without_verdict("%5", str(tr)))
+        assert results.count(True) == qa_loop._RouteStallWatch.MAX_ERROR_RESUMES
+
+    def test_repeat_deferral_after_recovery_is_surfaced_again(self):
+        """Same failure message as the previous deferral, but the route
+        recovered in between: the TUI must show the new deferral."""
+        from pm_core import qa_loop
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        watch = qa_loop._RouteStallWatch(state, lambda: _status(True),
+                                         "Queued scenario launch")
+        with patch("pm_core.qa_loop._notify_state"):
+            watch.remember(_status(False))
+            watch.surface(_status(False), "deferred")
+            first = state.latest_output
+            watch.surface(_status(False), "deferred")  # still down: once
+            state.latest_output = "Scenario 2 (b): PASS (verified)"
+            watch.remember(_status(True))
+            watch.surface(_status(False), "deferred")
+        assert first.startswith("Queued scenario launch deferred — ")
+        assert state.latest_output == first
 
     def test_resumed_container_worker_checks_its_container(self, tmp_path):
         """Restart adoption: the resumed state carries container_name, and

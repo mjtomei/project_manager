@@ -220,3 +220,29 @@ def read_latest_assistant_text(transcript_path: str | Path | None) -> str:
                 if isinstance(piece, str):
                     chunks.append(piece)
     return "\n".join(chunks)
+
+
+def latest_api_error(transcript_path: str | Path | None) -> tuple[str, str] | None:
+    """Return ``(record id, text)`` when the latest assistant record is a
+    Claude Code API-error message (``isApiErrorMessage``: the request
+    still failed after Claude's own retries and the turn ended on it),
+    else ``None`` -- also when a user record follows it (a new turn)."""
+    text = _read_transcript_text(transcript_path)
+    for line in reversed(text.splitlines()):
+        if _USER_RE.search(line):
+            return None
+        if not _ASSISTANT_RE.search(line):
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(rec, dict) or not rec.get("isApiErrorMessage"):
+            return None
+        msg = rec.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        parts = [b.get("text") for b in content or []
+                 if isinstance(b, dict) and isinstance(b.get("text"), str)]
+        return (str(rec.get("uuid") or rec.get("timestamp") or ""),
+                " ".join(parts).strip() or "API error")
+    return None

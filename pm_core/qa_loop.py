@@ -1648,11 +1648,17 @@ class _RouteStallWatch:
 
     On such an idle turn the route is checked; when it is unhealthy the
     remedy is surfaced and, once the route is healthy again, the session
-    is nudged to carry on.  Healthy-route idles are left to the caller's
-    usual handling.
+    is nudged to carry on.  A turn that ended on an API error while the
+    route already answers again (the outage ended between Claude giving
+    up and its idle notification, which comes about a minute later) is
+    resumed right away.  Other healthy-route idles are left to the
+    caller's usual handling.
     """
     NUDGE = ("The model route is available again. Continue the task where "
              "you left off and finish with the required final output.")
+    # Resumes after an API-error turn on a healthy route, per session: an
+    # error that is not the route's keeps failing and must not loop.
+    MAX_ERROR_RESUMES = 3
 
     def __init__(self, state: QALoopState, check, what: str):
         self.state = state
@@ -1662,6 +1668,7 @@ class _RouteStallWatch:
         self._cached = None
         self._cached_at = 0.0
         self._shown = ""
+        self._resumed_errors: set[str] = set()
 
     def status(self, max_age: float | None = None):
         if max_age is None:
@@ -1676,6 +1683,10 @@ class _RouteStallWatch:
         a launch gate), so it is not re-checked for a recheck interval."""
         self._cached = st
         self._cached_at = _route_clock()
+        if st.ok:
+            # Recovered: a later failure is news even when its message
+            # matches the last one shown.
+            self._shown = ""
 
     def surface(self, st, verb: str = "waiting") -> None:
         msg = f"{self.what} {verb} — {st.message()}"
@@ -1685,13 +1696,32 @@ class _RouteStallWatch:
             self.state.latest_output = msg
             _notify_state(self.state)
 
-    def on_idle_without_verdict(self, pane_id: str | None) -> bool:
+    def on_idle_without_verdict(self, pane_id: str | None,
+                                transcript_path: str | None = None) -> bool:
         """True when the idle turn is attributed to a route outage."""
         st = self.status(max_age=0)
         if st.ok:
-            return False
+            return self._resume_after_api_error(pane_id, transcript_path, st)
         self.stalled_pane = pane_id
         self.surface(st, "stalled")
+        return True
+
+    def _resume_after_api_error(self, pane_id: str | None,
+                                transcript_path: str | None, st) -> bool:
+        if not pane_id or not transcript_path:
+            return False
+        from pm_core.verdict_transcript import latest_api_error
+        err = latest_api_error(transcript_path)
+        if err is None:
+            return False
+        key, text = err
+        if (key in self._resumed_errors
+                or len(self._resumed_errors) >= self.MAX_ERROR_RESUMES):
+            return False
+        self._resumed_errors.add(key)
+        self._resume(pane_id, f"{self.what}: turn ended on \"{text}\" and "
+                              f"work route '{st.route}' answers again — "
+                              "resumed")
         return True
 
     def tick(self) -> None:
@@ -1701,9 +1731,13 @@ class _RouteStallWatch:
         if not st.ok:
             self.surface(st, "stalled")
             return
-        from pm_core import tmux as tmux_mod
         pane, self.stalled_pane = self.stalled_pane, None
         self._shown = ""
+        self._resume(pane, f"{self.what}: work route '{st.route}' "
+                           "recovered — resumed")
+
+    def _resume(self, pane: str, msg: str) -> None:
+        from pm_core import tmux as tmux_mod
         try:
             if tmux_mod.pane_exists(pane):
                 tmux_mod.send_keys(pane, self.NUDGE)
@@ -1716,8 +1750,7 @@ class _RouteStallWatch:
             # Pane died in between: the caller's dead-pane handling
             # relaunches it.
             _log.debug("route resume nudge to %s failed", pane, exc_info=True)
-        self.state.latest_output = (f"{self.what}: work route '{st.route}' "
-                                    "recovered — resumed")
+        self.state.latest_output = msg
         _log.info("%s", self.state.latest_output)
         _notify_state(self.state)
 
@@ -1938,7 +1971,8 @@ def _concretize_scenario(
             log_prefix=f"qa-concretize-{scenario.index}",
             workdir=scenario_cwd,
             on_idle_without_verdict=(
-                (lambda: route_watch.on_idle_without_verdict(pane_id))
+                (lambda: route_watch.on_idle_without_verdict(
+                    pane_id, transcript_path))
                 if route_watch else None),
             on_tick=route_watch.tick if route_watch else None,
         )
@@ -3391,7 +3425,8 @@ def _poll_tmux_verdicts(
             # worker once the route recovers, instead of a reminder it
             # cannot act on.
             route_stalled = (verdict is None and _route_watch(scenario)
-                             .on_idle_without_verdict(pane_id))
+                             .on_idle_without_verdict(
+                                 pane_id, scenario.transcript_path))
 
             # Idle-reminder: when the agent emits idle_prompt without a
             # verdict, nudge once per _reminder_timeout window.
