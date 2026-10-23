@@ -10,6 +10,7 @@ The repo has no pytest-asyncio plugin, so each async body is driven through
 
 import asyncio
 import functools
+from unittest.mock import patch
 
 from textual.app import App, ComposeResult
 from textual.containers import ScrollableContainer
@@ -582,3 +583,55 @@ async def test_return_marker_shown_alongside_running_rework_markers():
         await pilot.pause()
         row = _status_row(app, "pr-a")
         assert "⟳2" in row and "⇤" in row
+
+
+# ---------------------------------------------------------------------------
+# Live QA marker vs a finished review loop (S29)
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_qa_spinner_not_masked_by_finished_review_loop():
+    """S29: B's review loop had finished (⟳1⏸); while B's QA scenarios ran
+    the node kept reading '● qa ⟳1⏸' with no QA spinner."""
+    from pm_core.tui.tech_tree import SPINNER_FRAMES
+    app = _TreeApp([_pr("pr-a", status="qa", workdir="/w")])
+    app._review_loops["pr-a"] = _finished_loop("pr-a", "INPUT_REQUIRED")
+    with patch("pm_core.tui.tech_tree.qa_pane_state", return_value="active"):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            row = _status_row(app, "pr-a")
+            assert any(f in row for f in SPINNER_FRAMES) and "⟳" not in row
+
+
+@async_test
+async def test_qa_waiting_marker_not_masked_by_finished_review_loop():
+    app = _TreeApp([_pr("pr-a", status="qa", workdir="/w")])
+    app._review_loops["pr-a"] = _finished_loop("pr-a", "PASS")
+    with patch("pm_core.tui.tech_tree.qa_pane_state", return_value="waiting"):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            row = _status_row(app, "pr-a")
+            assert "⏸" in row and "⟳" not in row
+
+
+@async_test
+async def test_idle_qa_keeps_finished_loop_marker():
+    app = _TreeApp([_pr("pr-a", status="qa", workdir="/w")])
+    app._review_loops["pr-a"] = _finished_loop("pr-a", "PASS")
+    with patch("pm_core.tui.tech_tree.qa_pane_state", return_value="idle"):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert "⟳1" in _status_row(app, "pr-a")
+
+
+@async_test
+async def test_running_review_loop_marker_wins_over_qa():
+    app = _TreeApp([_pr("pr-a", status="qa", workdir="/w")])
+    st = _finished_loop("pr-a", "")
+    st.running = True
+    app._review_loops["pr-a"] = st
+    with patch("pm_core.tui.tech_tree.qa_pane_state", return_value="active"):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert "⟳1" in _status_row(app, "pr-a")
