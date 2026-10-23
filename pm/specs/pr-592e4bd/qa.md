@@ -427,6 +427,13 @@ env-by-name).
   improvement (pr-eee7483). A Stop that replaced its
   `user_prompt` between two polls (a turn answered in under the poll
   interval) also counts as a new turn (ebf919e8, S35).
+  *Timing* (S38): "within a few seconds" follows the TUI's poll cadence.
+  Impl panes are polled every fifth 1 s tick, so a node change follows its
+  hook event by up to one 5 s poll plus render and observation overhead. S38
+  measured 0.8–4.2 s over 16 transitions sampled every 0.1 s, and one return
+  that fell between 4.9 and 5.4 s with 0.5 s sampling. A scenario's "≤ 5 s"
+  means "by the next impl poll", not a hard deadline. A transition that is
+  materially later than one poll, or never comes, still needs investigating.
 - **RQ36** Given two projects whose TUIs share one `~/.pm` (runtime
   mirror `~/.pm/runtime/<pr>.json`, QA run dirs `~/.pm/workdirs/qa`),
   When one project's TUI mounts, restarts or runs its resume scan, Then
