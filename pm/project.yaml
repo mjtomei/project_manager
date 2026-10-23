@@ -29697,11 +29697,28 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T15:49:43.888654+00:00'
-  updated_at: '2026-10-22T17:19:43.945696+00:00'
+  updated_at: '2026-10-23T03:12:32.445065+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-203b0c1
+    text: 'From pr-592e4bd QA S14 (2026-10-23, container mode, captures /pm-captures/scenarios/14/final-resume/s13-queued-launch/README.md):
+      kill -9 TUI restart 10 s into a DEQUEUED launch (s13 refiner fcc4a2fe running,
+      loop thread blocked in the synchronous _launch_next_queued) resumes from the
+      previous tick snapshot: s13 still queued, verified_scenarios [] although s11/s12
+      were verified. Effects: (1) s11/s12 re-verified; reused dead verifier panes
+      -> "Verification thread crashed" -> FLAGGED -> extra worker turn (self-recovers);
+      (2) s13 dequeued again: reclone s-13/repo, "Reusing existing container" whose
+      /workspace bind mount now points at the deleted pre-reclone dir (empty, getcwd
+      fails), new_window_get_pane returns the OLD same-named window/pane %84 (old
+      finished refiner), loop polls for new session 57b4a303 whose transcript never
+      appears -> run stuck. Same structure on master (not a pr-592e4bd regression).
+      Fix should persist the dequeue/refiner phase before the blocking launch (or
+      write the snapshot from inside it), and on relaunch kill the stale window/container
+      instead of reusing them.'
+    created_at: '2026-10-23T03:12:32Z'
+    last_edited: '2026-10-23T03:12:32Z'
 - id: pr-62fdd54
   plan: bugs
   title: 'Bug: synchronize the PR branch before QA planning and recover stale handoffs'
