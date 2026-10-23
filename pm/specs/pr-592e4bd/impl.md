@@ -193,9 +193,9 @@ config unchanged, passed on the final implementation 75f0dde6
 (`/pm-captures/host-work-route-smoke-20261022T190834Z/`: slirp4netns
 container; host + container `…190309Z/`). After 81cebf17 it passed on the
 host from an underscore cwd and in a container
-(`…195845Z/result.json`). Live QA S1–S33 is in
+(`…195845Z/result.json`). Live QA S1–S36 is in
 `/pm-captures/scenarios/<N>/` (REPORT.md). The latest full suite is
-recorded with item 27.
+recorded with item 28.
 
 **Rules fixed during validation (index).** Commits in parentheses.
 - Live smokes 1–4. The bridge stream has no timeout after connect
@@ -255,7 +255,7 @@ recorded with item 27.
   and NEEDS_WORK lines use `force=True, hold=CONFIRM_HOLD_SECONDS`
   (991addf9, 0697e450, 1098813c).
 - 24. A live QA marker beats a finished review-loop badge
-  (`_get_loop_marker(qa_live=)`), and `⏸M` survives (9cc2fb6b, 84662f7f).
+  (`_get_loop_marker(pane_live=)`), and `⏸M` survives (9cc2fb6b, 84662f7f).
   Kept on purpose: the idle `⟳N⏸` badge returns after QA. fake-claude
   `idle_once_after` is fixture-only. Known limitation: Ctrl+C in a review
   pane does not end an INPUT_REQUIRED wait (pr-89296d3, note-18c906b).
@@ -343,3 +343,21 @@ recorded with item 27.
     idle). That is the known, bounded limitation: a blocked prompt shows
     as working for about 60 s. The trust dialog showed waiting until the
     first `user_prompt`.
+
+### S35/S36 follow-ups (reviewed in review loop 3992 i1)
+28. Tree node and tracker fixes found live, all pre-existing on master,
+    each with a regression that fails when reverted:
+    - A live impl pane (spinner / `⏸`) also hides a finished loop's `⟳N`
+      badge; QA and impl share one `live_state` in `PRNode.render`
+      (41ff0d3c, 3992 i1 refactor).
+    - The hook file keeps only the latest event, so a Stop newer than an
+      observed `idle_prompt` is a new turn and reads as working until the
+      next `idle_prompt` (ebf919e8).
+    - The QA marker needs no cached workdir; a queued launch keeps the
+      run's own tracker keys (`QALoopState._ui_tracker_keys`); the TUI
+      mount sweep clears only its own project's PRs (93dca6ae).
+    Refiner, s0, planner, verifier and finalizer panes stay untracked by
+    design (qa.md RQ35; pr-eee7483). Full suite 3537 passed on 91f77840
+    (env -u PM_HOST_HOME, /usr/bin first; `/pm-captures/review-3992-i2`).
+    Captures `/pm-captures/scenarios/35`,
+    `/36`.
