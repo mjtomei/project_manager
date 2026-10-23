@@ -171,7 +171,9 @@ env-by-name).
   restart at any point during the new run's planning or execution resumes
   only the new run (or nothing), never the superseded one, and records no
   stale "Recovered completed QA" note naming the old workdir (ea78b9d1,
-  review 8a99 i2 lock). The pm log line for a reused shared push proxy is
+  review 8a99 i2 lock). The next run's numbering follows the launched-index
+  rule in the harness notes (never-launched queued indices may be reused),
+  not "above the stopped run's last planned index". The pm log line for a reused shared push proxy is
   plain text (no NUL; `grep` does not report "binary file matches")
   (c23a2021).
 
@@ -224,6 +226,17 @@ env-by-name).
   - Starting QA again on the same PR continues scenario numbering (4–6,
     7–9, …); marker-based holds in the stub router must target the real
     index (or match on prompt text, not number).
+  - Numbering continues from the earlier runs' highest *launched* index
+    (`_next_scenario_offset` counts `s-N` clone dirs), not the highest
+    *planned* one. Queued scenarios that a stopped or superseded run never
+    launched get no clone, so the next run may reuse their indices (impl.md
+    §5 item 9: "an older run's queued tail can exceed a newer run's
+    numbers — old 1-6 at cap 2, new 3-5"). Do not assert `scenario_start` >
+    the previous run's last planned index. Assert `scenario_start` = the
+    highest launched index of earlier runs + 1, and that the reused indices
+    carry no artifacts, windows or containers from the older run (S14,
+    2026-10-23: stopped run 18–21 launched only 18/19, next run started at
+    20).
   - Optional: export `ANTHROPIC_BASE_URL` to a second "main" stub and a
     dummy `ANTHROPIC_API_KEY` in the user environment to make main-account
     traffic visible: unrouted roles must reach the main stub with that key,
