@@ -212,6 +212,24 @@ class TestNeedsWorkStrict:
         pr = store.get_pr(data, "pr-001")
         assert pr["status"] == "in_review"
 
+    def test_needs_work_repaints_tree_with_reloaded_status(self, tmp_path):
+        """The tree is repainted from the reloaded in_review data at once,
+        not left showing qa until the 300 s background sync (S26)."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = _make_app(tmp_path, auto_start=False)
+        seen = []
+        app._update_display.side_effect = lambda: seen.append(
+            store.get_pr(app._data, "pr-001")["status"])
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.auto_start.is_enabled", return_value=False):
+            _on_qa_complete(app, state)
+
+        assert seen == ["in_review"]
+
     def test_needs_work_starts_review_loop_directly(self, tmp_path):
         """Step 7: NEEDS_WORK starts review loop via _start_self_driving_review."""
         from pm_core.tui.qa_loop_ui import _on_qa_complete

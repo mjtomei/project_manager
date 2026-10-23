@@ -626,12 +626,15 @@ def _on_qa_complete(app, state: QALoopState) -> None:
         _transition_pr_status(app, pr_id, "qa", "in_review")
         # Clear the stale review loop entry from the previous review pass
         app._review_loops.pop(pr_id, None)
-        # Reload in-memory state
+        # Reload in-memory state and repaint, so the tech tree shows
+        # in_review now rather than at the next 300 s background sync.
         if app._root:
             try:
                 app._data = store.load(app._root)
             except store.ProjectYamlParseError:
                 pass  # keep existing app._data
+            else:
+                app._update_display()
 
         if sd:
             # Self-driving: reset pass count and directly start review loop
