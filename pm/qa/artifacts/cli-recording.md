@@ -98,31 +98,90 @@ Once the cast exists, render a `.mp4` sibling so the recording embeds
 in the sign-off HTML report as a `<video controls>` element. `agg`
 renders the cast to frames (GIF), then `ffmpeg` encodes H.264 — there is
 no single cast→video tool worth using (the dedicated ones are orders of
-magnitude slower and fragile). The intermediate GIF is discarded.
+magnitude slower and fragile). The cast is the immutable source: never
+edit or re-record it to fix a render.
 
 ```
-cast=<capture-dir>/<short-name>/recording.cast
-agg --idle-time-limit 2 "$cast" "$cast.gif"
-# 2x nearest-neighbor upscale for crisp text — but only while the result
-# stays within iOS hardware-decode limits (4096x2304, H.264 level 5.1).
-# A terminal large enough to blow that budget is already crisp at native
-# size; then just round dimensions down to even (H.264 requires even).
-vf="scale=trunc(iw/2)*2:trunc(ih/2)*2"
-IFS=, read -r gw gh < <(ffprobe -v error -select_streams v:0 \
-    -show_entries stream=width,height -of csv=p=0 "$cast.gif")
-if [ -n "$gw" ] && [ -n "$gh" ] && \
-   [ "$((gw * 2))" -le 4096 ] && [ "$((gh * 2))" -le 2304 ]; then
-    vf="scale=iw*2:ih*2:flags=neighbor"
-fi
-ffmpeg -y -i "$cast.gif" -vf "$vf" \
-    -c:v libx264 -profile:v high -level:v 5.1 -pix_fmt yuv420p -crf 18 \
-    -movflags +faststart "${cast%.cast}.mp4"
-rm -f "$cast.gif"
+# render_cast <cast>: <cast> -> sibling recording.mp4 (variable frame rate).
+# Returns non-zero, and publishes no recording.mp4, if any step fails.
+render_cast() {
+    local cast=$1 gif="$1.gif" mp4="${1%.cast}.mp4"
+    local part="$mp4.partial.mp4" vf gw gh n dur
+    rm -f "$gif" "$part"
+    agg --idle-time-limit 2 "$cast" "$gif" \
+        || { echo "render_cast: agg failed for $cast" >&2; return 1; }
+    # 2x nearest-neighbor upscale for crisp text — but only while the result
+    # stays within iOS hardware-decode limits (4096x2304, H.264 level 5.1).
+    # A terminal large enough to blow that budget is already crisp at native
+    # size; then just round dimensions down to even (H.264 requires even).
+    vf="scale=trunc(iw/2)*2:trunc(ih/2)*2"
+    IFS=, read -r gw gh < <(ffprobe -v error -select_streams v:0 \
+        -show_entries stream=width,height -of csv=p=0 "$gif")
+    if [ -n "$gw" ] && [ -n "$gh" ] && \
+       [ "$((gw * 2))" -le 4096 ] && [ "$((gh * 2))" -le 2304 ]; then
+        vf="scale=iw*2:ih*2:flags=neighbor"
+    fi
+    # Hold the final screen: clone the last frame and place the clone at
+    # the GIF's total duration (a VFR encode otherwise ends the video
+    # when the last frame starts, dropping its hold).
+    n=$(ffprobe -v error -count_packets -select_streams v:0 \
+        -show_entries stream=nb_read_packets -of csv=p=0 "$gif")
+    dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$gif")
+    [ -n "$n" ] && [ -n "$dur" ] \
+        || { echo "render_cast: cannot probe $gif" >&2; return 1; }
+    vf="tpad=stop=1:stop_mode=clone,setpts='if(eq(N\,$n)\,$dur/TB\,PTS)',$vf"
+    if ffmpeg -loglevel error -y -i "$gif" -vf "$vf" \
+           -vsync vfr -enc_time_base 1/100 -video_track_timescale 100 \
+           -c:v libx264 -profile:v high -level:v 5.1 -pix_fmt yuv420p \
+           -crf 18 -movflags +faststart "$part" && [ -s "$part" ]; then
+        mv -f "$part" "$mp4" && rm -f "$gif"
+    else
+        echo "render_cast: ffmpeg failed for $cast;" \
+             "kept $gif (and any $part) for diagnosis" >&2
+        return 1
+    fi
+}
+render_cast "<capture-dir>/<short-name>/recording.cast" || echo "RENDER FAILED: do not publish this capture yet"
 ```
 
 Notes:
-- `--idle-time-limit 2` caps the long pauses a terminal session
-  accumulates, dropping dead air without losing anything worth watching.
+- `--idle-time-limit 2` caps the long pauses a terminal session accumulates,
+  dropping dead air without losing anything worth watching.
+- **Variable frame rate.** agg already merges identical screens into one
+  GIF frame with a long delay. `-vsync vfr` keeps those delays as frame
+  durations instead of padding them out to a constant rate. That padding
+  re-encoded thousands of identical frames: on 33-53 minute TUI casts the
+  constant-rate encode ran for more than 10 minutes at about 900% CPU,
+  while the VFR render finished in about 2 minutes. `-enc_time_base 1/100`
+  and `-video_track_timescale 100` give the GIF's centisecond delays an
+  exact timebase. Without them, the GIF's coarse frame rate becomes the
+  timebase and VFR merges neighbouring frames. (`-vsync` is spelled
+  `-fps_mode` in ffmpeg 5.1+, which still accepts `-vsync`.)
+- **Check the render:** the cloned final frame starts at the GIF's
+  duration, so the mp4 runs that long plus one frame tick (for example
+  5.34 s for a 5.30 s GIF). Its frame count is the GIF's plus one:
+  `ffprobe -v error -show_entries format=duration -of csv=p=0 recording.mp4`
+  and `ffprobe -v error -count_packets -select_streams v:0 -show_entries
+  stream=nb_read_packets -of csv=p=0 recording.mp4`.
+- **Partial output is never published.** ffmpeg writes to
+  `recording.mp4.partial.mp4`, which is renamed to `recording.mp4` only
+  after a successful encode. The GIF is deleted only after that rename.
+  An interrupted or failed render therefore leaves no `recording.mp4`.
+  Wait for (or test) `recording.mp4` itself; the GIF disappearing is not
+  a completion signal. If you stop a render on purpose, stop the shell
+  running `render_cast` before its `ffmpeg` child, so the cleanup step
+  cannot run. Label any partial output you keep (for example
+  `recording.mp4.INCOMPLETE-...`) and list it in the manifest.
+- **Video time is compressed pause time, not wall time.** Each gap
+  between cast output events is capped at 2 s, so to find the video
+  frame for a wall-clock instant, sum `min(gap, 2)` over the output
+  events up to that instant (cast timestamps are seconds from the
+  header's `timestamp`). Extract the frame on display at video time `vt`
+  with `ffmpeg -i recording.mp4 -vf "select='lte(t\,vt)'" -vsync 0
+  -update 1 frame.png`, which keeps the last frame starting at or before
+  `vt`. On a sparse VFR video, input seeking with `-ss vt` returns the
+  NEXT frame instead. Check a key frame's text against the cast replayed
+  to the same instant (for example with `pyte`) before citing it.
 - H.264 + `yuv420p` is the only combination that decodes everywhere,
   including iOS Safari (VP8/VP9 webm and 4:4:4 chroma do not). 4:2:0
   chroma subsampling would blur colored terminal text at native size,
@@ -134,8 +193,6 @@ Notes:
   visually lossless for this content; favor
   quality — file size is not a concern. `-movflags +faststart` puts the
   moov atom up front so playback starts before the full download.
-  A long, busy session may take several minutes to encode; that's
-  expected and acceptable for a rare case.
 
 ## Manifest format
 

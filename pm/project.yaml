@@ -31610,7 +31610,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T20:34:19.895644+00:00'
+  updated_at: '2026-10-23T20:51:52.008454+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32610,6 +32610,21 @@ prs:
       /pm-captures/scenarios/36 (REPORT.md).'
     created_at: '2026-10-23T20:34:19Z'
     last_edited: '2026-10-23T20:34:19Z'
+  - id: note-528c0be
+    text: 'S36 follow-up, recipe docs only (needs normal independent review; S36 verdict
+      stays NEEDS_WORK). tmux-screen-recording.md and cli-recording.md now carry the
+      S36-validated VFR render_cast: agg from PATH, -vsync vfr -enc_time_base 1/100,
+      the last frame held at the GIF duration, write to .partial and rename on success,
+      and on failure no recording.mp4 is published. They also explain that video time
+      is compressed pause time and how to pick key frames with select, not -ss. Codec
+      and size rules are unchanged; casts are never modified. Validated both snippets
+      as written on 2 sparse S36 casts: output identical to the S36 renders (5.34
+      s/7 frames, 3.80 s/12), ffmpeg and agg failure paths, select vs -ss, source
+      sha unchanged (/pm-captures/scenarios/36/recipe-validation). Open from S36:
+      typed refiner turns are untracked by node/picker and were not observed as working;
+      S35 merge picker visibility still needs QA.'
+    created_at: '2026-10-23T20:51:51Z'
+    last_edited: '2026-10-23T20:51:51Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
