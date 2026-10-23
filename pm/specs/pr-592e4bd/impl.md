@@ -494,3 +494,19 @@ repeated deaths turn a PASS into NEEDS_WORK.
     test_replaced_daemon_exits_and_keeps_the_new_socket` (real daemon) and
     `test_stop_of_a_replaced_proxy_leaves_the_new_socket`, each fails with
     its half reverted; logs `/pm-captures/review-b62f-i2/`).
+
+### QA S17 fix (reviewed in review loop ab29 i1)
+18. *Worker split into a closed refiner window logged as a launch*
+    (a2ff954c, pre-existing on master, host and container) — PR cleanup
+    (TUI `Y`) during a stopping run closed the refiner's window; the
+    worker split then raised, `qa_loop` logged a traceback, and
+    "Launched scenario N" was still logged because `window_name` is set
+    while the refiner runs. `_split_worker_pane` now returns `None` on
+    failure (plain warning when the refiner pane is gone, traceback
+    otherwise) and both launch paths count only a created worker pane as
+    a launch. Regressions `TestPollLoopRouteGating::
+    test_worker_split_after_window_closed_is_not_a_launch[container|tmux]`
+    and `test_worker_split_failure_with_live_refiner_keeps_traceback`
+    (fail with the fix reverted). The relaunch path
+    (`_relaunch_scenario_window`) already handles a vanished window in
+    its own `try`.
