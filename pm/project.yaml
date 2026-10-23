@@ -31557,7 +31557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T10:17:58.887164+00:00'
+  updated_at: '2026-10-23T11:07:52.069282+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32110,6 +32110,19 @@ prs:
       ~60-75 s while the loop refines a queued launch (pr-1ab9075).'
     created_at: '2026-10-23T10:17:58Z'
     last_edited: '2026-10-23T10:17:58Z'
+  - id: note-1853ad0
+    text: 'QA9 planner (2026-10-23): spec 738272ed adds a ninth pass (S24+), delta-only,
+      for the three _run_qa_finalize_pane changes since S21-S23 (ee3d0644, 2ff602fc,
+      54ff5a68; 54ff5a68 has never run live). New RQ28 covers the finalize gate against
+      qa-verify-pass: off, switched mid-run either way, another PR started after the
+      switch, and a TUI resume after the switch. New RQ29: a stopped or superseded
+      run spawns no finalizer. A possible gap from code reading, which S24 checks:
+      a run that accepts PASS unverified with verification off, is switched on and
+      is then resumed after a TUI restart reads "on" again. The resumed poll drops
+      scenarios that already have a verdict without verifying them (qa_loop.py ~3443),
+      so the finalize gate may skip with finalize=None.'
+    created_at: '2026-10-23T11:07:52Z'
+    last_edited: '2026-10-23T11:07:52Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
