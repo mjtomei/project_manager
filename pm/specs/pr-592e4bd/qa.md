@@ -191,10 +191,20 @@ env-by-name).
   verifier pane, and a verifier that dies while re-verifying ends that
   wait (no hang, finalize runs) (887a0b18, ff2c2474). Known and filed
   separately: a verifier death mid-check counts as FLAGGED against the
-  worker (pr-04dfffb). Open question for QA: when only the worker *pane*
-  dies and the verifier pane is still in the window, the flag follow-up
-  falls back to the window's first pane (`find_claude_pane`) and must
-  not land in the verifier pane.
+  worker (pr-04dfffb). When only the worker *pane* dies and the refiner
+  (host pane 0) or verifier pane is still in the window, the flag
+  follow-up must not land in either: QA S15 found it typed into the
+  refiner via the `find_claude_pane` first-pane fallback, and a dead
+  worker whose relaunch was route-deferred taken for that refiner (never
+  relaunched); fixed in 32961096. A relaunched worker must be a new
+  pane in the scenario's own window, never the surviving refiner and
+  never a second window of the same name (S15/S16 saw the relaunch
+  re-find the old window by name and record the refiner as the
+  worker; fixed in 296c08a7). The settled reason is the scenario's
+  verdict reason (qa_status.json / dashboard); the pm log line is
+  "Cannot send follow-up to scenario N — window gone, marking
+  INPUT_REQUIRED". Resuming a snapshot written by older pm (dead worker
+  saved as `pane_id: null`) still hits the fallback: pr-d1d0139.
 - **RQ25** Given a routed worker or refiner stalled on a route outage (or
   idle on an API-error turn), When its pane dies before the route answers
   again and the nudge can be sent, Then no "… recovered — resumed" or
