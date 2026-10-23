@@ -3482,6 +3482,12 @@ def _poll_tmux_verdicts(
                         "your verdict now if you have reached a conclusion."
                     )
                     tmux_mod.send_keys(pane_id, reminder)
+                    # Extra Enters so the reminder is submitted: Claude can
+                    # take the text+Enter burst as a paste and leave it
+                    # unsent, and the worker then never idles again.
+                    for _ in range(2):
+                        time.sleep(1)
+                        tmux_mod.send_keys(pane_id, "")
                     _last_reminder_sent[scenario.index] = now
                     _log.info(
                         "Sent verdict-format reminder to scenario %d",

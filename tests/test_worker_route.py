@@ -1105,6 +1105,41 @@ class TestPollLoopRouteGating:
             assert not watch.on_idle_without_verdict("%5", str(tr))
         send.assert_not_called()
 
+    def test_unrouted_api_error_idle_gets_submitted_reminder(self, tmp_path):
+        """An unrouted worker idles on an API error: no route nudge, and
+        the verdict reminder is followed by the Enters that submit it
+        (a single text+Enter burst can sit unsent in Claude's prompt)."""
+        from pm_core import qa_loop
+        tr = tmp_path / "t.jsonl"
+        tr.write_text(json.dumps(_api_error_record("e1")) + "\n")
+        sc = qa_loop.QAScenario(index=1, title="t", focus="f")
+        sc.window_name, sc.session_id, sc.pane_id = "w1", "sid-1", "%5"
+        sc.transcript_path = str(tr)
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        state.scenarios = [sc]
+        t0 = time.time() + 1e4
+        events = iter([{"event_type": "idle_prompt", "timestamp": t0}] * 3
+                      + [{"event_type": "idle_prompt", "timestamp": t0 + 5}] * 50)
+        verdicts = iter([None, "PASS"])
+        sent = []
+        with patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
+             patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                   return_value=120), \
+             patch("pm_core.hook_events.read_event",
+                   side_effect=lambda sid: next(events)), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   side_effect=lambda *a: next(verdicts)), \
+             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
+                   return_value=""), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys",
+                   side_effect=lambda p, m: sent.append(m)):
+            self._poll(state, tmp_path, [worker_route.RouteStatus(True)])
+        assert len(sent) == 3 and sent[0].startswith("Reminder: your verdict")
+        assert sent[1:] == ["", ""]
+        assert state.scenario_verdicts[1] == "PASS"
+
     def test_relaunched_worker_gets_a_fresh_route_watch(self, tmp_path):
         """A worker stalled on the route dies and is relaunched once the
         route answers: the dead session's stalled pane is not "resumed"
