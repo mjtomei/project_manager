@@ -577,7 +577,11 @@ class PRNode(Widget):
 
         status_text = f"{icon} {status}"
         qa_state = None
-        if status == "qa" and pr.get("workdir"):
+        if status == "qa":
+            # No workdir gate: QA tracker keys exist only while a QA loop
+            # runs, and a PR's first QA run writes its workdir after
+            # start_qa reloaded the TUI's PR data, so a workdir gate hid
+            # that PR's spinner until the next background sync (S36).
             qa_state = qa_pane_state(self.app._pane_idle_tracker, pr_id)
         # A turn typed (or sent) into the impl pane after a review loop
         # finished is live work too: its spinner / ⏸ must not be hidden
@@ -607,7 +611,7 @@ class PRNode(Widget):
                         marker_offset = 2 + len(status_text) + 1
                         loop_style = "bold cyan"
                         status_text += f" {spinner}"
-            elif status == "qa" and pr.get("workdir"):
+            elif status == "qa":
                 if qa_state == "waiting":
                     marker_offset = 2 + len(status_text) + 1
                     loop_style = "bold yellow"
@@ -1221,6 +1225,8 @@ class TechTree(Widget):
         if pr.get("status") in ("in_progress", "in_review", "qa", "sign_off") and pr.get("workdir"):
             return True
         try:
+            if pr.get("status") == "qa" and pr_id in getattr(self.app, "_qa_loops", {}):
+                return True
             if self.app._review_loops.get(pr_id):
                 return True
             if pr_id in getattr(self.app, "_merge_input_required_prs", set()):

@@ -252,6 +252,11 @@ class QALoopState:
     _notify_cb: Callable[[], None] | None = None
     # Set by qa_loop_ui after the completion callback has run once
     _ui_complete_notified: bool = False
+    # Idle-tracker keys qa_loop_ui registered for this run's panes.  A
+    # queued launch temporarily narrows ``scenarios`` to the one being
+    # launched, so this (not ``scenarios``) tells this run's keys apart
+    # from a replaced run's.
+    _ui_tracker_keys: set = field(default_factory=set, repr=False, compare=False)
     # Orders resume-snapshot renames against :func:`supersede_run`, so a
     # write already past its stop check cannot restore a snapshot that a
     # ``z t`` cleared.

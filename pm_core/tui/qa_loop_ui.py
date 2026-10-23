@@ -314,8 +314,11 @@ def poll_qa_state(app) -> None:
         # in _qa_loops (z t over a running run, a zz t restart) never
         # reaches the completion unregister below, and nothing polls its
         # keys again, so mid-turn panes stayed "active" for good: the
-        # node kept a QA spinner after the new run finished.
+        # node kept a QA spinner after the new run finished.  Keys this
+        # run registered stay: while a queued scenario launches,
+        # ``state.scenarios`` holds only that scenario (S36).
         live = {f"qa:{pr_id}:s{sc.index}" for sc in state.scenarios}
+        live |= state._ui_tracker_keys
         for key in tracker.tracked_keys():
             if key.startswith(f"qa:{pr_id}:") and key not in live:
                 tracker.unregister(key)
@@ -331,6 +334,7 @@ def poll_qa_state(app) -> None:
                     tracker.register(key, sc.pane_id, sc.transcript_path)
                 except ValueError:
                     continue
+            state._ui_tracker_keys.add(key)
             tracker.poll(key)
 
         if not state.running and state.latest_verdict:

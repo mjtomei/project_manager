@@ -511,16 +511,6 @@ class ProjectManagerApp(App):
         # so CLI commands can ask us to reload state without depending on
         # tmux send-keys (which gets eaten by whichever widget has focus).
         self._install_reload_signal()
-        # Sweep stale runtime_state entries from the previous TUI
-        # process — a freshly-started TUI doesn't own any pane or loop
-        # recorded by an old one, so anything still flagged as
-        # running/idle/queued is no longer live.  Action mirrors will
-        # rewrite real entries as panes register and loops resume.
-        try:
-            from pm_core import runtime_state as _rs
-            _rs.sweep_stale_states("tui-mount")
-        except Exception:
-            _log.debug("runtime_state sweep on mount failed", exc_info=True)
         # Load any existing capture config
         frame_capture.load_capture_config(self)
         # Set up watchers on child widgets for frame capture
@@ -530,6 +520,20 @@ class ProjectManagerApp(App):
         # Defer heavier operations (heal_registry, tmux bindings, GitHub
         # sync) to after the first frame.
         self._load_state()
+        # Sweep stale runtime_state entries from the previous TUI
+        # process — a freshly-started TUI doesn't own any pane or loop
+        # recorded by an old one, so anything still flagged as
+        # running/idle/queued is no longer live.  Action mirrors will
+        # rewrite real entries as panes register and loops resume.
+        # Only this project's PRs: ~/.pm/runtime is shared by every
+        # project, and another project's live TUI owns its entries (S36).
+        try:
+            from pm_core import runtime_state as _rs
+            _rs.sweep_stale_states(
+                "tui-mount",
+                pr_ids={p.get("id") for p in (self._data or {}).get("prs") or []})
+        except Exception:
+            _log.debug("runtime_state sweep on mount failed", exc_info=True)
         self._update_orientation()
         # Start the coalescing write queue now that the project root is known.
         # TUI mutations enqueue here instead of writing to disk inline.

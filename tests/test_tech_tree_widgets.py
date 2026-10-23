@@ -743,3 +743,32 @@ async def test_merge_input_marker_survives_live_impl():
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             assert "⏸M" in _status_row(app, "pr-a")
+@async_test
+async def test_qa_spinner_shows_before_the_workdir_reaches_the_cache():
+    """S36: a PR's first QA run writes its workdir after start_qa reloaded
+    the TUI data, so the cached PR has none; its node stayed "● qa" with no
+    spinner while its workers ran, until the 300 s background sync."""
+    from pm_core.tui.tech_tree import SPINNER_FRAMES
+    app = _TreeApp([_pr("pr-a", status="qa")])
+    with patch("pm_core.tui.tech_tree.qa_pane_state", return_value="active"):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert any(f in _status_row(app, "pr-a") for f in SPINNER_FRAMES)
+    app = _TreeApp([_pr("pr-a", status="qa")])
+    with patch("pm_core.tui.tech_tree.qa_pane_state", return_value="waiting"):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert "⏸" in _status_row(app, "pr-a")
+
+
+@async_test
+async def test_qa_node_without_cached_workdir_is_repainted_while_its_loop_runs():
+    from pm_core.tui.tech_tree import TechTree
+    app = _TreeApp([_pr("pr-a", status="qa")])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        tree = app.query_one("#tech-tree", TechTree)
+        pr = {"id": "pr-a", "status": "qa"}
+        assert not tree._is_active_pr(pr)
+        app._qa_loops = {"pr-a": object()}
+        assert tree._is_active_pr(pr)

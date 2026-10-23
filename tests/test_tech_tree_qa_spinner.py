@@ -222,3 +222,27 @@ def test_prune_keeps_the_current_runs_panes(tmp_path, tracker):
     entry = rs.get_action_state("pr-x", "qa")
     assert entry["state"] == "running"
     assert set(entry["panes"]) == {"s5"}
+
+
+def test_queued_launch_keeps_the_runs_mid_turn_keys(tmp_path, tracker):
+    """S36: a queued launch narrows state.scenarios to the scenario being
+    launched for its whole refiner turn; the replaced-run prune then dropped
+    the run's own mid-turn worker, so the node stopped spinning and the
+    picker lost the qa entry for that minute."""
+    from pm_core import runtime_state as rs
+    from pm_core.tui.qa_loop_ui import poll_qa_state
+    from pm_core.tui.tech_tree import qa_pane_state
+    t = _make_transcript(tmp_path)
+    s2 = _make_scenario(2, "%14", str(t))
+    s3 = _make_scenario(3, None, None)
+    app = _FakeApp(tracker)
+    state = _make_state("pr-x", [s2, s3])
+    app._qa_loops["pr-x"] = state
+    with patch("pm_core.tmux.pane_exists", return_value=True), \
+         patch("pm_core.hook_events.read_event", return_value=None):
+        poll_qa_state(app)
+        state.scenarios = [s3]          # _launch_next_queued's swap
+        poll_qa_state(app)
+    assert tracker.is_tracked("qa:pr-x:s2")
+    assert qa_pane_state(tracker, "pr-x") == "active"
+    assert set(rs.get_action_state("pr-x", "qa")["panes"]) == {"s2"}
