@@ -542,7 +542,12 @@ repeated deaths turn a PASS into NEEDS_WORK.
     skipped the finalizer on every all-PASS run (`finalize=None`). The gate
     now applies only while verification is enabled. Regression
     `tests/test_qa_finalize_wiring.py::test_run_qa_finalize_pane_runs_unverified_pass_when_verification_off`
-    (fails with the fix reverted, rechecked in 3ce6 i1).
+    (fails with the fix reverted, rechecked in 3ce6 i1). Review loop 3ce6
+    i2: the gate uses `qa-verify-pass` as the verdict poll read it
+    (`QALoopState.verify_pass_enabled`), not a fresh read at finalize, so
+    turning verification on mid-run cannot skip finalize again (regression
+    `test_run_qa_finalize_pane_gate_uses_the_poll_loops_setting`,
+    mutation-checked; logs `/pm-captures/review-3ce6-i2/`).
 21. *Stopped run spawned a finalizer into the new run's window* (2ff602fc,
     pre-existing on master) — after `z t` over a mid-turn run the stopped
     loop still reached `_run_qa_finalize_pane`, found the *new* run's QA

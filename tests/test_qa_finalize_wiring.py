@@ -141,6 +141,34 @@ def test_run_qa_finalize_pane_runs_unverified_pass_when_verification_off(
     assert looked_up == [("pm-test", "qa")]
 
 
+def test_run_qa_finalize_pane_gate_uses_the_poll_loops_setting(
+    monkeypatch, tmp_path,
+):
+    """The gate follows qa-verify-pass as the poll loop read it: turning
+    verification on mid-run (PASSes already accepted unverified) must not
+    skip finalize, and turning it off mid-run must not skip the gate."""
+    import pm_core.qa_loop as qa_loop_mod
+    import pm_core.tmux as tmux_mod
+    looked_up = []
+    monkeypatch.setattr(tmux_mod, "find_window_by_name",
+                        lambda *a, **kw: looked_up.append(a))
+
+    monkeypatch.setattr(qa_loop_mod, "_is_verification_enabled", lambda: True)
+    state = QALoopState(pr_id="x", verify_pass_enabled=False)
+    state.scenario_verdicts = {1: "PASS"}
+    _run_qa_finalize_pane(state, {}, "pm-test", "qa", str(tmp_path))
+    assert looked_up == [("pm-test", "qa")]
+
+    looked_up.clear()
+    monkeypatch.setattr(qa_loop_mod, "_is_verification_enabled", lambda: False)
+    state = QALoopState(pr_id="x", verify_pass_enabled=True)
+    state.scenario_verdicts = {1: "PASS"}
+    assert _run_qa_finalize_pane(
+        state, {}, "pm-test", "qa", str(tmp_path),
+    ) is None
+    assert looked_up == []
+
+
 # --- (g2) ----------------------------------------------------------------
 
 def test_run_qa_finalize_pane_spawns_nothing_when_stopped(
