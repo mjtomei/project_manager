@@ -31584,7 +31584,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T18:33:50.253773+00:00'
+  updated_at: '2026-10-23T18:39:59.435600+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32513,6 +32513,17 @@ prs:
       Evidence /pm-captures/review-a183-i1.'
     created_at: '2026-10-23T18:33:50Z'
     last_edited: '2026-10-23T18:33:50Z'
+  - id: note-5588b1e
+    text: 'Review a183 i2 (b8ebe2c3, CODE CHANGE, small, needs normal re-review):
+      aaf15356 exact-invocation ownership and the f4108fbf spec archive (verbatim,
+      checked line by line) are sound. One fix: a non-string hook "command" in user
+      settings.json made shlex.split raise AttributeError at hook install (pm session/TUI
+      start). It is now kept as a user hook. Regression test_installer_keeps_malformed_user_prompt_hooks
+      (mutation-checked). Full suite 3526 passed; logs /pm-captures/review-a183-i2
+      (an interrupted superseded first run is labelled there, its partial log was
+      lost).'
+    created_at: '2026-10-23T18:39:59Z'
+    last_edited: '2026-10-23T18:39:59Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
