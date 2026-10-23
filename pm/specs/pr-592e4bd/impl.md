@@ -193,9 +193,9 @@ config unchanged, passed on the final implementation 75f0dde6
 (`/pm-captures/host-work-route-smoke-20261022T190834Z/`: slirp4netns
 container; host + container `…190309Z/`). After 81cebf17 it passed on the
 host from an underscore cwd and in a container
-(`…195845Z/result.json`). Live QA S1–S36 is in
+(`…195845Z/result.json`). Live QA S1–S39 is in
 `/pm-captures/scenarios/<N>/` (REPORT.md). The latest full suite is
-recorded with item 28.
+recorded with item 29.
 
 **Rules fixed during validation (index).** Commits in parentheses.
 - Live smokes 1–4. The bridge stream has no timeout after connect
@@ -361,3 +361,28 @@ recorded with item 28.
     (env -u PM_HOST_HOME, /usr/bin first; `/pm-captures/review-3992-i2`).
     Captures `/pm-captures/scenarios/35`,
     `/36`.
+
+### S39 follow-up (QA scenario 39)
+29. *A TUI's restart-resume scan deleted another project's live QA
+    snapshot.* `~/.pm/workdirs/qa` is shared by every project under
+    `~/.pm`, like `~/.pm/runtime` (item 28, 93dca6ae). `_resume_incomplete_qa`
+    treated a PR missing from its own project as "left QA" and deleted its
+    `qa_resume.json` once the owner pid was gone. It also dropped that PR's
+    older superseded snapshots. Live, P1's TUI deleted P2's snapshot for C
+    within 30 ms of P2's TUI being killed, so P2's restart had nothing to
+    resume: no `Resuming QA`, and C's node and picker lost the spinner and
+    `[working]` while the C workers were still mid-turn. Pre-existing on
+    master for the not-in-project drop; the superseded drop came from this
+    PR (60574f28). The scan now ignores snapshots of PRs outside its own
+    project. The project is loaded only when a snapshot of a PR that is
+    neither tracked nor resumed is present. (a711f411; regression
+    `tests/test_qa_resume.py::test_other_projects_snapshots_are_left_alone`
+    fails with the fix reverted: 1 failed / 36 passed, and passes with
+    it: 37 passed.)
+    Evidence is in `/pm-captures/scenarios/39` (REPORT.md):
+    - Pre-fix: `pre-fix/story3`, `pre-fix/p2/recording.mp4`.
+    - Post-fix: `post-fix/recovery` (P1 restarted while the fixed P2 ran;
+      A/B snapshots kept, both resumed) and `post-fix/story3` (P2 restart
+      resumed C with A/B unchanged).
+    Full suite 3538 passed on a711f411 (env -u PM_HOST_HOME, /usr/bin
+    first; `suite/full-suite.log`).

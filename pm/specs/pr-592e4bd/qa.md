@@ -427,6 +427,15 @@ env-by-name).
   improvement (pr-eee7483). A Stop that replaced its
   `user_prompt` between two polls (a turn answered in under the poll
   interval) also counts as a new turn (ebf919e8, S35).
+- **RQ36** Given two projects whose TUIs share one `~/.pm` (runtime
+  mirror `~/.pm/runtime/<pr>.json`, QA run dirs `~/.pm/workdirs/qa`),
+  When one project's TUI mounts, restarts or runs its resume scan, Then
+  it never sweeps, resumes or deletes another project's runtime entries
+  or `qa_resume.json` snapshots. When a project's TUI is killed with a
+  run mid-turn and restarted while the other TUI keeps running, Then its
+  restart logs `Resuming QA for <pr>`, its node spins again and its
+  picker row reads `[working]` (93dca6ae mount sweep; a711f411 resume
+  scan, impl.md §5 item 29, S39).
 
 ## 2. Setup
 
@@ -550,6 +559,26 @@ env-by-name).
     `idle_prompt`; the row disappearing then is correct finalization,
     not a missing `[idle]`. Same scratch-only limits as the fourteenth
     pass.
+  - Sixteenth pass (S40+), delta-only. Product change since the
+    fifteenth pass: a711f411, where a TUI's restart-resume scan skips QA
+    snapshots of PRs outside its own project (RQ36; impl.md §5 item 29).
+    S39 verified it live, pre-fix and post-fix, in a scratch HOME with two
+    projects (`/pm-captures/scenarios/39`, REPORT.md).
+    - Its other Thens held on ace966c7: second-PR first-run spinner,
+      queued-launch keys, mount sweep, and RQ33 supersede.
+    - Full suite 3538 passed on a711f411 (`suite/full-suite.log`).
+    - Delta to check: kill one project's TUI with a routed run mid-turn
+      while the other project's TUI keeps running. Then restart it, in
+      both directions: it must log `Resuming QA` and spin again, and the
+      other project's runtime files must stay byte-identical.
+    - Harness facts:
+      - Plain `t` on a PR whose `qa-<pr>` window exists only focuses that
+        window, so a re-run needs `z t`.
+      - A wait for a run's end must match the TUI line `QA PASS for
+        <pr>`. The superseded run logs its own `QA complete … INPUT_REQUIRED`.
+      - A queued launch's refiner idles about 60 s before its worker
+        launches.
+    Same scratch-only limits as the fourteenth pass.
 
 ## 3. Edge cases
 
