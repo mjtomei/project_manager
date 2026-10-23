@@ -637,8 +637,8 @@ def start_push_proxy(container_name: str, workdir: str,
             with _proxy_lock:
                 _proxy_refs.setdefault(key, set()).add(container_name)
                 _container_to_proxy_key[container_name] = key
-            _log.info("Reusing live shared push proxy for %s (container %s)",
-                      key, container_name)
+            _log.info("Reusing live shared push proxy for %s %s (container %s)",
+                      session_tag, pr_id, container_name)
             return sock_path
 
         # Socket missing or dead — spawn a new subprocess proxy
