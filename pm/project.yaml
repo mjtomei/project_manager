@@ -22390,7 +22390,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-13T03:40:41.462348+00:00'
+  updated_at: '2026-10-23T18:33:51.145724+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22410,6 +22410,16 @@ prs:
       in session project_manager-c5a1006b.'
     created_at: '2026-10-13T03:40:41Z'
     last_edited: '2026-10-13T03:40:41Z'
+  - id: note-5b15e1d
+    text: 'Repro 2 on #249 (pr-592e4bd), 2026-10-23: the native review-loop a183 launch
+      failed with E2BIG. The prompt was 131310 bytes (PR notes ~57 KB + impl spec
+      49 KB). Production builders: review 131175, sign-off 144144, QA planner 134900.
+      Docs workaround f4108fbf archived spec history verbatim, with PR notes unchanged.
+      Host measurement after it: review 103592, sign-off 117479, planner 116120. Still
+      unbounded: PR notes and spec are inlined whole. Evidence /pm-captures/review-a183-i1
+      (measure_prompts.py, sizes-*.txt).'
+    created_at: '2026-10-23T18:33:51Z'
+    last_edited: '2026-10-23T18:33:51Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
@@ -31574,7 +31584,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T18:15:37.656226+00:00'
+  updated_at: '2026-10-23T18:33:50.253773+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32493,6 +32503,16 @@ prs:
       first), logs /pm-captures/review-d0d0-i1. impl.md item 27.'
     created_at: '2026-10-23T18:15:37Z'
     last_edited: '2026-10-23T18:15:37Z'
+  - id: note-2f2ded8
+    text: 'Review a183 i1 (aaf15356, CODE CHANGE, needs independent re-review + QA
+      RQ35): pm hook ownership is now an exact receiver invocation, not a substring.
+      af19cfcf deleted user hooks that mentioned or also ran the receiver. 3 mutation-checked
+      regressions; suite 3525 passed. Spec f4108fbf archived impl §5 items 1-26 and
+      qa passes 2-13 verbatim (impl-validation-history.md, qa-passes-2-13.md). Host
+      builders: sign-off 117479 B (~13.6 KB headroom), so keep verdict notes concise.
+      Evidence /pm-captures/review-a183-i1.'
+    created_at: '2026-10-23T18:33:50Z'
+    last_edited: '2026-10-23T18:33:50Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
