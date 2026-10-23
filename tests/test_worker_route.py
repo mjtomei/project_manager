@@ -1092,6 +1092,38 @@ class TestPollLoopRouteGating:
                 results.append(watch.on_idle_without_verdict("%5", str(tr)))
         assert results.count(True) == qa_loop._RouteStallWatch.MAX_ERROR_RESUMES
 
+    def test_recovered_route_does_not_claim_resume_of_a_dead_pane(self):
+        """The stalled pane died before the route came back: no nudge is
+        sent, so the status must not say the session was resumed."""
+        from pm_core import qa_loop
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        statuses = iter([_status(False), _status(True)])
+        watch = qa_loop._RouteStallWatch(state, lambda: next(statuses), "w")
+        with patch("pm_core.tmux.send_keys") as send:
+            assert watch.on_idle_without_verdict("%5", None)
+            stalled_msg = state.latest_output
+            with patch("pm_core.tmux.pane_exists", return_value=False), \
+                 patch("pm_core.qa_loop._route_clock", return_value=1e12):
+                watch.tick()
+        send.assert_not_called()
+        assert watch.stalled_pane is None
+        assert state.latest_output == stalled_msg
+        assert "resumed" not in (state.latest_output or "")
+
+    def test_nudge_send_failure_does_not_claim_resume(self, tmp_path):
+        """The pane dies between the liveness check and the nudge: the
+        failed send is not reported as a resume."""
+        from pm_core import qa_loop
+        tr = tmp_path / "t.jsonl"
+        tr.write_text(json.dumps(_api_error_record("e1")) + "\n")
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        watch = qa_loop._RouteStallWatch(state, lambda: _status(True), "w")
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys",
+                   side_effect=RuntimeError("can't find pane")):
+            assert watch.on_idle_without_verdict("%5", str(tr))
+        assert "resumed" not in (state.latest_output or "")
+
     def test_api_error_on_unrouted_session_is_not_resumed(self, tmp_path):
         """A main-account (unrouted) worker's API error is not a route
         outage: it keeps the usual reminder handling, with no nudge."""

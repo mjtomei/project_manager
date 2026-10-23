@@ -1795,12 +1795,17 @@ class _RouteStallWatch:
     def _resume(self, pane: str, msg: str) -> None:
         from pm_core import tmux as tmux_mod
         try:
-            if tmux_mod.pane_exists(pane):
+            sent = tmux_mod.pane_exists(pane)
+            if sent:
                 _send_submitted(pane, self.NUDGE)
         except Exception:
-            # Pane died in between: the caller's dead-pane handling
-            # relaunches it.
             _log.debug("route resume nudge to %s failed", pane, exc_info=True)
+            sent = False
+        if not sent:
+            # Pane died in between: nothing was resumed, and the caller's
+            # dead-pane handling relaunches it (and says so).
+            _log.info("%s: pane %s gone — not resumed", self.what, pane)
+            return
         self.state.latest_output = msg
         _log.info("%s", self.state.latest_output)
         _notify_state(self.state)
