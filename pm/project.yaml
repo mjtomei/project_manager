@@ -31557,7 +31557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T09:09:06.176996+00:00'
+  updated_at: '2026-10-23T09:57:54.050972+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32042,6 +32042,23 @@ prs:
       S22 sets it as bootstrap.'
     created_at: '2026-10-23T09:09:06Z'
     last_edited: '2026-10-23T09:09:06Z'
+  - id: note-b3c1df5
+    text: 'QA S22 (2026-10-23, host mode, real Claude vs router/main stubs; captures
+      /pm-captures/scenarios/22, REPORT.md): all Thens held for flag follow-up + worker
+      killed on held verifier (INPUT_REQUIRED window gone), stall then pane kill with
+      router down (deferred, retry 1/10, relaunch into same window), z t supersede
+      + 2 TUI restarts (only newest run resumed; B starts at M+1; snapshots removed
+      <150 ms), zz t during route wait, PR B model override on main. CODE CHANGE 2ff602fc
+      needs normal re-review: after z t over a mid-turn run the stopped loop ran _run_qa_finalize_pane,
+      found the NEW run qa-<pr> window by name and split a finalizer into it at pane
+      0; the new run logged "Planner pane: %35" (the stray finalizer) and the finalizer
+      session ran unsupervised. Pre-existing on master. Now skipped when stop_check()
+      is true; regression test_run_qa_finalize_pane_spawns_nothing_when_stopped (fails
+      reverted); full suite 3471 passed. Spec note: S22 story 3 Given ("Queued scenario
+      launch deferred" with both slots held) cannot occur: _launch_next_queued checks
+      the cap before the route.'
+    created_at: '2026-10-23T09:57:53Z'
+    last_edited: '2026-10-23T09:57:53Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
