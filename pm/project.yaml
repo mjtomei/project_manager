@@ -31526,7 +31526,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T03:47:27.558568+00:00'
+  updated_at: '2026-10-23T04:08:54.442372+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31783,6 +31783,20 @@ prs:
       refiner = pr-3201ea8 (note-203b0c1).'
     created_at: '2026-10-23T03:47:27Z'
     last_edited: '2026-10-23T03:47:27Z'
+  - id: note-99483be
+    text: 'Review 590d i2 (ff2c2474, CODE CHANGE, needs normal re-review): fixed the
+      i1 residual race and two related ones. (1) If the worker pane died between its
+      liveness check and the flagged-verification follow-up, the send error ended
+      the QA thread ("QA thread crashed", workers left unsupervised). That scenario
+      is now INPUT_REQUIRED (window gone). (2) If the verifier pane died before the
+      re-verify message, a fresh verifier now runs instead of "verification thread
+      crashed" flagging the worker. (3) A verifier pane dying during the re-verify
+      wait hung the wait forever, because the worker pane keeps the window alive.
+      wait_for_follow_up_verdict(pane_id=) fixes it. 4 mutation-checked regressions;
+      suite 3453 passed; logs /pm-captures/review-590d-i2. Filed pr-04dfffb: a verifier
+      death still counts as FLAGGED against the worker.'
+    created_at: '2026-10-23T04:08:54Z'
+    last_edited: '2026-10-23T04:08:54Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
