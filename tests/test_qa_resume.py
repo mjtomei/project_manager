@@ -534,6 +534,69 @@ def test_in_place_project_edit_also_forgets_foreign_ids(tmp_path):
     assert app._foreign_qa_pr_ids == set()
 
 
+def test_resume_of_a_pulled_pr_reloads_the_tree(tmp_path):
+    """A PR that arrived by a git pull is in project.yaml but not in the
+    TUI's loaded state (a pull signals no reload): resuming its run
+    reloads, so its node shows at once, not at the 300 s sync (S41)."""
+    app = _make_app(tmp_path)
+    app._data = {"prs": []}
+    _seed_run(tmp_path, overall="")
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+    app._load_state.assert_called_once()
+
+
+def test_resume_of_a_shown_pr_does_not_reload(tmp_path):
+    app = _make_app(tmp_path)
+    app._data = store.load(app._root)
+    _seed_run(tmp_path, overall="")
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+    app._load_state.assert_not_called()
+
+
+def _resume_in(tmp_path, *, live_sessions):
+    """resume_qa_sync for a run recorded by session tag "clone-b" in a TUI
+    whose own session is pm-clone-a; returns the session it drives."""
+    pm_dir = tmp_path / "pm"
+    pm_dir.mkdir()
+    wd = tmp_path / "wd"
+    wd.mkdir()
+    pr = {"id": "pr-001", "title": "T", "branch": "b", "status": "qa",
+          "workdir": str(wd), "notes": []}
+    store.save({"project": {"name": "test", "repo": "/tmp/r",
+                            "base_branch": "master"}, "prs": [pr]}, pm_dir)
+    state = _make_state(tmp_path / "qa")
+    state.session_tag = "clone-b"
+    with patch.object(qa_loop, "get_pm_session", return_value="pm-clone-a"), \
+         patch("pm_core.tmux.session_exists",
+               side_effect=lambda name, *a, **k: name.lstrip("=") in live_sessions), \
+         patch.object(qa_loop, "_execute_and_finalize",
+                      return_value=state) as run:
+        qa_loop.resume_qa_sync(state, pm_dir, pr)
+    return run.call_args.args[4]
+
+
+def test_resumed_run_is_driven_in_the_session_that_holds_its_windows(tmp_path):
+    """A run adopted from another clone's pm session keeps its windows
+    there: the resumed loop must look for them (finalizer, relaunches) in
+    that session, not this TUI's, which skipped the finalizer (S41)."""
+    assert _resume_in(tmp_path, live_sessions={"pm-clone-a", "pm-clone-b"}) \
+        == "pm-clone-b"
+
+
+def test_resumed_run_uses_own_session_when_its_session_is_gone(tmp_path):
+    assert _resume_in(tmp_path, live_sessions={"pm-clone-a"}) == "pm-clone-a"
+
+
 @pytest.mark.parametrize("stale_loop", ["aaa", "zzz"])
 @pytest.mark.parametrize("stale_mtime", [1_000_000, 4_000_000_000])
 def test_resume_prefers_live_snapshot_over_superseded_run(tmp_path,

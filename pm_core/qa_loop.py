@@ -4826,6 +4826,29 @@ def _execute_and_finalize(
     return state
 
 
+def _resume_session(state: QALoopState) -> str | None:
+    """The tmux session to drive a resumed run in.
+
+    A run's windows stay in the session that launched it.  That is usually
+    this TUI's own, but a run orphaned in another clone of the project
+    (its own pm session on the same tmux server) can be adopted here once
+    its PR arrives by a pull (S41).  Its workers, planner window and any
+    relaunch, verifier or finalizer pane belong in that session: looking
+    for its qa window in this one skipped the finalizer.  This TUI's
+    session is used when the run's session is gone (its windows with it).
+    """
+    own = get_pm_session()
+    if state.session_tag:
+        run_session = f"pm-{state.session_tag}"
+        if run_session != own:
+            from pm_core import tmux as tmux_mod
+            if tmux_mod.session_exists(f"={run_session}"):
+                _log.info("QA resume for %s: driving its windows in session "
+                          "%s (this TUI: %s)", state.pr_id, run_session, own)
+                return run_session
+    return own
+
+
 def resume_qa_sync(
     state: QALoopState,
     pm_root: Path,
@@ -4843,7 +4866,7 @@ def resume_qa_sync(
     from pm_core import store
 
     state.running = True
-    session = get_pm_session()
+    session = _resume_session(state)
     if not session:
         _log.error("QA resume aborted: no pm session for %s", state.pr_id)
         state.running = False
