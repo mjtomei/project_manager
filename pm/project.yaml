@@ -32651,6 +32651,19 @@ prs:
       on 91f77840; log /pm-captures/review-3992-i2.'
     created_at: '2026-10-23T21:02:35Z'
     last_edited: '2026-10-23T21:02:35Z'
+  - id: note-724fd74
+    text: 'QA S37 (2026-10-23, host, head ace966c7 code; captures /pm-captures/scenarios/37,
+      manifest.md): closed the S35 story-6 gap live, no product change. The rendered
+      picker popup from merge-<M> showed "● merge [open] [working]" during a turn
+      held 22 s at the main stub (after user_prompt, before release), [working] again
+      2 s after the fast reply Stop (ebf919e8), and [idle] after idle_prompt (60.0
+      s later). ⏸M + spinner held throughout; MERGED came +2.6 s after Stop and the
+      merge row left with no [idle] (terminal). Q routed QA stayed held and unchanged,
+      then PASS FINALIZE_DONE; 0 secrets. Doc-only commit 87279568 (user request):
+      the recording recipes now say a failed render_cast keeps an older completed
+      mp4 and that the call status should be checked; needs normal review.'
+    created_at: '2026-10-23T21:33:00Z'
+    last_edited: '2026-10-23T21:33:00Z'
   - id: note-cafeed5
     text: 'QA S39 (2026-10-23, two projects in one scratch HOME, host, real Claude
       on router/main stubs; captures /pm-captures/scenarios/39, REPORT.md). 93dca6ae
