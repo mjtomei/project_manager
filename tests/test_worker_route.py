@@ -999,6 +999,63 @@ class TestPollLoopRouteGating:
         assert list(deferred) == [4]
         remove.assert_called_once_with(sc.container_name)
 
+    @pytest.mark.parametrize("mode", ["container", "tmux"])
+    def test_worker_split_after_window_closed_is_not_a_launch(
+            self, tmp_path, caplog, mode):
+        """PR cleanup (TUI Y) closes the refiner's window under a running
+        loop: the worker split then fails.  That is logged without a
+        traceback and never as "Launched scenario"."""
+        import logging
+        from pm_core import qa_loop
+        sc = qa_loop.QAScenario(index=11, title="t", focus="f")
+        state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
+        state.scenarios = [sc]
+        gone = subprocess.CalledProcessError(1, ["tmux", "split-window"])
+        with patch("pm_core.qa_loop._route_checker",
+                   return_value=lambda: _status(True)), \
+             patch("pm_core.qa_loop._route_mounts", return_value={}), \
+             patch("pm_core.container.load_container_config"), \
+             patch("pm_core.container.create_qa_container"), \
+             patch("pm_core.qa_loop.create_scenario_workdir",
+                   return_value=(tmp_path / "repo", tmp_path / "scratch")), \
+             patch("pm_core.qa_loop._build_concretize_cmd",
+                   return_value="refiner"), \
+             patch("pm_core.qa_loop._build_scenario_run_cmd",
+                   return_value=("worker", str(tmp_path))), \
+             patch("pm_core.tmux.new_window_get_pane", return_value="%56"), \
+             patch("pm_core.tmux.split_pane_at", side_effect=gone), \
+             patch("pm_core.tmux.pane_exists", return_value=False), \
+             patch("pm_core.qa_loop._concretize_scenario",
+                   return_value=(None, None)), \
+             patch.object(qa_loop._log, "handlers",
+                          qa_loop._log.handlers + [caplog.handler]), \
+             caplog.at_level(logging.INFO, logger="pm.qa_loop"):
+            launch = (qa_loop._launch_scenarios_in_containers
+                      if mode == "container"
+                      else qa_loop._launch_scenarios_in_tmux)
+            launch(state, {}, {"id": "pr-1"}, "sess", None, str(tmp_path))
+        msgs = [r.getMessage() for r in caplog.records]
+        assert not any(m.startswith("Launched scenario") for m in msgs), msgs
+        assert not any(r.exc_info for r in caplog.records)
+        assert any("refiner pane %56 is gone" in m for m in msgs), msgs
+        assert sc.pane_id is None
+
+    def test_worker_split_failure_with_live_refiner_keeps_traceback(
+            self, tmp_path, caplog):
+        """An unexpected split failure (refiner pane still there) is
+        still logged with its traceback."""
+        import logging
+        from pm_core import qa_loop
+        sc = qa_loop.QAScenario(index=3, title="t", focus="f")
+        with patch("pm_core.tmux.split_pane_at",
+                   side_effect=RuntimeError("boom")), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch.object(qa_loop._log, "handlers",
+                          qa_loop._log.handlers + [caplog.handler]), \
+             caplog.at_level(logging.INFO, logger="pm.qa_loop"):
+            assert qa_loop._split_worker_pane(sc, "%7", "w", "/") is None
+        assert caplog.records and all(r.exc_info for r in caplog.records)
+
     def test_idle_without_verdict_on_down_route_then_resume(self, tmp_path):
         from pm_core import qa_loop
         sc = qa_loop.QAScenario(index=1, title="t", focus="f")

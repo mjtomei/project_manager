@@ -2529,10 +2529,9 @@ def _launch_scenarios_in_tmux(
             session=session, workdir_path=workdir_path,
         )
 
-        try:
-            scenario_pane = tmux_mod.split_pane_at(
-                concretize_pane, "v", child_cmd, background=True,
-                cwd=pane_cwd)
+        scenario_pane = _split_worker_pane(
+            scenario, concretize_pane, child_cmd, pane_cwd)
+        if scenario_pane:
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
             scenario.transcript_path = transcript
@@ -2541,11 +2540,10 @@ def _launch_scenarios_in_tmux(
                 scenario.session_id = session_id_from_transcript(transcript)
             except Exception:
                 scenario.session_id = None
-        except Exception:
-            _log.warning("Failed to split scenario pane for scenario %d",
-                         scenario.index, exc_info=True)
 
-        if scenario.window_name:
+        # window_name is already set while the refiner runs, so only a
+        # created worker pane counts as a launch.
+        if scenario_pane:
             _log.info("Launched scenario %d (%s) in window %s",
                       scenario.index, scenario.title, win_name)
             try:
@@ -2560,7 +2558,7 @@ def _launch_scenarios_in_tmux(
                 _log.debug("Registration/rebalance failed for scenario %d",
                            scenario.index, exc_info=True)
         else:
-            _log.warning("Scenario %d (%s) window creation failed",
+            _log.warning("Scenario %d (%s) worker pane not created — not launched",
                          scenario.index, scenario.title)
 
     threads = [
@@ -2792,10 +2790,9 @@ def _launch_scenarios_in_containers(
             scenario, state, data, transcript, _qa_resolution,
             session=None, workdir_path=workdir_path,
         )
-        try:
-            scenario_pane = tmux_mod.split_pane_at(
-                concretize_pane, "v", exec_cmd, background=True,
-                cwd=pane_cwd)
+        scenario_pane = _split_worker_pane(
+            scenario, concretize_pane, exec_cmd, pane_cwd)
+        if scenario_pane:
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
             scenario.transcript_path = transcript
@@ -2804,11 +2801,10 @@ def _launch_scenarios_in_containers(
                 scenario.session_id = session_id_from_transcript(transcript)
             except Exception:
                 scenario.session_id = None
-        except Exception:
-            _log.warning("Failed to split scenario pane for scenario %d",
-                         scenario.index, exc_info=True)
 
-        if scenario.window_name:
+        # window_name is already set while the refiner runs, so only a
+        # created worker pane counts as a launch.
+        if scenario_pane:
             _log.info("Launched scenario %d (%s) in container %s (window %s)",
                       scenario.index, scenario.title, cname, win_name)
             try:
@@ -2823,8 +2819,8 @@ def _launch_scenarios_in_containers(
                 _log.debug("Registration/rebalance failed for scenario %d",
                            scenario.index, exc_info=True)
         else:
-            _log.warning("Scenario %d (%s) container/window creation failed",
-                         scenario.index, scenario.title)
+            _log.warning("Scenario %d (%s) worker pane not created in container %s — not launched",
+                         scenario.index, scenario.title, cname)
 
     threads = [
         threading.Thread(
@@ -2844,6 +2840,29 @@ def _launch_scenarios_in_containers(
 # ---------------------------------------------------------------------------
 # Scenario launch helpers
 # ---------------------------------------------------------------------------
+
+def _split_worker_pane(scenario: QAScenario, refiner_pane: str,
+                       cmd: str, cwd: str) -> str | None:
+    """Split the worker pane off the refiner pane; None if that failed.
+
+    The refiner's window can be closed under a running loop (PR cleanup,
+    a fresh start's sweep), and then the split fails as expected: log it
+    without a traceback.
+    """
+    from pm_core import tmux as tmux_mod
+    try:
+        return tmux_mod.split_pane_at(refiner_pane, "v", cmd,
+                                      background=True, cwd=cwd)
+    except Exception:
+        if tmux_mod.pane_exists(refiner_pane):
+            _log.warning("Failed to split scenario pane for scenario %d",
+                         scenario.index, exc_info=True)
+        else:
+            _log.warning("Scenario %d: refiner pane %s is gone (window "
+                         "closed) — worker not launched",
+                         scenario.index, refiner_pane)
+        return None
+
 
 def _build_scenario_run_cmd(
     scenario: QAScenario,
