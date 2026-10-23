@@ -284,7 +284,14 @@ env-by-name).
   in S22). Pre-existing and out of scope (impl.md §5 item 21): a stop
   that arrives *during* the finalizer poll leaves that finalizer pane in
   the stopped run's own window until the next run's window cleanup.
-  Record it as an observation.
+  Record it as an observation. Ordering (S25): `z t` does not wait for the
+  old loop. The old loop sees the stop at its next poll tick, while the new
+  run starts planning at once, so its "skipped … QA was stopped" line can
+  come before or after the new run's "Planner pane:" line. In S25 it came
+  2 s after. Assert that the line exists and that no finalizer spawns. Do
+  not assert where it falls relative to the planner line. Router-log
+  Thens: Claude's own startup `GET /api/hello` (no model, 404) from routed
+  sessions is not a `/v1/messages` request.
 
 ## 2. Setup
 
