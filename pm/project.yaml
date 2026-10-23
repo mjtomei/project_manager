@@ -33010,3 +33010,31 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-42425ab
+  plan: bugs
+  title: 'Bug: redact credential environment values from container command debug logs'
+  branch: pm/pr-42425ab-bug-redact-credential-environment-values-from-cont
+  status: pending
+  depends_on: []
+  description: 'During the #249 review-launch investigation on 2026-10-23, the existing
+    container runtime debug logger printed a podman run command including a nonempty
+    ANTHROPIC_API_KEY environment value. Evidence location: host ~/.pm/debug/project-manager-c5a1006b.log,
+    13:17:16 and 13:22:15 CDT container launch entries; do not copy the raw lines
+    or credential into this PR, notes, captures, or tests. This is pre-existing plain-Claude
+    container logging, separate from the work-route feature. Redact sensitive environment
+    values at the command-log boundary (including error paths), preserving useful
+    nonsecret command structure and names. Test with synthetic canary credentials:
+    captured debug/error output must contain no raw token, while the actual subprocess
+    still receives the original env value. Inspect shared shell-command logging for
+    the same exposure and handle relevant existing secret variables consistently.
+    Keep this pending; do not autostart or expand #249. Related broader safety plan:
+    pr-726757e.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T19:51:49.156170+00:00'
+  updated_at: '2026-10-23T19:51:49.156170+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
