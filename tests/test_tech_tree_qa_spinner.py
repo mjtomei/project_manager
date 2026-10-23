@@ -175,11 +175,14 @@ def test_poll_qa_state_drops_keys_of_a_replaced_run(tmp_path, tracker):
 
 
 def test_pruned_planning_run_reads_like_a_first_run_in_the_picker(
-        tmp_path, tracker):
+        tmp_path, tracker, monkeypatch):
     """Pruning the last old subkey while the fresh run is still planning
     clears the qa runtime action: the picker shows no stale badge (a first
     run in planning has none either), not the old run's dead panes."""
+    from pm_core import hook_events
     from pm_core import runtime_state as rs
+    # The picker badge reads hook events: no event yet means [working].
+    monkeypatch.setattr(hook_events, "_HOOKS_BASE", tmp_path / "hooks")
     from pm_core.cli.session import _format_action_status
     from pm_core.tui.qa_loop_ui import poll_qa_state
     old = _make_transcript(tmp_path, "old.jsonl")

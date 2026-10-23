@@ -672,7 +672,7 @@ repeated deaths turn a PASS into NEEDS_WORK.
     as pr-237d610. Evidence: /pm-captures/scenarios/31 (pre-fix/story3,
     post-fix*, REPORT.md).
 
-### QA S30 (one PR + A2, RQ32; not yet reviewed)
+### QA S30 (one PR + A2, RQ32; reviewed in review loop 03a7 i1)
 26. *Superseded run's tracker keys kept the QA spinner forever*
     (94f36a18, pre-existing on master; it also hid the 24(a) idle badge).
     `z t` over a run with mid-turn scenario panes (and a zz t restart)
@@ -695,3 +695,10 @@ repeated deaths turn a PASS into NEEDS_WORK.
     the next run's entry by `_runtime_mirror_register`. The picker shows
     them as `[working]` until that run completes. Pre-existing and left
     out of scope; filed as pr-b2db183 with the S30 repro and evidence.
+    Review loop 03a7 i1 (items 25 and 26 sound, no product change):
+    `test_pruned_planning_run_reads_like_a_first_run_in_the_picker` failed
+    in full-suite order (" [idle]" for " [working]"). `tests/test_hook_events.py`
+    reloads `hook_events` under a temp HOME and never restored its
+    module-level `_HOOKS_BASE`, so later tests read that test's idle event
+    for the shared fixture session id. The fixture now restores the paths,
+    and the picker test points hook events at its own tmp dir.

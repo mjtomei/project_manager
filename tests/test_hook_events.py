@@ -17,6 +17,13 @@ def tmp_hooks_home(tmp_path, monkeypatch):
     """Point HOME at a tmp dir so ~/.pm/hooks and ~/.claude isolate per test."""
     monkeypatch.setenv("HOME", str(tmp_path))
     # Some code uses Path.home() which reads $HOME on POSIX
+    # Tests reload hook_events under this HOME, which rebinds its
+    # module-level paths; restore them afterwards so later tests don't
+    # read this test's hook events.
+    from pm_core import hook_events
+    monkeypatch.setattr(hook_events, "_HOOKS_BASE", hook_events._HOOKS_BASE)
+    monkeypatch.setattr(hook_events, "_SETTINGS_PATH",
+                        hook_events._SETTINGS_PATH)
     yield tmp_path
 
 
