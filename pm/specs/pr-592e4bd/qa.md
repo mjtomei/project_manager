@@ -335,6 +335,23 @@ env-by-name).
   story is false on disk unless that PR leaves the active statuses or
   its workdir is cleared (`pm pr cleanup`).
 
+- **RQ31** Given a QA run whose finish the TUI processes (RQ30), When
+  the verdict is NEEDS_WORK (plain `t` or `zz t`), Then the PR's
+  tech-tree box shows `in_review` at once, together with the "QA
+  NEEDS_WORK for <pr> — returning to review" line, not at the next 300 s
+  background sync (f57c500c, found in S26: 111 s live). With `zz t` the
+  self-driving review loop then starts on main Claude (never the work
+  route). When a `zz t` pass is PASS but below `qa-pass-count`, Then the
+  log line shows "QA PASS for <pr> (N/M consecutive) — restarting QA"
+  for about `CONFIRM_HOLD_SECONDS` (3 s) before start_qa's own messages
+  replace it (991addf9), also while another PR's sticky line (for
+  example a review loop "INPUT_REQUIRED … interact with Claude in the
+  review pane", sticky 30 s) is showing (0697e450, review 1298 i1). Two
+  held lines arriving together (two PRs' passes finishing in the same
+  tick) are each shown in turn, not one replacing the other. Every
+  message, shown or deferred, is in the `L` command log. The final pass
+  (N = M) reads "… press i to sign off" with no restart.
+
 ## 2. Setup
 
 - Install pm from this PR's clone (`./install.sh --local` or venv per
@@ -633,6 +650,25 @@ env-by-name).
     hours. S24 REPORT: the first story's original .cast is missing (logs
     and screens present), later stories are recorded. Check that every
     story's .cast exists before rendering.
+  - Eleventh pass (S28+), delta-only. S26/S27 held RQ30. The only
+    product changes since are the S26 TUI fixes f57c500c (repaint after
+    a QA NEEDS_WORK transition) and 991addf9 + 0697e450 (held and forced
+    zz t "restarting QA" line), reviewed in 1298 i1/i2 (impl.md §5 item
+    23). They are in `_on_qa_complete` only, so fresh live verification
+    is needed only for RQ31, in host mode. Keep refiners and workers
+    routed real Claude on the stub router, held per (PR, scenario,
+    role), so finish times are controlled; the worker reply decides the
+    verdict (pass / needs_work / input_required, as extended in S26).
+    `qa-pass-count` is the file `~/.pm/settings/qa-pass-count` in the
+    scratch HOME (`pm set` does not know it). A sticky line from another
+    PR is easiest from a `zz d` review loop whose fake `review` session
+    emits INPUT_REQUIRED. Measure what the TUI log line shows from the
+    TUI pane capture and the .cast (frame times), not only from `L`,
+    because the bug was a line recorded in `L` but never painted. The
+    tech-tree box status is read from the TUI pane, compared with
+    project.yaml. Reuse the S26 harness and write to new capture dirs.
+    Scratch TUI session only; no production settings or model changes.
+    Known items stay observations: pr-0f85376, pr-1139060, pr-04dfffb.
 
 ## 3. Edge cases
 
