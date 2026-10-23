@@ -292,6 +292,23 @@ env-by-name).
   not assert where it falls relative to the planner line. Router-log
   Thens: Claude's own startup `GET /api/hello` (no model, 404) from routed
   sessions is not a `/v1/messages` request.
+- **RQ30** Given a TUI session where nothing else keeps the shared poll
+  timer alive (no other active PR has a workdir, no review loop or
+  watcher running), When a QA run finishes (a PR's first `t` run, a
+  `zz t` self-driving run, or a run resumed after a TUI restart), Then
+  the TUI processes the finish within a few seconds, not at the next
+  300 s background sync: the "QA PASS for <pr> — press i to sign off" /
+  "QA NEEDS_WORK … returning to review" / "QA INPUT_REQUIRED …" message
+  and the lifecycle transition follow the pm "QA complete for <pr>"
+  line, the run's `qa_resume.json` is removed, one QA note is recorded,
+  and the popup action picker's qa row reads `[done <VERDICT>]` (the
+  second processing tick, which also drops the finished loop). A
+  `zz t` pass that needs another pass restarts QA at once. With two
+  PRs, the first to finish is processed while the other still runs, and
+  the second is processed fully after the first has gone. After every
+  finished run is processed, a TUI restart resumes or recovers nothing
+  and records no second note (89414241 found in S24, review 433b i1
+  fb7af748).
 
 ## 2. Setup
 
@@ -554,6 +571,40 @@ env-by-name).
     queued). Known items stay observations: pr-1139060, pr-0f85376 (a
     finalization INTERRUPTED on a dead-driver recovery), pr-04dfffb,
     pr-8f8ae78.
+  - Tenth pass (S26+), delta-only. S24 and S25 held RQ28 and RQ29 with
+    no product change other than 89414241 (S24: start the TUI poll timer
+    when a QA run is registered), and review 433b i1 fb7af748 (keep the
+    timer until the finished run's second tick). Both are in the TUI
+    poll timer only. The QA loop, routing, finalize and container code
+    are unchanged, so fresh live verification is needed only for RQ30,
+    in host mode (the timer does not depend on the mode). The failure
+    only shows when nothing else keeps the timer alive. Use PRs that have
+    never had QA (no `workdir` in project.yaml), no other PR in progress
+    with a workdir, no review loop and no watcher, and check that before
+    each story. Measure the gap between the pm "QA complete for <pr>"
+    line and the TUI message, the `qa_resume.json` removal and the
+    picker `[done …]` badge. Pre-fix the gap was about 95 s (up to
+    300 s). Pass is a few seconds. Keep refiners and workers routed real
+    Claude on the stub router, held per (PR, scenario, role), so finish
+    times are controlled. The stub needs a worker reply ending in
+    NEEDS_WORK or INPUT_REQUIRED for the non-PASS stories. Fake
+    `qa_planning` and `qa_finalize`. Verification can stay off. Reuse
+    the S24/S25 harness scripts and write to new capture dirs. Known
+    items stay observations: pr-0f85376, pr-1139060, pr-04dfffb.
+    QA10 handoff (supervisor, 2026-10-23): 89414241 and fb7af748 were
+    independently PASSed at 624f2112. The production root TUI still runs
+    old master: restart and load the candidate only in a scratch TUI
+    session (kill -9 the scratch pid in `~/.pm/tui-<session>.pid`, then
+    `pm session </dev/null`). Other production QA stays held. Make no
+    production setting or model changes. Recording: copy the renderer
+    from the S24 scripts (`/pm-captures/scenarios/24/scripts`): ffmpeg
+    `-vsync vfr` with a 1/100 time base, keeping the .cast and GIF,
+    then frame-count, duration and decode checks. The S25 scripts use
+    `-vsync vfr -enc_time_base 1/100 -video_track_timescale 100`. Never
+    reuse an older default-CFR render line. It duplicates frames for
+    hours. S24 REPORT: the first story's original .cast is missing (logs
+    and screens present), later stories are recorded. Check that every
+    story's .cast exists before rendering.
 
 ## 3. Edge cases
 
