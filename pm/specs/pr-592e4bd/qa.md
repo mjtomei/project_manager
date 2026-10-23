@@ -274,8 +274,19 @@ env-by-name).
   - Fourth pass (S13+), delta-only: S11/S12 held their stories and ended
     NEEDS_WORK only for their own code changes (1b6e2c68, 7c401141,
     ea78b9d1, c23a2021) plus review 8a99 i1/i2 (ea6b9e17, e47dc12d).
-    Everything else stays as evidence (S7–S12 captures). Fresh live
-    verification: RQ20–RQ23. To provoke an API-error turn on a healthy
+    Everything else stays as evidence (S7–S12 captures). Review 8a99 i3
+    PASS on e47dc12d (3446 tests, independent mutation checks,
+    captures review-8a99-i3). Already live post-fix and not rerun: RQ20
+    routed resume incl. exact route-recovers-before-idle timing and RQ22
+    repeat deferral (S11 post-fix/race, r2), RQ23 1b6e2c68/ea78b9d1
+    stories (S12 story1/4). Fresh live verification only for the delta:
+    RQ20 unrouted side + cap, RQ21 (ea6b9e17), RQ23 supersede-vs-write
+    race and restart (e47dc12d), c23a2021 log line. Run in a scratch
+    session only — never restart the production TUI or resume its held
+    runs. Reuse scenarios/11 and /12 scripts after reading their
+    Deviations (separate PR-id vs capture-dir variables, abort when
+    selection fails; bounded fresh-run waits, no self-matching pgrep);
+    render terminal video with VFR ffmpeg. To provoke an API-error turn on a healthy
     route, make the stub router answer the messages endpoint with a
     non-retryable error (HTTP 400/529 body in Anthropic error shape) or
     drop the connection for a chosen number of requests while still
