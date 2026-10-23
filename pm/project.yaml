@@ -31557,7 +31557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T11:45:45.721174+00:00'
+  updated_at: '2026-10-23T11:53:39.791641+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32167,6 +32167,18 @@ prs:
       passed.'
     created_at: '2026-10-23T11:45:45Z'
     last_edited: '2026-10-23T11:45:45Z'
+  - id: note-a55b2fd
+    text: 'Review 433b i1 (fb7af748, CODE CHANGE, needs normal re-review): 89414241
+      sound for starting the timer, but the poll timer stop check still keyed on s.running,
+      so on a finished run''s completion tick it stopped before tick 2 (runtime_state
+      done verdict, _qa_loops removal; a lingering entry with a verdict also holds
+      back auto-start) when no active PR has a workdir. Timer now runs while a QA
+      loop is running or has an unprocessed verdict (review_loop_ui._qa_needs_poll).
+      Regression TestQAPollTimer::test_timer_outlives_running_until_completion_is_processed
+      (mutation-checked). 54ff5a68 and spec 16964d91 (z t does not join the old loop)
+      re-checked, sound. Full suite 3477 passed; logs /pm-captures/review-433b-i1.'
+    created_at: '2026-10-23T11:53:39Z'
+    last_edited: '2026-10-23T11:53:39Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
