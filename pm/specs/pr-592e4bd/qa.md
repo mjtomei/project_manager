@@ -225,13 +225,22 @@ env-by-name).
     workers or a project without fake workers), pr-1139060 (-sN orphan
     sweep matching another PR's window), pr-173e11e (live probe leaves an
     empty temp dir), pr-3c7ce04 (login-expired pane).
-  - Third pass (S11+): S1–S10 covered every RQ/E at least once; S9/S10
-    ended NEEDS_WORK only because they produced code changes. Re-verify
-    the changed surfaces (RQ11–RQ14, RQ16–RQ19) end to end on the current
-    head, plus a regression sweep of RQ5/RQ6/RQ8 since qa_loop.py moved.
-  - The refresh-command cooldown is per process; it is only observable
-    inside a long-lived QA loop/TUI, not across separate `pm provider test`
-    runs.
+  - Third pass (S11+), delta-only per supervisor handoff: review acdb i5
+    PASS at 53419df2; QA2 S7/S8 independently verified PASS; S9/S10
+    exercised every story and ended NEEDS_WORK only for their own code
+    changes. Unchanged coverage kept as evidence, not rerun: RQ1–RQ4,
+    RQ9/RQ10 startup-failure matrix and E1–E3/E7 (S7/S8), bridge/transport
+    RQ8/E4–E6 and the real work-account host+container smoke
+    (host-work-route-smoke-20261022T195845Z, sources hash-checked).
+    Fresh live verification needed: RQ16 at BOTH gates (refiner gate:
+    route lost between container create and refiner launch; worker gate:
+    route lost after the refiner replies), RQ19 restart selection
+    (queued-tail overlap, older unfinished orphan vs newer run completed
+    while the TUI was down, empty-plan newer run, live-owner kept), and
+    light re-observation of RQ17/RQ18 plus RQ12/RQ14 gating on adopted
+    runs. Reuse driver scripts from capture scenarios/9 and /10; key
+    waits on the fresh run's loop id / terminal state, not on counts of
+    completion lines.
 
 ## 3. Edge cases
 
