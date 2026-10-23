@@ -495,6 +495,28 @@ env-by-name).
     pushes. Captures are in
     `/pm-captures/scenarios/<N>/` (REPORT.md); `pm pr note list
     pr-592e4bd` holds per-scenario harness notes.
+  - Fourteenth pass (S34+), delta-only. The only product changes
+    since S33 are af19cfcf, aaf15356 and b8ebe2c3: pm's `UserPromptSubmit`
+    hook (receiver `user_prompt`), coexist-append and hook-level merge
+    with exact-invocation ownership, and `PaneIdleTracker` clearing idle
+    on `user_prompt` (RQ35, impl.md §5 item 27). Earlier evidence stands:
+    S32 (RQ33) and S33 (RQ34 transcript preservation) are not rerun. The
+    exception is S33's one failed Then, a typed turn into an idle impl
+    pane after auto-start is turned off, which is replayed because
+    af19cfcf targets it. Affected surfaces that need live checks:
+    hook install at `pm session`/TUI start in scratch HOMEs (upgrade,
+    coexistence, conflicts, malformed entries, concurrent installs while
+    Claude panes fire hooks); node and picker state on typed turns and on
+    pm-sent turns (verdict reminder, route nudge, verification follow-up)
+    for impl, review, s0 and routed QA panes; and hooks inside QA
+    containers, which share the bind-mounted `settings.json`, receiver and
+    `~/.pm/hooks`. Use scratch HOMEs and scratch TUI sessions only. Do not
+    restart the host TUI, change host models or settings, or unpause other
+    QA. Each capture dir must hold `recording.cast`, `recording.mp4` and
+    `manifest.md` per the recipe before a verdict is given; earlier rounds
+    omitted them. Known items stay observations: pr-0ac6f7a (a plain-string
+    Notification/Stop entry crashes install), pr-b2db183, pr-237d610,
+    pr-1139060.
 
 ## 3. Edge cases
 
