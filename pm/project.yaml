@@ -31610,7 +31610,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T21:51:58.087334+00:00'
+  updated_at: '2026-10-23T22:01:06.237527+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32669,6 +32669,22 @@ prs:
       only focuses it (use z t).'
     created_at: '2026-10-23T21:51:58Z'
     last_edited: '2026-10-23T21:51:58Z'
+  - id: note-ec1616b
+    text: 'QA S38 (2026-10-23, host, two PRs, real Claude impl/s0/refiner/worker;
+      captures /pm-captures/scenarios/38, REPORT.md): no product change. Held live:
+      held R impl turn + 79 ms P fast turn each spin from their own events only (one
+      typed-turn request per PR); running loop ⟳1 wins over a typed turn for all 180
+      s, then ⟳1✓ and impl spinner on a later turn; QA worker held turn spinner, live
+      permission dialog -> [wait] + red ⏸ until idle_prompt, refiner/s0 typed turns
+      isolated and untracked (pr-eee7483), QA PASS ⟳1⏸ (24(a)), i -> sign_off no ⟳.
+      Literal story-2 Then ''⟳1✓ back within ≤5 s'' not shown: 4.9-5.4 s (0.5 s sampling);
+      16 transitions at 0.1 s sampling were 0.8-4.2 s. Spec clarification 87f9783c
+      (qa.md RQ35 Timing: a few seconds = next 5-tick impl poll + render, not a hard
+      deadline) needs normal independent review. Harness: scratch settings copied
+      from host allow Bash, so no permission dialog; S38 seed_home drops it (story3
+      attempt 1 kept as invalid fixture).'
+    created_at: '2026-10-23T22:01:06Z'
+    last_edited: '2026-10-23T22:01:06Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
