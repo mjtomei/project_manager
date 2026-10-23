@@ -31557,7 +31557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T08:25:26.092181+00:00'
+  updated_at: '2026-10-23T08:33:40.323535+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32006,6 +32006,19 @@ prs:
       (REPORT.md, pre-fix/, post-fix/).'
     created_at: '2026-10-23T08:25:26Z'
     last_edited: '2026-10-23T08:25:26Z'
+  - id: note-0d066d5
+    text: 'QA S19 (2026-10-23): RQ27 host mode PASS on ba37e36b, no code change; captures
+      /pm-captures/scenarios/19 (REPORT.md). Live refiner split refused (2-line window,
+      tmux 3.2a "no space for new pane") for initial parallel s2, queued s5, and s7
+      with the router stopped 15 ms after the warning: one traceback warning, refiner
+      pane closed, no Launched, retry 1/10 then Relaunched at normal height (s7: one
+      "worker relaunch deferred" during the 60 s outage, no retry spent, retry 4 s
+      after recovery). Closed refiner window (s10) and zz t + Y/y (s13-15): plain
+      "refiner pane %X is gone" warning, no Traceback; running loop relaunched s10
+      on planner draft steps, stopping loop relaunched nothing. Router saw only refiner/worker
+      work/ requests.'
+    created_at: '2026-10-23T08:33:40Z'
+    last_edited: '2026-10-23T08:33:40Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
