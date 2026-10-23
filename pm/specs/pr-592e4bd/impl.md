@@ -518,3 +518,19 @@ repeated deaths turn a PASS into NEEDS_WORK.
     relaunch with retries. Real-tmux regression
     `test_worker_split_failure_with_live_refiner_keeps_traceback` (fails
     without the kill).
+
+### QA S20 fix (reviewed in review loop 6c6f i1)
+19. *Closed refiner gated on the route; split error unnamed* (2314f1a8) —
+    (a) TUI `Y` during a stopping container run closed the refiners'
+    windows and removed their containers; the worker route gate then
+    checked the container being removed and surfaced "worker waiting —
+    work route … unavailable … Remedy: …". Both launch paths now check
+    the refiner pane first (`_refiner_gone`): a closed refiner skips the
+    gate and takes the dead-worker path, whose relaunch stays
+    route-gated. (b) `tmux._run` raises `TmuxCommandError` (a
+    `CalledProcessError` subclass, so existing handlers are unchanged)
+    whose message ends with tmux's stderr, so a refused split's
+    traceback names the reason ("no space for new pane"). Regressions
+    `TestPollLoopRouteGating::test_closed_refiner_window_skips_the_worker_route_gate[container|tmux]`
+    (fails with the check disabled, rechecked in 6c6f i1) and
+    `test_split_failure_traceback_names_the_tmux_error` (real tmux).
