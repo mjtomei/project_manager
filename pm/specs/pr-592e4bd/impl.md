@@ -534,3 +534,26 @@ repeated deaths turn a PASS into NEEDS_WORK.
     `TestPollLoopRouteGating::test_closed_refiner_window_skips_the_worker_route_gate[container|tmux]`
     (fails with the check disabled, rechecked in 6c6f i1) and
     `test_split_failure_traceback_names_the_tmux_error` (real tmux).
+
+### QA S21/S22 fixes (reviewed in review loop 3ce6 i1)
+20. *Finalize skipped with PASS verification off* (ee3d0644, pre-existing
+    since 09760b7e) — with `qa-verify-pass` off no PASS is ever added to
+    `verified_scenarios`, so `_run_qa_finalize_pane`'s unverified-PASS gate
+    skipped the finalizer on every all-PASS run (`finalize=None`). The gate
+    now applies only while verification is enabled. Regression
+    `tests/test_qa_finalize_wiring.py::test_run_qa_finalize_pane_runs_unverified_pass_when_verification_off`
+    (fails with the fix reverted, rechecked in 3ce6 i1).
+21. *Stopped run spawned a finalizer into the new run's window* (2ff602fc,
+    pre-existing on master) — after `z t` over a mid-turn run the stopped
+    loop still reached `_run_qa_finalize_pane`, found the *new* run's QA
+    window by name and split a finalizer at pane 0, which the new run then
+    took for its planner; the stray finalizer ran unsupervised (its poll
+    is abandoned at once on stop). A stopped run (`zz t` or superseded)
+    now spawns no finalizer; before the fix its finalizer never got
+    supervised either, so nothing a stopped run could finish is lost.
+    Regression `test_run_qa_finalize_pane_spawns_nothing_when_stopped`
+    (fails with the fix reverted, rechecked in 3ce6 i1). Unchanged and
+    pre-existing: a stop that arrives *during* the finalizer poll leaves
+    that pane running in the stopped run's own window until the next run's
+    `_cleanup_stale_scenario_windows` kills the window (like the scenario
+    panes, pr-1139060).
