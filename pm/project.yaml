@@ -31574,7 +31574,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T14:41:27.839294+00:00'
+  updated_at: '2026-10-23T14:49:47.694146+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32315,6 +32315,18 @@ prs:
       past in_review, as b290ebcb did for sign_off? See impl.md §5 item 24(a).'
     created_at: '2026-10-23T14:41:27Z'
     last_edited: '2026-10-23T14:41:27Z'
+  - id: note-bdd4b23
+    text: 'Review 4f28 i1 (84662f7f, CODE CHANGE, needs normal re-review): reviewed
+      1098813c, 9a7f9b13, 1d51bcef and 9cc2fb6b, all sound in intent. 9cc2fb6b cleared
+      the whole loop marker at render time, so a merge INPUT_REQUIRED marker (⏸M)
+      also disappeared while QA panes were active or waiting. The precedence now lives
+      in _get_loop_marker(qa_live=), next to the sign_off rule, and drops only a finished
+      loop badge. Regression test_merge_input_marker_survives_live_qa (fails on 9cc2fb6b).
+      Spec 24(a) decided: keep the idle badge in qa (pr-97614ed treats it as expected),
+      recorded as a known limitation. Full suite 3491 passed before the test-only
+      addition; logs /pm-captures/review-4f28-i1.'
+    created_at: '2026-10-23T14:49:47Z'
+    last_edited: '2026-10-23T14:49:47Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
