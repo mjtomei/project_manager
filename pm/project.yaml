@@ -31584,7 +31584,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T18:39:59.435600+00:00'
+  updated_at: '2026-10-23T18:41:30.582640+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32524,6 +32524,14 @@ prs:
       lost).'
     created_at: '2026-10-23T18:39:59Z'
     last_edited: '2026-10-23T18:39:59Z'
+  - id: note-67113fc
+    text: 'Review a183 i2 follow-up: a plain-string hook entry on Notification/Stop
+      crashes pm session/TUI start (AttributeError in _detect_foreign_hooks). It is
+      pre-existing and identical on master 859657d8. Classified as input Claude Code
+      does not accept: 2.1.309 skips the entry with a warning. pm should still not
+      crash, so filed pr-0ac6f7a (pending, not started). Evidence /pm-captures/review-a183-i2/plain-string-hook-entry.'
+    created_at: '2026-10-23T18:41:30Z'
+    last_edited: '2026-10-23T18:41:30Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
@@ -32957,3 +32965,34 @@ prs:
       idle_prompt.'
     created_at: '2026-10-23T18:15:38Z'
     last_edited: '2026-10-23T18:15:38Z'
+- id: pr-0ac6f7a
+  plan: bugs
+  title: 'Bug: pm session/TUI start crashes with a raw traceback on a malformed Notification/Stop
+    hook entry that Claude Code skips'
+  branch: pm/pr-0ac6f7a-bug-pm-session-tui-start-crashes-with-a-raw-traceb
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/hook_install.py _detect_foreign_hooks, cmd = (hook
+    or {}).get("command", ""), called by ensure_hooks_installed from cli/session.py
+    and cli/tui.py, which only catch HookConflictError. Repro: in ~/.claude/settings.json,
+    put a plain string where a hook object belongs on a pm-managed event, e.g. {"hooks":{"Stop":[{"hooks":["notify-send
+    stop"]}]}}, or the same under Notification[idle_prompt], or "hooks": "<str>".
+    Then pm session / TUI start exits with AttributeError: str object has no attribute
+    get. Same on master 859657d8 and on pr-592e4bd 239a3ebf: /pm-captures/review-a183-i2/plain-string-hook-entry/repro.log.
+    Classification: this is not input Claude Code accepts. Claude Code 2.1.309 skips
+    that entry with "Hook entry must be an object; received a string; entry ignored"
+    and keeps the rest of the file (claude-validation.log next to repro.log). Expected:
+    pm should not crash. Either ignore the invalid entry like Claude Code (a string
+    in a managed slot is not pm hook, so it is still a conflict) or raise HookConflictError
+    naming the entry, so the user gets a readable message. Narrow scope: guard non-dict
+    hooks in _detect_foreign_hooks and add one regression test. Found during review
+    a183 i2 of pr-592e4bd. Not a pr-592e4bd regression.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T18:41:20.069591+00:00'
+  updated_at: '2026-10-23T18:41:20.069591+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
