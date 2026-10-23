@@ -605,3 +605,34 @@ repeated deaths turn a PASS into NEEDS_WORK.
     Spec 8ae55361 (QA persists `prs[].workdir` via `_ensure_workdir`, so
     only a PR's first run with no cached workdir discriminates the
     item 22 timer fixes) was checked against the code in 1298 i1.
+
+### QA S29 (two PRs, RQ31; not yet reviewed)
+24. (a) *Product fix* 9cc2fb6b (pre-existing on master): a finished
+    review loop's tree badge (`⟳N✓`, `⟳N⏸`, …) masked the PR's live QA
+    marker. B, with a stopped loop, read "● qa ⟳1⏸" with no spinner while
+    its QA workers were mid-turn. b290ebcb fixed the same masking for
+    sign_off. While the PR is in qa with active or waiting QA panes, the
+    live QA spinner / ⏸ now wins. The badge returns once QA is idle, and a
+    running review loop still wins. 4 regressions in
+    `tests/test_tech_tree_widgets.py`.
+    (b) *Test-fixture support only, no product behaviour change*
+    9a7f9b13 + 1d51bcef: fake-claude refreshes `idle_prompt` every 2 s
+    while held open. A review loop waiting on INPUT_REQUIRED took each
+    refresh as a follow-up turn and relaunched (19 iterations live). Real
+    Claude 2.1.309 panes emitted one idle per turn (17 min idle, no
+    re-emit). The new opt-in per-entry key `idle_once_after` (`--idle-once-after`)
+    emits a single idle that many seconds after the output. It is wired
+    through `_fake_claude_args`, the click CLI and the standalone
+    `bin/fake-claude` entrypoint the launcher execs (the argparse wiring
+    was missed in 9a7f9b13 and added in 1d51bcef). Default behaviour is
+    unchanged. Tests include a bounded subprocess run of
+    `bin/fake-claude`. An `after_turn` hardening of
+    `wait_for_follow_up_verdict` was tried and withdrawn as unneeded for
+    real Claude (patch kept in the S29 captures).
+    (c) *Known limitation, NOT fixed here*: the review loop's
+    INPUT_REQUIRED wait checks `find_claude_pane(session, window)`
+    (`panes[0][0]`). When the Claude pane exits, the review diff pane
+    keeps the wait alive, so Ctrl+C / `/exit` in the review pane never
+    ends the loop (no KILLED, ⏸ stays). The native stop `z d` works.
+    This is in scope for pr-89296d3 (note-18c906b, with repro and
+    candidate patch).
