@@ -31574,7 +31574,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T16:03:35.166461+00:00'
+  updated_at: '2026-10-23T16:13:00.759905+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32360,6 +32360,35 @@ prs:
       a qa window only focuses it (use z t).'
     created_at: '2026-10-23T16:03:35Z'
     last_edited: '2026-10-23T16:03:35Z'
+  - id: note-2a62eb5
+    text: 'S30 refiner: for a running-loop-vs-QA check, do not end the loop with z
+      d. z d runs `pm pr review --fresh`, which moves a qa PR back to in_review. End
+      the loop with a fake review PASS after a delay instead; manual zz d PASS does
+      not start QA without auto-start. Two more facts: a QA pane keeps ⏸ after permission
+      approval until its next hook event (idle_prompt), and the S29 scratch HOME settings.json
+      allows Bash, so remove it to get a permission prompt.'
+    created_at: '2026-10-23T15:00:35Z'
+    last_edited: '2026-10-23T15:00:35Z'
+  - id: note-bfaed3d
+    text: 'QA S30 (2026-10-23, RQ32 one PR + A2, host, real Claude refiners/workers
+      on router stub; captures /pm-captures/scenarios/30, REPORT.md). All RQ32 Thens
+      held on 94f36a18: A ⟳1⏸ during planning then QA spinner when workers active;
+      Bash permission prompt -> "● qa ⏸" (SGR 1;91) in 7 s, stays 92 s after approval
+      until the pane idle_prompt; QA PASS -> idle badge ⟳1⏸ (known limitation 24(a));
+      i -> ◆ sign_off + spinner, no ⟳; A2 running loop ⟳1 wins over live QA in all
+      233 overlap frames, then plain QA spinner; A sign_off never ⟳; TUI restart drops
+      the badge, notes A unchanged / A2 +1. CODE CHANGE needing normal re-review:
+      94f36a18 (pre-existing on master) z t over a run with mid-turn scenario panes
+      left its qa:<pr>:sN tracker keys active forever, so after the new run PASS the
+      node kept spinning (hid the ⟳1⏸ badge); poll_qa_state now drops a PR qa: keys
+      not in the current run. 3 regressions (fail reverted), suite 3493 passed. Planning
+      run after supersede: picker qa [open] without badge (verified live on A2). Not
+      fixed: pre-fix/killed-TUI qa panes left in ~/.pm/runtime survive restarts and
+      merge into the next run entry (impl.md item 26). Harness: scratch settings need
+      permissions.defaultMode "default" (Claude starts in auto mode) and a writing
+      Bash command (echo is auto-allowed); stub re-holds atomically.'
+    created_at: '2026-10-23T16:13:00Z'
+    last_edited: '2026-10-23T16:13:00Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
