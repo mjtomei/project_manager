@@ -211,6 +211,20 @@ env-by-name).
   "… — resumed" status appears for it (the pm log says "pane … gone — not
   resumed"); the only follow-up is the usual dead-window relaunch through
   the route gate (QA5 planner fix 5432f736; review 590d i3 observation).
+- **RQ26** Given container-mode QA on a PR, whose scenario containers
+  share one host push proxy per (session, PR), When the PR's last QA
+  container is removed and a new one is created right away (a fresh start
+  `z t` over a running run, a queued launch deferred at the route gate and
+  relaunched after recovery, stop then start, parallel scenario creates),
+  Then within a few seconds exactly one push-proxy daemon serves the PR's
+  socket path: a replaced daemon exits by itself ("Push proxy socket
+  removed, exiting") and never removes the newer socket; parallel creates
+  log one "Push proxy subprocess started" per socket (the others "Reusing
+  live shared push proxy", plain text); a `git push` of the allowed branch
+  from inside every live scenario container goes through the proxy and a
+  push to another branch is refused; and repeated start/stop cycles leave
+  no accumulating proxy processes. A second PR's proxy is never touched
+  (75649ae4, review b62f i1 8a3d3412, i2 130e8ab9).
 
 ## 2. Setup
 
@@ -379,6 +393,24 @@ env-by-name).
     recovery checks (no crash or hang, INPUT_REQUIRED or a relaunch
     through the route gate, no misdirected message, no false "resumed")
     stay as required.
+  - Sixth pass (S17+), delta-only: S15/S16 held their stories and ended
+    NEEDS_WORK only for their own code changes (32961096, 296c08a7,
+    75649ae4), all reviewed sound in review b62f i1. The only product
+    changes since are push_proxy.py (b62f i1 8a3d3412 stop lock, i2
+    130e8ab9 daemon socket ownership); probe/bridge/launcher sources and
+    qa_loop.py logic are unchanged. Fresh live verification only for
+    RQ26, in container mode (host mode has no push proxy). Keep routed
+    workers real Claude on the stub router so the route gate is real
+    (RQ16 deferral path); push checks may be run by the tester from
+    inside a scenario container (`git push` of the PR branch and of a
+    disallowed branch), as a worker would. Count proxy daemons by the
+    exact socket path in their argv (`ps -o pid,lstart,args`), never by
+    `pgrep -f` patterns that match the shell running the check; compare
+    socket birth time, not inode (overlay fs). Out of scope, filed:
+    pr-748e708 (impl/review containers from a separate `pm pr start`
+    process share the QA proxy key, and per-process refs mean QA teardown
+    can stop a proxy an impl container still uses): record as an
+    observation only.
 
 ## 3. Edge cases
 
