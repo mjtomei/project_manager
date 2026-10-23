@@ -141,6 +141,30 @@ def test_run_qa_finalize_pane_runs_unverified_pass_when_verification_off(
     assert looked_up == [("pm-test", "qa")]
 
 
+# --- (g2) ----------------------------------------------------------------
+
+def test_run_qa_finalize_pane_spawns_nothing_when_stopped(
+    monkeypatch, tmp_path,
+):
+    """A stopped (zz t) or superseded (z t) run must not split a finalizer
+    pane: after z t the window found by name is the new run's QA window,
+    and the stray pane became pane 0 there (taken for the new planner)."""
+    import pm_core.tmux as tmux_mod
+    calls = []
+    monkeypatch.setattr(tmux_mod, "find_window_by_name",
+                        lambda *a, **kw: calls.append("find") or {"index": "1"})
+    monkeypatch.setattr(tmux_mod, "get_pane_indices",
+                        lambda *a, **kw: [("%1", 0)])
+    monkeypatch.setattr(tmux_mod, "split_pane_at",
+                        lambda *a, **kw: calls.append("split") or "%2")
+    state = QALoopState(pr_id="x")
+    assert _run_qa_finalize_pane(
+        state, {}, "pm-test", "qa-window", str(tmp_path),
+        stop_check=lambda: True,
+    ) is None
+    assert calls == []
+
+
 # --- (h) wiring test, textual-assertion fallback -------------------------
 # NOTE: A full integration test would require monkeypatching >12 helpers
 # (get_pm_session, store.load, _run_qa_finalize_pane, _launch_scenarios_*,

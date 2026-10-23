@@ -661,6 +661,13 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
     """
     if not workdir_path:
         return None
+    # A stopped run (zz t, or a run superseded by z t) never waits for a
+    # finalizer, so don't spawn one: it would be left running unsupervised,
+    # and after z t the window found by name is the NEW run's QA window,
+    # where the stray pane lands first and is taken for the new planner.
+    if stop_check and stop_check():
+        _log.info("QA finalize: skipped for %s — QA was stopped", state.pr_id)
+        return None
     # Gate: every PASS verdict must have been confirmed by the verifier
     # before we finalize. The poll loop already waits for verifications
     # to settle, but this guards against any path that reaches finalize
