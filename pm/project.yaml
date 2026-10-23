@@ -31557,7 +31557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T08:33:40.323535+00:00'
+  updated_at: '2026-10-23T08:49:40.746480+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32019,6 +32019,16 @@ prs:
       work/ requests.'
     created_at: '2026-10-23T08:33:40Z'
     last_edited: '2026-10-23T08:33:40Z'
+  - id: note-9a22792
+    text: 'QA S19 follow-up to note-0d066d5: stories 1, 4, 5 (+clean z t) replayed
+      in a fresh session on d9338561 (includes S20 2314f1a8), all Thens held; captures
+      /pm-captures/scenarios/19/replay. Only wording drift: the live-refiner split
+      traceback now ends in pm_core.tmux.TmuxCommandError (CalledProcessError subclass)
+      "... tmux: no space for new pane" instead of literal subprocess.CalledProcessError;
+      closed-refiner paths no longer log "Worker for scenario N: route=..." before
+      "refiner pane %X is gone".'
+    created_at: '2026-10-23T08:49:40Z'
+    last_edited: '2026-10-23T08:49:40Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
