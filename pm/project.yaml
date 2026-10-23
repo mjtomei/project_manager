@@ -14491,7 +14491,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-23T01:53:52.315396+00:00'
+  updated_at: '2026-10-23T06:53:57.654048+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14505,6 +14505,23 @@ prs:
       (session_tag, pr_id) key.'
     created_at: '2026-10-23T01:53:52Z'
     last_edited: '2026-10-23T01:53:52Z'
+  - id: note-6b474ce
+    text: 'pr-592e4bd QA S18 (2026-10-23, live, container mode, /pm-captures/scenarios/18/story34):
+      `pm pr start A` (separate process) reused the QA-owned shared proxy (Reusing
+      live shared push proxy ... container pm-<tag>-impl-A). After A QA completed,
+      `z t` swept the old QA containers in the TUI process, dropped that process last
+      refs, and the TUI removed the socket and rmdir-ed /tmp/pm-push-proxy-<tag>-A.
+      The old daemon exited ("Push proxy stopped"), and the new run spawned a new
+      daemon in a recreated dir. The impl container bind-mounts the old (deleted)
+      dir at /run/pm-push-proxy, so its git push failed with "git-proxy: cannot connect:
+      [Errno 2] No such file or directory" from 06:51:24 onward and STAYED failing
+      after the new daemon came up at 06:51:37 (32/32 failures, ls /run/pm-push-proxy
+      empty in the container). A fix must keep the socket dir (or count refs across
+      processes); restarting the daemon alone does not heal impl containers. Proxy
+      pushes use the requesting container HOST_WORKDIR (impl push ran git -C <impl
+      workdir>), so the wrong-workdir part of this bug did not reproduce here.'
+    created_at: '2026-10-23T06:53:57Z'
+    last_edited: '2026-10-23T06:53:57Z'
 - id: pr-48cb564
   plan: improvements
   title: 'Picker popup: indicate per-session window-selected state with ● vs ○'
@@ -31540,7 +31557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T06:16:17.217838+00:00'
+  updated_at: '2026-10-23T06:30:04.111130+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31910,6 +31927,23 @@ prs:
       Full suite 3463 passed; logs /pm-captures/review-b62f-i2.'
     created_at: '2026-10-23T06:16:17Z'
     last_edited: '2026-10-23T06:16:17Z'
+  - id: note-ee1d8a3
+    text: 'S18 refine (RQ26, 2026-10-23): (1) In-container pushes need a non-local
+      upstream: the proxy refuses a local-path origin, and a bare `pm init` project
+      has none (S16 had none). Use a bare repo with a file:// URL as origin and project.repo;
+      verified live that a proxied push of the allowed branch succeeds and another
+      branch is refused. (2) The detached daemon runs with cwd=/, so its own lines
+      ("Push proxy started/stopped", "socket removed, exiting", "Push proxy push:")
+      go to ~/.pm/debug/default.log. The parent process lines ("subprocess started",
+      "Reusing live shared push proxy") go to the session <tag>.log. (3) A finished
+      QA run does not remove its scenario containers or windows (pr-1139060), so QA
+      finish never drops proxy refs. The teardown that drops them is the orphan sweep
+      on the next z t, in the TUI process. With another PR holding the same -sN windows,
+      the old containers are kept and the daemon is reused. (4) QA started from the
+      TUI runs in TUI threads (one ref table). `pm pr start` from a CLI pane is a
+      separate process: pr-748e708.'
+    created_at: '2026-10-23T06:30:04Z'
+    last_edited: '2026-10-23T06:30:04Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
