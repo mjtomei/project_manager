@@ -31557,7 +31557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T12:47:56.149494+00:00'
+  updated_at: '2026-10-23T13:58:56.208401+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32248,6 +32248,24 @@ prs:
       _ensure_workdir: accurate. qa-related tests 548 passed.'
     created_at: '2026-10-23T12:47:56Z'
     last_edited: '2026-10-23T12:47:56Z'
+  - id: note-423bbe9
+    text: 'QA S28 (2026-10-23, RQ31 one PR, host, real Claude refiners/workers on
+      router stub; captures /pm-captures/scenarios/28, REPORT.md). CODE CHANGE 1098813c
+      needs normal re-review (pre-existing on master): after a zz t NEEDS_WORK, the
+      "QA NEEDS_WORK for <pr> — returning to review" line was replaced in the same
+      frame by the self-driving review loop sticky "Review loop started" and never
+      painted (only in L). It is now force=True, hold=CONFIRM_HOLD_SECONDS like the
+      restart line. Regression test_needs_work_message_holds_the_log_line (fails reverted);
+      full suite 3484 passed on 1098813c (summary tail only). Post-fix the line stayed
+      3.00 s on the cast, with the box in_review 0.04 s after it. impl.md §5 item
+      23(c) in 65d53fdb. Held: plain t NEEDS_WORK line + in_review box in the same
+      0.5 s sample; zz t 1/3 and 2/3 restart lines 3.00/3.01 s; 3/3 press i, no restart
+      or sign-off; NEEDS_WORK resets the count to 1/3; INPUT_REQUIRED pauses; restart
+      resumes nothing; router only work/ refiner+worker. Harness: the S26 stub read
+      answers before a hold (answers set during a hold were ignored); fixed in the
+      S28 stub.py.'
+    created_at: '2026-10-23T13:58:56Z'
+    last_edited: '2026-10-23T13:58:56Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
