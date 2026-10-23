@@ -194,9 +194,16 @@ class PaneIdleTracker:
                     state.idle_notified = False
                 elif etype == "Stop":
                     # Stop fires per-turn (not only at session end), so
-                    # we don't flip state on it.  pane_exists is the
-                    # authoritative session-gone signal.
-                    pass
+                    # it never marks a pane gone; pane_exists is the
+                    # authoritative session-gone signal.  The hook file
+                    # holds only the latest event, so a turn answered
+                    # between two polls shows up as a Stop that replaced
+                    # its user_prompt: a Stop newer than an observed
+                    # idle_prompt is a new turn, working until Claude's
+                    # next idle_prompt (S35).
+                    if state.idle:
+                        state.idle = False
+                        state.idle_notified = False
             return state.idle
 
     # -- Pure reads --

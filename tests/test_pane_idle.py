@@ -191,6 +191,28 @@ class TestUserPromptTurnStart:
         # The new turn's end is a fresh idle transition.
         assert tracker.became_idle("k")
 
+    def test_fast_turn_whose_user_prompt_was_overwritten_reads_working(
+            self, tracker, transcript, monkeypatch):
+        # S35 story 2: a typed turn answered in ~0.1 s.  The hook file
+        # holds only the latest event, so the 5 s impl poll saw Stop (not
+        # user_prompt) and the node stayed idle while the picker said
+        # [working].  The Stop is newer than the idle_prompt already seen,
+        # so a new turn ran: working until the next idle_prompt.
+        tracker.register("k", "%0", str(transcript))
+        emit = self._events(monkeypatch)
+        emit("idle_prompt", 1.0)
+        assert tracker.poll("k") is True
+        assert tracker.became_idle("k")
+        emit("user_prompt", 2.0)
+        emit("Stop", 2.1)  # overwrites user_prompt before the next poll
+        assert tracker.poll("k") is False
+        assert not tracker.is_idle("k")
+        assert not tracker.became_idle("k")
+        assert tracker.poll("k") is False  # same Stop again: still working
+        emit("idle_prompt", 62.1)
+        assert tracker.poll("k") is True
+        assert tracker.became_idle("k")
+
     def test_user_prompt_clears_waiting_for_input(
             self, tracker, transcript, monkeypatch):
         tracker.register("k", "%0", str(transcript))
