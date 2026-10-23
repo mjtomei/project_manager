@@ -423,3 +423,38 @@ regressions (both fail when the rename goes back to unlocked; logs
 `test_supersede_during_snapshot_write_leaves_no_snapshot` (supersede
 between check and rename) and `test_supersede_waits_for_an_in_flight_rename`
 (write paused at rename; supersede blocks, then clears).
+
+Review loop 590d i1 (on 7b765217): the four "send, then two Enters"
+copies became `qa_loop._send_submitted` (a failed message send raises,
+failed trailing Enters are logged and ignored). A failed verdict-format
+reminder is logged and no longer crashes the QA thread; the dead-pane
+handling relaunches the worker on the next tick.
+
+Review loop 590d i2 (pre-existing pane races, fixed in scope at the
+shepherd's request; logs `/pm-captures/review-590d-i2/`):
+- *Flagged-verification follow-up to a worker pane that died after its
+  liveness check*: the send error went up out of `_poll_tmux_verdicts`
+  and the run ended as "QA thread crashed" (ERROR). The worker panes kept
+  running with nothing supervising them and nothing was finalized. Now
+  the scenario is settled like a window that was already gone:
+  INPUT_REQUIRED, "window gone during PASS verification…".
+- *Re-verification into a verifier pane that died after its liveness
+  check*: this used to be "verification thread crashed", which flagged
+  the worker and made it re-run. Now the check runs in a fresh verifier
+  pane, the same as when the pane was already gone.
+- *Verifier pane dying during the re-verification wait*:
+  `loop_shared.wait_for_follow_up_verdict` only checked that the window
+  still had a pane. The worker pane shares that window, so the wait (no
+  time limit, by design) never ended and finalize was blocked. i1's
+  tolerant Enters sent the race above down this path. The wait now takes
+  `pane_id=` and the verifier passes its own pane. Review and watcher
+  callers are unchanged.
+Regressions (mutation-checked; with the wait mutation the unbounded test
+hung until a timeout killed it, so it now fails fast):
+`TestPollLoopRouteGating::test_flagged_followup_to_a_vanished_pane_is_input_required`,
+`TestVerifySingleScenario::test_reverify_into_a_vanished_verifier_starts_a_new_one`,
+`test_reverify_waits_on_the_verifier_pane`,
+`test_follow_up_wait_ends_when_its_pane_dies`.
+Still open and filed separately: a verifier that dies mid-check counts
+as FLAGGED ("verifier pane disappeared"), so the worker re-runs, and
+repeated deaths turn a PASS into NEEDS_WORK.

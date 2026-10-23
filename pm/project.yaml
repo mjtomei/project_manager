@@ -32013,3 +32013,31 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-04dfffb
+  plan: bugs
+  title: 'Bug: QA verifier pane dying mid-check flags the worker (and can turn a PASS
+    into NEEDS_WORK)'
+  branch: pm/pr-04dfffb-bug-qa-verifier-pane-dying-mid-check-flags-the-wor
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py _verify_single_scenario: when the verifier pane
+    dies during the initial poll_for_verdict or the re-verification wait, content
+    is None -> passed=False, reason "verifier pane disappeared". _poll_tmux_verdicts
+    treats that as FLAGGED: the worker is told "Your verdict was reviewed and flagged:
+    verifier pane disappeared" and re-runs the scenario. After verify_max_retries
+    such deaths, a worker PASS is recorded as NEEDS_WORK "failed verification: verifier
+    pane disappeared". A verifier infrastructure failure should re-verify in a fresh
+    pane (or leave the scenario unverified so finalize blocks) instead of counting
+    against the worker. Found in pr-592e4bd review 590d i2, which fixed the related
+    send/wait races (fresh verifier on a failed re-verify send; wait_for_follow_up_verdict(pane_id=)
+    so a dead verifier no longer hangs the wait). Repro: patch poll_for_verdict to
+    return None with verification enabled; the scenario receives the flagged follow-up.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T04:05:12.347637+00:00'
+  updated_at: '2026-10-23T04:05:12.347637+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

@@ -3280,6 +3280,7 @@ def _poll_tmux_verdicts(
                         pane_id = None
                     if pane_id is None:
                         pane_id = _get_scenario_pane(session, scenario.window_name)
+                    followup_sent = False
                     if pane_id:
                         followup_msg = (
                             f"Your verdict was reviewed and flagged: {reason} — "
@@ -3292,7 +3293,16 @@ def _poll_tmux_verdicts(
                             f"(PASS / NEEDS_WORK / INPUT_REQUIRED) alone "
                             f"on the last line."
                         )
-                        _send_submitted(pane_id, followup_msg)
+                        try:
+                            _send_submitted(pane_id, followup_msg)
+                            followup_sent = True
+                        except Exception:
+                            # Pane died after the liveness check: same as
+                            # gone before it (below), not a QA-thread crash.
+                            _log.warning("Follow-up to scenario %d pane %s "
+                                         "failed", scenario_idx, pane_id,
+                                         exc_info=True)
+                    if followup_sent:
                         _log.info("Sent follow-up message to scenario %d pane",
                                   scenario_idx)
                         # Clear verdict and put back in pending.  Stamp the
@@ -3956,16 +3966,34 @@ def _verify_single_scenario(
             f"VERIFIED on its own line, or wrap an explanation in "
             f"FLAGGED_START / FLAGGED_END markers."
         )
-        _send_submitted(scenario.verifier_pane_id, msg)
+        try:
+            _send_submitted(scenario.verifier_pane_id, msg)
+        except Exception:
+            # The verifier pane died after the liveness check above:
+            # verify in a fresh pane, as if it had been gone already.
+            _log.warning("Verification: follow-up to scenario %d verifier "
+                         "pane=%s failed — starting a new verifier",
+                         scenario.index, scenario.verifier_pane_id,
+                         exc_info=True)
+            scenario.verifier_pane_id = None
+            return _verify_single_scenario(
+                scenario, verdict, pane_output, pr_data, project_data,
+                session=session, stop_check=stop_check,
+                qa_workdir=qa_workdir, session_tag=session_tag,
+                pr_workdir=pr_workdir,
+            )
         _log.info("Verification: sent follow-up to scenario %d verifier pane=%s",
                   scenario.index, scenario.verifier_pane_id)
         try:
+            # Watch the verifier pane itself: the scenario's worker pane
+            # shares the window and outlives a dead verifier.
             content = wait_for_follow_up_verdict(
                 session, scenario.window_name or "",
                 scenario.verifier_transcript,
                 verdicts=_VERIFICATION_VERDICTS,
                 stop_check=stop_check,
                 log_prefix=f"qa-verify-{scenario.index}",
+                pane_id=scenario.verifier_pane_id,
             )
         except Exception:
             _log.warning("Verification: follow-up polling failed for scenario %d",

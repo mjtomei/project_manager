@@ -1494,6 +1494,59 @@ class TestVerifySingleScenario:
         assert mock_cmd.call_args.kwargs.get("cwd") == pr_workdir
         assert mock_split.call_args.kwargs.get("cwd") == pr_workdir
 
+    def test_reverify_into_a_vanished_verifier_starts_a_new_one(
+            self, tmp_path):
+        """The verifier pane passes the liveness check, then dies before
+        the re-verification message lands: a new verifier pane runs the
+        check instead of the scenario being flagged as crashed."""
+        import subprocess
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1",
+                              pane_id="%1")
+        scenario.verifier_pane_id = "%7"
+        scenario.verifier_cwd = str(tmp_path)
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys", side_effect=subprocess.CalledProcessError(1, ["tmux"])), \
+             patch("pm_core.loop_shared.wait_for_follow_up_verdict") as wait:
+            passed, reason, vpane = self._mock_verify(
+                scenario, "PASS", "output", "Looks right.\n\nVERIFIED")
+        assert (passed, reason, vpane) == (True, "", "%2")
+        wait.assert_not_called()
+
+    def test_reverify_waits_on_the_verifier_pane(self, tmp_path):
+        """The follow-up wait watches the verifier pane itself: the worker
+        pane sharing the window would keep a dead verifier's wait alive."""
+        scenario = QAScenario(index=1, title="Test", focus="test",
+                              steps="steps", window_name="qa-s1",
+                              pane_id="%1")
+        scenario.verifier_pane_id = "%7"
+        scenario.verifier_cwd = str(tmp_path)
+        scenario.verifier_transcript = str(tmp_path / "v.jsonl")
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.tmux.send_keys"), \
+             patch("pm_core.loop_shared.wait_for_follow_up_verdict",
+                   return_value=None) as wait:
+            passed, reason, _ = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir="/tmp/qa",
+                pr_workdir="/tmp/prworkdir")
+        assert wait.call_args.kwargs["pane_id"] == "%7"
+        assert (passed, reason) == (False, "verifier pane disappeared")
+
+    def test_follow_up_wait_ends_when_its_pane_dies(self, tmp_path):
+        """wait_for_follow_up_verdict(pane_id=...) ends once that pane is
+        gone even though another pane keeps the window alive."""
+        from pm_core import loop_shared
+        tr = tmp_path / "00000000-0000-0000-0000-000000000001.jsonl"
+        tr.write_text("")
+        with patch("pm_core.loop_shared.find_claude_pane", return_value="%1"), \
+             patch("pm_core.tmux.pane_exists", return_value=False), \
+             patch("pm_core.hook_events.wait_for_event",
+                   side_effect=AssertionError("waited on a dead pane")):
+            assert loop_shared.wait_for_follow_up_verdict(
+                "sess", "qa-s1", str(tr), ("VERIFIED",), pane_id="%7") is None
+
     def test_no_pr_workdir_marks_unverified(self):
         """Without a PR workdir we fail loud rather than silently fall back
         to the untrusted hashed QA dir (which would re-introduce the

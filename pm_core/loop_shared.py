@@ -224,13 +224,17 @@ def wait_for_follow_up_verdict(
     wait_timeout: float = 15,
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
+    pane_id: str | None = None,
 ) -> str | None:
     """Block for the next hook-driven idle on an existing pane and return
     the assistant text of the follow-up turn (or ``None``).
 
-    Hook-driven only — requires *transcript_path*.
+    Hook-driven only — requires *transcript_path*.  The wait ends when
+    the window has no pane left, or, given *pane_id*, when that pane is
+    gone (for a session that shares its window with another one).
     """
     from pm_core import hook_events
+    from pm_core import tmux as tmux_mod
     from pm_core.claude_launcher import session_id_from_transcript
     from pm_core.verdict_transcript import (
         extract_verdict_from_transcript,
@@ -246,8 +250,8 @@ def wait_for_follow_up_verdict(
     hook_baseline = time.time()
 
     while not (stop_check and stop_check()):
-        pane_id = find_claude_pane(session, window_name)
-        if not pane_id:
+        if not (tmux_mod.pane_exists(pane_id) if pane_id
+                else find_claude_pane(session, window_name)):
             _log.warning("%s: pane gone during follow-up wait", log_prefix)
             return None
 

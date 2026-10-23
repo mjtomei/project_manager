@@ -1178,6 +1178,55 @@ class TestPollLoopRouteGating:
         assert len(sent) == 1 and sent[0].startswith("Reminder: your verdict")
         assert state.scenario_verdicts[1] == "PASS"
 
+    def test_flagged_followup_to_a_vanished_pane_is_input_required(
+            self, tmp_path):
+        """Verification flags a PASS and the worker pane dies between the
+        liveness check and the follow-up: the scenario is settled as
+        INPUT_REQUIRED like a window already gone, instead of the send
+        error ending the whole QA run."""
+        import subprocess
+        from pm_core import qa_loop
+        tr = tmp_path / "t.jsonl"
+        tr.write_text("")
+        sc = qa_loop.QAScenario(index=1, title="t", focus="f")
+        sc.window_name, sc.session_id, sc.pane_id = "w1", "sid-1", "%5"
+        sc.transcript_path = str(tr)
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        state.scenarios = [sc]
+        t0 = time.time() + 1e4
+        sent = []
+
+        def send(p, m):
+            sent.append(m)
+            raise subprocess.CalledProcessError(1, ["tmux", "send-keys"])
+        with patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
+             patch("pm_core.qa_loop._get_verification_max_retries",
+                   return_value=2), \
+             patch("pm_core.qa_loop._verify_single_scenario",
+                   return_value=(False, "ran nothing", None)), \
+             patch("pm_core.hook_events.read_event",
+                   return_value={"event_type": "idle_prompt",
+                                 "timestamp": t0}), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="PASS"), \
+             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
+                   return_value=""), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys", side_effect=send), \
+             patch("pm_core.qa_loop._is_verification_enabled",
+                   return_value=True), \
+             patch("pm_core.qa_loop._route_checker",
+                   return_value=lambda: worker_route.RouteStatus(True)), \
+             patch("pm_core.qa_loop._write_resume_file"):
+            qa_loop._poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/w",
+                                        tmp_path / "status.json",
+                                        lambda *a: None)
+        assert len(sent) == 1 and sent[0].startswith("Your verdict was "
+                                                     "reviewed and flagged")
+        assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
+        assert "window gone" in state.scenario_verdict_reasons[1]
+
     def test_submit_survives_pane_dying_during_enters(self):
         """_send_submitted: the message typed, then the pane dies — the
         Enters stop quietly; a pane that cannot take the message raises."""
