@@ -251,6 +251,40 @@ env-by-name).
   the relaunched worker's verdict counts. Sibling scenarios launched in
   parallel, and another PR's run, are unaffected. A *stopping* loop
   (`zz t`/`z t`) relaunches nothing and announces no retry or deferral.
+- **RQ28** Given an all-PASS QA run (host or container mode, routed
+  workers), When it finishes, Then the finalizer runs on main Claude and
+  the TUI reads "QA complete: PASS [finalize: FINALIZE_DONE]" (pm log
+  "QA complete for <pr>: PASS (finalize=FINALIZE_DONE)"), whatever
+  `qa-verify-pass` is set to. With verification off no verifier pane
+  opens, and the pm log has no "QA finalize: skipping — PASS verdicts
+  [...] have not been verified yet" (ee3d0644, found in S21). The run
+  follows `qa-verify-pass` as its verdict poll read it when it started
+  ("PASS verdict verification is enabled/disabled" log line). Changing
+  the setting mid-run neither adds verifiers to that run nor skips its
+  finalize: started off and switched on, later PASSes stay unverified
+  and finalize still runs; started on and switched off, later PASSes are
+  still verified before finalize (3ce6 i2, 54ff5a68). A run started
+  after the change, for example another PR, uses the new value. A
+  resumed run (TUI restart) reads the setting again when its poll
+  restarts. If a PASS was accepted unverified before the restart and
+  verification is on now, the resumed run must still finalize. It may
+  verify that PASS first or trust it. It must never end with
+  `finalize=None` because of that gate. Planner code reading (QA9): a
+  scenario that already has a verdict is dropped from the resumed poll
+  without verification, so the gate may skip finalize in this case.
+  The scenario that exercises it decides.
+- **RQ29** Given a QA run that is stopped (`zz t`) or superseded by a
+  fresh start (`z t`) while workers are mid-turn or after the last
+  verdict, When the stopped loop winds down, Then it spawns no finalizer.
+  The pm log says "QA finalize: skipped for <pr> — QA was stopped" and
+  has no "QA finalize: polling pane=…" from the old loop. After `z t`,
+  the new run's `qa-<pr>` window holds only its own planner, and the
+  "Planner pane: %X" it logs is that planner session, not a finalizer.
+  A second PR's QA window and finalizer are untouched (2ff602fc, found
+  in S22). Pre-existing and out of scope (impl.md §5 item 21): a stop
+  that arrives *during* the finalizer poll leaves that finalizer pane in
+  the stopped run's own window until the next run's window cleanup.
+  Record it as an observation.
 
 ## 2. Setup
 
@@ -488,6 +522,31 @@ env-by-name).
     Known items stay observations: pr-1139060, pr-748e708, pr-8f8ae78
     (retry 1/10 on a failed split), pr-04dfffb, pr-d1d0139, pr-3c7ce04,
     pr-0f85376, pr-09f01da, pr-3201ea8.
+  - Ninth pass (S24+), delta-only. S21–S23 held on the combined head.
+    S21 and S22 ended NEEDS_WORK only for their own fixes: ee3d0644
+    (finalize ran with verification off), 2ff602fc (a stopped run spawned
+    no finalizer). Review 3ce6 i1 found both sound. Review 3ce6 i2
+    (54ff5a68) changed the finalize gate to use the poll's
+    `qa-verify-pass` reading. That last change has never run live. All
+    three are in `_run_qa_finalize_pane`. Fresh live verification is
+    needed only for RQ28 and RQ29, in host mode. The finalize logic is
+    the same in both modes, and S23 already held container-mode finalize
+    on 2ff602fc. Keep refiners and workers as routed real Claude on the
+    stub router, held per (PR, scenario, role) from the control file, so
+    PASS timing is controlled. Fake `qa_planning`, a `qa_verification`
+    VERIFIED with a delay long enough to see the verifier pane, and
+    `qa_finalize` FINALIZE_DONE. A fake finalizer is enough. The fix
+    decides whether a finalizer launches, not what it does.
+    `qa-verify-pass` is a global setting (`pm set qa-verify-pass on|off`),
+    shared by every run in the session. Read the TUI "QA complete: …
+    [finalize: …]" line and the pm "QA complete for <pr>: … (finalize=…)"
+    line, not only qa_status.json. Reuse the S21/S22 harness scripts
+    (stub.py, stubctl.sh, env.sh, seed_home.sh) and write to NEW capture
+    dirs. S23 spec slip, kept as is: the resume log line counts every
+    restored scenario ("3 scenario(s), 1 queued" for 2 live and 1
+    queued). Known items stay observations: pr-1139060, pr-0f85376 (a
+    finalization INTERRUPTED on a dead-driver recovery), pr-04dfffb,
+    pr-8f8ae78.
 
 ## 3. Edge cases
 
@@ -554,7 +613,9 @@ routed sessions.
 - *How to exercise gates with fake-claude.* Fake sessions bypass the gate
   by design, so routed roles run real `claude` against the stub; other
   roles may be faked.
-- *Config changes mid-run.* Take effect on the next QA run (impl.md §3);
-  not tested as a live switch.
+- *Config changes mid-run.* Route/model config takes effect on the next
+  QA run (impl.md §3) and is not tested as a live switch. The one live
+  switch that is tested is `qa-verify-pass` (RQ28): a running loop keeps
+  the value its poll read at start.
 - *Launcher in container mode.* Containers never use the launcher (always
   `claude` + bridge).
