@@ -489,15 +489,12 @@ class PRNode(Widget):
 
     # -- live marker state ---------------------------------------------------
 
-    def _review_loop_running(self) -> bool:
-        try:
-            state = self.app._review_loops.get(self.pr_id)
-            return bool(state and state.running)
-        except Exception:
-            return False
+    def _get_loop_marker(self, qa_live: bool = False) -> tuple[str, str]:
+        """Return ``(marker_text, marker_style)`` for review-loop/merge state.
 
-    def _get_loop_marker(self) -> tuple[str, str]:
-        """Return ``(marker_text, marker_style)`` for review-loop/merge state."""
+        *qa_live*: the PR's QA panes are active or waiting, so its live QA
+        marker must win over a finished review loop's verdict badge.
+        """
         try:
             loops = self.app._review_loops
             state = loops.get(self.pr_id)
@@ -510,8 +507,11 @@ class PRNode(Widget):
                         return (f"⏹{state.iteration}{spinner}", "bold red")
                     return (f"⟳{state.iteration}{spinner}", "bold cyan")
                 # A finished review loop's verdict must not mask the sign-off
-                # marker (▲ / re-run spinner) once the PR has moved on.
-                if state.latest_verdict and self._pr.get("status") != "sign_off":
+                # marker (▲ / re-run spinner) once the PR has moved on, nor
+                # the PR's live QA (spinner / ⏸); it shows again once QA is
+                # idle.
+                if (state.latest_verdict and not qa_live
+                        and self._pr.get("status") != "sign_off"):
                     v = state.latest_verdict
                     marker = VERDICT_MARKERS.get(v, v[:4])
                     style = VERDICT_STYLES.get(v, "")
@@ -576,15 +576,11 @@ class PRNode(Widget):
         title_line = f"{side} {title}{' ' * max(0, title_pad)} {side}"
 
         status_text = f"{icon} {status}"
-        loop_marker, loop_style = self._get_loop_marker()
         qa_state = None
         if status == "qa" and pr.get("workdir"):
             qa_state = qa_pane_state(self.app._pane_idle_tracker, pr_id)
-            # A finished review loop's verdict must not mask the PR's live
-            # QA (spinner / ⏸) either; it shows again once QA is idle.
-            if (loop_marker and qa_state in ("waiting", "active")
-                    and not self._review_loop_running()):
-                loop_marker, loop_style = "", ""
+        loop_marker, loop_style = self._get_loop_marker(
+            qa_live=qa_state in ("waiting", "active"))
         marker_offset = -1
         if loop_marker:
             marker_offset = 2 + len(status_text) + 1

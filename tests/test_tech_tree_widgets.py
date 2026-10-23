@@ -635,3 +635,17 @@ async def test_running_review_loop_marker_wins_over_qa():
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             assert "⟳1" in _status_row(app, "pr-a")
+
+
+@async_test
+async def test_merge_input_marker_survives_live_qa():
+    """Review 4f28 i1: only a finished loop's badge yields to live QA; a
+    merge INPUT_REQUIRED marker (⏸M) is not cleared with it."""
+    for qa_state in ("active", "waiting"):
+        app = _TreeApp([_pr("pr-a", status="qa", workdir="/w")])
+        app._merge_input_required_prs.add("pr-a")
+        with patch("pm_core.tui.tech_tree.qa_pane_state",
+                   return_value=qa_state):
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                assert "⏸M" in _status_row(app, "pr-a"), qa_state

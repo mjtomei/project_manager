@@ -606,7 +606,7 @@ repeated deaths turn a PASS into NEEDS_WORK.
     only a PR's first run with no cached workdir discriminates the
     item 22 timer fixes) was checked against the code in 1298 i1.
 
-### QA S29 (two PRs, RQ31; not yet reviewed)
+### QA S29 (two PRs, RQ31; reviewed in review loop 4f28 i1)
 24. (a) *Product fix* 9cc2fb6b (pre-existing on master): a finished
     review loop's tree badge (`⟳N✓`, `⟳N⏸`, …) masked the PR's live QA
     marker. B, with a stopped loop, read "● qa ⟳1⏸" with no spinner while
@@ -618,8 +618,19 @@ repeated deaths turn a PASS into NEEDS_WORK.
     fallback is kept on purpose (historical summary, cf. pr-97614ed). After
     QA PASS, "● qa ⟳1⏸" can still be read as a current input gate. The
     live gate is `⏸N` plus a spinner, so only the `⟳` prefix tells them
-    apart. This ambiguity is not resolved here. Should the badge be
-    dropped past in_review, as for sign_off?
+    apart. Review 4f28 i1 decision: keep the idle badge in qa. pr-97614ed
+    (pending bug) already treats "● qa ⟳2✓" as the expected finished-loop
+    summary in qa, and sign_off differs because it has its own marker that
+    the badge hid. The `⟳` ambiguity is pre-existing and out of scope.
+    Review 4f28 i1 also moved the precedence into `_get_loop_marker(qa_live=)`
+    next to the sign_off rule, so the override only drops a finished loop's
+    badge (a merge `⏸M` marker is no longer cleared with it) and the extra
+    `_review_loop_running` lookup is gone. Regression
+    `test_merge_input_marker_survives_live_qa` (status qa, QA active and
+    waiting, `⏸M` set; fails on the 9cc2fb6b blanket clearing). *Known
+    limitation, kept on purpose*: once QA is idle (e.g. after QA PASS) the
+    finished loop's historical badge returns, so "● qa ⟳1⏸" can still be
+    misread as a current input gate.
     (b) *Test-fixture support only, no product behaviour change*
     9a7f9b13 + 1d51bcef: fake-claude refreshes `idle_prompt` every 2 s
     while held open. A review loop waiting on INPUT_REQUIRED took each
