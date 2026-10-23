@@ -31610,7 +31610,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T22:12:31.409559+00:00'
+  updated_at: '2026-10-23T22:17:03.004377+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32709,6 +32709,19 @@ prs:
       (it overwrote an earlier 3539-pass run on the pre-invalidation tree).'
     created_at: '2026-10-23T22:12:31Z'
     last_edited: '2026-10-23T22:12:31Z'
+  - id: note-21c2de4
+    text: 'Review 5e26 i2 (cbf9941c, test/docs only, no product change): 7968f576
+      foreign-id cache checked independently and sound (per-TUI app, reset on project.yaml
+      inode/mtime_ns/size). Gap: its tests only changed project.yaml via store.save
+      (rename = new inode), so an inode-only stamp passed them. Added test_in_place_project_edit_also_forgets_foreign_ids
+      (in-place rewrite, as an editor under pm edit may), which fails with an inode-only
+      stamp. Also my own never-invalidate mutation fails the pull test. Recipes: finished
+      the half-done rewrap (whitespace only). impl.md item 29: reordered and dated
+      the a711f411 counts. Focused: test_qa_resume + test_qa_self_driving + test_autostart_multi_target
+      184 passed (/pm-captures/review-5e26-i2/focused.log). Full suite not rerun:
+      no source change since the 3540-pass run on 7968f576.'
+    created_at: '2026-10-23T22:17:02Z'
+    last_edited: '2026-10-23T22:17:02Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
