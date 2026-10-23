@@ -614,7 +614,12 @@ repeated deaths turn a PASS into NEEDS_WORK.
     sign_off. While the PR is in qa with active or waiting QA panes, the
     live QA spinner / ⏸ now wins. The badge returns once QA is idle, and a
     running review loop still wins. 4 regressions in
-    `tests/test_tech_tree_widgets.py`.
+    `tests/test_tech_tree_widgets.py`. Open review question: the idle
+    fallback is kept on purpose (historical summary, cf. pr-97614ed). After
+    QA PASS, "● qa ⟳1⏸" can still be read as a current input gate. The
+    live gate is `⏸N` plus a spinner, so only the `⟳` prefix tells them
+    apart. This ambiguity is not resolved here. Should the badge be
+    dropped past in_review, as for sign_off?
     (b) *Test-fixture support only, no product behaviour change*
     9a7f9b13 + 1d51bcef: fake-claude refreshes `idle_prompt` every 2 s
     while held open. A review loop waiting on INPUT_REQUIRED took each

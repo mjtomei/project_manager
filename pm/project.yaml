@@ -31574,7 +31574,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T14:37:23.339570+00:00'
+  updated_at: '2026-10-23T14:41:27.839294+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32302,6 +32302,19 @@ prs:
       picker closes with C-c, not q, and shows the PR of the client active window.'
     created_at: '2026-10-23T14:37:23Z'
     last_edited: '2026-10-23T14:37:23Z'
+  - id: note-085f956
+    text: 'QA S29 follow-up to note-6a2a546. (1) Story 2 proves the held-line queue:
+      the two "(1/2 consecutive) — restarting QA" lines were logged 1.00 s apart and
+      painted one after the other, ~3 s each. (2) The story 3 replay on 9cc2fb6b covered
+      only the render change (the failed B-marker Then, verified live). The other
+      story 3 evidence is from attempt 1 on TUI code 1d51bcef; no Then was waived.
+      (3) Review question for 9cc2fb6b: the finished review-loop badge returns when
+      QA is idle (kept on purpose as historical summary). After QA PASS, "● qa ⟳1⏸"
+      can be read as a current input gate (the live gate is ⏸N plus a spinner), and
+      that ambiguity is pre-existing and not fixed here. Should the badge be dropped
+      past in_review, as b290ebcb did for sign_off? See impl.md §5 item 24(a).'
+    created_at: '2026-10-23T14:41:27Z'
+    last_edited: '2026-10-23T14:41:27Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
