@@ -103,7 +103,8 @@ edit or re-record it to fix a render.
 
 ```
 # render_cast <cast>: <cast> -> sibling recording.mp4 (variable frame rate).
-# Returns non-zero, and publishes no recording.mp4, if any step fails.
+# Returns non-zero, and publishes no new recording.mp4, if any step fails
+# (an older completed recording.mp4 is left as it was).
 render_cast() {
     local cast=$1 gif="$1.gif" mp4="${1%.cast}.mp4"
     local part="$mp4.partial.mp4" vf gw gh n dur
@@ -166,9 +167,11 @@ Notes:
 - **Partial output is never published.** ffmpeg writes to
   `recording.mp4.partial.mp4`, which is renamed to `recording.mp4` only
   after a successful encode. The GIF is deleted only after that rename.
-  An interrupted or failed render therefore leaves no `recording.mp4`.
-  Wait for (or test) `recording.mp4` itself; the GIF disappearing is not
-  a completion signal. If you stop a render on purpose, stop the shell
+  An interrupted or failed render therefore publishes no new
+  `recording.mp4`; an older completed `recording.mp4` from an earlier
+  render stays in place (do not delete it). So neither the file
+  existing nor the GIF disappearing shows that this render succeeded:
+  check this `render_cast` call's return status. If you stop a render on purpose, stop the shell
   running `render_cast` before its `ffmpeg` child, so the cleanup step
   cannot run. Label any partial output you keep (for example
   `recording.mp4.INCOMPLETE-...`) and list it in the manifest.
