@@ -578,7 +578,7 @@ repeated deaths turn a PASS into NEEDS_WORK.
     `TestQAPollTimer::test_timer_outlives_running_until_completion_is_processed`
     (fails with the fix reverted; logs `/pm-captures/review-433b-i1/`).
 
-### QA S26/S28 fixes ((a), (b) reviewed in review loop 1298 i1/i2; (c) from QA S28, not yet reviewed)
+### QA S26/S28 fixes ((a), (b) reviewed in review loop 1298 i1/i2; (c) from QA S28, reviewed in review loop 4f28 i1)
 23. *TUI lagged after a QA completion* (all pre-existing on master).
     (a) f57c500c: after a NEEDS_WORK verdict `_on_qa_complete` moved the
     PR from qa to in_review and reloaded `app._data`, but did not repaint.
