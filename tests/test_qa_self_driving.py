@@ -125,6 +125,9 @@ class TestPassCountAndAutoMerge:
                    if "restarting QA" in c.args[0]]
         assert len(restart) == 1
         assert restart[0].kwargs.get("hold", 0) > 0
+        # Forced, like the other held confirmations: an unforced message is
+        # dropped outright while another PR's sticky line is showing.
+        assert restart[0].kwargs.get("force") is True
 
     def test_pass_triggers_auto_merge_when_enough(self, tmp_path):
         """Step 5: pass_count reaching required_passes triggers auto-merge."""
