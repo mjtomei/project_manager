@@ -32123,6 +32123,34 @@ prs:
       so the finalize gate may skip with finalize=None.'
     created_at: '2026-10-23T11:07:52Z'
     last_edited: '2026-10-23T11:07:52Z'
+  - id: note-36fbf1e
+    text: 'S25 refiner (RQ29): no /pm-captures/scenarios/24 harness exists here, so
+      S25 builds on the S21 host scripts (stub.py with "<pr> * worker" wildcard holds,
+      560 s hold cap) extended to two PRs as in S22. Restarting a completed A run
+      needs z t (plain t only focuses the existing qa-<pr> window). zz t during the
+      finalizer poll (story 3) is pre-existing behaviour: the run still ends "QA complete
+      for <pr>: PASS (finalize=None)" and the TUI says "QA PASS ... press i to sign
+      off". Treat it as an observation alongside impl.md §5 item 21. The finalize
+      polling line carries no PR id, so attribute it by the PR workdir name in its
+      transcript path.'
+    created_at: '2026-10-23T11:14:00Z'
+    last_edited: '2026-10-23T11:14:00Z'
+  - id: note-c7f1677
+    text: 'QA S25 (2026-10-23, host, real Claude vs router/main stubs, head dab74e81;
+      captures /pm-captures/scenarios/25, REPORT.md): RQ29/RQ23/RQ28 held live with
+      no code change. Fresh start z t over A (workers held) while B finalizer ran:
+      no A finalizer, new qa-A first listing = own planner, s3/s4 PASS+VERIFIED, one
+      finalize, PASS [finalize: FINALIZE_DONE]; B untouched; old qa_resume.json gone
+      0.09 s after z t. zz t with held workers: skipped + INPUT_REQUIRED (finalize=None)
+      in 4 s, no resume/recover after TUI restart. zz t during finalizer (item 21
+      observation): PASS (finalize=None), stray finalizer kept in old window until
+      the next z t cleanup, never taken for a new pane. One Then failed as written:
+      the old loop "skipped … QA was stopped" line came 2 s AFTER the new run "Planner
+      pane:" (z t does not wait for the old loop; order is a race). qa.md RQ29 clarified
+      in 16964d91 (also: GET /api/hello in the router log is Claude startup, not a
+      messages request); needs independent review.'
+    created_at: '2026-10-23T11:43:33Z'
+    last_edited: '2026-10-23T11:43:33Z'
   - id: note-a8fbbb1
     text: 'QA S24 (2026-10-23, RQ28 host, real Claude refiners/workers on router stub;
       captures /pm-captures/scenarios/24, REPORT.md): every finalize-gate Then held.
