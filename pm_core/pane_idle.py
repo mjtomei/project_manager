@@ -42,7 +42,8 @@ class PaneIdleState:
     Three orthogonal flags:
 
     * ``idle`` — the agent emitted ``idle_prompt`` (turn ended, waiting
-      for the next user message).
+      for the next user message); cleared by ``user_prompt`` (a new
+      turn was submitted).
     * ``waiting_for_input`` — the agent emitted ``permission_prompt``
       (Claude Code is showing its own tool-approval dialog and is
       blocked until the user responds).  This is a distinct "the user
@@ -183,6 +184,13 @@ class PaneIdleTracker:
                     # idle flag so the TUI renders a distinct indicator.
                     state.waiting_for_input = True
                     state.idle = False
+                    state.idle_notified = False
+                elif etype == "user_prompt":
+                    # A new turn started (typed or sent by pm), so a pane
+                    # that went idle reads as working again and its next
+                    # idle_prompt counts as newly idle.
+                    state.idle = False
+                    state.waiting_for_input = False
                     state.idle_notified = False
                 elif etype == "Stop":
                     # Stop fires per-turn (not only at session end), so

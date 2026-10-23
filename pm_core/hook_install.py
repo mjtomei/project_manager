@@ -12,8 +12,15 @@ and write a file under ``~/.pm/hooks/`` keyed by session_id:
   * ``Stop`` — fires per-turn.  Retained for future use; readers
     currently ignore it (``pane_exists`` is the authoritative
     session-gone signal).
+  * ``UserPromptSubmit`` — a new turn starts (the argv prompt or any
+    typed message).  Lets an idle pane read as working again.
 
-The installer is idempotent and merges into any existing user hooks.
+The installer is idempotent and merges into any existing user hooks:
+user hooks on these events are kept as they are.  A user hook on
+``Notification[idle_prompt|permission_prompt]`` or ``Stop`` is a
+conflict (pm refuses to install, see :class:`HookConflictError`);
+user ``UserPromptSubmit`` hooks are common, so pm's entry is appended
+next to them instead.
 """
 
 from __future__ import annotations
@@ -101,7 +108,16 @@ def _install_receiver() -> None:
         _log.warning("could not copy hook receiver to %s: %s", dest, e)
 
 
+# Events where a user hook on a pm matcher conflicts with pm's (refused).
 _MANAGED_EVENTS = ("Notification", "Stop")
+# Events where pm's entry is appended next to user hooks, never refused.
+# Claude runs all matching hooks in parallel, so pm's receiver cannot
+# depend on running before or after a user hook; a user hook that blocks
+# the prompt leaves pm's ``user_prompt`` record behind, and Claude fires
+# ``idle_prompt`` again ~60 s later (checked on 2.1.309), so the pane
+# reads as working for that minute only.
+_COEXIST_EVENTS = ("UserPromptSubmit",)
+_PM_EVENTS = _MANAGED_EVENTS + _COEXIST_EVENTS
 
 
 def _desired_hooks() -> dict:
@@ -114,6 +130,9 @@ def _desired_hooks() -> dict:
         "waiting for input" indicator distinct from plain idle.
     ``Stop`` — retained for future use (fires per-turn, not session
         exit) but the reader currently ignores it.
+    ``UserPromptSubmit`` — a turn starts; recorded as ``user_prompt``
+        (the receiver never stores the prompt and prints nothing, since
+        this hook's stdout would be added to the prompt).
     """
     return {
         "Notification": [
@@ -137,26 +156,69 @@ def _desired_hooks() -> dict:
                 ],
             }
         ],
+        "UserPromptSubmit": [
+            {
+                "hooks": [
+                    {"type": "command", "command": _hook_command_for("user_prompt")},
+                ],
+            }
+        ],
     }
 
 
-def _entry_is_pm(entry: dict) -> bool:
-    receiver_str = str(_receiver_path())
-    for hook in (entry or {}).get("hooks", []) or []:
-        cmd = (hook or {}).get("command", "")
-        # Current format references the standalone receiver path.
-        # Also recognise the legacy ``-m pm_core.hook_receiver`` form so
-        # installs upgrading from the old command get rewritten cleanly.
-        if receiver_str in cmd or "pm_core.hook_receiver" in cmd:
-            return True
-    return False
+def _hook_is_pm(hook) -> bool:
+    if not isinstance(hook, dict):
+        return False
+    cmd = hook.get("command", "") or ""
+    # Current format references the standalone receiver path.
+    # Also recognise the legacy ``-m pm_core.hook_receiver`` form so
+    # installs upgrading from the old command get rewritten cleanly.
+    return str(_receiver_path()) in cmd or "pm_core.hook_receiver" in cmd
+
+
+def _pm_hook_keys(entries) -> list[tuple]:
+    """Return sorted (matcher, command) pairs of pm's hooks in *entries*."""
+    keys = []
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        for hook in entry.get("hooks", []) or []:
+            if _hook_is_pm(hook):
+                keys.append((entry.get("matcher") or "", hook.get("command", "")))
+    return sorted(keys)
+
+
+def _event_up_to_date(entries, desired_entries: list) -> bool:
+    """True when *entries* hold exactly pm's desired hooks (user hooks aside)."""
+    return _pm_hook_keys(entries) == _pm_hook_keys(desired_entries)
+
+
+def _merge_event(entries, desired_entries: list) -> list:
+    """Return *entries* with pm's hooks replaced by *desired_entries*.
+
+    Every user hook is kept in place (an entry mixing user and pm hooks
+    keeps its user hooks); pm's current entries are appended.
+    """
+    merged = []
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict):
+            merged.append(entry)
+            continue
+        hooks = entry.get("hooks", []) or []
+        kept = [h for h in hooks if not _hook_is_pm(h)]
+        if len(kept) == len(hooks):
+            merged.append(entry)
+        elif kept:
+            merged.append({**entry, "hooks": kept})
+    return merged + [dict(e) for e in desired_entries]
 
 
 def _detect_foreign_hooks(existing_hooks: dict) -> list[str]:
     """Return human-readable descriptions of hooks pm did not install.
 
-    We only care about events pm manages (Notification idle_prompt,
-    Stop).  Other events are the user's business and we leave them alone.
+    We only care about events pm manages exclusively (Notification
+    idle_prompt / permission_prompt, Stop).  ``UserPromptSubmit`` and
+    other events are the user's business: pm's hook coexists there.
     """
     foreign: list[str] = []
     for event in _MANAGED_EVENTS:
@@ -172,9 +234,11 @@ def _detect_foreign_hooks(existing_hooks: dict) -> list[str]:
                 None, "idle_prompt", "permission_prompt",
             ):
                 continue
-            if _entry_is_pm(entry):
-                continue
+            # Hook by hook: a user hook sharing an entry with pm's is
+            # still a conflict (it would be kept, not dropped).
             for hook in entry.get("hooks", []) or []:
+                if _hook_is_pm(hook):
+                    continue
                 cmd = (hook or {}).get("command", "")
                 label = f"{event}"
                 if matcher:
@@ -211,30 +275,20 @@ def hooks_already_installed(settings_path: Path | None = None) -> bool:
         return False
     hooks = data.get("hooks") if isinstance(data.get("hooks"), dict) else {}
     desired = _desired_hooks()
-    for event in _MANAGED_EVENTS:
-        current = hooks.get(event)
-        if not isinstance(current, list):
-            return False
-        # Every desired entry's embedded command must be present — this
-        # catches added matchers on upgrade (e.g. new permission_prompt).
-        for need in desired[event]:
-            want_cmd = need["hooks"][0]["command"]
-            found = any(
-                h.get("command") == want_cmd
-                for e in current
-                for h in (e or {}).get("hooks", []) or []
-            )
-            if not found:
-                return False
-    return True
+    # pm's hooks must match exactly — this catches added events or
+    # matchers on upgrade (e.g. UserPromptSubmit) and stale pm commands.
+    return all(_event_up_to_date(hooks.get(event), desired[event])
+               for event in _PM_EVENTS)
 
 
 def ensure_hooks_installed(settings_path: Path | None = None) -> bool:
     """Install Claude Code hooks for verdict/session-end detection.
 
-    Refuses to overwrite any pre-existing Notification(idle_prompt) or
-    Stop hook that pm did not install — raises :class:`HookConflictError`
-    in that case so the user can resolve the conflict manually.
+    Refuses to install next to a pre-existing Notification(idle_prompt
+    / permission_prompt) or Stop hook that pm did not install — raises
+    :class:`HookConflictError` in that case so the user can resolve the
+    conflict manually.  Every other user hook is kept; pm's
+    ``UserPromptSubmit`` entry is appended next to the user's.
 
     Returns True if the settings file was modified. Idempotent.
     """
@@ -283,7 +337,8 @@ def ensure_hooks_installed(settings_path: Path | None = None) -> bool:
 
     merged_hooks = dict(current_hooks)
     for event, entries in desired.items():
-        merged_hooks[event] = list(entries)
+        if not _event_up_to_date(current_hooks.get(event), entries):
+            merged_hooks[event] = _merge_event(current_hooks.get(event), entries)
 
     existing["hooks"] = merged_hooks
     try:

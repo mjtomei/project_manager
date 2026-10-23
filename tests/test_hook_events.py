@@ -242,6 +242,7 @@ def test_installer_installs_clean(tmp_hooks_home):
         "hook_receiver" in h.get("command", "")
         for entry in stop for h in entry.get("hooks", [])
     )
+    assert _pm_cmds(data["hooks"]["UserPromptSubmit"])
     # Second call must be a no-op
     assert ensure_hooks_installed(settings_path) is False
 
@@ -262,14 +263,14 @@ def test_installer_preserves_unrelated_notification_matcher(tmp_hooks_home):
     # Non-conflicting: different matcher → install succeeds
     assert ensure_hooks_installed(settings_path) is True
     data = json.loads(settings_path.read_text())
-    # pm hook is now present; user hook on unrelated matcher is NOT in the merged
-    # Notification list (we replace the Notification entry wholesale for idle_prompt),
-    # so this is a known limitation — assert the pm entry exists.
     notif = data["hooks"]["Notification"]
     assert any(
         "hook_receiver" in h.get("command", "")
         for entry in notif for h in entry.get("hooks", [])
     )
+    # The user's hook on the unrelated matcher is kept.
+    assert notif[0] == {"matcher": "waiting_for_tool_permission",
+                        "hooks": [{"type": "command", "command": "echo unrelated"}]}
 
 
 def test_installer_refuses_to_clobber_foreign_hooks(tmp_hooks_home):
@@ -370,3 +371,108 @@ def test_session_id_from_transcript(tmp_path):
 def test_session_id_from_transcript_missing(tmp_path):
     from pm_core.claude_launcher import session_id_from_transcript
     assert session_id_from_transcript(tmp_path / "nope.jsonl") is None
+
+
+def test_hook_receiver_user_prompt_records_no_prompt_and_prints_nothing(tmp_hooks_home):
+    """UserPromptSubmit stdout is added to the prompt, and the prompt
+    text must never be stored."""
+    payload = json.dumps({"session_id": "abc-123", "cwd": "/tmp",
+                          "hook_event_name": "UserPromptSubmit",
+                          "prompt": "SECRET-PROMPT-TEXT", "prompt_id": "p1"})
+    result = subprocess.run(
+        [sys.executable, "-m", "pm_core.hook_receiver", "user_prompt"],
+        input=payload, text=True, capture_output=True,
+        env={**__import__("os").environ, "HOME": str(tmp_hooks_home)},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    raw = (tmp_hooks_home / ".pm" / "hooks" / "abc-123.json").read_text()
+    assert json.loads(raw)["event_type"] == "user_prompt"
+    assert "SECRET-PROMPT-TEXT" not in raw
+
+
+def _pm_cmds(entries):
+    return [h["command"] for e in entries for h in e.get("hooks", [])
+            if "hook_receiver" in h.get("command", "")]
+
+
+def _settings(tmp_hooks_home, hooks):
+    path = tmp_hooks_home / ".claude" / "settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"hooks": hooks}))
+    return path
+
+
+def test_installer_appends_user_prompt_hook_next_to_user_hooks(tmp_hooks_home):
+    """Coexist policy: user UserPromptSubmit hooks are kept, never refused."""
+    from pm_core.hook_install import ensure_hooks_installed
+    user_entries = [
+        {"hooks": [{"type": "command", "command": "user-context-a"}]},
+        {"matcher": "", "hooks": [{"type": "command", "command": "user-guard-b",
+                                   "timeout": 5}]},
+    ]
+    path = _settings(tmp_hooks_home, {"UserPromptSubmit": user_entries})
+    assert ensure_hooks_installed(path) is True
+    ups = json.loads(path.read_text())["hooks"]["UserPromptSubmit"]
+    assert ups[:2] == user_entries
+    assert len(_pm_cmds(ups)) == 1 and _pm_cmds(ups)[0].endswith(" user_prompt")
+    before = path.read_text()
+    assert ensure_hooks_installed(path) is False
+    assert path.read_text() == before
+
+
+def test_installer_does_not_rewrite_when_user_adds_hook_after_pm(tmp_hooks_home):
+    from pm_core.hook_install import ensure_hooks_installed
+    path = _settings(tmp_hooks_home, {})
+    ensure_hooks_installed(path)
+    data = json.loads(path.read_text())
+    data["hooks"]["UserPromptSubmit"].append(
+        {"hooks": [{"type": "command", "command": "user-later"}]})
+    path.write_text(json.dumps(data))
+    before = path.read_text()
+    assert ensure_hooks_installed(path) is False
+    assert path.read_text() == before
+
+
+def test_installer_upgrade_adds_user_prompt_and_keeps_all_user_hooks(tmp_hooks_home):
+    """An install from before UserPromptSubmit gains it; every user hook,
+    including unrelated Notification matchers, survives the rewrite."""
+    from pm_core.hook_install import _hook_command_for, ensure_hooks_installed
+    pm = lambda ev: {"type": "command", "command": _hook_command_for(ev)}
+    old = {
+        "Notification": [
+            {"matcher": "auth_success", "hooks": [{"type": "command", "command": "user-n"}]},
+            {"matcher": "idle_prompt", "hooks": [pm("idle_prompt")]},
+            {"matcher": "permission_prompt", "hooks": [pm("permission_prompt")]},
+        ],
+        "Stop": [{"hooks": [pm("Stop")]}],
+        "UserPromptSubmit": [
+            {"hooks": [{"type": "command", "command": "user-u"},
+                       # stale pm command (legacy form) in a mixed entry
+                       {"type": "command",
+                        "command": "python3 -m pm_core.hook_receiver user_prompt"}]},
+        ],
+        "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "user-p"}]}],
+    }
+    path = _settings(tmp_hooks_home, old)
+    assert ensure_hooks_installed(path) is True
+    hooks = json.loads(path.read_text())["hooks"]
+    assert hooks["Notification"] == old["Notification"]  # already up to date
+    assert hooks["Stop"] == old["Stop"]
+    assert hooks["PreToolUse"] == old["PreToolUse"]
+    ups = hooks["UserPromptSubmit"]
+    assert ups[0] == {"hooks": [{"type": "command", "command": "user-u"}]}
+    assert _pm_cmds(ups) == [_hook_command_for("user_prompt")]
+    assert ensure_hooks_installed(path) is False
+
+
+def test_installer_refuses_user_hook_sharing_an_entry_with_pm(tmp_hooks_home):
+    """A user idle_prompt hook inside pm's own entry is still a conflict."""
+    from pm_core.hook_install import (
+        HookConflictError, _hook_command_for, ensure_hooks_installed)
+    path = _settings(tmp_hooks_home, {"Notification": [
+        {"matcher": "idle_prompt",
+         "hooks": [{"type": "command", "command": _hook_command_for("idle_prompt")},
+                   {"type": "command", "command": "user-idle"}]}]})
+    with pytest.raises(HookConflictError, match="user-idle"):
+        ensure_hooks_installed(path)

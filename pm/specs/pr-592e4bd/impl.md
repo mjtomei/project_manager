@@ -702,3 +702,58 @@ repeated deaths turn a PASS into NEEDS_WORK.
     module-level `_HOOKS_BASE`, so later tests read that test's idle event
     for the shared fixture session id. The fixture now restores the paths,
     and the picker test points hook events at its own tmp dir.
+
+### S33 follow-up: typed turn after idle (review loop d0d0 i1)
+27. *An idle pane never read as working again when the user typed a new
+    turn* (pr-2a44020, pre-existing on master; found in S33). pm had no
+    prompt-submit hook, so `PaneIdleTracker` cleared `idle` only on
+    `permission_prompt`; the node and picker kept `[idle]` through the
+    whole typed turn. Scope decision note-1952e9c (0a854e58): retain RQ34
+    and fix it here with a coexist-append install policy.
+    - `hook_install` installs `UserPromptSubmit` → receiver `user_prompt`.
+      `Notification[idle_prompt|permission_prompt]` and `Stop` keep the
+      refuse-on-conflict policy (`_MANAGED_EVENTS`); `UserPromptSubmit`
+      (`_COEXIST_EVENTS`) never conflicts: pm's entry is appended next to
+      the user's. Merging is hook-level for every pm event: user hooks are
+      kept in place (also user Notification hooks on other matchers, which
+      the old wholesale list replacement dropped on every rewrite), only
+      pm's own hooks (current or legacy `-m pm_core.hook_receiver`) are
+      replaced, and an event whose pm hooks already match is not touched,
+      so a user hook added after pm's entry causes no rewrite. A user hook
+      sharing an entry with pm's on a managed matcher is now reported as a
+      conflict instead of being kept silently.
+    - The receiver stores only its fixed fields (never `prompt`) and
+      prints nothing (a `UserPromptSubmit` hook's stdout is added to the
+      prompt).
+    - `PaneIdleTracker.poll`: `user_prompt` sets `idle`,
+      `waiting_for_input` and `idle_notified` to False, so the turn's end
+      is a fresh `became_idle`. `runtime_state._hook_state_for` already
+      read any non-idle, non-permission event as working; the other
+      `read_event` readers wait for `idle_prompt` newer than a send time or
+      check "no event yet" (trust watches), and keep their meaning.
+    - Blocked prompts (checked live on claude 2.1.309, no ordering between
+      hooks assumed): a user `UserPromptSubmit` hook that exits 2 still
+      lets pm's record land, no `Stop` follows, and Claude fires
+      `idle_prompt` again ~60 s later, so the pane reads as working for
+      about a minute and then idle. A re-armed `became_idle` there (or after
+      a real typed turn) re-runs only idempotent handlers: impl idle →
+      auto-review only for in-scope `in_progress` PRs with auto-start on;
+      merge window idle → re-check the published merge.
+    - Approving a permission prompt is not a prompt submit, so a pane
+      keeps `⏸` after approval until its next hook event (unchanged, S30).
+    Regressions: `tests/test_pane_idle.py::TestUserPromptTurnStart` (3,
+    fail with the `user_prompt` branch disabled),
+    `test_picker_status_reads_working_after_user_prompt`,
+    `tests/test_hook_events.py` coexist/upgrade/idempotency/conflict and
+    receiver tests (`test_installer_appends_user_prompt_hook_next_to_user_hooks`,
+    `test_installer_upgrade_adds_user_prompt_and_keeps_all_user_hooks` and
+    `test_installer_preserves_unrelated_notification_matcher` fail with the
+    old list replacement; three fail with `UserPromptSubmit` treated as a
+    managed event). Full suite 3510 passed (env -u PM_HOST_HOME, /usr/bin first). Live
+    control replay `/pm-captures/review-d0d0-i1/live-control/` (README):
+    isolated HOME, real claude 2.1.309 on the S33 stub, user hooks kept
+    byte-identical by the install; on the same pane the fixed tracker left
+    idle 1.2 s after a typed turn and went idle again on the next
+    `idle_prompt`, while the pre-fix tracker (HEAD 0a854e58) stayed idle;
+    a blocked turn read as working for 60.7 s; the trust dialog showed
+    waiting until the first `user_prompt`.
