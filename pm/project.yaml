@@ -31557,7 +31557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T07:30:04.681149+00:00'
+  updated_at: '2026-10-23T08:25:26.092181+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31989,6 +31989,23 @@ prs:
       suite 3466 passed. Spec item 18 updated.'
     created_at: '2026-10-23T07:30:04Z'
     last_edited: '2026-10-23T07:30:04Z'
+  - id: note-6388592
+    text: 'QA S20 (2026-10-23, RQ27 container two-PR): CODE CHANGE 2314f1a8 needs
+      normal re-review. (1) A worker split refused by tmux logged a Traceback ending
+      "returned non-zero exit status 1." (tmux stderr "no space for new pane" captured
+      by tmux._run and dropped); tmux._run now raises TmuxCommandError (CalledProcessError
+      subclass) whose message ends with the stderr. (2) Y cleanup during a stopping
+      zz t run with held refiners: after the refiner panes died, the worker route
+      gate checked the containers being removed and logged + showed "Scenario N worker
+      waiting — work route ... unavailable ... Remedy: pm provider test" (S17 rerun
+      Then failed). Both launch paths now skip the worker route gate when the refiner
+      pane is gone (_refiner_gone) and take the dead-worker path. 3 mutation-checked
+      regressions in tests/test_worker_route.py; suite 3469 passed. All three stories
+      replayed post-fix with every Then held (A s1 relaunched into the same container,
+      one push proxy per PR with unchanged PID/birth, B untouched). Captures /pm-captures/scenarios/20
+      (REPORT.md, pre-fix/, post-fix/).'
+    created_at: '2026-10-23T08:25:26Z'
+    last_edited: '2026-10-23T08:25:26Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
