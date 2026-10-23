@@ -428,6 +428,29 @@ def test_resume_noop_when_no_qa_root(tmp_path):
     resume_bg.assert_not_called()
 
 
+def test_other_projects_snapshots_are_left_alone(tmp_path):
+    """~/.pm/workdirs/qa is shared by every project.  A run of another
+    project's PR whose TUI just died (owner gone) is that TUI's to resume:
+    this TUI neither adopts it nor drops its snapshots as "left QA", nor
+    drops an older superseded snapshot of it (S39)."""
+    app = _make_app(tmp_path)
+    older = _seed_run(tmp_path, overall="PASS", pr_id="pr-0ther", loop="old")
+    live = _seed_run(tmp_path, overall="", pr_id="pr-0ther", loop="live",
+                     first_index=4)
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_not_called()
+    on_complete.assert_not_called()
+    assert "pr-0ther" not in app._qa_loops
+    assert "pr-0ther" not in app._resumed_qa_pr_ids
+    assert _resume_file_path(live).is_file()
+    assert _resume_file_path(older).is_file()
+
+
 @pytest.mark.parametrize("stale_loop", ["aaa", "zzz"])
 @pytest.mark.parametrize("stale_mtime", [1_000_000, 4_000_000_000])
 def test_resume_prefers_live_snapshot_over_superseded_run(tmp_path,

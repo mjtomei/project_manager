@@ -431,8 +431,8 @@ def _resume_incomplete_qa(app) -> None:
     if not hasattr(app, "_resumed_qa_pr_ids"):
         app._resumed_qa_pr_ids = set()
 
-    # Defer the (relatively expensive) project load until a candidate is
-    # actually found — this runs on the ~1s poll tick.
+    # Defer the (relatively expensive) project load until a snapshot of a
+    # PR not tracked here is found — this runs on the ~1s poll tick.
     project_data = None
 
     # A fresh start (z t) stops the old loop without processing its
@@ -477,6 +477,17 @@ def _resume_incomplete_qa(app) -> None:
         if pr_id:
             by_pr.setdefault(pr_id, []).append(
                 (resume_file, rdata, _overall(resume_file.parent)))
+    # ~/.pm/workdirs/qa is shared by every project under ~/.pm.  Another
+    # project's runs are its own TUI's to resume or drop: treating its PR
+    # as "left QA" here deleted a live run's snapshot as soon as its TUI
+    # died, so that TUI's restart had nothing to resume (S39).
+    known = set(app._qa_loops) | app._resumed_qa_pr_ids
+    if set(by_pr) - known:
+        if not app._root:
+            return
+        project_data = store.load(app._root)
+        known |= {p.get("id") for p in project_data.get("prs") or []}
+        by_pr = {k: v for k, v in by_pr.items() if k in known}
 
     live_workdirs = {str(s.qa_workdir) for s in app._qa_loops.values()
                      if getattr(s, "qa_workdir", None)}
