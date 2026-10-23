@@ -102,14 +102,43 @@ def test_run_qa_finalize_pane_returns_none_when_window_missing(
 
 # --- (g) -----------------------------------------------------------------
 
-def test_run_qa_finalize_pane_returns_none_when_pass_unverified(tmp_path):
+def test_run_qa_finalize_pane_returns_none_when_pass_unverified(
+    monkeypatch, tmp_path,
+):
+    import pm_core.qa_loop as qa_loop_mod
+    import pm_core.tmux as tmux_mod
+    monkeypatch.setattr(qa_loop_mod, "_is_verification_enabled", lambda: True)
+    looked_up = []
+    monkeypatch.setattr(tmux_mod, "find_window_by_name",
+                        lambda *a, **kw: looked_up.append(a))
     state = QALoopState(pr_id="x")
     state.scenario_verdicts = {1: "PASS"}
     state.verified_scenarios = set()
-    # Gate fires before any tmux access (lines 388-395).
+    # Gate fires before any tmux access.
     assert _run_qa_finalize_pane(
         state, {}, "pm-test", "qa", str(tmp_path),
     ) is None
+    assert looked_up == []
+
+
+def test_run_qa_finalize_pane_runs_unverified_pass_when_verification_off(
+    monkeypatch, tmp_path,
+):
+    """S21: with qa-verify-pass off no PASS is ever verified, so the gate
+    must not skip finalize (it reaches the finalize window lookup)."""
+    import pm_core.qa_loop as qa_loop_mod
+    import pm_core.tmux as tmux_mod
+    monkeypatch.setattr(qa_loop_mod, "_is_verification_enabled", lambda: False)
+    looked_up = []
+    monkeypatch.setattr(tmux_mod, "find_window_by_name",
+                        lambda *a, **kw: looked_up.append(a))
+    state = QALoopState(pr_id="x")
+    state.scenario_verdicts = {1: "PASS", 2: "PASS"}
+    state.verified_scenarios = set()
+    assert _run_qa_finalize_pane(
+        state, {}, "pm-test", "qa", str(tmp_path),
+    ) is None
+    assert looked_up == [("pm-test", "qa")]
 
 
 # --- (h) wiring test, textual-assertion fallback -------------------------

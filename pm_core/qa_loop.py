@@ -664,12 +664,14 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
     # Gate: every PASS verdict must have been confirmed by the verifier
     # before we finalize. The poll loop already waits for verifications
     # to settle, but this guards against any path that reaches finalize
-    # with an unverified PASS still in scenario_verdicts.
+    # with an unverified PASS still in scenario_verdicts.  With PASS
+    # verification turned off (qa-verify-pass) no PASS is ever verified,
+    # so the gate would skip finalize on every all-PASS run.
     unverified = [
         idx for idx, v in state.scenario_verdicts.items()
         if v == VERDICT_PASS and idx not in state.verified_scenarios
     ]
-    if unverified:
+    if unverified and _is_verification_enabled():
         _log.warning("QA finalize: skipping — PASS verdicts %s have not been "
                      "verified yet", unverified)
         return None
