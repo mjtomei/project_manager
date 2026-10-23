@@ -354,6 +354,21 @@ env-by-name).
     no `kill -0` completion waits on zombies; convert recordings with VFR.
     Kept as-is (do not strengthen): S14 numbering clarification 590a39ab.
     Known separately: #245 queued-startup ownership, pr-04dfffb.
+    QA5 clarifications (supervisor, before S15/S16 refinement):
+    (1) `podman inspect` Config.Env of a QA container legitimately holds
+    the values passed by name (`-e NAME`, values via the runtime process
+    env) -- that is the intended delivery (RQ15, S14 evidence). The
+    no-secret check covers generated argv/commands, pm logs, pane output
+    and captures; if container env is inspected, record a count only,
+    never require absence and never copy values into captures.
+    (2) Dead-window container cleanup with two PRs running the same `-sN`
+    indices can hit the known orphan-sweep collision pr-1139060 (#241).
+    A lingering dead-window container, or a sweep that touches the other
+    PR's same-`sN` container, is attributed to pr-1139060 and recorded as
+    an observation, not a new pr-592e4bd requirement. Pane-loss and
+    recovery checks (no crash or hang, INPUT_REQUIRED or a relaunch
+    through the route gate, no misdirected message, no false "resumed")
+    stay as required.
 
 ## 3. Edge cases
 
