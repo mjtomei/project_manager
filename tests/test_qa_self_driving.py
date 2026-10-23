@@ -744,3 +744,50 @@ class TestEdgeCases:
         new_state = app._qa_loops["pr-001"]
         assert new_state is not stale
         assert "pr-001" in app._self_driving_qa
+
+
+# ---------------------------------------------------------------------------
+# A started QA run must have the poll timer that processes its completion
+# ---------------------------------------------------------------------------
+
+class TestQAPollTimer:
+    """Only the shared poll timer (poll_qa_state) handles a finished QA run.
+    The TUI otherwise starts it only when an active PR already has a
+    workdir, so a PR's first QA run (no workdir yet) waited for the next
+    300 s background sync before "QA PASS ... press i" (S24 story 1)."""
+
+    def _app(self, tmp_path):
+        app = _make_app(tmp_path, pr_status="in_review", auto_start=False)
+        app._review_loop_timer = None
+        return app
+
+    def test_start_qa_starts_poll_timer(self, tmp_path):
+        from pm_core.tui.qa_loop_ui import start_qa
+
+        app = self._app(tmp_path)
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background"):
+            start_qa(app, "pr-001")
+
+        app.set_interval.assert_called_once()
+        assert app._review_loop_timer is app.set_interval.return_value
+
+    def test_zz_t_starts_poll_timer(self, tmp_path):
+        from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
+
+        app = self._app(tmp_path)
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background"), \
+             patch("pm_core.tui.qa_loop_ui._get_qa_pass_count", return_value=1):
+            start_or_stop_qa_loop(app, "pr-001")
+
+        app.set_interval.assert_called_once()
+
+    def test_running_timer_is_not_restarted(self, tmp_path):
+        from pm_core.tui.qa_loop_ui import start_qa
+
+        app = self._app(tmp_path)
+        timer = app._review_loop_timer = MagicMock()
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background"):
+            start_qa(app, "pr-001")
+
+        app.set_interval.assert_not_called()
+        assert app._review_loop_timer is timer

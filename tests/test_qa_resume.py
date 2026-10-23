@@ -210,6 +210,19 @@ def test_resume_incomplete_respawns_loop(tmp_path):
     assert _resume_file_path(qa_dir).is_file()
 
 
+def test_resume_incomplete_starts_poll_timer(tmp_path):
+    # Only the poll timer processes the resumed run's completion.
+    app = _make_app(tmp_path)
+    app._review_loop_timer = None
+    _seed_run(tmp_path, overall="")
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background"):
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    app.set_interval.assert_called_once()
+
+
 def test_resume_completed_processes_and_clears(tmp_path):
     app = _make_app(tmp_path)
     qa_dir = _seed_run(tmp_path, overall=VERDICT_NEEDS_WORK)

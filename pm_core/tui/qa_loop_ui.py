@@ -104,6 +104,19 @@ def focus_or_start_qa(app, pr_id: str) -> None:
     start_qa(app, pr_id)
 
 
+def _ensure_qa_poll_timer(app) -> None:
+    """Start the shared poll timer for a newly registered QA loop.
+
+    Only that timer (``poll_qa_state``) processes a finished run: the
+    completion message, lifecycle transition and snapshot cleanup.  The
+    TUI otherwise starts it only when some active PR already has a
+    workdir, which a PR's first QA run (no workdir yet) does not satisfy,
+    so the completion waited for the next 300 s background sync.
+    """
+    from pm_core.tui.review_loop_ui import _ensure_poll_timer
+    _ensure_poll_timer(app)
+
+
 def start_qa(app, pr_id: str) -> None:
     """Start a QA session for a PR.
 
@@ -157,6 +170,7 @@ def start_qa(app, pr_id: str) -> None:
         app.call_from_thread(_on_qa_update, app, s)
 
     app._qa_loops[pr_id] = state
+    _ensure_qa_poll_timer(app)
     app.log_message(f"Starting QA for {pr_id}...")
 
     start_qa_background(state, app._root, pr, on_update)
@@ -261,6 +275,7 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
         app.call_from_thread(_on_qa_update, app, s)
 
     app._qa_loops[pr_id] = state
+    _ensure_qa_poll_timer(app)
 
     required = app._self_driving_qa[pr_id]["required_passes"]
     passes_label = f" ({required} pass{'es' if required > 1 else ''} required)" if required > 1 else ""
@@ -516,6 +531,7 @@ def _resume_incomplete_qa(app) -> None:
             _app.call_from_thread(_on_qa_update, _app, s)
 
         app._qa_loops[pr_id] = state
+        _ensure_qa_poll_timer(app)
         app.log_message(f"Resuming QA for {pr_id} after restart...")
         _log.info("Resuming incomplete QA from disk: %s", pr_id)
         qa_loop.resume_qa_background(state, app._root, pr, _on_update)
