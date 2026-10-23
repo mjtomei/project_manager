@@ -2847,7 +2847,11 @@ def _split_worker_pane(scenario: QAScenario, refiner_pane: str,
 
     The refiner's window can be closed under a running loop (PR cleanup,
     a fresh start's sweep), and then the split fails as expected: log it
-    without a traceback.
+    without a traceback.  Either way the scenario window is left without
+    panes, so the poll loop handles it as a dead worker (route-gated
+    relaunch with retries).  A live refiner left behind would be taken
+    for the worker by the poll loop's first-pane fallback, and could be
+    nudged into a verdict for a scenario that never ran.
     """
     from pm_core import tmux as tmux_mod
     try:
@@ -2855,8 +2859,13 @@ def _split_worker_pane(scenario: QAScenario, refiner_pane: str,
                                       background=True, cwd=cwd)
     except Exception:
         if tmux_mod.pane_exists(refiner_pane):
-            _log.warning("Failed to split scenario pane for scenario %d",
-                         scenario.index, exc_info=True)
+            _log.warning("Failed to split scenario pane for scenario %d — "
+                         "closing refiner pane %s so the worker is "
+                         "relaunched", scenario.index, refiner_pane,
+                         exc_info=True)
+            # Refinement is done; QA exec panes don't remove the container.
+            subprocess.run(tmux_mod._tmux_cmd("kill-pane", "-t", refiner_pane),
+                           check=False, capture_output=True)
         else:
             _log.warning("Scenario %d: refiner pane %s is gone (window "
                          "closed) — worker not launched",

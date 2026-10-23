@@ -509,4 +509,12 @@ repeated deaths turn a PASS into NEEDS_WORK.
     and `test_worker_split_failure_with_live_refiner_keeps_traceback`
     (fail with the fix reverted). The relaunch path
     (`_relaunch_scenario_window`) already handles a vanished window in
-    its own `try`.
+    its own `try`. Review loop ab29 i2: a split failure with the refiner
+    pane still alive left `window_name` set and no `pane_id`, so the poll
+    loop's first-pane fallback took the refiner for the worker (and could
+    remind it into a verdict for a scenario that never ran). The refiner
+    pane (refinement is done; QA exec panes don't remove the container)
+    is now closed, so the scenario takes the dead-worker path: route-gated
+    relaunch with retries. Real-tmux regression
+    `test_worker_split_failure_with_live_refiner_keeps_traceback` (fails
+    without the kill).

@@ -1041,20 +1041,44 @@ class TestPollLoopRouteGating:
         assert sc.pane_id is None
 
     def test_worker_split_failure_with_live_refiner_keeps_traceback(
-            self, tmp_path, caplog):
-        """An unexpected split failure (refiner pane still there) is
-        still logged with its traceback."""
+            self, caplog, monkeypatch):
+        """Real tmux: an unexpected split failure (refiner pane still
+        there) is logged with its traceback, and the refiner pane is
+        closed, so the poll loop finds no pane in the scenario window
+        (dead worker: relaunch) instead of taking the refiner for the
+        worker through its first-pane fallback."""
         import logging
+        import shutil
+        import subprocess
+        import tempfile
         from pm_core import qa_loop
+        if not shutil.which("tmux"):
+            pytest.skip("tmux not installed")
+        d = tempfile.mkdtemp(prefix="pmsp", dir="/tmp")
+        sock = os.path.join(d, "s")
+        monkeypatch.setenv("PM_TMUX_SOCKET", sock)
+        t = ["tmux", "-S", sock]
+
+        def tm(*a):
+            return subprocess.run(t + list(a), check=True, capture_output=True,
+                                  text=True).stdout.strip()
         sc = qa_loop.QAScenario(index=3, title="t", focus="f")
-        with patch("pm_core.tmux.split_pane_at",
-                   side_effect=RuntimeError("boom")), \
-             patch("pm_core.tmux.pane_exists", return_value=True), \
-             patch.object(qa_loop._log, "handlers",
-                          qa_loop._log.handlers + [caplog.handler]), \
-             caplog.at_level(logging.INFO, logger="pm.qa_loop"):
-            assert qa_loop._split_worker_pane(sc, "%7", "w", "/") is None
-        assert caplog.records and all(r.exc_info for r in caplog.records)
+        try:
+            tm("new-session", "-d", "-s", "sess", "-n", "main", "sleep 60")
+            refiner = tm("new-window", "-d", "-P", "-F", "#{pane_id}", "-t",
+                         "sess:", "-n", "qa-s3", "sleep 60")
+            assert qa_loop.find_claude_pane("sess", "qa-s3") == refiner
+            with patch("pm_core.tmux.split_pane_at",
+                       side_effect=RuntimeError("boom")), \
+                 patch.object(qa_loop._log, "handlers",
+                              qa_loop._log.handlers + [caplog.handler]), \
+                 caplog.at_level(logging.INFO, logger="pm.qa_loop"):
+                assert qa_loop._split_worker_pane(sc, refiner, "w", "/") is None
+            assert caplog.records and all(r.exc_info for r in caplog.records)
+            assert qa_loop.find_claude_pane("sess", "qa-s3") is None
+        finally:
+            subprocess.run(t + ["kill-server"], capture_output=True)
+            shutil.rmtree(d, ignore_errors=True)
 
     def test_idle_without_verdict_on_down_route_then_resume(self, tmp_path):
         from pm_core import qa_loop
