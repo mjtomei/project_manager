@@ -95,7 +95,10 @@ worker alike:
   fails between the queue check and the refiner/worker gate, the scenario
   is restored to its pre-launch state, put back at the front of the queue
   and the failing status cached for the queue check; a refiner window
-  already opened is closed (the refiner reruns at relaunch). The poll loop
+  already opened is closed (the refiner reruns at relaunch) and a QA
+  container created for the launch is removed (the relaunch re-clones the
+  workdir; a container reused by name would keep its bind mount on the
+  deleted clone). The poll loop
   retries the queue every tick (cached check), so a deferred scenario also
   launches when no other verdict event would refill its slot;
 - window-death retry: deferred without spending a retry slot;
@@ -362,3 +365,12 @@ inode, so a replacement socket cannot reuse the number.
    scenarios), used when it has no scenarios. Regression
    `test_newer_run_without_scenarios_outranks_older_orphan` (fails on
    bb198e46).
+
+Review loop acdb i4: a queued *container* launch deferred at the refiner
+or worker route gate left its container running; the relaunch re-cloned
+`s-N/repo` (rmtree + clone) and `create_container` reused the running
+container by name, whose `/workspace` bind mount still pointed at the
+deleted clone. `_drop_deferred_launch` (was `_drop_deferred_window`) now
+also removes that container (and its push proxy). Regression
+`TestPollLoopRouteGating::test_deferred_container_launch_removes_its_container`
+(both gates; fails without the fix).

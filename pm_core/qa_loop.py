@@ -2231,19 +2231,31 @@ def _install_artifact_files(pm_root: Path, scenario: QAScenario,
     scenario.artifact_paths = new_paths
 
 
-def _drop_deferred_window(session: str, scenario: "QAScenario",
-                          win_name: str, deferred: dict | None) -> None:
-    """Close a queued scenario's refiner window when its worker launch was
-    deferred: the scenario goes back to the queue and is prepared afresh
-    (refiner included) once the route is usable."""
+def _drop_deferred_launch(session: str, scenario: "QAScenario",
+                          win_name: str | None, deferred: dict | None,
+                          container_name: str | None = None) -> None:
+    """Undo a queued launch deferred by its route gate: close the refiner
+    window and remove the container created for it.  The scenario goes
+    back to the queue and is prepared afresh (refiner included) once the
+    route is usable.  The container must go: that preparation re-clones
+    the workdir, and a container reused by name would keep its bind mount
+    on the deleted clone."""
     if deferred is None or scenario.index not in deferred:
         return
     from pm_core import tmux as tmux_mod
-    try:
-        tmux_mod.kill_window(session, win_name)
-    except Exception:
-        _log.debug("could not close deferred window %s", win_name,
-                   exc_info=True)
+    if win_name:
+        try:
+            tmux_mod.kill_window(session, win_name)
+        except Exception:
+            _log.debug("could not close deferred window %s", win_name,
+                       exc_info=True)
+    if container_name:
+        from pm_core import container as container_mod
+        try:
+            container_mod.remove_container(container_name)
+        except Exception:
+            _log.warning("could not remove deferred container %s",
+                         container_name, exc_info=True)
 
 
 def _launch_scenarios_in_tmux(
@@ -2420,7 +2432,7 @@ def _launch_scenarios_in_tmux(
 
         if not _route_gate(state, pr_data, data, scenario, "qa_scenario",
                            deferred=_route_deferred):
-            _drop_deferred_window(session, scenario, win_name, _route_deferred)
+            _drop_deferred_launch(session, scenario, win_name, _route_deferred)
             return
         child_cmd, pane_cwd = _build_scenario_run_cmd(
             scenario, state, data, transcript, _qa_resolution,
@@ -2592,6 +2604,8 @@ def _launch_scenarios_in_containers(
 
         if not _route_gate(state, pr_data, data, scenario, "qa_concretize",
                            container_name=cname, deferred=_route_deferred):
+            _drop_deferred_launch(session, scenario, None, _route_deferred,
+                                  container_name=cname)
             return
 
         import uuid as _uuid
@@ -2681,7 +2695,8 @@ def _launch_scenarios_in_containers(
 
         if not _route_gate(state, pr_data, data, scenario, "qa_scenario",
                            container_name=cname, deferred=_route_deferred):
-            _drop_deferred_window(session, scenario, win_name, _route_deferred)
+            _drop_deferred_launch(session, scenario, win_name, _route_deferred,
+                                  container_name=cname)
             return
         exec_cmd, pane_cwd = _build_scenario_run_cmd(
             scenario, state, data, transcript, _qa_resolution,

@@ -932,6 +932,42 @@ class TestPollLoopRouteGating:
         assert list(deferred) == [4] and not deferred[4].ok
         assert not sc.window_name and 4 not in state.scenario_verdicts
 
+    @pytest.mark.parametrize("failing", ["qa_concretize", "qa_scenario"])
+    def test_deferred_container_launch_removes_its_container(
+            self, tmp_path, failing):
+        """A queued container launch deferred at either gate removes the
+        container it created: the relaunch re-clones the workdir, and a
+        container reused by name would keep its bind mount on the deleted
+        clone."""
+        from pm_core import qa_loop
+        sc = qa_loop.QAScenario(index=4, title="t", focus="f")
+        state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
+        state.scenarios = [sc]
+        deferred = {}
+
+        def checker(pr, data, session_type, **k):
+            return lambda: _status(session_type != failing)
+        with patch("pm_core.qa_loop._route_checker", side_effect=checker), \
+             patch("pm_core.qa_loop._route_mounts", return_value={}), \
+             patch("pm_core.container.load_container_config"), \
+             patch("pm_core.container.create_qa_container"), \
+             patch("pm_core.container.remove_container") as remove, \
+             patch("pm_core.qa_loop.create_scenario_workdir",
+                   return_value=(tmp_path / "repo", tmp_path / "scratch")), \
+             patch("pm_core.qa_loop._build_concretize_cmd",
+                   return_value="refiner"), \
+             patch("pm_core.tmux.new_window_get_pane", return_value="%9"), \
+             patch("pm_core.tmux.kill_window"), \
+             patch("pm_core.qa_loop._concretize_scenario",
+                   return_value=(None, None)), \
+             patch("pm_core.qa_loop._await_route",
+                   side_effect=AssertionError("blocking wait")):
+            qa_loop._launch_scenarios_in_containers(
+                state, {}, {"id": "pr-1"}, "sess", None, str(tmp_path),
+                _route_deferred=deferred)
+        assert list(deferred) == [4]
+        remove.assert_called_once_with(sc.container_name)
+
     def test_idle_without_verdict_on_down_route_then_resume(self, tmp_path):
         from pm_core import qa_loop
         sc = qa_loop.QAScenario(index=1, title="t", focus="f")
