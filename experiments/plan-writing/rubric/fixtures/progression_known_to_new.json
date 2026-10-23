@@ -1,0 +1,29 @@
+{
+  "id": "progression_known_to_new",
+  "dimension": "organization_and_progression",
+  "concerns": [
+    "non_sequiturs"
+  ],
+  "case_type": "whole_document",
+  "document_kind": "explanatory paragraph",
+  "strong": "The compact fluorescent bulb has become the standard bulb for household lamps. Until recently, most lamps used incandescent bulbs. This type of bulb operates by heating a tungsten filament until it glows, throwing off light. Unfortunately, heating the filament wastes approximately 90% of the energy used to produce the light.",
+  "weak": "The compact fluorescent bulb has become the standard bulb for household lamps. Until recently, most people used incandescent bulbs in their lamps. Heating a tungsten filament until it glows, throwing off light, is how this type of bulb operates. Unfortunately, approximately 90% of the energy used to produce the light is wasted by heating the filament.",
+  "expected": {
+    "better": "strong",
+    "dimension": "organization_and_progression"
+  },
+  "held_constant": "The same information in the same order of sentences; only what each sentence opens with changes.",
+  "notes": "In the weaker version each sentence starts on something new, so the reader has to supply the links.",
+  "pair_kind": "before_after",
+  "provenance": {
+    "weak": {
+      "ref": "unc-flow",
+      "locator": "Known-to-new sequencing, version 1"
+    },
+    "strong": {
+      "ref": "unc-flow",
+      "locator": "Known-to-new sequencing, version 2"
+    }
+  },
+  "direction_evidence": "The handout says both versions 'contain the same information' and recommends version 2."
+}

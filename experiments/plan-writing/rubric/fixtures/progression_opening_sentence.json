@@ -1,0 +1,29 @@
+{
+  "id": "progression_opening_sentence",
+  "dimension": "organization_and_progression",
+  "concerns": [
+    "poor_progression"
+  ],
+  "case_type": "whole_document",
+  "document_kind": "tutorial paragraph",
+  "strong": "A loop runs the same block of code multiple times. For example, suppose you wrote a block of code that detected whether an input line ended with a period. To evaluate a million input lines, create a loop that runs a million times.",
+  "weak": "A block of code is any set of contiguous code within the same function. For example, suppose you wrote a block of code that detected whether an input line ended with a period. To evaluate a million input lines, create a loop that runs a million times.",
+  "expected": {
+    "better": "strong",
+    "dimension": "organization_and_progression"
+  },
+  "held_constant": "Everything but the opening sentence.",
+  "notes": "The weaker opening defines a term the paragraph is not about; the source says it 'sends readers in the wrong direction'.",
+  "pair_kind": "before_after",
+  "provenance": {
+    "weak": {
+      "ref": "google-tw1",
+      "locator": "Paragraphs > Write a great opening sentence (weaker)"
+    },
+    "strong": {
+      "ref": "google-tw1",
+      "locator": "Paragraphs > Write a great opening sentence (stronger)"
+    }
+  },
+  "direction_evidence": "Google Technical Writing One presents the stronger opening as the fix."
+}

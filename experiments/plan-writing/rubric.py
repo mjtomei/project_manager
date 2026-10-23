@@ -2,9 +2,9 @@
 
 The rubric lives in rubric/ (rubric.md explains it; dimensions.json and references.json are
 the machine-readable source). render_judge() fills the blinded paired templates for the
-whole_document and continuation tracks; ordering and origin masking stay with the caller,
-which only ever passes candidates as A and B. Stdlib only, so the runner can import it
-without collect.py's dependencies.
+whole_document and continuation tracks, and render_single() the single-document ones; ordering
+and origin masking stay with the caller, which only ever passes candidates as A and B (or one
+document). Stdlib only, so the runner can import it without collect.py's dependencies.
 """
 
 import json
@@ -17,6 +17,7 @@ HERE = Path(__file__).resolve().parent
 RUBRIC = HERE / "rubric"
 CASE_TYPES = ("whole_document", "continuation")
 TEMPLATES = {"whole_document": "whole_document.md", "continuation": "continuation.md"}
+SINGLE_TEMPLATES = {"whole_document": "whole_document_single.md", "continuation": "continuation_single.md"}
 PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 PREFERENCES = ("A", "B", "tie")
 
@@ -82,40 +83,89 @@ def dimension_block(dims, case_type):
     return "\n\n".join(parts)
 
 
-def output_schema(dims):
-    example = {"dimensions": [{"dimension": d["id"], "evidence": ["<quoted or located passages>"],
-                               "rationale": "<why>", "score_a": 3, "score_b": 3,
-                               "preference": "A|B|tie"} for d in dims],
-               "overall_preference": "A|B|tie", "overall_rationale": "<why>"}
+def output_schema(dims, single=False):
+    if single:
+        example = {"dimensions": [{"dimension": d["id"], "evidence": ["<quoted or located passages>"],
+                                   "rationale": "<why>", "score": 3} for d in dims],
+                   "overall_score": 3, "overall_rationale": "<why>"}
+    else:
+        example = {"dimensions": [{"dimension": d["id"], "evidence": ["<quoted or located passages>"],
+                                   "rationale": "<why>", "score_a": 3, "score_b": 3,
+                                   "preference": "A|B|tie"} for d in dims],
+                   "overall_preference": "A|B|tie", "overall_rationale": "<why>"}
     return json.dumps(example, indent=2, ensure_ascii=False)
 
 
+def _common_values(case_type, single, brief, prefix, section_request, document_kind, material, no_brief,
+                   dimensions, rubric):
+    dims = dimensions_for(case_type, dimensions, rubric)
+    values = {"document_kind_line": (" Document kind: " + document_kind + "." if document_kind else ""),
+              "dimension_block": dimension_block(dims, case_type),
+              "output_schema": output_schema(dims, single)}
+    if case_type == "whole_document":
+        if prefix is not None:
+            raise ValueError("whole_document cases take a brief and no prefix")
+        if bool(brief) == bool(no_brief):
+            raise ValueError("whole_document cases take a brief, or no_brief=True when none exists")
+        if brief:
+            values["brief_block"] = "## Brief\n\n<brief>\n" + brief + "\n</brief>\n"
+        else:
+            values["brief_block"] = ("## Brief\n\nNo brief is available for this case. Where the rules or dimensions below"
+                                     " refer to the brief, judge against what the document itself establishes"
+                                     + (" and the material it describes" if material else "") + ".\n")
+        values["material_rule"] = " and the material the document describes" if material else ""
+        values["material_block"] = ("\n## Material the document describes\n\n<material>\n" + material
+                                    + "\n</material>\n" if material else "")
+    else:
+        if not prefix or brief is not None or no_brief:
+            raise ValueError("continuation cases take a prefix and no brief")
+        if material:
+            raise ValueError("continuation cases take no material; the prefix is their input")
+        values["prefix"] = prefix
+        values["section_request_line"] = (" The writers were asked: " + section_request if section_request else "")
+    return values
+
+
 def render_judge(case_type, *, document_a, document_b, brief=None, prefix=None,
-                 section_request=None, document_kind=None, dimensions=None, rubric=None):
+                 section_request=None, document_kind=None, material=None, no_brief=False, dimensions=None,
+                 rubric=None):
     """Render the judge prompt for one blinded pair.
 
     whole_document needs brief; continuation needs prefix and may take the section_request
     the generator was given. dimensions limits the rubric to the listed ids. Catalog cases of
     type pm_plan are whole-document cases: pass the instruction and conversation turns as the
     brief. Brief attachments belong in the brief text, since fidelity and coverage are judged
-    against it.
+    against it. Reports about existing work (digests, sign-off and QA reports) are whole-document
+    cases too: the brief is the request and material is what the report describes (diffs, code
+    excerpts, logs, test output), which fidelity is then judged against as well. no_brief=True
+    renders a whole-document case that has no brief at all (some published example pairs); the
+    judge is told so rather than shown an empty brief.
     """
-    dims = dimensions_for(case_type, dimensions, rubric)
-    kind_line = (" Document kind: " + document_kind + "." if document_kind else "")
-    values = {"document_kind_line": kind_line, "dimension_block": dimension_block(dims, case_type),
-              "output_schema": output_schema(dims)}
-    if case_type == "whole_document":
-        if not brief or prefix is not None:
-            raise ValueError("whole_document cases take a brief and no prefix")
-        values.update(brief=brief, document_a=document_a, document_b=document_b)
-    else:
-        if not prefix or brief is not None:
-            raise ValueError("continuation cases take a prefix and no brief")
-        values.update(prefix=prefix, section_a=document_a, section_b=document_b,
-                      section_request_line=(" The writers were asked: " + section_request if section_request else ""))
+    values = _common_values(case_type, False, brief, prefix, section_request, document_kind, material,
+                            no_brief, dimensions, rubric)
     if not document_a or not document_b:
         raise ValueError("Both candidates are required")
+    if case_type == "whole_document":
+        values.update(document_a=document_a, document_b=document_b)
+    else:
+        values.update(section_a=document_a, section_b=document_b)
     return fill((RUBRIC / "templates" / TEMPLATES[case_type]).read_text(), values)
+
+
+def render_single(case_type, *, document, brief=None, prefix=None, section_request=None,
+                  document_kind=None, material=None, no_brief=False, dimensions=None, rubric=None):
+    """Render the judge prompt for one document scored on its own (no comparison).
+
+    Takes the same inputs as render_judge() with one document in place of the pair, for cases
+    with nothing to compare against, such as a single report. The reply carries a score per
+    dimension and an overall_score; check it with validate_judgment(..., single=True).
+    """
+    values = _common_values(case_type, True, brief, prefix, section_request, document_kind, material,
+                            no_brief, dimensions, rubric)
+    if not document:
+        raise ValueError("A document is required")
+    values["document" if case_type == "whole_document" else "section"] = document
+    return fill((RUBRIC / "templates" / SINGLE_TEMPLATES[case_type]).read_text(), values)
 
 
 def render_fixture(fixture, strong_as="A", rubric=None):
@@ -125,7 +175,22 @@ def render_fixture(fixture, strong_as="A", rubric=None):
     a, b = ((fixture["strong"], fixture["weak"]) if strong_as == "A" else (fixture["weak"], fixture["strong"]))
     return render_judge(fixture["case_type"], document_a=a, document_b=b, brief=fixture.get("brief"),
                         prefix=fixture.get("prefix"), section_request=fixture.get("section_request"),
-                        document_kind=fixture.get("document_kind"), rubric=rubric)
+                        document_kind=fixture.get("document_kind"), material=fixture.get("material"),
+                        no_brief=_fixture_has_no_brief(fixture), rubric=rubric)
+
+
+def render_fixture_single(fixture, variant="strong", rubric=None):
+    """Render one variant of a fixture ("strong" or "weak") for single-document scoring."""
+    if variant not in ("strong", "weak"):
+        raise ValueError("variant must be strong or weak")
+    return render_single(fixture["case_type"], document=fixture[variant], brief=fixture.get("brief"),
+                         prefix=fixture.get("prefix"), section_request=fixture.get("section_request"),
+                         document_kind=fixture.get("document_kind"), material=fixture.get("material"),
+                         no_brief=_fixture_has_no_brief(fixture), rubric=rubric)
+
+
+def _fixture_has_no_brief(fixture):
+    return fixture["case_type"] == "whole_document" and not fixture.get("brief")
 
 
 def reference_markdown(rubric=None, references=None):
@@ -149,9 +214,13 @@ def reference_markdown(rubric=None, references=None):
                 "**Sources.** " + "; ".join("[" + refs[r]["title"] + "](" + refs[r]["url"] + ")" for r in d["references"]),
                 "", "**Detection guidance.**", ""] + ["- " + g for g in d["detection_guidance"]]
         out += ["", "**Not a fault.**", ""] + ["- " + g for g in d["not_a_defect"]]
-        out += ["", "**Example, stronger.** " + d["examples"]["strong"].replace("\n", " "),
-                "", "**Example, weaker.** " + d["examples"]["weak"].replace("\n", " "),
-                "", "**Score anchors.** " + " ".join(k + ": " + v for k, v in sorted(d["score_anchors"].items())),
+        for side, label in (("strong", "stronger"), ("weak", "weaker")):
+            ex = d["examples"][side]
+            ref = refs[ex["ref"]]
+            out += ["", "**Example, " + label + "** ([" + ref["title"] + "](" + ref["url"] + "), " + ex["locator"] + ")"
+                    + (". " + ex["note"] if ex.get("note") else "") + "", ""]
+            out += ["> " + line if line.strip() else ">" for line in ex["text"].strip().split("\n")]
+        out += ["", "**Score anchors.** " + " ".join(k + ": " + v for k, v in sorted(d["score_anchors"].items())),
                 "", "**Candidate measures** (readiness: " + d["measure_readiness"] + ").", ""]
         for m in d["candidate_measures"]:
             role = ", bias covariate" if m.get("role") == "bias_covariate" else ""
@@ -188,8 +257,10 @@ def write_doc():
         raise
 
 
-def validate_judgment(judgment, dimension_ids):
-    """Return a list of problems with a parsed judge reply; empty means it meets the output contract."""
+def validate_judgment(judgment, dimension_ids, single=False):
+    """Return a list of problems with a parsed judge reply; empty means it meets the output contract.
+
+    single=True checks a render_single() reply (score per dimension, overall_score)."""
     if not isinstance(judgment, dict):
         return ["reply is not a JSON object"]
     problems = []
@@ -207,16 +278,23 @@ def validate_judgment(judgment, dimension_ids):
     for r in rows:
         if not isinstance(r, dict):
             continue
-        for key in ("score_a", "score_b"):
-            if not (isinstance(r.get(key), int) and not isinstance(r.get(key), bool) and 1 <= r[key] <= 5):
+        for key in (("score",) if single else ("score_a", "score_b")):
+            if not _is_score(r.get(key)):
                 problems.append(str(r.get("dimension")) + ": " + key + " not an integer 1-5")
-        if r.get("preference") not in PREFERENCES:
+        if not single and r.get("preference") not in PREFERENCES:
             problems.append(str(r.get("dimension")) + ": preference not A, B or tie")
         if not isinstance(r.get("evidence"), list):
             problems.append(str(r.get("dimension")) + ": evidence not a list")
-    if judgment.get("overall_preference") not in PREFERENCES:
+    if single:
+        if not _is_score(judgment.get("overall_score")):
+            problems.append("overall_score not an integer 1-5")
+    elif judgment.get("overall_preference") not in PREFERENCES:
         problems.append("overall_preference not A, B or tie")
     return problems
+
+
+def _is_score(value):
+    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 5
 
 
 if __name__ == "__main__":
@@ -225,9 +303,13 @@ if __name__ == "__main__":
     parser.add_argument("--write-doc", action="store_true", help="Regenerate the dimension reference in rubric/rubric.md")
     parser.add_argument("--render", choices=CASE_TYPES + tuple(f["id"] for f in load_fixtures()),
                         help="Print the judge prompt for a fixture id, or for the first fixture of a case type")
+    parser.add_argument("--single", choices=("strong", "weak"),
+                        help="With --render, print the single-document prompt for that variant instead of the pair")
     args = parser.parse_args()
+    if args.single and not args.render:
+        parser.error("--single needs --render")
     if args.write_doc:
         write_doc()
     if args.render:
         fixture = next(f for f in load_fixtures() if args.render in (f["id"], f["case_type"]))
-        print(render_fixture(fixture))
+        print(render_fixture_single(fixture, args.single) if args.single else render_fixture(fixture))

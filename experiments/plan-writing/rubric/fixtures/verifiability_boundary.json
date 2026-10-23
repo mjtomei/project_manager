@@ -1,0 +1,27 @@
+{
+  "id": "verifiability_boundary",
+  "dimension": "verifiability",
+  "concerns": [],
+  "case_type": "whole_document",
+  "document_kind": "requirements specification",
+  "strong": "For up to and including 12 aircraft, the small display format shall be used. Otherwise, the large display format shall be used.",
+  "weak": "For up to 12 aircraft, the small display format shall be used. Otherwise, the large display format shall be used.",
+  "expected": {
+    "better": "strong",
+    "dimension": "verifiability"
+  },
+  "held_constant": "Both requirements; only 'up to' becomes 'up to and including'.",
+  "notes": "The weaker requirement cannot be tested at 12 aircraft.",
+  "pair_kind": "before_after",
+  "provenance": {
+    "weak": {
+      "ref": "berry-ambiguity",
+      "locator": "Section 5.1, example E38"
+    },
+    "strong": {
+      "ref": "berry-ambiguity",
+      "locator": "Section 5.1, example E39"
+    }
+  },
+  "direction_evidence": "Assuming that small and large display formats are defined previously, the ambiguity lies in the phrase for up to 12.\nIt can mean for up to and including 12 or for up to and excluding 12. The sentence should be rewritten to have\nthe fuller term."
+}

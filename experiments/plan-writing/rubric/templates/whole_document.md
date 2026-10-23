@@ -4,16 +4,11 @@ Judge each document on the quality dimensions below, one dimension at a time. Th
 
 Rules:
 - Score what the text does for its intended reader, not its length. A longer document is not more complete and a shorter one is not more concise unless the content shows it.
-- Judge fidelity and coverage against the brief. Useful elaboration that is consistent with the brief is not a fault, even when the brief never mentions it; text that contradicts the brief, or presents new material as already agreed, is.
+- Judge fidelity and coverage against the brief{{material_rule}}. Useful elaboration that is consistent with the brief is not a fault, even when the brief never mentions it; text that contradicts the brief, or presents new material as already agreed, is.
 - Before scoring a dimension, quote or point to the passages your judgment rests on.
 - Keep dimensions separate. A fault belongs to the dimension whose definition it violates; do not let one fault lower every score.
 
-## Brief
-
-<brief>
-{{brief}}
-</brief>
-
+{{brief_block}}{{material_block}}
 ## Document A
 
 <document_a>

@@ -1,0 +1,35 @@
+{
+  "id": "fidelity_report_nonexistent_api",
+  "dimension": "fidelity",
+  "concerns": [
+    "fidelity",
+    "unmarked_uncertainty"
+  ],
+  "case_type": "whole_document",
+  "document_kind": "release notes",
+  "material": "func New(src Source) *Rand {\nfunc (r *Rand) Int64() int64 { return int64(r.src.Uint64() &^ (1 << 63)) }\nfunc (r *Rand) Uint32() uint32 { return uint32(r.src.Uint64() >> 32) }\nfunc (r *Rand) Uint64() uint64 { return r.src.Uint64() }\nfunc (r *Rand) Int32() int32 { return int32(r.src.Uint64() >> 33) }\nfunc (r *Rand) Int() int { return int(uint(r.src.Uint64()) << 1 >> 1) }\nfunc (r *Rand) Int64N(n int64) int64 {\nfunc (r *Rand) Uint64N(n uint64) uint64 {\nfunc (r *Rand) Int32N(n int32) int32 {\nfunc (r *Rand) Uint32N(n uint32) uint32 {\nfunc (r *Rand) IntN(n int) int {\nfunc (r *Rand) UintN(n uint) uint {\nfunc (r *Rand) Float64() float64 {\nfunc (r *Rand) Float32() float32 {\nfunc (r *Rand) Perm(n int) []int {\nfunc (r *Rand) Shuffle(n int, swap func(i, j int)) {\nfunc Int64() int64 { return globalRand.Int64() }\nfunc Uint32() uint32 { return globalRand.Uint32() }\nfunc Uint64N(n uint64) uint64 { return globalRand.Uint64N(n) }\nfunc Uint32N(n uint32) uint32 { return globalRand.Uint32N(n) }\nfunc Uint64() uint64 { return globalRand.Uint64() }\nfunc Int32() int32 { return globalRand.Int32() }\nfunc Int() int { return globalRand.Int() }\nfunc Int64N(n int64) int64 { return globalRand.Int64N(n) }\nfunc Int32N(n int32) int32 { return globalRand.Int32N(n) }\nfunc IntN(n int) int { return globalRand.IntN(n) }\nfunc UintN(n uint) uint { return globalRand.UintN(n) }\nfunc N[Int intType](n Int) Int {\nfunc Float64() float64 { return globalRand.Float64() }\nfunc Float32() float32 { return globalRand.Float32() }\nfunc Perm(n int) []int { return globalRand.Perm(n) }\nfunc Shuffle(n int, swap func(i, j int)) { globalRand.Shuffle(n, swap) }\nfunc NormFloat64() float64 { return globalRand.NormFloat64() }\nfunc ExpFloat64() float64 { return globalRand.ExpFloat64() }",
+  "strong": "The Intn, Int31, Int31n, Int63, and Int64n top-level functions and methods from math/rand are spelled more idiomatically in math/rand/v2: IntN, Int32, Int32N, Int64, and Int64N. There are also new top-level functions and methods Uint32, Uint32N, Uint64, Uint64N, and UintN.",
+  "weak": "The Intn, Int31, Int31n, Int63, and Int64n top-level functions and methods from math/rand are spelled more idiomatically in math/rand/v2: IntN, Int32, Int32N, Int64, and Int64N. There are also new top-level functions and methods Uint32, Uint32N, Uint64, Uint64N, Uint, and UintN.",
+  "expected": {
+    "better": "strong",
+    "dimension": "fidelity"
+  },
+  "held_constant": "The whole paragraph; the weaker version lists Uint, which the shipped code does not define.",
+  "notes": "A report about shipped code, judged against the code: no brief exists, so the case renders with material only. The notes matched the proposal they were written from, not the code.",
+  "pair_kind": "revision_history",
+  "provenance": {
+    "material": {
+      "ref": "go1.22-math-rand-v2",
+      "locator": "exported func declarations in rand.go at go1.22.0, one per line"
+    },
+    "weak": {
+      "ref": "go-issue-66693",
+      "locator": "release notes text quoted in the issue"
+    },
+    "strong": {
+      "ref": "go-issue-66693",
+      "locator": "corrected go1.22.md (CL 578295)"
+    }
+  },
+  "direction_evidence": "The fix made 'the docs consistent with the code (ground truth)' (issue 66693)."
+}

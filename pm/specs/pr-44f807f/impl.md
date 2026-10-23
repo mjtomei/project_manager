@@ -42,13 +42,33 @@
    `experiments/plan-writing/rubric.py` (`load_rubric()`, `render_judge()`).
    Paired and blinded (Document A / Document B, no origin labels or provenance);
    the continuation template shows the prefix; output contract is per-dimension
-   JSON so dimensions stay distinct.
+   JSON so dimensions stay distinct. Single-document variants
+   (`whole_document_single.md`, `continuation_single.md`, `render_single()`,
+   `validate_judgment(..., single=True)`) score one document against the anchors
+   for cases with nothing to compare (user request 2026-10-23: "as long as we can
+   judge pairs and singles").
 
 5. **Fixtures.** `rubric/fixtures/*.json`: for every dimension at least one
-   fixture with a brief (or prefix), a strong and a weak variant that differ
-   mainly on the target dimension, and the expected direction. Fixtures tagged
-   with the concern they exercise must exist for padding, premature
-   implementation detail, poor progression, lost requirements (and fidelity).
+   fixture with a strong and a weak text that differ mainly on the target
+   dimension, the expected direction, and a brief, prefix or material where the
+   source has one. Fixtures tagged with the concern they exercise must exist for
+   every concern. **All example and fixture text is quoted from published
+   sources** (user request 2026-10-23: no self-generated examples): before/after
+   rewrites, verified IETF errata, reviewed revisions of PEPs/RFCs/KEPs/drafts,
+   annotated summarisation datasets. Each text part records its source in
+   `provenance`; `direction_evidence` says why the strong text is better.
+
+8. **Reports and reader-reported concerns** (user request 2026-10-23). Reports
+   about existing work (architecture digests, sign-off and QA reports) are
+   whole-document cases with optional `material` (what the report describes),
+   which fidelity is judged against. Add `salience_and_synthesis` (emphasis
+   follows importance; synthesis over inventory); extend organization (sentence
+   cohesion, fragmenting format), clarity (unintroduced shorthand), risks
+   (epistemic status: verified vs inferred, calibrated confidence) and fidelity
+   (claims about described material). Map the faults readers reported in
+   https://x.com/kitten_beloved/status/2113422896739860534 as concerns:
+   misplaced salience, non-sequiturs, unintroduced terms, unmarked uncertainty,
+   fragmenting format.
 
 6. **Measure readiness.** Each candidate measure is marked
    `automatic_candidate` (computable without a judge model: parsers, section
@@ -61,7 +81,9 @@
    measure, readiness flag; every dimension appears in rubric.md; fixtures exist
    for each dimension and each of the four concerns; both templates render
    (whole-document from a brief, continuation from a prefix) with no unfilled
-   placeholders, and rendering fixtures works.
+   placeholders, and rendering fixtures works. Also: single-document templates
+  render and validate; material and no-brief rendering; every example and
+  fixture text cites a reference and locator; fixtures exist for every concern.
 
 ## Implicit requirements
 
@@ -100,9 +122,17 @@
   (`role: bias_covariate`, e.g. `length_ratio`, `style_distance`) are
   automatic but do not make a dimension `automatic_candidate`.
 - *Pointwise vs paired judging.* Plan specifies blinded paired evaluation;
-  templates are paired, but ask for a 1–5 score per document per dimension plus
-  a per-dimension preference, so pointwise use stays possible. An overall
-  preference is requested separately and never computed from dimension scores.
+  paired templates ask for a 1–5 score per document per dimension plus a
+  per-dimension preference. Separate single-document templates exist for cases
+  with no comparison (reports); paired scores are conditioned on the other
+  document, so they are not a substitute. An overall preference (or overall
+  score) is requested separately and never computed from dimension scores.
+- *Sources with no brief.* Many published pairs have no recoverable request.
+  Rather than writing briefs, whole-document cases take `no_brief=True`, and the
+  judge is told no brief exists; a missing brief without the flag still raises.
+- *Plan text for reports.* No `plan-doc-eval.md` revision on master or any branch
+  mentions reports as of 2026-10-23; the user says the plan now covers them, so
+  the rubric supports them without citing plan text.
 - *Fidelity as a fifth concern.* The task lists fidelity next to the four
   concerns; it is mapped as its own dimension and given a concern-tagged fixture,
   while tests require the four named concerns.
@@ -118,9 +148,13 @@
   only) carry `applies_to`; templates list only applicable dimensions.
 - Requirement coverage in continuations is measured against commitments the
   prefix makes, not a brief.
-- Fixture variants are short; length differences are deliberate only in the
-  padding fixture, so other fixtures keep lengths similar to avoid confounding
-  with verbosity bias.
+- Published pairs cannot be length-matched. Pairs whose lengths differ by more
+  than 1.6x carry `length_confound: true` so calibration can separate them from
+  verbosity bias; padding pairs are long on the weak side by design.
+- Two fixtures join two verbatim passages of one document with `[...]` so a
+  contradiction between sections fits in one case; their notes say so.
+- In reports, code and test references given as evidence are not premature
+  implementation detail (scope_and_abstraction not_a_defect).
 - In continuations, each prefix-related fault has one owner: contradicting the
   prefix is fidelity, repeating or restarting it is continuity (concision judges
   filler within the section only), so fixtures for one do not move the other.
@@ -142,5 +176,5 @@
   Ctrl-C cleanup always finds it (QA S6); only SIGKILL can leave one, and
   `experiments/plan-writing/.gitignore` ignores it.
 - No network or model calls in tests; reference URLs are not fetched in tests.
-- Internal-consistency fixtures contradict themselves only about choices the brief
-  leaves open; a contradiction of the brief would also move fidelity.
+- Internal-consistency fixtures contradict themselves without a brief, so the
+  contradiction cannot also move fidelity.

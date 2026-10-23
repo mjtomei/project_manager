@@ -1,0 +1,34 @@
+{
+  "id": "salience_report_finding_last",
+  "dimension": "salience_and_synthesis",
+  "concerns": [
+    "misplaced_salience"
+  ],
+  "case_type": "whole_document",
+  "document_kind": "investigation report",
+  "brief": "DA Form 4697 (Report of Survey), block 26:",
+  "strong": "I have investigated the evidence and find PVT John T. Thomas as negligent. PVT Thomas damaged his M16 by carelessly leaving it on an M113 ramp. Private Thomas admits that he laid his M16 on the tailgate of the M113 to put on his protective mask. By doing so, he violated two specific directives. Private Thomas neither followed proper masking procedure (Exhibit F, “Soldier’s Manual of Common Tasks,” p.37) nor obeyed his field SOP that “at not time will equipment be placed on the ramp of personnel carriers” (Exhibit G). His squad leader, SSG Young, attests (Exhibit C) that Private Thomas knew the SOP. Direct support maintenance confirms that the M16 (total cost–$433.40) is damaged beyond repair (Exhibit D).",
+  "weak": "I have examined all available evidence as shown in exhibits A to G and as indicated below have personally investigated the same and it is my belief that the article (s) listed hereon and/or on attached sheets, total cost $433.50 was not damaged in an accidental manner. Something like this does not just happen; therefore, the soldier is responsible if negligent. [...] Well, one thing led to another and the next thing you know Thomas’ M16 is only good for shooting around corners. Such actions show negligence and make SP4 Farmer liable for restitution. (Exhibit D—statement from DS maintenance saying the M16 is irreparably damaged beyond repair).",
+  "expected": {
+    "better": "strong",
+    "dimension": "salience_and_synthesis"
+  },
+  "held_constant": "The same investigation and evidence; the weaker version narrates and states the finding last, the stronger one states it first. The weaker excerpt is shortened with [...] as marked.",
+  "notes": "A report whose verdict arrives only at the end versus one that leads with it, close in genre to a QA or sign-off verdict. Source errors (the wrong soldier named, $433.50 vs $433.40) are kept as printed and also bear on fidelity and consistency.",
+  "pair_kind": "before_after",
+  "provenance": {
+    "brief": {
+      "ref": "da-pam-600-67",
+      "locator": "Figures 5-5 and 5-6, form block"
+    },
+    "weak": {
+      "ref": "da-pam-600-67",
+      "locator": "Figure 5-5 (poor), printed p. 9"
+    },
+    "strong": {
+      "ref": "da-pam-600-67",
+      "locator": "Figure 5-6 (good), printed p. 9"
+    }
+  },
+  "direction_evidence": "DA PAM 600-67 para 5-2d presents Figure 5-6 as the good version: the finding first, then the evidence."
+}

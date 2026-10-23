@@ -1,0 +1,35 @@
+{
+  "id": "progression_stacked_headings",
+  "dimension": "organization_and_progression",
+  "concerns": [
+    "fragmenting_format"
+  ],
+  "case_type": "whole_document",
+  "document_kind": "procedure document outline",
+  "brief": "suppose you are documenting the process for creating a new website. To create the site, the reader must initialize the Froobus framework. To initialize the Froobus framework, the reader must run the carambola command-line tool.",
+  "strong": "## Creating the site\nTo create the site, you run the `carambola` command-line tool. The command displays a series of prompts to help you configure the site.\n### Running the carambola command",
+  "weak": "## Creating the site\n### Running the carambola command",
+  "expected": {
+    "better": "strong",
+    "dimension": "organization_and_progression"
+  },
+  "held_constant": "Both headings; the stronger version adds the sentence that links them.",
+  "notes": "Formatting in place of the connecting explanation. Very short, and the stronger version is longer by design.",
+  "pair_kind": "before_after",
+  "provenance": {
+    "brief": {
+      "ref": "google-tw2",
+      "locator": "Add navigation > Provide text under each heading (scenario)"
+    },
+    "weak": {
+      "ref": "google-tw2",
+      "locator": "stacked headings"
+    },
+    "strong": {
+      "ref": "google-tw2",
+      "locator": "heading with introductory text"
+    }
+  },
+  "direction_evidence": "Google Technical Writing Two recommends text under each heading.",
+  "length_confound": true
+}

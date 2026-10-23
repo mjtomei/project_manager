@@ -1,0 +1,30 @@
+{
+  "id": "risks_caveats_removed",
+  "dimension": "risks_and_open_questions",
+  "concerns": [
+    "unmarked_uncertainty"
+  ],
+  "case_type": "whole_document",
+  "document_kind": "intelligence assessment key judgments",
+  "strong": "We judge that Iraq has continued its weapons of mass destruction (WMD) programs in defiance of UN resolutions and restrictions. Baghdad has chemical and biological weapons as well as missiles with ranges in excess of UN restrictions; if left unchecked, it probably will have a nuclear weapon during this decade. (See INR alternative view at the end of these Key Judgments.) We judge that we are seeing only a portion of Iraq's WMD efforts, owing to Baghdad's vigorous denial and deception efforts. Revelations after the Gulf war starkly demonstrate the extensive efforts undertaken by Iraq to deny information. We lack specific information on many key aspects of Iraq's WMD programs.",
+  "weak": "Iraq has continued its weapons of mass destruction (WMD) programs in defiance of UN resolutions and restrictions. Baghdad has chemical and biological weapons as well as missiles with ranges in excess of UN restrictions; if left unchecked, it probably will have a nuclear weapon during this decade. Baghdad hides large portions of Iraq's WMD efforts. Revelations after the Gulf war starkly demonstrate the extensive efforts undertaken by Iraq to deny information.",
+  "expected": {
+    "better": "strong",
+    "dimension": "risks_and_open_questions"
+  },
+  "held_constant": "The same judgments published in the same month; the weaker version drops 'We judge', the pointer to the dissenting view and the stated evidence gap.",
+  "notes": "Assessments turned into statements of fact. The weaker version also rewords one judgment into a stronger claim, and the stronger one was itself criticised for not explaining uncertainty enough, so it is stronger only relatively.",
+  "pair_kind": "before_after",
+  "provenance": {
+    "weak": {
+      "ref": "cia-white-paper-2002",
+      "locator": "Key Judgments, first paragraphs"
+    },
+    "strong": {
+      "ref": "nie-2002-key-judgments",
+      "locator": "Key Judgments, first paragraphs"
+    }
+  },
+  "direction_evidence": "Conclusion 85. The Intelligence Community's elimination of the caveats from the unclassified White Paper misrepresented their judgments to the public which did not have access to the classified National Intelligence Estimate containing the more carefully worded assessments. (SSCI 2004, Conclusion 85)",
+  "direction_evidence_ref": "ssci-2004-prewar"
+}

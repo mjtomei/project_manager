@@ -7,8 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from pm_core.plans.parser import parse_plan_prs
-
 ROOT = Path(__file__).resolve().parent.parent
 EXP = ROOT / "experiments" / "plan-writing"
 _spec = importlib.util.spec_from_file_location("doc_rubric", EXP / "rubric.py")
@@ -20,18 +18,26 @@ REFS = rubric.load_references()
 FIXTURES = rubric.load_fixtures()
 DIMS = RUBRIC["dimensions"]
 DIM_IDS = [d["id"] for d in DIMS]
-EXTERNAL_KINDS = {"standard", "guideline", "process_template", "rubric", "paper", "book", "tool"}
+EXTERNAL_KINDS = {"standard", "guideline", "process_template", "rubric", "paper", "book", "tool", "example_source"}
+CONCERN_IDS = [c["id"] for c in RUBRIC["concerns"]]
 
 
 @pytest.mark.parametrize("dim", DIMS, ids=DIM_IDS)
 class TestDimension:
     def test_has_definition_example_guidance_question(self, dim):
         assert dim["definition"].strip()
-        assert dim["examples"]["strong"].strip() and dim["examples"]["weak"].strip()
-        assert dim["examples"]["strong"] != dim["examples"]["weak"]
+        strong, weak = dim["examples"]["strong"], dim["examples"]["weak"]
+        assert strong["text"].strip() and weak["text"].strip() and strong["text"] != weak["text"]
         assert dim["detection_guidance"] and all(g.strip() for g in dim["detection_guidance"])
         assert dim["judge_question"].strip()
         assert set(dim["score_anchors"]) == {"1", "3", "5"}
+
+    def test_examples_are_external_quotations(self, dim):
+        # Examples are quoted from published sources, never written for the rubric.
+        for side in ("strong", "weak"):
+            ex = dim["examples"][side]
+            assert ex["ref"] in REFS and REFS[ex["ref"]]["url"].startswith("https://")
+            assert ex["locator"].strip()
 
     def test_cites_external_source(self, dim):
         assert dim["references"], "dimension cites no source"
@@ -79,7 +85,10 @@ def test_references_well_formed():
     assert len(ids) == len(set(ids))
     for r in REFS.values():
         assert r["title"].strip() and r["url"].startswith("https://") and r["kind"] in EXTERNAL_KINDS
-    cited = {ref for d in DIMS for ref in d["references"] + [r for m in d["candidate_measures"] for r in m.get("references", [])]}
+    cited = {ref for d in DIMS for ref in d["references"] + [r for m in d["candidate_measures"] for r in m.get("references", [])]
+             + [d["examples"][side]["ref"] for side in ("strong", "weak")]}
+    cited |= {f["provenance"][part]["ref"] for f in FIXTURES for part in f["provenance"]}
+    cited |= {f["direction_evidence_ref"] for f in FIXTURES if "direction_evidence_ref" in f}
     assert set(RUBRIC["judge_design_references"]) <= set(REFS)
     cited |= set(RUBRIC["judge_design_references"])
     assert set(REFS) <= cited, "uncited references: " + ", ".join(sorted(set(REFS) - cited))
@@ -89,7 +98,8 @@ def test_concerns_map_onto_dimensions():
     concerns = {c["id"]: c for c in RUBRIC["concerns"]}
     assert set(RUBRIC["previously_identified_concerns"]) == {
         "padding", "premature_implementation_detail", "poor_progression", "lost_requirements"}
-    assert set(RUBRIC["previously_identified_concerns"]) | {"fidelity"} == set(concerns)
+    assert set(RUBRIC["previously_identified_concerns"]) | {"fidelity"} | set(RUBRIC["reader_reported_concerns"]) \
+        == set(concerns)
     for c in concerns.values():
         assert c["primary_dimension"] in DIM_IDS
         assert set(c["also_affects"]) <= set(DIM_IDS)
@@ -122,7 +132,7 @@ def test_fixture_for_every_dimension():
     assert covered == set(DIM_IDS)
 
 
-@pytest.mark.parametrize("concern", RUBRIC["previously_identified_concerns"] + ["fidelity"])
+@pytest.mark.parametrize("concern", CONCERN_IDS)
 def test_fixture_for_every_concern(concern):
     tagged = [f for f in FIXTURES if concern in f["concerns"]]
     assert tagged
@@ -134,6 +144,9 @@ def test_fixtures_cover_both_case_types():
     assert {f["case_type"] for f in FIXTURES} == set(rubric.CASE_TYPES)
 
 
+FIXTURE_TEXT_PARTS = ("brief", "prefix", "material", "strong", "weak")
+
+
 @pytest.mark.parametrize("fixture", FIXTURES, ids=[f["id"] for f in FIXTURES])
 class TestFixture:
     def test_well_formed(self, fixture):
@@ -143,43 +156,66 @@ class TestFixture:
         assert fixture["case_type"] in dim["applies_to"]
         assert fixture["strong"].strip() and fixture["weak"].strip() and fixture["strong"] != fixture["weak"]
         assert fixture["expected"] == {"better": "strong", "dimension": fixture["dimension"]}
-        assert fixture["held_constant"].strip() and fixture["notes"].strip()
-        assert set(fixture["concerns"]) <= {c["id"] for c in RUBRIC["concerns"]}
+        assert fixture["held_constant"].strip() and fixture["notes"].strip() and fixture["direction_evidence"].strip()
+        assert fixture.get("direction_evidence_ref", "sec-plain-english") in REFS
+        assert fixture["pair_kind"] in {"before_after", "erratum", "revision_history", "annotated_dataset"}
+        assert set(fixture["concerns"]) <= set(CONCERN_IDS)
         if fixture["case_type"] == "whole_document":
-            assert fixture.get("brief") and "prefix" not in fixture
+            assert "prefix" not in fixture
         else:
-            assert fixture.get("prefix") and "brief" not in fixture
+            assert fixture.get("prefix") and "brief" not in fixture and "material" not in fixture
 
-    def test_lengths_matched_unless_padding(self, fixture):
+    def test_every_text_is_quoted_from_a_cited_source(self, fixture):
+        # Fixture texts are published passages, never written for the rubric: each one names its source.
+        parts = [p for p in FIXTURE_TEXT_PARTS if fixture.get(p)]
+        assert set(fixture["provenance"]) == set(parts)
+        for part in parts:
+            prov = fixture["provenance"][part]
+            assert prov["ref"] in REFS and prov["locator"].strip()
+
+    def test_length_confound_is_flagged(self, fixture):
+        # Published pairs cannot be length-matched; a large difference is flagged so calibration can
+        # separate it from verbosity bias. Padding pairs are long on the weak side by design.
         a, b = len(fixture["strong"].split()), len(fixture["weak"].split())
         if "padding" in fixture["concerns"]:
-            assert b > a
+            assert b > a and "length_confound" not in fixture
         else:
-            assert max(a, b) <= 1.6 * min(a, b)
+            assert fixture.get("length_confound", False) == (max(a, b) > 1.6 * min(a, b))
 
     @pytest.mark.parametrize("strong_as", ["A", "B"])
     def test_renders_in_both_orders(self, fixture, strong_as):
         prompt = rubric.render_fixture(fixture, strong_as=strong_as)
         assert "{{" not in prompt.replace(fixture["strong"], "").replace(fixture["weak"], "")
         first, second = (fixture["strong"], fixture["weak"]) if strong_as == "A" else (fixture["weak"], fixture["strong"])
-        assert prompt.index(first) < prompt.index(second)
+        tag = "document" if fixture["case_type"] == "whole_document" else "section"
+        assert "<%s_a>\n%s\n</%s_a>" % (tag, first, tag) in prompt
+        assert "<%s_b>\n%s\n</%s_b>" % (tag, second, tag) in prompt
+        assert "### " + fixture["dimension"] + " — " in prompt
+        assert ("No brief is available" in prompt) == (fixture["case_type"] == "whole_document" and not fixture.get("brief"))
+
+    @pytest.mark.parametrize("variant", ["strong", "weak"])
+    def test_renders_single(self, fixture, variant):
+        prompt = rubric.render_fixture_single(fixture, variant)
+        tag = "document" if fixture["case_type"] == "whole_document" else "section"
+        assert "<%s>\n%s\n</%s>" % (tag, fixture[variant], tag) in prompt
+        assert prompt.count("<" + tag + ">") == 1 and "<document_a>" not in prompt
+        assert "{{" not in prompt.replace(fixture[variant], "")
         assert "### " + fixture["dimension"] + " — " in prompt
 
+    def test_prompt_does_not_leak_provenance(self, fixture):
+        prompt = rubric.render_fixture(fixture)
+        for part in fixture["provenance"].values():
+            ref = REFS[part["ref"]]
+            assert ref["url"] not in prompt and part["ref"] not in prompt
+        assert fixture["id"] not in prompt and fixture["direction_evidence"] not in prompt
 
-def test_genre_fixture_matches_pm_parser():
-    f = next(f for f in FIXTURES if f["id"] == "genre_pm_plan_fields")
-    strong = parse_plan_prs(f["strong"])
-    assert [p["title"] for p in strong] == ["Note subcommand", "Notes in session prompts"]
-    assert all(p["description"] and p["tests"] and p["files"] for p in strong)
-    assert parse_plan_prs(f["weak"]) == []
 
-
-def test_consistency_fixture_blocks_disagree_with_prose():
-    f = next(f for f in FIXTURES if f["id"] == "consistency_dependency_mismatch")
-    strong_deps = {p["title"]: p["depends_on"] for p in parse_plan_prs(f["strong"])}
-    weak_deps = {p["title"]: p["depends_on"] for p in parse_plan_prs(f["weak"])}
-    assert strong_deps["Evaluation runner"] == weak_deps["Evaluation runner"] == "Case catalog, Rubric"
-    assert weak_deps["Case catalog"] == "Rubric" and strong_deps["Case catalog"] == ""
+def test_fixtures_include_a_report_judged_against_material():
+    f = next(f for f in FIXTURES if f.get("material"))
+    declared = set(re.findall(r"^func (?:\(r \*Rand\) )?(\w+)", f["material"], re.M))
+    named = lambda text: set(re.findall(r"\b(?:Int|Uint)\w*", text.split("math/rand/v2:", 1)[1]))
+    assert named(f["strong"]) <= declared
+    assert named(f["weak"]) - declared == {"Uint"}
 
 
 # ---- templates ----------------------------------------------------------------
@@ -208,14 +244,60 @@ def test_continuation_template_renders_with_prefix():
     assert "imitating the prefix author's personal style" in prompt
 
 
+ALL_TEMPLATES = list(rubric.TEMPLATES.values()) + list(rubric.SINGLE_TEMPLATES.values())
+
+
 def test_templates_do_not_leak_origin():
-    for name in rubric.TEMPLATES.values():
+    for name in ALL_TEMPLATES:
         text = (EXP / "rubric" / "templates" / name).read_text().lower()
         for word in ("original", "reference", "generated", "human-written", "llm", "provenance", "source"):
             assert not re.search(r"\b" + word + r"\b", text), word
     fields = set(rubric.PLACEHOLDER.findall("".join(
-        (EXP / "rubric" / "templates" / n).read_text() for n in rubric.TEMPLATES.values())))
+        (EXP / "rubric" / "templates" / n).read_text() for n in ALL_TEMPLATES)))
     assert not fields & {"source", "url", "origin", "provenance", "author"}
+
+
+def test_single_templates_render():
+    prompt = rubric.render_single("whole_document", brief="BRIEF TEXT", document="ONLY DOC",
+                                  document_kind="sign-off report")
+    assert prompt.index("BRIEF TEXT") < prompt.index("ONLY DOC")
+    assert "Document kind: sign-off report." in prompt
+    assert "Document A" not in prompt and "preference" not in prompt and "<material>" not in prompt
+    assert not rubric.PLACEHOLDER.search(prompt)
+    schema = json.loads(prompt.split("in this shape:\n\n", 1)[1].split("\n\nScores use", 1)[0])
+    assert set(schema) == {"dimensions", "overall_score", "overall_rationale"}
+    assert all(set(r) == {"dimension", "evidence", "rationale", "score"} for r in schema["dimensions"])
+    assert "### continuity — " not in prompt
+    prompt = rubric.render_single("continuation", prefix="PREFIX TEXT", document="NEXT ONLY",
+                                  section_request="Write the migration section.")
+    assert prompt.index("PREFIX TEXT") < prompt.index("NEXT ONLY")
+    assert "The writers were asked: Write the migration section." in prompt
+    assert "### continuity — " in prompt and "imitating the prefix author's personal style" in prompt
+    assert not rubric.PLACEHOLDER.search(prompt)
+
+
+def test_material_for_reports():
+    for prompt in (rubric.render_judge("whole_document", brief="B", document_a="a", document_b="b",
+                                       material="MATERIAL TEXT {{brief}}"),
+                   rubric.render_single("whole_document", brief="B", document="a", material="MATERIAL TEXT {{brief}}")):
+        assert prompt.index("</brief>") < prompt.index("<material>\nMATERIAL TEXT {{brief}}\n</material>") \
+            < prompt.index("<document")
+        assert "against the brief and the material the document describes" in prompt
+    with pytest.raises(ValueError):
+        rubric.render_judge("continuation", prefix="p", document_a="a", document_b="b", material="m")
+    with pytest.raises(ValueError):
+        rubric.render_single("continuation", prefix="p", document="a", material="m")
+
+
+def test_render_single_rejects_wrong_inputs():
+    with pytest.raises(ValueError):
+        rubric.render_single("whole_document", brief="b", document="")
+    with pytest.raises(ValueError):
+        rubric.render_single("whole_document", prefix="p", document="a")
+    with pytest.raises(ValueError):
+        rubric.render_single("continuation", brief="b", document="a")
+    with pytest.raises(ValueError):
+        rubric.render_single("whole_document", brief="b", document="a", dimensions=[])
 
 
 def test_document_text_is_not_re_expanded():
@@ -237,6 +319,20 @@ def test_render_rejects_wrong_inputs():
         rubric.render_judge("whole_document", brief="b", document_a="a", document_b="b", dimensions=["continuity"])
     with pytest.raises(ValueError):
         rubric.render_judge("whole_document", brief="b", document_a="a", document_b="b", dimensions=[])
+    # A missing brief must be declared, never silently rendered empty.
+    with pytest.raises(ValueError):
+        rubric.render_judge("whole_document", document_a="a", document_b="b")
+    with pytest.raises(ValueError):
+        rubric.render_judge("whole_document", brief="b", no_brief=True, document_a="a", document_b="b")
+    with pytest.raises(ValueError):
+        rubric.render_judge("continuation", prefix="p", no_brief=True, document_a="a", document_b="b")
+
+
+def test_no_brief_rendering():
+    prompt = rubric.render_judge("whole_document", no_brief=True, document_a="a", document_b="b")
+    assert "No brief is available for this case." in prompt and "<brief>" not in prompt
+    prompt = rubric.render_single("whole_document", no_brief=True, document="a", material="m")
+    assert "establishes and the material it describes." in prompt and "<material>\nm\n</material>" in prompt
 
 
 def test_dimension_subset():
@@ -286,9 +382,26 @@ def test_validate_judgment():
     assert any("malformed" in p for p in problems) and any("evidence" in p for p in problems)
 
 
+def test_validate_single_judgment():
+    ids = [d["id"] for d in rubric.dimensions_for("whole_document")]
+    good = {"dimensions": [{"dimension": i, "evidence": ["q"], "rationale": "r", "score": 3} for i in ids],
+            "overall_score": 4, "overall_rationale": "r"}
+    assert rubric.validate_judgment(good, ids, single=True) == []
+    # A paired reply is not a valid single reply, and the reverse.
+    assert rubric.validate_judgment(_judgment(ids), ids, single=True)
+    assert rubric.validate_judgment(good, ids)
+    bad = json.loads(json.dumps(good))
+    bad["dimensions"][0]["score"] = True
+    bad["overall_score"] = 6
+    problems = rubric.validate_judgment(bad, ids, single=True)
+    assert any(": score not" in p for p in problems) and any("overall_score" in p for p in problems)
+
+
 def test_render_fixture_rejects_bad_slot():
     with pytest.raises(ValueError):
         rubric.render_fixture(FIXTURES[0], strong_as="a")
+    with pytest.raises(ValueError):
+        rubric.render_fixture_single(FIXTURES[0], variant="A")
 
 
 def test_write_doc_replaces_file_by_rename(tmp_path, monkeypatch):

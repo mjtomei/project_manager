@@ -1,0 +1,33 @@
+{
+  "id": "risks_no_drawbacks",
+  "dimension": "risks_and_open_questions",
+  "concerns": [],
+  "case_type": "whole_document",
+  "document_kind": "Rust RFC section",
+  "brief": "This proposes a minor new feature for rustc and cargo, which will allow rustc to detect invalid usage of #[cfg] conditions, such as misspelling a \"feature\" name.\n\nThe feature is purely opt-in. If the user doesn't enable this feature, then there is no impact on anything. If the user does enable this feature, then the only possible impact is that rustc fires new diagnostics. Language semantics, codegen, etc. are all unchanged.",
+  "strong": "## Drawbacks\n\n* Adds complexity, in the form of additional command-line options.\n* As with all lints, correct code may be trigger lints. Developers will need to take time to\n  examine them and see whether they are legitimate or not.\n* To take full advantage of this, build systems (including but not limited to Cargo) must be\n  updated. However, for those systems that are not updated, there is no penalty or drawback,\n  since `--check-cfg` is opt-in.",
+  "weak": "## Drawbacks\n\nThere are no known drawbacks to this proposal.",
+  "expected": {
+    "better": "strong",
+    "dimension": "risks_and_open_questions"
+  },
+  "held_constant": "The section heading; the commit changed only this section.",
+  "notes": "'No known drawbacks' versus named costs with a mitigation.",
+  "pair_kind": "revision_history",
+  "provenance": {
+    "brief": {
+      "ref": "rust-rfc-3013",
+      "locator": "pull request description"
+    },
+    "weak": {
+      "ref": "rust-rfc-3013",
+      "locator": "Drawbacks, parent of 1788dd4d"
+    },
+    "strong": {
+      "ref": "rust-rfc-3013",
+      "locator": "Drawbacks, 1788dd4d"
+    }
+  },
+  "direction_evidence": "I'm not suggesting anything to fix it. Merely to document it. Drawbacks are inherent in almost any proposal and they should be documented in the RFC.\n\nUsually, when I see a drawbacks section that says \"None\", it signals to me that the author hasn't thought hard enough about what the tradeoffs they are making actually are. I just posted the first drawback I could think of, but there are probably others, though nothing RFC-stopping to me.",
+  "length_confound": true
+}

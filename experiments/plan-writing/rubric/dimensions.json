@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "description": "Quality dimensions for technical, design and planning documents, derived in rubric.md for pm/plans/plan-doc-eval.md. Judge templates in templates/ render these; fixtures/ exercise each one.",
+  "description": "Quality dimensions for technical, design and planning documents and reports about existing work, derived in rubric.md for pm/plans/plan-doc-eval.md. Judge templates in templates/ render these; fixtures/ exercise each one.",
   "case_types": ["whole_document", "continuation"],
   "measure_statuses": {
     "automatic_candidate": "Computable without a judge or model (parsers, section and lexicon checks, n-gram statistics). Diagnostic only until the calibration PR shows it tracks calibrated judges on this dimension; never a quality score by itself.",
@@ -23,12 +23,13 @@
       "detection_guidance": [
         "Can a reader state the problem, the intended reader and the requested decision after the first screen?",
         "Is there material that serves no identifiable reader need (history of the author's process, general tutorials, marketing)?",
-        "Does the document address a different problem than the brief asks for, or a generic version of it?"
+        "Does the document address a different problem than the brief asks for, or a generic version of it?",
+        "For reports about existing work (digests, sign-off and QA reports), can the reader tell what the report asks of them: a decision, an approval, something to watch? Whether the details carry weight in proportion to that is scored under salience_and_synthesis."
       ],
       "not_a_defect": ["A short motivation when the brief already establishes shared context.", "Background that a reviewer needs to evaluate the decision."],
       "examples": {
-        "strong": "Reviewers currently cannot tell which PRs are blocked by an unmerged dependency. This plan adds a merge wait so autostart holds dependents until their dependencies merge; it asks reviewers to accept the hold semantics in section 2.",
-        "weak": "Project management is an important part of software engineering. Teams use many tools to organize work. This document describes some improvements."
+        "strong": {"text": "Because this is a summary, it does not contain all the information that may be important to you. You should read the entire proxy statement and its appendices carefully before you decide how to vote.", "ref": "sec-plain-english", "locator": "Chapter 6, 'Try personal pronouns', printed p. 22", "note": "The rewrite names the reader and the decision the summary serves ('before you decide how to vote')."},
+        "weak": {"text": "This Summary does not purport to be complete and is qualified in its entirety by the more detailed information contained in the Proxy Statement and the Appendices hereto, all of which should be carefully reviewed.", "ref": "sec-plain-english", "locator": "Chapter 6, 'Try personal pronouns', printed p. 22"}
       },
       "judge_question": "Does the document make its problem, intended reader and requested decision clear, and select content for that reader?",
       "score_anchors": {
@@ -40,13 +41,47 @@
         {"name": "judge_purpose", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference on this dimension."}
       ],
       "measure_readiness": "calibration_required",
-      "maps_concerns": ["padding"]
+      "maps_concerns": ["padding", "misplaced_salience"]
+    },
+    {
+      "id": "salience_and_synthesis",
+      "name": "Salience and synthesis",
+      "applies_to": ["whole_document", "continuation"],
+      "definition": "Emphasis follows importance: what the reader most needs (the main conclusion, the decisions, the core constraints) comes early and gets the most weight, details are subordinated to the points they support, and the document pulls them together into an overview the reader can act on rather than an inventory of facts.",
+      "track_notes": {"continuation": "Within the section: its main point is clear and its details serve it. Repeating the prefix is scored under continuity, not here."},
+      "references": ["summeval", "minto", "da-pam-600-67", "gov-uk", "fplg", "grice"],
+      "derived_from": "SummEval 'relevance' (selection of the important content of a source); Minto's governing thought and pyramid; the Army's bottom line up front (DA PAM 600-67); GOV.UK front-loading; plain-language 'put the main point first'; Grice's maxims of quantity and relation.",
+      "detection_guidance": [
+        "After the first screen, can the reader state the main conclusion and what needs their decision?",
+        "Compare space with importance: flag details that get more words than the core constraints or decisions, and core constraints mentioned once in passing.",
+        "Flag details introduced without saying what they mean for the reader (why this matters here).",
+        "Flag inventories: lists of facts, components or changes with no statement of what they add up to.",
+        "Filler and restatement are scored under concision and the order of sections under organization_and_progression; this dimension is about what gets weight and whether the parts are synthesised."
+      ],
+      "not_a_defect": ["Reference sections or appendices that hold detail on purpose, after the main points.", "Genre-mandated order that puts background first, when the main point is still stated where readers of that genre look (abstract, summary, executive summary)."],
+      "examples": {
+        "strong": {"text": "Abstract\n\nThis document describes the TinyMT32 Pseudo Random Number Generator (PRNG) that produces 32-bit pseudo-random unsigned integers and aims at having a simple-to-use and deterministic solution.  This PRNG is a small-sized variant of Mersenne Twister (MT) PRNG.  The main advantage of TinyMT32 over MT is the use of a small internal state, compatible with most target platforms that include embedded devices, while keeping a reasonably good randomness that represents a sigificant improvement compared to the Park-Miller Linear Congruential PRNG.  However, neither the TinyMT nor MT PRNG are meant to be used for cryptographic applications.", "ref": "tinymt32-drafts", "locator": "Abstract, revision -03 (weaker) and -04 (stronger)", "note": "An IESG reviewer said the not-for-cryptography warning was 'more buried than it should be'; the next revision put it in the abstract."},
+        "weak": {"text": "Abstract\n\nThis document describes the TinyMT32 Pseudo Random Number Generator (PRNG) that produces 32-bit pseudo-random unsigned integers and aims at having a simple-to-use and deterministic solution.  This PRNG is a small-sized variant of Mersenne Twister (MT) PRNG [MT98].  The main advantage of TinyMT32 over MT is the use of a small internal state, compatible with most target platforms including embedded devices, while keeping a reasonably good randomness.", "ref": "tinymt32-drafts", "locator": "Abstract, revision -03 (weaker) and -04 (stronger)"}
+      },
+      "judge_question": "Does the document give the earliest place and the most weight to what matters most to its reader, and pull its details together into an overview the reader can act on?",
+      "score_anchors": {
+        "1": "Main point and core constraints buried or missing; an inventory of details with no synthesis.",
+        "3": "Main point findable; some core constraints underweighted or details left unconnected to what they mean.",
+        "5": "Main point and decisions up front; weight tracks importance; details serve a clear overview."
+      },
+      "candidate_measures": [
+        {"name": "judge_salience", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge; must name the points it considers most important and where the document places them."},
+        {"name": "lead_coverage", "kind": "deterministic", "status": "automatic_candidate", "description": "Content-word recall of the brief's obligation items (for reports, of headline facts in the material such as failing tests or changed interfaces) within the first fifth of the document, compared with the reference distribution for the document kind; flags buried core constraints."},
+        {"name": "emphasis_allocation", "kind": "model_assisted", "status": "needs_calibration", "description": "A prompted model ranks the brief's or material's items by importance; words spent on each item in the document are compared with that ranking.", "references": ["summeval"]}
+      ],
+      "measure_readiness": "automatic_candidate",
+      "maps_concerns": ["misplaced_salience", "unintroduced_terms", "fragmenting_format"]
     },
     {
       "id": "fidelity",
-      "name": "Fidelity to brief or prefix",
+      "name": "Fidelity to brief, prefix or described material",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "Every claim, decision and constraint the document attributes to the brief (or, for continuations, to the prefix) is supported by it and none contradicts it; elaboration beyond the input is consistent with it and recognisable as the writer's proposal rather than presented as agreed fact.",
+      "definition": "Every claim, decision and constraint the document attributes to the brief (or, for continuations, to the prefix) is supported by it and none contradicts it; elaboration beyond the input is consistent with it and recognisable as the writer's proposal rather than presented as agreed fact. For reports about existing work, every claim about the material the report describes (code, diffs, logs, test results) is supported by that material.",
       "track_notes": {"continuation": "Judge against the prefix: no contradiction of decisions, names, numbers or scope established earlier in the document."},
       "references": ["iso29148", "factscore", "summac", "factcc", "qags", "summeval", "grice"],
       "derived_from": "ISO 29148 'correct'; summarisation consistency literature (FActScore atomic claims, SummaC/FactCC entailment, QAGS question answering, SummEval 'consistency'); Grice's maxim of quality.",
@@ -54,14 +89,15 @@
         "Split the document into atomic claims; for each claim that refers to the input, check that the input supports it.",
         "Flag numbers, names, identifiers, dates and owners that do not appear in the input and are stated as given rather than proposed.",
         "Flag reversals: a constraint from the input stated with the opposite polarity or a weakened obligation (MUST to SHOULD).",
-        "For PM plans, flag decisions attributed to the human that the conversation shows the assistant proposed and the human did not accept."
+        "For PM plans, flag decisions attributed to the human that the conversation shows the assistant proposed and the human did not accept.",
+        "For reports, check claims about code, tests and runs against the material: a file, function, test or result the report names must exist and do or say what the report says."
       ],
       "not_a_defect": ["Useful elaboration, reasoning or design detail that is consistent with the input, even when the input never mentions it.", "Explicitly marked proposals or assumptions."],
       "examples": {
-        "strong": "The brief requires a 30-day retention window. This design keeps 30 days; we also propose compacting entries older than 7 days, which the brief does not address.",
-        "weak": "As agreed, retention is 14 days and compaction is mandatory for all tenants."
+        "strong": {"text": "Rules for Lexical Equivalence:\n\n         The namespace-specific part of the URN is case-sensitive.", "ref": "rfc5134-erratum-1325", "locator": "RFC 5134 Section 2 as published (weaker) and as corrected (stronger)", "note": "The source rule (RFC 2141) compares 'urn:' and the namespace id case-insensitively; the published text claimed the entire URN is case-sensitive."},
+        "weak": {"text": "Rules for Lexical Equivalence:\n\n         The entire URN is case-sensitive.", "ref": "rfc5134-erratum-1325", "locator": "RFC 5134 Section 2 as published (weaker) and as corrected (stronger)"}
       },
-      "judge_question": "Is everything the document states about the brief or prefix supported by it, with no contradictions and with new material presented as proposal rather than agreed fact?",
+      "judge_question": "Is everything the document states about the brief, prefix or described material supported by it, with no contradictions and with new material presented as proposal rather than agreed fact?",
       "score_anchors": {
         "1": "Contradicts the input on a material point or invents agreed decisions.",
         "3": "No material contradiction, but some unsupported specifics are stated as given.",
@@ -70,10 +106,11 @@
       "candidate_measures": [
         {"name": "judge_fidelity", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge with the brief or prefix in view; must quote the conflicting passages."},
         {"name": "atomic_claim_support", "kind": "model_assisted", "status": "needs_calibration", "description": "FActScore-style: a prompted model decomposes the draft into input-referring claims and labels each supported/contradicted/unsupported against the input.", "references": ["factscore"]},
-        {"name": "nli_consistency", "kind": "model_assisted", "status": "deferred", "description": "SummaC-style sentence-pair entailment between input and draft using an NLI classifier's probabilities.", "references": ["summac", "factcc"]}
+        {"name": "nli_consistency", "kind": "model_assisted", "status": "deferred", "description": "SummaC-style sentence-pair entailment between input and draft using an NLI classifier's probabilities.", "references": ["summac", "factcc"]},
+        {"name": "cited_artifact_resolution", "kind": "deterministic", "status": "automatic_candidate", "description": "For reports, file paths, symbols, commit ids and test names the report cites resolve in the repository at the stated revision, and quoted counts or log lines appear in the material. Catches invented references, not wrong descriptions of real ones."}
       ],
-      "measure_readiness": "calibration_required",
-      "maps_concerns": ["fidelity", "lost_requirements"]
+      "measure_readiness": "automatic_candidate",
+      "maps_concerns": ["fidelity", "lost_requirements", "unmarked_uncertainty"]
     },
     {
       "id": "requirement_coverage",
@@ -90,8 +127,8 @@
       ],
       "not_a_defect": ["Requirements consolidated into one statement that still implies each.", "A requirement deliberately deferred with a stated reason."],
       "examples": {
-        "strong": "PR 2 tests: verify that dependents stay held while any dependency is unmerged, including when the dependency is edited mid-run (brief item 3).",
-        "weak": "PR 2 tests: verify the merge wait works."
+        "strong": {"text": "9.3 MKCOL Method\n\n   The MKCOL method is used to create a new collection. All DAV compliant\n   resources MUST support the MKCOL method.\n\n   MKCOL creates a new collection resource at the location specified by\n   the Request-URI. [...]", "ref": "rfc4918-erratum-1430", "locator": "RFC 4918 Section 9.3 as published (weaker) and as corrected (stronger)", "note": "The predecessor (RFC 2518 Section 8.3) required every DAV-compliant resource to support MKCOL; the revision dropped that requirement."},
+        "weak": {"text": "9.3.  MKCOL Method\n\n   MKCOL creates a new collection resource at the location specified by\n   the Request-URI. [...]", "ref": "rfc4918-erratum-1430", "locator": "RFC 4918 Section 9.3 as published (weaker) and as corrected (stronger)"}
       },
       "judge_question": "Are all of the brief's (or prefix's) requirements, constraints and promised topics present where a reader would look for them?",
       "score_anchors": {
@@ -122,10 +159,10 @@
         "The opposite failure also counts: so abstract that no decision is made (words too abstract).",
         "Check for explicit non-goals or boundaries."
       ],
-      "not_a_defect": ["Interface, schema or protocol detail that is itself the decision under review.", "Detail the brief explicitly requests.", "Reference-level sections in genres that require them (PEP specification, RFC protocol detail)."],
+      "not_a_defect": ["Interface, schema or protocol detail that is itself the decision under review.", "Detail the brief explicitly requests.", "Reference-level sections in genres that require them (PEP specification, RFC protocol detail).", "In reports about existing work, file, function, test or commit references given as evidence for a claim: they locate, they do not prescribe."],
       "examples": {
-        "strong": "Holds are derived from dependency state at read time rather than stored, so an edited dependency graph takes effect without migration. Non-goal: changing how merges themselves are detected.",
-        "weak": "Add a function _compute_holds(self, prs: list[dict]) -> set[str] in pm_core/tui/auto_start.py after line 212, iterate with a for loop, and store results in self._hold_cache."
+        "strong": {"text": "Backwards Compatibility\n=======================\n\nThis PEP changes the rules for how ``TypedDict`` behaves (allowing subclasses to\ninherit from ``TypedMapping`` protocols in a way that changes the resulting\noverloads), so code that inspects ``TypedDict`` types will have to change. This\nis expected to mainly affect type-checkers.\n\nThe ``TypedMapping`` type will be added to the ``typing_extensions`` module,\nenabling its use in older versions of Python.", "ref": "pep705-pr2997", "locator": "PEP 705 Backwards Compatibility, reviewed draft (weaker) and next revision (stronger)", "note": "The reviewer called the metaclass workaround 'a bit too much implementation detail' and asked to cut everything from 'Users wanting to inherit'."},
+        "weak": {"text": "Backwards Compatibility\n=======================\n\nThis PEP changes the rules for how ``TypedDict`` behaves (allowing subclasses to\ninherit from ``TypedMapping`` protocols in a way that changes the resulting\noverloads), so code that inspects ``TypedDict`` types will have to change. This\nis expected to mainly affect type-checkers.\n\nThe ``TypedMapping`` type will be added to the ``typing_extensions`` module,\nenabling its use in older versions of Python. Users wanting to inherit from\nboth ``TypedDict`` and ``TypedMapping`` will need to use\n``typing_extensions.TypedDict`` in these versions, as the existing ``typing`` implementation\nof ``TypedDict`` does an ``is`` check on the metaclass of all base classes and raises\nan error if any other metaclass is found. This would cause any subclass of both\nthat implementation and a ``TypedMapping`` protocol to trigger an error at runtime.", "ref": "pep705-pr2997", "locator": "PEP 705 Backwards Compatibility, reviewed draft (weaker) and next revision (stronger)"}
       },
       "judge_question": "Is the level of detail right for this document's kind and stage, deciding what must be reviewed now without fixing implementation choices that no stated decision depends on?",
       "score_anchors": {
@@ -155,8 +192,8 @@
       ],
       "not_a_defect": ["Decisions the brief already settled, cited rather than re-argued."],
       "examples": {
-        "strong": "We derive holds at read time instead of storing them: stored holds would need invalidation on every graph edit, which is where the previous design lost holds. The cost is a recomputation per poll, measured at under 1 ms for 500 PRs.",
-        "weak": "We derive holds at read time because it is the best approach."
+        "strong": {"text": "# Rationale and alternatives [rationale-and-alternatives]: #rationale-and-alternatives\n\nWe could require that multiple attributes must be within in a delimiter to make it so that it's always two arguments at the top level. E.g., `#[cfg_attr(predicate, [attr, attr])]`. While this could increase clarity, it mostly seems like it would just add noise. In the multiline case, it already reads pretty clear with the predicate on the first line and each attribute indented.\n\nThe default alternative of not doing this is a possibility. It would just mean that conditionally including attributes is slightly less ergonomic than it could be.", "ref": "rust-rfc-2539", "locator": "Rationale and alternatives, before and after commit ad8ba5ef", "note": "The draft said 'There are no other alternatives'; after a reviewer raised the bracket syntax, the author added it with a reason for rejecting it."},
+        "weak": {"text": "# Rationale and alternatives [rationale-and-alternatives]: #rationale-and-alternatives\n\nThere are no other alternatives.\n\nBy not doing this, conditionally including attributes is slightly less ergonomic than it can be.", "ref": "rust-rfc-2539", "locator": "Rationale and alternatives, before and after commit ad8ba5ef"}
       },
       "judge_question": "Are consequential decisions justified with reasons, trade-offs and credible rejected alternatives?",
       "score_anchors": {
@@ -174,34 +211,39 @@
       "id": "organization_and_progression",
       "name": "Organization and progression",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "The document moves from context to decision to detail in an order a reader can follow: overview before specifics, terms defined before use, dependencies before what depends on them, and each part building on what came before.",
+      "definition": "The document moves from context to decision to detail in an order a reader can follow: overview before specifics, terms defined before use, dependencies before what depends on them, and each part building on what came before, down to each sentence picking up from the one before it, without formatting that cuts the links between connected ideas.",
       "track_notes": {"continuation": "Judge order within the section; restarting the prefix, looping back over it or jumping ahead of material it has not yet introduced is scored under continuity, not here."},
-      "references": ["gopen-swan", "minto", "rfc4101", "rust-rfc-template", "six-traits", "aacu-value", "fplg", "gov-uk", "coh-metrix"],
-      "derived_from": "Gopen and Swan reader expectations (old before new, stress position); Minto governing idea first; RFC 4101 model before detail; Rust RFC guide-level before reference-level; 6+1 'organization'; AAC&U 'content development'; plain-language 'organize to meet readers' needs'; GOV.UK front-loading; Coh-Metrix cohesion.",
+      "references": ["gopen-swan", "williams-style", "minto", "rfc4101", "rust-rfc-template", "six-traits", "aacu-value", "fplg", "gov-uk", "coh-metrix", "barzilay-lapata", "format-bias"],
+      "derived_from": "Gopen and Swan reader expectations (old before new, stress position); Williams on cohesion and coherence; Minto governing idea first; RFC 4101 model before detail; Rust RFC guide-level before reference-level; 6+1 'organization'; AAC&U 'content development'; plain-language 'organize to meet readers' needs'; GOV.UK front-loading; Coh-Metrix cohesion and the entity-grid model of local coherence; format-bias findings for the judge-side risk of rewarding lists and bold.",
       "detection_guidance": [
         "Read only headings and first sentences: do they tell the argument in order?",
         "Flag terms, components or PRs used before they are introduced, and conclusions that appear before the material supporting them without signposting.",
         "Flag sections whose order would have to change for the dependencies among them to make sense (for PM plans, a PR described before the PRs it depends on without reason).",
-        "Flag repeated returns to the same topic in separate places."
+        "Flag repeated returns to the same topic in separate places.",
+        "Within paragraphs, check that each sentence picks up something from the one before (known information first, new information last). Flag non-sequiturs: sentences whose link to the previous one is a leap the reader has to supply.",
+        "Flag formatting that fragments reasoning: bullet lists whose items depend on each other but drop the connectives (because, so, but, which means) that would say how, and headings or bold so dense they flatten what matters."
       ],
-      "not_a_defect": ["A summary-first structure that states conclusions up front by design (pyramid order).", "Genre-mandated section order."],
+      "not_a_defect": ["A summary-first structure that states conclusions up front by design (pyramid order).", "Genre-mandated section order.", "Lists of genuinely parallel items, steps or reference values."],
       "examples": {
-        "strong": "Section 1 states the hold rule; section 2 shows how holds are derived from dependency state; section 3 covers edits to the graph while holds are active.",
-        "weak": "Section 1 describes cache invalidation on graph edits; section 2 introduces the hold rule that section 1 relied on; section 3 returns to the cache."
+        "strong": {"text": "The compact fluorescent bulb has become the standard bulb for household lamps. Until recently, most lamps used incandescent bulbs. This type of bulb operates by heating a tungsten filament until it glows, throwing off light. Unfortunately, heating the filament wastes approximately 90% of the energy used to produce the light.", "ref": "unc-flow", "locator": "Cohesion, known-to-new sequencing, versions 1 and 2", "note": "The source says both versions contain the same information; in the stronger one each sentence opens on what the previous one ended with."},
+        "weak": {"text": "The compact fluorescent bulb has become the standard bulb for household lamps. Until recently, most people used incandescent bulbs in their lamps. Heating a tungsten filament until it glows, throwing off light, is how this type of bulb operates. Unfortunately, approximately 90% of the energy used to produce the light is wasted by heating the filament.", "ref": "unc-flow", "locator": "Cohesion, known-to-new sequencing, versions 1 and 2"}
       },
-      "judge_question": "Can a reader follow the document front to back, with context before detail, terms before use and each part building on the last?",
+      "judge_question": "Can a reader follow the document front to back, with context before detail, terms before use, each part building on the last and each sentence following from the one before?",
       "score_anchors": {
-        "1": "Order obstructs understanding; frequent use-before-introduction or loops.",
-        "3": "Generally ordered with some jumps, forward references or repeated returns.",
-        "5": "Clear progression; headings alone tell the argument."
+        "1": "Order obstructs understanding; frequent use-before-introduction, loops, non-sequiturs or fragments that leave the reader to supply the connections.",
+        "3": "Generally ordered with some jumps, forward references, repeated returns or unconnected sentences.",
+        "5": "Clear progression at every level; headings alone tell the argument and sentences follow from one another."
       },
       "candidate_measures": [
         {"name": "judge_progression", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference."},
         {"name": "define_before_use", "kind": "deterministic", "status": "automatic_candidate", "description": "Acronyms and capitalised/coded terms whose first occurrence is not a definition pattern (expansion, 'X is', 'we call') but whose defining occurrence appears later."},
-        {"name": "adjacent_section_overlap", "kind": "deterministic", "status": "automatic_candidate", "description": "Coh-Metrix-style content-word overlap between adjacent sections versus non-adjacent ones; low adjacency relative to the reference flags jumps.", "references": ["coh-metrix"]}
+        {"name": "adjacent_section_overlap", "kind": "deterministic", "status": "automatic_candidate", "description": "Coh-Metrix-style content-word overlap between adjacent sections versus non-adjacent ones; low adjacency relative to the reference flags jumps.", "references": ["coh-metrix"]},
+        {"name": "adjacent_sentence_link", "kind": "deterministic", "status": "automatic_candidate", "description": "Share of sentences that share no content word or entity with either of the two sentences before them (Coh-Metrix referential cohesion, entity-grid transitions), compared with the reference distribution; flags non-sequiturs.", "references": ["coh-metrix", "barzilay-lapata"]},
+        {"name": "list_fragmentation", "kind": "deterministic", "status": "automatic_candidate", "description": "Share of words in list items, and share of list items with no clause connective, compared with the reference distribution for the document kind."},
+        {"name": "format_density", "kind": "deterministic", "status": "automatic_candidate", "role": "bias_covariate", "description": "Headings, list items and bold spans per 1000 words; recorded to measure how much judges reward formatting, never scored as quality.", "references": ["format-bias"]}
       ],
       "measure_readiness": "automatic_candidate",
-      "maps_concerns": ["poor_progression", "padding"]
+      "maps_concerns": ["poor_progression", "padding", "non_sequiturs", "fragmenting_format", "unintroduced_terms"]
     },
     {
       "id": "concision",
@@ -219,8 +261,8 @@
       ],
       "not_a_defect": ["Useful elaboration, examples and reasoning beyond the brief.", "Deliberate repetition for skimmability (a one-line summary at the top of a long section).", "Length the genre requires."],
       "examples": {
-        "strong": "Dependents stay held until every dependency merges; a dependency edited while held re-evaluates on the next poll.",
-        "weak": "It is important to note that dependencies matter. As we have discussed above, dependents should, in general, wait for their dependencies. In other words, a dependent PR should not start before its dependencies are merged, which, as mentioned, is key."
+        "strong": {"text": "More night jobs would keep youths off the streets.", "ref": "fplg", "locator": "III. Write clearly, 'Use short, simple words', printed p. 36", "note": "A published parody of padded prose and its one-line rewrite; the long version also carries hedges the short one drops."},
+        "weak": {"text": "There is no escaping the fact that it is considered very important to note that a number of various available applicable studies ipso facto have generally identified the fact that additional appropriate nocturnal employment could usually keep juvenile adolescents off thoroughfares during the night hours, including but not limited to the time prior to midnight on weeknights and/or 2 a.m. on weekends.", "ref": "fplg", "locator": "III. Write clearly, 'Use short, simple words', printed p. 36"}
       },
       "judge_question": "Does every passage add information this reader needs, without filler, restatement or generic material, while useful elaboration is kept?",
       "score_anchors": {
@@ -235,7 +277,7 @@
         {"name": "length_ratio", "kind": "deterministic", "status": "automatic_candidate", "role": "bias_covariate", "description": "Draft length over reference length; recorded to measure judge length sensitivity, never scored as quality.", "references": ["lc-alpacaeval"]}
       ],
       "measure_readiness": "automatic_candidate",
-      "maps_concerns": ["padding", "premature_implementation_detail"]
+      "maps_concerns": ["padding", "premature_implementation_detail", "misplaced_salience"]
     },
     {
       "id": "clarity_and_precision",
@@ -248,12 +290,13 @@
       "detection_guidance": [
         "Flag vague qualifiers (appropriate, as needed, fast, robust, user-friendly, etc., and/or) where a reviewer needs a specific value or condition.",
         "Flag obligations whose force is unclear (should vs must) when it matters.",
-        "Flag pronouns or 'this' with more than one plausible referent, and undefined acronyms. One concept named several ways is scored under internal_consistency, not here."
+        "Flag pronouns or 'this' with more than one plausible referent, and undefined acronyms. One concept named several ways is scored under internal_consistency, not here.",
+        "Flag shorthand from the writer's working context (internal names, ticket or PR ids, code identifiers, jargon) used as if the reader shared that context. A report for a reader who does not read the code needs each such term introduced or described in plain words."
       ],
       "not_a_defect": ["Deliberate openness that is labelled as an open question."],
       "examples": {
-        "strong": "The hold MUST be released within one poll interval (default 2 s) after the last dependency merges.",
-        "weak": "The hold should be released quickly and appropriately once things are merged."
+        "strong": {"text": "You must apply at least 30 days before you need the certification. a. If you are an individual, apply at the State office in the State where you reside. b. If you are an organization, apply at the State office in the State where your headquarters is located.", "ref": "fplg", "locator": "II. Organize, 'Address one person, not a group', printed p. 10", "note": "'Appropriate offices' and 'in a timely manner' become a 30-day deadline and a named office for each kind of applicant."},
+        "weak": {"text": "Individuals and organizations wishing to apply must file applications with the appropriate offices in a timely manner.", "ref": "fplg", "locator": "II. Organize, 'Address one person, not a group', printed p. 10"}
       },
       "judge_question": "Does each statement have one reasonable reading, with explicit obligations, specific conditions and defined terms?",
       "score_anchors": {
@@ -264,10 +307,11 @@
       "candidate_measures": [
         {"name": "judge_clarity", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference."},
         {"name": "vague_term_rate", "kind": "deterministic", "status": "automatic_candidate", "description": "INCOSE-derived lexicon of vague and escape-clause terms per 1000 words.", "references": ["incose-gtwr", "vale"]},
-        {"name": "undefined_acronyms", "kind": "deterministic", "status": "automatic_candidate", "description": "Acronyms never expanded in the document or input."}
+        {"name": "undefined_acronyms", "kind": "deterministic", "status": "automatic_candidate", "description": "Acronyms never expanded in the document or input."},
+        {"name": "unglossed_identifiers", "kind": "deterministic", "status": "automatic_candidate", "description": "Code identifiers, paths and ids (snake_case, CamelCase, dotted or slashed tokens, PR/issue ids) whose first occurrence has no accompanying plain description in the same sentence, per 1000 words; read against the document kind, since specs legitimately name identifiers."}
       ],
       "measure_readiness": "automatic_candidate",
-      "maps_concerns": []
+      "maps_concerns": ["unintroduced_terms"]
     },
     {
       "id": "internal_consistency",
@@ -284,8 +328,8 @@
       ],
       "not_a_defect": ["A value changed with an explicit note (\"revised from 30 to 14 days after section 4\")."],
       "examples": {
-        "strong": "Section 2 and the PR list both state that the runner depends on the rubric and the case catalog.",
-        "weak": "Section 2 says the runner needs only the rubric; the PR list makes it depend on the case catalog as well."
+        "strong": {"text": "Each PA-TNC message may\ncontain zero or more attributes associated with the functional\ncomponent identified in the component type (PA Subtype) of the\nPosture Broker (PB) protocol.", "ref": "rfc5792-erratum-3935", "locator": "RFC 5792 Section 3.1 as published (weaker) and as corrected (stronger)", "note": "Section 4 of the same RFC says a message carries 'zero or more' attributes; the published Section 3.1 said 'one or more'."},
+        "weak": {"text": "Each PA-TNC message may\ncontain one or more attributes associated with the functional\ncomponent identified in the component type (PA Subtype) of the\nPosture Broker (PB) protocol.", "ref": "rfc5792-erratum-3935", "locator": "RFC 5792 Section 3.1 as published (weaker) and as corrected (stronger)"}
       },
       "judge_question": "Do names, numbers, scope and decisions agree everywhere they recur in the document?",
       "score_anchors": {
@@ -305,31 +349,34 @@
       "id": "risks_and_open_questions",
       "name": "Risks, uncertainty and open questions",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "The document states what could go wrong, what is unknown, and which questions remain for reviewers, instead of presenting an uncertain plan as settled.",
+      "definition": "The document states what could go wrong, what is unknown, and which questions remain for reviewers, instead of presenting an uncertain plan as settled. Claims carry the confidence their evidence supports, and reports about existing work say what was verified and what is inferred or assumed.",
       "track_notes": {"continuation": "Applies when the section's role includes risks or unresolved questions, or when it makes claims whose uncertainty the prefix has flagged."},
-      "references": ["kep-template", "rust-rfc-template", "pep1", "shapeup-pitch", "rfc3552", "oxide-rfd1", "google-design-docs"],
-      "derived_from": "KEP risks and mitigations; Rust unresolved questions; PEP open issues and security implications; Shape Up rabbit holes; RFC 3552 security considerations; Oxide RFD discussion states; Google cross-cutting concerns.",
+      "references": ["kep-template", "rust-rfc-template", "pep1", "shapeup-pitch", "rfc3552", "oxide-rfd1", "google-design-docs", "icd203", "kent-wep", "ipcc-uncertainty"],
+      "derived_from": "KEP risks and mitigations; Rust unresolved questions; PEP open issues and security implications; Shape Up rabbit holes; RFC 3552 security considerations; Oxide RFD discussion states; Google cross-cutting concerns; ICD 203 analytic standards (express uncertainty, separate information from assumptions and judgments); Kent's words of estimative probability and the IPCC uncertainty guidance for calibrated language.",
       "detection_guidance": [
         "Look for named risks with consequences and mitigations, not a generic 'risks: bugs may occur'.",
         "Check that genuinely unknown things are marked as unknown. Exclusions and non-goals are scored under scope_and_abstraction, not here.",
-        "Flag false certainty: claims about performance, adoption or compatibility without evidence or caveat."
+        "Flag false certainty: claims about performance, adoption or compatibility without evidence or caveat.",
+        "For reports, check that claims about the system's state or behaviour say how they are known (run, tested, read, inferred) where that is not obvious, and that inferences and untested assumptions are labelled. A report that sounds equally sure of everything fails here.",
+        "Flag hedges that carry no information (\"should be fine\", \"likely\") where the writer could say what was checked."
       ],
       "not_a_defect": ["A short or empty risks section for a small, low-risk change, if it says so."],
       "examples": {
-        "strong": "Risk: a dependency closed without merging would hold dependents forever. Mitigation: treat closed-unmerged as released and log it. Open question for reviewers: should a reopened dependency re-hold started dependents?",
-        "weak": "Risks: there may be some edge cases, which will be handled during implementation."
+        "strong": {"text": "## Drawbacks\n\n* Adds complexity, in the form of additional command-line options.\n* As with all lints, correct code may be trigger lints. Developers will need to take time to\n  examine them and see whether they are legitimate or not.\n* To take full advantage of this, build systems (including but not limited to Cargo) must be\n  updated. However, for those systems that are not updated, there is no penalty or drawback,\n  since `--check-cfg` is opt-in.", "ref": "rust-rfc-3013", "locator": "Drawbacks, before and after commit 1788dd4d", "note": "A reviewer wrote that a drawbacks section saying 'None' signals the author 'hasn't thought hard enough' about the trade-offs."},
+        "weak": {"text": "## Drawbacks\n\nThere are no known drawbacks to this proposal.", "ref": "rust-rfc-3013", "locator": "Drawbacks, before and after commit 1788dd4d"}
       },
-      "judge_question": "Are specific risks, unknowns and reviewer questions stated, without false certainty?",
+      "judge_question": "Are specific risks, unknowns and reviewer questions stated, with confidence matched to the evidence and verified claims told apart from inferred ones?",
       "score_anchors": {
-        "1": "No risks or open questions where clearly needed; false certainty.",
-        "3": "Some specific risks; others generic or missing.",
-        "5": "Specific risks with mitigations, explicit unknowns and reviewer questions."
+        "1": "No risks or open questions where clearly needed; false certainty, or guesses stated as findings.",
+        "3": "Some specific risks; others generic or missing; confidence not always matched to evidence.",
+        "5": "Specific risks with mitigations, explicit unknowns and reviewer questions; every claim as certain as its evidence and no more."
       },
       "candidate_measures": [
-        {"name": "judge_risks", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference."}
+        {"name": "judge_risks", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference."},
+        {"name": "evidence_pointer_rate", "kind": "deterministic", "status": "automatic_candidate", "description": "For reports, share of sentences that assert code or test behaviour and carry an evidence pointer (test name, command, log excerpt, path, commit) or an explicit inference marker; low rates flag unmarked guesses."}
       ],
-      "measure_readiness": "calibration_required",
-      "maps_concerns": []
+      "measure_readiness": "automatic_candidate",
+      "maps_concerns": ["unmarked_uncertainty"]
     },
     {
       "id": "verifiability",
@@ -346,8 +393,8 @@
       ],
       "not_a_defect": ["Exploratory documents (early RFDs, pitches) that state what evidence would settle a question rather than full acceptance tests."],
       "examples": {
-        "strong": "Tests: a dependent stays held while its dependency is open; it starts within one poll after merge; a closed-unmerged dependency releases it with a log line.",
-        "weak": "Tests: test the merge wait thoroughly."
+        "strong": {"text": "For up to and including 12 aircraft, the small display format shall be used. Otherwise, the large display format shall be used.", "ref": "berry-ambiguity", "locator": "Section 5.1, examples E38 and E39, p. 20", "note": "Whether 12 aircraft get the small or the large format cannot be tested from the weaker sentence."},
+        "weak": {"text": "For up to 12 aircraft, the small display format shall be used. Otherwise, the large display format shall be used.", "ref": "berry-ambiguity", "locator": "Section 5.1, examples E38 and E39, p. 20"}
       },
       "judge_question": "Can a reader tell from the document how success will be checked, with concrete, testable criteria?",
       "score_anchors": {
@@ -377,8 +424,8 @@
       ],
       "not_a_defect": ["Merged or renamed sections that keep the content the template asks for.", "Brief instructions that override the template."],
       "examples": {
-        "strong": "### PR: Rubric\n- **description**: ...\n- **tests**: ...\n- **files**: ...\n- **depends_on**:",
-        "weak": "PR 2 - rubric (do this after the catalog): write the rubric and test it."
+        "strong": {"text": "Ordering comparisons are undefined for sentinel objects.\n\n\nBackwards Compatibility\n=======================\n\nWhile not breaking existing code, adding a new \"sentinels\" stdlib module could\ncause some confusion with regard to existing modules named \"sentinels\", and\nspecifically with the \"sentinels\" package on PyPI.\n\nThe existing \"sentinels\" package on PyPI [10]_ appears to be abandoned, with\nthe latest release being made on Aug. 2016.  Therefore, using this name for a\nnew stdlib module seems reasonable.\n\nIf and when this PEP is accepted, it may be worth verifying if this has indeed\nbeen abandoned, and if so asking to transfer ownership to the CPython\nmaintainers to reduce the potential for confusion with the new stdlib module.\n\n\nHow to Teach This\n=================\n\nThe normal types of documentation of new stdlib modules and features, namely\ndoc-strings, module docs and a section in \"What's New\", should suffice.\n\n\nSecurity Implications\n=====================\n\nThis proposal should have no security implications.\n\n\nReference Implementation\n========================", "ref": "pep661-pr4050", "locator": "PEP 661 between Specification and Reference Implementation, before and after the pull request", "note": "The pull request, titled 'Add missing sections', adds sections PEP 1 requires."},
+        "weak": {"text": "Ordering comparisons are undefined for sentinel objects.\n\n\nReference Implementation\n========================", "ref": "pep661-pr4050", "locator": "PEP 661 between Specification and Reference Implementation, before and after the pull request"}
       },
       "judge_question": "Does the document follow the conventions and required structure of its kind?",
       "score_anchors": {
@@ -409,8 +456,8 @@
       ],
       "not_a_defect": ["A different but clear writing style.", "A short bridge sentence that recalls a point from much earlier in the prefix."],
       "examples": {
-        "strong": "With the hold rule from section 2 in place, graph edits need only one addition: a hold re-evaluates whenever its dependency set changes.",
-        "weak": "This document describes a merge-wait feature for autostart. Autostart is a feature that starts PRs automatically."
+        "strong": {"text": "The message formats in this document are specified using RBNF encoding as specified in [RFC5511].", "ref": "pce-vendor-drafts", "locator": "Section 2, revision -10 (weaker) and -11 (stronger)", "note": "Section 1.2 already expanded RBNF; a reviewer flagged the repetition and the next revision stopped re-expanding it (it kept the sentence, so the fix is partial)."},
+        "weak": {"text": "The message formats in this document are specified using Routing Backus-Naur Format (RBNF) encoding as specified in [RFC5511].", "ref": "pce-vendor-drafts", "locator": "Section 2, revision -10 (weaker) and -11 (stronger)"}
       },
       "judge_question": "Does the section continue the prefix, using its terms and decisions, without repeating it or skipping ahead, judged on content and structure rather than stylistic resemblance?",
       "score_anchors": {
@@ -425,7 +472,7 @@
         {"name": "style_distance", "kind": "deterministic", "status": "automatic_candidate", "role": "bias_covariate", "description": "Burrows's Delta between prefix and section; recorded to measure how much judges reward style match, never scored as quality.", "references": ["burrows-delta"]}
       ],
       "measure_readiness": "automatic_candidate",
-      "maps_concerns": ["poor_progression", "padding"]
+      "maps_concerns": ["poor_progression", "padding", "non_sequiturs"]
     }
   ],
   "concerns": [
@@ -468,13 +515,59 @@
     {
       "id": "fidelity",
       "name": "Fidelity",
-      "description": "Content attributed to the brief or prefix that it does not support or that contradicts it, including assistant proposals presented as human decisions.",
+      "description": "Content attributed to the brief, prefix or described material that it does not support or that contradicts it, including assistant proposals presented as human decisions and report claims the code or runs do not bear out.",
       "source": "pm/plans/plan-doc-eval.md (\"Judge factual fidelity against the brief or prefix as well as readability\")",
       "primary_dimension": "fidelity",
       "also_affects": ["internal_consistency", "requirement_coverage"],
       "boundary": "Consistent elaboration offered as the writer's proposal is not a fidelity failure."
+    },
+    {
+      "id": "misplaced_salience",
+      "name": "Misplaced salience",
+      "description": "Details that will not matter again get line after line while core constraints are mentioned briefly; no synthesis into a high-level overview the reader can steer from.",
+      "source": "https://x.com/kitten_beloved/status/2113422896739860534 and replies (2026-10-23)",
+      "primary_dimension": "salience_and_synthesis",
+      "also_affects": ["concision", "purpose_and_audience"],
+      "boundary": "Detail placed in a reference section after the main points is not misplaced."
+    },
+    {
+      "id": "non_sequiturs",
+      "name": "Non-sequiturs",
+      "description": "Sentences that seem barely related to one another; semantic leaps that are not obvious to the reader.",
+      "source": "https://x.com/kitten_beloved/status/2113422896739860534 and replies (2026-10-23)",
+      "primary_dimension": "organization_and_progression",
+      "also_affects": ["continuity"],
+      "boundary": "A new paragraph or section that announces a change of topic is not a non-sequitur."
+    },
+    {
+      "id": "unintroduced_terms",
+      "name": "Unintroduced terms and shorthand",
+      "description": "Terms, shorthand and fine details used casually without introducing them or saying why they are relevant.",
+      "source": "https://x.com/kitten_beloved/status/2113422896739860534 and replies (2026-10-23)",
+      "primary_dimension": "clarity_and_precision",
+      "also_affects": ["organization_and_progression", "salience_and_synthesis"],
+      "boundary": "Terms the intended reader already uses (from the brief or the prefix) need no introduction."
+    },
+    {
+      "id": "unmarked_uncertainty",
+      "name": "Unmarked uncertainty",
+      "description": "Reports read as confident while the writer is guessing, and do not say what was not verified.",
+      "source": "https://x.com/kitten_beloved/status/2113422896739860534 and replies (2026-10-23)",
+      "primary_dimension": "risks_and_open_questions",
+      "also_affects": ["fidelity"],
+      "boundary": "Plain statements of facts the material shows directly need no evidence marker."
+    },
+    {
+      "id": "fragmenting_format",
+      "name": "Fragmenting format",
+      "description": "Walls of bullets and heavy formatting in place of connected explanation.",
+      "source": "https://x.com/kitten_beloved/status/2113422896739860534 and replies (2026-10-23)",
+      "primary_dimension": "organization_and_progression",
+      "also_affects": ["salience_and_synthesis"],
+      "boundary": "Lists of genuinely parallel items, steps or reference values are not fragmenting."
     }
   ],
+  "reader_reported_concerns": ["misplaced_salience", "non_sequiturs", "unintroduced_terms", "unmarked_uncertainty", "fragmenting_format"],
   "previously_identified_concerns": ["padding", "premature_implementation_detail", "poor_progression", "lost_requirements"],
-  "judge_design_references": ["g-eval", "prometheus", "mt-bench", "verbosity-bias", "lc-alpacaeval", "llm-judge-finetuned"]
+  "judge_design_references": ["g-eval", "prometheus", "mt-bench", "verbosity-bias", "lc-alpacaeval", "llm-judge-finetuned", "format-bias"]
 }
