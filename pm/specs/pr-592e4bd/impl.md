@@ -694,4 +694,4 @@ repeated deaths turn a PASS into NEEDS_WORK.
     mid-run) survive a TUI restart under a `done` entry and are merged into
     the next run's entry by `_runtime_mirror_register`. The picker shows
     them as `[working]` until that run completes. Pre-existing and left
-    out of scope.
+    out of scope; filed as pr-b2db183 with the S30 repro and evidence.

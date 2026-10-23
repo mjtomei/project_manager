@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-d1d0139
+  active_pr: pr-b2db183
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -31574,7 +31574,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T16:13:00.759905+00:00'
+  updated_at: '2026-10-23T16:14:03.191878+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32389,6 +32389,16 @@ prs:
       Bash command (echo is auto-allowed); stub re-holds atomically.'
     created_at: '2026-10-23T16:13:00Z'
     last_edited: '2026-10-23T16:13:00Z'
+  - id: note-4b48931
+    text: 'S30 follow-up to note-bfaed3d: the runtime-mirror limitation (qa scenario
+      panes left in ~/.pm/runtime/<pr>.json by a pre-94f36a18 or killed TUI survive
+      a restart, are merged into the next run qa entry, and the picker shows [working]
+      for a planning run with no live pane) is filed as pr-b2db183 (pending, not started)
+      with repro and evidence under /pm-captures/scenarios/30 (post-fix/reset-picker
+      runtime-A-*.json + picker-A-R2-planning.txt, post-fix/demo/runtime-A-after-pass.json).
+      impl.md item 26 and REPORT.md reference it. No change to the 94f36a18 fix.'
+    created_at: '2026-10-23T16:14:03Z'
+    last_edited: '2026-10-23T16:14:03Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
@@ -32724,6 +32734,52 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-23T15:53:17.974177+00:00'
   updated_at: '2026-10-23T15:53:17.974177+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b2db183
+  plan: bugs
+  title: 'Bug: stale qa scenario panes in ~/.pm/runtime/<pr>.json survive a TUI restart
+    and are merged into the next QA run, so the actions picker shows [working] from
+    dead panes'
+  branch: pm/pr-b2db183-bug-stale-qa-scenario-panes-in-pm-runtime-pr-json-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/pane_idle.py _runtime_mirror_register (merges cur["panes"]
+    from the existing qa entry) and _runtime_mirror_clear (only pops subkeys the live
+    tracker unregisters); TUI-mount sweep keeps a done+verdict qa entry with its panes
+    dict. Pre-existing on master; not fixed by pr-592e4bd 94f36a18, which only prunes
+    keys the current TUI process tracks.
+
+
+    Repro (seen live in pr-592e4bd QA S30, /pm-captures/scenarios/30): (1) leave qa
+    scenario panes in the runtime file: either a pre-94f36a18 TUI with z t over a
+    run whose workers are mid-turn, or kill -9 the TUI while a QA run has scenario
+    panes registered and do not let it resume; (2) the run/next run completes, so
+    the qa entry becomes state=done verdict=X but keeps panes {s3,s4} pointing at
+    dead panes (%32/%33); (3) restart the TUI (kill -9 pid in ~/.pm/tui-<session>.pid,
+    pm session); the new process never tracked s3/s4, so nothing removes them; (4)
+    start QA again (z t). Registering the new scenarios merges into that dict: panes
+    {s3,s4,s11,s12}, state running. After the next z t, the new run is still planning
+    (no panes of its own), but the entry still has {s3,s4} with state running, and
+    the prefix+P actions picker shows "qa [open] [working]" for a run that has no
+    live pane. It stays that way until a completion overwrites it. The same PR without
+    leftovers shows "qa [open]" (no badge) during planning (post-fix/picker-planning-A2-win).
+
+
+    Evidence: post-fix/demo/runtime-A-after-pass.json (done PASS still listing s3/s4
+    after the TUI restart); post-fix/reset-picker/runtime-A-R1-running.json (s3,s4,s11,s12
+    merged), runtime-A-R2-planning.json (only s3/s4, state running), picker-A-R2-planning.txt
+    (qa [open] [working]); pre-fix/all-panes.txt (%32/%33 absent). Candidate fix:
+    on register, drop qa subkeys whose pane no longer exists, or start a fresh panes
+    dict when the existing entry is done; and/or have the TUI-mount sweep drop dead
+    qa panes from done entries. Keep the [done VERDICT] badge.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T16:13:51.145790+00:00'
+  updated_at: '2026-10-23T16:13:51.145790+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
