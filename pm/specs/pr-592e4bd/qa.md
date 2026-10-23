@@ -442,7 +442,21 @@ env-by-name).
   run mid-turn and restarted while the other TUI keeps running, Then its
   restart logs `Resuming QA for <pr>`, its node spins again and its
   picker row reads `[working]` (93dca6ae mount sweep; a711f411 resume
-  scan, impl.md §5 item 29, S39).
+  scan, impl.md §5 item 29, S39). The scan remembers PR ids it found to
+  be another project's and forgets them whenever its own project.yaml
+  changes (inode, mtime or size: a `git pull`/`store.save` replacement or
+  an in-place rewrite by an editor under `pm edit`). So when a PR whose
+  orphaned snapshot was already seen arrives in this project later (for
+  example pulled from another clone of the same project, whose TUI died
+  mid-run, with the PR in status `qa`), the next scan treats it like its
+  own PR: it resumes the run once, keeps adopted live workers rather than
+  starting second ones, and leaves it alone while another live TUI owns
+  the snapshot (7968f576, cbf9941c; review loop 5e26 i1/i2). Not yet run
+  live (QA planner, sixteenth pass): resume runs in the adopting TUI's own
+  pm session (`get_pm_session`) while the orphan's windows live in the
+  other clone's session, and two TUIs that both see the dead owner in the
+  same scan can each adopt the run (`resume_owned_elsewhere` is a read,
+  not a claim). The scenario decides whether either is a failure.
 
 ## 2. Setup
 
@@ -566,9 +580,10 @@ env-by-name).
     `idle_prompt`; the row disappearing then is correct finalization,
     not a missing `[idle]`. Same scratch-only limits as the fourteenth
     pass.
-  - Sixteenth pass (S40+), delta-only. Product change since the
-    fifteenth pass: a711f411, where a TUI's restart-resume scan skips QA
-    snapshots of PRs outside its own project (RQ36; impl.md §5 item 29).
+  - Sixteenth pass (S40+), delta-only. Product changes since the
+    fifteenth pass: a711f411 and 7968f576. A TUI's restart-resume scan
+    skips QA snapshots of PRs outside its own project and caches their ids
+    until project.yaml changes (RQ36; impl.md §5 item 29).
     S39 verified it live, pre-fix and post-fix, in a scratch HOME with two
     projects (`/pm-captures/scenarios/39`, REPORT.md).
     - Its other Thens held on ace966c7: second-PR first-run spinner,
@@ -578,6 +593,19 @@ env-by-name).
       while the other project's TUI keeps running. Then restart it, in
       both directions: it must log `Resuming QA` and spin again, and the
       other project's runtime files must stay byte-identical.
+    - Review loop 5e26 then changed the same scan (7968f576, plus the
+      test-only cbf9941c): another project's PR ids are cached until
+      project.yaml changes, so all of the above must be rerun on the
+      current head, not inferred from S39. New surface (RQ36): two clones
+      of one project (two sessions) where a PR added and QA'd in clone B,
+      whose TUI then dies mid-turn, reaches clone A by `git pull` or an
+      in-place `pm edit`. Clone A must ignore the orphan until then and
+      resume it on its next scan afterwards. Exactly one TUI may drive it
+      when clone B restarts at the same moment.
+    - Also not covered live by S39: a long downtime (dozens of 5 s scans)
+      of one TUI, both TUIs killed and restarted together, and a run whose
+      result was written while its TUI was down (`Recovered completed QA`
+      only in its own project's TUI).
     - Harness facts:
       - Plain `t` on a PR whose `qa-<pr>` window exists only focuses that
         window, so a re-run needs `z t`.
