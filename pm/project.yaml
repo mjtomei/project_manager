@@ -31610,7 +31610,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T20:25:55.036935+00:00'
+  updated_at: '2026-10-23T20:34:19.895644+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32590,6 +32590,26 @@ prs:
       pr-04dfffb); use a real verifier for follow-up counts.'
     created_at: '2026-10-23T20:25:54Z'
     last_edited: '2026-10-23T20:25:54Z'
+  - id: note-0e183ff
+    text: 'QA S36 (2026-10-23, container two-PR routed QA, RQ35 in containers): hook
+      Thens held live. The pm UserPromptSubmit entry was appended after the byte-identical
+      user hook at both installs. For all 36 routed sessions, user_prompt records
+      = stub turns. The user hook ran 0 times for container turns (non-blocking error
+      only). The proj2 reinstall during live turns gave no gap and no errors. Reminder,
+      flag follow-up and typed question each reached only their target pane. All runs
+      PASS/FINALIZE_DONE; 0 secrets. CODE CHANGE 93dca6ae needs normal re-review:
+      (1) the second PR started on a first QA run had no node spinner until the 300
+      s sync (workdir gate on cached data); (2) a queued launch narrows state.scenarios,
+      so the 94f36a18 prune dropped the run own live keys (spinner and picker qa entry
+      gone for the refiner turn); (3) another project TUI mount swept this project
+      live qa runtime entries. Regressions fail when reverted. Combined suite with
+      S35 41ff0d3c/ebf919e8: 3537 passed (88124d1b, code-identical to 27678558). Spec:
+      refiner panes are never tracked by node/picker, so a typed refiner turn cannot
+      read as working. Infra: the post-fix TUI died on fork EAGAIN at the 2048 PID
+      cap (PID-1 zombies, pr-2111fa0 note-76c738e) and recovered via TUI resume. Captures
+      /pm-captures/scenarios/36 (REPORT.md).'
+    created_at: '2026-10-23T20:34:19Z'
+    last_edited: '2026-10-23T20:34:19Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
