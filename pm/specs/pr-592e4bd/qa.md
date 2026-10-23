@@ -144,6 +144,36 @@ env-by-name).
   completed newer run's result is processed rather than dropped, and
   superseded snapshots are cleared unless a live loop elsewhere owns them
   (60574f28, aea1fb8a, review loop acdb i1–i3).
+- **RQ20** Given a routed refiner or worker whose turn ended on a Claude
+  Code API error (e.g. "API Error: Connection dropped" or a 4xx/5xx from
+  the router) while the router already answers again, When its idle
+  notification arrives without a verdict, Then the session is resumed with
+  the route nudge (submitted), the status reads "<what>: turn ended on
+  \"<error>\" and work route '<route>' answers again — resumed", and it
+  finishes with its verdict. Each error record is resumed at most once and
+  a session at most 3 times; after that the usual idle reminder applies
+  (no endless loop). An *unrouted* (main-account) worker's API error is
+  never answered with a route nudge and never mentions "work route
+  'None'"; it gets the usual reminder (7c401141, review 8a99 i1).
+- **RQ21** Given a routed worker that used up resumes (or was stalled)
+  and whose window then dies, When it is relaunched, Then the new session
+  has a fresh resume budget and no later "recovered — resumed" message
+  refers to the dead pane (review 8a99 i1).
+- **RQ22** Given a route that failed, recovered, and fails again with the
+  same problem, When a queued or initial launch is deferred the second
+  time, Then the TUI shows the deferral again (not only the pm log)
+  (7c401141).
+- **RQ23** Given a running QA (container mode, possibly mid-snapshot
+  write), When the user starts QA afresh (`z t`) or stops it, Then the
+  stopped loop announces no "relaunch deferred" / "retry n/10" for the
+  windows the new run kills (1b6e2c68), the old run's `qa_resume.json` is
+  gone at once and is not rewritten by the stopped thread, and a TUI
+  restart at any point during the new run's planning or execution resumes
+  only the new run (or nothing), never the superseded one, and records no
+  stale "Recovered completed QA" note naming the old workdir (ea78b9d1,
+  review 8a99 i2 lock). The pm log line for a reused shared push proxy is
+  plain text (no NUL; `grep` does not report "binary file matches")
+  (c23a2021).
 
 ## 2. Setup
 
@@ -241,6 +271,20 @@ env-by-name).
     runs. Reuse driver scripts from capture scenarios/9 and /10; key
     waits on the fresh run's loop id / terminal state, not on counts of
     completion lines.
+  - Fourth pass (S13+), delta-only: S11/S12 held their stories and ended
+    NEEDS_WORK only for their own code changes (1b6e2c68, 7c401141,
+    ea78b9d1, c23a2021) plus review 8a99 i1/i2 (ea6b9e17, e47dc12d).
+    Everything else stays as evidence (S7–S12 captures). Fresh live
+    verification: RQ20–RQ23. To provoke an API-error turn on a healthy
+    route, make the stub router answer the messages endpoint with a
+    non-retryable error (HTTP 400/529 body in Anthropic error shape) or
+    drop the connection for a chosen number of requests while still
+    listening (preflight stays healthy); Claude's idle notification comes
+    about a minute after the error turn. For the unrouted case point
+    `ANTHROPIC_BASE_URL` at the "main" stub and make it fail the same way.
+    TUI restart = kill -9 the pid in `~/.pm/tui-<session>.pid`, then
+    `pm session </dev/null`. Out of scope, filed: pr-0f85376 (finalization
+    INTERRUPTED when a completed run is recovered after a dead driver).
 
 ## 3. Edge cases
 
