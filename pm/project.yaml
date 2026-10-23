@@ -11830,7 +11830,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-22T23:00:47.948428+00:00'
+  updated_at: '2026-10-23T01:40:54.695319+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -11879,6 +11879,12 @@ prs:
       /pm-captures/scenarios/10/story2 (app.log 22:35:24-27, before.txt/qa-ids-before.txt).'
     created_at: '2026-10-22T23:00:47Z'
     last_edited: '2026-10-22T23:00:47Z'
+  - id: note-ec6e744
+    text: 'Repro from pr-592e4bd QA S12 (post-fix/story4): z t on pr C left the stopped
+      run containers …-<loop>-s3/-s4 running because another PR (B) still had windows
+      qa-<B>-s3/-s4; the -sN suffix match in cleanup_orphaned_qa_containers kept them.'
+    created_at: '2026-10-23T01:40:54Z'
+    last_edited: '2026-10-23T01:40:54Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -29411,7 +29417,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T18:57:33.967457+00:00'
-  updated_at: '2026-10-22T22:50:53.679278+00:00'
+  updated_at: '2026-10-23T01:40:53.806179+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29443,6 +29449,17 @@ prs:
       Related: pr-4296808, pr-31413e8 (superseded-run reporting).'
     created_at: '2026-10-22T22:50:53Z'
     last_edited: '2026-10-22T22:50:53Z'
+  - id: note-5655e2e
+    text: 'pr-592e4bd QA S12 (1b6e2c68): the stopped loop after z t ran the work-route
+      relaunch gate on its killed windows (podman exec into the container being removed)
+      and surfaced "Scenario N worker relaunch deferred — in-container forwarder failed"
+      on the TUI, or logged "window died — retry 1/10" and slept the backoff; the
+      dead-window branch now breaks on stop_requested before the gate. ea78b9d1: z
+      t also drops the superseded run snapshot (no later Recovered/QA note for it).
+      The stopped run still announces "QA complete: INPUT_REQUIRED — …: ?" as a progress
+      line.'
+    created_at: '2026-10-23T01:40:53Z'
+    last_edited: '2026-10-23T01:40:53Z'
 - id: pr-c9e69fb
   plan: bugs
   title: 'Bug: shell `pm pr start` impl panes are never trust-watched (no --session-id
@@ -31483,7 +31500,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T23:34:19.409500+00:00'
+  updated_at: '2026-10-23T01:41:05.732331+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31663,6 +31680,40 @@ prs:
       TUI does not name a missing-image failure (pm log only).'
     created_at: '2026-10-22T23:34:19Z'
     last_edited: '2026-10-22T23:34:19Z'
+  - id: note-8e03dbc
+    text: 'S12 refine (RQ19, 2026-10-23): the TUI cannot be closed with a key, because
+      quit only detaches. "TUI down" means kill -9 the pid in ~/.pm/tui-<session>.pid,
+      then `pm session </dev/null` to respawn it. `pm pr qa-run-bg` (the detached
+      driver that auto-sequence uses) deletes its own qa_resume.json when it finishes.
+      So "newer run completed while the TUI was down" only leaves a snapshot if the
+      driver dies after qa_status gets `overall`. That status is written before the
+      blocking finalizer, so S12 kills the driver during a slow fake finalizer. A
+      newer run with an empty plan has a snapshot that lives for less than a second,
+      so S12 drives that case with a live `z t`. Code reading only: the stopped older
+      run snapshot may outlive the empty-plan run snapshot, and the next TUI scan
+      might then recover it ("Recovered completed QA from disk"). Not part of S12:
+      an older orphan beside a qa-run-bg run that finished cleanly would be the only
+      snapshot left and would be revived. Only the hidden command reaches this; auto-sequence
+      does not start a run while the orphan qa window exists.'
+    created_at: '2026-10-23T00:26:59Z'
+    last_edited: '2026-10-23T00:26:59Z'
+  - id: note-1da413e
+    text: 'QA S12 (2026-10-23): resume selection + adopted routed gating live on dac9c537→ea78b9d1,
+      captures /pm-captures/scenarios/12 (REPORT.md). Held: Ctrl+R resumes A-new not
+      A-old (Dropping at restart), adoption + queued routed s5; adopted run router
+      outage → one deferral, retry 1/10 only after recovery, same container; dead
+      driver after PASS → Recovered PASS, B-old dropped (finalization was INTERRUPTED:
+      filed pr-0f85376); live qa-run-bg driver run left alone; unrouted adopted container
+      → missing-mount deferral, nothing launched. CODE CHANGES needing normal re-review:
+      1b6e2c68 stopped loop skipped route gate for dead windows (no stray "relaunch
+      deferred"/retry after z t); ea78b9d1 z t drops the superseded run qa_resume.json
+      and stopped loops no longer rewrite it — pre-fix an empty-plan z t over a mid-turn
+      run let the live scan "Recover" the old run and record a QA INPUT_REQUIRED note
+      naming the old workdir (and a restart during the new run planning would resume
+      the old run). Empty structured-less plan waits up to _PLANNER_TIMEOUT (60 min)
+      by design; closed the planner pane to reach the no-scenarios path.'
+    created_at: '2026-10-23T01:41:05Z'
+    last_edited: '2026-10-23T01:41:05Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
@@ -31854,6 +31905,41 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T23:36:34.815807+00:00'
   updated_at: '2026-10-22T23:36:34.815807+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0f85376
+  plan: bugs
+  title: 'Bug: TUI recovery of a completed QA run whose driver died mid-finalizer
+    records QA PASS without finalization'
+  branch: pm/pr-0f85376-bug-tui-recovery-of-a-completed-qa-run-whose-drive
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/qa_loop_ui.py _resume_incomplete_qa (overall
+    set → "Recovered completed QA from disk" → _on_qa_complete) and pm_core/qa_loop.py
+    run_qa_sync (qa_status.json overall is written BEFORE the blocking _run_qa_finalize_pane;
+    the snapshot is refreshed with finalize_verdict only after it). If the driving
+    process (TUI thread or a detached `pm pr qa-run-bg` / auto-sequence child) dies
+    while the finalizer runs, a later TUI start sees overall=PASS, records "QA PASS
+    for <pr> — press i to sign off" and a "QA PASS: … (workdir: …)" note with no [finalize:
+    …], clears the snapshot, and never relaunches or polls the finalizer. The orphaned
+    finalize pane keeps running unobserved. Finalization (verify scenario pushes reached
+    origin/<branch>, fast-forward the PR workdir, collect worker changes/notes) is
+    skipped silently, so the PR can go to sign-off with worker commits not reconciled.
+    Live repro (pr-592e4bd QA S12 story 3, captures /pm-captures/scenarios/12/story3):
+    container QA, kill -9 the TUI, run `pm pr qa-run-bg <pr>` in a tmux window with
+    a fake qa_finalize delay 600, kill -9 the driver as soon as qa_status.json has
+    overall PASS, reopen with `pm session` → app log "Recovered completed QA from
+    disk: <pr> → PASS", finalize pane %56 still alive, no finalize verdict anywhere.
+    Expected: recovery either re-runs/adopts the finalizer when the snapshot has no
+    finalize_verdict, or reports the run as finalize-interrupted rather than a clean
+    PASS.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T00:59:29.573038+00:00'
+  updated_at: '2026-10-23T00:59:29.573038+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
