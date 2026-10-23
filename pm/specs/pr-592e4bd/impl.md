@@ -578,8 +578,8 @@ repeated deaths turn a PASS into NEEDS_WORK.
     `TestQAPollTimer::test_timer_outlives_running_until_completion_is_processed`
     (fails with the fix reverted; logs `/pm-captures/review-433b-i1/`).
 
-### QA S26 fixes (reviewed in review loop 1298 i1/i2)
-23. *TUI lagged after a QA completion* (both pre-existing on master).
+### QA S26/S28 fixes ((a), (b) reviewed in review loop 1298 i1/i2; (c) from QA S28, not yet reviewed)
+23. *TUI lagged after a QA completion* (all pre-existing on master).
     (a) f57c500c: after a NEEDS_WORK verdict `_on_qa_complete` moved the
     PR from qa to in_review and reloaded `app._data`, but did not repaint.
     The tech tree kept showing qa until the 300 s background sync. It now
@@ -592,6 +592,16 @@ repeated deaths turn a PASS into NEEDS_WORK.
     confirmations, because without force a sticky line from another PR
     still drops it. Regression `test_restart_message_holds_the_log_line`
     (asserts hold and force).
+    (c) 1098813c (S28): after a zz t NEEDS_WORK, "QA NEEDS_WORK for <pr> —
+    returning to review" was replaced in the same frame by the
+    self-driving review loop's sticky "Review loop started" and never
+    painted (absent from the raw TUI pane output and the cast; only in
+    `L`). It now uses `force=True, hold=CONFIRM_HOLD_SECONDS`, like (b).
+    Live post-fix, the cast shows the line for 3.00 s, with the box
+    showing in_review 0.04 s after it appears. Regression
+    `test_needs_work_message_holds_the_log_line` (asserts hold and force;
+    fails with the fix reverted). The plain-t NEEDS_WORK path was
+    already painted, because nothing followed it in that frame.
     Spec 8ae55361 (QA persists `prs[].workdir` via `_ensure_workdir`, so
     only a PR's first run with no cached workdir discriminates the
     item 22 timer fixes) was checked against the code in 1298 i1.
