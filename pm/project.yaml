@@ -2445,8 +2445,25 @@ prs:
       filed as pr-d1d0139.'
     created_at: '2026-10-23T05:12:00Z'
     last_edited: '2026-10-23T05:12:00Z'
+  - id: note-18c906b
+    text: 'S29 repro (pr-592e4bd QA, 2026-10-23, head 1d51bcef; evidence /pm-captures/scenarios/29/story2-attempt1-given-not-met
+      + story2/dead-review-pane-evidence). A review loop waiting on INPUT_REQUIRED
+      never ends when its Claude pane exits. review_loop._wait_for_follow_up_verdict
+      calls loop_shared.wait_for_follow_up_verdict without pane_id, so the liveness
+      check is find_claude_pane(session, window) = panes[0][0]. After the Claude pane
+      dies, that is the review diff pane, which stays alive. Live repro: fake review
+      pane %136 ended by Ctrl+C at 14:00:46. The loop kept waiting (TUI box ⏸1) and
+      never logged "pane gone during follow-up wait" or KILLED "Review pane disappeared
+      during INPUT_REQUIRED wait"; the fake only stands in for a Claude process that
+      exits (/exit, double Ctrl+C). The native stop (z d) still works. A candidate
+      fix (record the polled pane on ReviewLoopState in _run_claude_review/_adopt_in_flight_review
+      and pass pane_id=) plus a real-tmux regression is in dead-review-pane-evidence/review_pane_id.patch:
+      2 tests pass, and fail with either mutation. Not committed on #249 by request;
+      it belongs to this PR scope item 2.'
+    created_at: '2026-10-23T14:11:43Z'
+    last_edited: '2026-10-23T14:11:43Z'
   created_at: '2026-03-01T17:48:54.305206+00:00'
-  updated_at: '2026-10-23T05:12:00.103975+00:00'
+  updated_at: '2026-10-23T14:11:43.647718+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-89296d3-harden-window-management-against-une-ab512a43
 - id: pr-eee190a
   plan: null
