@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-b2db183
+  active_pr: pr-2a44020
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -31574,7 +31574,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T16:42:21.016517+00:00'
+  updated_at: '2026-10-23T17:47:40.752217+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32409,6 +32409,23 @@ prs:
       PATH=/usr/bin first).'
     created_at: '2026-10-23T16:42:20Z'
     last_edited: '2026-10-23T16:42:20Z'
+  - id: note-1c73dc7
+    text: 'QA S33 (2026-10-23, RQ34 host, ab14aafc, no code change; captures /pm-captures/scenarios/33,
+      REPORT.md). c97aaf9c held live: A removing the last target over a merge window
+      at INPUT_REQUIRED kept merge-<M>.jsonl a symlink ("still read live — not finalized"),
+      archived the sign-off, then MERGED was detected about 1 s after the reply (✓
+      merged), with Q routed QA held and unaffected. /autostart off kept review-i2,
+      impl-R and impl-S live and archived i1; the loop saw PASS (⟳2✓) and S went [working]→[idle].
+      Natural prune "all targets complete — auto-start OFF" archived signoff-T and
+      kept impl-V. After a TUI kill -9 + restart nothing was re-reported and all run
+      dirs were byte-identical (X untracked = pr-237d610). One Then FAILED as written:
+      after V was already idle, typing a message into its pane never showed a spinner/[working].
+      A control on a never-disabled session (W) shows the same, so it is pre-existing:
+      pm has no prompt-submit hook, so idle clears only on permission_prompt. Filed
+      pr-2a44020. Decision needed: narrow the RQ34 "idle/active state tracked" wording
+      to idle detection of a turn in flight, or require pr-2a44020 first.'
+    created_at: '2026-10-23T17:47:40Z'
+    last_edited: '2026-10-23T17:47:40Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
@@ -32790,6 +32807,36 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-23T16:13:51.145790+00:00'
   updated_at: '2026-10-23T16:13:51.145790+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2a44020
+  plan: bugs
+  title: 'Bug: a Claude pane that already went idle never shows as working again when
+    the user types a new turn (no prompt-submit hook)'
+  branch: pm/pr-2a44020-bug-a-claude-pane-that-already-went-idle-never-sho
+  status: pending
+  depends_on: []
+  description: 'pm_core/hook_install.py installs only Notification[idle_prompt|permission_prompt]
+    and Stop hooks; pm_core/pane_idle.py PaneIdleTracker.poll only sets idle on idle_prompt
+    and never clears it on a new user turn (Stop is ignored), and the picker reads
+    the same latest hook event. So once an impl/merge/review pane has emitted idle_prompt,
+    typing a new message into it leaves the tech-tree node without its spinner and
+    the picker row [idle] for the whole turn. Repro (pr-592e4bd QA S33, captures /pm-captures/scenarios/33/control-w/part2
+    and story3): pm pr start a PR (auto-start off), wait for the first turn to end
+    (spinner stops, picker [idle]), type a message in the impl pane while the API
+    turn is held (main stub status=held 17:39:48-17:40:14): node never spins, picker
+    stays [idle]; hook file shows idle_prompt 17:37:52 then Stop 17:40:14, nothing
+    at submit. Same on master (hook_install/pane_idle/hook_events unchanged by pr-592e4bd).
+    Likely fix: a UserPromptSubmit hook (event user_prompt) that clears idle/waiting
+    in the tracker and reads as working in the picker; check every read_event consumer
+    that assumes the latest event is idle_prompt.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T17:41:04.955112+00:00'
+  updated_at: '2026-10-23T17:41:04.955112+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
