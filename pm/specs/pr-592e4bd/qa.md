@@ -120,6 +120,31 @@ env-by-name).
   create passes env vars as `-e NAME` and a failed `podman create` error
   does not contain their values.
 
+### Fixed in scope during QA (pre-existing on master or found in QA)
+- **RQ16** Given container mode and a route that fails while a scenario
+  is queued, When the queued launch reaches the refiner or worker route
+  gate and is deferred, Then the container created for that launch is
+  removed (no `pm-qa-…-sN` container left running, its push proxy gone);
+  after the route recovers the scenario relaunches in a freshly created
+  container whose `/workspace` mount is the new clone (53419df2).
+- **RQ17** Given `qa-max-scenarios` below the scenario count, When the
+  initial capped launch or a queued launch runs, Then the QA status
+  dashboard keeps counting every scenario and shows the not-yet-launched
+  ones as "queued", not "pending" or missing (b97c0e3d).
+- **RQ18** Given a project whose root contains its own `pm_core/`
+  package, When container QA starts, Then each container's push proxy
+  comes up (no "did not become ready within 3s") (dbb88ea8).
+- **RQ19** Given a PR with more than one QA snapshot (a run superseded by
+  a fresh start, a stopped run's late write, an older orphan beside a
+  newer run that completed while the TUI was down, a newer run whose
+  planner produced no scenarios, a newer run with fewer scenarios than an
+  older run's queued tail), When the TUI restarts and resumes incomplete
+  QA, Then it resumes the newest *run* (ordered by its first scenario
+  index / persisted `scenario_start`, then unfinished, then mtime), a
+  completed newer run's result is processed rather than dropped, and
+  superseded snapshots are cleared unless a live loop elsewhere owns them
+  (60574f28, aea1fb8a, review loop acdb i1–i3).
+
 ## 2. Setup
 
 - Install pm from this PR's clone (`./install.sh --local` or venv per
@@ -190,7 +215,20 @@ env-by-name).
     cli/provider.py, container.py) are unchanged since the real
     host + rootless-container work-account smoke with underscore cwd
     (`host-work-route-smoke-20261022T195845Z`) and still match a4cec139;
-    later product changes are qa_loop.py only (0b1edfca, c5d7d64f).
+    later product changes are in qa_loop.py (0b1edfca, c5d7d64f,
+    b97c0e3d, acdb i3/i4), push_proxy.py (dbb88ea8) and
+    tui/qa_loop_ui.py resume selection (60574f28, aea1fb8a, acdb i1–i3).
+  - Out of scope, filed: pr-8f8ae78 (worker launch after a dead refiner
+    pane logs Launched but creates no pane and burns a retry), pr-09f01da
+    (in-container pm shim imports a shadow project pm_core, so *faked*
+    workers break in shadow projects — RQ18 checks use real/routed
+    workers or a project without fake workers), pr-1139060 (-sN orphan
+    sweep matching another PR's window), pr-173e11e (live probe leaves an
+    empty temp dir), pr-3c7ce04 (login-expired pane).
+  - Third pass (S11+): S1–S10 covered every RQ/E at least once; S9/S10
+    ended NEEDS_WORK only because they produced code changes. Re-verify
+    the changed surfaces (RQ11–RQ14, RQ16–RQ19) end to end on the current
+    head, plus a regression sweep of RQ5/RQ6/RQ8 since qa_loop.py moved.
   - The refresh-command cooldown is per process; it is only observable
     inside a long-lived QA loop/TUI, not across separate `pm provider test`
     runs.
