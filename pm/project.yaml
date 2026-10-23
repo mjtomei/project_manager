@@ -31574,7 +31574,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T13:58:56.208401+00:00'
+  updated_at: '2026-10-23T14:37:23.339570+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32283,6 +32283,25 @@ prs:
       S28 stub.py.'
     created_at: '2026-10-23T13:58:56Z'
     last_edited: '2026-10-23T13:58:56Z'
+  - id: note-6a2a546
+    text: 'QA S29 (2026-10-23, RQ31 two PRs, host, scratch TUI; captures /pm-captures/scenarios/29,
+      REPORT.md). The RQ31 Thens held live once the Givens were met. Story 1 (1d51bcef):
+      B sticky IR painted 4.01 s before A forced "(1/2) restarting QA", which held
+      81 s. Story 2: two restart lines 1.00 s apart, each painted ~3 s. Story 3: A
+      NEEDS_WORK box in_review +0.2 s. CODE CHANGE needing normal re-review: 9cc2fb6b
+      (pre-existing on master; like b290ebcb for sign_off) - a finished review loop
+      badge (⟳1⏸) masked the live QA spinner of a PR in qa; the live QA marker now
+      wins while QA panes are active or waiting, the badge returns when idle, and
+      a running loop still wins. Fixture-only: 9a7f9b13 + 1d51bcef fake-claude idle_once_after
+      (single idle_prompt per turn; the standalone bin/fake-claude argparse was missed
+      at first). The 2 s refresh made a waiting review loop relaunch 19x, while real
+      Claude emitted one idle per turn. Known limitation, NOT fixed here: Ctrl+C in
+      a review pane never ends a loop waiting on INPUT_REQUIRED (find_claude_pane
+      = surviving diff pane); filed as note-18c906b on pr-89296d3; z d stops it. impl.md
+      §5 item 24. Harness: env.sh scrubs env vars (whitelist OUT/ZZD_AFTER); the non-fzf
+      picker closes with C-c, not q, and shows the PR of the client active window.'
+    created_at: '2026-10-23T14:37:23Z'
+    last_edited: '2026-10-23T14:37:23Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
