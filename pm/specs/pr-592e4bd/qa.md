@@ -225,6 +225,28 @@ env-by-name).
   push to another branch is refused; and repeated start/stop cycles leave
   no accumulating proxy processes. A second PR's proxy is never touched
   (75649ae4, review b62f i1 8a3d3412, i2 130e8ab9).
+- **RQ27** Given a QA run (host or container mode, initial or queued
+  launch) whose refiner has produced its steps, When the worker pane
+  cannot be split off the refiner, Then no "Launched scenario N" line is
+  logged for that attempt. The scenario is never left looking like a
+  running worker. If the refiner window was already closed (TUI PR
+  cleanup `Y`, a fresh-start sweep, or the user closing it), the pm log
+  has a plain warning "Scenario N: refiner pane %X is gone (window
+  closed) — worker not launched" with no Traceback (a2ff954c). If the
+  refiner pane is still alive (the split was refused, e.g. tmux "no
+  space for new pane" in a window shrunk to two lines), the warning
+  "Failed to split scenario pane for scenario N — closing refiner pane
+  %X so the worker is relaunched" carries its traceback, and that
+  refiner pane is closed (ded27fcd). In both cases a *running* loop
+  then takes the dead-worker path: "Scenario N window died — retry
+  1/10", gated on the route ("relaunch deferred — …" with no retry spent
+  while the route is down). The worker is relaunched in a fresh
+  `qa-<pr>-sN` window (container mode: the same container, still
+  running). The refiner is never polled, reminded or nudged as if it
+  were the worker, and never yields a verdict for the scenario. Only
+  the relaunched worker's verdict counts. Sibling scenarios launched in
+  parallel, and another PR's run, are unaffected. A *stopping* loop
+  (`zz t`/`z t`) relaunches nothing and announces no retry or deferral.
 
 ## 2. Setup
 
@@ -411,6 +433,32 @@ env-by-name).
     process share the QA proxy key, and per-process refs mean QA teardown
     can stop a proxy an impl container still uses): record as an
     observation only.
+  - Seventh pass (S19+), delta-only: S17/S18 held their RQ26 stories.
+    The only product changes since are qa_loop.py `_split_worker_pane`
+    (a2ff954c from S17, review ab29 i2 ded27fcd). Fresh live
+    verification is needed only for RQ27, in host and container mode.
+    Initial and queued launches use the same code path. Keep refiners
+    and workers routed real Claude on the stub router, so the refiner
+    can be held at the stub (control file) until the split moment.
+    - To make tmux refuse the split while the refiner is alive, run
+      `tmux resize-window -t <pm session>:qa-<pr>-sN -y 2` on the held
+      refiner's window (this sets that window's window-size to manual
+      only), then release the refiner. Checked on tmux 3.4: a 2-line
+      window gives "no space for new pane", rc 1. The relaunch opens
+      a new window at normal size.
+    - The closed-window case is the user (or `Y`) closing the
+      `qa-<pr>-sN` window while its refiner is held. The refiner then
+      reports a pane death, the planner draft steps are used, and the
+      split hits a gone pane.
+    - Retry backoff is `_SCENARIO_RETRY_BASE * 2**n`. Key waits on the
+      log lines, not on fixed sleeps.
+    - Reuse the S15/S16/S17 harness scripts (stub.py, stubctl.sh,
+      env.sh, seed_home.sh). Write to new capture dirs.
+    - pr-8f8ae78 covers this same path. a2ff954c fixes its false
+      "Launched" line. Still open there, and by design here: the
+      retry the relaunch spends and the blocking backoff sleep. Record
+      "retry 1/10" as expected, not a failure.
+    - Out of scope, already filed: pr-1139060, pr-748e708.
 
 ## 3. Edge cases
 

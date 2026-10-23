@@ -31557,7 +31557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T07:17:03.642034+00:00'
+  updated_at: '2026-10-23T07:30:04.681149+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31977,6 +31977,18 @@ prs:
       pass (CDIR).'
     created_at: '2026-10-23T07:17:03Z'
     last_edited: '2026-10-23T07:17:03Z'
+  - id: note-1748d0d
+    text: 'Review ab29 i2 (ded27fcd, CODE CHANGE, needs normal re-review): a2ff954c
+      is sound for the closed-window case. Remaining edge fixed: a worker split that
+      failed with the refiner pane still alive left window_name set and pane_id None,
+      so the poll loop first-pane fallback polled the refiner as the worker (and could
+      remind it into a verdict). _split_worker_pane now kills that refiner pane (refinement
+      done; QA exec panes use cleanup=False so the container stays), and the scenario
+      takes the dead-worker path (route-gated relaunch with retries). Real-tmux regression
+      test_worker_split_failure_with_live_refiner_keeps_traceback, mutation-checked;
+      suite 3466 passed. Spec item 18 updated.'
+    created_at: '2026-10-23T07:30:04Z'
+    last_edited: '2026-10-23T07:30:04Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
@@ -32167,11 +32179,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T23:36:34.815807+00:00'
-  updated_at: '2026-10-22T23:36:34.815807+00:00'
+  updated_at: '2026-10-23T07:38:52.266239+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-c73194b
+    text: 'pr-592e4bd a2ff954c and ded27fcd fix part of this bug in _split_worker_pane.
+      A failed worker split is no longer logged as "Launched". When the refiner pane
+      is still alive it is now closed, so the scenario cleanly takes the dead-worker
+      relaunch. Still open: the relaunch spends retry 1/10 and the poll loop sleeps
+      through the backoff. Creating the worker in a fresh window directly would avoid
+      both.'
+    created_at: '2026-10-23T07:38:52Z'
+    last_edited: '2026-10-23T07:38:52Z'
 - id: pr-0f85376
   plan: bugs
   title: 'Bug: TUI recovery of a completed QA run whose driver died mid-finalizer
