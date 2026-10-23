@@ -374,22 +374,26 @@ recorded with item 29.
     `[working]` while the C workers were still mid-turn. Pre-existing on
     master for the not-in-project drop; the superseded drop came from this
     PR (60574f28). The scan now ignores snapshots of PRs outside its own
-    project. The project is loaded only when a snapshot of a PR that is
-    neither tracked nor resumed is present, and PR ids found to be another
+    project (a711f411; regression
+    `tests/test_qa_resume.py::test_other_projects_snapshots_are_left_alone`
+    fails with the fix reverted: 1 failed / 36 passed at a711f411, and
+    passes with it: 37 passed).
+    The project is loaded only when a snapshot of a PR that is neither
+    tracked nor resumed is present, and PR ids found to be another
     project's are remembered (`app._foreign_qa_pr_ids`), so a long-lived
     foreign snapshot does not reload project.yaml on every 5 s scan. The
-    set is cleared whenever project.yaml changes (inode, mtime, size), so
-    a PR pulled or added after its snapshot was first seen is resumed on
-    the next scan (review loop 5e26 i1;
+    set is cleared whenever project.yaml changes (inode, mtime, size):
+    `store.save` replaces the file, an editor under `pm edit` may rewrite
+    it in place. So a PR pulled or added after its snapshot was first seen
+    is resumed on the next scan (review loop 5e26 i1/i2;
     `test_other_projects_snapshots_load_the_project_once`,
-    `test_snapshot_seen_before_its_pr_arrives_resumes_after_pull`). (a711f411; regression
-    `tests/test_qa_resume.py::test_other_projects_snapshots_are_left_alone`
-    fails with the fix reverted: 1 failed / 36 passed, and passes with
-    it: 37 passed.)
+    `test_snapshot_seen_before_its_pr_arrives_resumes_after_pull`,
+    `test_in_place_project_edit_also_forgets_foreign_ids`).
     Evidence is in `/pm-captures/scenarios/39` (REPORT.md):
     - Pre-fix: `pre-fix/story3`, `pre-fix/p2/recording.mp4`.
     - Post-fix: `post-fix/recovery` (P1 restarted while the fixed P2 ran;
       A/B snapshots kept, both resumed) and `post-fix/story3` (P2 restart
       resumed C with A/B unchanged).
     Full suite 3538 passed on a711f411 (env -u PM_HOST_HOME, /usr/bin
-    first; `suite/full-suite.log`).
+    first; `suite/full-suite.log`), and 3540 passed on 7968f576
+    (`/pm-captures/review-5e26-i1/full-suite.log`).

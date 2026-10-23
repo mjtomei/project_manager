@@ -23,6 +23,7 @@ import json
 from unittest.mock import patch, MagicMock
 
 import pytest
+import yaml
 
 from pm_core import qa_loop
 from pm_core.qa_loop import (
@@ -500,6 +501,37 @@ def test_snapshot_seen_before_its_pr_arrives_resumes_after_pull(tmp_path):
     assert app._foreign_qa_pr_ids == {"pr-0ther"}
     assert _resume_file_path(late).is_file()
     assert _resume_file_path(other).is_file()
+
+
+def test_in_place_project_edit_also_forgets_foreign_ids(tmp_path):
+    """store.save replaces project.yaml (new inode), but an editor (under
+    `pm edit`, for example) may rewrite it in place: that edit must
+    clear the remembered ids too."""
+    app = _make_app(tmp_path)
+    _seed_run(tmp_path, overall="", pr_id="pr-late", loop="late")
+    project_file = app._root / "project.yaml"
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+        assert app._foreign_qa_pr_ids == {"pr-late"}
+
+        inode = project_file.stat().st_ino
+        data = store.load(app._root)
+        data["prs"].append({"id": "pr-late", "title": "L", "branch": "l",
+                            "status": "qa", "workdir": str(tmp_path / "wl"),
+                            "notes": []})
+        text = yaml.safe_dump(data, sort_keys=False)
+        project_file.chmod(0o644)  # store.save leaves it read-only
+        with open(project_file, "r+") as f:
+            f.write(text)
+            f.truncate()
+        assert project_file.stat().st_ino == inode
+
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    assert [c.args[2]["id"] for c in resume_bg.call_args_list] == ["pr-late"]
+    assert app._foreign_qa_pr_ids == set()
 
 
 @pytest.mark.parametrize("stale_loop", ["aaa", "zzz"])
