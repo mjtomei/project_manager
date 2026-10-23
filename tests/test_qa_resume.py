@@ -162,7 +162,7 @@ def _make_app(tmp_path, *, pr_status="qa"):
 
 
 def _seed_run(home, *, overall="", pr_id="pr-001", loop="loop1",
-              first_index=1, indices=None):
+              first_index=1, indices=None, scenario_start=0):
     """Create a qa workdir under <home>/.pm/workdirs/qa with resume+status.
 
     *first_index* numbers the run's scenarios, as a later run of the same
@@ -177,6 +177,7 @@ def _seed_run(home, *, overall="", pr_id="pr-001", loop="loop1",
     if indices is not None:
         state.scenarios = [QAScenario(index=i, title=f"S{i}", focus="")
                            for i in indices]
+    state.scenario_start = scenario_start
     # Incomplete by default: clear verdicts so it has pending work.
     state.scenario_verdicts = {}
     state.verified_scenarios = set()
@@ -553,6 +554,35 @@ def test_newer_run_with_fewer_scenarios_outranks_queued_tail(tmp_path):
     assert resume_bg.call_args[0][0].qa_workdir == str(new)
     on_complete.assert_not_called()
     assert not _resume_file_path(old).exists()
+
+
+def test_newer_run_without_scenarios_outranks_older_orphan(tmp_path):
+    """A newer run whose planner produced no scenarios has no scenario
+    index to order by; the start index it was given (past the older run's
+    launched scenarios) does.  Its completion is processed and the older
+    orphan is neither revived nor kept."""
+    app = _make_app(tmp_path)
+    old = _seed_run(tmp_path, overall="", loop="old", indices=[1, 2, 3])
+    new = _seed_run(tmp_path, overall="INPUT_REQUIRED", loop="new",
+                    indices=[], scenario_start=4)
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_not_called()
+    on_complete.assert_called_once()
+    assert on_complete.call_args[0][1].qa_workdir == str(new)
+    assert not _resume_file_path(old).exists()
+
+
+def test_scenario_start_survives_resume_round_trip(tmp_path):
+    state = _make_state(tmp_path)
+    state.scenario_start = 7
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    rebuilt = build_resume_state(_load_resume_file(tmp_path))
+    assert rebuilt.scenario_start == 7
 
 
 def test_older_unfinished_run_owned_elsewhere_is_kept(tmp_path):

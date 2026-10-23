@@ -217,6 +217,10 @@ class QALoopState:
     # planning.  Non-empty forces the overall verdict to NEEDS_WORK so the
     # change gets reviewed before sign-off.
     planner_code_changes: list[str] = field(default_factory=list)
+    # First scenario index the planner was given (0 = not planned here).
+    # Persisted so a run that planned no scenarios still orders against
+    # the PR's other runs on TUI resume (qa_loop_ui._resume_incomplete_qa).
+    scenario_start: int = 0
     # Error message for status display (e.g. missing spec, no scenarios)
     _error: str = ""
     # Progress callback (run_qa_sync / resume_qa_sync ``_notify``) so
@@ -884,6 +888,7 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
         "verified_scenarios": sorted(state.verified_scenarios),
         "planner_head": state.planner_head,
         "planner_code_changes": list(state.planner_code_changes),
+        "scenario_start": state.scenario_start,
         "queued_indices": sorted(queued_indices or set()),
         "scenarios": [_scenario_to_resume_dict(s) for s in state.scenarios],
         "scenario_0": (
@@ -995,6 +1000,7 @@ def build_resume_state(resume_data: dict) -> QALoopState:
     state.planner_head = resume_data.get("planner_head")
     state.planner_code_changes = list(
         resume_data.get("planner_code_changes") or [])
+    state.scenario_start = int(resume_data.get("scenario_start") or 0)
     return state
 
 
@@ -4024,6 +4030,7 @@ def run_qa_sync(
         _notify()
 
         scenario_start = _next_scenario_offset(state.pr_id, state.loop_id) + 1
+        state.scenario_start = scenario_start
         planner_prompt = prompt_gen.generate_qa_planner_prompt(
             data, state.pr_id, session,
             scenario_start=scenario_start,

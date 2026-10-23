@@ -353,4 +353,12 @@ inode, so a replacement socket cannot reuse the number.
    elsewhere drives them, so a later restart cannot revive them.
    Regressions in `tests/test_qa_resume.py` (the two acdb i1 cases fail on
    aea1fb8a; `test_newer_run_with_fewer_scenarios_outranks_queued_tail`
-   fails on 2dfd9768).
+   fails on 2dfd9768).  Review loop acdb i3: a run whose planner produced
+   no scenarios still reaches the poll tail and writes a snapshot with
+   `scenarios: []`, which ordered as 0, below an older orphan, so the
+   orphan was revived and the newer run's INPUT_REQUIRED completion
+   dropped.  The snapshot now carries the run's `scenario_start` (the
+   index the planner was given, past every earlier run's launched
+   scenarios), used when it has no scenarios. Regression
+   `test_newer_run_without_scenarios_outranks_older_orphan` (fails on
+   bb198e46).
