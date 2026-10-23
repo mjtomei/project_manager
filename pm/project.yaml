@@ -31557,7 +31557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T10:08:34.048283+00:00'
+  updated_at: '2026-10-23T10:17:58.887164+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32086,6 +32086,30 @@ prs:
       the other PR holds same-sN windows; one lingered after its push proxy stopped.'
     created_at: '2026-10-23T10:08:33Z'
     last_edited: '2026-10-23T10:08:33Z'
+  - id: note-a9323bf
+    text: 'S21 refiner: "Queued scenario launch deferred" only appears when a slot
+      frees during the outage (_launch_next_queued returns on cap before the route
+      check). With every slot held by stalled/dead workers it never shows. S21 therefore
+      uses cap 3 with 5 fake-planned scenarios, and one worker PASSes just before
+      the router stop. RQ22 (repeat deferral) is a cap-1 run with two router stops,
+      each right after a worker PASS reply. The S19 stub needs the S13 fail control
+      ported (key "<pr> <N> worker") for the API-error story.'
+    created_at: '2026-10-23T09:10:46Z'
+    last_edited: '2026-10-23T09:10:46Z'
+  - id: note-dbdd358
+    text: 'QA S21 (2026-10-23, host consolidated regression): CODE CHANGE ee3d0644
+      needs normal re-review. With qa-verify-pass off no PASS is ever verified, so
+      _run_qa_finalize_pane skipped finalize on every all-PASS run ("QA finalize:
+      skipping — PASS verdicts [...] have not been verified yet", finalize=None);
+      pre-existing since 09760b7e. The unverified gate now applies only while verification
+      is enabled; regression test_run_qa_finalize_pane_runs_unverified_pass_when_verification_off
+      (fails reverted); suite 3470 passed. All 6 triples held post-fix (startup +
+      mid-run outages, API-error resume, repeat queued deferral on the TUI, refused
+      split + closed refiner, FINALIZE_DONE). Captures /pm-captures/scenarios/21 (REPORT.md,
+      pre-fix/, post-fix/). Observation: resume/retry after a router restart can lag
+      ~60-75 s while the loop refines a queued launch (pr-1ab9075).'
+    created_at: '2026-10-23T10:17:58Z'
+    last_edited: '2026-10-23T10:17:58Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
