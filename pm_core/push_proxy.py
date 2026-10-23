@@ -496,6 +496,11 @@ _proxy_lock = threading.Lock()
 
 # For shared proxies: which containers reference each proxy key
 _proxy_refs: dict[str, set[str]] = {}
+# Serialises the check-then-spawn of one shared proxy: QA launches a PR's
+# scenario containers in parallel threads, and without it each sees no live
+# socket, spawns its own proxy (the later one unlinks the earlier socket)
+# and resets the refs, so removing one container stops the others' proxy.
+_spawn_locks: dict[str, threading.Lock] = {}
 # Reverse lookup: container_name -> proxy key
 _container_to_proxy_key: dict[str, str] = {}
 
@@ -632,35 +637,38 @@ def start_push_proxy(container_name: str, workdir: str,
         sock_dir = _shared_sock_dir(session_tag, pr_id)
         sock_path = os.path.join(sock_dir, "push.sock")
 
-        # Reuse if an existing proxy is alive on this socket
-        if os.path.exists(sock_path) and proxy_is_alive(sock_path):
-            with _proxy_lock:
-                _proxy_refs.setdefault(key, set()).add(container_name)
-                _container_to_proxy_key[container_name] = key
-            _log.info("Reusing live shared push proxy for %s %s (container %s)",
-                      session_tag, pr_id, container_name)
-            return sock_path
-
-        # Socket missing or dead — spawn a new subprocess proxy
-        os.makedirs(sock_dir, exist_ok=True)
-        # Remove stale socket before spawning.  Docker creates a
-        # *directory* when bind-mounting a non-existent socket path, so
-        # handle both files and directories left over from old runs.
-        try:
-            os.unlink(sock_path)
-        except IsADirectoryError:
-            import shutil
-            shutil.rmtree(sock_path, ignore_errors=True)
-        except FileNotFoundError:
-            pass
-
-        _start_proxy_subprocess(sock_path, workdir, allowed_branch)
-
         with _proxy_lock:
-            _proxy_refs[key] = {container_name}
-            _container_to_proxy_key[container_name] = key
+            spawn_lock = _spawn_locks.setdefault(key, threading.Lock())
+        with spawn_lock:
+            # Reuse if an existing proxy is alive on this socket
+            if os.path.exists(sock_path) and proxy_is_alive(sock_path):
+                with _proxy_lock:
+                    _proxy_refs.setdefault(key, set()).add(container_name)
+                    _container_to_proxy_key[container_name] = key
+                _log.info("Reusing live shared push proxy for %s %s (container %s)",
+                          session_tag, pr_id, container_name)
+                return sock_path
 
-        return sock_path
+            # Socket missing or dead — spawn a new subprocess proxy
+            os.makedirs(sock_dir, exist_ok=True)
+            # Remove stale socket before spawning.  Docker creates a
+            # *directory* when bind-mounting a non-existent socket path, so
+            # handle both files and directories left over from old runs.
+            try:
+                os.unlink(sock_path)
+            except IsADirectoryError:
+                import shutil
+                shutil.rmtree(sock_path, ignore_errors=True)
+            except FileNotFoundError:
+                pass
+
+            _start_proxy_subprocess(sock_path, workdir, allowed_branch)
+
+            with _proxy_lock:
+                _proxy_refs[key] = {container_name}
+                _container_to_proxy_key[container_name] = key
+
+            return sock_path
 
     # Legacy per-container proxy
     import tempfile
