@@ -31557,7 +31557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T12:43:09.681704+00:00'
+  updated_at: '2026-10-23T12:47:56.149494+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32179,6 +32179,19 @@ prs:
       re-checked, sound. Full suite 3477 passed; logs /pm-captures/review-433b-i1.'
     created_at: '2026-10-23T11:53:39Z'
     last_edited: '2026-10-23T11:53:39Z'
+  - id: note-8d4c153
+    text: 'QA10 planner (2026-10-23): spec 023d9cf6 adds a tenth pass (S26+), delta-only,
+      for the TUI poll-timer fixes 89414241 and fb7af748 (RQ30: a finished QA run
+      is processed within seconds, not at the 300 s sync, when nothing else keeps
+      the timer alive). QA never sets the PR workdir, so a PR stays eligible for the
+      no-workdir condition across runs. Do not use auto-start or start an impl: either
+      can give a PR a workdir or start loops that keep the timer alive and hide the
+      bug. S26 covers one PR (t PASS / NEEDS_WORK / INPUT_REQUIRED, zz t with qa-pass-count
+      2). S27 covers two PRs at once plus scratch-TUI restart resume. The QA10 harness
+      handoff (VFR renderer from the S24/S25 scripts, scratch TUI only, no production
+      settings) is recorded in the spec.'
+    created_at: '2026-10-23T12:00:10Z'
+    last_edited: '2026-10-23T12:00:10Z'
   - id: note-16dbbdb
     text: 'QA S27 (2026-10-23, RQ30 two-PR + TUI-restart resume, host, head 023d9cf6;
       captures /pm-captures/scenarios/27, REPORT.md): every Then held, with each finish
@@ -32226,6 +32239,15 @@ prs:
       timer fixes.'
     created_at: '2026-10-23T12:43:09Z'
     last_edited: '2026-10-23T12:43:09Z'
+  - id: note-c7a66a6
+    text: 'Review 1298 i1 (0697e450, CODE CHANGE, needs normal re-review): f57c500c
+      (NEEDS_WORK repaint) sound. 991addf9 held the zz t "restarting QA" line but
+      did not force it, so it was still dropped while another PR sticky line showed
+      (e.g. review loop sticky=30); now force=True like every other held confirmation.
+      Test assertion added (fails with force removed). Spec 8ae55361 checked against
+      _ensure_workdir: accurate. qa-related tests 548 passed.'
+    created_at: '2026-10-23T12:47:56Z'
+    last_edited: '2026-10-23T12:47:56Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
