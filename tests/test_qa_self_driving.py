@@ -791,3 +791,36 @@ class TestQAPollTimer:
 
         app.set_interval.assert_not_called()
         assert app._review_loop_timer is timer
+
+    def test_timer_outlives_running_until_completion_is_processed(self, tmp_path):
+        # poll_qa_state processes a finished run over two ticks; stopping
+        # the timer on the first (running already False) skipped the
+        # runtime_state verdict record and the _qa_loops removal.
+        from pm_core.tui.review_loop_ui import _poll_loop_state_inner
+
+        app = self._app(tmp_path)
+        app._data["prs"][0]["workdir"] = None  # no active PR keeps the timer
+        app._impl_poll_counter = 0
+        app._watcher_manager.is_any_running.return_value = False
+        timer = app._review_loop_timer = MagicMock()
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_PASS
+        app._qa_loops["pr-001"] = state
+
+        with patch("pm_core.tui.qa_loop_ui._on_qa_complete"), \
+             patch("pm_core.tui.qa_loop_ui._resume_incomplete_qa"), \
+             patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
+             patch("pm_core.tui.review_loop_ui._refresh_tech_tree"), \
+             patch("pm_core.runtime_state.set_action_state") as set_state:
+            _poll_loop_state_inner(app)
+            assert app._review_loop_timer is timer
+            timer.stop.assert_not_called()
+
+            _poll_loop_state_inner(app)
+            assert "pr-001" not in app._qa_loops
+            set_state.assert_called_once_with("pr-001", "qa", "done",
+                                              verdict=VERDICT_PASS)
+
+            _poll_loop_state_inner(app)
+        timer.stop.assert_called_once()
+        assert app._review_loop_timer is None

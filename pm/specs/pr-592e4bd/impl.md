@@ -562,3 +562,18 @@ repeated deaths turn a PASS into NEEDS_WORK.
     that pane running in the stopped run's own window until the next run's
     `_cleanup_stale_scenario_windows` kills the window (like the scenario
     panes, pr-1139060).
+
+### QA S24 fix (reviewed in review loop 433b i1)
+22. *First QA run's completion waited for the background sync*
+    (89414241) — only the shared poll timer (`poll_qa_state`) processes a
+    finished run, and the TUI started it only when an active PR had a
+    workdir. `start_qa`, `zz t` and the restart resume now ensure the
+    timer. Review loop 433b i1: the timer's stop check still used
+    `s.running`, so on the completion tick (running already False) it
+    stopped before the second tick, which records the runtime_state
+    verdict and drops the `_qa_loops` entry (a lingering entry with a
+    verdict also holds back auto-start). The timer now runs while a QA
+    loop is running *or* has an unprocessed verdict
+    (`review_loop_ui._qa_needs_poll`). Regression
+    `TestQAPollTimer::test_timer_outlives_running_until_completion_is_processed`
+    (fails with the fix reverted; logs `/pm-captures/review-433b-i1/`).

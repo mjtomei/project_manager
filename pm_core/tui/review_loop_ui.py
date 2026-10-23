@@ -361,6 +361,16 @@ def _ensure_poll_timer(app) -> None:
         app._review_loop_timer = app.set_interval(1.0, lambda: _poll_loop_state(app))
 
 
+def _qa_needs_poll(app) -> bool:
+    """True while a QA loop is running or its completion is unprocessed.
+
+    ``poll_qa_state`` handles a finished run over two ticks (completion
+    message and lifecycle first, then the runtime_state verdict and the
+    ``_qa_loops`` removal), so the timer must outlive ``running``.
+    """
+    return any(s.running or s.latest_verdict for s in app._qa_loops.values())
+
+
 def ensure_animation_timer(app) -> None:
     """Start the poll timer if there are active PRs that need animation.
 
@@ -371,7 +381,7 @@ def ensure_animation_timer(app) -> None:
         pr.get("status") in ("in_progress", "in_review", "qa", "sign_off") and pr.get("workdir")
         for pr in (app._data.get("prs") or [])
     )
-    qa_running = any(s.running for s in app._qa_loops.values())
+    qa_running = _qa_needs_poll(app)
     if has_active or any(s.running for s in app._review_loops.values()) or qa_running:
         _ensure_poll_timer(app)
 
@@ -457,7 +467,7 @@ def _poll_loop_state_inner(app) -> None:
         pr.get("status") in ("in_progress", "in_review", "qa", "sign_off") and pr.get("workdir")
         for pr in (app._data.get("prs") or [])
     )
-    qa_running = any(s.running for s in app._qa_loops.values())
+    qa_running = _qa_needs_poll(app)
     watcher_running = app._watcher_manager.is_any_running()
     if not any_running and not has_active_prs and not watcher_running and not qa_running:
         if app._review_loop_timer:
