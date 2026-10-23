@@ -309,6 +309,31 @@ env-by-name).
   finished run is processed, a TUI restart resumes or recovers nothing
   and records no second note (89414241 found in S24, review 433b i1
   fb7af748).
+  RQ30 clarification (S27, 2026-10-23): the "no other active PR has a
+  workdir" condition only holds until a PR's first QA run starts. QA
+  itself persists `prs[].workdir`: `run_qa_sync` calls
+  `_ensure_workdir` (qa_loop.py ~4212) before planning, and the PR is
+  then in status `qa`. On disk, every PR that has been QA'd has a workdir
+  from then on. The timer, however, reads the TUI's cached `app._data`.
+  It starts whenever a `_load_state` (`_update_display` →
+  `ensure_animation_timer`) sees an active PR with a workdir: another
+  PR's `start_qa`, a reload or a TUI restart. A persisted workdir on
+  disk therefore does not show that the timer was alive. Only the cache
+  at that moment decides. Live data, S27 (head 023d9cf6 vs a scratch
+  tree with 89414241 and fb7af748 reverted, same flow): two PRs started
+  0.6 s / 3.6 s apart, each finishing about 1 s before the TUI "QA PASS"
+  line, in BOTH trees. A run resumed after a TUI restart was processed
+  1 s after its "QA complete" in BOTH trees. So the two-PR and resume
+  stories do not discriminate the fixes: B's `start_qa` reload caches
+  A's workdir, and the restarted TUI loads the resumed PR's workdir. The
+  discriminating case remains a single PR's first run with no other
+  active PR workdir in the cache (S24). Whether the
+  `_resume_incomplete_qa` timer start matters when the cache has no
+  workdir (for example a workdir cleared during the run) was not
+  exercised. Do not count these stories as coverage of that path. After
+  any QA run, the "no other active PR has a workdir" Given for a later
+  story is false on disk unless that PR leaves the active statuses or
+  its workdir is cleared (`pm pr cleanup`).
 
 ## 2. Setup
 
@@ -581,7 +606,10 @@ env-by-name).
     only shows when nothing else keeps the timer alive. Use PRs that have
     never had QA (no `workdir` in project.yaml), no other PR in progress
     with a workdir, no review loop and no watcher, and check that before
-    each story. Measure the gap between the pm "QA complete for <pr>"
+    each story. A PR's first QA run itself persists its workdir (see the
+    RQ30 clarification), so this holds only for the first run in a
+    fresh project. Record disk state and the cached-state reload points
+    separately. Measure the gap between the pm "QA complete for <pr>"
     line and the TUI message, the `qa_resume.json` removal and the
     picker `[done …]` badge. Pre-fix the gap was about 95 s (up to
     300 s). Pass is a few seconds. Keep refiners and workers routed real
