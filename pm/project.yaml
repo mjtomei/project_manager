@@ -31574,7 +31574,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T16:14:03.191878+00:00'
+  updated_at: '2026-10-23T16:42:21.016517+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32399,6 +32399,16 @@ prs:
       impl.md item 26 and REPORT.md reference it. No change to the 94f36a18 fix.'
     created_at: '2026-10-23T16:14:03Z'
     last_edited: '2026-10-23T16:14:03Z'
+  - id: note-65db075
+    text: 'Review 03a7 i1 (c3d3f978, test-only): 94f36a18 (superseded-run tracker
+      keys) and c97aaf9c (keep live transcripts on auto-start disable) reviewed, both
+      sound. Full suite failed 1 test in suite order: test_pruned_planning_run_reads_like_a_first_run_in_the_picker
+      read a leftover idle hook event, because tests/test_hook_events.py reloads hook_events
+      under a tmp HOME and never restored _HOOKS_BASE. Fixed: fixture restores the
+      paths; picker test uses its own hooks dir. Full suite 3500 passed (env -u PM_HOST_HOME,
+      PATH=/usr/bin first).'
+    created_at: '2026-10-23T16:42:20Z'
+    last_edited: '2026-10-23T16:42:20Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
