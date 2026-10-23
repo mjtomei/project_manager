@@ -31574,7 +31574,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T14:49:47.694146+00:00'
+  updated_at: '2026-10-23T16:03:35.166461+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32327,6 +32327,39 @@ prs:
       addition; logs /pm-captures/review-4f28-i1.'
     created_at: '2026-10-23T14:49:47Z'
     last_edited: '2026-10-23T14:49:47Z'
+  - id: note-e84c098
+    text: 'S31 refiner (from reading the code, not run live): ⏸M can be reached only
+      on a vanilla/file:// project, through the auto-start merge. Steps: A target,
+      SIGNOFF_MERGE, main checkout diverged (unpushed commit), so ff-only fails and
+      the merge-<id> window opens with --transcript; the merge prompt is real Claude
+      on the main stub, which replies INPUT_REQUIRED. Manual g / `pr merge --resolve-window`
+      passes no --transcript, so the TUI never tracks that window. The sticky "⏸ Merge
+      INPUT_REQUIRED" line is logged again on every ~5 s merge poll while the PR is
+      in _pending_merge_prs (also while it is in qa). This keeps dropping unforced
+      lines (QA PASS … press i, MERGED detected, ✓ Merged) on the TUI log line; they
+      are still in L. This is pre-existing and outside RQ32: record it as an observation
+      or file it. To return M to in_review after the publish, use `pm pr edit --status
+      in_review` (the sign-off driver skips pending merges).'
+    created_at: '2026-10-23T15:03:05Z'
+    last_edited: '2026-10-23T15:03:05Z'
+  - id: note-04d574c
+    text: 'QA S31 (2026-10-23, RQ32 two PRs, host, real Claude refiners/workers +
+      merge window on stubs; captures /pm-captures/scenarios/31, REPORT.md). RQ32
+      triples 1-2 held: M read "● qa ⏸M"+spinner in every cast frame of its live QA
+      (595/595, replay 611/611), B showed only its own QA spinner then ⟳1⏸, M NEEDS_WORK
+      line painted 3.0 s with M in_review ⏸M. Triple 3 FAILED pre-fix: CODE CHANGE
+      needing normal re-review (pre-existing on master, 23df1ff1): A removing the
+      last target disables auto-start and _finalize_all_transcripts copied the live
+      merge window transcript, so MERGED was never detected (INPUT_REQUIRED every
+      5 s, ⏸M and window stayed). Fix keeps symlinks a reader still polls (live tracker
+      entries, running review loop iteration, impl/merge/review sessions in a live
+      pane); finished sessions incl. sign-off still archived. tests/test_autostart_transcript_finalize.py
+      (6 mutations caught); full suite 3497 passed. Post-fix MERGED detected ~1 s
+      after the reply, ✓ Merged, B unchanged. Future-only: frozen copies and merge
+      windows from an earlier TUI filed as pr-237d610. Harness: plain t on a PR with
+      a qa window only focuses it (use z t).'
+    created_at: '2026-10-23T16:03:35Z'
+    last_edited: '2026-10-23T16:03:35Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
@@ -32627,6 +32660,41 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-23T05:11:52.756342+00:00'
   updated_at: '2026-10-23T05:11:52.756342+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-237d610
+  plan: bugs
+  title: 'Bug: merge-window MERGED never detected when its tracked transcript is a
+    frozen copy or the window predates the current TUI'
+  branch: pm/pr-237d610-bug-merge-window-merged-never-detected-when-its-tr
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/review_loop_ui.py _poll_impl_idle second pass
+    (merge:<pr> registration from get_transcript_dir(app)/merge-<pr>.jsonl) and auto_start._finalize_all_transcripts.
+    Found in pr-592e4bd QA S31 (/pm-captures/scenarios/31/pre-fix/story3). pr-592e4bd
+    now keeps live sessions (live tmux pane running the --session-id, or live idle-tracker
+    entry) as symlinks when auto-start is disabled, but only going forward. Remaining:
+    (1) merge-<pr>.jsonl copies frozen by an earlier disable are never repaired, so
+    a window answered later keeps reporting INPUT_REQUIRED (repro: pre-fix S31 run,
+    A removes the last target while the merge window waits on INPUT_REQUIRED, then
+    answer MERGED: pm log repeats "merge_verdict: INPUT_REQUIRED detected" every 5
+    s, window and the merge marker stay). (2) After a TUI restart, get_transcript_dir
+    is a new run dir, so an open merge-<pr> window from the previous TUI is never
+    registered (ValueError, skipped) and its MERGED is never detected; _merge_input_required_prs
+    is lost too. Remedy today: pm pr merge --propagation-only <pr> by hand. Suggested
+    fix: fall back to claude_launcher.pane_transcript_path(pane) (session id from
+    the pane start command), as _watch_untracked_trust does, when the run-dir transcript
+    is missing or not a symlink. (3) Sessions whose pane stays open after finishing
+    (e.g. an idle sign-off pane) are left as symlinks at disable, so they are not
+    archived until their pane exits. There is no later finalizer for impl/merge/signoff
+    transcripts.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T15:53:17.974177+00:00'
+  updated_at: '2026-10-23T15:53:17.974177+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

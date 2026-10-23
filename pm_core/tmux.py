@@ -653,6 +653,16 @@ def pane_start_command(pane_id: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
+def live_pane_start_commands(session: str) -> list[str]:
+    """Start commands of the live (not dead) panes in *session*'s windows."""
+    result = _run(_tmux_cmd("list-panes", "-s", "-t", session, "-F",
+                            "#{pane_dead} #{pane_start_command}"), text=True)
+    if result.returncode != 0:
+        return []
+    return [line[2:] for line in result.stdout.splitlines()
+            if line.startswith("0 ")]
+
+
 def capture_pane(pane_id: str, full_scrollback: bool = False) -> str:
     """Capture the contents of a tmux pane.
 

@@ -652,3 +652,22 @@ repeated deaths turn a PASS into NEEDS_WORK.
     ends the loop (no KILLED, ⏸ stays). The native stop `z d` works.
     This is in scope for pr-89296d3 (note-18c906b, with repro and
     candidate patch).
+25. *Disabling auto-start froze live transcripts* (pre-existing on master,
+    23df1ff1; found by QA S31). `A` removing the last target runs
+    `auto_start._disable` → `_finalize_all_transcripts`, which replaced
+    every transcript symlink in the run dir with a copy. That included a
+    post-merge repo-update window waiting on INPUT_REQUIRED, so its later
+    MERGED never reached the copy the idle tracker reads: the TUI kept
+    "merge_verdict: INPUT_REQUIRED detected" every 5 s, and ⏸M and the
+    window stayed. Now `_live_read_transcripts` keeps the symlinks a reader
+    still polls: live idle-tracker entries, a running review loop's current
+    iteration file, and impl / merge / non-loop review transcripts whose
+    session runs in a live pane (`tmux.live_pane_start_commands`, which
+    covers windows not registered yet). Everything else is archived as
+    before, including a finished sign-off whose pane is still open: its
+    driver steps only auto-start-driven PRs. Tests:
+    tests/test_autostart_transcript_finalize.py (real tmux; 6 mutations
+    each caught). Future-only: copies frozen earlier are not repaired, and
+    a restarted TUI never registers an older merge window. Both are filed
+    as pr-237d610. Evidence: /pm-captures/scenarios/31 (pre-fix/story3,
+    post-fix*, REPORT.md).
