@@ -352,6 +352,24 @@ env-by-name).
   message, shown or deferred, is in the `L` command log. The final pass
   (N = M) reads "… press i to sign off" with no restart.
 
+- **RQ32** Given a PR in `qa` whose node also carries review-loop or
+  merge state from this TUI process, When its QA panes are active (a
+  scenario mid-turn) or waiting (a QA pane on a permission prompt), Then
+  the node shows the live QA marker (spinner / `⏸`), not a *finished*
+  review loop's badge (`⟳N✓`, `⟳N⏸`, …) (9cc2fb6b, found in S29). A
+  *running* review loop's marker (`⟳N`+spinner, `⏸N`+spinner,
+  `⏹N`+spinner) still wins over QA. A merge INPUT_REQUIRED marker
+  (`⏸M`+spinner) is not cleared by live QA (review 4f28 i1, 84662f7f;
+  the 9cc2fb6b render-time clearing dropped it). Once QA is idle (all
+  scenarios finished, e.g. after QA PASS while the PR is still `qa`) the
+  finished loop's badge returns: known limitation kept on purpose
+  (impl.md §5 item 24(a), cf. pr-97614ed), so record "● qa ⟳1⏸" after
+  QA PASS as expected, not a failure. In `sign_off` the badge stays
+  hidden (b290ebcb, unchanged). Each node shows only its own PR's state;
+  a second PR's QA or loop never changes it. `_review_loops` and
+  `_merge_input_required_prs` are TUI-process memory, so a TUI restart
+  drops finished badges and `⏸M` (expected).
+
 ## 2. Setup
 
 - Install pm from this PR's clone (`./install.sh --local` or venv per
@@ -669,6 +687,33 @@ env-by-name).
     project.yaml. Reuse the S26 harness and write to new capture dirs.
     Scratch TUI session only; no production settings or model changes.
     Known items stay observations: pr-0f85376, pr-1139060, pr-04dfffb.
+  - Twelfth pass (S30+), delta-only. S28/S29 held RQ31. The only
+    product changes since are tree-node marker precedence in
+    `pm_core/tui/tech_tree.py` (9cc2fb6b from S29, replayed live there
+    for the masked-spinner case only; review 4f28 i1 84662f7f moved it
+    into `_get_loop_marker(qa_live=)` and never ran live). Fresh live
+    verification is needed only for RQ32, in host mode (rendering does
+    not depend on the mode). Read markers from the TUI pane capture and
+    the .cast frames (spinner frames change every tick, so assert the
+    marker family, not one glyph). A finished loop: `zz d` on an
+    in_review PR with a fake `review` session (use `idle_once_after`,
+    impl.md §5 item 24(b)), then `z d`. A running loop: start QA with
+    `t` while that loop is still running (start_qa does not refuse it).
+    QA `waiting`: workers run without the session's
+    dangerously-skip-permissions file and the stub router answers a
+    worker turn with a Bash `tool_use`, so real Claude shows a
+    permission prompt; if that cannot be produced, record it and keep
+    the active-state Thens. `⏸M` needs a merge window INPUT_REQUIRED
+    (`merge-<id>` window, transcript `merge-<pr>.jsonl`) on an in_review
+    or sign_off PR, discovered by the TUI, before QA starts on that PR;
+    reach it through `pm pr merge` with a main-checkout update that
+    needs input. If no user flow reaches it, say so in the REPORT and
+    rely on `test_merge_input_marker_survives_live_qa`; do not inject
+    TUI state. Reuse the S28/S29 harness and write to new capture dirs.
+    Scratch TUI session only; no production settings or model changes.
+    Known items stay observations: pr-97614ed, pr-89296d3 note-18c906b
+    (Ctrl+C in a review pane never ends an INPUT_REQUIRED wait; use
+    `z d`), pr-0f85376, pr-1139060.
 
 ## 3. Edge cases
 
