@@ -451,12 +451,13 @@ env-by-name).
   mid-run, with the PR in status `qa`), the next scan treats it like its
   own PR: it resumes the run once, keeps adopted live workers rather than
   starting second ones, and leaves it alone while another live TUI owns
-  the snapshot (7968f576, cbf9941c; review loop 5e26 i1/i2). Not yet run
-  live (QA planner, sixteenth pass): resume runs in the adopting TUI's own
-  pm session (`get_pm_session`) while the orphan's windows live in the
-  other clone's session, and two TUIs that both see the dead owner in the
-  same scan can each adopt the run (`resume_owned_elsewhere` is a read,
-  not a claim). The scenario decides whether either is a failure.
+  the snapshot (7968f576, cbf9941c; review loop 5e26 i1/i2). S41 ran it
+  live (impl.md §5 item 30). The adopted run is driven in the session
+  that holds its windows: its workers, finalizer and any relaunch stay in
+  the other clone's session, and the adopting TUI collects verdicts and
+  writes the one note. The adopted PR's node shows within seconds of the
+  pull. A conflicted pull does not kill the TUI. Adoption is an atomic
+  claim, so two TUIs never both adopt one run.
 
 ## 2. Setup
 

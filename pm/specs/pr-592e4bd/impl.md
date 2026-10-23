@@ -397,3 +397,47 @@ recorded with item 29.
     Full suite 3538 passed on a711f411 (env -u PM_HOST_HOME, /usr/bin
     first; `suite/full-suite.log`), and 3540 passed on 7968f576
     (`/pm-captures/review-5e26-i1/full-suite.log`).
+
+### S41 follow-ups (QA scenario 41: two clones of one project)
+30. Adopting a run orphaned in another clone (its own pm session on the
+    same tmux server; the PR arrives by `git pull` or an in-place
+    `pm edit`). Found live; all four need normal independent re-review.
+    (a) *Adopted run finalized nowhere.* `resume_qa_sync` drove the run in
+        the adopting TUI's own session, so `_run_qa_finalize_pane` did not
+        find its `qa-<pr>` window (in the other clone's session) and the
+        run ended `PASS (finalize=None)` with no finalizer. Relaunches
+        would also have opened windows in the wrong session. The resumed
+        run now uses the snapshot's session when it still exists
+        (`_resume_session`, f22e6f4c). Workers, finalizer and any relaunch
+        stay in the session that holds the run; the adopting TUI collects
+        verdicts and writes the note.
+    (b) *Pulled PR missing from the tree for up to 300 s.* A pull signals
+        no reload, so the adopted PR's node appeared only at the
+        background sync (4 min 25 s live). The scan now reloads the TUI
+        state when it resumes a PR not in its loaded data (f22e6f4c).
+    (c) *Conflicted pull killed the TUI.* A `git pull` that conflicts on
+        project.yaml leaves conflict markers; the scan's `store.load`
+        raised `ProjectYamlParseError` out of the poll tick, which re-raises,
+        and Textual exited as soon as an unknown snapshot appeared. The
+        scan now logs once per file stamp and skips until the file parses
+        (c8ab2f4c).
+    (d) *Check-then-adopt race.* The scan checked `resume_owned_elsewhere`
+        on a snapshot read earlier, and the adopted loop wrote its pid
+        later, so two TUIs could both adopt one run. `claim_resume_file`
+        re-reads the snapshot under an exclusive flock (`qa_resume.claim`),
+        re-checks owner and `loop_id`, and writes this process as owner
+        before adopting (ec227cf0). Live S41 runs showed one winner each
+        time (B on old code, A on old code, and the claim-code replay).
+        Those are favorable timings, not proof: the guarantee comes from
+        the claim, shown by a deterministic barrier regression (fails
+        without the claim) and a two-process regression (fails 4/4 with
+        the lock removed).
+    Regressions in `tests/test_qa_resume.py` (each fails with its fix
+    reverted): `test_resume_of_a_pulled_pr_reloads_the_tree`,
+    `test_resumed_run_is_driven_in_the_session_that_holds_its_windows`,
+    `test_unparseable_project_file_does_not_escape_the_scan`,
+    `test_scan_does_not_adopt_a_run_another_tui_claimed_after_the_check`,
+    `test_two_processes_claiming_one_orphan_get_exactly_one_owner`.
+    Full suite 3549 passed on the d809b358 tree (code-identical to ec227cf0 after the rebase onto ee423ea9) (env -u PM_HOST_HOME,
+    /usr/bin first; `/pm-captures/scenarios/41/tests/full-suite.log`).
+    Evidence: `/pm-captures/scenarios/41` (REPORT.md).
