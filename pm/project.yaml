@@ -31610,7 +31610,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T22:17:03.004377+00:00'
+  updated_at: '2026-10-23T22:32:30.368568+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32722,6 +32722,20 @@ prs:
       no source change since the 3540-pass run on 7968f576.'
     created_at: '2026-10-23T22:17:02Z'
     last_edited: '2026-10-23T22:17:02Z'
+  - id: note-a2fbcd4
+    text: 'QA16 planner (2026-10-23): spec c236dec1 extends RQ36 and the sixteenth
+      pass for 7968f576 (foreign PR ids cached until project.yaml changes), which
+      landed after S39 and has not run live. S40 reruns the two-project kill/restart
+      in both directions on the current head, plus long downtime, both TUIs killed
+      together, and a result written while its TUI was down (driver killed after overall,
+      S12 method). S41 is new: two clones of one project (two sessions) where a PR
+      QAd in clone B, whose TUI dies, reaches clone A by git pull or an in-place pm
+      edit. From code reading, still open: resume_qa_sync uses the adopting TUI own
+      pm session (get_pm_session), not the snapshot session_tag, and resume_owned_elsewhere
+      is a read, not a claim, so two TUIs can both adopt a run in the same scan. S41
+      decides whether either fails.'
+    created_at: '2026-10-23T22:32:30Z'
+    last_edited: '2026-10-23T22:32:30Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
