@@ -2959,8 +2959,19 @@ def _relaunch_scenario_window(
             session=None if (use_containers and scenario.container_name) else session,
             workdir_path=workdir_path,
         )
-        pane_id = tmux_mod.new_window_get_pane(session, win_name, run_cmd,
-                                               cwd=pane_cwd, switch=False)
+        # Only the worker pane may have died: its refiner (and a verifier)
+        # can keep the scenario window alive.  Relaunch into that window,
+        # as the first launch split the worker from the refiner, instead
+        # of a second window of the same name, which would leave every
+        # name lookup (focus, cleanup, kill) ambiguous.
+        win = tmux_mod.find_window_by_name(session, win_name)
+        live = tmux_mod.get_pane_indices(session, win["id"]) if win else []
+        if live:
+            pane_id = tmux_mod.split_pane_at(live[0][0], "v", run_cmd,
+                                             background=True, cwd=pane_cwd)
+        else:
+            pane_id = tmux_mod.new_window_get_pane(session, win_name, run_cmd,
+                                                   cwd=pane_cwd, switch=False)
 
         scenario.window_name = win_name
         scenario.pane_id = pane_id

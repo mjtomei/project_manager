@@ -1359,6 +1359,66 @@ class TestPollLoopRouteGating:
         assert state.scenario_verdicts[1] == "PASS"
         assert not [c for c in send.call_args_list if c.args[0] == "%3"]
 
+    def test_relaunch_reuses_the_window_its_refiner_keeps_alive(
+            self, monkeypatch):
+        """Real tmux: only the worker pane of qa-<pr>-sN died; the refiner
+        pane keeps the window.  The relaunched worker is a new pane in that
+        same window (never the refiner pane, never a second window of the
+        same name); with the window gone it gets a fresh window."""
+        import shutil
+        import subprocess
+        import tempfile
+        from pm_core import qa_loop
+        if not shutil.which("tmux"):
+            pytest.skip("tmux not installed")
+        d = tempfile.mkdtemp(prefix="pmrl", dir="/tmp")
+        sock = os.path.join(d, "s")
+        monkeypatch.setenv("PM_TMUX_SOCKET", sock)
+        t = ["tmux", "-S", sock]
+
+        def tm(*a):
+            return subprocess.run(t + list(a), check=True, capture_output=True,
+                                  text=True).stdout.strip()
+
+        def windows():
+            return tm("list-panes", "-s", "-t", "sess", "-F",
+                      "#{window_name} #{window_id} #{pane_id}").splitlines()
+        sc = qa_loop.QAScenario(index=1, title="t", focus="f")
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        state.qa_workdir = d
+        pr_data = {"id": "pr-1"}
+        win = qa_loop._scenario_window_name(pr_data, 1)
+        try:
+            tm("new-session", "-d", "-s", "sess", "-n", "main", "sleep 60")
+            refiner = tm("new-window", "-d", "-P", "-F", "#{pane_id}", "-t",
+                         "sess:", "-n", win, "sleep 60")
+            worker = tm("split-window", "-d", "-v", "-t", refiner, "-P", "-F",
+                        "#{pane_id}", "sleep 60")
+            sc.window_name, sc.pane_id = win, worker
+            tm("kill-pane", "-t", worker)
+            with patch("pm_core.qa_loop._build_scenario_run_cmd",
+                       return_value=("sleep 60", d)), \
+                 patch("pm_core.qa_loop._resolve_qa_model"), \
+                 patch("pm_core.container.is_container_mode_enabled",
+                       return_value=False), \
+                 patch("pm_core.pane_layout.register_and_rebalance"):
+                assert qa_loop._relaunch_scenario_window(
+                    sc, state, {}, pr_data, "sess", d)
+                first = sc.pane_id
+                rows = [r.split() for r in windows() if r.startswith(win + " ")]
+                assert first not in (refiner, worker)
+                assert {r[2] for r in rows} == {refiner, first}
+                assert len({r[1] for r in rows}) == 1  # one window
+                # The whole window gone: a fresh window, one of that name.
+                tm("kill-window", "-t", rows[0][1])
+                assert qa_loop._relaunch_scenario_window(
+                    sc, state, {}, pr_data, "sess", d)
+                rows = [r.split() for r in windows() if r.startswith(win + " ")]
+                assert [r[2] for r in rows] == [sc.pane_id]
+        finally:
+            subprocess.run(t + ["kill-server"], capture_output=True)
+            shutil.rmtree(d, ignore_errors=True)
+
     def test_submit_survives_pane_dying_during_enters(self):
         """_send_submitted: the message typed, then the pane dies — the
         Enters stop quietly; a pane that cannot take the message raises."""
