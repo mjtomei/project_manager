@@ -415,6 +415,18 @@ env-by-name).
   pm's Notification `idle_prompt`/`permission_prompt` matchers or on
   `Stop` is refused as a conflict and left in place (review loop a183
   i1). The receiver stores no prompt text and prints nothing.
+  *Which panes* (reconciled after S36): "QA pane" means a scenario
+  worker pane (`sc.pane_id`, tracker key `qa:<pr>:s<N>`), the only QA
+  pane the node and picker have tracked since 162442ec. Refiner, s0,
+  planner, verifier and finalizer panes are not tracked by design, so a
+  turn typed into one changes neither node nor picker; that is not an
+  RQ35 failure. S36's "typed refiner question reads as working" Then
+  tested an untracked pane and is classified out of scope here, not
+  waived: the refiner's `user_prompt` record and pane isolation are
+  still required. Showing refiner turns on the node is a separate
+  improvement (pr-eee7483). A Stop that replaced its
+  `user_prompt` between two polls (a turn answered in under the poll
+  interval) also counts as a new turn (ebf919e8, S35).
 
 ## 2. Setup
 
@@ -517,6 +529,23 @@ env-by-name).
     omitted them. Known items stay observations: pr-0ac6f7a (a plain-string
     Notification/Stop entry crashes install), pr-b2db183, pr-237d610,
     pr-1139060.
+  - Fifteenth pass (S37+), delta-only. Product changes since S34 are
+    41ff0d3c (a live impl pane hides a finished loop's `⟳N` badge),
+    ebf919e8 (a Stop newer than an observed `idle_prompt` reads as
+    working), 93dca6ae (QA node spinner without a cached workdir, queued
+    launches keep the run's tracker keys, the TUI mount sweep is limited
+    to its own project's PRs) and the review-loop 3992 i1 render
+    refactor of those markers (no behaviour change). S35/S36 Thens on
+    those commits stand (captures `/pm-captures/scenarios/35`, `/36`;
+    full suite 3537 passed on 88124d1b). One open evidence gap must be
+    closed live, not inferred: S35 story 6 captured the merge window's
+    `user_prompt` and the picker formatter reading `[working]`, but no
+    visible picker popup during that interval. Hold the merge window's
+    response at the stub (held turn, not a 0.1 s answer), open the
+    picker popup while it is held, and record the popup frame showing
+    the merge row `[working]` in `recording.cast`/`recording.mp4`, then
+    `[idle]` after the next `idle_prompt`. Same scratch-only limits as
+    the fourteenth pass.
 
 ## 3. Edge cases
 

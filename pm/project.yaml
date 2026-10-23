@@ -33124,3 +33124,26 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-eee7483
+  plan: bugs
+  title: 'Improvement: show QA refiner (and planner) turns on the tech-tree node and
+    picker, not only scenario workers'
+  branch: pm/pr-eee7483-improvement-show-qa-refiner-and-planner-turns-on-t
+  status: pending
+  depends_on: []
+  description: Only QA scenario worker panes (qa:<pr>:s<N>) are registered in PaneIdleTracker
+    / the picker qa entry (since 162442ec). Refiner panes (and s0/planner/verifier/finalizer)
+    are untracked, so during refinement the node reads "● qa" with no spinner, and
+    a turn typed into a refiner never reads as working. Seen in pr-592e4bd S36 (/pm-captures/scenarios/36/REPORT.md
+    story 2; boxmon.log 19:01:24 refiner turns). Not a regression; pr-592e4bd qa.md
+    RQ35 now scopes "QA pane" to workers. Decide whether refiners should register
+    under e.g. qa:<pr>:r<N> and how the aggregate/picker present them.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T20:53:42.594737+00:00'
+  updated_at: '2026-10-23T20:53:42.594737+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

@@ -489,10 +489,10 @@ class PRNode(Widget):
 
     # -- live marker state ---------------------------------------------------
 
-    def _get_loop_marker(self, qa_live: bool = False) -> tuple[str, str]:
+    def _get_loop_marker(self, pane_live: bool = False) -> tuple[str, str]:
         """Return ``(marker_text, marker_style)`` for review-loop/merge state.
 
-        *qa_live*: the PR's QA or impl panes are active or waiting, so that
+        *pane_live*: the PR's QA or impl panes are active or waiting, so that
         live marker must win over a finished review loop's verdict badge.
         """
         try:
@@ -508,9 +508,9 @@ class PRNode(Widget):
                     return (f"⟳{state.iteration}{spinner}", "bold cyan")
                 # A finished review loop's verdict must not mask the sign-off
                 # marker (▲ / re-run spinner) once the PR has moved on, nor
-                # the PR's live QA (spinner / ⏸); it shows again once QA is
-                # idle.
-                if (state.latest_verdict and not qa_live
+                # the PR's live QA or impl pane (spinner / ⏸); it shows
+                # again once that pane is idle.
+                if (state.latest_verdict and not pane_live
                         and self._pr.get("status") != "sign_off"):
                     v = state.latest_verdict
                     marker = VERDICT_MARKERS.get(v, v[:4])
@@ -576,51 +576,41 @@ class PRNode(Widget):
         title_line = f"{side} {title}{' ' * max(0, title_pad)} {side}"
 
         status_text = f"{icon} {status}"
-        qa_state = None
+        # Live pane state ("waiting" / "active", else idle): the PR's QA panes
+        # in qa, its impl pane in in_progress / in_review.  A turn typed
+        # (or sent) into the impl pane after a review loop finished is
+        # live work too, so either one hides a finished loop's ⟳N badge
+        # (S35).
+        live_state = None
+        tracker = self.app._pane_idle_tracker
         if status == "qa":
             # No workdir gate: QA tracker keys exist only while a QA loop
             # runs, and a PR's first QA run writes its workdir after
             # start_qa reloaded the TUI's PR data, so a workdir gate hid
             # that PR's spinner until the next background sync (S36).
-            qa_state = qa_pane_state(self.app._pane_idle_tracker, pr_id)
-        # A turn typed (or sent) into the impl pane after a review loop
-        # finished is live work too: its spinner / ⏸ must not be hidden
-        # behind the loop's ⟳N verdict badge (S35).
-        impl_live = False
-        if status in ("in_progress", "in_review") and pr.get("workdir"):
-            tracker = self.app._pane_idle_tracker
-            impl_live = tracker.is_tracked(pr_id) and (
-                tracker.is_waiting_for_input(pr_id)
-                or not tracker.is_idle(pr_id))
+            live_state = qa_pane_state(tracker, pr_id)
+        elif (status in ("in_progress", "in_review") and pr.get("workdir")
+              and tracker.is_tracked(pr_id)):
+            if tracker.is_waiting_for_input(pr_id):
+                live_state = "waiting"
+            elif not tracker.is_idle(pr_id):
+                live_state = "active"
         loop_marker, loop_style = self._get_loop_marker(
-            qa_live=qa_state in ("waiting", "active") or impl_live)
+            pane_live=live_state in ("waiting", "active"))
         marker_offset = -1
         if loop_marker:
             marker_offset = 2 + len(status_text) + 1
             status_text += f" {loop_marker}"
         else:
-            if status in ("in_progress", "in_review") and pr.get("workdir"):
-                tracker = self.app._pane_idle_tracker
-                if tracker.is_tracked(pr_id):
-                    if tracker.is_waiting_for_input(pr_id):
-                        marker_offset = 2 + len(status_text) + 1
-                        loop_style = "bold yellow"
-                        status_text += " ⏸"
-                    elif not tracker.is_idle(pr_id):
-                        spinner = SPINNER_FRAMES[self._tree._anim_frame % len(SPINNER_FRAMES)]
-                        marker_offset = 2 + len(status_text) + 1
-                        loop_style = "bold cyan"
-                        status_text += f" {spinner}"
-            elif status == "qa":
-                if qa_state == "waiting":
-                    marker_offset = 2 + len(status_text) + 1
-                    loop_style = "bold yellow"
-                    status_text += " ⏸"
-                elif qa_state == "active":
-                    spinner = SPINNER_FRAMES[self._tree._anim_frame % len(SPINNER_FRAMES)]
-                    marker_offset = 2 + len(status_text) + 1
-                    loop_style = "bold cyan"
-                    status_text += f" {spinner}"
+            if live_state == "waiting":
+                marker_offset = 2 + len(status_text) + 1
+                loop_style = "bold yellow"
+                status_text += " ⏸"
+            elif live_state == "active":
+                spinner = SPINNER_FRAMES[self._tree._anim_frame % len(SPINNER_FRAMES)]
+                marker_offset = 2 + len(status_text) + 1
+                loop_style = "bold cyan"
+                status_text += f" {spinner}"
             elif status == "sign_off":
                 # Sign-off is running until the router records a verdict: show
                 # the latest verdict icon if recorded, else animate the spinner.
