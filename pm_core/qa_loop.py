@@ -1663,8 +1663,10 @@ class _RouteStallWatch:
     """
     NUDGE = ("The model route is available again. Continue the task where "
              "you left off and finish with the required final output.")
-    # Resumes after an API-error turn on a healthy route, per session: an
-    # error that is not the route's keeps failing and must not loop.
+    # Resumes after an API-error turn on a healthy route, per watch (one
+    # session: the poll loop replaces a worker's watch when it relaunches
+    # the worker): an error that is not the route's keeps failing and must
+    # not loop.
     MAX_ERROR_RESUMES = 3
 
     def __init__(self, state: QALoopState, check, what: str):
@@ -1715,7 +1717,9 @@ class _RouteStallWatch:
 
     def _resume_after_api_error(self, pane_id: str | None,
                                 transcript_path: str | None, st) -> bool:
-        if not pane_id or not transcript_path:
+        # Unrouted (main-account) sessions keep the caller's usual idle
+        # handling: an API error there has nothing to do with a route.
+        if not st.route or not pane_id or not transcript_path:
             return False
         from pm_core.verdict_transcript import latest_api_error
         err = latest_api_error(transcript_path)
@@ -3347,6 +3351,9 @@ def _poll_tmux_verdicts(
                         # Reset grace period for this retry
                         grace_start = time.monotonic()
                         _last_scenario_hook_ts.pop(scenario.index, None)
+                        # A new worker session: fresh API-error resume
+                        # budget, and no stalled pane from the dead one.
+                        _route_watches.pop(scenario.index, None)
                         continue
                     # Relaunch failed — will retry on next poll iteration
                     continue

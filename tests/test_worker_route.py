@@ -1092,6 +1092,65 @@ class TestPollLoopRouteGating:
                 results.append(watch.on_idle_without_verdict("%5", str(tr)))
         assert results.count(True) == qa_loop._RouteStallWatch.MAX_ERROR_RESUMES
 
+    def test_api_error_on_unrouted_session_is_not_resumed(self, tmp_path):
+        """A main-account (unrouted) worker's API error is not a route
+        outage: it keeps the usual reminder handling, with no nudge."""
+        from pm_core import qa_loop
+        tr = tmp_path / "t.jsonl"
+        tr.write_text(json.dumps(_api_error_record("e1")) + "\n")
+        watch = qa_loop._RouteStallWatch(
+            qa_loop.QALoopState(pr_id="pr-1"),
+            lambda: worker_route.RouteStatus(True), "w")
+        with patch("pm_core.tmux.send_keys") as send:
+            assert not watch.on_idle_without_verdict("%5", str(tr))
+        send.assert_not_called()
+
+    def test_relaunched_worker_gets_a_fresh_route_watch(self, tmp_path):
+        """A worker stalled on the route dies and is relaunched once the
+        route answers: the dead session's stalled pane is not "resumed"
+        and the new session starts with its own API-error budget."""
+        from pm_core import qa_loop
+        sc = qa_loop.QAScenario(index=1, title="t", focus="f")
+        sc.window_name, sc.session_id, sc.pane_id = "w1", "sid-1", "%5"
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        state.scenarios = [sc]
+        seen = []
+        state._notify_cb = lambda: seen.append(state.latest_output)
+        dead = set()
+        t0 = time.time() + 1e4
+
+        def relaunch(scenario, *a):
+            scenario.pane_id, scenario.session_id = "%9", "sid-2"
+            return True
+
+        def verdict(*a):
+            if sc.pane_id == "%5":
+                dead.add("%5")
+                return None
+            return "PASS"
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window",
+                   side_effect=relaunch), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
+             patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                   return_value=None), \
+             patch("pm_core.hook_events.read_event", side_effect=lambda sid: {
+                 "event_type": "idle_prompt",
+                 "timestamp": t0 + (sid == "sid-2")}), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   side_effect=verdict), \
+             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
+                   return_value=""), \
+             patch("pm_core.tmux.pane_exists",
+                   side_effect=lambda p: p not in dead), \
+             patch("pm_core.tmux.send_keys") as send:
+            self._poll(state, tmp_path, [_status(False), _status(True)])
+        assert any("worker stalled" in (o or "") for o in seen)
+        assert not [o for o in seen if "recovered — resumed" in (o or "")]
+        send.assert_not_called()
+        assert state.scenario_verdicts[1] == "PASS"
+
     def test_repeat_deferral_after_recovery_is_surfaced_again(self):
         """Same failure message as the previous deferral, but the route
         recovered in between: the TUI must show the new deferral."""

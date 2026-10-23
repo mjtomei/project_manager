@@ -374,3 +374,35 @@ deleted clone. `_drop_deferred_launch` (was `_drop_deferred_window`) now
 also removes that container (and its push proxy). Regression
 `TestPollLoopRouteGating::test_deferred_container_launch_removes_its_container`
 (both gates; fails without the fix).
+
+### QA S11/S12 fixes (fixed in scope)
+10. *Stopped loop gated a dead worker on the route* (1b6e2c68) — after
+    `z t` the stopped loop's next poll ran the relaunch route check (exec
+    into the dying container) and surfaced "relaunch deferred" or burned a
+    retry backoff; it now breaks before the gate when stop is requested.
+    Regression `TestPollLoopRouteGating::test_stopped_run_does_not_gate_or_defer_dead_worker`.
+11. *Repeat deferral not resurfaced; API-error turn never resumed*
+    (7c401141) — `_RouteStallWatch.remember()` clears the surface dedupe on
+    a healthy status, so a second outage with the same message is shown
+    again. A routed session whose turn ended on a Claude Code API error
+    (`isApiErrorMessage`, `verdict_transcript.latest_api_error`) while the
+    route already answers again is resumed with the same nudge, once per
+    error record and at most `MAX_ERROR_RESUMES` (3) per watch.
+12. *Superseded snapshot revived* (ea78b9d1) — `z t` clears the stopped
+    run's `qa_resume.json` at once, and `_write_resume_file` clears instead
+    of writing once `stop_requested` is set (a stopped run is never
+    resumed; its completion is processed in memory).
+13. *NUL in the push-proxy reuse log line* (c23a2021, pre-existing).
+
+Review loop 8a99 i1 (on 7c401141): (a) the API-error resume applied to
+every worker, since unrouted workers also get a watch whose status is
+always ok; a main-account worker's API error (usage limit, bad request)
+was nudged up to 3 times with "work route 'None' answers again". It now
+applies only when the status names a route. (b) The watch is keyed by
+scenario index and outlived a window-death relaunch, so the new worker
+session inherited the dead session's spent error budget and its
+`stalled_pane` (a later tick announced "recovered — resumed" for the dead
+pane). Intended behaviour is per worker session: a successful relaunch
+drops the scenario's watch. Regressions (mutation-checked):
+`TestPollLoopRouteGating::test_api_error_on_unrouted_session_is_not_resumed`,
+`test_relaunched_worker_gets_a_fresh_route_watch`.
