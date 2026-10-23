@@ -170,10 +170,26 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     active window (useful for background operations like the review loop).
     """
     target = f"{session}:"
-    _run(
-        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
-        check=True,
+    result = _run(
+        _tmux_cmd("new-window", "-d", "-P", "-F",
+                  "#{pane_id} #{window_id} #{window_index}",
+                  "-t", target, "-n", name, "-c", cwd, cmd),
+        check=True, text=True,
     )
+    # Use the pane tmux reports for the window it just made: a lookup by
+    # name finds an older window of the same name first (e.g. a QA
+    # scenario window that its refiner pane keeps alive after the worker
+    # pane died) and would return that window's first pane instead.
+    out = result.stdout.split() if isinstance(result.stdout, str) else []
+    if len(out) == 3 and out[0].startswith("%"):
+        pane_id, win_id, win_index = out
+        _log.info("new_window_get_pane: session=%s name=%s id=%s index=%s "
+                  "pane=%s switch=%s", session, name, win_id, win_index,
+                  pane_id, switch)
+        if switch:
+            current = current_or_base_session(session)
+            _run(_tmux_cmd("select-window", "-t", f"{current}:{win_index}"))
+        return pane_id
     win = find_window_by_name(session, name)
     _log.info("new_window_get_pane: session=%s name=%s id=%s index=%s switch=%s",
               session, name,

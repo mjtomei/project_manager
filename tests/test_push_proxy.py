@@ -407,6 +407,49 @@ class TestSharedProxy:
             stop_push_proxy("c2")
             assert get_proxy_socket_path("c2") is None
 
+    def test_concurrent_starts_spawn_one_proxy_and_keep_both_refs(self):
+        """Two containers of one PR created at once (QA scenarios launch in
+        parallel threads) share one proxy subprocess and both stay
+        referenced, so removing one does not stop the other's proxy."""
+        import threading
+        import time
+        spawned = []
+
+        def slow_start(sock_path, workdir, branch):
+            spawned.append(sock_path)
+            time.sleep(0.3)  # the real spawn waits for the socket
+            os.makedirs(os.path.dirname(sock_path), exist_ok=True)
+            Path(sock_path).touch()
+
+        sock_dir = "/tmp/pm-push-proxy-repo-race-pr-race"
+        if os.path.exists(os.path.join(sock_dir, "push.sock")):
+            os.unlink(os.path.join(sock_dir, "push.sock"))
+        barrier = threading.Barrier(2)
+
+        def start(name):
+            barrier.wait()
+            start_push_proxy(name, "/w", "pm/pr-race",
+                             session_tag="repo-race", pr_id="pr-race")
+
+        with patch("pm_core.push_proxy._start_proxy_subprocess",
+                   side_effect=slow_start), \
+             patch("pm_core.push_proxy.proxy_is_alive",
+                   side_effect=os.path.exists):
+            threads = [threading.Thread(target=start, args=(n,))
+                       for n in ("c1", "c2")]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
+            try:
+                assert len(spawned) == 1
+                stop_push_proxy("c1")
+                assert get_proxy_socket_path("c2") is not None
+            finally:
+                stop_push_proxy("c1")
+                stop_push_proxy("c2")
+            assert get_proxy_socket_path("c2") is None
+
     def test_shared_proxy_deterministic_path(self):
         """Shared proxy socket is at a deterministic path."""
         with self._mock_start():

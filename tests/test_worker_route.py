@@ -1259,6 +1259,166 @@ class TestPollLoopRouteGating:
         assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
         assert "window gone" in state.scenario_verdict_reasons[1]
 
+    def test_flag_followup_never_lands_in_another_pane(self, tmp_path):
+        """Host mode: the worker pane dies while its verifier runs, and the
+        window's first pane is the still-live refiner.  The flag follow-up
+        must not be typed into that pane; the scenario settles as
+        INPUT_REQUIRED (window gone) instead."""
+        from pm_core import qa_loop
+        tr = tmp_path / "t.jsonl"
+        tr.write_text("")
+        sc = qa_loop.QAScenario(index=1, title="t", focus="f")
+        sc.window_name, sc.session_id, sc.pane_id = "w1", "sid-1", "%5"
+        sc.transcript_path = str(tr)
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        state.scenarios = [sc]
+        t0 = time.time() + 1e4
+        dead = set()
+        sent = []
+
+        def verify(*a, **k):
+            dead.add("%5")  # worker pane killed while the verifier ran
+            return (False, "ran nothing", None)
+        with patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
+             patch("pm_core.qa_loop._get_verification_max_retries",
+                   return_value=2), \
+             patch("pm_core.qa_loop._verify_single_scenario",
+                   side_effect=verify), \
+             patch("pm_core.qa_loop._get_scenario_pane", return_value="%3"), \
+             patch("pm_core.qa_loop._relaunch_scenario_window",
+                   side_effect=lambda *a: setattr(
+                       state, "stop_requested", True)) as relaunch, \
+             patch("pm_core.hook_events.read_event",
+                   return_value={"event_type": "idle_prompt",
+                                 "timestamp": t0}), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="PASS"), \
+             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
+                   return_value=""), \
+             patch("pm_core.tmux.pane_exists",
+                   side_effect=lambda p: p not in dead), \
+             patch("pm_core.tmux.send_keys",
+                   side_effect=lambda p, m: sent.append((p, m))), \
+             patch("pm_core.qa_loop._is_verification_enabled",
+                   return_value=True), \
+             patch("pm_core.qa_loop._route_checker",
+                   return_value=lambda: worker_route.RouteStatus(True)), \
+             patch("pm_core.qa_loop._write_resume_file"):
+            qa_loop._poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/w",
+                                        tmp_path / "status.json",
+                                        lambda *a: None)
+        assert sent == []
+        relaunch.assert_not_called()
+        assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
+        assert "window gone" in state.scenario_verdict_reasons[1]
+
+    def test_dead_worker_is_not_taken_for_the_refiner_pane(self, tmp_path):
+        """Host mode: a worker dies while its route is down, and the
+        window's first pane is the still-live refiner.  Later ticks must
+        still see the worker as gone (not poll the refiner as if it were
+        the worker), so it is relaunched once the route answers."""
+        from pm_core import qa_loop
+        sc = qa_loop.QAScenario(index=1, title="t", focus="f")
+        sc.window_name, sc.session_id, sc.pane_id = "w1", "sid-1", "%5"
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        state.scenarios = [sc]
+        relaunches = []
+        ticks = {"n": 0}
+        t0 = time.time() + 1e4
+
+        def relaunch(scenario, *a):
+            relaunches.append(scenario.index)
+            scenario.pane_id, scenario.session_id = "%9", "sid-2"
+            return True
+
+        def sleep(_):
+            ticks["n"] += 1
+            if ticks["n"] > 50:  # bound the buggy (never relaunched) case
+                state.stop_requested = True
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%3"), \
+             patch("pm_core.qa_loop._relaunch_scenario_window",
+                   side_effect=relaunch), \
+             patch("pm_core.qa_loop.time.sleep", side_effect=sleep), \
+             patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
+             patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                   return_value=None), \
+             patch("pm_core.hook_events.read_event", side_effect=lambda sid: {
+                 "event_type": "idle_prompt",
+                 "timestamp": t0 + (sid == "sid-2")}), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   side_effect=lambda *a: (
+                       "PASS" if sc.session_id == "sid-2" else None)), \
+             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
+                   return_value=""), \
+             patch("pm_core.tmux.pane_exists",
+                   side_effect=lambda p: p != "%5"), \
+             patch("pm_core.tmux.send_keys") as send:
+            self._poll(state, tmp_path, [_status(False)] * 3 + [_status(True)])
+        assert relaunches == [1]
+        assert state.scenario_verdicts[1] == "PASS"
+        assert not [c for c in send.call_args_list if c.args[0] == "%3"]
+
+    def test_relaunch_reuses_the_window_its_refiner_keeps_alive(
+            self, monkeypatch):
+        """Real tmux: only the worker pane of qa-<pr>-sN died; the refiner
+        pane keeps the window.  The relaunched worker is a new pane in that
+        same window (never the refiner pane, never a second window of the
+        same name); with the window gone it gets a fresh window."""
+        import shutil
+        import subprocess
+        import tempfile
+        from pm_core import qa_loop
+        if not shutil.which("tmux"):
+            pytest.skip("tmux not installed")
+        d = tempfile.mkdtemp(prefix="pmrl", dir="/tmp")
+        sock = os.path.join(d, "s")
+        monkeypatch.setenv("PM_TMUX_SOCKET", sock)
+        t = ["tmux", "-S", sock]
+
+        def tm(*a):
+            return subprocess.run(t + list(a), check=True, capture_output=True,
+                                  text=True).stdout.strip()
+
+        def windows():
+            return tm("list-panes", "-s", "-t", "sess", "-F",
+                      "#{window_name} #{window_id} #{pane_id}").splitlines()
+        sc = qa_loop.QAScenario(index=1, title="t", focus="f")
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        state.qa_workdir = d
+        pr_data = {"id": "pr-1"}
+        win = qa_loop._scenario_window_name(pr_data, 1)
+        try:
+            tm("new-session", "-d", "-s", "sess", "-n", "main", "sleep 60")
+            refiner = tm("new-window", "-d", "-P", "-F", "#{pane_id}", "-t",
+                         "sess:", "-n", win, "sleep 60")
+            worker = tm("split-window", "-d", "-v", "-t", refiner, "-P", "-F",
+                        "#{pane_id}", "sleep 60")
+            sc.window_name, sc.pane_id = win, worker
+            tm("kill-pane", "-t", worker)
+            with patch("pm_core.qa_loop._build_scenario_run_cmd",
+                       return_value=("sleep 60", d)), \
+                 patch("pm_core.qa_loop._resolve_qa_model"), \
+                 patch("pm_core.container.is_container_mode_enabled",
+                       return_value=False), \
+                 patch("pm_core.pane_layout.register_and_rebalance"):
+                assert qa_loop._relaunch_scenario_window(
+                    sc, state, {}, pr_data, "sess", d)
+                first = sc.pane_id
+                rows = [r.split() for r in windows() if r.startswith(win + " ")]
+                assert first not in (refiner, worker)
+                assert {r[2] for r in rows} == {refiner, first}
+                assert len({r[1] for r in rows}) == 1  # one window
+                # The whole window gone: a fresh window, one of that name.
+                tm("kill-window", "-t", rows[0][1])
+                assert qa_loop._relaunch_scenario_window(
+                    sc, state, {}, pr_data, "sess", d)
+                rows = [r.split() for r in windows() if r.startswith(win + " ")]
+                assert [r[2] for r in rows] == [sc.pane_id]
+        finally:
+            subprocess.run(t + ["kill-server"], capture_output=True)
+            shutil.rmtree(d, ignore_errors=True)
+
     def test_submit_survives_pane_dying_during_enters(self):
         """_send_submitted: the message typed, then the pane dies — the
         Enters stop quietly; a pane that cannot take the message raises."""

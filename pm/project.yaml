@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-09f01da
+  active_pr: pr-d1d0139
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -2437,9 +2437,16 @@ prs:
   started_at: '2026-03-01T17:48:54.305206+00:00'
   reviewed_at: '2026-03-02T00:28:30.910840+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-512dbfa
+    text: 'Concrete QA instance of the pane-index-0 assumption: pr-592e4bd QA S15
+      found flag follow-ups and route nudges typed into the refiner (pane 0 of qa-<pr>-sN).
+      Fresh runs fixed in 32961096 (pr-592e4bd); the old-snapshot resume path remains,
+      filed as pr-d1d0139.'
+    created_at: '2026-10-23T05:12:00Z'
+    last_edited: '2026-10-23T05:12:00Z'
   created_at: '2026-03-01T17:48:54.305206+00:00'
-  updated_at: '2026-03-23T13:13:26.308098+00:00'
+  updated_at: '2026-10-23T05:12:00.103975+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-89296d3-harden-window-management-against-une-ab512a43
 - id: pr-eee190a
   plan: null
@@ -29697,7 +29704,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T15:49:43.888654+00:00'
-  updated_at: '2026-10-23T03:12:32.445065+00:00'
+  updated_at: '2026-10-23T05:11:59.250470+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29719,6 +29726,13 @@ prs:
       instead of reusing them.'
     created_at: '2026-10-23T03:12:32Z'
     last_edited: '2026-10-23T03:12:32Z'
+  - id: note-4e9c20f
+    text: 'Related resume case filed as pr-d1d0139 (pr-592e4bd QA S15): a qa_resume.json
+      written by pre-32961096 pm holds pane_id null for a dead worker; resuming it
+      takes the window first pane (live refiner) as the worker and sends it the route
+      nudge. Not startup ownership, but the same refiner-vs-worker identity on resume.'
+    created_at: '2026-10-23T05:11:59Z'
+    last_edited: '2026-10-23T05:11:59Z'
 - id: pr-62fdd54
   plan: bugs
   title: 'Bug: synchronize the PR branch before QA planning and recover stale handoffs'
@@ -31526,7 +31540,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T04:08:54.442372+00:00'
+  updated_at: '2026-10-23T05:51:31.687633+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31797,6 +31811,54 @@ prs:
       death still counts as FLAGGED against the worker.'
     created_at: '2026-10-23T04:08:54Z'
     last_edited: '2026-10-23T04:08:54Z'
+  - id: note-52a773c
+    text: 'S15 refine (RQ24/25 host, 2026-10-23): qa.md fifth-pass advice to drive
+      the verifier with a fake-claude qa_verification sequence does not work for re-verification.
+      A held fake exits as soon as anything is typed into its pane (checked live:
+      the fake exits rc=0 right after send-keys), so a re-verify request kills a fake
+      verifier and yields "verifier pane disappeared". S15 therefore runs the verifier
+      as real Claude on a main stub (ANTHROPIC_BASE_URL, S13 stub.py --main) that
+      answers FLAGGED/VERIFIED/slow from a control file. Also from code reading: in
+      host mode pane 0 of qa-<pr>-sN is the still-live refiner, so when only the worker
+      pane dies the flag follow-up fallback (find_claude_pane = first pane) targets
+      the refiner pane, not the verifier. S15 story 3 asserts the follow-up reaches
+      neither pane.'
+    created_at: '2026-10-23T04:26:42Z'
+    last_edited: '2026-10-23T04:26:42Z'
+  - id: note-06ec44c
+    text: 'QA S15 (2026-10-23, host/tmux, real Claude vs router+main stubs; captures
+      /pm-captures/scenarios/15, REPORT.md). Two CODE CHANGES need normal re-review:
+      (1) 32961096: a flag follow-up after only the worker pane died was typed into
+      the live refiner (pane 0) through the find_claude_pane fallback, and a dead
+      worker whose relaunch was route-deferred was then taken for the refiner and
+      never relaunched (hang). Fix: no first-pane fallback for a recorded dead pane_id,
+      and the dead id is kept. (2) 296c08a7: the relaunch re-found the old same-named
+      window by name and recorded the refiner as the worker (S16 container, and S15
+      story 4 on 32961096). Fix: new_window_get_pane returns the created pane (-P
+      -F), and the relaunch splits into the surviving scenario window. Real-tmux regressions;
+      full suite 3459 passed. Filed pr-d1d0139 (pending): resuming a pre-32961096
+      snapshot with pane_id null still sends the route nudge to the refiner. Story
+      3 Then sub-clause failed as written: the reason "window gone during PASS verification"
+      is in qa_status.json, not in the pm log (qa.md RQ24 clarified). Stories 1-2
+      ran on 50200a21, 3-5 on 32961096, 6 and the 4 rerun on 296c08a7.'
+    created_at: '2026-10-23T05:46:54Z'
+    last_edited: '2026-10-23T05:46:54Z'
+  - id: note-99d9ed8
+    text: 'QA S16 (2026-10-23): container-mode two-PR RQ24/RQ25 held live; captures
+      /pm-captures/scenarios/16 (REPORT.md). Story1 on 50200a21, story2 on 32961096,
+      story3 replayed PASS on 296c08a7 (S15 relaunch fix; snapshot pane_id = actual
+      worker, one window per scenario). Story3 attempt on 75649ae4 kept as INTERRUPTED
+      (relaunch bound surviving refiner %7, nudge went to refiner, real worker idle).
+      CODE CHANGE needing normal re-review: 75649ae4 start_push_proxy check-then-spawn
+      now under a per-key lock. Pre-fix, parallel s1/s2 container creates spawned
+      two shared proxies at one socket (orphan + refs reset to one container, so removing
+      it would stop the other container proxy); seen live in S16 stories 1-2. Regression
+      TestSharedProxy::test_concurrent_starts_spawn_one_proxy_and_keep_both_refs (fails
+      reverted); full suite 3460 passed on 296c08a7. Harness: pm logs container create
+      argv (podman run -d) only with ~/.pm/sessions/<tag>/debug; detached push proxies
+      outlive tmux, stop by exact argv.'
+    created_at: '2026-10-23T05:51:31Z'
+    last_edited: '2026-10-23T05:51:31Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
@@ -32051,6 +32113,43 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-23T04:05:12.347637+00:00'
   updated_at: '2026-10-23T04:05:12.347637+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d1d0139
+  plan: bugs
+  title: 'Bug: QA resume of a pre-32961096 snapshot with pane_id null sends the route
+    nudge to the refiner pane'
+  branch: pm/pr-d1d0139-bug-qa-resume-of-a-pre-32961096-snapshot-with-pane
+  status: pending
+  depends_on: []
+  description: 'Upgrade/resume compatibility (found in pr-592e4bd QA S15, 2026-10-23,
+    host mode). Producer: pm at 50200a21 (TUI pid 1412 started 04:32:31, code loaded
+    before fix 32961096). Its _poll_tmux_verdicts cleared scenario.pane_id when the
+    worker pane died, so qa_resume.json saved {"index": 4, "pane_id": null, "session_id":
+    "86b13070-..."} while the window qa-pr-2e1e412-s4 still held only the live refiner
+    pane %31 (pane 0). Saved snapshot: /pm-captures/scenarios/15/pre-fix/story6/resume-after-tui-restart/qa_resume.json
+    (README.md, pm-log-since-restart.txt, router-since-restart.jsonl, scrollback-31-refiner-after-resume.txt
+    in the same dir). Consumer: pm at 32961096 (TUI kill -9 + pm session respawn at
+    05:07:03). Observed: "Resuming incomplete QA from disk", then 05:07:36 the pending
+    loop resolved pane_id=None via _get_scenario_pane/find_claude_pane (first pane
+    = refiner %31), took the dead worker session API-error idle as that pane, and
+    typed the _RouteStallWatch NUDGE into the refiner (router stub seq 68 class=refiner,
+    refiner answered REFINED_STEPS) while TUI + log claimed "Scenario 4 worker: turn
+    ended on API Error: Connection refused ... and work route claude-work answers
+    again — resumed". No worker was relaunched. Recovery remedy used: z t fresh start
+    (superseded run stopped, QA complete INPUT_REQUIRED). 32961096 keeps a dead pane_id
+    so new snapshots do not hit this; snapshots from older pm still do. Review should
+    decide the compatibility requirement (e.g. on resume treat pane_id null for a
+    launched scenario as dead and relaunch, or never fall back to the window first
+    pane when a refiner/verifier pane shares the window). Related: pr-89296d3 (pane
+    index 0 assumptions), pr-3201ea8 (refiner vs worker identity on resume).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T05:11:52.756342+00:00'
+  updated_at: '2026-10-23T05:11:52.756342+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
