@@ -450,6 +450,54 @@ class TestSharedProxy:
                 stop_push_proxy("c2")
             assert get_proxy_socket_path("c2") is None
 
+    def test_start_during_last_stop_spawns_a_new_proxy(self):
+        """The last container's stop is removing the shared proxy while a
+        new container of the PR starts: the start must not reuse the proxy
+        being killed (it would be left without one), but spawn a new one."""
+        import threading
+        spawned = []
+        killing = threading.Event()
+        release = threading.Event()
+        from pm_core import push_proxy as push_proxy_mod
+        real_kill = push_proxy_mod._kill_proxy_socket
+
+        def fake_start(sock_path, workdir, branch):
+            spawned.append(sock_path)
+            os.makedirs(os.path.dirname(sock_path), exist_ok=True)
+            Path(sock_path).touch()
+
+        def slow_kill(sock_path):
+            killing.set()
+            release.wait(5)
+            real_kill(sock_path)
+
+        with patch("pm_core.push_proxy._start_proxy_subprocess",
+                   side_effect=fake_start), \
+             patch("pm_core.push_proxy.proxy_is_alive",
+                   side_effect=os.path.exists), \
+             patch("pm_core.push_proxy._kill_proxy_socket",
+                   side_effect=slow_kill):
+            sock = start_push_proxy("c1", "/w", "pm/pr-stop",
+                                    session_tag="repo-stop", pr_id="pr-stop")
+            stopper = threading.Thread(target=stop_push_proxy, args=("c1",))
+            stopper.start()
+            assert killing.wait(5)
+            starter = threading.Thread(
+                target=start_push_proxy,
+                args=("c2", "/w", "pm/pr-stop"),
+                kwargs={"session_tag": "repo-stop", "pr_id": "pr-stop"})
+            starter.start()
+            starter.join(0.3)
+            release.set()
+            stopper.join(5)
+            starter.join(5)
+            try:
+                assert len(spawned) == 2
+                assert os.path.exists(sock)
+            finally:
+                stop_push_proxy("c2")
+        assert not os.path.exists(sock)
+
     def test_shared_proxy_deterministic_path(self):
         """Shared proxy socket is at a deterministic path."""
         with self._mock_start():

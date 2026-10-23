@@ -726,6 +726,19 @@ def stop_push_proxy(container_name: str) -> None:
     referencing it is removed.
     """
     with _proxy_lock:
+        key = _container_to_proxy_key.get(container_name)
+        spawn_lock = _spawn_locks.get(key) if key else None
+    if spawn_lock is None:
+        _stop_push_proxy(container_name)
+        return
+    # Hold the start path's lock: a start between the last ref going and
+    # the socket removal would reuse the proxy this is about to kill.
+    with spawn_lock:
+        _stop_push_proxy(container_name)
+
+
+def _stop_push_proxy(container_name: str) -> None:
+    with _proxy_lock:
         key = _container_to_proxy_key.pop(container_name, None)
         if key is None:
             return

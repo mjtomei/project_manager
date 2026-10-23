@@ -458,3 +458,29 @@ hung until a timeout killed it, so it now fails fast):
 Still open and filed separately: a verifier that dies mid-check counts
 as FLAGGED ("verifier pane disappeared"), so the worker re-runs, and
 repeated deaths turn a PASS into NEEDS_WORK.
+
+### QA5/S15/S16 fixes (reviewed in review loop b62f i1)
+14. *"Resumed" claimed for a dead pane* (5432f736) —
+    `_RouteStallWatch._resume` announces a resume only after the nudge
+    is typed; otherwise it logs "pane gone — not resumed" and the
+    dead-pane relaunch takes over.
+15. *Flag follow-up / dead worker taken for the refiner* (32961096) — in
+    host mode the scenario window's first pane is the still-live
+    refiner. A recorded worker `pane_id` that died is kept (not cleared)
+    and never replaced by the first-pane fallback, so the follow-up is
+    not typed into the refiner and the dead worker is still relaunched.
+    A snapshot from before this fix (`pane_id` null) still falls back:
+    pr-d1d0139.
+16. *Relaunch bound to the refiner* (296c08a7) — `new_window_get_pane`
+    returns the pane tmux reports for the created window (`-P -F`), not a
+    by-name lookup, and `_relaunch_scenario_window` splits the new worker
+    into the surviving scenario window (fresh window only when it is
+    gone), so one window per scenario remains.
+17. *Shared push proxy start races* (75649ae4, b62f i1) — the
+    check-then-spawn in `start_push_proxy` runs under a per-key lock, so
+    parallel scenario container creates spawn one proxy and keep both
+    refs. Review b62f i1: `stop_push_proxy` takes the same lock, so a
+    start racing the last container's stop cannot reuse the proxy being
+    killed (regression
+    `TestSharedProxy::test_start_during_last_stop_spawns_a_new_proxy`,
+    fails without the lock).

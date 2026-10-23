@@ -2935,13 +2935,14 @@ def _relaunch_scenario_window(
     session: str,
     workdir_path: str,
 ) -> bool:
-    """Re-create the tmux window for a scenario whose window died.
+    """Relaunch the worker of a scenario whose worker pane died.
 
     The worktree / container should still exist — we just need to launch
-    a new ``docker exec`` (container mode) or ``claude`` (host mode) in a
-    fresh tmux window.
+    a new ``docker exec`` (container mode) or ``claude`` (host mode) as a
+    new pane of the scenario window, or in a fresh window when that is
+    gone too.
 
-    Returns True if the window was recreated successfully.
+    Returns True if the worker was relaunched successfully.
     """
     from pm_core import tmux as tmux_mod
     from pm_core.container import is_container_mode_enabled, _runtime_available
