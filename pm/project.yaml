@@ -31540,7 +31540,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T06:01:21.187706+00:00'
+  updated_at: '2026-10-23T06:16:17.217838+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31897,6 +31897,19 @@ prs:
       lock). Spec items 14-17 added. Full suite 3461 passed.'
     created_at: '2026-10-23T06:01:21Z'
     last_edited: '2026-10-23T06:01:21Z'
+  - id: note-ec55f9e
+    text: 'Review b62f i2 (130e8ab9, CODE CHANGE, needs normal re-review): 8a3d3412
+      stop lock is sound, but the push-proxy daemon only checked that its socket path
+      existed. After a stop then immediate start of a PR shared proxy, the old daemon
+      kept running (orphan on an unlinked socket; reproduced 60/60 cycles), and its
+      exit cleanup unlinked the path whatever was there, which could delete the newer
+      proxy socket. PushProxy now checks its socket inode (owns_socket, as route_bridge
+      does): it exits when the path is removed or replaced and unlinks only its own
+      socket. Regressions test_replaced_daemon_exits_and_keeps_the_new_socket (real
+      daemon) and test_stop_of_a_replaced_proxy_leaves_the_new_socket, each mutation-checked.
+      Full suite 3463 passed; logs /pm-captures/review-b62f-i2.'
+    created_at: '2026-10-23T06:16:17Z'
+    last_edited: '2026-10-23T06:16:17Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
