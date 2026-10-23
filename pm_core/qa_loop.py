@@ -3279,12 +3279,14 @@ def _poll_tmux_verdicts(
                 else:
                     # Send the scenario a follow-up message and put back in pending.
                     # Use the stored pane_id to target the original scenario
-                    # pane, not the verification pane that may now be pane 0.
+                    # pane.  When that pane died, the window's first pane is
+                    # another session (the refiner, or the verifier split
+                    # from the worker), so there is no fallback to it.
                     pane_id = scenario.pane_id
-                    if pane_id and not tmux_mod.pane_exists(pane_id):
-                        pane_id = None
                     if pane_id is None:
                         pane_id = _get_scenario_pane(session, scenario.window_name)
+                    elif not tmux_mod.pane_exists(pane_id):
+                        pane_id = None
                     followup_sent = False
                     if pane_id:
                         followup_msg = (
@@ -3366,8 +3368,10 @@ def _poll_tmux_verdicts(
 
             pane_id = scenario.pane_id or _get_scenario_pane(session, scenario.window_name)
             if pane_id and not tmux_mod.pane_exists(pane_id):
+                # Keep the dead id: clearing it would make the next tick
+                # fall back to the window's first pane, which in host mode
+                # is the still-live refiner, and take that for the worker.
                 pane_id = None
-                scenario.pane_id = None
             if pane_id is None:
                 if state.stop_requested:
                     # A stop (e.g. ``z t`` fresh start) killed the window
