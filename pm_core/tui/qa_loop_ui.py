@@ -600,9 +600,13 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                         "press i to sign off"
                     )
             else:
+                # Hold the line: start_qa's own messages in this same frame
+                # would otherwise replace it before it is ever painted.
+                from pm_core.tui import auto_start as _auto_start
                 app.log_message(
                     f"[green]QA PASS[/] for {pr_id} "
-                    f"({sd['pass_count']}/{required} consecutive) — restarting QA"
+                    f"({sd['pass_count']}/{required} consecutive) — restarting QA",
+                    hold=_auto_start.CONFIRM_HOLD_SECONDS,
                 )
                 _log.info("QA self-driving: %d/%d passes, restarting QA",
                           sd["pass_count"], required)

@@ -105,6 +105,27 @@ class TestPassCountAndAutoMerge:
         mock_merge.assert_not_called()
         mock_restart.assert_called_once_with(app, "pr-001")
 
+    def test_restart_message_holds_the_log_line(self, tmp_path):
+        """The "restarting QA" line is held against start_qa's messages in
+        the same frame, so it is painted at all (S26: never shown live)."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = _make_app(tmp_path)
+        app._self_driving_qa["pr-001"] = {
+            "pass_count": 0, "required_passes": 2
+        }
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_PASS
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.qa_loop_ui.start_qa"):
+            _on_qa_complete(app, state)
+
+        restart = [c for c in app.log_message.call_args_list
+                   if "restarting QA" in c.args[0]]
+        assert len(restart) == 1
+        assert restart[0].kwargs.get("hold", 0) > 0
+
     def test_pass_triggers_auto_merge_when_enough(self, tmp_path):
         """Step 5: pass_count reaching required_passes triggers auto-merge."""
         from pm_core.tui.qa_loop_ui import _on_qa_complete
