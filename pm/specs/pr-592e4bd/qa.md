@@ -176,6 +176,25 @@ env-by-name).
   not "above the stopped run's last planned index". The pm log line for a reused shared push proxy is
   plain text (no NUL; `grep` does not report "binary file matches")
   (c23a2021).
+- **RQ24** Given a QA run with PASS verification on (routed real-Claude
+  workers, verifier on main/fake), When the pm sends a message into a
+  Claude pane (route nudge, verdict-format reminder, flagged-verification
+  follow-up to the worker, re-verification request to the verifier), Then
+  it is submitted (a new turn starts; nothing is left typed in the prompt
+  box). When the target pane dies around that send, Then the QA run
+  goes on and does not end in "QA thread crashed" or "verification thread
+  crashed":
+  a reminder to a vanished worker leads to the usual relaunch (through the
+  route gate), a flag follow-up to a vanished worker window settles the
+  scenario INPUT_REQUIRED ("window gone during PASS verification…"), a
+  re-verify request to a vanished verifier runs the check in a fresh
+  verifier pane, and a verifier that dies while re-verifying ends that
+  wait (no hang, finalize runs) (887a0b18, ff2c2474). Known and filed
+  separately: a verifier death mid-check counts as FLAGGED against the
+  worker (pr-04dfffb). Open question for QA: when only the worker *pane*
+  dies and the verifier pane is still in the window, the flag follow-up
+  falls back to the window's first pane (`find_claude_pane`) and must
+  not land in the verifier pane.
 
 ## 2. Setup
 
@@ -309,6 +328,19 @@ env-by-name).
     TUI restart = kill -9 the pid in `~/.pm/tui-<session>.pid`, then
     `pm session </dev/null`. Out of scope, filed: pr-0f85376 (finalization
     INTERRUPTED when a completed run is recovered after a dead driver).
+  - Fifth pass (S15+), delta-only: S13/S14 held their stories. The only
+    later product changes are review 590d i1/i2 (887a0b18 `_send_submitted`
+    for every pane message, reminder failure no longer crashes the QA
+    thread; ff2c2474 verification pane races). Fresh live verification only
+    for RQ24, in host and container mode. Drive the verifier with a
+    fake-claude scripted sequence for `qa_verification` (e.g.
+    `{"sequence": ["FLAGGED_END", "VERIFIED"]}` with a `delay` long enough
+    to kill panes while it works) and keep workers routed real Claude on
+    the stub router so that follow-ups go into a real prompt box. Kill
+    single panes by the pane id shown in the pm log/`tmux list-panes`, not
+    whole windows, unless the story says window. Set
+    `qa-verdict-reminder-timeout` low for the reminder story and make the
+    stub answer the worker without a verdict line.
 
 ## 3. Edge cases
 
