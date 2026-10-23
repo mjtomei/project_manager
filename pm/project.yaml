@@ -31610,7 +31610,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T22:01:06.237527+00:00'
+  updated_at: '2026-10-23T22:12:31.409559+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32698,6 +32698,17 @@ prs:
       attempt 1 kept as invalid fixture).'
     created_at: '2026-10-23T22:01:06Z'
     last_edited: '2026-10-23T22:01:06Z'
+  - id: note-e1f94df
+    text: 'Review 5e26 i1 (7968f576, CODE CHANGE, needs normal re-review): a711f411
+      and docs 87279568, 87f9783c, 5f557465 are sound. a711f411 reloaded project.yaml
+      on every 5 s resume scan while another project snapshot existed; foreign PR
+      ids are now cached, cleared whenever project.yaml changes (inode/mtime/size),
+      so a PR pulled/added after its snapshot was first seen resumes on the next scan
+      (supervisor concern). 3 mutations checked: never-invalidate, no-cache, no-filter.
+      Full suite 3540 passed (env -u PM_HOST_HOME, /usr/bin first); log /pm-captures/review-5e26-i1/full-suite.log
+      (it overwrote an earlier 3539-pass run on the pre-invalidation tree).'
+    created_at: '2026-10-23T22:12:31Z'
+    last_edited: '2026-10-23T22:12:31Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
