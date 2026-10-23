@@ -540,12 +540,16 @@ env-by-name).
     full suite 3537 passed on 88124d1b). One open evidence gap must be
     closed live, not inferred: S35 story 6 captured the merge window's
     `user_prompt` and the picker formatter reading `[working]`, but no
-    visible picker popup during that interval. Hold the merge window's
-    response at the stub (held turn, not a 0.1 s answer), open the
-    picker popup while it is held, and record the popup frame showing
-    the merge row `[working]` in `recording.cast`/`recording.mp4`, then
-    `[idle]` after the next `idle_prompt`. Same scratch-only limits as
-    the fourteenth pass.
+    visible picker popup during that interval. The required Then is a
+    visible popup frame showing the merge row `[working]` during a held
+    turn (stub holds the response, not a 0.1 s answer), recorded in
+    `recording.cast`/`recording.mp4`. To also see `[idle]`, use a held
+    nonterminal follow-up turn while the merge window stays open, and its
+    next `idle_prompt`, then a separate terminal MERGED turn. A MERGED
+    reply can make pm close/archive the merge window before any
+    `idle_prompt`; the row disappearing then is correct finalization,
+    not a missing `[idle]`. Same scratch-only limits as the fourteenth
+    pass.
 
 ## 3. Edge cases
 
