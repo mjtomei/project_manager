@@ -31610,7 +31610,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T23:26:06.545228+00:00'
+  updated_at: '2026-10-23T23:44:17.000098+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32751,6 +32751,30 @@ prs:
       fault kept in story3/attempt1-invalid.'
     created_at: '2026-10-23T23:26:06Z'
     last_edited: '2026-10-23T23:26:06Z'
+  - id: note-a6299fd
+    text: 'QA S41 (2026-10-23, two clones of one project, host; captures /pm-captures/scenarios/41,
+      REPORT.md). Four CODE CHANGES need normal independent re-review, pushed as f22e6f4c,
+      c8ab2f4c, ec227cf0 (code-identical to the tested aea367fc, 22890086, d809b358;
+      spec impl.md item 30 + qa.md RQ36 in 72205ab5). (1) An adopted run from the
+      other clone was driven in the adopting TUI session, so it ended PASS (finalize=None)
+      with no finalizer. It now uses the snapshot session; the finalizer runs in the
+      qa-<pr> window that holds the run. (2) After a pull, the adopted PR node appeared
+      only at the 300 s sync (4m25s live); the scan now reloads. (3) A conflicted
+      git pull plus any unknown snapshot killed the TUI (ProjectYamlParseError re-raised
+      by the poll tick); the scan now skips until the file parses, verified live.
+      (4) Check-then-adopt race: claim_resume_file re-checks owner and loop_id under
+      flock and writes the owner before adopting. Three live races had one winner
+      each (B, A, B), which is favorable timing, not proof. The guarantee rests on
+      a deterministic barrier regression and a two-process regression (4/4 fail without
+      the lock). Held: pull and in-place pm edit (same inode) resume once within 1-4
+      s, B panes kept, 0 retries, one note and one finalizer per PR. Full suite 3549
+      passed on d809b358. Fixture caveats: the post-fix P release files 1/2 were wrong
+      (P ran s3/s4); Claude dropped the held P requests itself at 360 s and retried
+      them, and the s3/s4 files released those retries (P PASS FINALIZE_DONE, one
+      note). Claude request timeout is about 360 s, so keep holds under it. Story
+      3 attempt 1 is kept as invalid (the A TUI died from the harness-committed conflict).'
+    created_at: '2026-10-23T23:44:16Z'
+    last_edited: '2026-10-23T23:44:16Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
