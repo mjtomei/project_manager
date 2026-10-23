@@ -31610,7 +31610,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T21:02:35.554126+00:00'
+  updated_at: '2026-10-23T21:51:58.087334+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32651,6 +32651,24 @@ prs:
       on 91f77840; log /pm-captures/review-3992-i2.'
     created_at: '2026-10-23T21:02:35Z'
     last_edited: '2026-10-23T21:02:35Z'
+  - id: note-cafeed5
+    text: 'QA S39 (2026-10-23, two projects in one scratch HOME, host, real Claude
+      on router/main stubs; captures /pm-captures/scenarios/39, REPORT.md). 93dca6ae
+      held live: second PR first-run spinner within 1 s of its held worker, queued
+      s3 launch kept A/B spinning and runtime panes (181/181 samples), P2 TUI start
+      and restart left P1 runtime files byte-identical with no P1 sweep. RQ33 supersede
+      held. CODE CHANGE a711f411 needs normal re-review (pre-existing on master, plus
+      the superseded drop from 60574f28): ~/.pm/workdirs/qa is shared, and a TUI resume
+      scan deleted another project live qa_resume.json about 30 ms after that project
+      TUI died, treating the PR as "left QA". The killed TUI restart then never resumed
+      (C lost spinner and [working] mid-turn). The scan now skips PRs outside its
+      own project. Regression test_other_projects_snapshots_are_left_alone (1 failed
+      reverted / 37 passed); full suite 3538 passed on a711f411. Post-fix: P1 restart
+      while P2 ran resumed A and B, and P2 restart resumed C. Spec: impl.md item 29,
+      qa.md RQ36 + sixteenth pass (5f557465). Harness: plain t on a PR with a qa window
+      only focuses it (use z t).'
+    created_at: '2026-10-23T21:51:58Z'
+    last_edited: '2026-10-23T21:51:58Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
