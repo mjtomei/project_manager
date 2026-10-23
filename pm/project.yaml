@@ -31610,7 +31610,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T22:32:30.368568+00:00'
+  updated_at: '2026-10-23T23:26:06.545228+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32736,6 +32736,21 @@ prs:
       decides whether either fails.'
     created_at: '2026-10-23T22:32:30Z'
     last_edited: '2026-10-23T22:32:30Z'
+  - id: note-e05e36c
+    text: 'QA S40 (2026-10-23, head 8d938546 incl. 7968f576, no code change; captures
+      /pm-captures/scenarios/40, REPORT.md): RQ36 two-project kill/restart held live
+      in both directions with 95 s downtime (other project snapshot sha+mtime constant
+      in 5 s samples, 0 foreign log lines, Resuming QA ... 3 scenario(s), 1 queued
+      only by the owning TUI, panes/router sids unchanged), both TUIs killed in one
+      command (exactly one resume each, none for B or the other project, further restart
+      none), and a qa-run-bg result written while P2 was down (P1 never touched it;
+      P2 start Recovered completed QA → PASS once, one note, status qa; interrupted
+      finalizer not rerun = pr-0f85376). All A/B/C PASS FINALIZE_DONE, router only
+      work/ refiner+worker, 0 secrets. Harness: Claude re-sends a held stream request
+      every 360 s with the same session id (stub logs sid now); story3 attempt 1 fixture
+      fault kept in story3/attempt1-invalid.'
+    created_at: '2026-10-23T23:26:06Z'
+    last_edited: '2026-10-23T23:26:06Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
