@@ -189,8 +189,11 @@ def _hook_is_pm(hook) -> bool:
     """
     if not isinstance(hook, dict) or hook.get("type", "command") != "command":
         return False
+    command = hook.get("command")
+    if not isinstance(command, str):
+        return False
     try:
-        argv = shlex.split(hook.get("command", "") or "")
+        argv = shlex.split(command)
     except ValueError:
         return False
     if len(argv) == 3:

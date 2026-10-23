@@ -300,7 +300,10 @@ recorded with item 27.
       and `test_installer_refuses_mixed_user_command_on_a_managed_matcher`
       fail with the substring matcher. `test_hook_is_pm_recognises_receiver_invocations`
       covers both pm forms for all four events. Full suite 3525 passed (env -u PM_HOST_HOME, /usr/bin first). Logs:
-      `/pm-captures/review-a183-i1/`.
+      `/pm-captures/review-a183-i1/`. A malformed non-string `command`
+      is the user's too and is kept; a183 i1's `shlex.split` raised on it
+      at hook install (review loop a183 i2,
+      `test_installer_keeps_malformed_user_prompt_hooks`).
     - The receiver stores only its fixed fields (never `prompt`) and
       prints nothing (a `UserPromptSubmit` hook's stdout is added to the
       prompt).

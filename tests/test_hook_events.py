@@ -535,3 +535,18 @@ def test_installer_refuses_mixed_user_command_on_a_managed_matcher(tmp_hooks_hom
     with pytest.raises(HookConflictError, match="notify-send idle"):
         ensure_hooks_installed(path)
     assert path.read_text() == before
+
+
+def test_installer_keeps_malformed_user_prompt_hooks(tmp_hooks_home):
+    """A non-string command in the user's settings is the user's: kept,
+    never a crash at pm session start."""
+    from pm_core.hook_install import (
+        _hook_command_for, _hook_is_pm, ensure_hooks_installed)
+    user_entries = [{"hooks": [{"type": "command", "command": c}]}
+                    for c in (["python3", "x", "user_prompt"], 5, None)]
+    path = _settings(tmp_hooks_home, {"UserPromptSubmit": user_entries})
+    assert ensure_hooks_installed(path) is True
+    ups = json.loads(path.read_text())["hooks"]["UserPromptSubmit"]
+    assert ups[:len(user_entries)] == user_entries
+    pm = [h["command"] for e in ups for h in e["hooks"] if _hook_is_pm(h)]
+    assert pm == [_hook_command_for("user_prompt")]
