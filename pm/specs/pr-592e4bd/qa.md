@@ -195,6 +195,12 @@ env-by-name).
   dies and the verifier pane is still in the window, the flag follow-up
   falls back to the window's first pane (`find_claude_pane`) and must
   not land in the verifier pane.
+- **RQ25** Given a routed worker or refiner stalled on a route outage (or
+  idle on an API-error turn), When its pane dies before the route answers
+  again and the nudge can be sent, Then no "… recovered — resumed" or
+  "… — resumed" status appears for it (the pm log says "pane … gone — not
+  resumed"); the only follow-up is the usual dead-window relaunch through
+  the route gate (QA5 planner fix 5432f736; review 590d i3 observation).
 
 ## 2. Setup
 
@@ -341,6 +347,13 @@ env-by-name).
     whole windows, unless the story says window. Set
     `qa-verdict-reminder-timeout` low for the reminder story and make the
     stub answer the worker without a verdict line.
+    QA5 handoff harness lessons (S13/S14 REPORTs): use the exact TUI/pm
+    log path from those reports; their env.sh clears variables, so pass
+    values as positional args; never copy rotating OAuth credentials;
+    scratch containers on slirp4netns; no `pgrep -f` self-matching and
+    no `kill -0` completion waits on zombies; convert recordings with VFR.
+    Kept as-is (do not strengthen): S14 numbering clarification 590a39ab.
+    Known separately: #245 queued-startup ownership, pr-04dfffb.
 
 ## 3. Edge cases
 
