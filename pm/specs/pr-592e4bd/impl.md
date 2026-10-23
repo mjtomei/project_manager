@@ -577,3 +577,21 @@ repeated deaths turn a PASS into NEEDS_WORK.
     (`review_loop_ui._qa_needs_poll`). Regression
     `TestQAPollTimer::test_timer_outlives_running_until_completion_is_processed`
     (fails with the fix reverted; logs `/pm-captures/review-433b-i1/`).
+
+### QA S26 fixes (reviewed in review loop 1298 i1/i2)
+23. *TUI lagged after a QA completion* (both pre-existing on master).
+    (a) f57c500c: after a NEEDS_WORK verdict `_on_qa_complete` moved the
+    PR from qa to in_review and reloaded `app._data`, but did not repaint.
+    The tech tree kept showing qa until the 300 s background sync. It now
+    calls `app._update_display()` after a successful reload. Regression
+    `test_needs_work_repaints_tree_with_reloaded_status`.
+    (b) 991addf9 + 0697e450 (1298 i1): the zz t "QA PASS for <pr> (N/M
+    consecutive) — restarting QA" line was replaced in the same frame by
+    start_qa's messages and never painted. It now uses
+    `hold=CONFIRM_HOLD_SECONDS` and also `force=True`, like the other held
+    confirmations, because without force a sticky line from another PR
+    still drops it. Regression `test_restart_message_holds_the_log_line`
+    (asserts hold and force).
+    Spec 8ae55361 (QA persists `prs[].workdir` via `_ensure_workdir`, so
+    only a PR's first run with no cached workdir discriminates the
+    item 22 timer fixes) was checked against the code in 1298 i1.
