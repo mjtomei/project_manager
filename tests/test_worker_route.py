@@ -721,6 +721,28 @@ class TestPollLoopRouteGating:
         assert len(relaunches) == 1
         assert state.scenario_verdicts[1] == "PASS"
 
+    def test_stopped_run_does_not_gate_or_defer_dead_worker(self, tmp_path):
+        """``z t`` stops the run, then kills its windows and removes its
+        containers: the stopped loop must not run the route check (an exec
+        into the dying container) or announce a relaunch deferral."""
+        from pm_core import qa_loop
+        sc = qa_loop.QAScenario(index=1, title="t", focus="f")
+        sc.window_name, sc.session_id = "w1", "sid-1"
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        state.scenarios = [sc]
+        seen = []
+        state._notify_cb = lambda: seen.append(state.latest_output)
+
+        def stop_on_sleep(_):
+            state.stop_requested = True
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window") as relaunch, \
+             patch("pm_core.qa_loop.time.sleep", side_effect=stop_on_sleep):
+            self._poll(state, tmp_path, [_status(False)])
+        relaunch.assert_not_called()
+        assert not [o for o in seen if "deferred" in (o or "")]
+        assert 1 not in state.scenario_verdicts
+
     def test_stop_during_route_wait_leaves_scenario_unverdicted(self, tmp_path):
         """A scenario stopped in its initial route wait has no window; the
         launch-failed INPUT_REQUIRED marking must not give it a verdict."""

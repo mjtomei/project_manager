@@ -3274,6 +3274,11 @@ def _poll_tmux_verdicts(
                 pane_id = None
                 scenario.pane_id = None
             if pane_id is None:
+                if state.stop_requested:
+                    # A stop (e.g. ``z t`` fresh start) killed the window
+                    # and removes the container: nothing is relaunched, so
+                    # don't gate (or announce a deferral) on the route.
+                    break
                 # A worker that died while its route is unusable is not
                 # relaunched (and spends no retry) until the route is back.
                 route_st = _route_watch(scenario).status()
