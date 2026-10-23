@@ -31610,7 +31610,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T20:51:52.008454+00:00'
+  updated_at: '2026-10-23T20:57:05.494482+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32625,6 +32625,23 @@ prs:
       S35 merge picker visibility still needs QA.'
     created_at: '2026-10-23T20:51:51Z'
     last_edited: '2026-10-23T20:51:51Z'
+  - id: note-15858db
+    text: 'Review 3992 i1 (156d7ae4 + spec 8dcda1fe; synced recipe f3385f12, which
+      is recipe-only and looks sound): S35 41ff0d3c/ebf919e8 and S36 93dca6ae reviewed
+      independently and all sound. Each of the 5 fixes was mutation-checked: its regression
+      fails when the fix is reverted. The mount-sweep reorder is safe because the
+      first _load_state writes no runtime state. The only code change is a render
+      refactor with no behaviour change: QA and impl now share one live_state and
+      one marker branch, and _get_loop_marker(qa_live=) is renamed pane_live. Re-mutated
+      after the refactor. Spec: RQ35 "QA pane" now means the scenario worker. Refiner,
+      s0, planner, verifier and finalizer panes are untracked by design (162442ec),
+      so the S36 typed-refiner Then is classified explicitly, not waived; filed pr-eee7483
+      to show refiner turns. Fifteenth pass: a visible picker popup frame with the
+      merge row [working] during a HELD turn is required. A MERGED reply closing the
+      row is terminal and is not a missing [idle]. Full suite 3537 passed (env -u
+      PM_HOST_HOME, /usr/bin first). Log in /pm-captures/review-3992-i1.'
+    created_at: '2026-10-23T20:57:05Z'
+    last_edited: '2026-10-23T20:57:05Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
