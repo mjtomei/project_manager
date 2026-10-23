@@ -31584,7 +31584,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T19:15:55.696616+00:00'
+  updated_at: '2026-10-23T20:25:55.036935+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32546,6 +32546,24 @@ prs:
       running (nested Claude).'
     created_at: '2026-10-23T19:15:55Z'
     last_edited: '2026-10-23T19:15:55Z'
+  - id: note-c751503
+    text: 'QA S35 (2026-10-23, RQ35/RQ34 host, captures /pm-captures/scenarios/35,
+      REPORT.md): CODE CHANGES needing normal re-review, pushed 41ff0d3c + ebf919e8
+      (tested as 43e38f0c/db01a42c, same tree; full suite 3532 passed). (1) tech_tree:
+      a live impl turn spinner/⏸ was masked by a finished review-loop badge (⟳2☠ after
+      z d); live impl now drops only that badge, as for live QA. (2) pane_idle: hook
+      file keeps only the latest event and impl panes poll every 5 s, so a turn answered
+      in ~0.1 s left Stop and the tracker stayed idle while the picker read [working];
+      a Stop newer than an observed idle_prompt now reads working until the next idle_prompt.
+      Story 2 held only on db01a42c (pre-fix and 43e38f0c attempts kept). Held: S1
+      typed turn after auto-start off, S3 pm sends (replays 3b/3c), S4 s0 untracked,
+      S5 user hook + BLOCKME 60.1 s working, S6 MERGED +4.8 s. Unobserved, hand to
+      next QA: S6 visible picker popup merge row [working] (pickmon read [working]
+      at 20:17:23.506, user_prompt 20:17:23.478; no popup in that 5 s window). Fixture:
+      fake qa_verification gives a second follow-up (fake exits on re-verify input,
+      pr-04dfffb); use a real verifier for follow-up counts.'
+    created_at: '2026-10-23T20:25:54Z'
+    last_edited: '2026-10-23T20:25:54Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
@@ -32808,11 +32826,18 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-23T04:05:12.347637+00:00'
-  updated_at: '2026-10-23T04:05:12.347637+00:00'
+  updated_at: '2026-10-23T20:25:55.955272+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-1584caa
+    text: 'S35 (pr-592e4bd, 2026-10-23) reproduced this live: fake verifier exited
+      on the re-verify message, pm logged "FLAGGED scenario 3, attempt 2: verifier
+      pane disappeared" and sent the worker a second follow-up. Evidence /pm-captures/scenarios/35/story3
+      (pmlog-ts.log 19:38:51-19:38:57).'
+    created_at: '2026-10-23T20:25:55Z'
+    last_edited: '2026-10-23T20:25:55Z'
 - id: pr-d1d0139
   plan: bugs
   title: 'Bug: QA resume of a pre-32961096 snapshot with pane_id null sends the route
