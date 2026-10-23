@@ -671,3 +671,27 @@ repeated deaths turn a PASS into NEEDS_WORK.
     a restarted TUI never registers an older merge window. Both are filed
     as pr-237d610. Evidence: /pm-captures/scenarios/31 (pre-fix/story3,
     post-fix*, REPORT.md).
+
+### QA S30 (one PR + A2, RQ32; not yet reviewed)
+26. *Superseded run's tracker keys kept the QA spinner forever*
+    (94f36a18, pre-existing on master; it also hid the 24(a) idle badge).
+    `z t` over a run with mid-turn scenario panes (and a zz t restart)
+    replaces the PR's `_qa_loops` entry before the completion path
+    unregisters that run's `qa:<pr>:s<N>` keys, and `poll_qa_state` only
+    polls the current run's scenarios. The old keys stayed "active" in the
+    idle tracker. Seen live: after the new run's QA PASS, A read
+    "● qa ◐" (spinning) for more than 2 min instead of "● qa ⟳1⏸", and
+    the runtime mirror kept the dead panes. `poll_qa_state` now unregisters
+    a PR's `qa:` keys that are not the current run's scenarios. While the
+    fresh run is still planning this clears the qa runtime action. The
+    picker then shows `qa [open]` with no state badge, the same as a run
+    whose panes have not registered, instead of `[working]`/`[idle]` from
+    the old run's dead panes. Other PRs' keys and the current run's panes
+    are kept (verified live on A2, S30 post-fix/picker-planning-A2-win).
+    3 regressions in `tests/test_tech_tree_qa_spinner.py`, all failing with
+    the fix reverted. Residue the fix does not clean up: qa panes already
+    left in `~/.pm/runtime/<pr>.json` by a pre-fix TUI (or a TUI killed
+    mid-run) survive a TUI restart under a `done` entry and are merged into
+    the next run's entry by `_runtime_mirror_register`. The picker shows
+    them as `[working]` until that run completes. Pre-existing and left
+    out of scope.
