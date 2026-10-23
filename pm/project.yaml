@@ -11854,7 +11854,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-23T01:40:54.695319+00:00'
+  updated_at: '2026-10-23T19:59:21.119473+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -11909,6 +11909,14 @@ prs:
       qa-<B>-s3/-s4; the -sN suffix match in cleanup_orphaned_qa_containers kept them.'
     created_at: '2026-10-23T01:40:54Z'
     last_edited: '2026-10-23T01:40:54Z'
+  - id: note-20b801e
+    text: 'Related evidence 2026-10-23 (pr-592e4bd QA S36): idle panes of finished
+      QA runs (about 60 `podman exec -it` clients at 17-25 threads each) plus unreaped
+      zombies pushed a pm-created QA container to its 2048 PID cap. The zombie and
+      PID 1 part is pr-2111fa0 (note added there). The retention part (finished-run
+      windows/containers kept) is this PR. Evidence: /pm-captures/scenarios/36/post-fix/infra-failure/.'
+    created_at: '2026-10-23T19:59:21Z'
+    last_edited: '2026-10-23T19:59:21Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -29604,11 +29612,29 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T14:08:28.137551+00:00'
-  updated_at: '2026-10-14T14:08:28.137551+00:00'
+  updated_at: '2026-10-23T19:59:20.239905+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-76c738e
+    text: 'Fresh repro 2026-10-23 (pr-592e4bd QA S36, container-mode two-PR routed
+      QA with nested rootless podman; NOT test-script process substitution this time):
+      the pm-created QA scenario container (PID 1 = sleep infinity) reached pids.current
+      2018/2048 with 210 zombies (203 parented to PID 1: 130 conmon, 49 fuse-overlayfs,
+      23 podman, 14 claude) left by nested podman exec/run children, plus about 1000
+      live threads from 60 idle `podman exec -it` pane clients of finished QA runs
+      (pr-1139060 retention). pids.events max=42. Consequence: a fork in the nested
+      TUI poll timer (tmux pane_exists) got EAGAIN, and _poll_loop_state re-raises
+      every BaseException, so the whole TUI exited and every running QA loop thread
+      with it (a PASS that was already emitted was never collected). Evidence: /pm-captures/scenarios/36/post-fix/infra-failure/
+      (pids-at-diagnosis.txt, zombies.txt, process-table.txt, tui-death-traceback.log).
+      Recovery used: close completed S36 fixture windows/containers only (pids 1934
+      -> 1170); zombies stay until the container restarts. Suggest the fix also covers
+      podman-in-container children (podman run --init or a real subreaper) and that
+      a transient fork failure in the TUI poll timer is logged, not fatal.'
+    created_at: '2026-10-23T19:59:20Z'
+    last_edited: '2026-10-23T19:59:20Z'
 - id: pr-0c3659d
   plan: bugs
   title: 'Bug: pm set list shows qa-verify-pass "off" when unset (effective default
