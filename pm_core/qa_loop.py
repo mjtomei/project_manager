@@ -868,6 +868,13 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
     """
     if not state.qa_workdir:
         return
+    if state.stop_requested:
+        # A stopped run is never resumed: ``z t`` superseded it (and nothing
+        # processes its completion) or the user stopped it.  A late write
+        # would leave a snapshot that a restart revives, or that the scan
+        # "recovers" once the newer run is done (a stale QA note).
+        clear_resume_file(state.qa_workdir)
+        return
     data = {
         "pr_id": state.pr_id,
         "loop_id": state.loop_id,

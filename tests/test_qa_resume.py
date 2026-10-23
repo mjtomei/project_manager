@@ -729,3 +729,48 @@ def test_resumed_pass_skips_reverification(tmp_path):
     assert "verifying" not in state.latest_output
     assert state.scenario_verdicts[1] == VERDICT_PASS
     assert 1 in state.verified_scenarios
+
+
+# ---------------------------------------------------------------------------
+# A stopped (z t superseded) run leaves no snapshot behind
+# ---------------------------------------------------------------------------
+
+def test_stopped_run_does_not_write_a_snapshot(tmp_path):
+    """The stopped loop keeps writing while it winds down (each poll tick
+    and once more at the end): those writes drop the snapshot instead."""
+    state = _make_state(tmp_path)
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    state.stop_requested = True
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    assert not _resume_file_path(tmp_path).exists()
+
+
+def test_fresh_start_drops_superseded_snapshot_before_new_run_has_one(
+        tmp_path):
+    """z t over a running loop: the new run writes no snapshot while it
+    plans (and an empty plan clears its own at once), so the old run's
+    snapshot would be the PR's only one — revived by a restart, or
+    "recovered" with a stale QA note once the new run is done."""
+    app = _make_app(tmp_path)
+    old = _seed_run(tmp_path, overall="", loop="old")
+    running = build_resume_state(_load_resume_file(old))
+    running.running = True
+    app._qa_loops["pr-001"] = running
+
+    with patch.object(qa_loop_ui, "start_qa") as start:
+        qa_loop_ui.fresh_start_qa(app, "pr-001")
+    start.assert_called_once()
+    assert running.stop_requested
+    assert not _resume_file_path(old).exists()
+
+    # The stopped thread's final write (overall INPUT_REQUIRED) leaves none.
+    (old / "qa_status.json").write_text(json.dumps(
+        {"pr_id": "pr-001", "scenarios": [], "overall": "INPUT_REQUIRED"}))
+    _write_resume_file(running, use_containers=False, concurrency_cap=0)
+    app._qa_loops.clear()  # the new run completed and was processed
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+    resume_bg.assert_not_called()
+    on_complete.assert_not_called()

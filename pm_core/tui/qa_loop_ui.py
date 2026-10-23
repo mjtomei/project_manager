@@ -194,6 +194,12 @@ def fresh_start_qa(app, pr_id: str) -> None:
     if existing and existing.running:
         existing.stop_requested = True
         _log.info("fresh_start_qa: stopping running QA for %s", pr_id)
+        # The new run supersedes it: drop its snapshot now rather than when
+        # its thread winds down.  The new run has none until its scenarios
+        # launch, so until then a restart would revive the old run.
+        if existing.qa_workdir:
+            from pm_core import qa_loop
+            qa_loop.clear_resume_file(existing.qa_workdir)
 
     # Remove from loops dict so start_qa doesn't see it as running
     app._qa_loops.pop(pr_id, None)
