@@ -1521,6 +1521,56 @@ class TestTranscriptHookCLI:
         assert hook.exists()
 
 
+    def _hook_timestamps(self, tmp_path, extra):
+        """Run the real bin/fake-claude (bounded hold) and sample its hook
+        file every 50 ms; return the distinct idle_prompt timestamps."""
+        import os
+        import time
+        env = {**os.environ, "HOME": str(tmp_path)}
+        hook = tmp_path / ".pm" / "hooks" / f"{self.SID}.json"
+        proc = subprocess.Popen(
+            [sys.executable, str(BIN_FAKE_CLAUDE),
+             "--verdict", "INPUT_REQUIRED", "--preamble", "0",
+             "--session-id", self.SID, "--hold", "4.5", *extra],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            cwd=str(tmp_path), env=env)
+        seen = []
+        deadline = time.monotonic() + 15
+        while proc.poll() is None and time.monotonic() < deadline:
+            try:
+                ts = json.loads(hook.read_text())["timestamp"]
+            except (OSError, ValueError, KeyError):
+                ts = None
+            if ts is not None and ts not in seen:
+                seen.append(ts)
+            time.sleep(0.05)
+        if proc.poll() is None:
+            proc.kill()
+        assert proc.wait(timeout=5) == 0
+        return seen
+
+    def test_executable_idle_once_after_emits_a_single_idle(self, tmp_path):
+        """S29: the launcher execs bin/fake-claude (its own argparse), not
+        the click CLI — the flag must reach run_fake_claude there too."""
+        seen = self._hook_timestamps(tmp_path, ["--idle-once-after", "1"])
+        assert len(seen) == 1
+
+    def test_executable_refreshes_idle_by_default(self, tmp_path):
+        assert len(self._hook_timestamps(tmp_path, [])) >= 2
+
+    def test_executable_parser_accepts_idle_once_after(self):
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.SourceFileLoader(
+            "bin_fake_claude", str(BIN_FAKE_CLAUDE))
+        mod = importlib.util.module_from_spec(
+            importlib.util.spec_from_loader("bin_fake_claude", loader))
+        loader.exec_module(mod)
+        args, rest = mod._build_parser().parse_known_args(
+            ["--verdict", "PASS", "--idle-once-after", "25"])
+        assert args.idle_once_after == 25.0 and rest == []
+
+
 class TestFakeArgsSessionId:
     def test_fake_claude_args_includes_session_id(self):
         from pm_core.claude_launcher import _fake_claude_args

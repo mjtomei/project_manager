@@ -122,6 +122,15 @@ def _build_parser() -> argparse.ArgumentParser:
              "open afterwards. The launcher passes this for polled panes.",
     )
     p.add_argument(
+        "--idle-once-after",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="With --session-id: emit the idle_prompt hook once, SECONDS "
+             "after the output, instead of refreshing it every couple of "
+             "seconds (real Claude sends one per turn).",
+    )
+    p.add_argument(
         "--display-bullet",
         default=None,
         metavar="TEXT",
@@ -153,6 +162,7 @@ def main() -> None:
         hold=args.hold,
         session_id=args.session_id,
         display_bullet=args.display_bullet,
+        idle_once_after=args.idle_once_after,
     )
 
 
