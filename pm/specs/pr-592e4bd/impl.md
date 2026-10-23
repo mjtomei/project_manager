@@ -752,8 +752,12 @@ repeated deaths turn a PASS into NEEDS_WORK.
     managed event). Full suite 3510 passed (env -u PM_HOST_HOME, /usr/bin first). Live
     control replay `/pm-captures/review-d0d0-i1/live-control/` (README):
     isolated HOME, real claude 2.1.309 on the S33 stub, user hooks kept
-    byte-identical by the install; on the same pane the fixed tracker left
-    idle 1.2 s after a typed turn and went idle again on the next
-    `idle_prompt`, while the pre-fix tracker (HEAD 0a854e58) stayed idle;
-    a blocked turn read as working for 60.7 s; the trust dialog showed
-    waiting until the first `user_prompt`.
+    byte-identical by the install. On the same pane, the patched tracker
+    reported working (`idle=false`) about 1.2 s after the typed Enter and
+    reported idle again at the turn's next `idle_prompt`; the pre-fix
+    tracker (HEAD 0a854e58) reported idle throughout. For a turn blocked
+    by a user hook, the patched tracker reported working until Claude's
+    next `idle_prompt` 60.7 s later, then idle (the pre-fix tracker stayed
+    idle). That is the known, bounded limitation: a blocked prompt shows
+    as working for about 60 s. The trust dialog showed waiting until the
+    first `user_prompt`.
