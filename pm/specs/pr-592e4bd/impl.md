@@ -375,7 +375,14 @@ recorded with item 29.
     master for the not-in-project drop; the superseded drop came from this
     PR (60574f28). The scan now ignores snapshots of PRs outside its own
     project. The project is loaded only when a snapshot of a PR that is
-    neither tracked nor resumed is present. (a711f411; regression
+    neither tracked nor resumed is present, and PR ids found to be another
+    project's are remembered (`app._foreign_qa_pr_ids`), so a long-lived
+    foreign snapshot does not reload project.yaml on every 5 s scan. The
+    set is cleared whenever project.yaml changes (inode, mtime, size), so
+    a PR pulled or added after its snapshot was first seen is resumed on
+    the next scan (review loop 5e26 i1;
+    `test_other_projects_snapshots_load_the_project_once`,
+    `test_snapshot_seen_before_its_pr_arrives_resumes_after_pull`). (a711f411; regression
     `tests/test_qa_resume.py::test_other_projects_snapshots_are_left_alone`
     fails with the fix reverted: 1 failed / 36 passed, and passes with
     it: 37 passed.)

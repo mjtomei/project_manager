@@ -163,9 +163,9 @@ Notes:
   `recording.mp4`; an older completed `recording.mp4` from an earlier
   render stays in place (do not delete it). So neither the file
   existing nor the GIF disappearing shows that this render succeeded:
-  check this `render_cast` call's return status. If you stop a render on purpose, stop the shell
-  running `render_cast` before its `ffmpeg` child, so the cleanup step
-  cannot run. Label any partial output you keep (for example
+  check this `render_cast` call's return status. If you stop a render
+  on purpose, stop the shell running `render_cast` before its `ffmpeg`
+  child, so the cleanup step cannot run. Label any partial output you keep (for example
   `recording.mp4.INCOMPLETE-...`) and list it in the manifest.
 - **Video time is compressed pause time, not wall time.** Each gap
   between cast output events is capped at 2 s, so to find the video

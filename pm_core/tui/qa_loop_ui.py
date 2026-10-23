@@ -390,6 +390,18 @@ def poll_qa_state(app) -> None:
     app._qa_resume_poll_counter += 1
 
 
+def _project_file_stamp(root) -> tuple | None:
+    """Identity of *root*'s project.yaml (changes on any save or pull)."""
+    from pathlib import Path
+    if not root:
+        return None
+    try:
+        st = (Path(root) / "project.yaml").stat()
+    except OSError:
+        return None
+    return (st.st_ino, st.st_mtime_ns, st.st_size)
+
+
 def _resume_incomplete_qa(app) -> None:
     """Resume or finish QA runs orphaned by a TUI restart.
 
@@ -480,13 +492,26 @@ def _resume_incomplete_qa(app) -> None:
     # ~/.pm/workdirs/qa is shared by every project under ~/.pm.  Another
     # project's runs are its own TUI's to resume or drop: treating its PR
     # as "left QA" here deleted a live run's snapshot as soon as its TUI
-    # died, so that TUI's restart had nothing to resume (S39).
+    # died, so that TUI's restart had nothing to resume (S39).  Foreign
+    # ids are remembered: another project's snapshot can outlive many scans
+    # (its run is live, or its TUI never comes back), and each would
+    # otherwise reload this project.  They are forgotten whenever
+    # project.yaml changes, so a PR pulled or added after its snapshot was
+    # first seen becomes eligible on the next scan.
+    stamp = _project_file_stamp(app._root)
+    if (not hasattr(app, "_foreign_qa_pr_ids")
+            or getattr(app, "_foreign_qa_stamp", None) != stamp):
+        app._foreign_qa_pr_ids = set()
+        app._foreign_qa_stamp = stamp
+    foreign = app._foreign_qa_pr_ids
+    by_pr = {k: v for k, v in by_pr.items() if k not in foreign}
     known = set(app._qa_loops) | app._resumed_qa_pr_ids
     if set(by_pr) - known:
         if not app._root:
             return
         project_data = store.load(app._root)
         known |= {p.get("id") for p in project_data.get("prs") or []}
+        foreign.update(set(by_pr) - known)
         by_pr = {k: v for k, v in by_pr.items() if k in known}
 
     live_workdirs = {str(s.qa_workdir) for s in app._qa_loops.values()

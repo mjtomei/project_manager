@@ -158,6 +158,7 @@ def _make_app(tmp_path, *, pr_status="qa"):
     app._root = pm_dir
     app._qa_loops = {}
     app._resumed_qa_pr_ids = set()
+    del app._foreign_qa_pr_ids  # MagicMock: start with no cache attribute
     return app
 
 
@@ -449,6 +450,56 @@ def test_other_projects_snapshots_are_left_alone(tmp_path):
     assert "pr-0ther" not in app._resumed_qa_pr_ids
     assert _resume_file_path(live).is_file()
     assert _resume_file_path(older).is_file()
+
+
+def test_other_projects_snapshots_load_the_project_once(tmp_path):
+    """The scan runs every few seconds, and another project's snapshot can
+    stay for the whole session: its PR is looked up in this project once,
+    not on every scan."""
+    app = _make_app(tmp_path)
+    _seed_run(tmp_path, overall="", pr_id="pr-0ther", loop="live")
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui.store, "load",
+                      wraps=qa_loop_ui.store.load) as load:
+        qa_loop_ui._resume_incomplete_qa(app)
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    assert load.call_count == 1
+    resume_bg.assert_not_called()
+    assert app._foreign_qa_pr_ids == {"pr-0ther"}
+
+
+def test_snapshot_seen_before_its_pr_arrives_resumes_after_pull(tmp_path):
+    """A snapshot whose PR is not in this project yet (it arrives by a pull
+    or import of project.yaml) is not foreign forever: once project.yaml
+    has the PR in QA, the next scan resumes it.  A truly foreign snapshot
+    seen alongside it stays untouched."""
+    app = _make_app(tmp_path)
+    late = _seed_run(tmp_path, overall="", pr_id="pr-late", loop="late")
+    other = _seed_run(tmp_path, overall="", pr_id="pr-0ther", loop="other")
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+        resume_bg.assert_not_called()
+        assert app._foreign_qa_pr_ids == {"pr-late", "pr-0ther"}
+
+        data = store.load(app._root)
+        data["prs"].append({"id": "pr-late", "title": "L", "branch": "l",
+                            "status": "qa", "workdir": str(tmp_path / "wl"),
+                            "notes": []})
+        store.save(data, app._root)
+
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    assert [c.args[2]["id"] for c in resume_bg.call_args_list] == ["pr-late"]
+    assert "pr-late" in app._qa_loops
+    assert "pr-0ther" not in app._qa_loops
+    assert app._foreign_qa_pr_ids == {"pr-0ther"}
+    assert _resume_file_path(late).is_file()
+    assert _resume_file_path(other).is_file()
 
 
 @pytest.mark.parametrize("stale_loop", ["aaa", "zzz"])
