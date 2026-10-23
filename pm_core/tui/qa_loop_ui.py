@@ -505,11 +505,27 @@ def _resume_incomplete_qa(app) -> None:
         app._foreign_qa_stamp = stamp
     foreign = app._foreign_qa_pr_ids
     by_pr = {k: v for k, v in by_pr.items() if k not in foreign}
+
+    def _load_project():
+        # An unparseable project.yaml (e.g. conflict markers left by a git
+        # pull) must not escape: the poll tick re-raises, which kills the
+        # TUI and every QA loop it drives (S41).  Retry on the next scan.
+        try:
+            return store.load(app._root)
+        except store.ProjectYamlParseError as e:
+            if getattr(app, "_resume_parse_error_stamp", None) != stamp:
+                app._resume_parse_error_stamp = stamp
+                _log.warning("QA resume scan skipped until project.yaml "
+                             "parses again: %s", e)
+            return None
+
     known = set(app._qa_loops) | app._resumed_qa_pr_ids
     if set(by_pr) - known:
         if not app._root:
             return
-        project_data = store.load(app._root)
+        project_data = _load_project()
+        if project_data is None:
+            return
         known |= {p.get("id") for p in project_data.get("prs") or []}
         foreign.update(set(by_pr) - known)
         by_pr = {k: v for k, v in by_pr.items() if k in known}
@@ -550,7 +566,9 @@ def _resume_incomplete_qa(app) -> None:
         if not app._root:
             continue
         if project_data is None:
-            project_data = store.load(app._root)
+            project_data = _load_project()
+            if project_data is None:
+                return
         pr = store.get_pr(project_data, pr_id)
         if not pr or pr.get("status") != "qa":
             # The PR has left QA, so this snapshot can never be validly

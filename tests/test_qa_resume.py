@@ -534,6 +534,33 @@ def test_in_place_project_edit_also_forgets_foreign_ids(tmp_path):
     assert app._foreign_qa_pr_ids == set()
 
 
+def test_unparseable_project_file_does_not_escape_the_scan(tmp_path):
+    """A git pull that conflicts on project.yaml leaves conflict markers in
+    it.  The resume scan loads the file when it sees a snapshot of an
+    unknown PR (or to check a known one's status); the parse error used
+    to escape the poll tick, which re-raises and so killed the TUI (S41).
+    The scan now skips until the file parses, then resumes as usual."""
+    app = _make_app(tmp_path)
+    _seed_run(tmp_path, overall="", pr_id="pr-001")
+    project_file = app._root / "project.yaml"
+    good = project_file.read_text()
+    project_file.chmod(0o644)
+    project_file.write_text(good.replace(
+        "prs:\n", "prs:\n<<<<<<< HEAD\n=======\n>>>>>>> abc\n", 1))
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+        qa_loop_ui._resume_incomplete_qa(app)
+        resume_bg.assert_not_called()
+        assert "pr-001" not in app._foreign_qa_pr_ids
+
+        project_file.write_text(good)
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+
+
 def test_resume_of_a_pulled_pr_reloads_the_tree(tmp_path):
     """A PR that arrived by a git pull is in project.yaml but not in the
     TUI's loaded state (a pull signals no reload): resuming its run
