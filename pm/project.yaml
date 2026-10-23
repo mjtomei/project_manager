@@ -14484,11 +14484,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-05-04T11:58:45.935220+00:00'
+  updated_at: '2026-10-23T01:53:52.315396+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-ee59da7
+    text: 'S11 observation (pr-592e4bd QA, 2026-10-23): after z t, the new QA loop
+      reused the live shared push proxy started by the superseded loop, whose argv
+      repo is the old loop clone (workdirs/qa/<pr>-<oldloop>/s-1/repo). Pushes/fetches
+      from the new loops containers go through a clone of a finished run; if that
+      workdir is cleaned, the proxy points at a deleted repo. Same root cause as the
+      (session_tag, pr_id) key.'
+    created_at: '2026-10-23T01:53:52Z'
+    last_edited: '2026-10-23T01:53:52Z'
 - id: pr-48cb564
   plan: improvements
   title: 'Picker popup: indicate per-session window-selected state with ● vs ○'
@@ -31500,7 +31509,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T01:41:05.732331+00:00'
+  updated_at: '2026-10-23T01:53:51.435431+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31714,6 +31723,23 @@ prs:
       by design; closed the planner pane to reach the no-scenarios path.'
     created_at: '2026-10-23T01:41:05Z'
     last_edited: '2026-10-23T01:41:05Z'
+  - id: note-72fda31
+    text: 'QA S11 (2026-10-23): RQ16/17/18 held live in container mode (2 PR A deferrals
+      at the refiner and worker gates, PR B sharing bridge+podman+proxy untouched)
+      and in host mode (PR C). CODE CHANGES needing normal re-review: 7c401141 (1)
+      a repeat queued deferral with the same message after recovery was never re-surfaced
+      on the TUI (_RouteStallWatch._shown only cleared by the stall nudge; remember()
+      now clears it on a healthy status); (2) a routed worker whose turn ended on
+      "API Error: Connection dropped" was never resumed when the route recovered within
+      the ~60 s before its idle_prompt hook (healthy-route idle, reminder off -> stuck
+      forever; seen live 00:42->00:50). Now an idle turn whose latest assistant record
+      has isApiErrorMessage on a healthy route is resumed with the same nudge, once
+      per error record, max 3 per session. 6 mutation-checked regressions (test_worker_route,
+      test_verdict_transcript). Incidental c23a2021: "Reusing live shared push proxy"
+      log line wrote the NUL key separator into the pm log (grep -> binary). Captures
+      /pm-captures/scenarios/11 (REPORT.md).'
+    created_at: '2026-10-23T01:53:51Z'
+    last_edited: '2026-10-23T01:53:51Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
