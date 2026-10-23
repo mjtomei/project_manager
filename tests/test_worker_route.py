@@ -988,6 +988,7 @@ class TestPollLoopRouteGating:
              patch("pm_core.qa_loop._build_concretize_cmd",
                    return_value="refiner"), \
              patch("pm_core.tmux.new_window_get_pane", return_value="%9"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
              patch("pm_core.tmux.kill_window"), \
              patch("pm_core.qa_loop._concretize_scenario",
                    return_value=(None, None)), \
@@ -1079,6 +1080,94 @@ class TestPollLoopRouteGating:
         finally:
             subprocess.run(t + ["kill-server"], capture_output=True)
             shutil.rmtree(d, ignore_errors=True)
+
+    def test_split_failure_traceback_names_the_tmux_error(
+            self, caplog, monkeypatch):
+        """Real tmux: a split into a window too small for a new pane is
+        logged with a traceback whose last line carries tmux's reason
+        ("no space for new pane"), not only the exit status."""
+        import logging
+        import shutil
+        import subprocess
+        import tempfile
+        from pm_core import qa_loop
+        if not shutil.which("tmux"):
+            pytest.skip("tmux not installed")
+        d = tempfile.mkdtemp(prefix="pmsp", dir="/tmp")
+        sock = os.path.join(d, "s")
+        monkeypatch.setenv("PM_TMUX_SOCKET", sock)
+        t = ["tmux", "-S", sock]
+
+        def tm(*a):
+            return subprocess.run(t + list(a), check=True, capture_output=True,
+                                  text=True).stdout.strip()
+        sc = qa_loop.QAScenario(index=1, title="t", focus="f")
+        try:
+            tm("new-session", "-d", "-s", "sess", "-n", "main", "sleep 60")
+            refiner = tm("new-window", "-d", "-P", "-F", "#{pane_id}", "-t",
+                         "sess:", "-n", "qa-s1", "sleep 60")
+            tm("resize-window", "-t", "sess:qa-s1", "-y", "2")
+            with patch.object(qa_loop._log, "handlers",
+                              qa_loop._log.handlers + [caplog.handler]), \
+                 caplog.at_level(logging.INFO, logger="pm.qa_loop"):
+                assert qa_loop._split_worker_pane(
+                    sc, refiner, "sleep 1", "/") is None
+            rec = [r for r in caplog.records if r.exc_info]
+            assert rec, caplog.records
+            last = caplog.text.rstrip().splitlines()[-1]
+            assert "no space for new pane" in last, caplog.text
+        finally:
+            subprocess.run(t + ["kill-server"], capture_output=True)
+            shutil.rmtree(d, ignore_errors=True)
+
+    @pytest.mark.parametrize("mode", ["container", "tmux"])
+    def test_closed_refiner_window_skips_the_worker_route_gate(
+            self, tmp_path, caplog, mode):
+        """PR cleanup closes the refiner's window (and removes its
+        container) under a stopping run: the worker is not gated on its
+        route, which would report the container being removed as an
+        unusable route ("worker waiting — ... Remedy: ...")."""
+        import logging
+        from pm_core import qa_loop
+        sc = qa_loop.QAScenario(index=5, title="t", focus="f")
+        state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
+        state.scenarios = [sc]
+        gates = []
+
+        def gate(state, pr_data, data, scenario, session_type, **kw):
+            gates.append(session_type)
+            return session_type != "qa_scenario"
+        with patch("pm_core.qa_loop._route_gate", side_effect=gate), \
+             patch("pm_core.qa_loop._route_checker",
+                   return_value=lambda: _status(True)), \
+             patch("pm_core.qa_loop._route_mounts", return_value={}), \
+             patch("pm_core.container.load_container_config"), \
+             patch("pm_core.container.create_qa_container"), \
+             patch("pm_core.qa_loop.create_scenario_workdir",
+                   return_value=(tmp_path / "repo", tmp_path / "scratch")), \
+             patch("pm_core.qa_loop._build_concretize_cmd",
+                   return_value="refiner"), \
+             patch("pm_core.qa_loop._build_scenario_run_cmd",
+                   return_value=("worker", str(tmp_path))), \
+             patch("pm_core.tmux.new_window_get_pane", return_value="%38"), \
+             patch("pm_core.tmux.split_pane_at") as split, \
+             patch("pm_core.tmux.pane_exists", return_value=False), \
+             patch("pm_core.qa_loop._concretize_scenario",
+                   return_value=(None, None)), \
+             patch.object(qa_loop._log, "handlers",
+                          qa_loop._log.handlers + [caplog.handler]), \
+             caplog.at_level(logging.INFO, logger="pm.qa_loop"):
+            launch = (qa_loop._launch_scenarios_in_containers
+                      if mode == "container"
+                      else qa_loop._launch_scenarios_in_tmux)
+            launch(state, {}, {"id": "pr-1"}, "sess", None, str(tmp_path))
+        msgs = [r.getMessage() for r in caplog.records]
+        assert "qa_scenario" not in gates, gates
+        split.assert_not_called()
+        assert any("refiner pane %38 is gone" in m for m in msgs), msgs
+        assert any("worker pane not created" in m for m in msgs), msgs
+        assert not any(m.startswith("Launched scenario") for m in msgs), msgs
+        assert sc.pane_id is None
 
     def test_idle_without_verdict_on_down_route_then_resume(self, tmp_path):
         from pm_core import qa_loop

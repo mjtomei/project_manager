@@ -23,14 +23,35 @@ def _tmux_cmd(*args: str, socket_path: str | None = None) -> list[str]:
     return cmd
 
 
+class TmuxCommandError(subprocess.CalledProcessError):
+    """A failed tmux command whose message ends with tmux's own stderr
+    (e.g. "no space for new pane"), so a logged traceback says why."""
+
+    def __str__(self) -> str:
+        err = self.stderr
+        if isinstance(err, bytes):
+            err = err.decode(errors="replace")
+        err = (err or "").strip() if isinstance(err, str) else ""
+        base = super().__str__()
+        return f"{base} tmux: {err}" if err else base
+
+
 def _run(*args, **kwargs) -> subprocess.CompletedProcess:
     """Run subprocess.run with capture_output=True by default.
 
     Suppresses tmux's stderr (e.g. "can't find pane: %5") from leaking
-    into the TUI terminal when targeting stale pane IDs.
+    into the TUI terminal when targeting stale pane IDs.  With
+    ``check=True`` a failure raises :class:`TmuxCommandError` (a
+    ``CalledProcessError``) that names that stderr.
     """
     kwargs.setdefault("capture_output", True)
-    return subprocess.run(*args, **kwargs)
+    try:
+        return subprocess.run(*args, **kwargs)
+    except subprocess.CalledProcessError as e:
+        if isinstance(e, TmuxCommandError):
+            raise
+        raise TmuxCommandError(e.returncode, e.cmd, e.output,
+                               e.stderr) from None
 
 
 def has_tmux() -> bool:

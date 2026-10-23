@@ -2520,17 +2520,18 @@ def _launch_scenarios_in_tmux(
         if refined_steps:
             scenario.steps = refined_steps
 
-        if not _route_gate(state, pr_data, data, scenario, "qa_scenario",
-                           deferred=_route_deferred):
-            _drop_deferred_launch(session, scenario, win_name, _route_deferred)
-            return
-        child_cmd, pane_cwd = _build_scenario_run_cmd(
-            scenario, state, data, transcript, _qa_resolution,
-            session=session, workdir_path=workdir_path,
-        )
-
-        scenario_pane = _split_worker_pane(
-            scenario, concretize_pane, child_cmd, pane_cwd)
+        scenario_pane = None
+        if not _refiner_gone(scenario, concretize_pane):
+            if not _route_gate(state, pr_data, data, scenario, "qa_scenario",
+                               deferred=_route_deferred):
+                _drop_deferred_launch(session, scenario, win_name, _route_deferred)
+                return
+            child_cmd, pane_cwd = _build_scenario_run_cmd(
+                scenario, state, data, transcript, _qa_resolution,
+                session=session, workdir_path=workdir_path,
+            )
+            scenario_pane = _split_worker_pane(
+                scenario, concretize_pane, child_cmd, pane_cwd)
         if scenario_pane:
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
@@ -2781,17 +2782,19 @@ def _launch_scenarios_in_containers(
         if refined_steps:
             scenario.steps = refined_steps
 
-        if not _route_gate(state, pr_data, data, scenario, "qa_scenario",
-                           container_name=cname, deferred=_route_deferred):
-            _drop_deferred_launch(session, scenario, win_name, _route_deferred,
-                                  container_name=cname)
-            return
-        exec_cmd, pane_cwd = _build_scenario_run_cmd(
-            scenario, state, data, transcript, _qa_resolution,
-            session=None, workdir_path=workdir_path,
-        )
-        scenario_pane = _split_worker_pane(
-            scenario, concretize_pane, exec_cmd, pane_cwd)
+        scenario_pane = None
+        if not _refiner_gone(scenario, concretize_pane):
+            if not _route_gate(state, pr_data, data, scenario, "qa_scenario",
+                               container_name=cname, deferred=_route_deferred):
+                _drop_deferred_launch(session, scenario, win_name, _route_deferred,
+                                      container_name=cname)
+                return
+            exec_cmd, pane_cwd = _build_scenario_run_cmd(
+                scenario, state, data, transcript, _qa_resolution,
+                session=None, workdir_path=workdir_path,
+            )
+            scenario_pane = _split_worker_pane(
+                scenario, concretize_pane, exec_cmd, pane_cwd)
         if scenario_pane:
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
@@ -2867,10 +2870,30 @@ def _split_worker_pane(scenario: QAScenario, refiner_pane: str,
             subprocess.run(tmux_mod._tmux_cmd("kill-pane", "-t", refiner_pane),
                            check=False, capture_output=True)
         else:
-            _log.warning("Scenario %d: refiner pane %s is gone (window "
-                         "closed) — worker not launched",
-                         scenario.index, refiner_pane)
+            _log_refiner_gone(scenario, refiner_pane)
         return None
+
+
+def _refiner_gone(scenario: QAScenario, refiner_pane: str) -> bool:
+    """True (and logged) when the refiner's pane was closed under the run.
+
+    Checked before the worker's route gate: with the window closed there
+    is nothing to split the worker off, and the gate would only report
+    its container (often being removed with the window, e.g. by PR
+    cleanup) as an unusable route.  The scenario takes the dead-worker
+    path instead, like a failed split.
+    """
+    from pm_core import tmux as tmux_mod
+    if tmux_mod.pane_exists(refiner_pane):
+        return False
+    _log_refiner_gone(scenario, refiner_pane)
+    return True
+
+
+def _log_refiner_gone(scenario: QAScenario, refiner_pane: str) -> None:
+    _log.warning("Scenario %d: refiner pane %s is gone (window "
+                 "closed) — worker not launched",
+                 scenario.index, refiner_pane)
 
 
 def _build_scenario_run_cmd(
