@@ -31540,7 +31540,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T05:46:54.772979+00:00'
+  updated_at: '2026-10-23T05:51:31.687633+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31843,6 +31843,22 @@ prs:
       ran on 50200a21, 3-5 on 32961096, 6 and the 4 rerun on 296c08a7.'
     created_at: '2026-10-23T05:46:54Z'
     last_edited: '2026-10-23T05:46:54Z'
+  - id: note-99d9ed8
+    text: 'QA S16 (2026-10-23): container-mode two-PR RQ24/RQ25 held live; captures
+      /pm-captures/scenarios/16 (REPORT.md). Story1 on 50200a21, story2 on 32961096,
+      story3 replayed PASS on 296c08a7 (S15 relaunch fix; snapshot pane_id = actual
+      worker, one window per scenario). Story3 attempt on 75649ae4 kept as INTERRUPTED
+      (relaunch bound surviving refiner %7, nudge went to refiner, real worker idle).
+      CODE CHANGE needing normal re-review: 75649ae4 start_push_proxy check-then-spawn
+      now under a per-key lock. Pre-fix, parallel s1/s2 container creates spawned
+      two shared proxies at one socket (orphan + refs reset to one container, so removing
+      it would stop the other container proxy); seen live in S16 stories 1-2. Regression
+      TestSharedProxy::test_concurrent_starts_spawn_one_proxy_and_keep_both_refs (fails
+      reverted); full suite 3460 passed on 296c08a7. Harness: pm logs container create
+      argv (podman run -d) only with ~/.pm/sessions/<tag>/debug; detached push proxies
+      outlive tmux, stop by exact argv.'
+    created_at: '2026-10-23T05:51:31Z'
+    last_edited: '2026-10-23T05:51:31Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
