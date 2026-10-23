@@ -126,6 +126,7 @@ class PushProxy:
         self._server_socket: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._ino: int | None = None
 
     def start(self) -> None:
         """Start the proxy in a background daemon thread."""
@@ -141,6 +142,7 @@ class PushProxy:
         self._server_socket.bind(self.socket_path)
         # Make socket world-writable so the container user can connect
         os.chmod(self.socket_path, 0o777)
+        self._ino = os.stat(self.socket_path).st_ino
         self._server_socket.listen(1)
         self._server_socket.settimeout(2.0)
 
@@ -162,18 +164,33 @@ class PushProxy:
                 pass
         if self._thread:
             self._thread.join(timeout=5)
-        try:
-            os.unlink(self.socket_path)
-        except FileNotFoundError:
-            pass
+        # A newer proxy may already serve this path (a stop then start of
+        # the PR's shared proxy): leave its socket alone.
+        if self.owns_socket():
+            try:
+                os.unlink(self.socket_path)
+            except FileNotFoundError:
+                pass
         _log.info("Push proxy stopped: %s", self.socket_path)
+
+    def owns_socket(self) -> bool:
+        """True while ``socket_path`` is still the socket this proxy bound.
+
+        False once it is removed or replaced by a newer proxy.  The open
+        listener pins its inode, so a replacement cannot reuse the number.
+        """
+        try:
+            return os.stat(self.socket_path).st_ino == self._ino
+        except OSError:
+            return False
 
     def _serve_loop(self) -> None:
         """Accept connections and handle push requests."""
         while not self._stop.is_set():
             # If the socket file was removed externally (e.g. container
-            # cleanup in tmux), exit the loop so the thread terminates.
-            if not os.path.exists(self.socket_path):
+            # cleanup in tmux) or replaced by a newer proxy, exit the loop
+            # so the thread terminates.
+            if not self.owns_socket():
                 _log.info("Push proxy socket removed, exiting: %s",
                           self.socket_path)
                 break
@@ -895,13 +912,13 @@ if __name__ == "__main__":
     proxy = PushProxy(_sock, _workdir, _branch)
     proxy.start()
 
-    # Block until the socket is removed or we get a signal
+    # Block until the socket is removed or replaced, or we get a signal
     import signal as _signal
     _stop = threading.Event()
     _signal.signal(_signal.SIGTERM, lambda *_: _stop.set())
     _signal.signal(_signal.SIGINT, lambda *_: _stop.set())
     while not _stop.is_set():
-        if not os.path.exists(_sock):
+        if not proxy.owns_socket():
             break
         _stop.wait(2.0)
     proxy.stop()

@@ -483,4 +483,14 @@ repeated deaths turn a PASS into NEEDS_WORK.
     start racing the last container's stop cannot reuse the proxy being
     killed (regression
     `TestSharedProxy::test_start_during_last_stop_spawns_a_new_proxy`,
-    fails without the lock).
+    fails without the lock). Review b62f i2: the proxy daemon only checked
+    that its socket *path* existed, so after a stop and an immediate start
+    of the PR's proxy the old daemon kept running (orphan, bound to an
+    unlinked socket), and its exit cleanup unlinked the path whatever was
+    there, which could delete the newer proxy's socket. `PushProxy` now
+    records its socket inode, exits when the path is removed *or replaced*
+    (`owns_socket`, as `route_bridge` does) and unlinks only its own socket
+    (regressions `TestPushProxyLifecycle::
+    test_replaced_daemon_exits_and_keeps_the_new_socket` (real daemon) and
+    `test_stop_of_a_replaced_proxy_leaves_the_new_socket`, each fails with
+    its half reverted; logs `/pm-captures/review-b62f-i2/`).

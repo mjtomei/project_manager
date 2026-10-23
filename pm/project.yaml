@@ -31540,7 +31540,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T05:51:31.687633+00:00'
+  updated_at: '2026-10-23T06:01:21.187706+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31811,6 +31811,35 @@ prs:
       death still counts as FLAGGED against the worker.'
     created_at: '2026-10-23T04:08:54Z'
     last_edited: '2026-10-23T04:08:54Z'
+  - id: note-0c67a0e
+    text: 'QA5 planner (2026-10-23): CODE CHANGE 5432f736 on top of 96a4e5a8 (prior
+      reviewed head, review 590d i3 PASS), needs independent review via the normal
+      NEEDS_WORK/finalization path. Confirmed review i3 observation: _RouteStallWatch._resume
+      announced "recovered — resumed" / "turn ended on ... — resumed" when the pane
+      was gone or the nudge send failed (nothing sent). Now it announces only after
+      the nudge is typed; otherwise it logs "pane gone — not resumed" and the dead-pane
+      relaunch takes over. Regressions test_recovered_route_does_not_claim_resume_of_a_dead_pane
+      and test_nudge_send_failure_does_not_claim_resume, both fail with the fix reverted.
+      Raw output in /pm-captures/qa5-planner-route-resume-dead-pane (env -u PM_HOST_HOME,
+      PATH=/usr/bin, markdown 3.5.2): focused rc 0, mutation rc 1, related files rc
+      0. Full suite 3455 passed, run once before the capture request in the default
+      shell. Only the summary line was kept and it was not rerun, so the reviewer
+      should rerun it under the declared env. Also spec RQ24 (110b7b0e). Possible
+      issue for S15: a flag follow-up after only the worker pane dies may land in
+      the verifier pane via find_claude_pane.'
+    created_at: '2026-10-23T04:21:14Z'
+    last_edited: '2026-10-23T04:21:14Z'
+  - id: note-5fcf8c5
+    text: 'QA5 planner clarification for S15/S16 refiners (spec e28ff299): (1) container
+      inspect Config.Env holds the -e NAME values by design (RQ15/S14). Assert no
+      secrets in generated argv, pm logs, pane output and captures; if container env
+      is inspected, record a count only, not an absence requirement. (2) In S16 (two
+      PRs, same -sN), a dead-window container that lingers, or a sweep that touches
+      the other PR''s same-sN container, is known pr-1139060 (#241): record it as
+      an observation, not a new pr-592e4bd failure. The pane-loss and recovery Thens
+      stay required.'
+    created_at: '2026-10-23T04:23:17Z'
+    last_edited: '2026-10-23T04:23:17Z'
   - id: note-52a773c
     text: 'S15 refine (RQ24/25 host, 2026-10-23): qa.md fifth-pass advice to drive
       the verifier with a fake-claude qa_verification sequence does not work for re-verification.
@@ -31859,6 +31888,15 @@ prs:
       outlive tmux, stop by exact argv.'
     created_at: '2026-10-23T05:51:31Z'
     last_edited: '2026-10-23T05:51:31Z'
+  - id: note-a6b28ea
+    text: 'Review b62f i1 (8a3d3412, CODE CHANGE, needs normal re-review): reviewed
+      5432f736/32961096/75649ae4/296c08a7, all sound. Fixed a residual race in the
+      75649ae4 lock: stop_push_proxy dropped the last ref and removed the socket without
+      the per-key spawn lock, so a start in between reused the proxy being killed.
+      Regression test_start_during_last_stop_spawns_a_new_proxy (fails without the
+      lock). Spec items 14-17 added. Full suite 3461 passed.'
+    created_at: '2026-10-23T06:01:21Z'
+    last_edited: '2026-10-23T06:01:21Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")

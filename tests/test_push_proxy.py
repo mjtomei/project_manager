@@ -363,6 +363,58 @@ class TestPushProxyLifecycle:
         # Clean up (stop is safe to call even after thread exited)
         proxy.stop()
 
+    def test_replaced_daemon_exits_and_keeps_the_new_socket(self, tmp_path):
+        """A shared proxy stopped and started again at once: the old daemon
+        must exit although the path exists again, and its exit cleanup
+        must not unlink the newer proxy's socket (that left the new
+        container without a proxy).  Spawns the real daemon."""
+        import sys
+        import time
+        from pm_core.push_proxy import proxy_is_alive
+
+        sock = str(tmp_path / "push.sock")
+        pm_root = str(Path(__file__).resolve().parent.parent)
+        old = subprocess.Popen(
+            [sys.executable, "-m", "pm_core.push_proxy", sock,
+             str(tmp_path), "pm/pr-x"],
+            cwd=pm_root, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            for _ in range(50):
+                if os.path.exists(sock) and proxy_is_alive(sock):
+                    break
+                time.sleep(0.1)
+            else:
+                pytest.fail("old proxy daemon never came up")
+            new = PushProxy(sock, str(tmp_path), "pm/pr-x")
+            new.start()  # unlinks the old socket and binds the path again
+            try:
+                assert old.wait(timeout=10) == 0
+                assert new.owns_socket()
+                assert proxy_is_alive(sock)
+            finally:
+                new.stop()
+            assert not os.path.exists(sock)
+        finally:
+            if old.poll() is None:
+                old.kill()
+                old.wait()
+
+    def test_stop_of_a_replaced_proxy_leaves_the_new_socket(self, sock_path):
+        from pm_core.push_proxy import proxy_is_alive
+
+        old = PushProxy(sock_path, "/w", "branch")
+        old.start()
+        new = PushProxy(sock_path, "/w", "branch")
+        new.start()
+        try:
+            assert not old.owns_socket()
+            old.stop()
+            assert proxy_is_alive(sock_path)
+        finally:
+            new.stop()
+        assert not os.path.exists(sock_path)
+
     @patch("subprocess.run")
     def test_socket_is_world_writable(self, mock_run, sock_path):
         proxy = PushProxy(sock_path, "/w", "branch")
