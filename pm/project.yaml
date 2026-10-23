@@ -31574,7 +31574,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T17:55:19.775334+00:00'
+  updated_at: '2026-10-23T18:15:37.656226+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32469,6 +32469,30 @@ prs:
       refuses or drops them.'
     created_at: '2026-10-23T17:55:19Z'
     last_edited: '2026-10-23T17:55:19Z'
+  - id: note-3082972
+    text: 'Review d0d0 i1 (af19cfcf + spec 9ff9a728, CODE CHANGE, needs independent
+      re-review and native QA): implemented the pr-2a44020 fix per note-1952e9c. pm
+      installs a UserPromptSubmit hook (receiver "user_prompt"; stores no prompt,
+      prints nothing). It is appended next to user hooks and never refused. Notification/Stop
+      keep refuse-on-conflict. Merging is now hook-level for every pm event: all user
+      hooks are kept, including other Notification matchers that the old wholesale
+      replacement dropped. Only pm hooks are replaced, and up-to-date events are not
+      rewritten. PaneIdleTracker clears idle/waiting/idle_notified on user_prompt.
+      Live control (isolated HOME, real claude 2.1.309, S33 stub; /pm-captures/review-d0d0-i1/live-control/README.md):
+      after a typed turn the patched tracker reported WORKING (idle=false) about 1.2
+      s after Enter and idle again at the next idle_prompt. The pre-fix tracker stayed
+      idle throughout. Bounded limitation: for a prompt blocked by a user hook (no
+      ordering between hooks assumed), pm still records user_prompt, so the patched
+      tracker reports working until Claude re-fires idle_prompt about 60 s later (60.7
+      s observed), then idle. Trust dialog: waiting until the first user_prompt. Permission
+      approval is unchanged (pane keeps waiting until its next event). Side effect:
+      became_idle re-arms after a typed turn; only idempotent handlers run (auto-review
+      for in-scope in_progress PRs with auto-start on, merge re-check). After merge,
+      the next pm session/TUI start appends the UserPromptSubmit entry to the host
+      ~/.claude/settings.json. Full suite 3510 passed (env -u PM_HOST_HOME, /usr/bin
+      first), logs /pm-captures/review-d0d0-i1. impl.md item 27.'
+    created_at: '2026-10-23T18:15:37Z'
+    last_edited: '2026-10-23T18:15:37Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
@@ -32879,7 +32903,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-23T17:41:04.955112+00:00'
-  updated_at: '2026-10-23T17:52:41.358968+00:00'
+  updated_at: '2026-10-23T18:15:38.540576+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32893,3 +32917,12 @@ prs:
       in pr-592e4bd yet.'
     created_at: '2026-10-23T17:52:41Z'
     last_edited: '2026-10-23T17:52:41Z'
+  - id: note-2fd8b3f
+    text: 'Fixed on pr-592e4bd branch in af19cfcf (review d0d0 i1; impl.md item 27
+      there): UserPromptSubmit hook with coexist-append install + PaneIdleTracker
+      user_prompt handling. Not merged yet: keep this PR open (not started) until
+      pr-592e4bd merges, then close as done there. Known bounded limitation: a prompt
+      blocked by a user hook reads as working for about 60 s, until Claude re-fires
+      idle_prompt.'
+    created_at: '2026-10-23T18:15:38Z'
+    last_edited: '2026-10-23T18:15:38Z'
