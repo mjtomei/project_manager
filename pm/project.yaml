@@ -31574,7 +31574,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T17:47:40.752217+00:00'
+  updated_at: '2026-10-23T17:52:40.485260+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32426,6 +32426,40 @@ prs:
       to idle detection of a turn in flight, or require pr-2a44020 first.'
     created_at: '2026-10-23T17:47:40Z'
     last_edited: '2026-10-23T17:47:40Z'
+  - id: note-8ab9169
+    text: 'S33 follow-up: assessment of the idle→working fix for a manually typed
+      new turn (pr-2a44020). Not implemented, because the S33 verdict was already
+      final. CLI facts, checked live on claude 2.1.309 with a probe HOME (/tmp/s33/hookprobe/log):
+      "UserPromptSubmit" fires for the argv prompt and for every typed turn. Payload
+      keys: session_id, hook_event_name, prompt, prompt_id, cwd, permission_mode,
+      transcript_path. Order per turn is UserPromptSubmit → Stop, then Notification
+      idle_prompt about 60 s after Stop if nothing new is typed. While the workspace-trust
+      dialog is up, no hook fires (not even SessionStart), so the "no hook event yet"
+      trust watches still hold. Code fix: (1) hook_install._desired_hooks adds UserPromptSubmit
+      → receiver argv "user_prompt"; the receiver needs no change and must not store
+      the prompt. (2) PaneIdleTracker.poll: on "user_prompt" set idle=False, waiting_for_input=False,
+      idle_notified=False. (3) runtime_state._hook_state_for already treats any non-idle,
+      non-permission event as working, so the picker needs no change. The other read_event
+      readers (qa_loop ~3553, review_loop adoption ~252, loop_shared/qa_loop wait_for_event
+      idle_prompt newer_than) keep correct semantics. Regression test: tracker idle
+      → user_prompt → not idle → idle_prompt → became_idle again, which fails without
+      (2). Live replay: S33 scripts/control_w2.sh (W control, held turn). BLOCKER
+      needing a user choice: install policy. _detect_foreign_hooks refuses to install
+      any pm hooks (HookConflictError at pm session/TUI start, which disables verdict
+      detection) when a managed event already holds a foreign entry, and ensure_hooks_installed
+      replaces each managed event entry list. Adding UserPromptSubmit to _MANAGED_EVENTS
+      would therefore break pm for anyone with their own UserPromptSubmit hook (a
+      common customisation), and an upgrade rewrites every user settings.json, inside
+      containers too. A safe version needs a per-event "coexist" policy: append the
+      pm entry next to foreign ones, never refuse, never drop. That changes how pm
+      edits a user-owned file, which the current docstrings deliberately avoid. Decide:
+      coexist-append for UserPromptSubmit (my recommendation), or keep refuse-on-conflict
+      and accept that it breaks for those users. Side effect to accept: became_idle
+      re-arms after a typed turn, so an in_progress PR that goes idle again with auto-start
+      on gets an auto-review. Current host and scratch settings hold only pm hooks
+      (Notification x2, Stop). No auto-start target added and no QA unpaused.'
+    created_at: '2026-10-23T17:52:40Z'
+    last_edited: '2026-10-23T17:52:40Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
@@ -32836,8 +32870,17 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-23T17:41:04.955112+00:00'
-  updated_at: '2026-10-23T17:41:04.955112+00:00'
+  updated_at: '2026-10-23T17:52:41.358968+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-366dbb5
+    text: 'Tracking record. Assessment and CLI facts are in note on pr-592e4bd (S33
+      follow-up, 2026-10-23): UserPromptSubmit (argv user_prompt) plus PaneIdleTracker
+      reset is a bounded code change. It is blocked on the install-policy choice:
+      the current _detect_foreign_hooks refuse-on-conflict would break pm for users
+      with their own UserPromptSubmit hook, so it needs coexist-append. Not addressed
+      in pr-592e4bd yet.'
+    created_at: '2026-10-23T17:52:41Z'
+    last_edited: '2026-10-23T17:52:41Z'
