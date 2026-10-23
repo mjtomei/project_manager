@@ -228,6 +228,11 @@ class QALoopState:
     _notify_cb: Callable[[], None] | None = None
     # Set by qa_loop_ui after the completion callback has run once
     _ui_complete_notified: bool = False
+    # Orders resume-snapshot renames against :func:`supersede_run`, so a
+    # write already past its stop check cannot restore a snapshot that a
+    # ``z t`` cleared.
+    _resume_lock: threading.Lock = field(
+        default_factory=threading.Lock, repr=False, compare=False)
 
 
 # ---------------------------------------------------------------------------
@@ -904,10 +909,16 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
         ),
     }
     path = _resume_file_path(state.qa_workdir)
+    tmp = path.with_suffix(".tmp")
     try:
-        tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2))
-        tmp.rename(path)
+        with state._resume_lock:
+            if state.stop_requested:
+                # Superseded while this snapshot was being built.
+                tmp.unlink(missing_ok=True)
+                clear_resume_file(state.qa_workdir)
+                return
+            tmp.rename(path)
     except OSError:
         _log.warning("Failed to write QA resume snapshot for %s",
                      state.pr_id, exc_info=True)
@@ -966,6 +977,20 @@ def resume_owned_elsewhere(resume_data: dict) -> bool:
     if started and len(fields) > 19 and fields[19] != started:
         return False  # pid reused by an unrelated process
     return True
+
+
+def supersede_run(state: QALoopState) -> None:
+    """Stop *state*'s run and drop its resume snapshot for good.
+
+    For a run replaced by a new one (``z t``): the new run has no snapshot
+    until its scenarios launch, so a restart before then would revive this
+    one.  Under the state's resume lock, a snapshot write in flight either
+    lands before the clear or sees the stop and discards itself.
+    """
+    with state._resume_lock:
+        state.stop_requested = True
+        if state.qa_workdir:
+            clear_resume_file(state.qa_workdir)
 
 
 def clear_resume_file(qa_workdir: str | Path) -> None:

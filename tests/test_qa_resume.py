@@ -745,6 +745,64 @@ def test_stopped_run_does_not_write_a_snapshot(tmp_path):
     assert not _resume_file_path(tmp_path).exists()
 
 
+def test_supersede_during_snapshot_write_leaves_no_snapshot(tmp_path):
+    """z t lands after a write passed its stop check but before its
+    rename: the write must not restore the snapshot z t just cleared
+    (a restart before the stopped thread's next write would revive the
+    superseded run while the new one is still planning)."""
+    state = _make_state(tmp_path)
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    real_dumps = qa_loop.json.dumps
+
+    def dumps_then_supersede(*a, **kw):
+        out = real_dumps(*a, **kw)
+        qa_loop.supersede_run(state)  # past the stop check, before rename
+        return out
+
+    with patch.object(qa_loop.json, "dumps", side_effect=dumps_then_supersede):
+        _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    assert state.stop_requested
+    assert not _resume_file_path(tmp_path).exists()
+    assert not _resume_file_path(tmp_path).with_suffix(".tmp").exists()
+
+
+def test_supersede_waits_for_an_in_flight_rename(tmp_path):
+    """A write paused at its rename: the supersede waits for it and then
+    clears, so the renamed snapshot does not outlive the clear."""
+    import threading
+    from pathlib import Path
+
+    state = _make_state(tmp_path)
+    at_rename, release = threading.Event(), threading.Event()
+    real_rename = Path.rename
+
+    def paused_rename(self, target):
+        if self.name.startswith("qa_resume"):
+            at_rename.set()
+            assert release.wait(10)
+        return real_rename(self, target)
+
+    with patch.object(Path, "rename", paused_rename):
+        writer = threading.Thread(target=_write_resume_file,
+                                  args=(state, False, 0))
+        superseder = threading.Thread(target=qa_loop.supersede_run,
+                                      args=(state,))
+        writer.start()
+        try:
+            assert at_rename.wait(10)
+            superseder.start()
+            superseder.join(0.3)
+            assert superseder.is_alive()  # held off by the in-flight write
+        finally:
+            release.set()
+            writer.join(10)
+            if superseder.ident is not None:
+                superseder.join(10)
+    assert not writer.is_alive() and not superseder.is_alive()
+    assert state.stop_requested
+    assert not _resume_file_path(tmp_path).exists()
+
+
 def test_fresh_start_drops_superseded_snapshot_before_new_run_has_one(
         tmp_path):
     """z t over a running loop: the new run writes no snapshot while it

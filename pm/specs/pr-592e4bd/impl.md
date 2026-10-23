@@ -406,3 +406,20 @@ pane). Intended behaviour is per worker session: a successful relaunch
 drops the scenario's watch. Regressions (mutation-checked):
 `TestPollLoopRouteGating::test_api_error_on_unrouted_session_is_not_resumed`,
 `test_relaunched_worker_gets_a_fresh_route_watch`.
+
+Review loop 8a99 i2 (race left open by ea78b9d1, raised by the shepherd):
+`_write_resume_file` checked `stop_requested` and then built, wrote and
+renamed the snapshot, while `fresh_start_qa` set `stop_requested` and
+cleared the file from the TUI thread. A write already past its check could
+rename `qa_resume.json` back after the clear. The stopped loop only clears
+it again at its final write, after the finalizer (pr-f8acf21), or never if
+the thread dies, so a restart in that window revived the superseded run
+while the new run was still planning. Fix: `QALoopState._resume_lock`.
+`qa_loop.supersede_run` (now used by `z t`) sets the stop flag and clears
+the file under the lock, and the writer rechecks the stop flag and renames
+under the same lock (when stopped it drops its tmp file and clears). Deterministic
+regressions (both fail when the rename goes back to unlocked; logs
+`/pm-captures/review-8a99-i2/`):
+`test_supersede_during_snapshot_write_leaves_no_snapshot` (supersede
+between check and rename) and `test_supersede_waits_for_an_in_flight_rename`
+(write paused at rename; supersede blocks, then clears).
