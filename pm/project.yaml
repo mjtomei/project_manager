@@ -31584,7 +31584,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T18:41:30.582640+00:00'
+  updated_at: '2026-10-23T19:15:55.696616+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32532,6 +32532,20 @@ prs:
       crash, so filed pr-0ac6f7a (pending, not started). Evidence /pm-captures/review-a183-i2/plain-string-hook-entry.'
     created_at: '2026-10-23T18:41:30Z'
     last_edited: '2026-10-23T18:41:30Z'
+  - id: note-0d6c70d
+    text: 'QA S34 (2026-10-23, RQ35, head c24f18b0, no code change; captures /pm-captures/scenarios/34,
+      manifest.md): every Then held live with real claude 2.1.309 on a stub. The S33-layout
+      upgrade appends only the pm UPS entry; the 2nd start leaves settings byte-identical
+      (receiver re-copied). Typed turn: user hooks ran, user_prompt +0.03 s, Stop
+      +2.1 s, idle_prompt +62 s; no prompt stored, no hook text in the request. Refusals
+      (a/b/c) use the exact wording, rc 1, nothing changed. 24 concurrent start rounds
+      with 2 live typing panes: 70/70 Enters got their own user_prompt within 0.06
+      s, no parse/hook errors. Coverage caveat: the non-atomic write_text/copyfile
+      race was not provoked (resets were upgraded about 60 ms later; both starts wrote
+      only once), so absence is not proof. h1/h4 scratch tmux servers + stub left
+      running (nested Claude).'
+    created_at: '2026-10-23T19:15:55Z'
+    last_edited: '2026-10-23T19:15:55Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
