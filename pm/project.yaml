@@ -31557,7 +31557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T12:30:43.986028+00:00'
+  updated_at: '2026-10-23T12:43:09.681704+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32197,6 +32197,35 @@ prs:
       8ae55361 (qa.md RQ30 + tenth pass) needs independent review. No product change.'
     created_at: '2026-10-23T12:30:43Z'
     last_edited: '2026-10-23T12:30:43Z'
+  - id: note-8178f35
+    text: 'S26 refiner (RQ30): `pm set qa-pass-count 2` fails with "Unknown setting"
+      because it is not in cli _INT_SETTINGS. The TUI reads it from ~/.pm/settings/qa-pass-count
+      (_get_qa_pass_count), so the S26 Given writes that file in the scratch HOME.
+      The S24/S25 stub.py worker answers only pass|noverdict, so S26 extends it with
+      needs_work|input_required. Scenario indices keep counting up across runs (s1,s2
+      then s3,s4, and so on). Plain t on a PR whose qa-<pr> window still exists only
+      focuses that window, so re-runs use z t.'
+    created_at: '2026-10-23T12:04:31Z'
+    last_edited: '2026-10-23T12:04:31Z'
+  - id: note-1624544
+    text: 'QA S26 (2026-10-23, RQ30 one PR host, real Claude refiners/workers on router
+      stub; captures /pm-captures/scenarios/26, REPORT.md). Two CODE CHANGES need
+      normal re-review, both pre-existing on master: (1) f57c500c after QA NEEDS_WORK
+      the TUI moved qa->in_review and reloaded app._data without _update_display,
+      so the tech-tree box showed qa for 111 s until the 300 s background sync; (2)
+      991addf9 zz t "QA PASS (1/2 consecutive) - restarting QA" was replaced by start_qa
+      messages in the same frame and never painted (absent from pane output and cast);
+      now held CONFIRM_HOLD_SECONDS. Regressions in tests/test_qa_self_driving.py,
+      each fails reverted; suite 3479 passed. All other Thens held: verdict line 0.5-1.0
+      s after QA complete, snapshot removed, one note per run, [done VERDICT] written
+      1 s later, router only work/ refiner+worker, restart reprocessed nothing. Coverage
+      (agrees with S27 8ae55361): only story 1 discriminates 89414241/fb7af748 (cache
+      loaded at start_qa before _ensure_workdir, no reload until the 12:12:30 sync,
+      tick 2 at +1 s). Stories 2-4 had A workdir cached (background sync, TUI restarts),
+      so the persisted no-workdir Given was NOT met there and they do not test the
+      timer fixes.'
+    created_at: '2026-10-23T12:43:09Z'
+    last_edited: '2026-10-23T12:43:09Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
