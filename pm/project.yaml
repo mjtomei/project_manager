@@ -31557,7 +31557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T11:53:39.791641+00:00'
+  updated_at: '2026-10-23T12:30:43.986028+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32179,6 +32179,24 @@ prs:
       re-checked, sound. Full suite 3477 passed; logs /pm-captures/review-433b-i1.'
     created_at: '2026-10-23T11:53:39Z'
     last_edited: '2026-10-23T11:53:39Z'
+  - id: note-16dbbdb
+    text: 'QA S27 (2026-10-23, RQ30 two-PR + TUI-restart resume, host, head 023d9cf6;
+      captures /pm-captures/scenarios/27, REPORT.md): every Then held, with each finish
+      processed about 1 s after "QA complete" (A, B while the other was held, C resumed
+      after kill -9 + pm session, same panes and PIDs, no reprocessing on a third
+      restart, one note each, [done PASS]). Main finding: the QA10 premise "QA never
+      sets the PR workdir" is wrong. run_qa_sync -> _ensure_workdir (qa_loop.py ~4212)
+      persists prs[].workdir at the start of a PR first run, so story 2 Given ("no
+      other active PR has a workdir") was false on disk. A pre-fix replay on the same
+      flow (89414241 + fb7af748 reverted, /pm-captures/scenarios/27/pre-fix) was ALSO
+      prompt for A, B and resumed C. The timer reads cached app._data, and _load_state
+      -> ensure_animation_timer starts it once any active PR workdir is cached (B
+      start_qa reload, TUI restart). So these stories do not discriminate the fixes.
+      That shows neither that they work nor that they are unneeded; the discriminating
+      case stays a single first run with no cached workdir (S24). Spec clarification
+      8ae55361 (qa.md RQ30 + tenth pass) needs independent review. No product change.'
+    created_at: '2026-10-23T12:30:43Z'
+    last_edited: '2026-10-23T12:30:43Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
