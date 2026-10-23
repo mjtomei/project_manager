@@ -31557,7 +31557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T06:30:04.111130+00:00'
+  updated_at: '2026-10-23T07:17:03.642034+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31944,6 +31944,39 @@ prs:
       separate process: pr-748e708.'
     created_at: '2026-10-23T06:30:04Z'
     last_edited: '2026-10-23T06:30:04Z'
+  - id: note-fc16f80
+    text: 'S17 refiner (RQ26): (1) push-proxy daemons run with cwd=/ so their own
+      lines ("Push proxy started/stopped", "socket removed, exiting", "Push proxy
+      push") go to ~/.pm/debug/default.log, not the session log; "socket removed,
+      exiting" races with the main loop, "Push proxy stopped: <path>" is always logged.
+      (2) QA scenario containers are not removed on scenario completion or on stop
+      (only the next run''s orphan sweep, a route-gate deferral, or Y cleanup), so
+      a queued deferral with an earlier scenario container still up only drops a ref:
+      same daemon, relaunch logs "Reusing live shared push proxy". Last-container
+      restarts come from z t sweeps and Y. (3) In-container push probes that add commits
+      leave the PR workdir behind origin; fast-forward it before the next QA start
+      or the planner handoff stops with "is behind upstream". (4) The proxy rejects
+      local-path origins: use a file:// bare origin.'
+    created_at: '2026-10-23T06:31:25Z'
+    last_edited: '2026-10-23T06:31:25Z'
+  - id: note-5bed7f3
+    text: 'QA S17 (2026-10-23): RQ26 + RQ16 push-proxy Thens all held live in container
+      mode (captures /pm-captures/scenarios/17, REPORT.md). Story 1: one daemon, proxied
+      push + refused branch. Story 2: z t sweep of the last container -> old daemon
+      exits by itself ("Push proxy stopped"), new one sole LISTEN owner. Story 3 (+replay):
+      queued refiner-gate deferral during a 60 s router outage removes only -sM, same
+      daemon throughout, relaunch "Reusing live shared push proxy". Story 4: 5 z t/zz
+      t cycles max 1 daemon per 0.5 s sample; Y/y removes daemon, socket and dir.
+      CODE CHANGE needing normal re-review: a2ff954c. Y cleanup during a stopping
+      (zz t) run killed the refiner window, and _concretize_and_launch logged a qa_loop
+      Traceback splitting the worker off the dead pane, then a false "Launched scenario
+      N ... in container" (window_name is set during refinement). Pre-existing on
+      master, both host and container paths. Now only a created pane counts as a launch,
+      and a gone refiner pane is a plain warning. 3 regressions (2 mutation-checked);
+      suite 3466 passed. Harness: S17 env.sh unsets all vars, so whitelist any you
+      pass (CDIR).'
+    created_at: '2026-10-23T07:17:03Z'
+    last_edited: '2026-10-23T07:17:03Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
