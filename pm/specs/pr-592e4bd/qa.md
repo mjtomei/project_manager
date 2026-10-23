@@ -236,8 +236,12 @@ env-by-name).
   refiner pane is still alive (the split was refused, e.g. tmux "no
   space for new pane" in a window shrunk to two lines), the warning
   "Failed to split scenario pane for scenario N — closing refiner pane
-  %X so the worker is relaunched" carries its traceback, and that
-  refiner pane is closed (ded27fcd). In both cases a *running* loop
+  %X so the worker is relaunched" carries its traceback, whose last
+  line names tmux's reason (`pm_core.tmux.TmuxCommandError: ... tmux:
+  no space for new pane`, 2314f1a8), and that refiner pane is closed
+  (ded27fcd). A closed refiner skips the worker route gate: no "worker
+  waiting — work route …" line or TUI notice for it, even when its
+  container is being removed (2314f1a8, S20). In both cases a *running* loop
   then takes the dead-worker path: "Scenario N window died — retry
   1/10", gated on the route ("relaunch deferred — …" with no retry spent
   while the route is down). The worker is relaunched in a fresh
@@ -459,6 +463,31 @@ env-by-name).
       retry the relaunch spends and the blocking backoff sleep. Record
       "retry 1/10" as expected, not a failure.
     - Out of scope, already filed: pr-1139060, pr-748e708.
+  - Eighth pass (S21+), final acceptance on the current head. S19 (host)
+    and S20 (container) held RQ27. S20's only code change 2314f1a8
+    (TmuxCommandError naming tmux's stderr for every failing tmux
+    command run with check; closed refiner skips the worker route gate)
+    was replayed live post-fix in both modes (S19 replay on d9338561, S20
+    post-fix) and reviewed in 6c6f i1. Probe, bridge, launcher, provider
+    and container sources are unchanged since a4cec139, the commit the
+    real work-account host and container smoke ran on. qa_loop.py,
+    push_proxy.py and TUI resume have had about 26 fixes since the S7/S8
+    core matrix (b6cec11a). Each fix was checked live on its own, but
+    never all together. This pass is therefore a consolidated end-to-end
+    regression on the current head. It does not re-probe single fixes in
+    isolation. Run one long host-mode run and one long two-PR
+    container-mode run. Each covers, in one session: the role split (stub
+    request log plus the main stub), routing visibility, transcripts and
+    hooks, a startup outage with automatic recovery, a mid-run outage
+    with queued, stalled and dead workers, a PASS-verification round trip
+    with a flag follow-up, stop and fresh start, and a TUI restart with
+    resume. Container mode adds the bridge, the push proxy and the no-secret
+    checks. Reuse the S15–S20 harness (stub.py, stubctl.sh, env.sh,
+    seed_home.sh, the verifier main stub from S15). Write to new capture
+    dirs. Treat any Then that fails as a regression in the combined head.
+    Known items stay observations: pr-1139060, pr-748e708, pr-8f8ae78
+    (retry 1/10 on a failed split), pr-04dfffb, pr-d1d0139, pr-3c7ce04,
+    pr-0f85376, pr-09f01da, pr-3201ea8.
 
 ## 3. Edge cases
 
