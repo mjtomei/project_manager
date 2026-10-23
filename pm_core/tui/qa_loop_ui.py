@@ -625,9 +625,14 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                     f"[green bold]QA PASS[/] for {pr_id} — press i to sign off"
                 )
     elif verdict == VERDICT_NEEDS_WORK:
-        # Issues found or changes committed → back to review
+        # Issues found or changes committed → back to review.  Held and
+        # forced like the restart line: the self-driving review loop's
+        # sticky "Review loop started" lands in this same frame and would
+        # otherwise replace it before it is ever painted (S28).
+        from pm_core.tui import auto_start as _auto_start
         app.log_message(
-            f"[yellow bold]QA NEEDS_WORK[/] for {pr_id} — returning to review"
+            f"[yellow bold]QA NEEDS_WORK[/] for {pr_id} — returning to review",
+            force=True, hold=_auto_start.CONFIRM_HOLD_SECONDS,
         )
         _transition_pr_status(app, pr_id, "qa", "in_review")
         # Clear the stale review loop entry from the previous review pass
@@ -649,7 +654,6 @@ def _on_qa_complete(app, state: QALoopState) -> None:
             _start_self_driving_review(app, pr_id)
         else:
             # Legacy: rely on auto-start
-            from pm_core.tui import auto_start as _auto_start
             if _auto_start.is_enabled(app):
                 app.run_worker(_auto_start.check_and_start(app))
     elif verdict == VERDICT_INPUT_REQUIRED:

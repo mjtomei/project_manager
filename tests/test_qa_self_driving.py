@@ -254,6 +254,29 @@ class TestNeedsWorkStrict:
 
         assert seen == ["in_review"]
 
+    def test_needs_work_message_holds_the_log_line(self, tmp_path):
+        """The NEEDS_WORK line is held and forced against the self-driving
+        review loop's sticky "Review loop started" in the same frame, so it
+        is painted at all (S28: never shown live after a zz t NEEDS_WORK)."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = _make_app(tmp_path)
+        app._self_driving_qa["pr-001"] = {
+            "pass_count": 1, "required_passes": 2
+        }
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.qa_loop_ui._start_self_driving_review"):
+            _on_qa_complete(app, state)
+
+        nw = [c for c in app.log_message.call_args_list
+              if "returning to review" in c.args[0]]
+        assert len(nw) == 1
+        assert nw[0].kwargs.get("hold", 0) > 0
+        assert nw[0].kwargs.get("force") is True
+
     def test_needs_work_starts_review_loop_directly(self, tmp_path):
         """Step 7: NEEDS_WORK starts review loop via _start_self_driving_review."""
         from pm_core.tui.qa_loop_ui import _on_qa_complete
