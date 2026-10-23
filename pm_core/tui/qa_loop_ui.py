@@ -507,16 +507,19 @@ def _resume_incomplete_qa(app) -> None:
     by_pr = {k: v for k, v in by_pr.items() if k not in foreign}
 
     def _load_project():
-        # An unparseable project.yaml (e.g. conflict markers left by a git
-        # pull) must not escape: the poll tick re-raises, which kills the
-        # TUI and every QA loop it drives (S41).  Retry on the next scan.
+        # An unloadable project.yaml must not escape: the poll tick
+        # re-raises, which kills the TUI and every QA loop it drives (S41).
+        # A conflicted git pull leaves conflict markers or plan references
+        # that do not validate, and a checkout unlinks the file before
+        # rewriting it.  Retry on the next scan.
         try:
             return store.load(app._root)
-        except store.ProjectYamlParseError as e:
+        except (store.ProjectYamlParseError, store.PlanValidationError,
+                OSError) as e:
             if getattr(app, "_resume_parse_error_stamp", None) != stamp:
                 app._resume_parse_error_stamp = stamp
                 _log.warning("QA resume scan skipped until project.yaml "
-                             "parses again: %s", e)
+                             "loads again: %s", e)
             return None
 
     known = set(app._qa_loops) | app._resumed_qa_pr_ids
@@ -532,6 +535,7 @@ def _resume_incomplete_qa(app) -> None:
 
     live_workdirs = {str(s.qa_workdir) for s in app._qa_loops.values()
                      if getattr(s, "qa_workdir", None)}
+
     def _shown_ids():
         return {p.get("id") for p in (app._data or {}).get("prs") or []}
     candidates = []

@@ -420,7 +420,11 @@ recorded with item 29.
         raised `ProjectYamlParseError` out of the poll tick, which re-raises,
         and Textual exited as soon as an unknown snapshot appeared. The
         scan now logs once per file stamp and skips until the file parses
-        (c8ab2f4c).
+        (c8ab2f4c). Review loop 2b8a i1 widened this to every load
+        failure: a plan reference that does not validate
+        (`PlanValidationError`) and a file missing mid-checkout (`OSError`)
+        escaped the same way
+        (`test_unloadable_project_file_does_not_escape_the_scan`).
     (d) *Check-then-adopt race.* The scan checked `resume_owned_elsewhere`
         on a snapshot read earlier, and the adopted loop wrote its pid
         later, so two TUIs could both adopt one run. `claim_resume_file`

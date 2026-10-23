@@ -661,6 +661,34 @@ def test_unparseable_project_file_does_not_escape_the_scan(tmp_path):
     resume_bg.assert_called_once()
 
 
+@pytest.mark.parametrize("breakage", ["missing", "bad_plan_parent"])
+def test_unloadable_project_file_does_not_escape_the_scan(tmp_path, breakage):
+    """Besides conflict markers, a pull can leave a project.yaml that
+    parses but fails plan validation (PlanValidationError), and a checkout
+    unlinks the file before rewriting it (FileNotFoundError).  Either used
+    to escape the scan like the parse error did."""
+    app = _make_app(tmp_path)
+    _seed_run(tmp_path, overall="", pr_id="pr-001")
+    project_file = app._root / "project.yaml"
+    good = project_file.read_text()
+    project_file.chmod(0o644)
+    if breakage == "missing":
+        project_file.unlink()
+    else:
+        project_file.write_text(good + "plans:\n- id: plan-a\n"
+                                "  name: A\n  parent: plan-missing\n")
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+        resume_bg.assert_not_called()
+
+        project_file.write_text(good)
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+
+
 def test_resume_of_a_pulled_pr_reloads_the_tree(tmp_path):
     """A PR that arrived by a git pull is in project.yaml but not in the
     TUI's loaded state (a pull signals no reload): resuming its run
