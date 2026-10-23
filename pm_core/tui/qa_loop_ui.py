@@ -310,6 +310,15 @@ def poll_qa_state(app) -> None:
     """Called from the shared poll timer to update QA state in the TUI."""
     tracker = app._pane_idle_tracker
     for pr_id, state in list(app._qa_loops.items()):
+        # Drop scenario keys of an earlier run of this PR.  A run replaced
+        # in _qa_loops (z t over a running run, a zz t restart) never
+        # reaches the completion unregister below, and nothing polls its
+        # keys again, so mid-turn panes stayed "active" for good: the
+        # node kept a QA spinner after the new run finished.
+        live = {f"qa:{pr_id}:s{sc.index}" for sc in state.scenarios}
+        for key in tracker.tracked_keys():
+            if key.startswith(f"qa:{pr_id}:") and key not in live:
+                tracker.unregister(key)
         # Wire each scenario pane into the idle tracker so the tech tree
         # can animate a spinner while QA is active.  Mirrors the lazy
         # registration used by review_loop_ui._poll_impl_idle.
