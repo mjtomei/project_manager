@@ -579,6 +579,14 @@ def _resume_incomplete_qa(app) -> None:
             qa_loop.clear_resume_file(resume_file.parent)
             continue
 
+        # The ownership check above read the snapshot earlier; another TUI
+        # may have adopted the run since.  Claim it atomically (S41).
+        claimed = qa_loop.claim_resume_file(resume_file.parent,
+                                            rdata.get("loop_id"))
+        if claimed is None:
+            continue
+        rdata = claimed
+
         # A PR that reached project.yaml by a git pull or an edit outside
         # pm (neither signals a reload) is not in the tree yet; reload now
         # rather than at the next 300 s background sync (S41).

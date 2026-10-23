@@ -534,6 +534,106 @@ def test_in_place_project_edit_also_forgets_foreign_ids(tmp_path):
     assert app._foreign_qa_pr_ids == set()
 
 
+def _live_foreign_process():
+    import subprocess
+    return subprocess.Popen(["sleep", "60"])
+
+
+def test_scan_does_not_adopt_a_run_another_tui_claimed_after_the_check(
+        tmp_path):
+    """Check-then-adopt race between two TUIs (S41): both read the dead
+    owner; the other one adopts the run (its pid lands in the snapshot)
+    after this scan's ownership check but before this scan resumes.  The
+    barrier puts the other TUI's claim exactly in that window.  The scan
+    must re-check under the claim and leave the run alone."""
+    app = _make_app(tmp_path)
+    qa_dir = _seed_run(tmp_path, overall="")
+    other = _live_foreign_process()
+    real = qa_loop.resume_owned_elsewhere
+    calls = []
+
+    def check_then_other_adopts(rdata):
+        owned = real(rdata)
+        if not calls:  # the scan's first (stale) check: then B adopts
+            data = json.loads(_resume_file_path(qa_dir).read_text())
+            data["owner_pid"] = other.pid
+            data["owner_start"] = qa_loop._proc_start_time(other.pid)
+            _resume_file_path(qa_dir).write_text(json.dumps(data))
+        calls.append(owned)
+        return owned
+
+    try:
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch.object(qa_loop, "resume_owned_elsewhere",
+                          side_effect=check_then_other_adopts), \
+             patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+             patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+            qa_loop_ui._resume_incomplete_qa(app)
+    finally:
+        other.kill()
+        other.wait()
+
+    resume_bg.assert_not_called()
+    on_complete.assert_not_called()
+    assert "pr-001" not in app._qa_loops
+    assert "pr-001" not in app._resumed_qa_pr_ids  # re-checked next scan
+    assert json.loads(_resume_file_path(qa_dir).read_text())["owner_pid"] \
+        == other.pid
+
+
+def test_two_processes_claiming_one_orphan_get_exactly_one_owner(tmp_path):
+    """Two processes (two TUIs) released together onto the same dead-owner
+    snapshot: exactly one claim succeeds and the snapshot names it."""
+    import subprocess
+    import sys
+    import time
+    qa_dir = _seed_run(tmp_path, overall="")
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    data = json.loads(_resume_file_path(qa_dir).read_text())
+    data["owner_pid"] = dead.pid
+    _resume_file_path(qa_dir).write_text(json.dumps(data))
+    go = tmp_path / "go"
+    code = (
+        "import os, sys, time\n"
+        "from pm_core import qa_loop\n"
+        # widen the read-to-write window so an unlocked claim always races
+        "_read = qa_loop._load_resume_file\n"
+        "def _slow(d):\n"
+        "    r = _read(d); time.sleep(0.5); return r\n"
+        "qa_loop._load_resume_file = _slow\n"
+        "open(sys.argv[2] + '.ready.' + str(os.getpid()), 'w').close()\n"
+        "while not os.path.exists(sys.argv[2]): time.sleep(0.001)\n"
+        "d = qa_loop.claim_resume_file(sys.argv[1], sys.argv[3])\n"
+        "print('claimed' if d else 'skipped', os.getpid())\n"
+        # keep the claimant alive so the other one sees a live owner
+        "time.sleep(2)\n")
+    import os
+    from pathlib import Path
+    env = dict(os.environ,
+               PYTHONPATH=str(Path(qa_loop.__file__).resolve().parents[1]))
+    procs = [subprocess.Popen([sys.executable, "-c", code, str(qa_dir),
+                               str(go), data["loop_id"]],
+                              stdout=subprocess.PIPE, text=True, env=env)
+             for _ in range(2)]
+    deadline = time.monotonic() + 20
+    while (len(list(tmp_path.glob("go.ready.*"))) < 2
+           and time.monotonic() < deadline):
+        time.sleep(0.01)
+    go.touch()
+    out = [p.communicate(timeout=30)[0].split() for p in procs]
+    winners = [int(pid) for res, pid in out if res == "claimed"]
+    assert len(winners) == 1, out
+    assert json.loads(_resume_file_path(qa_dir).read_text())["owner_pid"] \
+        == winners[0]
+
+
+def test_claim_refuses_a_replaced_run(tmp_path):
+    qa_dir = _seed_run(tmp_path, overall="")
+    assert qa_loop.claim_resume_file(qa_dir, "some-other-loop") is None
+    assert qa_loop.claim_resume_file(qa_dir, "abc123") is not None
+
+
 def test_unparseable_project_file_does_not_escape_the_scan(tmp_path):
     """A git pull that conflicts on project.yaml leaves conflict markers in
     it.  The resume scan loads the file when it sees a snapshot of an

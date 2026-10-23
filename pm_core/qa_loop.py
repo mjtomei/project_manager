@@ -1034,6 +1034,49 @@ def supersede_run(state: QALoopState) -> None:
             clear_resume_file(state.qa_workdir)
 
 
+def claim_resume_file(qa_workdir: str | Path,
+                      loop_id: str | None) -> dict | None:
+    """Atomically make this process the owner of an orphaned run's snapshot.
+
+    A scan reads the snapshot, sees its owner dead and adopts the run, but
+    the adopted loop records its own pid only later.  Two TUIs (two clones
+    of one project, or a TUI restarting while another pulls the PR in) can
+    both read the dead owner in that window and both resume the run (S41).
+    The claim re-reads the snapshot under an exclusive lock, re-checks
+    ownership and that it is still the same run (*loop_id*), and writes
+    this process as owner before releasing the lock, so exactly one
+    claimant gets it.  Returns the claimed snapshot, or None when the run
+    is owned elsewhere, replaced or gone.
+    """
+    import fcntl
+    path = _resume_file_path(qa_workdir)
+    try:
+        fd = os.open(path.with_name("qa_resume.claim"),
+                     os.O_CREAT | os.O_RDWR, 0o644)
+    except OSError:
+        _log.warning("QA resume: cannot open claim lock in %s", qa_workdir,
+                     exc_info=True)
+        return None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        data = _load_resume_file(qa_workdir)
+        if (data is None or data.get("loop_id") != loop_id
+                or resume_owned_elsewhere(data)):
+            return None
+        data["owner_pid"] = os.getpid()
+        data["owner_start"] = _proc_start_time(os.getpid())
+        tmp = path.with_name("qa_resume.claim.tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        tmp.rename(path)
+        return data
+    except OSError:
+        _log.warning("QA resume: claim failed in %s", qa_workdir,
+                     exc_info=True)
+        return None
+    finally:
+        os.close(fd)  # releases the lock
+
+
 def clear_resume_file(qa_workdir: str | Path) -> None:
     """Remove the resume snapshot once a completed run has been processed."""
     try:
