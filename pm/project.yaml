@@ -31574,7 +31574,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T17:52:40.485260+00:00'
+  updated_at: '2026-10-23T17:55:19.775334+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32460,6 +32460,15 @@ prs:
       (Notification x2, Stop). No auto-start target added and no QA unpaused.'
     created_at: '2026-10-23T17:52:40Z'
     last_edited: '2026-10-23T17:52:40Z'
+  - id: note-1952e9c
+    text: 'Finalize handoff (2026-10-23): S33 verdict stays INPUT_REQUIRED; nothing
+      is approved or implemented here. The scope choice for the NEXT native review
+      step is resolved: retain RQ34, and implement the bounded prompt-start status
+      fix (pr-2a44020; see note-8ab9169) using the coexist-append install policy.
+      The pm UserPromptSubmit hook is appended next to existing user hooks and never
+      refuses or drops them.'
+    created_at: '2026-10-23T17:55:19Z'
+    last_edited: '2026-10-23T17:55:19Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
