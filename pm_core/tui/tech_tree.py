@@ -492,8 +492,8 @@ class PRNode(Widget):
     def _get_loop_marker(self, qa_live: bool = False) -> tuple[str, str]:
         """Return ``(marker_text, marker_style)`` for review-loop/merge state.
 
-        *qa_live*: the PR's QA panes are active or waiting, so its live QA
-        marker must win over a finished review loop's verdict badge.
+        *qa_live*: the PR's QA or impl panes are active or waiting, so that
+        live marker must win over a finished review loop's verdict badge.
         """
         try:
             loops = self.app._review_loops
@@ -579,8 +579,17 @@ class PRNode(Widget):
         qa_state = None
         if status == "qa" and pr.get("workdir"):
             qa_state = qa_pane_state(self.app._pane_idle_tracker, pr_id)
+        # A turn typed (or sent) into the impl pane after a review loop
+        # finished is live work too: its spinner / ⏸ must not be hidden
+        # behind the loop's ⟳N verdict badge (S35).
+        impl_live = False
+        if status in ("in_progress", "in_review") and pr.get("workdir"):
+            tracker = self.app._pane_idle_tracker
+            impl_live = tracker.is_tracked(pr_id) and (
+                tracker.is_waiting_for_input(pr_id)
+                or not tracker.is_idle(pr_id))
         loop_marker, loop_style = self._get_loop_marker(
-            qa_live=qa_state in ("waiting", "active"))
+            qa_live=qa_state in ("waiting", "active") or impl_live)
         marker_offset = -1
         if loop_marker:
             marker_offset = 2 + len(status_text) + 1
