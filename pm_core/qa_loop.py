@@ -99,6 +99,26 @@ def _get_verdict_reminder_timeout() -> int | None:
         return None
 
 
+def _send_submitted(pane: str, message: str) -> None:
+    """Type *message* into a Claude pane and make sure it is submitted.
+
+    Claude can take a text+Enter burst as a paste and leave it unsent in
+    the prompt box, so two bare Enters follow, a second apart.  Failing to
+    type the message raises; the pane dying during the Enters does not
+    (the message is already in, and callers' dead-pane handling takes
+    over on their next check).
+    """
+    from pm_core import tmux as tmux_mod
+    tmux_mod.send_keys(pane, message)
+    for _ in range(2):
+        time.sleep(1)
+        try:
+            tmux_mod.send_keys(pane, "")
+        except Exception:
+            _log.debug("submit Enter to %s failed", pane, exc_info=True)
+            return
+
+
 def _is_verification_enabled() -> bool:
     """Check if PASS verdict verification is enabled (default: True).
 
@@ -1776,12 +1796,7 @@ class _RouteStallWatch:
         from pm_core import tmux as tmux_mod
         try:
             if tmux_mod.pane_exists(pane):
-                tmux_mod.send_keys(pane, self.NUDGE)
-                # Extra Enters so the nudge is submitted: Claude can take
-                # the text+Enter burst as a paste and leave it unsent.
-                for _ in range(2):
-                    time.sleep(1)
-                    tmux_mod.send_keys(pane, "")
+                _send_submitted(pane, self.NUDGE)
         except Exception:
             # Pane died in between: the caller's dead-pane handling
             # relaunches it.
@@ -3277,12 +3292,7 @@ def _poll_tmux_verdicts(
                             f"(PASS / NEEDS_WORK / INPUT_REQUIRED) alone "
                             f"on the last line."
                         )
-                        tmux_mod.send_keys(pane_id, followup_msg)
-                        # Send extra Enters to ensure the message is
-                        # submitted — sometimes newlines don't trigger.
-                        for _ in range(2):
-                            time.sleep(1)
-                            tmux_mod.send_keys(pane_id, "")
+                        _send_submitted(pane_id, followup_msg)
                         _log.info("Sent follow-up message to scenario %d pane",
                                   scenario_idx)
                         # Clear verdict and put back in pending.  Stamp the
@@ -3481,18 +3491,20 @@ def _poll_tmux_verdicts(
                         "or INPUT_REQUIRED with no other text. Please output "
                         "your verdict now if you have reached a conclusion."
                     )
-                    tmux_mod.send_keys(pane_id, reminder)
-                    # Extra Enters so the reminder is submitted: Claude can
-                    # take the text+Enter burst as a paste and leave it
-                    # unsent, and the worker then never idles again.
-                    for _ in range(2):
-                        time.sleep(1)
-                        tmux_mod.send_keys(pane_id, "")
                     _last_reminder_sent[scenario.index] = now
-                    _log.info(
-                        "Sent verdict-format reminder to scenario %d",
-                        scenario.index,
-                    )
+                    try:
+                        _send_submitted(pane_id, reminder)
+                        _log.info(
+                            "Sent verdict-format reminder to scenario %d",
+                            scenario.index,
+                        )
+                    except Exception:
+                        # Pane gone since this tick's liveness check: the
+                        # dead-window handling relaunches it next tick.
+                        # Raising here would end the whole QA run.
+                        _log.warning("Verdict-format reminder to scenario "
+                                     "%d failed", scenario.index,
+                                     exc_info=True)
 
             if verdict:
                 state.scenario_verdicts[scenario.index] = verdict
@@ -3944,10 +3956,7 @@ def _verify_single_scenario(
             f"VERIFIED on its own line, or wrap an explanation in "
             f"FLAGGED_START / FLAGGED_END markers."
         )
-        tmux_mod.send_keys(scenario.verifier_pane_id, msg)
-        for _ in range(2):
-            time.sleep(1)
-            tmux_mod.send_keys(scenario.verifier_pane_id, "")
+        _send_submitted(scenario.verifier_pane_id, msg)
         _log.info("Verification: sent follow-up to scenario %d verifier pane=%s",
                   scenario.index, scenario.verifier_pane_id)
         try:

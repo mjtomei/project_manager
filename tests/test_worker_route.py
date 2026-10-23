@@ -1140,6 +1140,65 @@ class TestPollLoopRouteGating:
         assert sent[1:] == ["", ""]
         assert state.scenario_verdicts[1] == "PASS"
 
+    def test_reminder_to_a_vanished_pane_does_not_end_the_run(self, tmp_path):
+        """The pane dies between the tick's liveness check and the
+        reminder: the failed send is logged and verdict collection goes
+        on (an exception here used to crash the whole QA thread)."""
+        import subprocess
+        from pm_core import qa_loop
+        tr = tmp_path / "t.jsonl"
+        tr.write_text("")
+        sc = qa_loop.QAScenario(index=1, title="t", focus="f")
+        sc.window_name, sc.session_id, sc.pane_id = "w1", "sid-1", "%5"
+        sc.transcript_path = str(tr)
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        state.scenarios = [sc]
+        t0 = time.time() + 1e4
+        events = iter([{"event_type": "idle_prompt", "timestamp": t0}] * 3
+                      + [{"event_type": "idle_prompt", "timestamp": t0 + 5}] * 50)
+        verdicts = iter([None, "PASS"])
+        sent = []
+
+        def send(p, m):
+            sent.append(m)
+            raise subprocess.CalledProcessError(1, ["tmux", "send-keys"])
+        with patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
+             patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                   return_value=120), \
+             patch("pm_core.hook_events.read_event",
+                   side_effect=lambda sid: next(events)), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   side_effect=lambda *a: next(verdicts)), \
+             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
+                   return_value=""), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys", side_effect=send):
+            self._poll(state, tmp_path, [worker_route.RouteStatus(True)])
+        assert len(sent) == 1 and sent[0].startswith("Reminder: your verdict")
+        assert state.scenario_verdicts[1] == "PASS"
+
+    def test_submit_survives_pane_dying_during_enters(self):
+        """_send_submitted: the message typed, then the pane dies — the
+        Enters stop quietly; a pane that cannot take the message raises."""
+        import subprocess
+        from pm_core import qa_loop
+        calls = []
+
+        def send(p, m):
+            calls.append(m)
+            if m == "":
+                raise subprocess.CalledProcessError(1, ["tmux"])
+        with patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.tmux.send_keys", side_effect=send):
+            qa_loop._send_submitted("%5", "hi")
+        assert calls == ["hi", ""]
+        with patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.tmux.send_keys",
+                   side_effect=subprocess.CalledProcessError(1, ["tmux"])):
+            with pytest.raises(subprocess.CalledProcessError):
+                qa_loop._send_submitted("%5", "hi")
+
     def test_relaunched_worker_gets_a_fresh_route_watch(self, tmp_path):
         """A worker stalled on the route dies and is relaunched once the
         route answers: the dead session's stalled pane is not "resumed"
