@@ -31643,7 +31643,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T10:47:20.038618+00:00'
+  updated_at: '2026-10-24T11:24:04.024104+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33183,6 +33183,21 @@ prs:
       gate (the old text said the gate applied). Full suite 3646 passed; /pm-captures/review-679d-i3.'
     created_at: '2026-10-24T08:44:05Z'
     last_edited: '2026-10-24T08:44:05Z'
+  - id: note-baf12ee
+    text: 'QA20 planner (2026-10-24): spec 7887d772 records RQ38 as decided live (S48)
+      and adds a twentieth pass (S50+), delta-only, for review 679d i1 64b41a91. It
+      is the only product change not yet run live; 679d i2-i5 were test/spec/notes
+      only, and i5 passed with 3647 tests on 300aa1a3 (/pm-captures/review-679d-i1..i5).
+      S50 (host, one clone): a skip_qa review PASS hand-off with a brief lock holder
+      goes through after the 2 s wait. A hold longer than 2 s gives one Error and
+      no "waits" line; that loss is pr-7cf1fe4 (observation). Retried QA PASS hand-offs
+      with pm edit open stay non-blocking and say "waits" once per hand-off, also
+      after a SIGNOFF_REQA round and after a TUI restart. Control: ca8fa055. S51 (two
+      clones): "recorded — follow-up waiting" vs "to load to record it", one note
+      per run. Harness: S47/S48/S49 scripts; render with branch pm/qa/artifacts (VFR,
+      -nostdin, atomic .partial).'
+    created_at: '2026-10-24T09:08:45Z'
+    last_edited: '2026-10-24T09:08:45Z'
   - id: note-8cb8f56
     text: 'QA S50 (2026-10-24, RQ38 one-shot hand-offs, host; captures /pm-captures/scenarios/50,
       REPORT.md): 64b41a91 held live vs control ca8fa055. skip_qa review PASS with
@@ -33203,6 +33218,22 @@ prs:
       `pm meta` exit rm -rf the session dir (note-2bc73f1 on pr-7f90572).'
     created_at: '2026-10-24T10:47:19Z'
     last_edited: '2026-10-24T10:47:19Z'
+  - id: note-87a724c
+    text: 'Review 350f i1 (c3c39382, CODE CHANGE, small, needs normal re-review):
+      S50 4fb42e06, e60c9927 and f19831c2 reviewed, sound except: since e60c9927 a
+      non-empty held queue keeps the log line until a flush runs, and Textual sleeps
+      0.5 ms short of a timer delay. A flush that fired just before _log_hold_until
+      returned with no other timer pending, and the line then froze: every later unforced
+      or held message was deferred or queued and never painted (reproduced in a unit
+      repro; real Textual timers measured only 51-68 us late at minimum, so this is
+      rare, not a guarantee). The flush now counts pending timers and re-arms; a queue
+      with no flush pending holds nothing. Also: the one-shot skip_qa hand-off Error:
+      on an unloadable file is now forced and held like the lock Error: (it was hidden
+      by the sticky review-done line; the loss stays pr-7cf1fe4). Retried callers
+      keep it unforced. 4 mutations caught; full suite 3654 passed; impl.md 39(d);
+      /pm-captures/review-350f-i1.'
+    created_at: '2026-10-24T11:24:03Z'
+    last_edited: '2026-10-24T11:24:03Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
