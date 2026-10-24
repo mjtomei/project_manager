@@ -1080,6 +1080,7 @@ def wrap_claude_cmd(
     allowed_push_branch: str | None = None,
     session_tag: str | None = None,
     pr_id: str | None = None,
+    provider: str | None = None,
 ) -> tuple[str, str]:
     """Create a container and return a wrapped command for tmux.
 
@@ -1104,6 +1105,19 @@ def wrap_claude_cmd(
     """
     if not is_container_mode_enabled():
         return claude_cmd, ""
+
+    # Non-QA workflow roles need the same account-router bridge as QA
+    # workers. Validate before creating a container; never fall back to
+    # the main account when an explicitly selected route is unavailable.
+    if provider:
+        from pm_core import worker_route
+        from pm_core.model_config import ModelResolution
+        resolution = ModelResolution(provider=provider)
+        ready = worker_route.check_route(resolution, container=True)
+        if not ready.ok:
+            raise ContainerError(ready.message())
+        extra_rw_mounts = dict(extra_rw_mounts or {})
+        extra_rw_mounts.update(worker_route.container_mounts(resolution))
 
     config = load_container_config()
     cname = _make_container_name(label, session_tag=session_tag)

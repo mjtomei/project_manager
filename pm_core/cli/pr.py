@@ -1024,13 +1024,15 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                                          provider=resolved_provider,
                                          effort=_resolution.effort,
                                          session_tag=_stag,
-                                         session_type="impl")
+                                         session_type="impl",
+                                         container=_is_container_enabled())
             # Optionally wrap in a container for isolation
             from pm_core.container import wrap_claude_cmd, ContainerError
             try:
                 cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
                                               allowed_push_branch=branch,
-                                              session_tag=_stag, pr_id=pr_id)
+                                              session_tag=_stag, pr_id=pr_id,
+                                              provider=resolved_provider)
             except ContainerError as e:
                 click.echo(str(e), err=True)
                 raise SystemExit(1)
@@ -1203,7 +1205,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                          provider=_resolution.provider,
                                          effort=_resolution.effort,
                                          session_tag=_review_stag,
-                                         session_type="review")
+                                         session_type="review",
+                                         container=_is_container_enabled())
     # Optionally wrap in a container for isolation.
     # Always remove any existing container for this review before creating a
     # new one.  The previous session's bash EXIT trap runs "docker rm -f"
@@ -1224,7 +1227,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
                                               allowed_push_branch=branch,
                                               session_tag=_review_stag,
-                                              pr_id=pr_id)
+                                              pr_id=pr_id,
+                                              provider=_resolution.provider)
     except ContainerError as e:
         click.echo(str(e), err=True)
         raise SystemExit(1)

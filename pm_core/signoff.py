@@ -516,7 +516,9 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             model=_resolution.model,
             provider=_resolution.provider,
             effort=_resolution.effort,
-            session_type="signoff")
+            session_type="signoff",
+            session_tag=pm_session.removeprefix("pm-") if pm_session else None,
+            container=is_container_mode_enabled())
 
         branch = pr_entry.get("branch", "")
         if is_container_mode_enabled():
@@ -527,7 +529,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                     claude_cmd, workdir, label=f"signoff-{pr_id}",
                     allowed_push_branch=branch,
                     session_tag=_stag,
-                    pr_id=pr_id)
+                    pr_id=pr_id,
+                    provider=_resolution.provider)
             except ContainerError as e:
                 print(str(e))
                 return

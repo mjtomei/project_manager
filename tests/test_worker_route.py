@@ -1855,3 +1855,38 @@ class TestProviderCLI:
     def test_test_unknown_provider(self, pm_home_dir):
         r = self._run("test", "ghost")
         assert r.exit_code == 1 and "not configured" in r.output
+
+
+@pytest.mark.parametrize("ready", [True, False])
+def test_workflow_container_route_mount_and_fail_closed(pm_home_dir, monkeypatch, ready):
+    """The shared impl/review/signoff wrapper never launches an unavailable route."""
+    from pm_core import container as cm
+    from unittest.mock import Mock
+    _write_providers(pm_home_dir)
+    monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: True)
+    monkeypatch.setattr(cm, "load_container_config", lambda: cm.ContainerConfig())
+    monkeypatch.setattr(cm, "_make_container_name", lambda *a, **k: "review-test")
+    create = Mock()
+    monkeypatch.setattr(cm, "create_container", create)
+    monkeypatch.setattr(cm, "build_exec_cmd", lambda name, cmd, **kw: cmd)
+    monkeypatch.setattr("pm_core.push_proxy.get_proxy_socket_path", lambda name: None)
+    check = Mock(return_value=worker_route.RouteStatus(
+        ready, ROUTE, "router offline" if not ready else "", "start router"))
+    monkeypatch.setattr(worker_route, "check_route", check)
+    bridge = {Path("/bridge"): "/run/pm-route"}
+    mounts = Mock(return_value=bridge)
+    monkeypatch.setattr(worker_route, "container_mounts", mounts)
+    existing = {Path("/evidence"): "/evidence"}
+    if not ready:
+        with pytest.raises(cm.ContainerError, match="router offline"):
+            cm.wrap_claude_cmd("ROUTED", "/w", provider=ROUTE, extra_rw_mounts=existing)
+        create.assert_not_called()
+        mounts.assert_not_called()
+    else:
+        cmd, name = cm.wrap_claude_cmd("ROUTED", "/w", provider=ROUTE,
+                                       extra_rw_mounts=existing)
+        assert (cmd, name) == ("ROUTED", "review-test")
+        assert create.call_args.kwargs["extra_rw_mounts"] == {**existing, **bridge}
+        assert existing == {Path("/evidence"): "/evidence"}
+    assert check.call_args.args[0].provider == ROUTE
+    assert check.call_args.kwargs == {"container": True}

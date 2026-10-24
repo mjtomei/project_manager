@@ -673,7 +673,7 @@ class TestWindowLaunchWorkdir:
     """
 
     def _launch(self, tmp_path, *, transcript=None, existing=None,
-                head="abc"):
+                head="abc", routed=False):
         from types import SimpleNamespace
         from contextlib import ExitStack
         from unittest.mock import MagicMock
@@ -700,16 +700,19 @@ class TestWindowLaunchWorkdir:
             p(patch("pm_core.paths.workdirs_base", return_value=wdirs))
             p(patch("pm_core.signoff.head_sha", return_value=head))
             p(patch("pm_core.model_config.resolve_model_and_provider",
-                    return_value=SimpleNamespace(model=None, provider=None,
-                                                 effort=None)))
+                    return_value=SimpleNamespace(model=None, provider="claude-work" if routed else None,
+                                                 effort="high" if routed else None)))
             p(patch("pm_core.model_config.get_pr_model_override",
                     return_value=None))
             p(patch("pm_core.prompt_gen.generate_signoff_prompt",
                     return_value="PROMPT"))
-            p(patch("pm_core.claude_launcher.build_claude_shell_cmd",
+            self.build = p(patch("pm_core.claude_launcher.build_claude_shell_cmd",
                     return_value="CLAUDE_CMD"))
+            self.wrap = p(patch("pm_core.container.wrap_claude_cmd",
+                    return_value=("WRAPPED", "signoff-test")))
+            p(patch("pm_core.container.remove_container"))
             p(patch("pm_core.container.is_container_mode_enabled",
-                    return_value=False))
+                    return_value=routed))
             p(patch("pm_core.tmux.new_window_get_pane", new_window))
             p(patch("pm_core.tmux.set_shared_window_size"))
             p(patch("pm_core.tmux.switch_sessions_to_window"))
@@ -731,6 +734,13 @@ class TestWindowLaunchWorkdir:
                 data, pr_entry, background=True,
                 transcript=str(transcript) if transcript else None)
         return new_window, workdir
+
+    def test_signoff_container_uses_selected_route(self, tmp_path):
+        self._launch(tmp_path, routed=True)
+        assert self.build.call_args.kwargs["container"] is True
+        assert self.build.call_args.kwargs["provider"] == "claude-work"
+        assert self.build.call_args.kwargs["session_tag"] == "x"
+        assert self.wrap.call_args.kwargs["provider"] == "claude-work"
 
     def test_window_creation_uses_workdir_cwd(self, tmp_path):
         new_window, workdir = self._launch(tmp_path)

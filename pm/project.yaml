@@ -31568,7 +31568,7 @@ prs:
   title: Route QA scenario refinement and execution through claude-mixed work models;
     keep other sessions on main Claude
   branch: pm/pr-592e4bd-route-qa-execution-workers-through-claude-mixed-wo
-  status: pending
+  status: in_review
   depends_on: []
   description: 'The user expects the main Claude subscription to run out before reset.
     Integrate the existing claude-mixed/work-model routing promptly so autonomous
@@ -31643,7 +31643,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T11:43:26.891597+00:00'
+  updated_at: '2026-10-24T11:58:58.571517+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33260,6 +33260,7 @@ prs:
       Full suite 3656 passed, rc 0; /pm-captures/review-350f-i3. impl.md 39(f).'
     created_at: '2026-10-24T11:43:26Z'
     last_edited: '2026-10-24T11:43:26Z'
+  model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")

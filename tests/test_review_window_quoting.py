@@ -297,3 +297,21 @@ def test_review_claude_cmd_uses_tmux_session_tag(fake_tmux, monkeypatch):
     pr_mod._launch_review_window(_make_data(),
                                  _make_pr("t", fake_tmux["workdir"]))
     assert seen and seen[0]["session_tag"] == "test"
+
+
+def test_review_container_uses_selected_route(fake_tmux, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from pm_core import container as cm
+    build = Mock(return_value="ROUTED")
+    wrap = Mock(return_value=("WRAPPED", "review-test"))
+    monkeypatch.setattr(pr_mod, "build_claude_shell_cmd", build)
+    monkeypatch.setattr(cm, "wrap_claude_cmd", wrap)
+    monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: True)
+    monkeypatch.setattr("pm_core.model_config.resolve_model_and_provider",
+                        lambda *a, **k: SimpleNamespace(model=None,
+                            provider="claude-work", effort="high"))
+    pr_mod._launch_review_window(_make_data(), _make_pr("T", fake_tmux["workdir"]))
+    assert build.call_args.kwargs["container"] is True
+    assert build.call_args.kwargs["provider"] == "claude-work"
+    assert wrap.call_args.kwargs["provider"] == "claude-work"

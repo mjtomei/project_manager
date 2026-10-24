@@ -1,15 +1,18 @@
 # pr-592e4bd — Route QA scenario refinement and execution through the claude-mixed work route
 
-Scope update (note-da1f854, master 859657d8, 2026-10-22): BOTH scenario
-refinement (`qa_concretize`) and execution (`qa_scenario`) run on
-`work/claude-opus-5-5`/high. Every other role — interactive QA s0, planning,
-verification, finalization, implementation, review, sign-off, watcher,
-merge — stays on main/plain Claude (`claude-opus-5-5`/high) for remote
-control. Manual merge/spec gates are unchanged.
+Scope update (2026-10-24): the original refiner/executor-only routing remains
+available. The user also authorized running every role for this PR on the
+work account because the main account has less than 5% weekly allowance.
+Implementation, review, and sign-off containers must therefore support the
+same router provider as QA workers. Host QA planning, interactive s0,
+verification, and finalization already use the shared provider-aware launcher.
+The per-PR `model: provider:claude-work` override selects all these roles;
+project defaults can still keep other roles on plain Claude for remote control.
+Manual merge/spec gates are unchanged.
 
 ## 1. Requirements (grounded)
 
-R1. **Routed roles: refiner + worker only.** Routing is selected through the
+R1. **Selective routing, with an all-role override.** The original split is selected through the
 existing model config, per session type:
 `pm model set qa_concretize provider:<route> --effort high --project` and
 `pm model set qa_scenario provider:<route> --effort high --project`.
@@ -23,6 +26,13 @@ existing model config, per session type:
   (`_relaunch_scenario_window`).
 Both resolve via `_resolve_qa_model`, so existing overrides (`PM_MODEL` > PR
 `model` > project > global) apply identically to launch, retry and resume.
+For implementation, review, and sign-off, the shared container wrapper checks
+an explicitly selected provider before launch and mounts its router bridge.
+Their command builders use container mode, avoiding host-only launcher paths.
+An unavailable route blocks launch; it must not switch to the main account.
+The isolated route tests cover bridge mount preservation, refusal to launch an
+unavailable route, and the review/sign-off callers' container/provider wiring.
+
 
 R2. **Route definition is host-local.** A route is a provider in
 `~/.pm/providers.yaml` of new type `router` (`providers.ProviderConfig`):
