@@ -31649,7 +31649,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T23:36:17.987743+00:00'
+  updated_at: '2026-10-24T23:51:34.653933+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33469,6 +33469,24 @@ prs:
       impl.md 41(l); /pm-captures/review-e0e8-i13.'
     created_at: '2026-10-24T23:36:17Z'
     last_edited: '2026-10-24T23:36:17Z'
+  - id: note-8b74eaf
+    text: 'Review e0e8 i14 (05bfd6c5, CODE CHANGE, small, needs normal re-review):
+      i13 52ec17f3 (blank project session_models value counts as absent) and the e0e8
+      deltas (c1c08d83, 9c42bb6e, 3748691e, c08c7627, f1865615, 32df2893, 0c577dd2,
+      021f2810, 97a77383, 2d58dea4, 57f04ee6, d76cc9d5, d361858c, 5fbbedad, 620327fa,
+      7a437b79) re-reviewed independently, sound. Gap fixed (pre-existing on master):
+      a blank block (model_config:, session_models: or session_effort: with every
+      entry commented out, e.g. after commenting out the last route entry) loads as
+      None, so every launch of every type raised (the effort block is read even under
+      a PR override), and so did pm model set/unset --project, the remedy the route
+      errors name. A blank block now reads as empty in resolution, validation, pm
+      model show/set/unset; a non-mapping block is still malformed and still fails
+      launches. A blank or non-string session_effort level counts as absent like a
+      model entry (it reached --effort). 10 regressions fail pre-fix, 6 mutations
+      caught. Venv lacked markdown again (3.10.3 installed). Baseline 3706, final
+      full suite 3715 passed, rc 0; impl.md 41(m); /pm-captures/review-e0e8-i14.'
+    created_at: '2026-10-24T23:51:34Z'
+    last_edited: '2026-10-24T23:51:34Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
