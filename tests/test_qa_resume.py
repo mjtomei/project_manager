@@ -1442,3 +1442,157 @@ def test_run_qa_sync_writes_the_run_record():
     src = inspect.getsource(qa_loop.run_qa_sync)
     assert src.index("write_run_record(state)") > src.index(
         "state.qa_workdir = str(qa_wd)")
+
+
+def _mark_recorded(qa_dir, tag):
+    f = _resume_file_path(qa_dir)
+    d = json.loads(f.read_text())
+    d["result_recorded_by"] = tag
+    f.write_text(json.dumps(d))
+
+
+def test_run_recorded_by_another_clone_is_left_to_it(tmp_path):
+    """Clone A adopted clone B's run and recorded its result in A's
+    project.yaml, then died with a follow-up pending (snapshot kept).  B's
+    TUI starts first: the run carries B's session tag, but B's project.yaml
+    lacks A's note, so B must not recover (and record) it.  A's restart
+    then processes it once (S49)."""
+    app = _make_app(tmp_path)
+    qa_dir = _seed_run(tmp_path, overall=VERDICT_PASS)
+    _mark_recorded(qa_dir, "clone-a")
+    before = json.loads(_resume_file_path(qa_dir).read_text())
+
+    # B: the launching session (the seeded runs' tag; autouse fixture).
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+        qa_loop_ui._resume_incomplete_qa(app)
+    on_complete.assert_not_called()
+    resume_bg.assert_not_called()
+    assert json.loads(_resume_file_path(qa_dir).read_text()) == before
+    assert "pr-001" not in app._resumed_qa_pr_ids
+
+    # A: the recording session, with no run of its own of the PR.
+    (tmp_path / "a").mkdir()
+    app_a = _make_app(tmp_path / "a")
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "get_pm_session", return_value="pm-clone-a"), \
+         patch.object(qa_loop_ui, "_on_qa_complete",
+                      return_value=True) as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app_a)
+    on_complete.assert_called_once()
+    assert on_complete.call_args.args[1].latest_verdict == VERDICT_PASS
+    assert not _resume_file_path(qa_dir).exists()
+
+
+def test_recorded_here_run_whose_pr_left_qa_is_dropped_here(tmp_path):
+    """Recorded by this TUI's session (e.g. a NEEDS_WORK already moved to
+    in_review here) but launched from another clone: the result is here, so
+    the snapshot is this clone's to clean up, not kept as foreign."""
+    app = _make_app(tmp_path, pr_status="in_review")
+    qa_dir = _seed_run(tmp_path, overall=VERDICT_NEEDS_WORK)
+    _retag(qa_dir, "clone-b")
+    _mark_recorded(qa_dir, "project_manager-deadbeef")
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+    on_complete.assert_not_called()
+    assert not _resume_file_path(qa_dir).exists()
+
+
+def test_claim_refuses_a_run_recorded_by_another_session(tmp_path):
+    qa_dir = _seed_run(tmp_path, overall=VERDICT_PASS)
+    loop = json.loads(_resume_file_path(qa_dir).read_text())["loop_id"]
+    _mark_recorded(qa_dir, "clone-a")
+    assert qa_loop.claim_resume_file(qa_dir, loop) is None
+    with patch.object(qa_loop, "get_pm_session", return_value="pm-clone-a"):
+        assert qa_loop.claim_resume_file(qa_dir, loop) is not None
+
+
+def test_completion_marks_its_snapshot_and_the_launching_clone_records_no_second_note(
+        tmp_path):
+    """End to end over two project.yaml files sharing ~/.pm: clone A
+    processes B's adopted run, writes its note, and the sign-off hand-off
+    fails (lock held), so the snapshot is kept.  A dies.  B's TUI starts:
+    no note is written in B's project.yaml; A's restart records nothing new
+    (its note is already there) and clears the snapshot."""
+    qa_dir = _seed_run(tmp_path, overall=VERDICT_PASS)   # tag: B's session
+    snap = json.loads(_resume_file_path(qa_dir).read_text())
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    app_a = _make_app(tmp_path / "a")
+    app_a._data = store.load(app_a._root)
+    app_a._self_driving_qa = {}
+    app_a._review_loops = {}
+    app_a._pane_idle_tracker.tracked_keys.return_value = []
+    state = build_resume_state(snap)
+    state.running = False
+    state.latest_verdict = VERDICT_PASS
+    app_a._qa_loops["pr-001"] = state
+
+    def qa_notes(root):
+        pr = store.get_pr(store.load(root), "pr-001")
+        return [n for n in pr.get("notes") or [] if n["text"].startswith("QA ")]
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "get_pm_session", return_value="pm-clone-a"), \
+         patch("pm_core.tui.qa_loop_ui._resume_incomplete_qa"), \
+         patch("pm_core.runtime_state.set_action_state"), \
+         patch("pm_core.tui.auto_start.in_scope", return_value=True), \
+         patch("pm_core.tui.signoff_ui.start_signoff", return_value=False):
+        qa_loop_ui.poll_qa_state(app_a)
+    assert state._ui_pending and _resume_file_path(qa_dir).exists()
+    assert len(qa_notes(app_a._root)) == 1
+    marked = json.loads(_resume_file_path(qa_dir).read_text())
+    assert marked["result_recorded_by"] == "clone-a"
+    assert marked["session_tag"] == snap["session_tag"]
+
+    # A dies; B (the launching session) starts first.
+    app_b = _make_app(tmp_path / "b")
+    app_b._data = store.load(app_b._root)
+    app_b._self_driving_qa = {}
+    app_b._review_loops = {}
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch("pm_core.tui.auto_start.in_scope", return_value=False), \
+         patch("pm_core.runtime_state.set_action_state"):
+        qa_loop_ui._resume_incomplete_qa(app_b)
+    assert qa_notes(app_b._root) == []
+    assert _resume_file_path(qa_dir).exists()
+
+    # A restarts: processed once, no second note, snapshot cleared.
+    app_a2 = _make_app(tmp_path / "a")
+    app_a2._data = store.load(app_a2._root)
+    app_a2._self_driving_qa = {}
+    app_a2._review_loops = {}
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "get_pm_session", return_value="pm-clone-a"), \
+         patch("pm_core.tui.auto_start.in_scope", return_value=False), \
+         patch("pm_core.runtime_state.set_action_state"):
+        qa_loop_ui._resume_incomplete_qa(app_a2)
+    assert len(qa_notes(app_a2._root)) == 1
+    assert not _resume_file_path(qa_dir).exists()
+
+
+def test_recorded_here_run_is_processed_even_beside_this_clones_own_run(
+        tmp_path):
+    """This clone also QA'd the PR while the other clone's run went on (the
+    overlap that normally leaves that run to its own clone), but this TUI
+    recorded the other run's result: it finishes it here, once."""
+    import time
+    app = _make_app(tmp_path)
+    now = time.time()
+    own = _seed_run(tmp_path, overall=VERDICT_PASS, loop="own")
+    _record_run(own, tag="clone-a", started_at=now - 100)
+    _finish_run(own, ended_at=now)
+    other = _retag(_seed_run(tmp_path, overall=VERDICT_PASS, loop="other",
+                             first_index=5), "clone-b")
+    _record_run(other, tag="clone-b", started_at=now - 50)
+    _mark_recorded(other, "clone-a")
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "get_pm_session", return_value="pm-clone-a"), \
+         patch.object(qa_loop_ui, "_on_qa_complete",
+                      return_value=True) as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+    on_complete.assert_called_once()
+    assert not _resume_file_path(other).exists()

@@ -638,3 +638,29 @@ recorded with item 33(d).
     Observation (unchanged): zz t on an in_review PR does not move it to
     qa.  Full suite 3622 passed on 8ff5e7a2.  Evidence:
     `/pm-captures/scenarios/45` (REPORT.md).
+35. (S49, RQ37 one note per run across two clones) Live on 3ebe4d7a:
+    clone A adopted clone B's run (snapshot `session_tag` = B), recorded
+    its PASS note, and the auto-start sign-off hand-off then failed (the
+    project lock held, then an unloadable file), so the snapshot was kept
+    for the retry.  A's TUI was killed and B's TUI started first.  B's scan
+    took the run as its own (B's tag, dead owner), recovered it and wrote a
+    second, separately created note in B's project.yaml, which lacked A's
+    note.  Both notes had the same id (it hashes the text) and different
+    `created_at` values (06:35:48 in A, 06:35:52 in B), so the ba5dd6e7
+    dedupe cannot help across clones.  Fix: once `_record_completion` has
+    written the result, `qa_loop.mark_result_recorded` writes
+    `result_recorded_by: <this session tag>` into the snapshot under the
+    claim lock.  `_resume_incomplete_qa` leaves a finished run recorded by
+    another session to that session (kept, treated as foreign until
+    project.yaml changes), and `claim_resume_file` refuses it.  A run this
+    session recorded is processed here wherever it was launched: this
+    session's own-run cleanup applies to it, and so does the same-PR
+    overlap gate.  Cost: if the recording clone never returns, its
+    pending follow-up stays undone, as for any foreign snapshot.  Tests
+    (each mutation-checked) are in `tests/test_qa_resume.py`:
+    `test_run_recorded_by_another_clone_is_left_to_it`,
+    `test_recorded_here_run_whose_pr_left_qa_is_dropped_here`,
+    `test_claim_refuses_a_run_recorded_by_another_session`,
+    `test_completion_marks_its_snapshot_and_the_launching_clone_records_no_second_note`,
+    `test_recorded_here_run_is_processed_even_beside_this_clones_own_run`.
+    Full suite 3629 passed.  Evidence: `/pm-captures/scenarios/49`.

@@ -1140,7 +1140,8 @@ def claim_resume_file(qa_workdir: str | Path,
         fcntl.flock(fd, fcntl.LOCK_EX)
         data = _load_resume_file(qa_workdir)
         if (data is None or data.get("loop_id") != loop_id
-                or resume_owned_elsewhere(data)):
+                or resume_owned_elsewhere(data)
+                or launched_elsewhere(data.get("result_recorded_by"))):
             return None
         data["owner_pid"] = os.getpid()
         data["owner_start"] = _proc_start_time(os.getpid())
@@ -1154,6 +1155,52 @@ def claim_resume_file(qa_workdir: str | Path,
         return None
     finally:
         os.close(fd)  # releases the lock
+
+
+def own_session_tag() -> str | None:
+    """This process's pm session tag (``pm-<tag>``), or None."""
+    sess = get_pm_session()
+    return sess[3:] if sess and sess.startswith("pm-") else None
+
+
+def mark_result_recorded(qa_workdir: str | Path | None,
+                         loop_id: str | None) -> None:
+    """Note in a finished run's snapshot which pm session recorded its
+    result (transition, QA note) in its project.yaml.
+
+    The snapshot outlives the recording while a follow-up is pending (RQ37),
+    and a TUI restart then re-processes the run, deduplicating its note.
+    That only works in the clone whose project.yaml holds the note: a run
+    adopted from another clone keeps that clone's session_tag, so once the
+    adopting TUI died the launching clone's TUI recovered the run as its
+    own and recorded it again in its project.yaml (S49).  A run recorded
+    elsewhere is that session's to finish (claim_resume_file refuses it).
+    Written under the claim lock; best-effort."""
+    import fcntl
+    tag = own_session_tag()
+    if not qa_workdir or not tag:
+        return
+    path = _resume_file_path(qa_workdir)
+    try:
+        fd = os.open(path.with_name("qa_resume.claim"),
+                     os.O_CREAT | os.O_RDWR, 0o644)
+    except OSError:
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        data = _load_resume_file(qa_workdir)
+        if (data is None or data.get("loop_id") != loop_id
+                or data.get("result_recorded_by") == tag):
+            return
+        data["result_recorded_by"] = tag
+        tmp = path.with_name("qa_resume.claim.tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        tmp.rename(path)
+    except OSError:
+        _log.warning("QA: could not mark the result recorded in %s",
+                     qa_workdir, exc_info=True)
+    finally:
+        os.close(fd)
 
 
 _RUN_RECORD = "qa_run.json"

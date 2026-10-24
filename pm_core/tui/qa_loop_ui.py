@@ -477,6 +477,12 @@ def _record_completion(app, state: QALoopState) -> bool:
         if not _record_qa_note(app, state):
             return False
         done.add("note")
+    # The snapshot may outlive this for a pending follow-up: say which
+    # clone's project.yaml holds the result, so only this session's TUI
+    # re-processes it (S49).
+    if state.qa_workdir:
+        from pm_core import qa_loop
+        qa_loop.mark_result_recorded(state.qa_workdir, state.loop_id)
     return True
 
 
@@ -697,6 +703,19 @@ def _resume_incomplete_qa(app) -> None:
         if qa_loop.resume_owned_elsewhere(rdata):
             continue
 
+        # A finished run whose result another clone's TUI already recorded
+        # (in its own project.yaml) and kept for a pending follow-up is that
+        # TUI's to finish, even when this session launched the run: this
+        # project.yaml lacks that note, so recovering it here recorded the
+        # run a second time (S49).  Recorded here, it is processed here
+        # (the note is deduplicated), wherever it was launched.
+        recorded_by = rdata.get("result_recorded_by") if overall else None
+        if recorded_by and qa_loop.launched_elsewhere(recorded_by):
+            foreign.add(pr_id)
+            continue
+        ours = (not qa_loop.launched_elsewhere(rdata.get("session_tag"))
+                or bool(recorded_by))
+
         # Only resume PRs still in QA — skip (and forget) ones that have
         # already moved on.
         if not app._root:
@@ -714,7 +733,7 @@ def _resume_incomplete_qa(app) -> None:
             # can still bring the PR here in QA and this TUI then adopts
             # it.  Only this session's own runs are cleaned up here.
             # Leave it until this project.yaml changes.
-            if qa_loop.launched_elsewhere(rdata.get("session_tag")):
+            if not ours:
                 foreign.add(pr_id)
                 continue
             # The PR has left QA, so this snapshot can never be validly
@@ -731,7 +750,7 @@ def _resume_incomplete_qa(app) -> None:
         # after this TUI restarts (S43).  Adopted are runs of a PR that
         # reached QA here by a pull or an edit (S41), and runs started after
         # this clone's own QA of the PR was over.
-        if qa_loop.launched_elsewhere(rdata.get("session_tag")) and (
+        if not ours and (
                 pr_id in own_prs or qa_loop.run_overlaps_own_run(
                     pr_id, (qa_loop.read_run_record(resume_file.parent)
                             or {}).get("started_at"))):
