@@ -187,8 +187,7 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     claude_cmd = build_claude_shell_cmd(prompt=prompt, session_tag=session_tag,
                                         cwd=str(work_path),
                                         session_type="meta")
-    clear_cmd = f"rm -rf ~/.pm/sessions/{session_tag}"
-    cmd = f"{claude_cmd} ; {clear_cmd}"
+    cmd = _build_meta_pane_cmd(claude_cmd, session_tag, work_path)
 
     # Try to launch in tmux (reuse pm_session from above)
     if pm_session:
@@ -206,8 +205,29 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     # Fallback: launch interactively
     click.echo("Launching Claude...")
     result = subprocess.run(f"cd {shell_quote(str(work_path))} && {cmd}", shell=True)
-    # The clear_cmd in the shell command handles cleanup
+    # The EXIT/INT/TERM trap in the shell command handles cleanup
     raise SystemExit(result.returncode)
+
+
+def _build_meta_pane_cmd(claude_cmd: str, session_tag: str, work_path: Path) -> str:
+    """Wrap *claude_cmd* with an override cleanup that survives pane death.
+
+    The override file this meta window owns (~/.pm/sessions/<tag>/override)
+    is removed by a trap on EXIT/HUP/INT/TERM, so both a normal Claude exit
+    and a tmux kill-window (SIGHUP to the pane shell) clean up — the old
+    trailing ``; rm -rf ~/.pm/sessions/<tag>`` only ran on normal exit, and
+    wiped the whole shared session dir (debug flags, fake-claude config,
+    captures) when it did.  Only the override is removed, and only while it
+    still points at this meta workdir, so an override another component owns
+    (e.g. qa_loop._setup_clone_override) is left alone.
+    """
+    override_file = Path.home() / ".pm" / "sessions" / session_tag / "override"
+    of = shell_quote(str(override_file))
+    wd = shell_quote(str(work_path))
+    clear = f'[ "$(cat {of} 2>/dev/null)" = {wd} ] && rm -f {of} || true'
+    return (f"pm_meta_clear_override() {{ {clear} ; }} ; "
+            f"trap pm_meta_clear_override EXIT HUP INT TERM ; "
+            f"{claude_cmd}")
 
 
 def _meta_workdir() -> Path:
