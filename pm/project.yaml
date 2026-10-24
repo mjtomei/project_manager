@@ -31628,7 +31628,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T07:13:35.510946+00:00'
+  updated_at: '2026-10-24T07:36:37.770600+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33092,6 +33092,25 @@ prs:
       replay in progress.'
     created_at: '2026-10-24T06:53:33Z'
     last_edited: '2026-10-24T06:53:33Z'
+  - id: note-9b681d8
+    text: 'QA S48 (RQ38 + ba5dd6e7, host, scratch TUI, routed workers on stub; /pm-captures/scenarios/48
+      REPORT.md). CODE CHANGES needing normal re-review: 716d6ce1 (TUI writes retried
+      per poll tick use one non-blocking lock attempt store.NO_WAIT: completion transition+note,
+      start_signoff, review->QA hand-off status write, launch clear_return_awaiting
+      + shared _enter_qa_status via start_qa(lock_timeout=), recovered completion;
+      user keys/CLI keep 2 s) and 006d7b4d (hand-off "waiting for project.yaml to
+      be unlocked/to load to start QA" line now sticky: live it was hidden by the
+      sticky "Review loop done ... PASS" line; expected NO_WAIT timeout no longer
+      logged at DEBUG each tick). Live pre-fix 3ebe4d7a: keys 1.99 s, spinner/cast
+      4 s gaps x15-17, 15 StoreLockTimeout warnings in 154 s (result kept). Control
+      bf21931b: one 4 s stall, "returning to review" shown, result lost (qa, 0 notes,
+      9 min). Post-fix: keys 0.055 s, 0 gaps >= 2 s, 0 lock warnings, one waiting
+      line per reason, all writes/hand-offs applied once after :wq, restart resumed
+      only the mid-run PR. ba5dd6e7 held (No PR selected kept across load; 5de77fe7
+      control blanks it). Fixture: J sign-off MERGE coerced to BLOCKED (J has no commits).
+      Full suite 3641 passed on 006d7b4d.'
+    created_at: '2026-10-24T07:36:37Z'
+    last_edited: '2026-10-24T07:36:37Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
