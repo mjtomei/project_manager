@@ -1089,3 +1089,15 @@ recorded with item 41.
         (all four crash pre-fix; 2 mutations caught,
         `/pm-captures/review-e0e8-i12/mutation-checks.log`).  Full suite:
         `/pm-captures/review-e0e8-i12/full-suite.log`.
+    (l) Review loop e0e8 i13: (e)'s twin at project level.  A blank or
+        non-string `model_config.session_models.<type>` value (`signoff:`
+        with no value) raised `AttributeError` at every launch of that
+        type and in `pm model show` (the block is a mapping, so (k) did
+        not apply), and `validate_model_config` reported nothing
+        (pre-existing on master).  Such a value now counts as absent (the
+        parent type, then global settings apply) and is reported.
+        `test_blank_or_non_string_project_entries_count_as_absent`,
+        `test_project_session_models_bad_values_flagged`,
+        `test_model_show_reports_a_blank_project_entry` (2 mutations
+        caught, `/pm-captures/review-e0e8-i13/mutation-checks.log`).  Full
+        suite: `/pm-captures/review-e0e8-i13/full-suite.log`.

@@ -71,6 +71,22 @@ class TestResolveModel:
             "session_models": {"review": "sonnet", "signoff": "opus"}}}}
         assert resolve_model("signoff", project_data=data) == "opus"
 
+    @patch("pm_core.model_config.get_global_setting_value", return_value=None)
+    def test_blank_or_non_string_project_entries_count_as_absent(self, _gsv,
+                                                                 monkeypatch):
+        """``signoff:`` left blank under model_config.session_models must not
+        raise at every sign-off launch (nor hide the parent type's model),
+        as for a PR's role entries."""
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        for bad in (None, "", "  ", 5, {"model": "x"}):
+            data = {"project": {"model_config": {"session_models": {
+                "signoff": bad, "review": "provider:claude-work"}}}}
+            res = resolve_model_and_provider("signoff", project_data=data)
+            assert res.provider == "claude-work"
+            data["project"]["model_config"]["session_models"].pop("review")
+            res = resolve_model_and_provider("signoff", project_data=data)
+            assert (res.model, res.provider) == (None, None)
+
 
 class TestEffortResolution:
     def test_defaults_are_none(self):
@@ -469,6 +485,17 @@ class TestValidateModelConfig:
         assert "None is not a model name" in errors[0]
         assert errors[1].startswith("prs[pr-a].session_models['review']")
 
+    def test_project_session_models_bad_values_flagged(self):
+        """Blank or non-string project entries are ignored, so say so."""
+        from pm_core.model_config import validate_model_config
+        data = {"project": {"model_config": {"session_models": {
+            "signoff": None, "review": 5, "impl": "sonnet"}}}}
+        errors = validate_model_config(data)
+        assert len(errors) == 2
+        assert errors[0].startswith("model_config.session_models['signoff']")
+        assert "None is not a model name" in errors[0]
+        assert errors[1].startswith("model_config.session_models['review']")
+
     def test_non_mapping_model_config_still_checks_prs(self):
         from pm_core.model_config import validate_model_config
         data = {"project": {"model_config": "opus"},
@@ -522,3 +549,25 @@ def test_model_show_reports_a_malformed_model_config(tmp_path, monkeypatch, mc):
     assert "must be a mapping" in out
     assert "pr-a  bogus model  -> x" in out
     assert "prs[pr-a].session_models: unknown session type 'bogus'" in out
+
+
+def test_model_show_reports_a_blank_project_entry(tmp_path, monkeypatch):
+    """A blank value under model_config.session_models is shown as a
+    problem; the per-type table still resolves (it crashed before)."""
+    from click.testing import CliRunner
+    from pm_core import store
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "model_config": {
+                                "session_models": {"signoff": None,
+                                                   "review": "opus"}}},
+                "prs": []}, tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    result = CliRunner().invoke(model_cli.model, ["show"])
+    out = result.output
+    assert result.exit_code == 0, (out, result.exception)
+    assert "Effective config per session type:" in out
+    assert any(line.split()[:2] == ["signoff", "opus"]
+               for line in out.splitlines())
+    assert "model_config.session_models['signoff']: None is not a model" in out

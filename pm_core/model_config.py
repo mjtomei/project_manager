@@ -165,7 +165,10 @@ def resolve_model_and_provider(
             if project_data else {}
         )
         for st in type_chain:
-            if st in session_models:
+            # A blank or non-string entry (hand-edited YAML) counts as
+            # absent, as for a PR's role entries: it must not raise at
+            # every launch of the type (or in `pm model show`).
+            if _is_model_value(session_models.get(st)):
                 resolution = _resolve_value(session_models[st])
                 break
         # 4. Global setting (~/.pm/settings/model-<type>)
@@ -244,6 +247,7 @@ def validate_model_config(project_data: dict | None) -> list[str]:
 
     - ``session_models`` / ``session_effort`` keys are known session types
       (``SESSION_TYPES``);
+    - ``session_models`` values are model names (other values are ignored);
     - ``session_effort`` values are valid effort levels (``EFFORT_LEVELS``);
     - each PR's ``session_models`` is a mapping keyed by known session types,
       with model-name values (other values are ignored).
@@ -271,6 +275,10 @@ def validate_model_config(project_data: dict | None) -> list[str]:
                     f"model_config.{block}: unknown session type {st!r}. "
                     f"Valid types: {known}"
                 )
+            elif block == "session_models" and not _is_model_value(entries[st]):
+                errors.append(
+                    f"model_config.session_models[{st!r}]: {entries[st]!r} "
+                    "is not a model name or 'provider:<name>' (ignored)")
     effort_entries = mc.get("session_effort", {})
     if isinstance(effort_entries, dict):
         for st, level in effort_entries.items():
