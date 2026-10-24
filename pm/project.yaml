@@ -31649,7 +31649,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T11:58:58.571517+00:00'
+  updated_at: '2026-10-24T21:36:17.011217+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33328,6 +33328,19 @@ prs:
       Full suite 3683 passed rc 0; /pm-captures/review-e0e8-i4. impl.md 41(d).'
     created_at: '2026-10-24T20:52:55Z'
     last_edited: '2026-10-24T20:52:55Z'
+  - id: note-c1e6370
+    text: 'Review e0e8 i5 (97a77383, CODE CHANGE, small, needs normal re-review):
+      i4 021f2810 (s0 legacy fallback reads project/global only) and the e0e8 deltas
+      (c1c08d83, 9c42bb6e, 3748691e, c08c7627, f1865615, 32df2893, 0c577dd2) re-reviewed,
+      sound. Gap fixed: get_pr_model_override took a PR session_models role entry
+      whatever its value. A blank one (signoff: with no value) dropped the PR model
+      for that role (sign-off silently on the project default), and a non-string one
+      raised AttributeError at every launch of the role. Both now count as absent
+      (parent role, then PR model) and validate_model_config / pm model show report
+      them. 2 mutations caught; baseline 3683 and final full suite 3685 passed rc
+      0 (markdown 3.10.3 installed first); impl.md 41(e); /pm-captures/review-e0e8-i5.'
+    created_at: '2026-10-24T21:36:16Z'
+    last_edited: '2026-10-24T21:36:16Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
