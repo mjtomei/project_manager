@@ -509,6 +509,9 @@ recorded with item 29.
     `test_restarted_tui_adopts_another_clones_run_only_after_its_own_qa`
     (fresh app, retained records), `test_run_qa_sync_writes_the_run_record`,
     `test_relaunched_pane_is_persisted_before_the_next_tick`.
-    Not fixed here: an existing PR's tree box stays at its old status
-    after a pull until a later reload (32 s live in S43); S42 owns that
-    fix. Evidence: `/pm-captures/scenarios/43` (REPORT.md).
+    Not fixed here: an existing PR's tree box stayed at its old status
+    after a pull until a later reload (32 s live in S43, on a817f5c9).
+    S42 fixed that in bb39b92e (reload when the shown status differs),
+    which landed before the S43 commits were rebased onto it; S43 did not
+    rerun live on the merged tree. Evidence: `/pm-captures/scenarios/43`
+    (REPORT.md).
