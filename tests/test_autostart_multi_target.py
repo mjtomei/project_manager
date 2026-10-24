@@ -1327,6 +1327,58 @@ class TestCursorFollowsActivePr:
             asyncio.run(auto_start._start_pr_quiet(app, "u"))
         assert "u" in app._quiet_activations
 
+    def test_failed_start_shows_its_reason_on_the_log_line(self):
+        """A routed impl start whose work route is down exits 1 with the
+        remedy as its last stderr line.  That reached only the pm log, so
+        the TUI said "Auto-start: starting u" and nothing else, and no
+        periodic pass retries it.  It is shown like a failed sign-off
+        launch, forced and held (one-shot), once per reason: later
+        scheduler passes start the PR again and may fail the same way."""
+        app = FakeApp([_pr("u")])
+        app._quiet_activations = {}
+        shown = []
+        app.log_message = lambda msg, **kw: shown.append((msg, kw))
+        remedy = ("work route 'claude-work' unavailable: router not "
+                  "reachable at 127.0.0.1:8790. Remedy: start the router "
+                  "[claude-mixed]; then launch the impl session again")
+        result = {"rc": 1, "err": remedy}
+
+        class _P:
+            @property
+            def returncode(self):
+                return result["rc"]
+
+            async def communicate(self):
+                return b"", f"Checking out...\n{result['err']}\n".encode()
+
+        async def fake_shell(*a, **k):
+            return _P()
+
+        def start():
+            with patch("pm_core.tui.auto_start._run_shell_async", fake_shell):
+                asyncio.run(auto_start._start_pr_quiet(app, "u"))
+
+        start()
+        assert len(shown) == 1
+        msg, kw = shown[0]
+        assert "u" in msg and "failed" in msg
+        # Rendered as text, not markup: the remedy's brackets survive.
+        from rich.text import Text
+        assert Text.from_markup(msg).plain.endswith(remedy)
+        assert kw == {"force": True, "hold": auto_start.CONFIRM_HOLD_SECONDS}
+        assert "u" not in app._quiet_activations
+
+        start()  # the next pass fails the same way: not said again
+        assert len(shown) == 1
+        result["err"] = "Review: pm pr spec-approve u  (or press 'V' in TUI)"
+        start()  # a different reason is said
+        assert len(shown) == 2 and shown[1][0].endswith(result["err"])
+        result["rc"] = 0
+        start()  # a start that goes through clears it ...
+        result["rc"] = 1
+        start()  # ... so the same failure later is said again
+        assert len(shown) == 3 and shown[2][0] == shown[1][0]
+
 
 def test_predates_open_return_accepts_z_suffix():
     """runtime_state / return timestamps may end in "Z" (Python 3.10's

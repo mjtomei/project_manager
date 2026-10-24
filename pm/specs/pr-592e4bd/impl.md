@@ -1025,3 +1025,22 @@ recorded with item 41.
         `test_unavailable_route_propagates_and_opens_no_window`; 3
         mutations caught (`/pm-captures/review-e0e8-i7/mutation-checks.log`).
         Full suite: `/pm-captures/review-e0e8-i7/full-suite.log`.
+    (h) Review loop e0e8 i8: the same gap for implementation under
+        auto-start.  `auto_start._start_pr_quiet` runs `pm pr start
+        --background` and, on rc != 0, only logged a pm-log warning, so a
+        routed impl whose work route is down (item 40's `ContainerError`,
+        printed on stderr with rc 1) showed "Auto-start: starting <pr>"
+        and nothing else; the scheduler has no periodic pass, so the PR
+        then sat in_progress with no window until some unrelated event.
+        Pre-existing for every start failure (i7 recorded it as an
+        observation).  The last stderr line is now shown as "Auto-start:
+        pm pr start <pr> failed: …" (markup-escaped), forced and held like
+        the other one-shot errors.  Later passes start the PR again (an
+        in_progress PR whose spec awaits approval fails on each), so each
+        reason is said once per PR until a start goes through.
+        `test_failed_start_shows_its_reason_on_the_log_line`; 7 mutations
+        caught.  i7's `test_unavailable_route_propagates_and_opens_no_window`
+        now also checks that no window opened and the per-PR launch lock
+        was released (mutation caught).
+        (`/pm-captures/review-e0e8-i8/mutation-checks.log`; full suite
+        `/pm-captures/review-e0e8-i8/full-suite.log`.)

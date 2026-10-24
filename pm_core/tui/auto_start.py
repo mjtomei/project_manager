@@ -1131,12 +1131,37 @@ async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:
     stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
 
     if proc.returncode != 0:
-        stderr_text = stderr.decode() if stderr else ""
+        stderr_text = (stderr.decode(errors="replace") if stderr else "").strip()
         _log.warning("auto_start: pm pr start %s failed: %s", pr_id, stderr_text[:200])
         if isinstance(quiet, dict):
             quiet.pop(pr_id, None)
+        # The reason is the last stderr line, as for a failed sign-off
+        # launch (e.g. a routed impl whose work route is down, with its
+        # remedy).  No periodic pass retries this start, so it is shown
+        # like the other one-shot errors: forced and held.  Every later
+        # scheduler pass starts the PR again (an in_progress PR whose spec
+        # awaits approval fails each time), so a reason is said once per
+        # PR until a start goes through.
+        reason = (stderr_text.splitlines()[-1] if stderr_text
+                  else f"exit {proc.returncode}")
+        if _start_failures_shown(app).get(pr_id) != reason:
+            _start_failures_shown(app)[pr_id] = reason
+            from rich.markup import escape
+            app.log_message(f"[red]Auto-start: pm pr start {pr_id} "
+                            f"failed[/]: {escape(reason)}",
+                            force=True, hold=CONFIRM_HOLD_SECONDS)
     else:
+        _start_failures_shown(app).pop(pr_id, None)
         _log.info("auto_start: pm pr start %s succeeded", pr_id)
+
+
+def _start_failures_shown(app) -> dict:
+    """PR id -> the ``pm pr start`` failure reason last shown for it."""
+    d = getattr(app, "_auto_start_failures_shown", None)
+    if not isinstance(d, dict):
+        d = {}
+        app._auto_start_failures_shown = d
+    return d
 
 
 # ---------------------------------------------------------------------------

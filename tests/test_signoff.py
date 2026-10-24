@@ -711,7 +711,7 @@ class TestWindowLaunchWorkdir:
         if model_settings is not None:
             pr_entry.update(model_settings)
 
-        new_window = MagicMock(return_value="cl_pane")
+        new_window = self.new_window = MagicMock(return_value="cl_pane")
         with ExitStack() as es:
             p = es.enter_context
             p(patch("pm_core.tmux.has_tmux", return_value=True))
@@ -794,6 +794,13 @@ class TestWindowLaunchWorkdir:
         with pytest.raises(ContainerError, match="work route"):
             self._launch(tmp_path, routed=True, wrap_error=ContainerError(
                 "work route 'claude-work' unavailable: x. Remedy: y"))
+        self.new_window.assert_not_called()
+        # The per-PR launch lock was released, so the next launch is not
+        # stuck behind it (non-blocking probe: a leak fails, not hangs).
+        import fcntl
+        lock = tmp_path / "workdirs" / ".signoff-launch-pm-x-pr-001.lock"
+        with open(lock, "w") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 
     def test_window_creation_uses_workdir_cwd(self, tmp_path):
         new_window, workdir = self._launch(tmp_path)
