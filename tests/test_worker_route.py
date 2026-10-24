@@ -1857,15 +1857,23 @@ class TestProviderCLI:
         assert r.exit_code == 1 and "not configured" in r.output
 
 
-@pytest.mark.parametrize("ready", [True, False])
-def test_workflow_container_route_mount_and_fail_closed(pm_home_dir, monkeypatch, ready):
-    """The shared impl/review/signoff wrapper never launches an unavailable route."""
+@pytest.mark.parametrize("state", ["down", "fresh", "reused_mounted",
+                                   "reused_unmounted"])
+def test_workflow_container_route_mount_and_fail_closed(pm_home_dir, monkeypatch, state):
+    """The shared impl/review/signoff wrapper never launches an unavailable
+    route, and never reuses a running container that lacks the route mount
+    (create_container reuses by name; the ensure step would refuse there)."""
     from pm_core import container as cm
     from unittest.mock import Mock
     _write_providers(pm_home_dir)
+    ready = state != "down"
     monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: True)
     monkeypatch.setattr(cm, "load_container_config", lambda: cm.ContainerConfig())
     monkeypatch.setattr(cm, "_make_container_name", lambda *a, **k: "review-test")
+    monkeypatch.setattr(cm, "container_is_running",
+                        lambda name: state.startswith("reused"))
+    monkeypatch.setattr(worker_route, "container_has_route_mount",
+                        lambda name: state == "reused_mounted")
     create = Mock()
     monkeypatch.setattr(cm, "create_container", create)
     monkeypatch.setattr(cm, "build_exec_cmd", lambda name, cmd, **kw: cmd)
@@ -1877,11 +1885,13 @@ def test_workflow_container_route_mount_and_fail_closed(pm_home_dir, monkeypatch
     mounts = Mock(return_value=bridge)
     monkeypatch.setattr(worker_route, "container_mounts", mounts)
     existing = {Path("/evidence"): "/evidence"}
-    if not ready:
-        with pytest.raises(cm.ContainerError, match="router offline"):
+    if state in ("down", "reused_unmounted"):
+        match = ("router offline" if state == "down"
+                 else "review-test is running without the route socket mount")
+        with pytest.raises(cm.ContainerError, match=match):
             cm.wrap_claude_cmd("ROUTED", "/w", provider=ROUTE, extra_rw_mounts=existing)
         create.assert_not_called()
-        mounts.assert_not_called()
+        assert mounts.called == (state != "down")
     else:
         cmd, name = cm.wrap_claude_cmd("ROUTED", "/w", provider=ROUTE,
                                        extra_rw_mounts=existing)
@@ -1890,3 +1900,81 @@ def test_workflow_container_route_mount_and_fail_closed(pm_home_dir, monkeypatch
         assert existing == {Path("/evidence"): "/evidence"}
     assert check.call_args.args[0].provider == ROUTE
     assert check.call_args.kwargs == {"container": True}
+
+
+def test_unrouted_provider_reuses_a_running_container_untouched(pm_home_dir, monkeypatch):
+    """A non-router provider adds no mount and no reuse refusal."""
+    from pm_core import container as cm
+    from unittest.mock import Mock
+    _write_providers(pm_home_dir)
+    monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: True)
+    monkeypatch.setattr(cm, "load_container_config", lambda: cm.ContainerConfig())
+    monkeypatch.setattr(cm, "_make_container_name", lambda *a, **k: "impl-test")
+    monkeypatch.setattr(cm, "container_is_running", lambda name: True)
+    has_mount = Mock(return_value=False)
+    monkeypatch.setattr(worker_route, "container_has_route_mount", has_mount)
+    create = Mock()
+    monkeypatch.setattr(cm, "create_container", create)
+    monkeypatch.setattr(cm, "build_exec_cmd", lambda name, cmd, **kw: cmd)
+    monkeypatch.setattr("pm_core.push_proxy.get_proxy_socket_path", lambda name: None)
+    assert cm.wrap_claude_cmd("CMD", "/w", provider="claude") == ("CMD", "impl-test")
+    has_mount.assert_not_called()
+    assert create.call_args.kwargs["extra_rw_mounts"] == {}
+
+
+@pytest.mark.parametrize("route_ok", [True, False])
+def test_impl_start_builds_and_wraps_for_the_selected_route(tmp_path, monkeypatch, route_ok):
+    """`pm pr start` in container mode builds the impl command for the
+    container on the selected route and hands the provider to the shared
+    wrapper; a route the wrapper refuses launches no window (exit 1)."""
+    import yaml
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, Mock
+    from click.testing import CliRunner
+    from pm_core import container as cm, store
+    from pm_core.cli import pr as pr_mod
+    pm_dir = tmp_path / "pm"
+    pm_dir.mkdir()
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    store.save({"project": {"name": "t", "repo": str(tmp_path), "base_branch": "master"},
+                "prs": [{"id": "pr-001", "title": "T", "branch": "pm/pr-001",
+                         "status": "in_progress", "workdir": str(workdir)}]}, pm_dir)
+    tmux = MagicMock()
+    tmux.session_exists.return_value = True
+    tmux.find_window_by_name.return_value = None
+    tmux.new_window_get_pane.return_value = "%1"
+    build = Mock(return_value="ROUTED")
+    wrap = Mock(return_value=("WRAPPED", "impl-pr-001"))
+    if not route_ok:
+        wrap.side_effect = cm.ContainerError("work route 'claude-work' unavailable: x")
+    committed = SimpleNamespace(returncode=0, stdout=yaml.safe_dump(store.load(pm_dir)),
+                                stderr="")
+    monkeypatch.setattr(pr_mod.git_ops, "run_git", lambda *a, **k: committed)
+    monkeypatch.setattr(pr_mod, "tmux_mod", tmux)
+    monkeypatch.setattr(pr_mod, "pane_registry", MagicMock())
+    monkeypatch.setattr(pr_mod, "pane_layout", MagicMock())
+    monkeypatch.setattr(pr_mod, "prompt_gen", MagicMock())
+    monkeypatch.setattr(pr_mod, "find_claude", lambda: "/usr/bin/claude")
+    monkeypatch.setattr(pr_mod, "build_claude_shell_cmd", build)
+    monkeypatch.setattr(pr_mod, "state_root", lambda: pm_dir)
+    monkeypatch.setattr(pr_mod, "_get_pm_session", lambda: "pm-sess")
+    monkeypatch.setattr(cm, "wrap_claude_cmd", wrap)
+    monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: True)
+    monkeypatch.setattr("pm_core.model_config.resolve_model_and_provider",
+                        lambda *a, **k: SimpleNamespace(
+                            model=None, provider=ROUTE, effort="high"))
+    result = CliRunner().invoke(pr_mod.pr, ["start", "pr-001"])
+    kw = build.call_args.kwargs
+    assert (kw["session_type"], kw["container"], kw["provider"]) == ("impl", True, ROUTE)
+    assert kw["cwd"] == cm._CONTAINER_WORKDIR and kw["write_dir"] == str(workdir)
+    assert wrap.call_args.kwargs["provider"] == ROUTE
+    if route_ok:
+        assert result.exit_code == 0, result.output
+        launched = tmux.new_window.call_args or tmux.new_window_get_pane.call_args
+        assert "WRAPPED" in launched.args
+    else:
+        assert result.exit_code == 1
+        assert "unavailable" in result.output
+        tmux.new_window.assert_not_called()
+        tmux.new_window_get_pane.assert_not_called()

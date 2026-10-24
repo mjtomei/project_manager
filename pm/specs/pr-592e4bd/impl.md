@@ -84,7 +84,9 @@ QA containers get the socket dir bind-mounted at `/run/pm-route` via
 routed; no published ports, no `--network` change, other containers
 unchanged.
 
-R5. **s0 and every other role stay on main.** `_launch_scenario_0` resolves
+R5. **s0 and every other role stay on main by default.** (Unless a PR-level
+`model: provider:<route>` override selects the route for every role, as the
+2026-10-24 scope update does for this PR.) `_launch_scenario_0` resolves
 new session type `qa_interactive` (fallback `qa`) through
 `_resolve_interactive_model`, still passing `session_type="qa_scenario"` to
 `build_claude_shell_cmd` so fake-claude behaviour is unchanged. Planner,
@@ -171,8 +173,15 @@ a tools-disabled `claude -p` through the route, reporting requested models
   `ANTHROPIC_BASE_URL` prefix keeps even a launcher run on the router.
   Containers never use the launcher.
 - *Other session types on a router provider.* Routing is generic config, so
-  a user could put any type on a router provider; only refiner and worker
-  launches are gated, and this project configures only those two.
+  a user could put any type on a router provider (a PR-level override puts
+  every role there). Refiner and worker launches are gated with the
+  recoverable waits of R6. In container mode, implementation, review and
+  sign-off are gated once by the shared `container.wrap_claude_cmd`: an
+  unavailable route is a `ContainerError` with the remedy, and nothing is
+  launched. Host-mode launches of those roles, and host QA planner, s0,
+  verifier and finalizer, are not gated: they start Claude with the
+  router's `ANTHROPIC_BASE_URL`, so a down router shows an API error in the
+  pane, never a main-account fallback.
 
 ## 4. Edge cases
 - Router up but work token expired → caught by the `expiresAt` check
@@ -205,7 +214,7 @@ container; host + container `…190309Z/`). After 81cebf17 it passed on the
 host from an underscore cwd and in a container
 (`…195845Z/result.json`). Live QA S1–S50 is in
 `/pm-captures/scenarios/<N>/` (REPORT.md). The latest full suite is
-recorded with item 39.
+recorded with item 40.
 
 **Rules fixed during validation (index).** Commits in parentheses.
 - Live smokes 1–4. The bridge stream has no timeout after connect
@@ -860,3 +869,33 @@ recorded with item 39.
     (cli/meta.py), deleting the whole shared session dir on a normal exit
     (note-2bc73f1 on pr-7f90572).  Evidence: `/pm-captures/scenarios/50`
     (REPORT.md).
+
+40. (2026-10-24 all-role scope update) c1c08d83: implementation, review and
+    sign-off build their command with `container=` in container mode
+    (bridge-ensure step, in-container router URL, plain `claude`) and pass
+    the provider to `container.wrap_claude_cmd`, which runs
+    `worker_route.check_route(container=True)` before creating the
+    container and adds the route bridge mount; an unavailable route raises
+    `ContainerError` (the callers print it and launch nothing).  The
+    sign-off command now carries the tmux session tag like impl/review.
+    Review loop e0e8 i1: `create_container` reuses a running container by
+    name, and a container created before the route was selected has no
+    socket mount, so its in-container ensure step would refuse to start
+    Claude with a QA-worded remedy.  The wrapper now refuses that reuse up
+    front ("running without the route socket mount", remedy: end the
+    session using it, remove the container, launch again).  Review and
+    sign-off remove their container first, so this matters for impl.
+    Regressions in `tests/test_worker_route.py`
+    (`test_workflow_container_route_mount_and_fail_closed[down|fresh|reused_mounted|reused_unmounted]`,
+    `test_unrouted_provider_reuses_a_running_container_untouched`,
+    `test_impl_start_builds_and_wraps_for_the_selected_route`), plus the
+    review and sign-off wiring tests; 9 mutations caught
+    (`/pm-captures/review-e0e8-i1/mutation-checks.log`).  Review loop 350f
+    i4's preserved tests (9c42bb6e) catch all 11 of its mutations
+    (`/pm-captures/review-e0e8-i1/mutation-checks-i4-rerun.log`).  Live:
+    this review ran in a routed review container (ensure step, router env,
+    `ANTHROPIC_API_KEY`/`AUTH_TOKEN` unset;
+    `/pm-captures/review-e0e8-i1/live-review-container-route.txt`).
+    Full suite 3669 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
+    PYTHONPATH=/workspace; markdown 3.10.3 installed first;
+    `/pm-captures/review-e0e8-i1/full-suite.log`).

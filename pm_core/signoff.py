@@ -508,6 +508,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             _claude_cwd = workdir
             _claude_write_dir = None
 
+        _stag = pm_session.removeprefix("pm-") if pm_session else None
         claude_cmd = build_claude_shell_cmd(
             prompt=signoff_prompt,
             transcript=transcript,
@@ -517,13 +518,12 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             provider=_resolution.provider,
             effort=_resolution.effort,
             session_type="signoff",
-            session_tag=pm_session.removeprefix("pm-") if pm_session else None,
+            session_tag=_stag,
             container=is_container_mode_enabled())
 
         branch = pr_entry.get("branch", "")
         if is_container_mode_enabled():
             remove_container(_make_container_name(f"signoff-{pr_id}"))
-            _stag = pm_session.removeprefix("pm-") if pm_session else None
             try:
                 claude_cmd, _cname = wrap_claude_cmd(
                     claude_cmd, workdir, label=f"signoff-{pr_id}",

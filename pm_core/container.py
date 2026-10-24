@@ -1099,12 +1099,18 @@ def wrap_claude_cmd(
             for shared push proxies (with *pr_id*).
         pr_id: PR identifier — combined with *session_tag* to share push
             proxies across containers on the same branch.
+        provider: The provider *claude_cmd* was built for.  A router
+            provider (pm_core.worker_route) is checked before the
+            container is created and its bridge socket dir is mounted;
+            an unavailable route raises ContainerError.
 
     Returns:
         (wrapped_cmd, container_name).  container_name is "" if not containerised.
     """
     if not is_container_mode_enabled():
         return claude_cmd, ""
+
+    cname = _make_container_name(label, session_tag=session_tag)
 
     # Non-QA workflow roles need the same account-router bridge as QA
     # workers. Validate before creating a container; never fall back to
@@ -1116,11 +1122,21 @@ def wrap_claude_cmd(
         ready = worker_route.check_route(resolution, container=True)
         if not ready.ok:
             raise ContainerError(ready.message())
+        route_mounts = worker_route.container_mounts(resolution)
+        # create_container reuses a running container by name, and a
+        # container created before the route was selected cannot gain the
+        # mount: its in-container ensure step would refuse to start Claude.
+        if (route_mounts and container_is_running(cname)
+                and worker_route.container_has_route_mount(cname) is False):
+            raise ContainerError(
+                f"work route '{ready.route}' unavailable: container {cname} is "
+                "running without the route socket mount. Remedy: end the "
+                f"session using it, remove it ({_get_runtime()} rm -f "
+                f"{cname}) and launch again.")
         extra_rw_mounts = dict(extra_rw_mounts or {})
-        extra_rw_mounts.update(worker_route.container_mounts(resolution))
+        extra_rw_mounts.update(route_mounts)
 
     config = load_container_config()
-    cname = _make_container_name(label, session_tag=session_tag)
     _log.info(
         "wrap_claude_cmd: label=%s workdir=%s container=%s session_tag=%s pr_id=%s",
         label, workdir, cname, session_tag, pr_id,
