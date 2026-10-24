@@ -22350,7 +22350,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-24T20:54:19.867819+00:00'
+  updated_at: '2026-10-24T21:13:55.104891+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22442,6 +22442,23 @@ prs:
       B, impl 75,143 B — all under the 120,000 B limit.'
     created_at: '2026-10-24T20:54:19Z'
     last_edited: '2026-10-24T20:54:19Z'
+  - id: note-c716edc
+    text: 'Review-loop 4e41 i3: probed for pathological *item size* (the other half
+      of i2''s cap x size lesson). Sibling-PR/dependency listings were count-capped
+      only and inlined user-authored titles: 25 siblings with long titles gave review
+      247,157 B and sign-off 276,969 B — over PROMPT_ARG_LIMIT. Now bounded via a
+      shared PLAN_LIST_BUDGET (20,000) on bounded_join max_bytes in generate_review_prompt
+      / generate_signoff_prompt / generate_prompt and the plan builders'' PR listings;
+      all real prompts (483 PRs, 22 plans) are byte-identical before/after. pm plan
+      review''s fallback cascade was a no-op for plans with <=40 PRs — brief listing
+      now uses a count-uncapped _PLAN_BRIEF_BUDGET (40,000) plus a quarter-budget
+      second net. Also: _materialize_oversized_prompt now writes to write_dir but
+      names the cwd path in the bootstrap (container split), and bounded_lines no
+      longer silently ignores max_bytes when pointer is None. tests/test_prompt_bounds.py
+      60 cases (7 new); full suite 3417 passed, 1 pre-existing failure (test_hook_events,
+      pr-4bde874). Evidence /pm-captures/review-4e41-i3/. (2026-10-24T21:35:00Z)'
+    created_at: '2026-10-24T21:13:55Z'
+    last_edited: '2026-10-24T21:13:55Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
