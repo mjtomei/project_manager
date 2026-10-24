@@ -33299,6 +33299,22 @@ prs:
       (README records a reverted venv editable-install slip).'
     created_at: '2026-10-24T12:38:43Z'
     last_edited: '2026-10-24T12:38:43Z'
+  - id: note-cf2b104
+    text: 'Review e0e8 i3 (0c577dd2, CODE CHANGE, small, needs normal re-review):
+      c08c7627 (tagged container removal, role-aware remedies) and user commits f1865615
+      (per-PR session_models role exceptions) / 32df2893 (trial PRs sign off on claude-work)
+      reviewed independently and sound in wiring: impl, review, merge, sign-off and
+      every QA type pass their role; s0 never follows a worker exception. Fixed: (1)
+      route remedies named only the PR model override (impl/review/sign-off) or only
+      pm model set (QA gates), but a session_models entry may select the route and
+      PR overrides beat pm model set; both now name "the PR session_models entry or
+      model override". (2) a non-mapping session_models matched roles by substring
+      and raised TypeError; now ignored. (3) validate_model_config flags non-mapping/unknown-type
+      PR session_models (e.g. sign_off), pm model show lists PR overrides. 12 mutations
+      caught; full suite 3682 passed rc 0 (markdown installed first); impl.md item
+      41; /pm-captures/review-e0e8-i3.'
+    created_at: '2026-10-24T13:21:28Z'
+    last_edited: '2026-10-24T13:21:28Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
