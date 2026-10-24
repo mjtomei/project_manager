@@ -57,12 +57,16 @@ def _status(app):
 
 @pytest.mark.parametrize("kind", ["conflict_markers", "invalid_plans",
                                   "missing_file"])
-def test_review_pass_waits_and_starts_qa_once_the_file_loads(tmp_path, kind):
+def test_review_pass_waits_and_starts_qa_once_the_file_loads(
+        tmp_path, kind, caplog):
     app = _self_driving_app(tmp_path)
     good = _break(app._root, kind)
-    with patch("pm_core.tui.qa_loop_ui.start_qa") as start:
-        review_loop_ui._start_qa_after_review(app, "pr-001")
-        review_loop_ui._start_qa_after_review(app, "pr-001")  # next tick
+    with patch("pm_core.tui.qa_loop_ui.start_qa") as start, \
+            caplog.at_level("WARNING", logger="pm.tui.review_loop_ui"):
+        for _ in range(3):  # three poll ticks while the file is broken
+            review_loop_ui._start_qa_after_review(app, "pr-001")
+        warned = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warned) == 1, [r.getMessage() for r in warned]  # S45 live: one per tick
         start.assert_not_called()
         assert "pr-001" in app._pending_auto_qa
         waits = [c.args[0] for c in app.log_message.call_args_list

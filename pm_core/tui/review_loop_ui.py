@@ -645,7 +645,8 @@ def _maybe_start_qa(app, pr_id: str) -> tuple | None:
         try:
             store.locked_update(app._root, apply_qa)
         except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
-            _log.warning("auto_qa: %s for %s: %s", type(e).__name__, pr_id, e)
+            # The caller logs once per reason; this runs every poll tick.
+            _log.debug("auto_qa: %s for %s: %s", type(e).__name__, pr_id, e)
             return ("transition", str(e))
         app._load_state()
         if transitioned:
