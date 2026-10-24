@@ -11830,7 +11830,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-22T14:17:54.192707+00:00'
+  updated_at: '2026-10-22T18:42:17.175661+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -11866,6 +11866,18 @@ prs:
       WIP; preserve its work and finish integrations/tests.'
     created_at: '2026-10-22T15:34:41Z'
     last_edited: '2026-10-22T15:34:41Z'
+  - id: note-ce3ae10
+    text: 'pr-1ab9075 (2c18b50c) added pure helpers in pm_core/container.py you can
+      reuse instead of duplicating: classify_runtime_error(text, name) (keyring "session
+      key"/EDQUOT and PID "Cannot fork"/pids limit -> cause + remediation), runtime_error_summary,
+      launch_error_summary(exc), diagnose_exec_failure(name) (bounded inspect + exec
+      true probe). The keyring remediation text points at pr-1139060 for reaping;
+      update it to the real cleanup command once it exists. pr-1ab9075 does NOT restart/recreate
+      unhealthy containers; QA retries just pick up once the container recovers within
+      the ~5 min retry window. The setup-timeout message in create_container still
+      says "pm session cleanup" (yours to fix).'
+    created_at: '2026-10-22T18:42:17Z'
+    last_edited: '2026-10-22T18:42:17Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -26068,7 +26080,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T21:41:47.459945+00:00'
-  updated_at: '2026-05-25T22:43:57.109042+00:00'
+  updated_at: '2026-10-22T18:42:15.813625+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26086,6 +26098,19 @@ prs:
       archaeology.'
     created_at: '2026-05-25T22:43:57Z'
     last_edited: '2026-05-25T22:43:57Z'
+  - id: note-766ffa3
+    text: 'pr-1ab9075 (2c18b50c) delivered PART of this: container create failures
+      now record "container create failed: <cause>" (container.launch_error_summary
+      classifies stderr; keyring/EDQUOT and PID/Cannot-fork carry remediation); dead-before-start
+      workers are probed via container.diagnose_exec_failure; launch failures retry
+      on a bounded nonblocking backoff (qa_status shows "launch retry n/max" + cause)
+      and on exhaustion get INPUT_REQUIRED with reason "...(runtime failure, not an
+      agent verdict); gave up after N relaunch attempt(s): <cause>". A dead pane no
+      longer hangs "running" forever. NOT done here: persisting every scenario transcript
+      to the host captures dir, and any separate non-INPUT_REQUIRED error verdict
+      state. Not closed by pr-1ab9075.'
+    created_at: '2026-10-22T18:42:15Z'
+    last_edited: '2026-10-22T18:42:15Z'
 - id: pr-fa9f172
   plan: improvements
   title: 'Self-documenting + consistent pm commands: complete --help, actionable errors,
@@ -29668,11 +29693,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T15:49:43.888654+00:00'
-  updated_at: '2026-10-22T17:19:43.945696+00:00'
+  updated_at: '2026-10-22T18:42:18.546926+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-cbd6b5a
+    text: 'pr-1ab9075 (2c18b50c): _poll_tmux_verdicts now launches dequeued scenarios
+      and retries in background threads and persists QALoopState.launch_retries (attempts/kind/cause/state/retry_at/sessions)
+      in qa_resume.json. On resume, records left in state "launching" are re-detected
+      from panes (a no-pane scenario is relaunched via the full launcher, so an orphaned
+      concretizer window from the dead controller may remain). Launchers accept scenarios=[...]
+      and write_status=False. Initial-batch persistence/adoption before the first
+      snapshot is still yours.'
+    created_at: '2026-10-22T18:42:18Z'
+    last_edited: '2026-10-22T18:42:18Z'
 - id: pr-62fdd54
   plan: bugs
   title: 'Bug: synchronize the PR branch before QA planning and recover stale handoffs'
@@ -31449,11 +31484,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-22T17:19:44.677099+00:00'
+  updated_at: '2026-10-22T18:42:20.245432+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-222cad3
+    text: 'Impl done 2c18b50c (spec pm/specs/pr-1ab9075/impl.md). Tests: tests/test_qa_launch_retry.py
+      (fake clock; pre-fix the healthy PASS was verified ~5195 s after start). Run
+      with a scratch venv + PATH=/usr/bin:$PATH; test_hook_events::test_installer_writes_standalone_receiver
+      fails on master too. Evidence files /tmp/pm-recovery-20261022.jsonl and /home/matt/.pm/...
+      are not visible in this container; regressions are synthetic. Live QA should
+      cover: real podman exec failure (e.g. stop a scenario container) while siblings
+      finish, z t during backoff, TUI restart mid-backoff.'
+    created_at: '2026-10-22T18:42:20Z'
+    last_edited: '2026-10-22T18:42:20Z'
 - id: pr-a80bde5
   plan: bugs
   title: 'Bug: review INPUT_REQUIRED stays visible after recovery while later iterations
