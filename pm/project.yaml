@@ -31620,7 +31620,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T03:05:40.195407+00:00'
+  updated_at: '2026-10-24T03:26:00.086567+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32931,6 +32931,22 @@ prs:
       once the file loads. QA keys refuse with Error: and start nothing.'
     created_at: '2026-10-24T03:05:40Z'
     last_edited: '2026-10-24T03:05:40Z'
+  - id: note-5a9df10
+    text: 'S45 (2026-10-24) coordination: both RQ37 predictions reproduced live on
+      4d8f968a (captures /pm-captures/scenarios/45/pre-fix/combined; narrow 131 s
+      control window). (a) planning run A "QA thread crashed" 9 s after a conflicting
+      pull (mid-planning merge guard load) -> fixed in e11b952a (CODE CHANGE, needs
+      normal re-review): merge guards skip a round, start/spec-gate/resume loads wait
+      until project.yaml loads again; 17 regressions in tests/test_qa_load_failures.py.
+      (b) completions during conflict markers: C plain-t NEEDS_WORK logged "returning
+      to review" but transition + note lost (warnings only, snapshot cleared); F zz
+      t PASS 1/2 "restarting QA" then "Error: project.yaml is not valid YAML" and
+      the loop is gone; G zz t NEEDS_WORK review loop never started (_start_self_driving_review
+      warning) -> left to S46 per shepherd. Observation: zz t (start_or_stop_qa_loop)
+      leaves an in_review PR at in_review during its run (no in_review->qa like start_qa),
+      so a zz t NEEDS_WORK transition is a no-op.'
+    created_at: '2026-10-24T03:26:00Z'
+    last_edited: '2026-10-24T03:26:00Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
