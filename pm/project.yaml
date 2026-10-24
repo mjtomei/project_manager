@@ -31620,7 +31620,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T04:53:57.848975+00:00'
+  updated_at: '2026-10-24T05:39:53.268773+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32991,6 +32991,22 @@ prs:
       (batch loop mangled paths); needs review. Filed pr-235f465.'
     created_at: '2026-10-24T04:53:57Z'
     last_edited: '2026-10-24T04:53:57Z'
+  - id: note-ff48815
+    text: 'QA S45 (2026-10-24, RQ37 host one clone, captures /pm-captures/scenarios/45
+      REPORT.md): both predictions reproduced live on 4d8f968a; (b) also on the bf21931b
+      base (pre-existing). CODE CHANGES needing normal re-review: e11b952a planning
+      guards (merge guards skip a round; start/spec-gate/resume loads wait), 8400faf7
+      stop during the spec-gate wait ends quietly, 0454edaf sync skip names the missing
+      file, be8f23d1+85463cfe+195889a5 review->QA hand-off kept pending (status write
+      or QA start) and retried once the file loads, dropped on zz t stop / auto-start
+      scope loss (live: a zz t review PASS during invalid plans left G at in_review
+      for good pre-fix; post-fix QA starts at the fix second), 8ff5e7a2 test mock.
+      S46 a9b966ec/54c88ad8 completion retention validated live for plain t NEEDS_WORK/PASS/INPUT_REQUIRED,
+      zz t PASS below count and NEEDS_WORK, and a kill -9 restart (no resume/recover/second
+      note). All Thens held on e52e8fac+; full suite 3622 passed. Observation: zz
+      t on an in_review PR does not move it to qa.'
+    created_at: '2026-10-24T05:39:53Z'
+    last_edited: '2026-10-24T05:39:53Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
