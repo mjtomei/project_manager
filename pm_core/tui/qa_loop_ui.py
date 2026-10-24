@@ -536,8 +536,11 @@ def _resume_incomplete_qa(app) -> None:
     live_workdirs = {str(s.qa_workdir) for s in app._qa_loops.values()
                      if getattr(s, "qa_workdir", None)}
 
-    def _shown_ids():
-        return {p.get("id") for p in (app._data or {}).get("prs") or []}
+    def _shown_status(pr_id):
+        for p in (app._data or {}).get("prs") or []:
+            if p.get("id") == pr_id:
+                return p.get("status")
+        return None
     candidates = []
     for pr_id, snaps in by_pr.items():
         snaps.sort(key=lambda s: (-_run_order(s[1]), bool(s[2]),
@@ -601,10 +604,11 @@ def _resume_incomplete_qa(app) -> None:
             continue
         rdata = claimed
 
-        # A PR that reached project.yaml by a git pull or an edit outside
-        # pm (neither signals a reload) is not in the tree yet; reload now
-        # rather than at the next 300 s background sync (S41).
-        if pr_id not in _shown_ids():
+        # A PR that reached project.yaml (or reached QA in it) by a git pull
+        # or an edit outside pm, neither of which signals a reload, is not in
+        # the tree yet or is shown at its old status; reload now rather than
+        # at the next 300 s background sync (S41, S42).
+        if _shown_status(pr_id) != pr.get("status"):
             app._load_state()
 
         # Is the run already complete (daemon wrote overall, TUI died

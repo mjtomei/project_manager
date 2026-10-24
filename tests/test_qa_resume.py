@@ -761,6 +761,24 @@ def test_resume_of_a_pulled_pr_reloads_the_tree(tmp_path):
     app._load_state.assert_called_once()
 
 
+def test_resume_of_a_pr_shown_at_a_stale_status_reloads_the_tree(tmp_path):
+    """The PR was already in the tree at in_review (pulled earlier) when a
+    later pull brought it in QA: resuming its run reloads, so the node
+    shows qa at once, not at the 300 s sync (S42)."""
+    app = _make_app(tmp_path)
+    app._data = store.load(app._root)
+    for p in app._data["prs"]:
+        p["status"] = "in_review"
+    _seed_run(tmp_path, overall="")
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+    app._load_state.assert_called_once()
+
+
 def test_resume_of_a_shown_pr_does_not_reload(tmp_path):
     app = _make_app(tmp_path)
     app._data = store.load(app._root)
