@@ -33315,6 +33315,19 @@ prs:
       41; /pm-captures/review-e0e8-i3.'
     created_at: '2026-10-24T13:21:28Z'
     last_edited: '2026-10-24T13:21:28Z'
+  - id: note-e328d87
+    text: 'Review e0e8 i4 (021f2810, CODE CHANGE, small, needs normal re-review):
+      c1c08d83, 9c42bb6e, i1 3748691e, i2 c08c7627, user f1865615/32df2893 and i3
+      0c577dd2 reviewed independently, sound except one gap: s0 legacy fallback (plain-model
+      qa_scenario from configs before qa_interactive) read the PR session_models,
+      so session_models {qa_scenario: haiku} on a PR without model moved s0 to haiku,
+      contrary to impl.md item 41. It now reads project/global settings only. Regression
+      test_plain_worker_exception_does_not_move_s0 fails reverted. Venv lacked markdown
+      again (3.10.3 installed). Baseline suite 3681 passed + 1 artifact failure (source-text
+      test read qa_loop.py while I edited it mid-run; passes alone), kept and labelled.
+      Full suite 3683 passed rc 0; /pm-captures/review-e0e8-i4. impl.md 41(d).'
+    created_at: '2026-10-24T20:52:55Z'
+    last_edited: '2026-10-24T20:52:55Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
