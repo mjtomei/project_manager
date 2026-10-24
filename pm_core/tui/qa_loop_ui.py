@@ -405,6 +405,9 @@ def _drop_superseded(pr_id, snaps, live_workdirs) -> None:
             qa_loop.clear_resume_file(resume_file.parent)
 
 
+_NO_STAMP = object()
+
+
 def _project_file_stamp(root) -> tuple | None:
     """Identity of *root*'s project.yaml (changes on any save or pull)."""
     from pathlib import Path
@@ -531,7 +534,9 @@ def _resume_incomplete_qa(app) -> None:
             return store.load(app._root)
         except (store.ProjectYamlParseError, store.PlanValidationError,
                 OSError) as e:
-            if getattr(app, "_resume_parse_error_stamp", None) != stamp:
+            # A missing file has no stamp (None): compare against a
+            # sentinel, or a fresh TUI never logs that skip (S44).
+            if getattr(app, "_resume_parse_error_stamp", _NO_STAMP) != stamp:
                 app._resume_parse_error_stamp = stamp
                 _log.warning("QA resume scan skipped until project.yaml "
                              "loads again: %s", e)

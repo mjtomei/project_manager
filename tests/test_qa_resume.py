@@ -880,6 +880,28 @@ def test_unloadable_project_file_does_not_escape_the_scan(tmp_path, breakage):
     resume_bg.assert_called_once()
 
 
+def test_missing_project_file_skip_is_logged_once_by_a_fresh_tui(tmp_path):
+    """A missing project.yaml has no file stamp (None), the same value the
+    remembered stamp of a fresh TUI defaults to, so the skip was never
+    logged (S44 story 3).  It is logged once, not on every scan."""
+    app = _make_app(tmp_path)
+    del app._resume_parse_error_stamp  # a fresh TUI has no remembered stamp
+    _seed_run(tmp_path, overall="", pr_id="pr-001")
+    (app._root / "project.yaml").unlink()
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_log") as log:
+        qa_loop_ui._resume_incomplete_qa(app)
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_not_called()
+    skips = [c for c in log.warning.call_args_list
+             if "skipped until project.yaml" in c.args[0]]
+    assert len(skips) == 1
+    assert "No such file" in str(skips[0].args[1])
+
+
 def test_resume_of_a_pulled_pr_reloads_the_tree(tmp_path):
     """A PR that arrived by a git pull is in project.yaml but not in the
     TUI's loaded state (a pull signals no reload): resuming its run
