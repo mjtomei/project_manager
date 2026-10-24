@@ -46,7 +46,9 @@ from pm_core.cli.helpers import (
     _pr_display_id,
     _record_status_timestamp,
 )
-from pm_core.prompt_bounds import INTEGRATION_MAX_PATHS, bounded_join
+from pm_core.prompt_bounds import (
+    INTEGRATION_LIST_BUDGET, INTEGRATION_MAX_PATHS, bounded_join,
+)
 
 # --- Routing verdicts ------------------------------------------------------
 # The Claude pane emits exactly one of these on its own line.  pm polls the
@@ -853,15 +855,20 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
             return (f" (+{n} more; "
                     f"{integration.integration_pointer(pr.get('id', '???'))})")
 
+        # Byte-bounded as well as count-capped: the lines are filesystem
+        # paths, so 20 long ones blow the argv budget on their own (this
+        # block feeds the impl / review / QA-planner prompts).
         if integ.get("conflicts"):
             lines.append("Conflicting paths: " + bounded_join(
                 integ["conflicts"], lambda c: f"`{c}`",
-                max_items=INTEGRATION_MAX_PATHS, separator=", ",
+                max_items=INTEGRATION_MAX_PATHS,
+                max_bytes=INTEGRATION_LIST_BUDGET, separator=", ",
                 omitted_note=_integ_note))
         if integ.get("overlap"):
             lines.append("Changed on both sides: " + bounded_join(
                 integ["overlap"], lambda c: f"`{c}`",
-                max_items=INTEGRATION_MAX_PATHS, separator=", ",
+                max_items=INTEGRATION_MAX_PATHS,
+                max_bytes=INTEGRATION_LIST_BUDGET, separator=", ",
                 omitted_note=_integ_note))
     applied = rec.get("applied") or {}
     if applied.get("merge_sha"):

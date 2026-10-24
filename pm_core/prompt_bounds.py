@@ -57,7 +57,17 @@ MOCKS_BUDGET = 12_000
 QA_SCENARIOS_MAX = 40
 QA_SCENARIO_REASON_CHARS = 200
 INTEGRATION_MAX_PATHS = 20
+# The integration overlap/conflict listings are count-capped, but their items
+# are filesystem paths (bounded only by PATH_MAX), so 20 of them measured
+# 200 KB in the sign-off prompt — over PROMPT_ARG_LIMIT, and in a block
+# ``fit_prompt`` cannot shrink because it is part of the builder's static
+# text.  This byte budget bounds the product; real records run a few KB.
+INTEGRATION_LIST_BUDGET = 8_000
 ARTIFACT_PATHS_MAX = 20
+# Full paths (``{scratch}/qa-artifacts/<name>``) rather than basenames, so the
+# count cap alone does not bound the listing — the same cap-times-item-size
+# defect as the plan listings, and this one feeds the QA child prompt.
+ARTIFACT_PATHS_BUDGET = 8_000
 WATCHER_MANAGED_MAX = 40
 MERGE_ERROR_MAX_LINES = 60
 DEPS_MAX = 40

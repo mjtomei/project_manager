@@ -4,7 +4,8 @@ from pm_core import store, notes
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
 from pm_core.prompt_bounds import (
-    ARTIFACT_PATHS_MAX, DEPS_MAX, INTEGRATION_MAX_PATHS,
+    ARTIFACT_PATHS_BUDGET, ARTIFACT_PATHS_MAX, DEPS_MAX,
+    INTEGRATION_LIST_BUDGET, INTEGRATION_MAX_PATHS,
     MERGE_ERROR_MAX_LINES, PLAN_CONTEXT_MAX_SIBLINGS, PLAN_LIST_BUDGET,
     PR_NOTE_SUMMARY_CHARS, PR_NOTES_BUDGET,
     QA_CHILD_STEPS_BUDGET, QA_SCENARIO_REASON_CHARS, QA_SCENARIOS_MAX,
@@ -30,7 +31,9 @@ _PLAN_LIST_BUDGET = PLAN_LIST_BUDGET
 _QA_SCENARIOS_MAX = QA_SCENARIOS_MAX
 _QA_SCENARIO_REASON_CHARS = QA_SCENARIO_REASON_CHARS
 _INTEGRATION_MAX_PATHS = INTEGRATION_MAX_PATHS
+_INTEGRATION_LIST_BUDGET = INTEGRATION_LIST_BUDGET
 _ARTIFACT_PATHS_MAX = ARTIFACT_PATHS_MAX
+_ARTIFACT_PATHS_BUDGET = ARTIFACT_PATHS_BUDGET
 _WATCHER_MANAGED_MAX = WATCHER_MANAGED_MAX
 _MERGE_ERROR_MAX_LINES = MERGE_ERROR_MAX_LINES
 _DEPS_MAX = DEPS_MAX
@@ -638,15 +641,20 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
             f"{rec['merge_base'][:12]}..{base_sha[:12]}` / `git diff "
             f"{rec['merge_base'][:12]} {base_sha[:12]}` "
             f"({rec.get('base_files_count', 0)} file(s))")
+    # Count-capped *and* byte-bounded: the lines are filesystem paths, so 20
+    # long ones measured 200 KB — over PROMPT_ARG_LIMIT, in static text
+    # fit_prompt cannot shrink.  The pointer names the full record.
     if rec.get("overlap"):
         lines.append("- Files changed on both sides: " + bounded_join(
             rec["overlap"], lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
+            max_bytes=_INTEGRATION_LIST_BUDGET,
             separator=", ",
             omitted_note=lambda n: (
                 f" (+{n} more; {integ.integration_pointer(pr_id)})")))
     if rec.get("conflicts"):
         lines.append("- Conflicting paths: " + bounded_join(
             rec["conflicts"], lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
+            max_bytes=_INTEGRATION_LIST_BUDGET,
             separator=", ",
             omitted_note=lambda n: (
                 f" (+{n} more; {integ.integration_pointer(pr_id)})")))
@@ -2424,6 +2432,7 @@ If a setup step fails or a required tool is unavailable, report
         bullets = bounded_join(
             artifact_paths, lambda p: f"- `{p}`",
             max_items=_ARTIFACT_PATHS_MAX,
+            max_bytes=_ARTIFACT_PATHS_BUDGET,
             omitted_note=lambda n: (
                 f"- ... (+{n} more recipes; run `pm qa list` to see the library)"),
         )

@@ -300,6 +300,42 @@ class TestSignoffPromptBounding:
         assert "(+180 more" in ret
         assert "/cap/pr-x/integration.json" in ret
 
+    def test_integration_path_lists_are_byte_bounded_too(self, monkeypatch):
+        """A count cap does not bound a listing whose items are filesystem
+        paths: 20 of ~4 KB (PATH_MAX) measured 200 KB in the sign-off prompt,
+        and that block is *static* text — fit_prompt cannot shrink it, so the
+        whole prompt went over PROMPT_ARG_LIMIT and the launcher had to fire
+        for a builder this PR exists to bound."""
+        # Resolving the marker's pointer would otherwise create the real
+        # captures dir as a side effect.
+        monkeypatch.setattr("pm_core.paths.captures_dir",
+                            lambda pr_id: Path("/cap") / pr_id)
+        long_paths = [f"{'d' * 4000}/f{i}.py" for i in range(20)]
+        pr = _pr(integration={
+            "base_branch": "master", "base_sha": "a" * 40,
+            "target_repo": "r", "status": "conflict",
+            "overlap": long_paths, "conflicts": long_paths})
+        p = prompt_gen.generate_signoff_prompt(_data(pr), "pr-x")
+        _assert_bounded(p)
+        # The abbreviation must name where the full record lives.
+        assert "more; read /cap/pr-x/integration.json" in p
+
+    def test_return_block_bounds_long_integration_paths(self, monkeypatch):
+        """Same defect in the block the impl / review / QA-planner prompts
+        inline via format_signoff_return."""
+        from pm_core.signoff import format_signoff_return
+        monkeypatch.setattr("pm_core.paths.captures_dir",
+                            lambda pr_id: Path("/cap") / pr_id)
+        long_paths = [f"{'d' * 4000}/f{i}.py" for i in range(20)]
+        block = format_signoff_return(_pr(signoff_return={
+            "verdict": "NEEDS_WORK", "hop": "impl", "reason": "conflict",
+            "reviewed_head": "b" * 40,
+            "integration": {"base_branch": "master", "base_sha": "a" * 40,
+                            "target_repo": "r", "status": "conflict",
+                            "conflicts": long_paths, "overlap": long_paths}}))
+        assert prompt_bytes(block) < 25_000, prompt_bytes(block)
+        assert "more;" in block
+
     def test_integration_marker_falls_back_to_pr_show(self, monkeypatch):
         monkeypatch.setattr("pm_core.paths.captures_dir", lambda pr_id: None)
         block = prompt_gen._signoff_integration_block(
@@ -557,6 +593,22 @@ class TestQaPromptsBounding:
             index=1, title="S", focus="F",
             artifact_paths=[f"/tmp/recipe-{i}.md" for i in range(100)],
             steps="GIVEN x\n" * 20000,
+        )
+        p = prompt_gen.generate_qa_child_prompt(
+            _data(pr), "pr-x", scenario, workdir="/tmp/w",
+            captures_root="/tmp/cap")
+        _assert_bounded(p, "pm qa list")
+
+    def test_child_artifact_paths_are_byte_bounded_too(self):
+        """The listing inlines full paths (not basenames), so the 20-item cap
+        alone leaves the product unbounded — the same defect as the plan
+        listings."""
+        pr = _pr()
+        scenario = QAScenario(
+            index=1, title="S", focus="F",
+            artifact_paths=[f"/scratch/qa-artifacts/{'a' * 4000}-{i}.md"
+                            for i in range(20)],
+            steps="GIVEN x\n" * 200,
         )
         p = prompt_gen.generate_qa_child_prompt(
             _data(pr), "pr-x", scenario, workdir="/tmp/w",

@@ -733,3 +733,51 @@ failing-then-passing — the finalize byte bound, the marker accuracy and the
 lazy pointer; the other 3 guard the unchanged paths). Full suite re-run after
 the edits; failure set compared against an `origin/master` baseline in the
 same sandbox (see the PR note for the counts).
+
+## 14. Review-loop follow-ups (iteration 8)
+
+Iteration 8 re-ran the i7 sweep independently — every reachable builder, on
+each dimension (count, item size, single-document size) — and then split the
+remaining over-limit results by whether the *item* can actually be that long.
+Two listings were still count-capped with no byte budget; the rest are
+bounded by something other than the budget.
+
+- **The integration overlap/conflict listings (R6 / §5) were count-capped
+  only.** `INTEGRATION_MAX_PATHS = 20` bounds the count, but the items are
+  filesystem paths, whose length is bounded only by `PATH_MAX` — so 20 of
+  them measured **199,920 bytes** in the sign-off prompt and 200,114 with 40
+  (the YAML record's own `_YAML_LIST_LIMIT`). This is the cap-times-item-size
+  defect i3/i7 fixed for every other listing, and it is worse here than
+  elsewhere because `_signoff_integration_block` is part of the builder's
+  **static text**, not one of `fit_prompt`'s shrinkable blocks — so the
+  launcher guard had to fire for a builder this PR exists to bound. New
+  shared `INTEGRATION_LIST_BUDGET = 8_000` on all four sites: both lists in
+  `_signoff_integration_block` and both in `signoff.format_signoff_return`
+  (the block the impl / review / QA-planner prompts inline via
+  `_signoff_return_block`). The omission markers already name the full record
+  (`integration.integration_pointer`, R6/§12). Re-measured: **47,752 bytes**;
+  a 20 × 200 B record (the realistic shape) is byte-identical at 28,920.
+- **The QA child prompt's artifact listing was count-capped only.** It
+  inlines full paths (`{scratch}/qa-artifacts/<name>`), not basenames, so
+  `ARTIFACT_PATHS_MAX = 20` does not bound it: 20 paths of ~4 KB measured
+  **108,490 bytes** (the same reasoning i7 used for the finalize worktree
+  paths, which are the same shape). New `ARTIFACT_PATHS_BUDGET = 8_000`;
+  re-measured **31,934 bytes**.
+
+Checked and deliberately unchanged:
+
+- **`_build_verification_prompt`'s recipe bullets** are count-capped only
+  (`ARTIFACT_PATHS_MAX`) but carry `Path(p).name` — basenames, so the item is
+  bounded by the filesystem's `NAME_MAX` (255) and 20 of them cannot exceed
+  ~5 KB. A byte budget there could never fire, which is the dead-parameter
+  defect §12 removed from `mocks_for_prompt`; the count cap does bound it.
+- **`build_regression_test_prompt`** (the test body *is* the prompt) and the
+  watcher managed/target lists (PR ids and short target names, 40 items)
+  remain as recorded in §10 and §13.
+
+Verification: `tests/test_prompt_bounds.py` 89 cases (3 new, all
+failing-then-passing — the sign-off integration list, the sign-off-return
+block, and the QA child artifact list; each measured 108-200 KB before the
+fix). Real-data sweep unchanged. Evidence:
+`/pm-captures/review-4e41-i8/` (`sweep.py`, `sweep-after-i8.txt`,
+`integration-paths-before-after.txt`).
