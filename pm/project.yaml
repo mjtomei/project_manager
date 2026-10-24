@@ -33076,6 +33076,22 @@ prs:
       project.yaml to load to record it" shows although only the follow-up waits.'
     created_at: '2026-10-24T07:13:35Z'
     last_edited: '2026-10-24T07:13:35Z'
+  - id: note-7e99ea1
+    text: 'S48 (RQ38) shared fix 716d6ce1 (on S49 b740e188 + S47 13eb925b), CODE CHANGE
+      needing normal re-review. Live pre-fix on 3ebe4d7a (pm edit open, F NEEDS_WORK
+      finished): _transition_pr_status retried each poll tick and waited the 2 s lock
+      timeout on the TUI loop each time (15 StoreLockTimeout warnings in 154 s, keys
+      0.056 s -> 1.99 s, spinner/cast gaps of 4 s). Result itself was not lost. Fix:
+      TUI writes retried per tick make one non-blocking attempt (store.NO_WAIT): completion
+      transition+note, start_signoff, review->QA hand-off status write, launch clear_return_awaiting
+      and the shared _enter_qa_status via start_qa(lock_timeout=). A held lock keeps
+      result/follow-up/hand-off pending with its snapshot, says so once ("waiting
+      for project.yaml to be unlocked ..."), lands on the first tick after release.
+      No separate probe (no check-then-act race). User keys/CLI keep the 2 s wait.
+      tests/test_project_lock_held.py (9, per-site mutations each caught). Live post-fix
+      replay in progress.'
+    created_at: '2026-10-24T06:53:33Z'
+    last_edited: '2026-10-24T06:53:33Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
