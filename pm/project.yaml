@@ -28962,7 +28962,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T09:20:01.185973+00:00'
-  updated_at: '2026-10-24T23:04:54.727517+00:00'
+  updated_at: '2026-10-24T23:20:33.165578+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29127,6 +29127,21 @@ prs:
       the pane process tree changes.'
     created_at: '2026-10-24T23:04:54Z'
     last_edited: '2026-10-24T23:04:54Z'
+  - id: note-eab6c19
+    text: 'review-loop f5ea i1 (2026-10-25, commit 6f6fee32): fixed the fish default-shell
+      SIGNOFF_IMPL gap — meta_cmd tmux branch now passes sh -c {shlex.quote(cmd)}
+      to new_window (interactive fallback deliberately unwrapped, Popen(shell=True)
+      is already /bin/sh and an extra outer shell could break the 130 exit status).
+      New tests: wrapper unit test, wrapped-command normal-exit + process-group-HUP
+      behavior tests under the default shell (fish when available, dash otherwise),
+      skip-if-no-fish test proving fish rejects the unwrapped cmd (rc != 0, override
+      left) but accepts the wrapper. Spec R1 premise corrected. Suite on new HEAD:
+      3367 passed + 1 skipped (fish absent here) + 1 pre-existing env failure (test_installer_writes_standalone_receiver,
+      fails identically stashed). QA per sign-off: re-run the tmux lifecycle (kill-window,
+      normal exit, relaunch, foreign guard) and S4 fallback interrupt incl. slow-exit
+      child on this HEAD — the pane process tree changed.'
+    created_at: '2026-10-24T23:20:33Z'
+    last_edited: '2026-10-24T23:20:33Z'
 - id: pr-19990de
   plan: bugs
   title: 'Bug: vanilla/GitHub merge propagation still resolves in the project root
