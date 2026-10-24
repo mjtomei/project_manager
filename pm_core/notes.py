@@ -34,6 +34,23 @@ PROMPT_SECTIONS: dict[str, tuple[str, ...]] = {
     "watcher": ("General", "Watcher", "Local"),
 }
 
+
+def notes_pointer() -> str:
+    """Where a session reads the session notes in full.
+
+    The notes blocks are byte-bounded (see ``notes_section`` /
+    ``notes_for_prompt``), and the omission marker has to name a way to read
+    the text that was cut.  It names the notes *files*, not ``pm notes``: that
+    command opens an interactive editor (with a splash that waits for a
+    keypress), so a session following the marker gets no text at all.  The
+    paths are relative to the project root so they resolve both on the host
+    and inside a container, where the workdir is mounted at ``/workspace`` and
+    an absolute host path does not exist.
+    """
+    return (f"`pm/{NOTES_FILENAME}` and `pm/{LOCAL_NOTES_FILENAME}` "
+            f"in the project root")
+
+
 # Descriptions shown in the edit template header lines.
 _SECTION_DESCS: dict[str, str] = {
     "General": "included in all prompts",
@@ -308,10 +325,10 @@ def notes_section(root: Path, prompt_type: str | None = None) -> str:
     combined = "\n\n".join(parts)
     block = f"\n## Session Notes\n{combined}\n"
     # Bound the block so a long notes file cannot blow the prompt's argv
-    # budget; the marker points at the notes file for the full text.
+    # budget; the marker points at the notes files for the full text.
     return bounded_text(
         block, max_bytes=SESSION_NOTES_BUDGET,
-        pointer=f"`pm notes` (file: {root / NOTES_FILENAME})",
+        pointer=notes_pointer(),
         label="session notes",
     )
 
@@ -363,10 +380,9 @@ def notes_for_prompt(root: Path, prompt_type: str) -> tuple[str, str]:
             )
 
     # Bound the user-authored notes so a long notes file cannot blow the
-    # prompt's argv budget; the marker points at the notes file for the full
+    # prompt's argv budget; the marker points at the notes files for the full
     # text.  Empty blocks pass through unchanged.
-    notes_path = root / NOTES_FILENAME
-    pointer = f"`pm notes` (file: {notes_path})"
+    pointer = notes_pointer()
     general_block = bounded_text(general_block, max_bytes=SESSION_NOTES_BUDGET,
                                  pointer=pointer, label="session notes")
     specific_block = bounded_text(specific_block, max_bytes=SESSION_NOTES_BUDGET,

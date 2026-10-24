@@ -368,7 +368,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
             "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
             "spec": (impl_spec_block, f"`pm pr spec {pr_id} impl`",
                      "implementation spec"),
-            "session_notes": (general_notes_block, "`pm notes`",
+            "session_notes": (general_notes_block, notes.notes_pointer(),
                               "session notes"),
         },
     )
@@ -544,7 +544,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
                      f"`pm pr list --plan {plan_ref}`" if plan_ref
                      else "`pm pr list`", "plan context"),
             "session_notes": (general_notes_block,
-                              "`pm notes`", "session notes"),
+                              notes.notes_pointer(), "session notes"),
         },
     )
 
@@ -2271,9 +2271,10 @@ not accomplishing this goal.
             "library": (library_summary, "`pm qa list`", "QA library summary"),
             "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
             "spec": (qa_spec_block, f"`pm pr spec {pr_id} qa`", "QA spec"),
-            "session_notes": (general_notes_block, "`pm notes`",
+            "session_notes": (general_notes_block, notes.notes_pointer(),
                               "session notes"),
-            "qa_notes": (qa_specific_block, "`pm notes`", "QA session notes"),
+            "qa_notes": (qa_specific_block, notes.notes_pointer(),
+                         "QA session notes"),
         },
     )
 

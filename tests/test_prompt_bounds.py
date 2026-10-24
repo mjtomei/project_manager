@@ -870,7 +870,7 @@ class TestNotesBounding:
             _isolated_pm_root, "impl")
         assert prompt_bytes(general) <= 8_000 + 400
         assert prompt_bytes(specific) <= 8_000 + 400
-        assert "pm notes" in general
+        assert "pm/notes.txt" in general
 
     def test_notes_section_bounded(self, _isolated_pm_root):
         from pm_core import notes as notes_mod
@@ -878,7 +878,32 @@ class TestNotesBounding:
             "## General\n" + "g" * 100000 + "\n")
         block = notes_mod.notes_section(_isolated_pm_root)
         assert prompt_bytes(block) <= 8_000 + 400
-        assert "pm notes" in block
+        assert "pm/notes.txt" in block
+
+    def test_notes_marker_names_a_readable_file_not_the_editor(
+            self, _isolated_pm_root):
+        """The truncation marker must name something a session can read.
+
+        ``pm notes`` opens an interactive editor (with a splash that waits for
+        a keypress), so a session that follows it gets no text at all — the
+        marker names the notes files instead.  The path is relative to the
+        project root, because the sessions these blocks feed (impl / review /
+        QA planner) run inside a container where the host path does not exist.
+        """
+        from pm_core import notes as notes_mod
+        (_isolated_pm_root / "notes.txt").write_text(
+            "## General\n" + "g" * 100000 + "\n")
+        block = notes_mod.notes_section(_isolated_pm_root)
+        assert "pm/notes.txt" in block
+        assert "`pm notes`" not in block
+        assert str(_isolated_pm_root) not in block
+        for prompt in (
+            prompt_gen.generate_prompt(_data(_pr()), "pr-x"),
+            prompt_gen.generate_review_prompt(_data(_pr()), "pr-x"),
+            prompt_gen.generate_qa_planner_prompt(_data(_pr()), "pr-x"),
+        ):
+            assert "`pm notes`" not in prompt
+            assert str(_isolated_pm_root) not in prompt
 
 
 # ---------------------------------------------------------------------------

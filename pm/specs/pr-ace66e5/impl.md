@@ -872,3 +872,53 @@ flaky `test_git_ops::test_keeps_unpushed_merge`, `test_popup_session_code`)
 give 43 failed / 84 passed / 17 errors on both this branch and an
 `origin/master` worktree in the same sandbox — identical, and none
 prompt-related. Evidence: `/pm-captures/review-4e41-i10/`.
+
+## 17. Review-loop follow-ups (iteration 11)
+
+Iteration 11 re-checked each omission marker against what the session can
+actually do with it — the i5/i6 method — and found one marker that named no
+usable reader at all: the session-notes marker (R3b, `notes.notes_section` /
+`notes.notes_for_prompt`, and the `session_notes` / `qa_notes` blocks the four
+`fit_prompt` builders pass).
+
+- **The session-notes marker pointed at `pm notes`, which cannot read notes.**
+  `pm notes` opens the interactive section editor (`pm_core/cli/guide.py`,
+  `notes_cmd` → `run_watched_editor`) and, on first use, a splash that waits
+  for a raw-mode keypress. A session following "Read the full text: `pm notes`"
+  gets an editor (or a blocked read) and no text — the truncation was
+  unrecoverable in practice, which is the silent loss R3b exists to prevent.
+- **The file path beside it was a host absolute path.** `f"file: {root /
+  NOTES_FILENAME}"` resolves through `store.find_project_root()` in the pm
+  process that *builds* the prompt (the host), while the sessions these blocks
+  feed — impl, review, QA planner — run inside a container where the workdir is
+  mounted at `/workspace` and the host path does not exist. So both halves of
+  the marker failed in the common case (the same host-vs-container split i5
+  fixed for `integration_pointer` and i6 for the QA-scenario marker).
+
+Fixed with a shared `notes.notes_pointer()` in `pm_core/notes.py`, naming the
+notes *files* relative to the project root — `` `pm/notes.txt` and
+`pm/notes-local.txt` in the project root `` — which resolves both on the host
+and in the container. This matches the precedent `spec_gen` already sets for
+its own paths (`file_path.relative_to(root.parent)`, with the same
+container-mount comment). The four `fit_prompt` block pointers
+(`session_notes` x3, `qa_notes`) now call the helper instead of hard-coding
+`` `pm notes` ``, so the block-level and block-internal markers agree.
+
+Deliberately unchanged: the two pre-existing human-facing mentions of
+`pm notes` in `generate_watcher_review_prompt` ("read via `pm notes` or
+directly"; "`pm notes` or a direct edit") — that session is a chat-driven
+human surface, and both already offer the direct-edit alternative. Also
+unchanged: the truncated-scenario-steps marker ("the QA plan in the QA planner
+transcript"). `qa_loop` does hold the planner's `transcript_path`
+(`_run_qa_loop`), but the child/concretization builders are not passed it, so
+naming it would mean threading a new argument through both for a degradation
+that needs a >20 KB single scenario's steps. The marker is vague, not wrong —
+the transcript is reachable (`~/.claude` is mounted in the container) and the
+scenario's title and focus are inlined in full.
+
+Verification: `tests/test_prompt_bounds.py` 93 cases (1 new,
+failing-then-passing on `assert "`pm notes`" not in block`). A marker sweep
+over the four builders with pathological inputs now finds no absolute host path
+in any marker. Real prompts are byte-identical (this repo's `notes.txt` is
+211 B, far under the 8 KB budget, so the marker never fires here). Full suite
+failure set unchanged from the i10 baseline.
