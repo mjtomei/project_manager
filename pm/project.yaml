@@ -31649,7 +31649,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T22:24:02.770302+00:00'
+  updated_at: '2026-10-24T22:36:05.956666+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33391,6 +33391,21 @@ prs:
       41(h); /pm-captures/review-e0e8-i8.'
     created_at: '2026-10-24T22:24:02Z'
     last_edited: '2026-10-24T22:24:02Z'
+  - id: note-e050f6c
+    text: 'Review e0e8 i9 (d361858c, CODE CHANGE, small, needs normal re-review):
+      i8 d76cc9d5 (failed auto-start `pm pr start` reason shown forced/held, once
+      per reason per PR) and the e0e8 deltas (c1c08d83, 9c42bb6e, 3748691e, c08c7627,
+      f1865615, 32df2893, 0c577dd2, 021f2810, 97a77383, 2d58dea4, 57f04ee6) re-reviewed,
+      sound; route messages stay single-line and under the review loop''s 500-char
+      stderr cut. Gap fixed: the once-per-reason dedupe also swallowed a user''s explicit
+      retry. Re-adding the PR as a target (A / autostart add) or `autostart all` while
+      the route was still down showed only the targets line. An explicit re-arm now
+      forgets the shown reason for those PRs (enable_all: all); event-driven passes
+      keep the dedupe. Regression test_explicit_rearm_says_a_shown_start_failure_again[add_targets|enable_all],
+      each fails with its clear removed. Venv lacked markdown again (3.10.3 installed).
+      Baseline 3693, final full suite 3695 passed, rc 0; impl.md 41(h); /pm-captures/review-e0e8-i9.'
+    created_at: '2026-10-24T22:36:05Z'
+    last_edited: '2026-10-24T22:36:05Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
