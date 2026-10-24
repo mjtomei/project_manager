@@ -563,3 +563,41 @@ recorded with item 32.
     Full suite 3575 passed on the c1d4 i1 tree (env -u PM_HOST_HOME, /usr/bin first;
     `/pm-captures/review-c1d4-i1/full-suite.log`). Evidence:
     `/pm-captures/scenarios/44` (REPORT.md).
+33. (S46, RQ37 completions and restarts; two clones) Live on 4d8f968a,
+    every completion processed while project.yaml could not be loaded
+    lost its result: `_record_qa_note` / `_transition_pr_status` only
+    logged a warning and `poll_qa_state` cleared the snapshot right
+    after, so an adopted run (driven in the other clone's session), this
+    clone's own run (conflict markers) and an adopted run whose session
+    was gone (file missing) each ended with 0 QA notes and nothing
+    retried, while the TUI said "press i to sign off" and the picker read
+    `[done PASS]`.  A TUI restarted on a conflicted file, or on plans
+    that do not validate, died at mount (`guide.detect_state`
+    RuntimeError, then `TUI unmount`).
+    (a) a9b966ec: a finished run is processed only once project.yaml
+        loads (`_completion_waits_for_project`; one "waiting for
+        project.yaml" line per reason); its snapshot stays meanwhile, so
+        a restart in between recovers it once.  `_load_state` with no
+        previous state shows the tree instead of the guide and reloads
+        on the 5 s idle timer once the file changes.
+    (b) 54c88ad8 (review of (a), the race between the load check and a
+        write): the transition and note are written first, each once
+        (`_record_completion`); nothing else runs until both took, and
+        the whole completion is retried.  Follow-ups (review loop start,
+        zz t `start_qa`, sign-off, tree reload) report False on an
+        unloadable file and are retried on their own; a retried zz t
+        restart that replaced the run only drops the old snapshot.  The
+        sticky "cannot be loaded" line is cleared on load (live it hid
+        "QA PASS ... press i").
+    (c) e52e8fac: the empty tree names the reason
+        (`TechTree.update_prs(unavailable=)`), not Textual's
+        "TechTree#tech-tree" placeholder.
+    `tests/test_qa_completion_unloadable.py` (13; the 7 file-state tests
+    fail on 4d8f968a, the 5 race tests on a9b966ec).  Planning-phase
+    guards are S45's (e11b952a, 8400faf7, 0454edaf).  Full suite 3610
+    passed on e52e8fac (`/pm-captures/scenarios/46/tests`).  Spec notes:
+    the resume scan logs "scan skipped" only when it needs the file (an
+    untracked snapshot exists), so a missing file with every run already
+    adopted logs only the completion's wait line; release to "QA
+    complete" takes ~90 s in the S41-S46 harness, longer than S46 story
+    3's 60 s cap.  Evidence: `/pm-captures/scenarios/46` (REPORT.md).
