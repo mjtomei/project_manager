@@ -31620,7 +31620,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T04:00:56.300082+00:00'
+  updated_at: '2026-10-24T04:53:57.848975+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32972,6 +32972,25 @@ prs:
       fail on a9b966ec. S45 can validate its completion matrix on 54c88ad8.'
     created_at: '2026-10-24T04:00:56Z'
     last_edited: '2026-10-24T04:00:56Z'
+  - id: note-0b329d4
+    text: 'QA S46 (2026-10-24, two clones, RQ37 completions + restarts; captures /pm-captures/scenarios/46,
+      REPORT.md): NEEDS_WORK. Pre-fix 4d8f968a reproduced the QA18 predictions live:
+      adopted X + own P (conflict markers) and X3 (file missing) each ended with 0
+      QA notes, snapshot cleared, no retry; pm tui restart on conflict markers / invalid
+      plans died at mount (guide.detect_state RuntimeError, TUI unmount). CODE CHANGES
+      needing normal re-review: a9b966ec (completion waits for the file), 54c88ad8
+      (writes first then follow-ups, each retried; race regressions), e52e8fac (empty
+      tree names the reason). Post-fix all three stories held: one note each, recorded
+      after the file loads, also across an in-conflict restart; finalizers in the
+      launching session window; restarted TUI alive, snapshots/owners untouched, Q
+      resumed once per round with identical panes; X2 only by B; pm session Error
+      rc 1. Full suite 3610 passed on e52e8fac. Not met as written: story 3 expects
+      a "QA resume scan skipped [Errno 2]" line, but the scan only loads the file
+      when an untracked snapshot exists; story 3 60 s cap < ~91 s release-to-complete,
+      so the absence was extended. Recipes: af12945d adds ffmpeg -nostdin to render_cast
+      (batch loop mangled paths); needs review. Filed pr-235f465.'
+    created_at: '2026-10-24T04:53:57Z'
+    last_edited: '2026-10-24T04:53:57Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
