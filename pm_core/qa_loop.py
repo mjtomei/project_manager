@@ -696,12 +696,11 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
         return None
     from pm_core import tmux as tmux_mod
     win = tmux_mod.find_window_by_name(session, window_name)
-    if not win:
-        return None
-    panes = tmux_mod.get_pane_indices(session, win["index"])
-    if not panes:
-        return None
-    anchor_pane = panes[0][0]
+    panes = tmux_mod.get_pane_indices(session, win["index"]) if win else []
+    # A run resumed after its session died (killed with the TUI, or another
+    # clone's session gone) has no QA window left; the finalizer opens one
+    # rather than being skipped (S43: PASS with finalize=None).
+    anchor_pane = panes[0][0] if panes else None
 
     from pm_core.qa_finalize_prompt import build_qa_finalize_prompt
     from pm_core.claude_launcher import build_claude_shell_cmd, transcript_path_for
@@ -737,17 +736,26 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
     )
 
     try:
-        finalize_pane = tmux_mod.split_pane_at(
-            anchor_pane, "v", finalize_cmd, background=True,
-            cwd=workdir_path,
-        )
+        if anchor_pane:
+            finalize_pane = tmux_mod.split_pane_at(
+                anchor_pane, "v", finalize_cmd, background=True,
+                cwd=workdir_path,
+            )
+        else:
+            _log.info("QA finalize: no %s window in %s — opening one",
+                      window_name, session)
+            finalize_pane = tmux_mod.new_window_get_pane(
+                session, window_name, finalize_cmd, cwd=workdir_path,
+                switch=False)
+            if not finalize_pane:
+                return None
     except Exception:
-        _log.exception("split_pane_at failed for finalize pane")
+        _log.exception("could not start the finalize pane")
         return None
 
     try:
         from pm_core import pane_layout
-        qa_win_id = tmux_mod.pane_window_id(anchor_pane)
+        qa_win_id = tmux_mod.pane_window_id(anchor_pane or finalize_pane)
         if qa_win_id:
             pane_layout.register_and_rebalance(session, qa_win_id, [
                 (finalize_pane, "qa-finalize", "finalize"),
@@ -1075,6 +1083,68 @@ def claim_resume_file(qa_workdir: str | Path,
         return None
     finally:
         os.close(fd)  # releases the lock
+
+
+_RUN_RECORD = "qa_run.json"
+
+
+def write_run_record(state: QALoopState) -> None:
+    """Record which pm session launched this run, and when, in its QA
+    workdir.  Written once and kept after the run ends (unlike
+    ``qa_resume.json``): a TUI restart uses it to tell whether this clone
+    QA'd a PR alongside another clone's run of it (run_overlaps_own_run).
+    Best-effort."""
+    if not state.qa_workdir:
+        return
+    path = Path(state.qa_workdir) / _RUN_RECORD
+    if path.exists():
+        return
+    data = {"pr_id": state.pr_id, "loop_id": state.loop_id,
+            "session_tag": state.session_tag, "started_at": time.time()}
+    try:
+        tmp = path.with_name(_RUN_RECORD + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        tmp.rename(path)
+    except OSError:
+        _log.warning("QA: could not write %s", path, exc_info=True)
+
+
+def read_run_record(qa_workdir: str | Path) -> dict | None:
+    try:
+        data = json.loads((Path(qa_workdir) / _RUN_RECORD).read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def run_overlaps_own_run(pr_id: str, other_started_at) -> bool:
+    """True when this pm session launched a run of *pr_id* that was not over
+    before another session's run of it started at *other_started_at*.
+
+    Two clones QA'ing one PR at the same time run independently: the other
+    clone's run is its own TUI's to resume, not an orphan this TUI adopts,
+    and that must hold after this TUI restarts too (S43).  A run of this
+    session is over when its snapshot is gone; its status file's last write
+    then marks its end.  A run without a start record (written before
+    records existed) overlaps nothing.
+    """
+    if not isinstance(other_started_at, (int, float)):
+        return False
+    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
+    for rec_path in qa_root.glob(f"{pr_id}-*/{_RUN_RECORD}"):
+        rec = read_run_record(rec_path.parent)
+        if (not rec or rec.get("pr_id") != pr_id
+                or launched_elsewhere(rec.get("session_tag"))):
+            continue
+        if _resume_file_path(rec_path.parent).exists():
+            return True
+        try:
+            ended = (rec_path.parent / "qa_status.json").stat().st_mtime
+        except OSError:
+            ended = rec.get("started_at") or 0
+        if ended >= other_started_at:
+            return True
+    return False
 
 
 def clear_resume_file(qa_workdir: str | Path) -> None:
@@ -4269,6 +4339,7 @@ def run_qa_sync(
     if not state.qa_workdir:
         qa_wd = create_qa_workdir(state.pr_id, state.loop_id)
         state.qa_workdir = str(qa_wd)
+    write_run_record(state)
 
     # Status file path (inside QA workdir)
     status_path = Path(state.qa_workdir) / "qa_status.json"

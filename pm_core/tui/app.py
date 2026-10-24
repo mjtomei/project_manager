@@ -553,6 +553,10 @@ class ProjectManagerApp(App):
             self.run_worker(self._write_queue.run(), exclusive=False)
         # Background sync interval: 5 minutes for automatic PR sync
         self._sync_timer = self.set_interval(300, self._background_sync)
+        # The QA resume scan runs on the shared poll timer, which an idle
+        # TUI stops.  Another clone's orphaned run whose PR arrives by a
+        # pull would then wait for the 5 minute sync (S43); keep scanning.
+        self._qa_resume_timer = self.set_interval(5, self._idle_qa_resume_scan)
         # Run heavier startup tasks (heal_registry, tmux bindings) in a
         # background thread so they don't block input processing.
         self.run_worker(self._deferred_startup(), exclusive=False)
@@ -984,6 +988,16 @@ class ProjectManagerApp(App):
             pass
 
     # --- Sync delegates (see tui/sync.py) ---
+
+    def _idle_qa_resume_scan(self) -> None:
+        """QA resume scan while the shared poll timer (which scans) is off."""
+        if self._review_loop_timer:
+            return
+        try:
+            from pm_core.tui import qa_loop_ui
+            qa_loop_ui._resume_incomplete_qa(self)
+        except Exception:
+            _log.warning("idle QA resume scan failed", exc_info=True)
 
     async def _background_sync(self) -> None:
         try:

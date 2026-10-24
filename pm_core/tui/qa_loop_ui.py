@@ -390,6 +390,21 @@ def poll_qa_state(app) -> None:
     app._qa_resume_poll_counter += 1
 
 
+def _drop_superseded(pr_id, snaps, live_workdirs) -> None:
+    """Drop this session's snapshots of *pr_id* that a newer run of it
+    superseded (finished or not, so a later restart cannot revive a stale
+    run) unless something still drives them: an in-memory loop here or a
+    live process elsewhere.  Their status, verdicts and transcripts stay."""
+    from pm_core import qa_loop
+    for resume_file, rdata, _overall in snaps:
+        if (str(resume_file.parent) not in live_workdirs
+                and str(rdata.get("qa_workdir")) not in live_workdirs
+                and not qa_loop.resume_owned_elsewhere(rdata)):
+            _log.info("Dropping superseded QA resume snapshot for %s: %s",
+                      pr_id, resume_file.parent)
+            qa_loop.clear_resume_file(resume_file.parent)
+
+
 def _project_file_stamp(root) -> tuple | None:
     """Identity of *root*'s project.yaml (changes on any save or pull)."""
     from pathlib import Path
@@ -541,22 +556,29 @@ def _resume_incomplete_qa(app) -> None:
             if p.get("id") == pr_id:
                 return p.get("status")
         return None
+    # Runs of one PR from two clones (two pm sessions) are independent:
+    # neither supersedes the other, whichever started later.  Ordering and
+    # the superseded drop apply within one session's runs, and only this
+    # session's are dropped here: another clone's older runs are its own
+    # TUI's to drop.  Dropping them on liveness lost a clone's run as soon
+    # as its TUI died, so its restart had nothing to resume (S43).
     candidates = []
+    own_prs = set()
     for pr_id, snaps in by_pr.items():
-        snaps.sort(key=lambda s: (-_run_order(s[1]), bool(s[2]),
-                                  -_mtime(s[0])))
-        candidates.append(snaps[0])
-        # A newer run superseded the rest: drop their snapshots (finished
-        # or not, so a later restart cannot revive a stale run) unless
-        # something still drives them: an in-memory loop here or a live
-        # process elsewhere.  Their status, verdicts and transcripts stay.
-        for resume_file, rdata, overall in snaps[1:]:
-            if (str(resume_file.parent) not in live_workdirs
-                    and str(rdata.get("qa_workdir")) not in live_workdirs
-                    and not qa_loop.resume_owned_elsewhere(rdata)):
-                _log.info("Dropping superseded QA resume snapshot for %s: %s",
-                          pr_id, resume_file.parent)
-                qa_loop.clear_resume_file(resume_file.parent)
+        by_session: dict = {}
+        for snap in snaps:
+            tag = snap[1].get("session_tag")
+            key = tag if qa_loop.launched_elsewhere(tag) else None
+            by_session.setdefault(key, []).append(snap)
+        if None in by_session:
+            own_prs.add(pr_id)
+        for key, group in by_session.items():
+            group.sort(key=lambda s: (-_run_order(s[1]), bool(s[2]),
+                                      -_mtime(s[0])))
+            candidates.append(group[0])
+            if key is not None:
+                continue
+            _drop_superseded(pr_id, group[1:], live_workdirs)
 
     for resume_file, rdata, overall in candidates:
         pr_id = rdata["pr_id"]
@@ -594,6 +616,18 @@ def _resume_incomplete_qa(app) -> None:
             # PR ever returns to QA under a different loop_id.
             app._resumed_qa_pr_ids.add(pr_id)
             qa_loop.clear_resume_file(resume_file.parent)
+            continue
+
+        # This clone QA'd the PR alongside the other clone's run (its own
+        # run of it is resumable, or ended after that run started): that run
+        # is the other clone's to resume, not an orphan to adopt here, also
+        # after this TUI restarts (S43).  Adopted are runs of a PR that
+        # reached QA here by a pull or an edit (S41), and runs started after
+        # this clone's own QA of the PR was over.
+        if qa_loop.launched_elsewhere(rdata.get("session_tag")) and (
+                pr_id in own_prs or qa_loop.run_overlaps_own_run(
+                    pr_id, (qa_loop.read_run_record(resume_file.parent)
+                            or {}).get("started_at"))):
             continue
 
         # The ownership check above read the snapshot earlier; another TUI

@@ -45,6 +45,15 @@ from pm_core.tui import qa_loop_ui
 # Round-trip serialization
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _in_the_runs_session():
+    """The scanning TUI runs in the pm session the seeded runs were launched
+    from (their session_tag), unless a test patches get_pm_session itself."""
+    with patch.object(qa_loop, "get_pm_session",
+                      return_value="pm-project_manager-deadbeef"):
+        yield
+
+
 def _make_state(qa_workdir) -> QALoopState:
     state = QALoopState(pr_id="pr-001")
     state.loop_id = "abc123"
@@ -299,6 +308,132 @@ def test_stale_status_keeps_another_clones_snapshot(tmp_path,
         assert qa_loop._resume_session(state) == (
             run_session if other_session_live else "pm-clone-a")
     assert _resume_file_path(qa_dir).is_file()
+
+
+def _retag(qa_dir, tag):
+    """Mark a seeded run as launched from another pm session (clone)."""
+    f = _resume_file_path(qa_dir)
+    d = json.loads(f.read_text())
+    d["session_tag"] = tag
+    f.write_text(json.dumps(d))
+    return qa_dir
+
+
+def _record_run(qa_dir, *, tag, started_at, pr_id="pr-001"):
+    """The run record a run's launch writes (qa_loop.write_run_record)."""
+    import os
+    state = QALoopState(pr_id=pr_id)
+    state.loop_id = qa_dir.name
+    state.qa_workdir = str(qa_dir)
+    state.session_tag = tag
+    qa_loop.write_run_record(state)
+    rec = qa_dir / "qa_run.json"
+    d = json.loads(rec.read_text())
+    d["started_at"] = started_at
+    rec.write_text(json.dumps(d))
+    return qa_dir
+
+
+def _finish_run(qa_dir, *, ended_at):
+    """A finished run: completion processed (snapshot removed), status
+    file last written at *ended_at*."""
+    import os
+    qa_loop.clear_resume_file(qa_dir)
+    os.utime(qa_dir / "qa_status.json", (ended_at, ended_at))
+
+
+@pytest.mark.parametrize("other_clone_newer", [True, False])
+def test_another_clones_run_of_the_same_pr_is_neither_dropped_nor_adopted(
+        tmp_path, other_clone_newer):
+    """Both clones QA one PR id and both TUIs die (S43 Z2/Z3): runs from two
+    sessions do not supersede each other.  This TUI resumes its own run and
+    leaves the other clone's snapshot for that clone's restart, whichever
+    run numbered its scenarios later.  Dropping it on liveness (its TUI is
+    dead) left that restart nothing to resume."""
+    app = _make_app(tmp_path)
+    own = _seed_run(tmp_path, overall="", loop="own",
+                    first_index=1 if other_clone_newer else 3)
+    other = _retag(_seed_run(tmp_path, overall="", loop="other",
+                             first_index=3 if other_clone_newer else 1),
+                   "clone-b")
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch("pm_core.tmux.session_exists", return_value=True), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        for _ in range(3):
+            qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+    assert resume_bg.call_args.args[0].qa_workdir == str(own)
+    assert _resume_file_path(other).is_file()
+
+
+@pytest.mark.parametrize("other_started_before_own_end", [True, False])
+def test_restarted_tui_adopts_another_clones_run_only_after_its_own_qa(
+        tmp_path, other_started_before_own_end):
+    """Restart boundary (S43 review): this clone finished its own run of the
+    PR (snapshot removed, run record and status file kept) while the other
+    clone's run of it is orphaned (that clone's TUI dead).  A fresh TUI here
+    has nothing in memory, only the other clone's snapshot.
+
+    - The other run started before this clone's run ended: the two ran
+      alongside, so it stays the other clone's to resume, not adopted.
+    - It started after this clone's run was over: a later QA of the PR from
+      the other clone, orphaned there; adopted as in S41 (driven in its own
+      session if that is up)."""
+    app = _make_app(tmp_path)  # fresh app: no loops, nothing remembered
+    own = _record_run(_seed_run(tmp_path, overall="PASS", loop="own"),
+                      tag="project_manager-deadbeef", started_at=1000.0)
+    _finish_run(own, ended_at=2000.0)
+    other = _record_run(
+        _retag(_seed_run(tmp_path, overall="", loop="other", first_index=3),
+               "clone-b"),
+        tag="clone-b",
+        started_at=1500.0 if other_started_before_own_end else 2500.0)
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch("pm_core.tmux.session_exists", return_value=True), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        for _ in range(3):
+            qa_loop_ui._resume_incomplete_qa(app)
+
+    assert _resume_file_path(other).is_file()
+    if other_started_before_own_end:
+        resume_bg.assert_not_called()
+        assert "pr-001" not in app._resumed_qa_pr_ids
+    else:
+        resume_bg.assert_called_once()
+        assert resume_bg.call_args.args[0].qa_workdir == str(other)
+
+
+def test_run_without_a_record_overlaps_nothing(tmp_path):
+    """Runs launched before run records existed keep the S41 behaviour:
+    another clone's orphaned run is adopted once its PR is in QA here."""
+    app = _make_app(tmp_path)
+    own = _seed_run(tmp_path, overall="PASS", loop="own")
+    _finish_run(own, ended_at=2000.0)
+    other = _retag(_seed_run(tmp_path, overall="", loop="other",
+                             first_index=3), "clone-b")
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch("pm_core.tmux.session_exists", return_value=True), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+    resume_bg.assert_called_once()
+    assert resume_bg.call_args.args[0].qa_workdir == str(other)
+
+
+def test_write_run_record_is_written_once(tmp_path):
+    """A resumed or re-entered run keeps its launching session and start."""
+    state = QALoopState(pr_id="pr-001")
+    state.loop_id = "l1"
+    state.qa_workdir = str(tmp_path)
+    state.session_tag = "clone-b"
+    qa_loop.write_run_record(state)
+    first = qa_loop.read_run_record(tmp_path)
+    state.session_tag = "clone-a"
+    qa_loop.write_run_record(state)
+    assert qa_loop.read_run_record(tmp_path) == first
+    assert first["session_tag"] == "clone-b" and first["pr_id"] == "pr-001"
 
 
 def test_stale_status_drops_this_sessions_own_snapshot(tmp_path):
@@ -1243,3 +1378,45 @@ def test_fresh_start_drops_superseded_snapshot_before_new_run_has_one(
         qa_loop_ui._resume_incomplete_qa(app)
     resume_bg.assert_not_called()
     on_complete.assert_not_called()
+
+
+def test_idle_tui_keeps_scanning_for_resumable_runs():
+    """The resume scan runs on the shared poll timer, which an idle TUI
+    stops (no running loop, no active PR with a workdir in its cached
+    data).  Another clone's orphaned run whose PR arrives by a pull then
+    waited for the 300 s sync (S43: adopted 53 s after the pull).  The
+    always-on 5 s timer scans whenever the poll timer is off, and a scan
+    failure must not escape it."""
+    from pm_core.tui.app import ProjectManagerApp
+    app = MagicMock()
+    with patch.object(qa_loop_ui, "_resume_incomplete_qa") as scan:
+        app._review_loop_timer = None
+        ProjectManagerApp._idle_qa_resume_scan(app)
+        scan.assert_called_once_with(app)
+
+        scan.reset_mock()
+        app._review_loop_timer = object()  # the poll timer scans instead
+        ProjectManagerApp._idle_qa_resume_scan(app)
+        scan.assert_not_called()
+
+        app._review_loop_timer = None
+        scan.side_effect = RuntimeError("boom")
+        ProjectManagerApp._idle_qa_resume_scan(app)
+
+
+def test_idle_resume_scan_is_scheduled_at_mount():
+    """Wiring (textual-assertion fallback): the TUI schedules the idle scan
+    every 5 s for its whole life, next to the 300 s sync timer."""
+    import inspect
+    from pm_core.tui.app import ProjectManagerApp
+    src = inspect.getsource(ProjectManagerApp)
+    assert "self.set_interval(5, self._idle_qa_resume_scan)" in src
+
+
+def test_run_qa_sync_writes_the_run_record():
+    """Wiring (textual-assertion fallback): every launched run records its
+    session and start right after its QA workdir exists."""
+    import inspect
+    src = inspect.getsource(qa_loop.run_qa_sync)
+    assert src.index("write_run_record(state)") > src.index(
+        "state.qa_workdir = str(qa_wd)")
