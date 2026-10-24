@@ -29042,11 +29042,38 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T09:20:01.185973+00:00'
-  updated_at: '2026-10-13T09:20:01.185973+00:00'
+  updated_at: '2026-10-24T21:05:05.327763+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f9e58cb
+    text: 'Scenario 4 (interactive-fallback interrupt) concretizer notes: (1) run
+      `pm meta` from a pane in a tmux session whose name does NOT start with pm- (e.g.
+      tmux new-session -d -s meta-int-driver), with no pm session for the test cwd
+      running — if the driver session is itself named pm-*, _get_pm_session() resolves
+      to it and pm meta opens a tmux meta window instead of the interactive fallback.
+      (2) Set a fake-claude config {"_all": {}} for the test dir tag first (pm fake-claude
+      config set from the test cwd) — meta is a valid fake session type, and with
+      no verdicts the fake stays open like real claude, giving something to interrupt;
+      also creates ~/.pm/sessions/<tag>/ and reveals the tag. (3) The meta workdir
+      is cloned from the public GitHub repo, whose master is c98fa96e (pre-fix) —
+      that is expected: the trap under test is built by the launching pm (PYTHONPATH=/workspace
+      clone), not by the workdir copy. (4) pm meta exits 1 with "Claude CLI not found"
+      without setting the override if claude is not on PATH in the pane.'
+    created_at: '2026-10-24T20:59:23Z'
+    last_edited: '2026-10-24T20:59:23Z'
+  - id: note-5025c33
+    text: 'QA scenario 4 (interactive-fallback interrupt): trap cleanup itself passed
+      on the first run against 79205aa9/40f27fa9 (override removed, session dir preserved,
+      no hang), but the interrupt was not reflected in the exit status: click 8.5
+      turns the KeyboardInterrupt in the meta.py:207 subprocess.run fallback into
+      Abort — "Aborted!", exit 1, scenario Then expects 130. Fixed in commit 0b3f34b9
+      (qa: catch KeyboardInterrupt, exit 128+2); re-ran the full scenario against
+      the fix and every Then held (pm-meta-exit:130, override removed, debug+fake-claude
+      config preserved, pm which back to /workspace/pm_core). Evidence /pm-captures/scenarios/4/{pre-fix,post-fix}/.'
+    created_at: '2026-10-24T21:05:05Z'
+    last_edited: '2026-10-24T21:05:05Z'
 - id: pr-19990de
   plan: bugs
   title: 'Bug: vanilla/GitHub merge propagation still resolves in the project root
