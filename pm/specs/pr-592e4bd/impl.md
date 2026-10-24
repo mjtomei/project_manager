@@ -462,3 +462,53 @@ recorded with item 29.
     Full suite 3549 passed on the d809b358 tree (code-identical to ec227cf0 after the rebase onto ee423ea9) (env -u PM_HOST_HOME,
     /usr/bin first; `/pm-captures/scenarios/41/tests/full-suite.log`).
     Evidence: `/pm-captures/scenarios/41` (REPORT.md).
+31. Two-clone resume edge cases (S43; QA17 open points (a) and (b)). Found
+    live; all need normal independent re-review (a817f5c9, b8c111eb).
+    (a) *Idle TUI adopted only at the 300 s sync.* The resume scan runs on
+        the shared poll timer, which a TUI with no running loop and no
+        active PR with a workdir in its cached data stops. Another
+        clone's orphaned run whose PR arrived by a pull waited for the
+        background sync (53 s after the pull live; up to 300 s). An
+        always-on 5 s timer (`_idle_qa_resume_scan`) scans while the poll
+        timer is off; a scan failure is logged, never raised.
+    (b) *Run resumed without its QA window finalized nowhere.* When the
+        session holding a run is gone (the TUI's own session killed and
+        restarted, or another clone's whole session gone), no `qa-<pr>`
+        window is left and `_run_qa_finalize_pane` returned None:
+        `PASS (finalize=None)`, also in the single-clone control, so
+        pre-existing. The finalizer now opens the window in the driving
+        session ("QA finalize: no qa-<pr> window in <session> — opening
+        one").
+    (c) *Runs of one PR from two clones superseded or adopted each other.*
+        The scan ordered all snapshots of a PR together and dropped the
+        older ones on liveness, and adopted the other clone's run once its
+        own run finished. Now runs supersede only within one session, only
+        this session's are dropped, and another clone's run is not adopted
+        while this clone QA'd the PR alongside it. "Alongside" uses a run
+        record kept in each QA workdir (`qa_run.json`: session_tag,
+        started_at, written once at launch): an own run that is resumable,
+        or whose status file was last written after the other run started,
+        overlaps it (`run_overlaps_own_run`). So the guard survives a TUI
+        restart, not only in memory. Intended adoption semantics: a PR
+        that reached QA here only by a pull or an edit (S41), or another
+        clone's run that started after this clone's own QA of the PR was
+        over, is adopted; runs without a record (older) overlap nothing.
+    (d) *Relaunched pane persisted only at the next tick.* One tick
+        relaunches dead scenarios one after another, each after its retry
+        backoff (5 s, doubling), and the snapshot was rewritten at the top
+        of the next tick, so the dead pane id stayed on disk for 10 s or
+        more (minutes on later retries). A TUI death then made the resume
+        relaunch again beside the surviving worker. The snapshot is now
+        written right after each successful relaunch.
+    Regressions (each fails with its fix reverted;
+    `/pm-captures/scenarios/43/tests/mutation-checks.log`):
+    `test_idle_tui_keeps_scanning_for_resumable_runs`,
+    `test_idle_resume_scan_is_scheduled_at_mount`,
+    `test_run_qa_finalize_pane_opens_the_qa_window_when_it_is_gone`,
+    `test_another_clones_run_of_the_same_pr_is_neither_dropped_nor_adopted`,
+    `test_restarted_tui_adopts_another_clones_run_only_after_its_own_qa`
+    (fresh app, retained records), `test_run_qa_sync_writes_the_run_record`,
+    `test_relaunched_pane_is_persisted_before_the_next_tick`.
+    Not fixed here: an existing PR's tree box stays at its old status
+    after a pull until a later reload (32 s live in S43); S42 owns that
+    fix. Evidence: `/pm-captures/scenarios/43` (REPORT.md).
