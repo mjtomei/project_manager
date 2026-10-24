@@ -193,9 +193,9 @@ config unchanged, passed on the final implementation 75f0dde6
 (`/pm-captures/host-work-route-smoke-20261022T190834Z/`: slirp4netns
 container; host + container `…190309Z/`). After 81cebf17 it passed on the
 host from an underscore cwd and in a container
-(`…195845Z/result.json`). Live QA S1–S44 is in
+(`…195845Z/result.json`). Live QA S1–S46 is in
 `/pm-captures/scenarios/<N>/` (REPORT.md). The latest full suite is
-recorded with item 32.
+recorded with item 33(d).
 
 **Rules fixed during validation (index).** Commits in parentheses.
 - Live smokes 1–4. The bridge stream has no timeout after connect
@@ -592,7 +592,7 @@ recorded with item 32.
     (c) e52e8fac: the empty tree names the reason
         (`TechTree.update_prs(unavailable=)`), not Textual's
         "TechTree#tech-tree" placeholder.
-    `tests/test_qa_completion_unloadable.py` (13; the 7 file-state tests
+    `tests/test_qa_completion_unloadable.py` (13, plus (d)'s 2; the 7 file-state tests
     fail on 4d8f968a, the 5 race tests on a9b966ec).  Planning-phase
     guards are S45's (e11b952a, 8400faf7, 0454edaf).  Full suite 3610
     passed on e52e8fac (`/pm-captures/scenarios/46/tests`).  Spec notes:
@@ -612,7 +612,9 @@ recorded with item 32.
         message keeps the log line.
         `test_restart_while_a_follow_up_is_pending_records_no_second_note`
         (fails with no guard and with an exact-text guard),
-        `test_qa_notes_of_different_runs_are_all_recorded`.
+        `test_qa_notes_of_different_runs_are_all_recorded`.  Full suite
+        3624 passed on ba5dd6e7 (`/pm-captures/review-7026-i1`), again in
+        review loop 7026 i2 (`/pm-captures/review-7026-i2`).
 34. (S45, RQ37 one clone, every QA phase) Live on 4d8f968a, a run in
     planning died "QA thread crashed" 9 s after a conflicting pull (the
     mid-planning merge guard's `store.load`), and a review PASS during the
