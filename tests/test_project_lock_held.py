@@ -21,6 +21,8 @@ import time
 from contextlib import contextmanager
 from unittest.mock import patch
 
+import pytest
+
 from pm_core import store
 from pm_core.qa_loop import VERDICT_NEEDS_WORK, VERDICT_PASS
 from tests.test_qa_completion_unloadable import (
@@ -183,6 +185,10 @@ def test_start_signoff_waits_for_a_held_lock(tmp_path):
         signoff_ui.start_signoff(app, "pr-001", lock_timeout=store.NO_WAIT)
     assert _pr(app._root)["status"] == "sign_off"
     step.assert_called_once()
+    # Said once per wait, so it is forced and held past a sticky line (S50).
+    wait_call = next(c for c in app.log_message.call_args_list
+                     if "waits for project.yaml" in c.args[0])
+    assert wait_call.kwargs == signoff_ui._SHOWN
 
 
 def test_later_sign_off_wait_of_the_same_pr_is_said_again(tmp_path):
@@ -380,3 +386,72 @@ def test_review_hand_off_wait_line_is_not_hidden_by_the_done_line(tmp_path):
              if "waiting for project.yaml to be unlocked" in c.args[0]]
     assert len(calls) == 1
     assert calls[0].kwargs.get("sticky", 0) > 0 or calls[0].kwargs.get("force")
+
+
+def _painting(app):
+    """Route ``app.log_message`` through the TUI's real log-line logic.
+
+    Returns the painted lines and a function that ends the current hold
+    (as its timer would)."""
+    from types import SimpleNamespace
+    from pm_core.tui.app import ProjectManagerApp
+    shown, timers = [], []
+    app._log_sticky_until = app._log_hold_until = 0.0
+    app._log_held = app._log_held_queue = None
+    app._log_seq = app._log_shown_seq = 0
+    app._last_logged_message = None
+    app.query_one = lambda *a, **k: SimpleNamespace(update=shown.append)
+    app.call_after_refresh = lambda *a, **k: None
+    app.set_timer = lambda delay, cb: timers.append(cb)
+    app.log_message = lambda msg, **kw: ProjectManagerApp.log_message(
+        app, msg, **kw)
+    app._flush_held_log_message = (
+        lambda: ProjectManagerApp._flush_held_log_message(app))
+
+    def end_hold():
+        app._log_hold_until = 0.0
+        cbs = timers[:]
+        timers.clear()
+        for cb in cbs:
+            cb()
+    return shown, end_hold
+
+
+@pytest.mark.parametrize("held", [False, True], ids=["free", "held_past_wait"])
+def test_skip_qa_hand_off_lines_are_painted_after_the_review_done_line(
+        tmp_path, held):
+    """S50: under skip_qa the review PASS hands off in the same frame as the
+    sticky "Review loop done … PASS" line, which dropped the hand-off lines
+    unseen (the pm log had them only as "(hidden by sticky message)").  The
+    "skipping QA" line and then its outcome ("→ sign-off", or the one-shot
+    wait's "Error:") are each painted, in that order."""
+    from contextlib import nullcontext
+    from pm_core.tui import auto_start, review_loop_ui, signoff_ui
+    app = _make_app(tmp_path)
+
+    def skip_qa(d):
+        d["project"]["skip_qa"] = True
+        store.get_pr(d, "pr-001")["status"] = "in_review"
+    store.locked_update(app._root, skip_qa)
+    app._data = store.load(app._root)
+    shown, end_hold = _painting(app)
+    app.log_message("Review loop done for pr-001: ✓ PASS (1 iteration)",
+                    sticky=10)
+    with patch.object(auto_start, "is_enabled", return_value=True), \
+            patch.object(auto_start, "in_scope", return_value=True), \
+            patch.object(signoff_ui, "_driven", return_value=True), \
+            patch.object(signoff_ui, "step"), \
+            (_held(app._root) if held else nullcontext()):
+        review_loop_ui._start_qa_after_review(app, "pr-001")
+    # The outcome waits behind the "skipping QA" line's hold instead of
+    # replacing it in the same frame.
+    assert shown[-1] == (
+        " Auto-start: pr-001 review passed, skipping QA (skip_qa enabled)")
+    end_hold()
+    end_hold()
+    outcome = "Error: Could not acquire lock" if held else "pr-001 → sign-off"
+    assert [s for s in shown if "pr-001" in s or "Error:" in s] == [
+        " Review loop done for pr-001: ✓ PASS (1 iteration)",
+        " Auto-start: pr-001 review passed, skipping QA (skip_qa enabled)",
+        next(s for s in shown if outcome in s)]
+    assert _pr(app._root)["status"] == ("in_review" if held else "sign_off")

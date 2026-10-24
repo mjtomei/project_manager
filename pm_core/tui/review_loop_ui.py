@@ -633,7 +633,12 @@ def _maybe_start_qa(app, pr_id: str) -> tuple | None:
     project = (app._data or {}).get("project") or {}
     if project.get("skip_qa"):
         _log.info("auto_qa: skip_qa enabled, skipping QA for %s", pr_id)
-        app.log_message(f"Auto-start: {pr_id} review passed, skipping QA (skip_qa enabled)")
+        # Held and forced: the sticky "Review loop done … PASS" line logged
+        # just before would drop it unseen, and the hand-off's outcome line
+        # ("→ sign-off" or an "Error:") follows in the same frame (S50).
+        app.log_message(
+            f"Auto-start: {pr_id} review passed, skipping QA (skip_qa enabled)",
+            force=True, hold=_auto_start.CONFIRM_HOLD_SECONDS)
         _maybe_auto_merge(app, pr_id)
         return
 

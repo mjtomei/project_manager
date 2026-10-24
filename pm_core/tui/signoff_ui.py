@@ -15,8 +15,15 @@ manual ``i`` key (``pr_view.signoff_pr``) stays recommendation-only.
 
 from pm_core.paths import configure_logger
 from pm_core import store
+from pm_core.tui.auto_start import CONFIRM_HOLD_SECONDS
 
 _log = configure_logger("pm.tui.signoff_ui")
+
+# Hand-off outcome lines ("→ sign-off", a lock "waits" or "Error:") are
+# forced and held like auto-start's other confirmations: under skip_qa they
+# follow the sticky "Review loop done … PASS" line in the same frame, which
+# dropped them unseen (S50).  The hold queues them behind the line before.
+_SHOWN = {"force": True, "hold": CONFIRM_HOLD_SECONDS}
 
 
 def _driven(app, pr_id: str) -> bool:
@@ -107,10 +114,10 @@ def start_signoff(app, pr_id: str,
                              "lock", pr_id)
                 app.log_message(
                     f"Sign-off for {pr_id} waits for project.yaml to be "
-                    f"unlocked: {store.LOCK_BUSY_REASON}")
+                    f"unlocked: {store.LOCK_BUSY_REASON}", **_SHOWN)
             return False
         waiting.discard(pr_id)
-        app.log_message(f"Error: {e}")
+        app.log_message(f"Error: {e}", **_SHOWN)
         _log.warning("start_signoff: StoreLockTimeout for %s: %s", pr_id, e)
         return False
     except store.ProjectYamlParseError as e:
@@ -123,7 +130,7 @@ def start_signoff(app, pr_id: str,
         _log.info("start_signoff: %s %s -> sign_off", pr_id, moved["from"])
         _launched_at(app).pop(pr_id, None)
         _reload(app)
-        app.log_message(f"Auto-start: {pr_id} → sign-off")
+        app.log_message(f"Auto-start: {pr_id} → sign-off", **_SHOWN)
     step(app, pr_id)
 
 
