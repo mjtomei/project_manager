@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2a44020
+  active_pr: pr-235f465
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -33518,6 +33518,31 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-24T02:38:29.173294+00:00'
   updated_at: '2026-10-24T02:38:29.173294+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-235f465
+  plan: bugs
+  title: 'Bug: pm tui restart -s <session> prints a TmuxCommandError traceback when
+    that session is gone'
+  branch: pm/pr-235f465-bug-pm-tui-restart-s-session-prints-a-tmuxcommande
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/tui.py tui_restart: _find_tui_pane(session) returns the
+    pane recorded for a pm session whose tmux session no longer exists (seen in QA
+    S46 on pr-592e4bd: B session pm-b-* killed with tmux kill-session; ~/.pm/tui-<session>.pid
+    left behind), and tmux_mod.send_keys_literal(pane, "C-r") raises pm_core.tmux.TmuxCommandError
+    "tmux: can not find pane: %72" as a raw Python traceback, rc 1. Expected: "Error:
+    no TUI pane for session <s> (is the pm session running?)" and rc 1, like the "No
+    TUI pane found" branch. Repro: pm session in a project; tmux kill-session -t =<pm
+    session> and its ~1; pm tui restart -s <pm session>. Evidence /pm-captures/scenarios/46
+    (pre-fix/story3, B session killed; restart attempt at 03:51).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-24T04:01:32.540503+00:00'
+  updated_at: '2026-10-24T04:01:32.540503+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
