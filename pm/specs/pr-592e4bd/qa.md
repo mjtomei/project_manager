@@ -511,6 +511,48 @@ env-by-name).
   the PR stays `qa` with no note, and nothing retries. That was already
   true on master for conflict markers. Before c1d4 it was a TUI exit for
   invalid plans. The scenarios decide, with a pre-existing control.
+  Decided live (S45/S46, fixes e11b952a … 195889a5, a9b966ec, 54c88ad8,
+  e52e8fac; impl.md items 33, 34). Clarifications from those runs:
+  the "QA resume scan skipped …" line appears only when the scan has an
+  untracked snapshot to look at (an orphan), and once per file state
+  *per TUI process*; a run already driven in memory reports the failure
+  through its completion wait ("result kept until project.yaml loads
+  again: …") instead. Release to "QA complete" takes ~90 s in the
+  S41–S46 harness (worker idle ~60 s + fake finalizer), so a failure
+  window meant to span a completion must outlast that.
+  *One note per run across restarts* (review loop 7026 i1, ba5dd6e7,
+  impl.md item 33(d)): once the transition and note are written, a
+  follow-up that then fails (sign-off hand-off, `zz t` restart, review
+  loop start, tree reload) keeps the snapshot for its retry. A TUI
+  restart in that gap recovers the run once more; the restarted TUI must
+  not write a second note for it (`_record_qa_note` skips a note with
+  the same verdict that ends in this run's `(workdir: …)`; pm log "QA
+  note for <pr> already recorded"), and the remaining follow-up is
+  applied once. Distinct runs, including consecutive `zz t` passes with
+  the same verdict, each keep their own note. A TUI started on an
+  unloadable file clears only its own "project.yaml cannot be loaded"
+  line when the file loads: a newer message on the log line is not
+  blanked. Self-driving `zz t` state is TUI memory (documented
+  limitation in `_resume_incomplete_qa`), so after a restart a recovered
+  `zz t` pass is processed like a plain `t` run.
+- **RQ38** Given a TUI driving routed QA, When another pm process holds
+  the project lock for a long time (the user has `pm edit` open, which
+  holds it "until you quit") while a run finishes, a follow-up is
+  pending, or a review → QA hand-off waits, Then (QA19 planner decision,
+  2026-10-24, same principle as RQ37) no result is lost: the transition,
+  the one note and the follow-ups are applied once after the editor
+  quits, and the snapshot stays until then. The TUI stays usable while
+  it waits: its tree, spinners and keys keep responding (every TUI write
+  waits up to `LOCK_TIMEOUT_SECONDS` = 2 s for the lock, and those
+  writes run on the TUI's poll timer, so a retry on every 1 s tick could
+  keep it busy). The pm log does not repeat a lock warning on every
+  tick. Code reading (QA19 planner): `_transition_pr_status`,
+  `_record_qa_note`, `start_signoff` and the pending hand-off treat
+  `StoreLockTimeout` like a load failure and are retried on each poll
+  tick, while `_completion_waits_for_project` checks only that the file
+  loads, so each tick may block for 2 s. On master the same completion
+  blocked once and lost its note. The scenarios decide, with a
+  pre-existing control.
 
 ## 2. Setup
 
@@ -740,6 +782,44 @@ env-by-name).
     Planners need to be slow enough for the failure to land during
     planning: a fake planner with a delay, or real Claude on the main
     stub with a hold. Same scratch-only limits as the fourteenth pass.
+  - Nineteenth pass (S47+), delta-only. S45/S46 ran live, fixed the
+    RQ37 bugs and replayed every story post-fix (REPORT.md in
+    `/pm-captures/scenarios/45`, `46`; full suite 3622 passed). Their
+    evidence stands and is not rerun. Product delta since then:
+    ba5dd6e7 (review loop 7026 i1; i2/i3 PASS, suite 3624): one QA note
+    per run when a TUI restart re-processes a completion whose follow-up
+    was pending, and the load-error line cleared by its arrival number.
+    Neither has run live. Live checks needed, host mode, scratch TUI,
+    S45/S46 harness:
+    - The gap itself: transition and note written, follow-up pending,
+      snapshot kept, TUI killed -9 and restarted. Only the sign-off
+      hand-off waits on the project lock (`start_signoff`'s
+      `locked_update`), so a helper that takes the lock the instant the
+      note lands, and leaves the file unloadable before releasing it,
+      reaches the gap reliably. `start_qa` / review start / tree reload
+      only `store.load`, so the gap there is a sub-millisecond race:
+      attempt it with a bounded budget, report attempts, and count it
+      only if the pm log proves the follow-up failed after the note.
+      A pre-fix control on 5de77fe7 (ba5dd6e7^) must show the second
+      note, so the story discriminates.
+    - Distinct runs keep their notes (consecutive `zz t` PASS passes,
+      a `z t` rerun, a run resumed mid-execution, a result recorded
+      while the TUI was down), on two PRs at once.
+    - Two clones: an adopted run in that gap when the adopting TUI dies
+      and the launching clone restarts first. The kept snapshot names
+      the launching session, whose project.yaml lacks the adopter's
+      note, so the run may be recorded in both clones. The scenario
+      decides.
+    - RQ38 (`pm edit` held open) against a pre-existing control.
+    - The load-error line: a TUI restarted on an unloadable file, its
+      reason changing, a newer message after the 30 s sticky window,
+      then the file loading, against a pre-fix control.
+    Harness: copy `/pm-captures/scenarios/45/scripts` (one clone) or
+    `/46/scripts` (two clones) and change S, ports and paths. Render
+    with this branch's `/workspace/pm/qa/artifacts` `render_cast` (VFR,
+    `-nostdin`), stop every recorder and wait until its cast stops
+    growing before rendering, and never use `/scratch/qa-artifacts`.
+    Same scratch-only limits as the fourteenth pass.
 
 ## 3. Edge cases
 
