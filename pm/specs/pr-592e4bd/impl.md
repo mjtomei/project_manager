@@ -193,9 +193,9 @@ config unchanged, passed on the final implementation 75f0dde6
 (`/pm-captures/host-work-route-smoke-20261022T190834Z/`: slirp4netns
 container; host + container `…190309Z/`). After 81cebf17 it passed on the
 host from an underscore cwd and in a container
-(`…195845Z/result.json`). Live QA S1–S39 is in
+(`…195845Z/result.json`). Live QA S1–S44 is in
 `/pm-captures/scenarios/<N>/` (REPORT.md). The latest full suite is
-recorded with item 29.
+recorded with item 32.
 
 **Rules fixed during validation (index).** Commits in parentheses.
 - Live smokes 1–4. The bridge stream has no timeout after connect
@@ -515,3 +515,40 @@ recorded with item 29.
     which landed before the S43 commits were rebased onto it; S43 did not
     rerun live on the merged tree. Evidence: `/pm-captures/scenarios/43`
     (REPORT.md).
+
+### S44 follow-ups (QA scenario 44: unloadable project.yaml)
+32. A TUI with live routed QA must survive project.yaml becoming
+    unloadable in any way a pull, merge or checkout can leave it. Found
+    live in S44 (deb23fea, a4a45ffa, 67ea18e8); each regression fails with
+    its fix reverted.
+    (a) *Plans that do not validate killed the TUI at the 300 s sync.*
+        A clean merge can leave a file that parses but whose plan parent
+        does not exist. `background_sync` and `_load_state` caught only
+        `ProjectYamlParseError`, so `PlanValidationError` escaped the
+        timer (item 30(c) covered only the resume scan). Both now keep
+        the previous state.
+    (b) *A briefly missing project.yaml dropped the project root.* A
+        sync or reload while a checkout had unlinked the file set
+        `app._root = None`, so the resume scan stopped (an orphan was
+        adopted 4 min 55 s late). The root and state are kept while the
+        pm dir exists.
+    (c) *A fresh TUI never logged the missing-file scan skip* (the
+        missing file's `None` stamp equalled the default); a sentinel.
+    (d) Review loop c1d4 i1: about 40 other TUI handlers that keep their
+        state on an unloadable file also caught only
+        `ProjectYamlParseError`, e.g. the QA NEEDS_WORK completion reload,
+        so a run finishing while plans did not validate still raised out
+        of the poll timer (reproduced). `PlanValidationError` is now a
+        subclass of `ProjectYamlParseError`, so every such handler (and
+        the CLI's `Error:` exit) covers both, and the explicit tuples from
+        (a) are folded back.
+        `tests/test_store.py::test_invalid_plans_are_an_unloadable_file`,
+        `tests/test_qa_self_driving.py::test_needs_work_survives_plans_that_do_not_validate`;
+        with the subclass reverted these and the (a)/item 30(c)
+        regressions fail (5 tests).
+    Not fixed here: a TUI never resumes a later orphaned run of a PR it
+    already resumed or dropped once (`_resumed_qa_pr_ids` is never
+    cleared; pre-existing, filed pr-43b14d2).
+    Full suite 3575 passed on the c1d4 i1 tree (env -u PM_HOST_HOME, /usr/bin first;
+    `/pm-captures/review-c1d4-i1/full-suite.log`). Evidence:
+    `/pm-captures/scenarios/44` (REPORT.md).

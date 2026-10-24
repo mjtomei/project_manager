@@ -68,8 +68,13 @@ class ProjectYamlParseError(Exception):
     """Raised when project.yaml cannot be parsed (e.g. mid-edit or merge conflict)."""
 
 
-class PlanValidationError(Exception):
-    """Raised when plan entries have invalid references (e.g. bad parent ID, cycles)."""
+class PlanValidationError(ProjectYamlParseError):
+    """Raised when plan entries have invalid references (e.g. bad parent ID, cycles).
+
+    A ProjectYamlParseError: a clean merge or pull can leave such a file just
+    as it can leave conflict markers, and every caller that keeps its previous
+    state on an unloadable file must survive both (S44: the TUI exited).
+    """
 
 
 VALID_PLAN_STATUSES = {"draft", "active", "done"}

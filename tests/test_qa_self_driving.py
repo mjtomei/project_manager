@@ -254,6 +254,28 @@ class TestNeedsWorkStrict:
 
         assert seen == ["in_review"]
 
+    def test_needs_work_survives_plans_that_do_not_validate(self, tmp_path):
+        """A merge or pull can leave plans that do not validate while QA
+        runs; the completion reload keeps the previous data instead of
+        raising PlanValidationError out of the poll timer, which would kill
+        the TUI and every QA loop it drives (S44 class)."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = _make_app(tmp_path, auto_start=False)
+        data = store.load(app._root)
+        data["plans"] = [{"id": "plan-child", "name": "c",
+                          "parent": "plan-base"}]
+        store.save(data, app._root)
+        before = app._data
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.auto_start.is_enabled", return_value=False):
+            _on_qa_complete(app, state)
+
+        assert app._data is before
+
     def test_needs_work_message_holds_the_log_line(self, tmp_path):
         """The NEEDS_WORK line is held and forced against the self-driving
         review loop's sticky "Review loop started" in the same frame, so it

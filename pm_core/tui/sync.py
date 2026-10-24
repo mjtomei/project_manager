@@ -72,10 +72,11 @@ async def background_sync(app) -> None:
             return
         app._root = None
         app._data = {}
-    except (store.ProjectYamlParseError, store.PlanValidationError) as e:
-        # A merge can leave a file that parses but whose plans do not
-        # validate; like a conflicted file it must not escape this timer,
-        # which would kill the TUI and every QA loop it drives (S44).
+    except store.ProjectYamlParseError as e:
+        # Also a merge that leaves plans that do not validate
+        # (PlanValidationError): like a conflicted file it must not escape
+        # this timer, which would kill the TUI and every QA loop it drives
+        # (S44).
         _log.warning("Skipping sync: %s", e)
         return
     else:

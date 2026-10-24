@@ -134,6 +134,17 @@ class TestPlanParentInvalid:
         with pytest.raises(store.PlanValidationError, match="non-existent parent"):
             store.load(tmp_pm_root)
 
+    def test_invalid_plans_are_an_unloadable_file(self, tmp_pm_root):
+        """Callers that keep their state on an unloadable project.yaml catch
+        ProjectYamlParseError; plans that do not validate must be caught
+        there too (S44: one escaping a TUI timer kills the TUI)."""
+        _write_yaml(tmp_pm_root,
+            "project:\n  name: test\nplans:\n"
+            "  - id: plan-001\n    name: A\n    file: a.md\n    status: draft\n    parent: plan-999\n"
+        )
+        with pytest.raises(store.ProjectYamlParseError, match="non-existent parent"):
+            store.load(tmp_pm_root)
+
     def test_invalid_parent_skipped_when_validate_false(self, tmp_pm_root):
         _write_yaml(tmp_pm_root,
             "project:\n  name: test\nplans:\n"

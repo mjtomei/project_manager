@@ -532,8 +532,7 @@ def _resume_incomplete_qa(app) -> None:
         # rewriting it.  Retry on the next scan.
         try:
             return store.load(app._root)
-        except (store.ProjectYamlParseError, store.PlanValidationError,
-                OSError) as e:
+        except (store.ProjectYamlParseError, OSError) as e:
             # A missing file has no stamp (None): compare against a
             # sentinel, or a fresh TUI never logs that skip (S44).
             if getattr(app, "_resume_parse_error_stamp", _NO_STAMP) != stamp:

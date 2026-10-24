@@ -22398,7 +22398,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-23T18:33:51.145724+00:00'
+  updated_at: '2026-10-24T00:14:43.598248+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22428,6 +22428,16 @@ prs:
       (measure_prompts.py, sizes-*.txt).'
     created_at: '2026-10-23T18:33:51Z'
     last_edited: '2026-10-23T18:33:51Z'
+  - id: note-62c9b82
+    text: 'Evidence from pr-592e4bd review 5e15 i1 (head 59d15fea, production builders,
+      host-only notes merged; /pm-captures/review-5e15-i1/sizes-before.txt): the review
+      prompt is over MAX_ARG_STRLEN (131101 B measured, 131236 B actual), and so are
+      sign-off (144070 B) and the QA planner (143767 B). The next sign-off launch
+      will hit E2BIG too. PR notes are ~83.5 KB of each prompt (101 notes), so archiving
+      the spec cannot bring sign-off or the planner under the limit. A notes bound
+      is needed.'
+    created_at: '2026-10-24T00:14:43Z'
+    last_edited: '2026-10-24T00:14:43Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
@@ -31610,7 +31620,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T02:26:45.533969+00:00'
+  updated_at: '2026-10-24T02:41:55.272954+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32775,6 +32785,55 @@ prs:
       3 attempt 1 is kept as invalid (the A TUI died from the harness-committed conflict).'
     created_at: '2026-10-23T23:44:16Z'
     last_edited: '2026-10-23T23:44:16Z'
+  - id: note-a722e58
+    text: 'Review 2b8a i1 (db1eb982, CODE CHANGE, small, needs normal re-review):
+      S41 f22e6f4c (snapshot session), c8ab2f4c (parse-error deferral), ec227cf0 (flock
+      claim) reviewed and sound; _load_state from the scan cannot re-enter it (on_state_loaded
+      only schedules an async worker). Gap fixed: the scan guard caught only ProjectYamlParseError,
+      but store.load also raises PlanValidationError (a pulled plan parent that does
+      not validate) and FileNotFoundError (checkout unlinks then rewrites), which
+      escaped the poll tick the same way. Now skipped and retried. Regression test_unloadable_project_file_does_not_escape_the_scan[missing|bad_plan_parent],
+      both fail reverted. Full suite 3551 passed (env -u PM_HOST_HOME, scratch venv
+      PYTHONPATH=/workspace); tail in /pm-captures/review-2b8a-i1.'
+    created_at: '2026-10-23T23:53:22Z'
+    last_edited: '2026-10-23T23:53:22Z'
+  - id: note-d63d41c
+    text: 'Review 2b8a i2 (59d15fea, CODE CHANGE, small, needs normal re-review):
+      db1eb982 (scan survives PlanValidationError/OSError) is sound. Gap fixed: the
+      resume scan "left QA" cleanup deleted the snapshot of a run launched from another
+      clone when this clone project.yaml still had the PR at an older status, so that
+      clone restart had nothing to resume (S39 loss between clones). Cleanup now applies
+      only to runs launched from this TUI pm session (snapshot session_tag); provenance
+      decides, not liveness: a foreign run is kept (until project.yaml changes) even
+      when its session is gone, and after a pull to qa it is adopted and driven in
+      its session or, if gone, this TUI one (qa_loop.launched_elsewhere, _resume_session).
+      Cost: a foreign snapshot whose PR really left QA stays until its clone drops
+      it. Regressions test_stale_status_keeps_another_clones_snapshot[live|gone] (liveness-only
+      guard fails gone; no guard fails both) and test_stale_status_drops_this_sessions_own_snapshot.
+      Full suite 3554 passed; logs /pm-captures/review-2b8a-i2 (README lists the superseded
+      liveness-guard run and an -x run stopped by missing markdown).'
+    created_at: '2026-10-24T00:04:18Z'
+    last_edited: '2026-10-24T00:04:18Z'
+  - id: note-ac6e235
+    text: 'Review 5e15 i1 (59d15fea): PASS, no code change. The stale-status guard
+      (launched_elsewhere) is sound and the mutation is caught; related tests 395
+      passed. /pm-captures/review-5e15-i1. Prompt-size evidence went to pr-ace66e5
+      (note-62c9b82).'
+    created_at: '2026-10-24T00:14:52Z'
+    last_edited: '2026-10-24T00:14:52Z'
+  - id: note-033c97b
+    text: 'QA17 planner (2026-10-24): spec 2bcae5f6 adds a seventeenth pass (S42+),
+      delta-only, for db1eb982 (scan survives any project.yaml load failure) and 59d15fea
+      (another clone snapshot kept while this clone status is stale); neither has
+      run live. Two open points from code reading, which the scenarios decide: (a)
+      once B session is gone, A drives the adopted run in its own session, which has
+      no qa-<pr> window, so an all-PASS run may end finalize=None; the snapshot also
+      keeps B session_tag. (b) The superseded-snapshot drop still decides on liveness,
+      so a PR QAd in both clones can lose B older run once B TUI dies. Harness: S41
+      scripts, with recordings rendered by the current /workspace/pm/qa/artifacts
+      render_cast (VFR), not the S41 render_cast.sh or /scratch/qa-artifacts.'
+    created_at: '2026-10-24T00:23:14Z'
+    last_edited: '2026-10-24T00:23:14Z'
   - id: note-81d5495
     text: 'QA S42 (2026-10-24, two clones, host; captures /pm-captures/scenarios/42,
       REPORT.md). CODE CHANGE bb39b92e needs normal re-review and reconciliation with
@@ -32832,6 +32891,19 @@ prs:
       0 secrets.'
     created_at: '2026-10-24T02:26:45Z'
     last_edited: '2026-10-24T02:26:45Z'
+  - id: note-6a7402d
+    text: 'Review c1d4 i1 (CODE CHANGE, small, needs normal re-review): S42 bb39b92e,
+      S43 af2278e5/e0f74e2b and S44 deb23fea/a4a45ffa/67ea18e8 reviewed, all sound.
+      Gap fixed: about 40 other TUI keep-state handlers caught only ProjectYamlParseError.
+      Reproduced: a QA NEEDS_WORK completion while plans did not validate raised PlanValidationError
+      out of the poll timer, which kills the TUI. PlanValidationError now subclasses
+      ProjectYamlParseError, and the S44 tuples are folded back. Regressions test_invalid_plans_are_an_unloadable_file
+      and test_needs_work_survives_plans_that_do_not_validate; 5 tests fail with the
+      subclass reverted. impl.md item 32 now records S44. Filed pr-43b14d2 (pre-existing:
+      _resumed_qa_pr_ids never cleared, so a later orphan of a PR this TUI already
+      handled is not recovered). Full suite 3575 passed; logs in /pm-captures/review-c1d4-i1.'
+    created_at: '2026-10-24T02:41:55Z'
+    last_edited: '2026-10-24T02:41:55Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
@@ -33350,6 +33422,34 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-23T20:53:42.594737+00:00'
   updated_at: '2026-10-23T20:53:42.594737+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-43b14d2
+  plan: bugs
+  title: 'Bug: TUI never recovers a later orphaned QA run of a PR it already resumed
+    or dropped once (_resumed_qa_pr_ids is never cleared)'
+  branch: pm/pr-43b14d2-bug-tui-never-recovers-a-later-orphaned-qa-run-of-
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/qa_loop_ui.py _resume_incomplete_qa adds a PR id to app._resumed_qa_pr_ids
+    when it resumes, recovers or drops a snapshot ("left QA" cleanup), and nothing
+    ever removes it. Every later scan skips that PR for the TUI lifetime. Repro (code
+    reading, found in pr-592e4bd review c1d4 i1): restart the TUI mid-QA of PR X so
+    it resumes the run and finishes it. Later in the same TUI lifetime, X goes through
+    QA again in a process other than this TUI: a pm pr qa-run-bg auto-sequence driver,
+    or another clone whose TUI then dies (S41 cross-clone adoption). Kill that driver
+    mid-run. Its qa_resume.json is left as an orphan, but this TUI never resumes it
+    until the TUI itself restarts. Pre-existing on master for the qa-run-bg case;
+    the S41 cross-clone adoption in pr-592e4bd makes it easier to reach. Possible
+    fix: key the guard on (pr_id, loop_id) or qa_workdir instead of pr_id, so only
+    the snapshot that was handled is skipped.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-24T02:38:29.173294+00:00'
+  updated_at: '2026-10-24T02:38:29.173294+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
