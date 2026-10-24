@@ -200,6 +200,7 @@ async def _launch_quiet(app, pr_id: str, transcript) -> None:
     """
     import asyncio
     import sys
+    from rich.markup import escape
     from pm_core.tui._shell import _run_shell_async
 
     cmd = [sys.executable, "-m", "pm_core.wrapper", "pr", "signoff",
@@ -219,7 +220,8 @@ async def _launch_quiet(app, pr_id: str, transcript) -> None:
             except ProcessLookupError:
                 pass
         _log.exception("signoff_ui: launch failed for %s", pr_id)
-        app.log_message(f"[red]Sign-off launch failed[/] for {pr_id}: {e}")
+        app.log_message(f"[red]Sign-off launch failed[/] for {pr_id}: "
+                        f"{escape(str(e))}")
         return
     finally:
         _inflight(app).discard(pr_id)
@@ -227,8 +229,12 @@ async def _launch_quiet(app, pr_id: str, transcript) -> None:
         err = (stderr.decode(errors="replace") if stderr else "").strip()
         _log.warning("signoff_ui: pm pr signoff %s exit=%s: %s",
                      pr_id, proc.returncode, err[:200])
+        # Text, not markup (as auto_start's failed `pm pr start` line): a
+        # stray "[...]" in the reason would be dropped, and "[/...]" makes
+        # the log line refuse the whole message.
+        reason = err.splitlines()[-1] if err else f"exit {proc.returncode}"
         app.log_message(f"[red]Sign-off launch failed[/] for {pr_id}: "
-                        f"{err.splitlines()[-1] if err else proc.returncode}")
+                        f"{escape(reason)}")
     else:
         _log.info("signoff_ui: pm pr signoff %s launched", pr_id)
     _reload(app)

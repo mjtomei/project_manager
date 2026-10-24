@@ -1050,4 +1050,17 @@ recorded with item 41.
         now also checks that no window opened and the per-PR launch lock
         was released (mutation caught).
         (`/pm-captures/review-e0e8-i8/mutation-checks.log`; full suite
-        `/pm-captures/review-e0e8-i8/full-suite.log`.)
+        `/pm-captures/review-e0e8-i8/full-suite.log`; after i9 3695
+        passed, rc 0, `/pm-captures/review-e0e8-i9/full-suite.log`.)
+    (i) Review loop e0e8 i10: the sign-off driver's failure line
+        (`signoff_ui._launch_quiet`, which (g) made carry the route
+        remedy) put the stderr line or exception text into markup
+        unescaped, unlike (h)'s line.  A "[...]" in it was dropped, and a
+        "[/...]" made the log line refuse the whole message (the
+        `MarkupError` is swallowed, so nothing was shown).  Both are now
+        escaped (pre-existing on master).
+        `test_launch_failure_reason_is_text_not_markup`,
+        `test_launch_exception_is_text_not_markup`; 2 mutations caught
+        (`/pm-captures/review-e0e8-i10/mutation-checks.log`).  Full suite
+        3698 passed, rc 0 (markdown 3.10.3 installed first;
+        `/pm-captures/review-e0e8-i10/full-suite.log`).
