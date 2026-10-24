@@ -296,15 +296,21 @@ def fit_prompt(
     label)``.  The largest blocks are shrunk first, each with a head+tail
     marker naming its *pointer*, until the render fits.
 
-    Blocks are never shrunk below *min_bytes*.  If the static text alone is
-    over the limit this returns the render unchanged — the launcher's
-    file-backed bootstrap then carries the complete prompt, so nothing is
-    lost.
+    Blocks are never shrunk below *min_bytes*.  When no amount of shrinking
+    can bring the prompt under the limit — the static text alone is over it —
+    the *original* render is returned unchanged, because a prompt that cannot
+    fit is delivered by the launcher's file-backed bootstrap anyway, so
+    abbreviating its blocks would only lose detail the session would otherwise
+    have received intact.
     """
     texts = {name: text for name, (text, _pointer, _label) in blocks.items()}
     prompt = render(texts)
     if prompt_bytes(prompt) <= limit:
         return prompt
+    # Keep the untouched render: if the loop below cannot reach the limit, this
+    # is what gets delivered (intact, via the bootstrap) instead of a needlessly
+    # abbreviated one.
+    original = prompt
 
     for name in sorted(blocks, key=lambda n: -prompt_bytes(texts[n])):
         over = prompt_bytes(prompt) - limit
@@ -318,4 +324,6 @@ def fit_prompt(
         texts[name] = bounded_text(texts[name], max_bytes=target,
                                    pointer=pointer, label=label)
         prompt = render(texts)
+    if prompt_bytes(prompt) > limit:
+        return original
     return prompt

@@ -486,6 +486,34 @@ class TestFitPrompt:
         out = fit_prompt(lambda p: p["a"], blocks, limit=2_000)
         assert 1_500 < prompt_bytes(out) <= 2_000
 
+    def test_unfittable_prompt_returns_the_render_unchanged(self):
+        """When shrinking cannot reach the limit, the blocks stay intact.
+
+        Static text alone over the limit means no shrink can fit the prompt,
+        so it will be delivered by the launcher's file-backed bootstrap —
+        abbreviating the blocks would only lose detail the session could have
+        read in full.
+        """
+        from pm_core.prompt_bounds import fit_prompt
+        block = "a" * 4_000
+        blocks = {"a": (block, "`pm a`", "a block")}
+        out = fit_prompt(lambda p: "S" * 10_000 + p["a"], blocks, limit=5_000)
+        assert prompt_bytes(out) > 5_000
+        assert out == "S" * 10_000 + block
+        assert "truncated" not in out
+
+    def test_partial_shrink_still_returns_the_render_unchanged(self):
+        """A shrink that gets closer but still does not fit is discarded."""
+        from pm_core.prompt_bounds import fit_prompt
+        a, b = "a" * 20_000, "b" * 20_000
+        blocks = {"a": (a, "`pm a`", "a block"), "b": (b, "`pm b`", "b block")}
+        out = fit_prompt(lambda p: "S" * 118_000 + p["a"] + p["b"], blocks,
+                         limit=120_000)
+        assert prompt_bytes(out) > 120_000
+        # Both blocks are whole: the abbreviated render would have been closer
+        # to the limit but still over it, so it is not what gets delivered.
+        assert out == "S" * 118_000 + a + b
+
     def test_empty_blocks_are_left_alone(self):
         from pm_core.prompt_bounds import fit_prompt
         blocks = {"a": ("", "`pm a`", "a block"),

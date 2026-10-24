@@ -823,3 +823,52 @@ listings, which this repo's real data never triggers). Full suite failure set
 byte-identical to an `origin/master` worktree baseline in this sandbox
 (54 failed / 17 errors / 3376 passed vs 54 / 17 / 3287 — the delta is this
 PR's new tests). Evidence: `/pm-captures/review-4e41-i9/`.
+
+## 16. Review-loop follow-ups (iteration 10)
+
+Iteration 10 re-ran the i7-i9 method independently — every reachable builder,
+on each dimension (count, item size, single-document size, and the sum of the
+blocks) — with the launcher guard's own path exercised end to end. No builder
+is over `PROMPT_ARG_LIMIT` under realistic maxima, and no unbounded join
+remains: `bug_fix_prompts.py`, `regression_prompts.py`, `qa_authoring.py`,
+`cli/meta.py` and `cli/container.py` contain no collection joins at all, and
+the watcher / discovery / standalone-QA / merge / finalize / verification /
+QA-child / guide builders measured 4-92 KB under maximal inputs.
+
+One defect, in the fallback `fit_prompt` documents but did not implement.
+
+- **`fit_prompt` truncated blocks even when it could not make the prompt
+  fit.** Its docstring (and the i4 test comment) promise that when the static
+  text alone is over the limit the *render is returned unchanged*, because the
+  launcher's file-backed bootstrap carries the complete prompt either way — so
+  nothing is lost. The loop instead shrank every block towards `min_bytes`
+  (2 KB) and returned that render: a prompt of 10,000 B static text + a
+  4,000-byte block came back at 12,000 B (still over the 5,000-byte limit it
+  was tested against) with the block halved and a truncation marker where the
+  text had been. The abbreviation bought nothing — the result was over the
+  limit anyway and is delivered by the bootstrap regardless — so the detail
+  was lost for no reason, which is the failure mode the module exists to
+  avoid. The same happened when the blocks *could* be shrunk but not enough
+  (e.g. 118 KB static + two 20 KB blocks against a 120 KB limit: the loop
+  reached 122 KB and returned that, discarding two blocks to no effect).
+  `fit_prompt` now keeps the untouched render and returns it whenever the loop
+  cannot reach the limit; the shrink path is unchanged for prompts that do
+  fit afterwards, so every real prompt and every budget-coordination test is
+  byte-identical.
+
+Verification: `tests/test_prompt_bounds.py` 92 cases (2 new, both
+failing-then-passing: the unfittable render and the partial-shrink render).
+Real-data builders are unaffected — the fix only changes what is returned when
+the prompt is over the limit, which no real PR produces. Independent sweep of
+every reachable builder with realistic per-item maxima (PATH_MAX paths,
+NAME_MAX basenames, 11 KB descriptions, 200 KB single documents) measured
+max 92 KB (`_build_verification_prompt`) against the 120 KB limit. The
+launcher's bootstrap was exercised end to end again: a 125,011-byte prompt
+arrives as a 203-byte argv, the child reads the complete file, and the file is
+removed after the command. Full suite: 3389 passed / 44 failed / 17 errors, and
+the five environmental files that account for every failure
+(`test_signoff_integration`, `test_merge_publish`, `test_hook_events`, the
+flaky `test_git_ops::test_keeps_unpushed_merge`, `test_popup_session_code`)
+give 43 failed / 84 passed / 17 errors on both this branch and an
+`origin/master` worktree in the same sandbox — identical, and none
+prompt-related. Evidence: `/pm-captures/review-4e41-i10/`.
