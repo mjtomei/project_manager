@@ -31620,7 +31620,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T05:39:53.268773+00:00'
+  updated_at: '2026-10-24T05:53:35.496101+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33007,6 +33007,18 @@ prs:
       t on an in_review PR does not move it to qa.'
     created_at: '2026-10-24T05:39:53Z'
     last_edited: '2026-10-24T05:39:53Z'
+  - id: note-1dfc281
+    text: 'Review 7026 i1 (ba5dd6e7, CODE CHANGE, small, needs normal re-review):
+      S45 e11b952a/8400faf7/0454edaf/be8f23d1/85463cfe/195889a5 and S46 a9b966ec/54c88ad8/e52e8fac
+      reviewed, all sound. Fixed: (1) a completion follow-up that fails after the
+      transition+note writes keeps the snapshot, so a TUI restart in that gap re-processed
+      it and wrote a second QA note (reproduced in a test); _record_qa_note now skips
+      a note this run already has (same verdict + this run workdir). (2) _load_state
+      cleared the sticky "cannot be loaded" line without its seq, which could wipe
+      a newer message. impl.md 33(d) + new item 34 (S45 fixes were unrecorded). Regressions
+      fail reverted; full suite 3624 passed; /pm-captures/review-7026-i1.'
+    created_at: '2026-10-24T05:53:35Z'
+    last_edited: '2026-10-24T05:53:35Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
