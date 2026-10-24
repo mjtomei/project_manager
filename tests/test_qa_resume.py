@@ -157,7 +157,7 @@ def _make_app(tmp_path, *, pr_status="qa"):
     app = MagicMock()
     app._root = pm_dir
     app._qa_loops = {}
-    app._resumed_qa_pr_ids = set()
+    app._resumed_qa_runs = set()
     return app
 
 
@@ -195,7 +195,7 @@ def test_resume_incomplete_respawns_loop(tmp_path):
     resume_bg.assert_called_once()
     on_complete.assert_not_called()
     assert "pr-001" in app._qa_loops
-    assert "pr-001" in app._resumed_qa_pr_ids
+    assert str(qa_dir) in app._resumed_qa_runs
     assert _resume_file_path(qa_dir).is_file()
 
 
@@ -215,7 +215,7 @@ def test_resume_completed_processes_and_clears(tmp_path):
     completed_state = on_complete.call_args[0][1]
     assert completed_state.latest_verdict == VERDICT_NEEDS_WORK
     assert "pr-001" not in app._qa_loops
-    assert "pr-001" in app._resumed_qa_pr_ids
+    assert str(qa_dir) in app._resumed_qa_runs
     assert not _resume_file_path(qa_dir).exists()
 
 
@@ -231,7 +231,7 @@ def test_resume_skips_non_qa_pr(tmp_path):
     resume_bg.assert_not_called()
     on_complete.assert_not_called()
     # Recorded so it isn't rechecked every tick.
-    assert "pr-001" in app._resumed_qa_pr_ids
+    assert str(qa_dir) in app._resumed_qa_runs
     # The PR left QA, so its stale snapshot is dropped from disk.
     assert not _resume_file_path(qa_dir).exists()
 
@@ -259,7 +259,7 @@ def test_resume_skips_run_owned_by_live_process(tmp_path):
         resume_bg.assert_not_called()
         on_complete.assert_not_called()
         assert "pr-001" not in app._qa_loops
-        assert "pr-001" not in app._resumed_qa_pr_ids   # re-checked later
+        assert str(qa_dir) not in app._resumed_qa_runs   # re-checked later
         assert rfile.is_file()
     finally:
         owner.kill()
@@ -383,8 +383,8 @@ def test_resume_skips_already_tracked(tmp_path):
 
 def test_resume_skips_already_recovered(tmp_path):
     app = _make_app(tmp_path)
-    app._resumed_qa_pr_ids.add("pr-001")
-    _seed_run(tmp_path, overall="")
+    qa_dir = _seed_run(tmp_path, overall="")
+    app._resumed_qa_runs.add(str(qa_dir))
 
     with patch("pathlib.Path.home", return_value=tmp_path), \
          patch.object(qa_loop, "resume_qa_background") as resume_bg, \

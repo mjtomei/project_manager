@@ -419,6 +419,10 @@ def qa_run(instruction_id: str, pr_id: str | None):
             click.echo(f"  [{s.latest_verdict or '...'}] {s.latest_output}")
 
     state = qa_loop.run_qa_sync(state, root, pr_data, on_update, max_scenarios=1)
+    # This process saw the run through; its resume snapshot exists only so
+    # a TUI can adopt a run whose driver died, and must not "recover" it.
+    if state.latest_verdict and state.qa_workdir:
+        qa_loop.clear_resume_file(state.qa_workdir)
 
     verdict = state.latest_verdict or "UNKNOWN"
     click.echo(f"\nResult: {verdict}")

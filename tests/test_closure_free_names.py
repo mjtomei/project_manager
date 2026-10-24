@@ -182,59 +182,34 @@ def test_no_unresolved_free_names_in_modified_modules() -> None:
     )
 
 
-def test_container_concretize_uses_container_workdir() -> None:
-    """Direct regression for the original bug: the container-path
-    ``_concretize_and_launch`` must pass ``container_workdir`` (a local of
-    ``_launch_scenarios_in_containers``) into ``_concretize_scenario``, not
-    the ``scenario_cwd`` name that only exists in the tmux-path twin.
+def test_container_concretize_uses_container_workdir(tmp_path) -> None:
+    """Direct regression for the original bug: container-mode scenario
+    launch must poll the refiner with the container's workdir (where its
+    transcript is keyed), not a host-path name that only the tmux path
+    defines.  The host and container launchers now share one body
+    (``_launch_scenarios``), so this drives the container entry point.
     """
-    repo_root = Path(__file__).resolve().parent.parent
-    src = (repo_root / "pm_core" / "qa_loop.py").read_text()
-    tree = ast.parse(src, "pm_core/qa_loop.py")
+    from unittest.mock import patch
+    from pm_core import qa_loop
+    from pm_core import container as container_mod
 
-    container_fn: ast.FunctionDef | None = None
-    for node in ast.walk(tree):
-        if (isinstance(node, ast.FunctionDef)
-                and node.name == "_launch_scenarios_in_containers"):
-            container_fn = node
-            break
-    assert container_fn is not None, (
-        "_launch_scenarios_in_containers not found — test needs updating"
-    )
+    state = qa_loop.QALoopState(pr_id="pr-c")
+    state.qa_workdir = str(tmp_path)
+    scenario = qa_loop.QAScenario(index=1, title="T", focus="f")
+    state.scenarios = [scenario]
+    seen = {}
 
-    # Find the nested _concretize_and_launch and confirm its
-    # _concretize_scenario call site passes scenario_cwd=container_workdir.
-    inner: ast.FunctionDef | None = None
-    for node in ast.walk(container_fn):
-        if (isinstance(node, ast.FunctionDef)
-                and node.name == "_concretize_and_launch"):
-            inner = node
-            break
-    assert inner is not None, (
-        "_concretize_and_launch not found inside "
-        "_launch_scenarios_in_containers — test needs updating"
-    )
+    def _concretize(sc, *a, scenario_cwd, **kw):
+        seen["cwd"] = scenario_cwd
+        return None, "rejected"
 
-    found = False
-    for call in ast.walk(inner):
-        if not isinstance(call, ast.Call):
-            continue
-        func = call.func
-        if isinstance(func, ast.Name) and func.id == "_concretize_scenario":
-            for kw in call.keywords:
-                if kw.arg == "scenario_cwd":
-                    assert isinstance(kw.value, ast.Name), (
-                        f"scenario_cwd must be a plain Name, got "
-                        f"{ast.dump(kw.value)}"
-                    )
-                    assert kw.value.id == "container_workdir", (
-                        f"container-mode _concretize_scenario must receive "
-                        f"scenario_cwd=container_workdir; got "
-                        f"scenario_cwd={kw.value.id!r} — this is the NameError "
-                        f"regression."
-                    )
-                    found = True
-    assert found, (
-        "Could not locate _concretize_scenario(scenario_cwd=...) call inside "
-        "the container-mode _concretize_and_launch closure"
-    )
+    with patch.object(qa_loop, "create_scenario_workdir",
+                      return_value=(tmp_path / "repo", tmp_path / "scratch")), \
+         patch.object(container_mod, "load_container_config"), \
+         patch.object(container_mod, "create_qa_container"), \
+         patch.object(qa_loop, "_build_concretize_cmd", return_value="cmd"), \
+         patch("pm_core.tmux.new_window_get_pane", return_value="%1"), \
+         patch.object(qa_loop, "_concretize_scenario", _concretize):
+        qa_loop._launch_scenarios_in_containers(
+            state, {}, {"id": "pr-c"}, "sess", tmp_path, str(tmp_path))
+    assert seen["cwd"] == container_mod._CONTAINER_WORKDIR

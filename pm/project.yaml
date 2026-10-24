@@ -29427,7 +29427,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T18:57:33.967457+00:00'
-  updated_at: '2026-10-13T22:18:20.648960+00:00'
+  updated_at: '2026-10-22T18:57:04.824263+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29440,6 +29440,15 @@ prs:
       This time no QA PASS PR note was persisted. Captures pr-b53bfe2/scenarios/10/W3-interrupted-QA/pm-log-stale-run.txt.'
     created_at: '2026-10-13T22:18:20Z'
     last_edited: '2026-10-13T22:18:20Z'
+  - id: note-5d9b45f
+    text: pr-3201ea8 persists state.stop_requested as qa_resume.json 'cancelled' (and
+      TUI stop paths / z t / zz t mark it immediately via qa_loop.mark_resume_cancelled),
+      so a restart never adopts a deliberately stopped run. It does NOT stop a stopped
+      run from launching workers/finalizer or recording PASS — that remains this PR's
+      scope; the launcher (_launch_scenarios) already checks stop_requested before
+      preparing, starting a refiner, and launching a worker.
+    created_at: '2026-10-22T18:57:04Z'
+    last_edited: '2026-10-22T18:57:04Z'
 - id: pr-c9e69fb
   plan: bugs
   title: 'Bug: shell `pm pr start` impl panes are never trust-watched (no --session-id
@@ -29668,11 +29677,25 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T15:49:43.888654+00:00'
-  updated_at: '2026-10-22T17:19:43.945696+00:00'
+  updated_at: '2026-10-22T18:56:51.137532+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-8613e86
+    text: 'Impl done (503863fd, 7981d35b, b493caec): qa_resume.json written from run
+      start with run phase (planning→planned→launching→executing→finalizing→done)
+      + per-scenario launch_phase and refiner/worker/planner/finalizer session ids
+      recorded before their panes; resume_qa_sync adopts by --session-id and launches
+      only missing work; TUI adopts only newest non-cancelled run, completes only
+      at phase done; start_qa adopts instead of starting a 2nd run; stop paths mark
+      cancelled. Tests: tests/test_qa_startup_resume.py (17, all fail pre-fix). Live
+      captures $CAP/impl/{pre-fix,post-fix/startup-restart,post-fix/finalize-restart}.
+      Filed pr-817596e (finalizer skipped when qa-verify-pass off, pre-existing).
+      pr-8020495 branch will need a small merge in _launch_next_queued/_poll_tmux_verdicts
+      snapshot calls.'
+    created_at: '2026-10-22T18:56:51Z'
+    last_edited: '2026-10-22T18:56:51Z'
 - id: pr-62fdd54
   plan: bugs
   title: 'Bug: synchronize the PR branch before QA planning and recover stale handoffs'
@@ -30626,11 +30649,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T19:14:50.410487+00:00'
-  updated_at: '2026-10-21T21:40:00.306182+00:00'
+  updated_at: '2026-10-22T18:57:03.837219+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-d4a20dd
+    text: 'pr-3201ea8 changes _poll_tmux_verdicts._launch_next_queued: it no longer
+      swaps state.scenarios (launchers take scenarios=[...]) and the launcher checkpoints
+      every startup step (qa_resume.json via _checkpoint), so this branch''s post-dequeue/relaunch
+      _snapshot() calls become redundant but harmless; expect a small merge conflict
+      there and in _relaunch_scenario_window (now writes the new worker identity before
+      its window exists).'
+    created_at: '2026-10-22T18:57:03Z'
+    last_edited: '2026-10-22T18:57:03Z'
 - id: pr-9e7847d
   plan: tui-ux
   title: 'Even Realities plan/spec review: interface constraints and demo screenshots'
@@ -31501,6 +31533,31 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T17:19:46.224920+00:00'
   updated_at: '2026-10-22T17:19:46.224920+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-817596e
+  plan: bugs
+  title: 'Bug: QA finalizer never runs when qa-verify-pass is off'
+  branch: pm/pr-817596e-bug-qa-finalizer-never-runs-when-qa-verify-pass-is
+  status: pending
+  depends_on: []
+  description: 'Found during pr-3201ea8 live verification (2026-10-22, captures pr-3201ea8
+    impl/post-fix/startup-restart). With qa-verify-pass off, PASS verdicts are never
+    added to state.verified_scenarios, and _run_qa_finalize_pane''s gate (every PASS
+    must be in verified_scenarios) then always skips: log ''QA finalize: skipping
+    — PASS verdicts [1, 2, 3] have not been verified yet'', ''QA complete: PASS (finalize=None)''.
+    Pre-existing on master (afe89ab2, same gate). Worker pushes are then never reconciled
+    into the PR workdir before sign-off. Fix: apply the unverified-PASS gate only
+    when verification is enabled (or mark PASS verified when it is disabled), keeping
+    it strict when verification is on. Regression: verification off, all PASS -> finalizer
+    runs once.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T18:56:42.626415+00:00'
+  updated_at: '2026-10-22T18:56:42.626415+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
