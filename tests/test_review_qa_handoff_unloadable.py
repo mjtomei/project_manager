@@ -102,7 +102,7 @@ def test_poll_tick_retries_a_pending_hand_off(tmp_path):
 
 def test_a_pr_that_left_in_review_drops_the_pending_hand_off(tmp_path):
     app = _self_driving_app(tmp_path)
-    app._pending_auto_qa = {"pr-001": "project.yaml is not valid YAML"}
+    app._pending_auto_qa = {"pr-001": ("transition", "project.yaml is not valid YAML")}
     data = store.load(app._root)
     store.get_pr(data, "pr-001")["status"] = "in_progress"
     store.save(data, app._root)
@@ -110,3 +110,86 @@ def test_a_pr_that_left_in_review_drops_the_pending_hand_off(tmp_path):
         review_loop_ui._start_qa_after_review(app, "pr-001")
     start.assert_not_called()
     assert app._pending_auto_qa == {}
+
+
+# --- the file breaks between the in_review -> qa write and the QA start ---
+
+def _race_app(tmp_path, kind, *, auto_start=False):
+    """App whose project.yaml breaks right after the status write (the
+    reload that follows it), so the real start_qa then fails to load."""
+    if auto_start:
+        app = _make_app(tmp_path, prs=[dict(PR, workdir=str(tmp_path / "wd"))],
+                        auto_start=True, target="pr-001")
+    else:
+        app = _self_driving_app(tmp_path)
+    saved = {}
+
+    def reload_breaks_file():
+        if "good" not in saved:
+            saved["good"] = _break(app._root, kind)
+    app._load_state.side_effect = reload_breaks_file
+    return app, saved
+
+
+@pytest.mark.parametrize("kind", ["conflict_markers", "invalid_plans",
+                                  "missing_file"])
+def test_launch_lost_after_the_status_write_starts_once_the_file_loads(
+        tmp_path, kind):
+    app, saved = _race_app(tmp_path, kind)
+    with patch("pm_core.tui.qa_loop_ui.start_qa_background") as bg, \
+            patch("pm_core.signoff.clear_return_awaiting"):
+        review_loop_ui._start_qa_after_review(app, "pr-001")
+        bg.assert_not_called()                       # start_qa could not load
+        assert app._pending_auto_qa["pr-001"][0] == "launch"
+        review_loop_ui._start_qa_after_review(app, "pr-001")   # still broken
+        bg.assert_not_called()
+        _write(app._root / "project.yaml", saved["good"])
+        assert _status(app) == "qa"                  # the write had landed
+        review_loop_ui._start_qa_after_review(app, "pr-001")   # file loads
+        review_loop_ui._start_qa_after_review(app, "pr-001")   # nothing left
+    assert bg.call_count == 1
+    assert app._pending_auto_qa == {}
+    waits = [c.args[0] for c in app.log_message.call_args_list
+             if "waiting for project.yaml" in c.args[0]]
+    assert len(waits) == 1
+
+
+def test_stopped_zz_t_loop_drops_a_pending_launch(tmp_path):
+    app, saved = _race_app(tmp_path, "invalid_plans")
+    with patch("pm_core.tui.qa_loop_ui.start_qa_background") as bg, \
+            patch("pm_core.signoff.clear_return_awaiting"):
+        review_loop_ui._start_qa_after_review(app, "pr-001")
+        assert app._pending_auto_qa["pr-001"][0] == "launch"
+        app._self_driving_qa.pop("pr-001")           # user stopped the loop
+        _write(app._root / "project.yaml", saved["good"])
+        review_loop_ui._start_qa_after_review(app, "pr-001")
+    bg.assert_not_called()
+    assert app._pending_auto_qa == {}
+
+
+@pytest.mark.parametrize("change", ["auto_start_off", "target_removed"])
+def test_auto_start_leaving_scope_drops_a_pending_launch(tmp_path, change):
+    app, saved = _race_app(tmp_path, "conflict_markers", auto_start=True)
+    with patch("pm_core.tui.qa_loop_ui.start_qa_background") as bg, \
+            patch("pm_core.signoff.clear_return_awaiting"):
+        review_loop_ui._start_qa_after_review(app, "pr-001")
+        assert app._pending_auto_qa["pr-001"][0] == "launch"
+        if change == "auto_start_off":
+            app._auto_start = False
+        else:
+            app._auto_start_targets = {"pr-other": {}}
+        _write(app._root / "project.yaml", saved["good"])
+        review_loop_ui._start_qa_after_review(app, "pr-001")
+    bg.assert_not_called()
+    assert app._pending_auto_qa == {}
+
+
+def test_auto_start_in_scope_launches_once_after_recovery(tmp_path):
+    app, saved = _race_app(tmp_path, "missing_file", auto_start=True)
+    with patch("pm_core.tui.qa_loop_ui.start_qa_background") as bg, \
+            patch("pm_core.signoff.clear_return_awaiting"):
+        review_loop_ui._start_qa_after_review(app, "pr-001")
+        _write(app._root / "project.yaml", saved["good"])
+        review_loop_ui._start_qa_after_review(app, "pr-001")
+        review_loop_ui._start_qa_after_review(app, "pr-001")
+    assert bg.call_count == 1

@@ -503,7 +503,9 @@ def _refresh_tech_tree(app) -> None:
 # ---------------------------------------------------------------------------
 
 def _pending_auto_qa(app) -> dict:
-    """PR id -> why its review → QA hand-off is waiting for project.yaml."""
+    """PR id -> ``(stage, reason)`` of a review → QA hand-off waiting for
+    project.yaml: stage "transition" (in_review → qa not written yet) or
+    "launch" (status is qa, the QA run did not start)."""
     pending = getattr(app, "_pending_auto_qa", None)
     if not isinstance(pending, dict):
         pending = {}
@@ -511,35 +513,86 @@ def _pending_auto_qa(app) -> dict:
     return pending
 
 
+def _qa_handoff_wanted(app, pr_id: str) -> bool:
+    """Self-driving (zz t) still owns the PR, or auto-start still covers it."""
+    from pm_core.tui import auto_start as _auto_start
+    if getattr(app, "_self_driving_qa", {}).get(pr_id):
+        return True
+    return _auto_start.is_enabled(app) and _auto_start.in_scope(app, pr_id)
+
+
 def _start_qa_after_review(app, pr_id: str) -> None:
     """Run the review → QA hand-off for *pr_id*, or keep it pending.
 
     While project.yaml cannot be loaded (conflict markers, plans that do
-    not validate, the file missing) the in_review → qa write fails; the
-    hand-off is then kept in ``app._pending_auto_qa`` and retried by the
-    poll timer, saying once per reason that it waits.
+    not validate, the file missing) either step can fail: the in_review →
+    qa write, or the QA start right after it.  The hand-off is then kept in
+    ``app._pending_auto_qa`` at the step that failed and retried by the
+    poll timer, saying once per reason that it waits.  A pending hand-off
+    is dropped when the user stopped the zz t loop or auto-start no longer
+    covers the PR, or (launch step) the PR left qa or a QA run started.
     """
     pending = _pending_auto_qa(app)
-    problem = _maybe_start_qa(app, pr_id)
-    if problem is None:
-        if pending.pop(pr_id, None) is not None:
-            _log.info("auto_qa: project.yaml loads again — %s handed to QA",
-                      pr_id)
+    entry = pending.get(pr_id)
+    if entry is not None and not _qa_handoff_wanted(app, pr_id):
+        pending.pop(pr_id, None)
+        _log.info("auto_qa: pending QA hand-off for %s dropped (no longer "
+                  "self-driving or in auto-start scope)", pr_id)
         return
-    if pending.get(pr_id) != problem:
-        pending[pr_id] = problem
-        _log.warning("auto_qa: %s review passed; QA waits until "
-                     "project.yaml loads again: %s", pr_id, problem)
+    if entry is not None and entry[0] == "launch":
+        result = _launch_qa_after_review(app, pr_id)
+    else:
+        result = _maybe_start_qa(app, pr_id)
+    if result is None:
+        if pending.pop(pr_id, None) is not None:
+            _log.info("auto_qa: pending QA hand-off for %s done", pr_id)
+        return
+    if pending.get(pr_id) != result:
+        pending[pr_id] = result
+        stage, reason = result
+        _log.warning("auto_qa: %s review passed; QA %s waits until "
+                     "project.yaml loads again: %s", pr_id,
+                     "start" if stage == "launch" else "transition", reason)
         app.log_message(escape(
             f"Review PASS for {pr_id} — waiting for project.yaml to load "
-            f"to start QA: {problem}"))
+            f"to start QA: {reason}"))
 
 
-def _maybe_start_qa(app, pr_id: str) -> str | None:
+def _launch_qa_after_review(app, pr_id: str) -> tuple | None:
+    """Start QA for a PR the hand-off already moved to qa.
+
+    ``("launch", reason)`` while project.yaml cannot be loaded, else None
+    (started, or no longer needed: the PR left qa or QA already runs).
+    """
+    from pm_core.tui import qa_loop_ui
+    try:
+        pr = store.get_pr(store.load(app._root), pr_id) if app._root else None
+    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        return ("launch", str(e))
+    if not pr or pr.get("status") != "qa":
+        _log.info("auto_qa: %s is no longer in qa (%s); QA not started",
+                  pr_id, (pr or {}).get("status"))
+        return None
+    loop = app._qa_loops.get(pr_id)
+    if loop is not None and loop.running:
+        return None
+    if qa_loop_ui.start_qa(app, pr_id) is False:
+        try:
+            store.load(app._root)
+            reason = "project.yaml could not be locked"
+        except store.ProjectYamlParseError as e:
+            reason = str(e)
+        return ("launch", reason)
+    return None
+
+
+def _maybe_start_qa(app, pr_id: str) -> tuple | None:
     """Transition a PR from in_review → qa and start QA.
 
-    Returns why the transition could not be written (project.yaml cannot
-    be loaded or locked) so the caller retries, else None.
+    Returns ``(stage, reason)`` when a step could not be done because
+    project.yaml cannot be loaded or locked (stage "transition": the
+    status write; "launch": the QA start after it), so the caller retries
+    from that step; else None.
 
     Called when review passes.  Works in two modes:
 
@@ -593,15 +646,14 @@ def _maybe_start_qa(app, pr_id: str) -> str | None:
             store.locked_update(app._root, apply_qa)
         except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
             _log.warning("auto_qa: %s for %s: %s", type(e).__name__, pr_id, e)
-            return str(e)
+            return ("transition", str(e))
         app._load_state()
         if transitioned:
             _log.info("auto_qa: transitioned %s to qa status", pr_id)
             app.log_message(f"Auto-QA: {pr_id} review passed, starting QA")
 
             # Start QA loop
-            from pm_core.tui import qa_loop_ui
-            qa_loop_ui.start_qa(app, pr_id)
+            return _launch_qa_after_review(app, pr_id)
         else:
             current = store.get_pr(app._data, pr_id)
             _log.debug("auto_qa: %s not in_review (status=%s), skipping",
