@@ -31628,7 +31628,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T07:36:37.770600+00:00'
+  updated_at: '2026-10-24T08:02:18.900834+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33111,6 +33111,28 @@ prs:
       Full suite 3641 passed on 006d7b4d.'
     created_at: '2026-10-24T07:36:37Z'
     last_edited: '2026-10-24T07:36:37Z'
+  - id: note-dd3d9a2
+    text: 'QA S47 (2026-10-24, RQ37 one note per run, host, one clone; captures /pm-captures/scenarios/47,
+      REPORT.md). ba5dd6e7 held live: auto-start sign-off hand-off gap (lock helper
+      took the lock as the note landed and left conflict markers), kill -9 or in-place
+      restart, resolve -> Recovered once + "QA note ... already recorded", one note,
+      press i, [done PASS] (A,F on 3ebe4d7a; G,H on df093f0c/006d7b4d). Pre-fix 5de77fe7
+      control wrote a 2nd note with the same workdir. zz t restart race (B) and NEEDS_WORK
+      tree-reload race (C) reached and held on 716d6ce1; distinct runs (resumed, zz
+      t 1-3/3, z t rerun, qa-run-bg while TUI down) one note each. Two CODE CHANGES
+      need normal re-review, both pre-existing on master: 13eb925b the first zz t
+      pass never moved an in_review PR to qa, so the resume scan silently dropped
+      its snapshot at any TUI restart (finished pass: no Recovered/press i; mid-run:
+      run abandoned); 3a3dcc3e the resume snapshot got the final scenario verdicts
+      only after the blocking finalizer, so a run recovered after its driver died
+      mid-finalizer got a note reading "?" per scenario; now written before overall
+      is published (pr-0f85376 finalizer re-run unchanged). Full suite 3642 passed.
+      Spec notes: pm session refuses (rc 1) on an unloadable file, so after kill -9
+      the TUI only returns after the resolve; markers-present restart Thens checked
+      via pm tui restart. With 716d6ce1 the hand-off logs "Sign-off for X waits for
+      project.yaml to be unlocked" (no 2 s StoreLockTimeout).'
+    created_at: '2026-10-24T08:02:18Z'
+    last_edited: '2026-10-24T08:02:18Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
