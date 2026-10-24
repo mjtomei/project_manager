@@ -938,7 +938,9 @@ class ProjectManagerApp(App):
         if not replay:
             _seq = self._log_seq = getattr(self, "_log_seq", 0) + 1
         # Replays come from the flush that releases the queue, so for them
-        # only the hold's own time counts.
+        # only the hold's own time counts.  (By log_line_held, a queue with
+        # another flush still pending, e.g. a late older timer, would hold:
+        # each replay would be queued again behind the next, forever.)
         holding = (now < self._log_hold_until if replay
                    else log_line_held(self, now))
         held = hold <= 0 and holding and not force

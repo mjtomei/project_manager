@@ -592,6 +592,37 @@ def test_queue_without_a_pending_flush_holds_nothing():
     assert shown[-1] == " C plain"
 
 
+# Review loop 350f i3 (pr-592e4bd): a flush timer delayed past a later hold
+# (an event loop blocked for longer than the hold) runs while that hold's
+# own timer is still pending.  Its replays must be judged by the hold's time
+# alone: judged by log_line_held, the queue with a flush pending counts as
+# holding the line, so each replay was queued again behind the next and the
+# flush never returned (the TUI hangs).
+
+def test_late_flush_with_another_flush_pending_releases_the_queue():
+    app, shown = _stub_app()
+    _log(app, "A held", force=True, hold=3)
+    app._log_hold_until = 0.0  # A's hold is over; its timer runs late
+    _log(app, "B held", force=True, hold=3)  # a second hold and timer
+    _log(app, "C queued", force=True, hold=3)
+    _log(app, "D queued", force=True, hold=3)
+    app._log_hold_until = 0.0  # B's hold is over too: both timers late
+    real, calls = app.log_message, []
+
+    def bounded(msg, **kw):
+        calls.append(msg)
+        assert len(calls) < 20, "flush replays re-queue each other"
+        return real(msg, **kw)
+    app.log_message = bounded
+    app.timers.pop(0)()  # A's late flush releases the queue
+    assert shown[-1] == " C queued"
+    app.timers.pop(0)()  # B's, right after: C's hold is active
+    assert shown[-1] == " C queued"
+    app._log_hold_until = 0.0
+    app.timers.pop(0)()  # C's flush
+    assert shown == [" A held", " B held", " C queued", " D queued"]
+
+
 # Review loop 350f i2 (pr-592e4bd): auto-start's "starting <pr>" decided
 # whether a hold was active from the hold's time alone.  Since S50 a hold
 # also lasts while its queued confirmations wait for their flush, so in

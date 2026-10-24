@@ -828,6 +828,16 @@ recorded with item 39.
         `test_starting_message_waits_for_queued_confirmations_flush` fails
         with the old check
         (`/pm-captures/review-350f-i2/mutation-checks.log`).
+    (f) Review loop 350f i3 (test only).  A flush's replays are judged by
+        the hold's time alone, not by `log_line_held`: a flush timer
+        delayed past a later hold runs while that hold's timer is still
+        pending, and by the shared predicate each replay of a queue of two
+        or more would be queued again behind the next, forever (TUI hang).
+        No test caught that mutation;
+        `test_late_flush_with_another_flush_pending_releases_the_queue`
+        now does (`/pm-captures/review-350f-i3/mutation-checks.log`).
+        Full suite 3656 passed, rc 0
+        (`/pm-captures/review-350f-i3/full-suite.log`).
     10 mutations, each caught (`/pm-captures/scenarios/50/tests/mutations.log`).
     Live runtime heads (by process, not by checkout): story 1 final run in
     a TUI restarted in place on e60c9927; story 2 on e60c9927; story 3 on
