@@ -12,10 +12,14 @@ window. It runs a short Claude session whose job is:
 Outputs a short structured report so the user sees what happened.
 """
 
-from pm_core.prompt_bounds import bounded_join
+from pm_core.prompt_bounds import PLAN_LIST_BUDGET, bounded_join
 
 # Cap the per-scenario worktree listing so a large QA run cannot blow the
-# finalize prompt's argv budget.
+# finalize prompt's argv budget.  The count cap alone does not bound the
+# listing — the lines carry worktree paths, whose length is bounded only by
+# PATH_MAX, so 40 of them can still exceed the limit (the same cap-times-item-
+# size defect the PR/plan/sibling listings had) — hence the shared byte budget
+# as well.
 _SCENARIO_LINES_MAX = 40
 
 
@@ -57,6 +61,7 @@ def build_qa_finalize_prompt(
             lambda t: (f"- Scenario {t[0]}: verdict={t[1] or '?'}, "
                        f"worktree={t[2] or '(none)'}"),
             max_items=_SCENARIO_LINES_MAX,
+            max_bytes=PLAN_LIST_BUDGET,
             omitted_note=lambda n: (
                 f"- ... (+{n} more scenarios; {_scenarios_pointer(pr_id)})"),
         )

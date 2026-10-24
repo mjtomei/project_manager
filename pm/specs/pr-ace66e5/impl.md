@@ -665,3 +665,71 @@ byte-identical to `origin/master` in this sandbox (all environmental: the
 sandbox git shim forwards pull/push to a host workdir, so
 `test_signoff_integration` / `test_merge_publish` cannot reach a real remote).
 Evidence: `/pm-captures/review-4e41-i6/`.
+
+## 13. Review-loop follow-ups (iteration 7)
+
+Iteration 7 re-ran the i5/i6 method (check every omission marker where the
+session actually reads it) plus an independent sweep of **every reachable
+builder** — not just the four wired through `fit_prompt` — with pathological
+inputs on each dimension (count, item size, single-document size). Three
+findings; no per-block budget, shared helper or launcher path changed.
+
+- **`build_qa_finalize_prompt` was the last count-capped listing with no byte
+  budget.** It caps the per-scenario worktree listing at 40 entries but bounds
+  neither the line length nor the total: 40 worktree paths of ~4 KB (the
+  `PATH_MAX` ceiling, since the paths are user-visible filesystem paths) built
+  a **162,870-byte** prompt. Every other listing the audit touched got a byte
+  budget in i3/i4 for exactly this reason (a count cap does not bound
+  `cap × item size`), so this one was an inconsistency as well as a gap. Now
+  bounded with the shared `PLAN_LIST_BUDGET`, with the existing marker naming
+  the run's `qa_status.json` / `qa_resume.json`; that prompt drops to 17,423 B,
+  and real listings (short paths) are byte-identical. A single path longer
+  than the whole budget keeps no lines and emits only the marker, which names
+  where every scenario is recorded — the same degradation the other bounded
+  listings use.
+- **`_render_pr_notes_bounded`'s "older notes are abbreviated" marker was
+  wrong when *nothing* was abbreviated in full.** A single note larger than
+  the whole budget cannot be upgraded, so `remaining` runs out at the first
+  (newest) note and every line stays a summary — yet the marker told the
+  session only the *older* notes had been abbreviated, so the newest handoff
+  (the most important one) read as if it were the full text. The marker now
+  says "notes are abbreviated" when zero notes were upgraded and keeps the
+  "older notes" wording otherwise. Real prompts are unchanged (in this repo
+  the upgrade path always upgrades at least the newest note).
+- **`format_signoff_return` resolved its pointer eagerly.** It called
+  `integration.integration_pointer()` before checking whether either path list
+  was actually abbreviated, and that pointer goes through
+  `paths.captures_dir()`, which **creates** `~/.pm/sessions/<tag>/captures/
+  <pr-id>/` as a side effect — so merely *building* an impl / review / QA
+  prompt for a PR with an integration record touched the filesystem. The
+  pointer is now resolved inside the `omitted_note` callable, so it runs only
+  when something was really dropped (matching `_signoff_integration_block` and
+  `_signoff_qa_scenarios_block`, which were already lazy).
+
+Checked and deliberately unchanged:
+
+- **Single user-authored fields (PR / scenario titles, project name) are still
+  inlined unbounded.** They are not collections, and they are handled: when
+  the static text alone is over the limit `fit_prompt` returns the render
+  unchanged and the launcher writes the complete prompt to a file and passes a
+  short bootstrap, so nothing is lost. Bounding them would mean truncating the
+  one line that names what the session is working on.
+- **`generate_watcher_prompt`'s managed-PR list truncates at 40 while the
+  block's "only PRs in the managed set above" instruction refers to it.** The
+  list is a display of a set pm itself enforces (the watcher acts by running
+  `pm` commands), the marker signals the abbreviation with `(+N more; ...)`,
+  and no command prints the exact managed set (`pm autostart status` lists
+  targets and their *pending* dependencies only), so no marker change would be
+  more accurate.
+- **`PromptTooLargeError` is raised but never caught.** It only escapes when
+  there is no writable location at all (`build_claude_shell_cmd` with no
+  `cwd`/`write_dir`, e.g. a >120 KB QA instruction body launched from the QA
+  pane or `pm qa launch`); every other over-limit prompt is delivered via the
+  file-backed bootstrap. Surfacing it as a pane/CLI message rather than an
+  uncaught traceback is caller-side error handling outside this PR's scope.
+
+Verification: `tests/test_prompt_bounds.py` 86 cases (6 new, 3 of them
+failing-then-passing — the finalize byte bound, the marker accuracy and the
+lazy pointer; the other 3 guard the unchanged paths). Full suite re-run after
+the edits; failure set compared against an `origin/master` baseline in the
+same sandbox (see the PR note for the counts).

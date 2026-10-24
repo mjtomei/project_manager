@@ -845,17 +845,24 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 f"`{(integ.get('base_sha') or '?')[:12]}` from "
                 f"`{integ.get('target_repo')}`")
         lines.append(f"Integration with {base}: **{integ.get('status')}**.")
-        pointer = integration.integration_pointer(pr.get("id", "???"))
+        # Resolved lazily: the pointer calls captures_dir(), which creates the
+        # PR's captures directory as a side effect.  Building a prompt must not
+        # touch the filesystem, and the pointer is only needed when a path list
+        # is actually abbreviated.
+        def _integ_note(n: int) -> str:
+            return (f" (+{n} more; "
+                    f"{integration.integration_pointer(pr.get('id', '???'))})")
+
         if integ.get("conflicts"):
             lines.append("Conflicting paths: " + bounded_join(
                 integ["conflicts"], lambda c: f"`{c}`",
                 max_items=INTEGRATION_MAX_PATHS, separator=", ",
-                omitted_note=lambda n: f" (+{n} more; {pointer})"))
+                omitted_note=_integ_note))
         if integ.get("overlap"):
             lines.append("Changed on both sides: " + bounded_join(
                 integ["overlap"], lambda c: f"`{c}`",
                 max_items=INTEGRATION_MAX_PATHS, separator=", ",
-                omitted_note=lambda n: f" (+{n} more; {pointer})"))
+                omitted_note=_integ_note))
     applied = rec.get("applied") or {}
     if applied.get("merge_sha"):
         lines.append(

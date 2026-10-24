@@ -22350,7 +22350,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-24T21:30:58.539865+00:00'
+  updated_at: '2026-10-24T22:29:02.532598+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22497,6 +22497,35 @@ prs:
       (2026-10-24T21:35:00Z)'
     created_at: '2026-10-24T21:30:58Z'
     last_edited: '2026-10-24T21:30:58Z'
+  - id: note-e169110
+    text: 'Review-loop 4e41 i7: three gaps, all found by sweeping every reachable
+      builder (not just the four wired through fit_prompt) with pathological count
+      / item-size / single-document inputs, then checking each omission marker in
+      the environment the session reads it in. (1) `build_qa_finalize_prompt` was
+      the last count-capped listing with no byte budget: 40 worktree paths of ~4 KB
+      (PATH_MAX) built a 162,870-byte prompt. Now bounded with the shared PLAN_LIST_BUDGET;
+      the existing marker still names the run qa_status.json / qa_resume.json, the
+      pathological prompt drops to 101,251 B and real listings are byte-identical.
+      (2) `_render_pr_notes_bounded` said "older notes are abbreviated" even when
+      nothing was abbreviated in full (one note bigger than the whole budget leaves
+      every line a summary, including the newest handoff) — the marker now says "notes
+      are abbreviated" when zero notes were upgraded and keeps the old wording otherwise.
+      (3) `format_signoff_return` resolved its integration pointer eagerly, and that
+      pointer goes through paths.captures_dir(), which *creates* the captures dir
+      as a side effect — so merely building an impl/review/QA prompt touched the filesystem;
+      the pointer is now resolved inside the omission callable, matching the two sign-off
+      markers that were already lazy. Deliberately unchanged: single user-authored
+      fields (PR/scenario titles) are still inlined unbounded but are not collections
+      and are delivered intact by the launcher bootstrap; the watcher managed-list
+      truncation (pm enforces the scope; no command prints the exact managed set);
+      and PromptTooLargeError remains uncaught by callers (filed as pr-a42a4f8). Verification:
+      tests/test_prompt_bounds.py 86 cases (6 new, 3 failing-then-passing); real-data
+      sweep over all 483 PRs x 4 builders byte-identical to i6 (impl 75,146 / review
+      77,616 / sign-off 92,165 / planner 80,652 max, pr-0b87a97); full suite failure
+      set byte-identical to an origin/master baseline run in the same sandbox. Evidence
+      /pm-captures/review-4e41-i7/. (2026-10-24T22:35:00Z)'
+    created_at: '2026-10-24T22:29:02Z'
+    last_edited: '2026-10-24T22:29:02Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
@@ -32380,6 +32409,45 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-23T23:45:13.949692+00:00'
   updated_at: '2026-10-23T23:45:40.418995+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a42a4f8
+  plan: bugs
+  title: 'Bug: a >120 KB QA instruction prompt raises an uncaught PromptTooLargeError
+    in the QA pane and `pm qa launch`'
+  branch: pm/pr-a42a4f8-bug-a-120-kb-qa-instruction-prompt-raises-an-uncau
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/pane_ops.py:553 (`launch_qa_item`) and pm_core/cli/qa.py:661
+    (`pm qa launch`) both call `build_claude_shell_cmd(prompt=full_prompt, session_type="qa_author")`
+    with no `cwd` and no `write_dir`.
+
+
+    Repro: give a QA instruction or regression test a body larger than PROMPT_ARG_LIMIT
+    (120,000 B). `build_claude_shell_cmd` has no writable location for file-backed
+    delivery, so it raises `PromptTooLargeError` (pm_core/claude_launcher.py:1028)
+    instead of building the command.
+
+
+    Result: the exception is uncaught — pressing Enter on the QA item in the TUI propagates
+    it out of the Textual message handler (`app.py:1616 on_qaitem_activated`), and
+    `pm qa launch <cat>:<id>` prints a raw traceback. Before pr-ace66e5 the same prompt
+    produced a tmux command that died at exec with E2BIG (errno 7), so this is not
+    a regression in reachability, but the new typed error should be reported as a
+    clear message (log_message / click.echo err + nonzero exit) rather than a traceback.
+
+
+    Note: pr-ace66e5 deliberately chose raising over silently truncating (`build_regression_test_prompt`
+    bodies are the prompt the test executes, so truncation would corrupt the test)
+    — the gap is caller-side handling only. `PromptTooLargeError` is raised in two
+    places and caught nowhere in the repo.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-24T22:28:40.901263+00:00'
+  updated_at: '2026-10-24T22:28:40.901263+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

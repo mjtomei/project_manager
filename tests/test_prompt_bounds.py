@@ -320,6 +320,39 @@ class TestSignoffPromptBounding:
         assert (integration.integration_pointer("pr-x")
                 == "read /pm-captures/integration.json")
 
+    def test_return_block_does_not_resolve_the_pointer_when_nothing_is_dropped(
+            self, monkeypatch):
+        """Resolving the pointer calls captures_dir(), which *creates* the
+        PR's captures directory.  Building a prompt must not touch the
+        filesystem, so the pointer is resolved only when a path list is
+        actually abbreviated."""
+        from pm_core.signoff import format_signoff_return
+
+        def _boom(pr_id):
+            raise AssertionError("pointer resolved with nothing omitted")
+
+        monkeypatch.setattr("pm_core.paths.captures_dir", _boom)
+        ret = format_signoff_return(_pr(signoff_return={
+            "verdict": "NEEDS_WORK", "hop": "impl", "reason": "conflict",
+            "reviewed_head": "b" * 40,
+            "integration": {"base_branch": "master", "base_sha": "a" * 40,
+                            "target_repo": "r", "status": "conflict",
+                            "conflicts": ["c1.py"], "overlap": ["f1.py"]}}))
+        assert "c1.py" in ret and "f1.py" in ret
+
+    def test_return_block_resolves_the_pointer_only_when_a_list_is_dropped(
+            self, monkeypatch):
+        from pm_core.signoff import format_signoff_return
+        monkeypatch.setattr("pm_core.paths.captures_dir",
+                            lambda pr_id: Path("/cap") / pr_id)
+        ret = format_signoff_return(_pr(signoff_return={
+            "verdict": "NEEDS_WORK", "hop": "impl", "reason": "conflict",
+            "reviewed_head": "b" * 40,
+            "integration": {"base_branch": "master", "base_sha": "a" * 40,
+                            "target_repo": "r", "status": "conflict",
+                            "conflicts": [f"c{i}.py" for i in range(100)]}}))
+        assert "(+80 more; read /cap/pr-x/integration.json)" in ret
+
     def _many_scenarios(self, tmp_path, monkeypatch, n=60):
         status = tmp_path / "qa_status.json"
         status.write_text(json.dumps({
@@ -362,6 +395,27 @@ class TestSignoffPromptBounding:
         block = prompt_gen._format_pr_notes(pr)
         assert "pm pr note list pr-x" in block
         assert "<pr-id>" not in block
+
+    def test_abbreviation_marker_matches_what_was_abbreviated(self):
+        """When a single note exceeds the whole budget, *no* note is rendered
+        in full — including the newest.  The marker must not claim only the
+        "older" ones were abbreviated, or the session reads a summary of the
+        newest handoff as if it were the full text."""
+        # One giant note: its full text cannot fit, so every line is a summary.
+        pr = _pr(notes=[_note(0, size=60_000)])
+        block = prompt_gen._format_pr_notes(pr)
+        assert "notes are abbreviated" in block
+        assert "older notes are abbreviated" not in block
+        assert "pm pr note list pr-x" in block
+
+    def test_abbreviation_marker_says_older_when_the_newest_is_full(self):
+        """The complementary case: newest notes kept in full, older ones
+        summarized — the marker must say so."""
+        notes = [_note(i, size=300) for i in range(120)]
+        notes[-1]["text"] = "newest handoff"
+        block = prompt_gen._format_pr_notes(_pr(notes=notes))
+        assert "older notes are abbreviated" in block
+        assert "newest handoff" in block
 
 
 class TestFitPrompt:
@@ -643,6 +697,26 @@ class TestQaFinalizeBounding:
             pr_id="pr-x", pr_title="T", branch="b", pr_workdir="/tmp/w",
             scenario_worktrees=worktrees, overall_verdict="PASS")
         _assert_bounded(p, "qa_resume.json")
+
+    def test_long_worktree_paths_are_byte_bounded_too(self):
+        """The listing is count-capped, but its lines carry worktree paths
+        whose length is bounded only by PATH_MAX: 40 of them can still exceed
+        the argv limit — the same cap-times-item-size defect the PR/plan and
+        sibling listings had, so it needs a byte budget as well."""
+        worktrees = [(i, "PASS", "/tmp/" + "d" * 4_000) for i in range(40)]
+        p = build_qa_finalize_prompt(
+            pr_id="pr-x", pr_title="T", branch="b", pr_workdir="/tmp/w",
+            scenario_worktrees=worktrees, overall_verdict="PASS")
+        _assert_bounded(p, "qa_resume.json")
+
+    def test_small_listing_is_unchanged(self):
+        worktrees = [(1, "PASS", "/tmp/s1"), (2, "FAIL", None)]
+        p = build_qa_finalize_prompt(
+            pr_id="pr-x", pr_title="T", branch="b", pr_workdir="/tmp/w",
+            scenario_worktrees=worktrees, overall_verdict="PASS")
+        assert "- Scenario 1: verdict=PASS, worktree=/tmp/s1" in p
+        assert "- Scenario 2: verdict=FAIL, worktree=(none)" in p
+        assert "more scenarios" not in p
 
 
 class TestQaLoopPromptsBounding:

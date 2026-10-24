@@ -224,6 +224,7 @@ def _render_pr_notes_bounded(notes: list[dict], budget: int,
     # would have to be dropped, leaving the abbreviations unexplained.
     remaining = budget - total - marker_budget
     rendered = list(summaries)
+    upgraded = 0
     for i in range(len(notes) - 1, -1, -1):
         full = full_line(notes[i])
         delta = prompt_bytes(full) - prompt_bytes(rendered[i])
@@ -231,10 +232,20 @@ def _render_pr_notes_bounded(notes: list[dict], budget: int,
             break
         rendered[i] = full
         remaining -= delta
-    marker = (
-        "... (older notes are abbreviated to fit the prompt size limit — "
-        f"run `{read_cmd}` to read them in full.)"
-    )
+        upgraded += 1
+    if upgraded:
+        marker = (
+            "... (older notes are abbreviated to fit the prompt size limit — "
+            f"run `{read_cmd}` to read them in full.)"
+        )
+    else:
+        # Not even the newest note fit in full (a single note can exceed the
+        # whole budget), so every note below is a summary.  Naming only the
+        # "older" ones would misdescribe the block the session is reading.
+        marker = (
+            "... (notes are abbreviated to fit the prompt size limit — "
+            f"run `{read_cmd}` to read them in full.)"
+        )
     if prompt_bytes(sep.join(rendered + [marker])) <= budget:
         return sep.join(rendered + [marker])
     # Defensive: drop the marker rather than overshoot the budget.
