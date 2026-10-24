@@ -204,7 +204,13 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
 
     # Fallback: launch interactively
     click.echo("Launching Claude...")
-    result = subprocess.run(f"cd {shell_quote(str(work_path))} && {cmd}", shell=True)
+    try:
+        result = subprocess.run(f"cd {shell_quote(str(work_path))} && {cmd}", shell=True)
+    except KeyboardInterrupt:
+        # Ctrl-C reaches this process too; the EXIT/INT/TERM trap in the shell
+        # command handles the cleanup.  Exit 130 the way a shell reports an
+        # interrupt instead of click's generic "Aborted!" status 1.
+        raise SystemExit(128 + 2) from None
     # The EXIT/INT/TERM trap in the shell command handles cleanup
     raise SystemExit(result.returncode)
 
