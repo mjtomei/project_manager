@@ -2018,3 +2018,58 @@ def test_impl_start_builds_and_wraps_for_the_selected_route(tmp_path, monkeypatc
         assert "unavailable" in result.output
         tmux.new_window.assert_not_called()
         tmux.new_window_get_pane.assert_not_called()
+
+
+def _launch_on_missing_provider(**kw):
+    """The real launcher with a provider this host does not configure."""
+    from pm_core.claude_launcher import build_claude_shell_cmd
+    with patch("pm_core.claude_launcher.log_shell_command"):
+        return build_claude_shell_cmd(provider="missing-route", **kw)
+
+
+def test_unconfigured_provider_is_a_clean_cli_error(pm_home_dir, monkeypatch, capsys):
+    """`pm pr start/review/signoff/merge` build their command before any
+    route gate, so a missing provider raised a traceback whose last line
+    held the remedy; the review loop shows only stderr[:500] of
+    `pm pr review`, which cut it off.  It is now one `Error:` line."""
+    import pm_core.cli as cli_mod
+    monkeypatch.setattr(cli_mod, "cli", lambda: _launch_on_missing_provider(
+        session_type="review", container=True))
+    with pytest.raises(SystemExit) as exc:
+        cli_mod.main()
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert err.startswith("Error: provider 'missing-route' is not configured")
+    assert "Traceback" not in err
+    head = err[:500]  # review_loop._launch_review_window's detail
+    assert "pm provider add missing-route" in head  # configure it, or
+    assert "'pm model show' lists them, PR overrides included" in head
+
+
+@pytest.mark.parametrize("starter", ["start_qa_background", "resume_qa_background"])
+def test_unconfigured_provider_explains_a_stopped_qa_run(pm_home_dir, starter):
+    """Planner, s0, verifier and finalizer launch without a route gate, so
+    a missing provider ended the run with a bare "QA thread crashed"."""
+    from pm_core import qa_loop
+    state = qa_loop.QALoopState(pr_id="pr-001")
+    sync = "run_qa_sync" if starter == "start_qa_background" else "resume_qa_sync"
+    with patch.object(qa_loop, sync, side_effect=lambda *a, **k:
+                      _launch_on_missing_provider(session_type="qa_planning")):
+        getattr(qa_loop, starter)(state, Path("/nonexistent"), {"id": "pr-001"}).join(5)
+    assert (state.running, state.latest_verdict) == (False, "ERROR")
+    assert state.latest_output.startswith(
+        "QA stopped: provider 'missing-route' is not configured")
+    assert "'pm model show' lists them" in state.latest_output
+    assert state.latest_output.endswith("then start QA again")
+
+
+@pytest.mark.parametrize("starter,default", [
+    ("start_qa_background", "QA thread crashed"),
+    ("resume_qa_background", "QA resume thread crashed")])
+def test_other_qa_thread_crashes_keep_their_message(starter, default):
+    from pm_core import qa_loop
+    state = qa_loop.QALoopState(pr_id="pr-001")
+    sync = "run_qa_sync" if starter == "start_qa_background" else "resume_qa_sync"
+    with patch.object(qa_loop, sync, side_effect=RuntimeError("boom")):
+        getattr(qa_loop, starter)(state, Path("/nonexistent"), {"id": "pr-001"}).join(5)
+    assert (state.latest_verdict, state.latest_output) == ("ERROR", default)

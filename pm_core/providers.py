@@ -73,6 +73,12 @@ class ProviderNotFoundError(LookupError):
     """An explicitly named provider is not configured in providers.yaml."""
 
 
+# The other way out of a ProviderNotFoundError (its message names the
+# first: adding the provider), quoted where a launch reports one.
+PROVIDER_SETTING_HINT = ("or change the model setting that selects it "
+                         "('pm model show' lists them, PR overrides included)")
+
+
 @dataclass
 class ProviderConfig:
     """Configuration for an LLM provider.

@@ -189,7 +189,9 @@ a tools-disabled `claude -p` through the route, reporting requested models
   launched. Host-mode launches of those roles, and host QA planner, s0,
   verifier and finalizer, are not gated: they start Claude with the
   router's `ANTHROPIC_BASE_URL`, so a down router shows an API error in the
-  pane, never a main-account fallback.
+  pane, never a main-account fallback.  A provider that is not configured
+  on this host is refused for every role when its command is built: one
+  `Error:` line from the CLI, `QA stopped: …` for a QA run (item 41(f)).
 
 ## 4. Edge cases
 - Router up but work token expired → caught by the `expiresAt` check
@@ -987,3 +989,24 @@ recorded with item 41.
         fix reverted; `/pm-captures/review-e0e8-i5/mutation-checks.log`).
         Full suite 3685 passed, rc 0 (markdown 3.10.3 installed first;
         `/pm-captures/review-e0e8-i5/full-suite.log`).
+    (f) Review loop e0e8 i6: a provider that this host does not configure
+        (strict `get_provider`, R3) raises `ProviderNotFoundError` from
+        `build_claude_shell_cmd`.  Implementation, review, sign-off and merge
+        build their command before `wrap_claude_cmd`'s route check, so the
+        check's role-aware "unconfigured" remedy (item 40) never ran for
+        them.  The CLI printed a traceback with the message on its last
+        line, and the review loop shows only `stderr[:500]` of
+        `pm pr review`, so its error had no remedy at all.  QA planner, s0,
+        verifier and finalizer have no route gate, so the run ended with a
+        bare "QA thread crashed".  Now `pm`'s `main()` prints one
+        `Error: <message>; or change the model setting that selects it
+        ('pm model show' lists them, PR overrides included)` line, rc 1, and
+        a QA thread stopped by it shows `QA stopped: <message>; … then start
+        QA again` (`qa_loop._crash_output`; other crashes keep their text).
+        Nothing falls back to the main account.
+        `test_unconfigured_provider_is_a_clean_cli_error`,
+        `test_unconfigured_provider_explains_a_stopped_qa_run[start|resume]`,
+        `test_other_qa_thread_crashes_keep_their_message`; 4 mutations
+        caught (`/pm-captures/review-e0e8-i6/mutation-checks.log`).
+        Full suite 3690 passed, rc 0 (markdown 3.10.3 installed first;
+        `/pm-captures/review-e0e8-i6/full-suite.log`).

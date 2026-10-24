@@ -5213,6 +5213,20 @@ def resume_qa_sync(
     )
 
 
+def _crash_output(exc: Exception, default: str) -> str:
+    """What a crashed QA thread shows on the TUI.
+
+    A session whose selected provider is not configured (planner, s0,
+    verifier and finalizer launch without a route gate) is a setup error
+    with a remedy, not a bare crash: launches never fall back to the main
+    account, so the user has to fix the setting before restarting QA.
+    """
+    from pm_core.providers import PROVIDER_SETTING_HINT, ProviderNotFoundError
+    if isinstance(exc, ProviderNotFoundError):
+        return f"QA stopped: {exc}; {PROVIDER_SETTING_HINT}, then start QA again"
+    return default
+
+
 def start_qa_background(
     state: QALoopState,
     pm_root: Path,
@@ -5224,11 +5238,11 @@ def start_qa_background(
     def _run():
         try:
             run_qa_sync(state, pm_root, pr_data, on_update, max_scenarios)
-        except Exception:
+        except Exception as exc:
             _log.exception("QA background thread crashed for %s", state.pr_id)
             state.running = False
             state.latest_verdict = "ERROR"
-            state.latest_output = "QA thread crashed"
+            state.latest_output = _crash_output(exc, "QA thread crashed")
             if on_update:
                 on_update(state)
 
@@ -5247,11 +5261,11 @@ def resume_qa_background(
     def _run():
         try:
             resume_qa_sync(state, pm_root, pr_data, on_update)
-        except Exception:
+        except Exception as exc:
             _log.exception("QA resume thread crashed for %s", state.pr_id)
             state.running = False
             state.latest_verdict = "ERROR"
-            state.latest_output = "QA resume thread crashed"
+            state.latest_output = _crash_output(exc, "QA resume thread crashed")
             if on_update:
                 on_update(state)
 
