@@ -355,6 +355,7 @@ class TestGetSessionName:
         mock_run.return_value = MagicMock(returncode=0, stdout="sess\n")
         env = os.environ.copy()
         env.pop("TMUX_PANE", None)
+        env.pop("PM_POPUP_SESSION", None)
         with patch.dict(os.environ, env, clear=True):
             result = get_session_name()
         cmd = mock_run.call_args[0][0]

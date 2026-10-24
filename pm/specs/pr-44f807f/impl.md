@@ -130,9 +130,11 @@
 - *Sources with no brief.* Many published pairs have no recoverable request.
   Rather than writing briefs, whole-document cases take `no_brief=True`, and the
   judge is told no brief exists; a missing brief without the flag still raises.
-- *Plan text for reports.* No `plan-doc-eval.md` revision on master or any branch
-  mentions reports as of 2026-10-23; the user says the plan now covers them, so
-  the rubric supports them without citing plan text.
+- *Plan text for reports.* master c98fa96e adds PM sign-off reports as a
+  generation task, with its own PR ("Sign-off report generation cases") owning
+  sign-off fixtures and a sign-off template. This PR supplies what that PR builds
+  on: `material` for what a report describes, the report guidance in the
+  dimensions, and single-document judging.
 - *Fidelity as a fifth concern.* The task lists fidelity next to the four
   concerns; it is mapped as its own dimension and given a concern-tagged fixture,
   while tests require the four named concerns.

@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-446cb83
+  active_pr: pr-089af69
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -11855,6 +11855,17 @@ prs:
       TUI startup, in_progress), pr-ac12b47 (session stale-container cleanup).'
     created_at: '2026-05-25T22:43:55Z'
     last_edited: '2026-05-25T22:43:55Z'
+  - id: note-1943d8d
+    text: 'Manual recovery 2026-10-22: #236 s28 reached 2041 processes (1929 treesample.sh)
+      under its 2048 PID cap; podman exec sh failed Cannot fork. Restart of that exact
+      container cleared pressure while preserving its filesystem and evidence. PID
+      1 was sleep. Please account for process-limit exhaustion and zombie accumulation
+      when diagnosing/recovering unhealthy containers; never treat running state alone
+      as health. Coordinate collector retry fixes with pr-1ab9075. The interrupted
+      #241 implementation was explicitly assigned to the reviewer to complete from
+      WIP; preserve its work and finish integrations/tests.'
+    created_at: '2026-10-22T15:34:41Z'
+    last_edited: '2026-10-22T15:34:41Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -12616,6 +12627,15 @@ prs:
       silently 404''ing on subsequent /api/doc.'
     created_at: '2026-05-03T23:01:01Z'
     last_edited: '2026-05-03T23:01:01Z'
+  - id: note-49c46c6
+    text: 'plan-doc-eval''s reading feedback loop (pr-66dfc08) consumes reading activity
+      from ambient surfaces: it maps viewport/scroll (and gaze, when available) history
+      onto document sections and versions to flag sections where the reader lost interest
+      or the thread, then proposes rewrites through the revision and approval flow.
+      The rc viewer is its first reading surface; keep the viewed document''s path
+      and version identifiable in what the viewer reports.'
+    created_at: '2026-10-23T23:45:49Z'
+    last_edited: '2026-10-23T23:45:49Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-4702a11-pm-rc-mobile-voice-document-viewer-a-372f0fc3
 - id: pr-39a4e66
   plan: plan-ambient
@@ -12653,7 +12673,17 @@ prs:
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-4e093a3
+    text: 'plan-doc-eval''s reading feedback loop (pr-66dfc08) consumes reading activity
+      from ambient surfaces: it maps viewport/scroll (and gaze, when available) history
+      onto document sections and versions to flag sections where the reader lost interest
+      or the thread, then proposes rewrites through the revision and approval flow.
+      It depends on this PR: keep document path and version, plus viewport positions
+      mappable to text offsets or section regions, in AttentionState and its archived
+      events.'
+    created_at: '2026-10-23T23:45:50Z'
+    last_edited: '2026-10-23T23:45:50Z'
 - id: pr-dc4f5fe
   plan: plan-ambient
   title: Host-local surface registry
@@ -12856,7 +12886,17 @@ prs:
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-8aa2df1
+    text: 'plan-doc-eval''s reading feedback loop (pr-66dfc08) consumes reading activity
+      from ambient surfaces: it maps viewport/scroll (and gaze, when available) history
+      onto document sections and versions to flag sections where the reader lost interest
+      or the thread, then proposes rewrites through the revision and approval flow.
+      It uses dwell and scroll-stop per region when this PR lands, and falls back
+      to viewport history from the archive before then, so region ids that line up
+      with document sections help.'
+    created_at: '2026-10-23T23:45:51Z'
+    last_edited: '2026-10-23T23:45:51Z'
 - id: pr-97ddabf
   plan: plan-regression
   title: Watcher-target window for regression test launches
@@ -29565,53 +29605,118 @@ prs:
   notes: []
 - id: pr-3201ea8
   plan: bugs
-  title: 'Investigate: QA run in execution phase not resumed after kill -9 of the
-    TUI (S15 W3.4), though another hard-killed run was'
+  title: 'Bug: preserve and resume QA ownership during worker startup'
   branch: pm/pr-3201ea8-investigate-qa-run-in-execution-phase-not-resumed-
   status: pending
   depends_on: []
-  description: Found in pr-b53bfe2 sign-off (2026-10-14) from QA r7 S15 W3.4 (captures
-    scenarios/15/W3.4-interrupted-QA, timeline.txt + pm-log-excerpt.txt). Run 1b on
-    pr-983dd4a was in the execution phase (worker s2 launched 14:37:30). The TUI was
-    killed with kill -9 at 14:38:00, and pm session respawned it at 14:38:02. Over
-    the next 22s the new TUI logged no 'Resuming incomplete QA from disk' line, though
-    _resume_incomplete_qa scans every ~5 ticks. The tester then pressed z t, which
-    killed the stale windows. In the same run, W3.5-hardkill-container (also kill
-    -9, then pm session) resumed within 1s ('Resuming QA for pr-9ca965b after restart').
-    Not trust-related, and the W3.4 Thens (fresh trust on restart, planned=launched)
-    held. Check whether qa_resume.json existed for run 1b, the PR status at kill time
-    (resume requires status==qa), and whether the respawned TUI's HOME/qa_root matched.
-    If it is by design, close with the reason.
+  description: 'A TUI restart during QA scenario refinement/launch can forget workers
+    that are already running and start a second run for the same PR. Persist and recover
+    run ownership and per-scenario phase throughout startup, not only after every
+    refiner/launcher has finished.
+
+
+    Confirmed on #234 on 2026-10-22. During recovery of another PR, a native TUI restart
+    at15:29Z resumed #236/#243 but started new QA for #234 while its original workers
+    kept running. Those workers pushed fixes until16:22Z while replacement review/planning
+    used an older local head. The old run never finalized, and two later planner handoffs
+    stopped on divergent histories. Evidence: original run ~/.pm/workdirs/qa/pr-9f111ef-1bdecc72976987b7;
+    subsequent runs badbdc1291e2c454 and2531ab466c475517; intervention log/checkpoint
+    under ~/.local/state/pm-pr-shepherd. Commits dc695f44, b769b725 and61bedfb5 came
+    from the old QA workers; reconciliations0e6a5d2d and5e9f27cd preserve them.
+
+
+    Current code waits for all _launch_scenarios_in_containers/_launch_scenarios_in_tmux
+    refinement threads before _execute_and_finalize first writes qa_resume.json. _resume_incomplete_qa
+    discovers only that snapshot. Fix the ownership gap and recovery of partially
+    launched runs, including refiner vs execution-worker identity, queued/not-yet-launched
+    scenarios, and completed results. A restart must adopt the same run, launch only
+    missing work once, and reach its normal finalizer before lifecycle advancement.
+    Do not discard transcripts, captures, dirty work, or existing commits. Do not
+    infer PASS for unrun work or bypass manual merge/spec gates.
+
+
+    Regression coverage: restart or kill the controller while one scenario is executing,
+    another is still refining, and another has not launched; verify same run, no duplicate
+    writer/worker, correct result collection and branch reconciliation. Also cover
+    restart immediately after a worker launch/relaunch before the next normal poll.
+    Use bounded deterministic harness failures plus live PM workflow evidence.
+
+
+    Coordinate with #237/pr-8020495, which already adds snapshots after relaunch/dequeued
+    launches, but does not close initial startup''s snapshot gap. pr-f8acf21 tracks
+    stop/supersede races: recovery must distinguish an interrupted run to adopt from
+    a deliberately cancelled run; check current fixes before duplicating them. pr-1ab9075
+    owns nonblocking retries, and pr-62fdd54 owns upstream synchronization before
+    planning.
+
+
+    Original report (retain its repro as a regression):
+
+    Found in pr-b53bfe2 sign-off (2026-10-14) from QA r7 S15 W3.4 (captures scenarios/15/W3.4-interrupted-QA,
+    timeline.txt + pm-log-excerpt.txt). Run 1b on pr-983dd4a was in the execution
+    phase (worker s2 launched 14:37:30). The TUI was killed with kill -9 at 14:38:00,
+    and pm session respawned it at 14:38:02. Over the next 22s the new TUI logged
+    no ''Resuming incomplete QA from disk'' line, though _resume_incomplete_qa scans
+    every ~5 ticks. The tester then pressed z t, which killed the stale windows. In
+    the same run, W3.5-hardkill-container (also kill -9, then pm session) resumed
+    within 1s (''Resuming QA for pr-9ca965b after restart''). Not trust-related, and
+    the W3.4 Thens (fresh trust on restart, planned=launched) held. Check whether
+    qa_resume.json existed for run 1b, the PR status at kill time (resume requires
+    status==qa), and whether the respawned TUI''s HOME/qa_root matched. If it is by
+    design, close with the reason.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T15:49:43.888654+00:00'
-  updated_at: '2026-10-14T15:49:43.888654+00:00'
+  updated_at: '2026-10-22T17:19:43.945696+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes: []
 - id: pr-62fdd54
   plan: bugs
-  title: 'Bug: QA start does not refresh the PR workdir from upstream, so a worker
-    fix pushed in an earlier QA round blocks the next planner handoff'
+  title: 'Bug: synchronize the PR branch before QA planning and recover stale handoffs'
   branch: pm/pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-workdir-from-
   status: pending
   depends_on: []
-  description: 'QA scenario workers push fixes straight to the upstream (origin swapped
-    in create_scenario_workdir), but nothing pulls them back into the PR workdir.
-    If QA is restarted without a review-loop pull in between (e.g. after INPUT_REQUIRED),
-    the PR workdir is behind the upstream. pr-b8561ac _publish_planner_head then refuses
-    the fan-out with "is behind upstream ... Pull the PR branch in the PR workdir
-    and restart QA", and the planner has also planned against a stale tree. Consider
-    fast-forwarding the PR workdir (ff-only, clean tree) to the upstream branch before
-    launching the planner in run_qa_sync. Repro: QA round 1 worker pushes qa: fix
-    and ends INPUT_REQUIRED, then restart QA.'
+  description: 'Before QA planning starts, reconcile the canonical PR workdir with
+    the PR''s actual upstream so the planner and workers use the same current revision.
+    Normal completed QA has a finalizer that imports worker pushes, but interrupted/INPUT_REQUIRED
+    runs can skip that finalizer. The planner currently edits the stale local branch
+    and _publish_planner_head later refuses the handoff.
+
+
+    Observed twice on #234 on2026-10-22: old QA workers pushed fixes while replacement
+    review/planning used older local heads. First d92b10a2 diverged from edc60832;
+    later planner f9954dc4 diverged from a18faeaf. Clean manual reconciliations0e6a5d2d/5e9f27cd
+    preserved both histories, then native review was restarted because application
+    code had been introduced. Underlying lost-worker ownership is separately tracked
+    by pr-3201ea8; synchronization must not race active writers or hide that defect.
+
+
+    Refresh the upstream before generating the plan. Clean behind-only branches should
+    fast-forward automatically. Preserve dirty files and local commits; divergent
+    or conflicting histories need an explicit native agent recovery/review route or
+    a specific actionable hold, never force-push, reset, silent overwrite or repeated
+    planning against a known-stale tree. If reconciliation imports application code
+    not covered by the prior review, invalidate that old review and route through
+    review/QA before sign-off. Preserve manual merge/spec-review gates and the existing
+    planner-head consistency guard.
+
+
+    Regression coverage: worker fix pushed in a previous QA round followed by interrupted/INPUT_REQUIRED
+    handoff, then new QA; local planner-only commits plus upstream fixes; dirty workdir;
+    conflict; upstream changes during handoff. Verify the revision read by the planner
+    and tested by every worker, and that code changes cannot inherit stale review/signoff
+    evidence. Evidence: ~/.local/state/pm-pr-shepherd/interventions.jsonl and #234
+    QA runs badbdc1291e2c454/2531ab466c475517.
+
+    '
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-13T06:08:05.900366+00:00'
+  updated_at: '2026-10-22T17:19:45.422450+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30034,6 +30139,34 @@ prs:
       explicitly or request a scoped input bundle if needed.'
     created_at: '2026-10-21T00:23:53Z'
     last_edited: '2026-10-21T00:35:10Z'
+  - id: note-6530cac
+    text: 'Plan review 2026-10-23 (revised after user decision): training uses strong
+      briefs only. Strong = document-specific request text (tracking issue, review
+      or discussion thread), derived downstream from provenance.brief_items kinds
+      and request_words_kept: 605 public briefs, plus PM conversations and spec inputs.
+      context_strength ''rich'' also covers 2,534 briefs whose only request text is
+      a shared IETF/QUIC working-group charter or NASA study call; those count as
+      weak alongside the 9,280 thin ones, held out of every split for strengthening
+      later (pr-5f50baf). No change to this PR is needed; pr-8df6472 records the definition
+      in the evaluator configuration. Before this PR''s workdir is cleaned up, preserve
+      experiments/plan-writing/data/ (3.9G, gitignored: cases/, context/, pm/ exist
+      only here; the main checkout has only the 2.6G corpus) somewhere pr-8df6472
+      can copy from; a rebuild re-fetches editable issue bodies and can change briefs
+      and case ids.'
+    created_at: '2026-10-23T21:33:59Z'
+    last_edited: '2026-10-23T21:51:38Z'
+  - id: note-b578a33
+    text: 'Plan review 2026-10-23: spec and sign-off report cases moved to their own
+      PRs, pr-4d116d1 and pr-180f697, which extend this catalog through its generator_input/reference_text
+      accessors and split groups before pr-8df6472 calibrates.'
+    created_at: '2026-10-23T22:00:45Z'
+    last_edited: '2026-10-23T22:00:45Z'
+  - id: note-3f24d05
+    text: 'Paused (user, 2026-10-23): QA restart waits until #249 (pr-592e4bd, QA
+      refinement and execution through claude-mixed work models) merges. Don''t restart
+      QA before then.'
+    created_at: '2026-10-23T22:09:11Z'
+    last_edited: '2026-10-23T22:09:11Z'
 - id: pr-44f807f
   plan: plan-doc-eval
   title: Technical document quality rubric
@@ -30312,23 +30445,45 @@ prs:
   depends_on:
   - pr-9f111ef
   - pr-44f807f
+  - pr-4d116d1
+  - pr-180f697
   description: 'Implement the catalog-to-draft-to-score workflow in pm/plans/plan-doc-eval.md
     using the case catalog, the rubric and `claude-mixed` model access. Add project-separated
     splits, blinded paired evaluation run as separate whole-document and continuation
     tracks with the prefix shown to judges, individual frontier, cross-lab panel,
-    open-model and JEV judge adapters and comparable generation from the current planning
-    prompts. Run the frozen-document scoring comparison and configured-open-model
-    coverage specified above; version model roles, panel membership and aggregation
-    rules. Estimate the share of weekly subscription limits taken by calibration runs
-    of different sizes, pick a size from that estimate under the twenty percent single-run
-    ceiling, and run it, including the style-continuity check for continuation cases
-    and the separate human-rated writing check; save a report identifying useful and
-    unreliable measures per rubric dimension. No manual corpus curation or code-task
-    execution is required. Extend the catalog with PM implementation and QA spec cases
-    from their original phase inputs, using current specs as production baselines.
-    Reuse the existing rubric and add spec examples that distinguish requirements,
-    design proposals, open questions and acceptance checks. Missing phase context
-    is reported rather than reconstructed from the finished spec.
+    open-model and JEV judge adapters and comparable generation from the current planning,
+    spec and sign-off prompts. JEV is a general-purpose classifier model reached through
+    OpenRouter; OpenRouter''s public listing currently shows only typesafe/jev-router,
+    which forwards each request to another model, so confirm a direct JEV model id
+    and record the router as a coverage gap rather than as a JEV judgment. Run the
+    frozen-document scoring comparison and configured-open-model coverage specified
+    above; version model roles, panel membership and aggregation rules. Estimate the
+    share of weekly subscription limits taken by calibration runs of different sizes,
+    pick a size from that estimate under the twenty percent per-subscription single-run
+    ceiling, and run it, including the style-continuity check for continuation cases;
+    save a report identifying useful and unreliable measures per rubric dimension.
+    No manual corpus curation or code-task execution is required. Calibrate on the
+    spec and sign-off report cases from their case PRs as well as plans and the public
+    corpus, so the evaluator is fixed with every document family in view. Generate,
+    calibrate and train on strong briefs only: briefs with document-specific request
+    text (a tracking issue, review or discussion thread asking for the document; 605
+    in the pr-9f111ef catalog, plus any pr-5f50baf strengthens before calibration),
+    PM task conversations and recovered spec and sign-off inputs. Briefs whose request
+    text is only a shared working-group charter or study call (2,534, marked rich
+    in the catalog) or that carry only index and metadata context (9,280) are weak:
+    keep them out of every split, held for strengthening later, and report their counts.
+    Continuation cases need no brief and are unaffected. Record the strong-brief definition,
+    derived from the catalog''s brief_items kinds and request_words_kept, in the versioned
+    evaluator configuration. Sample across sources, document types and lengths so
+    the largest collections do not dominate, and report PM new-plan and edit/reformat
+    cases apart. The catalog lives in gitignored data/; use the preserved pr-9f111ef
+    snapshot rather than rebuilding it, since a rebuild re-fetches editable issue
+    bodies and can change briefs. Environment dependency for review and QA: real runs
+    need the claude-mixed router and the routes behind each role (the ChatGPT and
+    Grok bridges, OpenRouter, the work account); when a required route is down, return
+    INPUT_REQUIRED asking the human to restore it, and record a coverage gap only
+    for a route still unavailable after that. Locally served models are out of scope
+    here and wait for the later local-model PR.
 
 
     Tests: Verify split and duplicate isolation, identity masking, order reversal,
@@ -30336,23 +30491,24 @@ prs:
     evaluations. Use the rubric fixtures to check that results preserve distinct quality
     dimensions. Run a real sample at the chosen size through the selected evaluators
     and report observed agreement, uncertainty and the usage actually consumed against
-    the estimate; mocked responses alone do not establish evaluator quality. Verify
-    that implementation-spec inputs exclude subsequent implementation/review artifacts
-    and QA-spec inputs exclude later scenarios/results; record the source revisions
-    and report calibration separately by document family. Verify independent panel
-    judgments, the equal-count repeated-single-model control, model/route provenance,
-    and explicit failures instead of silent model substitution. Retain real open-model
-    generations and judgments and a model-by-role coverage report.
+    the estimate; mocked responses alone do not establish evaluator quality. Report
+    calibration separately by document family: plans, implementation specs, QA specs,
+    sign-off reports and the public corpus. Verify independent panel judgments, the
+    equal-count repeated-single-model control, model/route provenance, and explicit
+    failures instead of silent model substitution. Retain real hosted open-model and
+    JEV generations or judgments and a model-by-role coverage report. Verify that
+    no weak-brief case enters any split, that samples span sources as configured,
+    and that PM task kinds are reported apart.
 
 
-    Files: experiments/plan-writing/, pm_core/cli/plan.py, pm_core/spec_gen.py and
-    narrowly extracted prompt builders, relevant tests, calibration artifacts and
-    report'
+    Files: experiments/plan-writing/, pm_core/cli/plan.py, pm_core/spec_gen.py, pm_core/prompt_gen.py
+    and narrowly extracted prompt builders, relevant tests, calibration artifacts
+    and report'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677748+00:00'
-  updated_at: '2026-10-21T19:18:18.101700+00:00'
+  updated_at: '2026-10-23T22:20:59.991827+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30377,6 +30533,17 @@ prs:
       brief attachments (label + text) to the brief string. dimensions=[] now raises.'
     created_at: '2026-10-21T03:24:58Z'
     last_edited: '2026-10-21T03:24:58Z'
+  - id: note-05a46e8
+    text: 'Deferred to this PR''s start (user, 2026-10-23): (1) ox-stack.service,
+      which runs the claude-router plus the ChatGPT/Grok subscription bridges, was
+      OOM-killed 2026-10-13 and has stayed down (ports 8791/8792 closed; the router
+      on 8790 runs separately); its last startup log showed the Grok auth session
+      already expired. Restore it and re-authenticate Grok before panel runs. (2)
+      JEV: OpenRouter''s public list shows only typesafe/jev-router, which forwards
+      requests to other models; confirm a direct JEV model id with the user. Locally
+      served models are deferred to pr-ff9fea2.'
+    created_at: '2026-10-23T22:06:36Z'
+    last_edited: '2026-10-23T22:06:36Z'
 - id: pr-09c4e8e
   plan: plan-doc-eval
   title: Automated planning prompt improvement campaign
@@ -30401,16 +30568,24 @@ prs:
     resource accounting and panel continuation or stop decisions. Estimate the share
     of weekly subscription limits taken by campaigns of different population sizes
     and generation counts, and pick the campaign shape from that estimate before running,
-    keeping every run under the twenty percent single-run ceiling. Report each campaign''s
-    regenerated PM plans against their original plan files on the rubric dimensions
-    and on fidelity to the recovered conversations. Produce a reproducible candidate
-    prompt diff and campaign evidence, or an explicit no-improvement result; the evaluator
-    stays fixed throughout. Include implementation and QA spec prompts in the campaign.
-    Keep candidates and baseline comparisons specific to each prompt family and writer
-    model, and report gains for plans and both spec types separately. Include representative
-    configured open models and measure prompt transfer. Run a bounded comparison of
-    single-judge versus cross-lab-panel feedback with the evaluator fixed within each
-    campaign and the same withheld measure for both winners.
+    keeping every run under the twenty percent per-subscription single-run ceiling.
+    Report each campaign''s regenerated PM plans against their original plan files
+    on the rubric dimensions and on fidelity to the recovered conversations. Produce
+    a reproducible candidate prompt diff and campaign evidence, or an explicit no-improvement
+    result; the evaluator stays fixed throughout. Include implementation-spec, QA-spec
+    and sign-off report prompts in the campaign. Keep candidates and baseline comparisons
+    specific to each prompt family and writer model, and report gains for plans, both
+    spec types and sign-off reports separately. Include representative hosted open
+    models and measure prompt transfer. Run a bounded comparison of single-judge versus
+    cross-lab-panel feedback with the evaluator fixed within each campaign and the
+    same withheld measure for both winners. Draw whole-document development, validation
+    and final cases from strong briefs only, as defined in the evaluator configuration,
+    and report PM new-plan and edit/reformat results apart. Environment dependency
+    for review and QA: real runs need the claude-mixed router and the routes behind
+    each role (the ChatGPT and Grok bridges, OpenRouter, the work account); when a
+    required route is down, return INPUT_REQUIRED asking the human to restore it,
+    and record a coverage gap only for a route still unavailable after that. Locally
+    served models are out of scope here and wait for the later local-model PR.
 
 
     Tests: Exercise resume without duplicate completed calls, plateau stopping, panel
@@ -30428,10 +30603,12 @@ prs:
     end the run. Run an actual campaign and retain repeated baseline/candidate comparisons,
     the original-plan comparison, failed attempts and usage consumed against the estimate.
     Verify prompt-family assignment and phase-context provenance, and retain real
-    baseline/candidate spec generations and their evaluations. Verify that cached
-    evaluations distinguish writer and evaluator versions, including panel membership/aggregation,
-    and that fitness never pools incompatible scoring configurations. Retain real
-    open-model baseline/candidate comparisons and the panel-feedback comparison.
+    baseline/candidate spec and sign-off report generations and their evaluations.
+    Verify that cached evaluations distinguish writer and evaluator versions, including
+    panel membership/aggregation, and that fitness never pools incompatible scoring
+    configurations. Retain real open-model baseline/candidate comparisons and the
+    panel-feedback comparison. Check that no weak-brief case enters whole-document
+    fitness, validation or final evaluation.
 
 
     Files: experiments/plan-writing/, reusable evaluation/optimization modules under
@@ -30440,7 +30617,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677755+00:00'
-  updated_at: '2026-10-21T19:18:18.796438+00:00'
+  updated_at: '2026-10-23T22:00:43.801990+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30462,6 +30639,19 @@ prs:
       alone does not establish it.'
     created_at: '2026-10-21T00:16:14.380980+00:00'
     last_edited: '2026-10-21T00:16:14.380980+00:00'
+  - id: note-f4931a7
+    text: 'Plan review 2026-10-23: this PR''s genetic search is reused with the evaluator
+      fixed. pr-891fd39 seeds one prompt per published reference and extracts the
+      document from a stream with interleaved reader annotations before scoring (a
+      malformed stream fails the evaluation rather than being repaired). pr-f440e1d
+      and pr-380e0c7 evolve iterative candidates: a candidate is a multi-prompt procedure
+      (writer, critics or reader, reviser, rounds) run within one generation, and
+      fitness is the evaluator''s score of its final output only. Keep seeding open
+      to arbitrary prompts with recorded origin, allow a post-generation transform
+      before evaluation, and let a candidate''s genome be a set of prompts plus procedure
+      settings.'
+    created_at: '2026-10-23T21:56:04Z'
+    last_edited: '2026-10-23T22:00:43Z'
 - id: pr-eadd1b7
   plan: plan-doc-eval
   title: Iterative generation with in-loop quality feedback
@@ -30481,13 +30671,20 @@ prs:
     signal, and usage and latency per variant. Compare equal-round and comparable-budget
     conditions so extra calls alone do not explain a panel advantage. Estimate the
     share of weekly subscription limits for different round counts and case counts
-    first, and keep every run under the twenty percent single-run ceiling. Deliver
-    evidence on whether iteration beats one-shot generation, whether cross-lab feedback
-    improves independently judged quality over its single-model controls, and at how
-    many rounds. Include implementation and QA specs in the one-shot versus iterative
-    comparison, using the same phase inputs as their production baselines and preserving
-    instructions about unresolved questions and approval. Report outcomes by document
-    family.
+    first, and keep every run under the twenty percent per-subscription single-run
+    ceiling. Deliver evidence on whether iteration beats one-shot generation, whether
+    cross-lab feedback improves independently judged quality over its single-model
+    controls, and at how many rounds. Include implementation and QA specs and sign-off
+    reports in the one-shot versus iterative comparison, using the same inputs as
+    their production baselines and preserving instructions about unresolved questions
+    and approval for specs and the verdict and revision tags for sign-off reports.
+    Report outcomes by document family. Use strong-brief whole-document cases only,
+    and report PM task kinds apart as well as document families. Environment dependency
+    for review and QA: real runs need the claude-mixed router and the routes behind
+    each role (the ChatGPT and Grok bridges, OpenRouter, the work account); when a
+    required route is down, return INPUT_REQUIRED asking the human to restore it,
+    and record a coverage gap only for a route still unavailable after that. Locally
+    served models are out of scope here and wait for the later local-model PR.
 
 
     Tests: Verify that the critic never sees the independent evaluation configuration
@@ -30497,9 +30694,9 @@ prs:
     and that independent scores never feed revisions; preserve individual panel feedback
     and aggregation provenance. Run a real sample and retain per-round independent
     scores alongside critic scores, with usage consumed against the estimate. Include
-    real comparisons for both spec types, cross-lab and repeated-single-model critics,
-    and the required open/local writer and critic combinations; check that revisions
-    preserve requirements and unresolved questions.
+    real comparisons for both spec types and sign-off reports, cross-lab and repeated-single-model
+    critics, and the required hosted open-model writer and critic combinations; check
+    that revisions preserve requirements and unresolved questions.
 
 
     Files: experiments/plan-writing/, iterative generation and critic modules under
@@ -30508,11 +30705,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677763+00:00'
-  updated_at: '2026-10-21T19:18:19.513654+00:00'
+  updated_at: '2026-10-23T22:00:43.063684+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-862603c
+    text: 'Plan review 2026-10-23: pr-f440e1d runs the genetic search with iterative
+      candidates, evolving this PR''s generation procedure (writer, critic and reviser
+      prompts, rounds, critic configuration) with pr-09c4e8e''s machinery and seeding
+      from this PR''s best configuration; fitness is the fixed evaluator''s score
+      of the final output only. pr-380e0c7 later plugs reader thought streams into
+      the same revision step. Keep the revision step''s feedback source and the writer/critic/reviser
+      prompts pluggable and versioned, and record the chosen configuration, initial
+      drafts and per-round artifacts for reuse.'
+    created_at: '2026-10-23T21:45:03Z'
+    last_edited: '2026-10-23T22:00:43Z'
 - id: pr-86c2188
   plan: plan-doc-eval
   title: Adopt measured improvements in PM planning prompts
@@ -30521,20 +30729,29 @@ prs:
   depends_on:
   - pr-09c4e8e
   - pr-eadd1b7
+  - pr-f440e1d
   description: 'Apply campaign-supported improvements to the plan-development, PR-breakdown,
-    implementation-spec and QA-spec prompt families in pm/plans/plan-doc-eval.md;
+    implementation-spec, QA-spec and sign-off report prompt families in pm/plans/plan-doc-eval.md;
     retain each family''s baseline when no improvement is supported. Where iterative
-    generation beats one-shot generation on the independent measure, adopt it through
-    the same entry point with its round count and critic or panel configuration fixed.
-    Report supported writer-model configurations, including open/local models, and
-    retain the baseline for unvalidated configurations; do not make a closed-model
-    panel mandatory for every backend. Validate the exact rendered production prompt
-    after integration, with held-out document comparisons and fresh generation through
-    normal PM commands in an isolated project. Carry forward scope, user constraints,
-    required fields and valid dependencies. Include in the adoption report the comparison
-    of regenerated plans against their originals. Deliver the production prompt change
-    and its evidence through the existing review and acceptance flow; a standalone
-    optimizer or demonstration rewrite does not complete this PR.
+    generation, including candidates evolved by the iterative genetic search, beats
+    one-shot generation on the independent measure, adopt it through the same entry
+    point with its prompts, round count and critic or panel configuration fixed. Report
+    supported writer-model configurations, including hosted open models, and retain
+    the baseline for unvalidated configurations, including locally served models until
+    the later local-model PR validates them; do not make a closed-model panel mandatory
+    for every backend. Validate the exact rendered production prompt after integration,
+    with held-out document comparisons and fresh generation through normal PM commands
+    in an isolated project. Carry forward scope, user constraints, required fields
+    and valid dependencies, and keep the verdict and revision meta tags in sign-off
+    reports that the dashboard and merge gate read. Include in the adoption report
+    the comparison of regenerated plans against their originals. Deliver the production
+    prompt change and its evidence through the existing review and acceptance flow;
+    a standalone optimizer or demonstration rewrite does not complete this PR. Manual
+    testing: fresh generation through normal PM commands (plan add and breakdown,
+    inline and standalone spec generation, sign-off) launches Claude sessions in tmux
+    windows; run it in an isolated pm project and session, never against this project''s
+    state, and expect review and QA to need human-guided confirmation (INPUT_REQUIRED)
+    of those sessions and of the hosted open-model entry point.
 
 
     Tests: Check that normal PM commands render the evaluated prompt version. Generate
@@ -30543,19 +30760,22 @@ prs:
     and with the original plan files using the reserved evaluators; retain examples
     and failures. Run affected prompt/parser tests and verify existing project state
     is untouched by the experiment. Exercise both inline and standalone spec-generation
-    paths where applicable, verify that spec review/approval behavior is preserved,
-    and report measured gains or retention of the baseline for every in-scope family
-    and evaluated writer model. Include production-entry-point checks with a configured
-    open/local model and preserve access to the baseline when panel routing is unavailable.
+    paths where applicable, verify that spec review/approval behavior is preserved
+    and that sign-off reports from the adopted prompt still carry the meta tags the
+    dashboard and merge gate read, and report measured gains or retention of the baseline
+    for every in-scope family and evaluated writer model. Include production-entry-point
+    checks with a configured hosted open model and preserve access to the baseline
+    when panel routing is unavailable.
 
 
-    Files: pm_core/cli/plan.py, pm_core/spec_gen.py, extracted prompt builders, tests/test_plan_parser.py
-    and affected planning/spec tests, campaign evidence and adoption report'
+    Files: pm_core/cli/plan.py, pm_core/spec_gen.py, pm_core/prompt_gen.py, extracted
+    prompt builders, tests/test_plan_parser.py and affected planning/spec tests, campaign
+    evidence and adoption report'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677768+00:00'
-  updated_at: '2026-10-21T19:18:20.218999+00:00'
+  updated_at: '2026-10-23T22:00:24.118139+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31259,7 +31479,1039 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T14:04:42.745914+00:00'
-  updated_at: '2026-10-22T14:04:42.745914+00:00'
+  updated_at: '2026-10-22T15:56:00.908045+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-721be68
+    text: 'QA S1 refine (live-checked on 8b1c3310): popup child logs go to ~/.pm/debug/<workdir-tag>.log,
+      not the session log; grep session_tag=. Test project needs pm_core AND bin/
+      (the fake-claude shim runs `pm which | tail -n1` in workdir panes, so print
+      the WORKDIR-CODE marker BEFORE the path). Merge needs a fresh SIGNOFF_MERGE:
+      commit decoy, `pm pr review <id>`, then O in TUI with skip-qa + fake review
+      PASS/signoff SIGNOFF_MERGE (~30 s). O on a manually started in_progress PR never
+      advances (no transcript). Picker merge lands the decoy on session master, so
+      run it last. Put /usr/bin/git first on PATH before pm session.'
+    created_at: '2026-10-22T14:54:40Z'
+    last_edited: '2026-10-22T14:54:40Z'
+  - id: note-baf898d
+    text: 'QA S2 refine: in this container /usr/local/bin/pm is `python3 -m pm_core.wrapper`
+      (cwd first on sys.path), so the OUTER `pm _popup-cmd` from a window cwd holding
+      a pm_core imports that cwd code; for a plain project (no pm_core next to pm/)
+      it never swaps away, so the child dispatcher_root = the cwd clone. Drive popup
+      QA with the venv console-script pm (pm_core.wrapper:main) first on the tmux
+      server PATH; the -m launcher gap is outside this PR (launcher, not the dispatchers).'
+    created_at: '2026-10-22T15:07:26Z'
+    last_edited: '2026-10-22T15:07:26Z'
+  - id: note-81515e3
+    text: 'QA S2 (3dbd4f7c): picker d (pr review) from a PR window launched REAL claude
+      despite session fake-claude _all config — build_claude_shell_cmd got no session_tag,
+      so the gate used the workdir cwd tag. Fixed by passing the tmux-aware tag in
+      pr start/review/merge launchers (pr.py) + test. Other launchers (qa_loop, signoff,
+      guide, pane_ops) still default to cwd tag — tracked by pr-ea4fffa. Harness:
+      ~/.local/bin/fake-claude resolves via `pm which` → breaks in workdirs without
+      bin/ or with a which marker; QA swapped it to exec /workspace/bin/fake-claude.'
+    created_at: '2026-10-22T15:07:28Z'
+    last_edited: '2026-10-22T15:07:28Z'
+  - id: note-09e901d
+    text: 'QA S4 incidental fix 2d126ac1 (+47167ee3 tests): concurrent prefix+M/P
+      from two clients raced on tmux "current client" (run-shell/popup have no pane).
+      Pre-fix: one client got no popup (its typing went into its pane), and picker
+      `s` (pr start, existing window) in client 1 switched client 2''s grouped session
+      to that window. Fix: bindings pass #{q:client_name} #{q:session_name}; _popup-show
+      uses display-popup -c/-t with S/W pinned; popup dispatchers export PM_POPUP_SESSION
+      read by tmux.get_session_name() when no TMUX_PANE. Sessions started before this
+      fix need a reattach (pm session) to pick up the new bindings.'
+    created_at: '2026-10-22T15:18:03Z'
+    last_edited: '2026-10-22T15:18:03Z'
+  - id: note-3b139a3
+    text: 'QA S5 refine: picker cannot start a never-started PR — its nav list only
+      holds PRs with an open window (plus the home PR), so the second PR is started
+      from the prefix+M runner (`pr start <beta>`). Picker start-launcher coverage
+      = `z s` on the home PR. fzf + vim-tiny are not preinstalled: `sudo apt-get update
+      && sudo apt-get install -y fzf vim-tiny` (z chords need fzf; picker e needs
+      an editor). Repro tests on f26610f0: 6 pass on branch, 5 fail with origin/master
+      session.py+wrapper.py.'
+    created_at: '2026-10-22T15:55:55Z'
+    last_edited: '2026-10-22T15:56:00Z'
+- id: pr-089af69
+  plan: bugs
+  title: 'Bug: TUI pr-edit pane vanishes silently when the editor fails to start'
+  branch: pm/pr-089af69-bug-tui-pr-edit-pane-vanishes-silently-when-the-ed
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/pane_ops.py launch_pane (edit_plan → "pm pr edit <id>"
+    pane): when $EDITOR/vi is missing, pm pr edit prints "Error: [Errno 2] No such
+    file or directory: <editor>" and exits 1, but the pane closes the same instant
+    (pane_exited trap), so the user sees nothing; TUI log still says "Launched pr-edit
+    pane". Repro: container without vi (see pr-c3762f7), press e in TUI or prefix+P
+    → e; pane %N registers and unregisters within the same second. Found in pr-24f022e
+    QA scenario 3. Suggest holding the pane open on non-zero exit (e.g. read -n1 prompt)
+    or surfacing the error in the TUI log.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T14:55:00.518596+00:00'
+  updated_at: '2026-10-22T14:55:00.518596+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ea4fffa
+  plan: bugs
+  title: 'Bug: claude launches from a PR-workdir cwd (prefix+P picker) read fake-claude
+    config by the workdir tag, not the tmux session tag'
+  branch: pm/pr-ea4fffa-bug-claude-launches-from-a-pr-workdir-cwd-prefix-p
+  status: pending
+  depends_on: []
+  description: 'pm_core/paths.py fake_claude_config(None) -> session_dir(None) ->
+    get_session_tag() derives the tag from the cwd git root, ignoring the tmux pm
+    session (unlike _resolve_session_tag). Repro (found in pr-24f022e QA scenario
+    1): session with `pm fake-claude config set --tag <TAG> {"_all":{}}`; `pm pr start
+    <id>` from the cli window gets fake-claude, but prefix+P in the PR window then
+    `z s` (pr start --fresh) or `d` (pr review) runs the child with cwd=the PR workdir,
+    tag=pm-pr-<id>-...-<hash>, no fake config -> REAL claude launches in pr-<id>/review-pr-<id>.
+    Pre-existing (paths.py untouched by pr-24f022e). Fix idea: resolve via _resolve_session_tag()
+    (tmux-aware) for the fake-claude/fake-github gates.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T15:00:51.407046+00:00'
+  updated_at: '2026-10-22T15:07:29.121136+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-57814cd
+    text: 'pr-24f022e QA S2 fixed the pr start/review/merge window launchers (pass
+      tmux-aware session_tag to build_claude_shell_cmd, commit 3dbd4f7c). Remaining:
+      _fake_claude_config_for_type(None) callers in claude_launcher + qa_loop/signoff/guide/pane_ops
+      launches, and skip-permissions lookup.'
+    created_at: '2026-10-22T15:07:29Z'
+    last_edited: '2026-10-22T15:07:29Z'
+- id: pr-3f52b15
+  plan: bugs
+  title: 'Bug: pm-home window created from a PR workdir shows that clone''s stale
+    project.yaml'
+  branch: pm/pr-3f52b15-bug-pm-home-window-created-from-a-pr-workdir-shows
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/home_window/pr_list.py PrListProvider.ensure_window
+    uses store.find_project_root() from the caller cwd as the new window start dir,
+    and _render_content resolves the project from that cwd every tick. When the first
+    park_if_on happens from a PR working copy (e.g. picker `z s` / pr start --fresh
+    from the PR window, cwd ~/.pm/workdirs/.../pm-pr-X-.../), pm-home is created with
+    cwd <workdir>/pm and renders the clone''s branch-time project.yaml forever: QA
+    pr-24f022e S5 saw both PRs [pending] ("updated 6m ago") while the session project
+    had them in_review/merged; after the picker g merge killed the PR window, the
+    client was parked on this stale list. Repro: pm session in a test project, pm
+    pr start A, focus A window, prefix+P z s (no pm-home yet) -> tmux list-panes -t
+    <S>:pm-home -F "#{pane_current_path}" is the workdir pm/; change PR states ->
+    pm-home never updates. Fix idea: resolve the session pm_root (~/.pm/sessions/<tag>/pm_root)
+    for the window cwd / pass --project to the loop.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T16:09:51.542797+00:00'
+  updated_at: '2026-10-22T16:09:51.542797+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8700be3
+  plan: improvements
+  title: Improve autostart status readability with compact text and highlighted human
+    waits
+  branch: pm/pr-8700be3-improve-autostart-status-readability-with-compact-
+  status: pending
+  depends_on:
+  - pr-0b87a97
+  description: 'Make pm autostart status and the TUI runs popup easy to scan when
+    many PRs run concurrently. Today inherited merge policies, phase/progress, and
+    dependency explanations repeat across rows, and long lines obscure requests for
+    human input. Depends on #229 (pr-0b87a97), which introduced this report.
+
+
+    Requirements:
+
+    - Remove text already implied by the surrounding target/group. State a shared
+    wait-for-merge policy once rather than repeating "wait-for-merge <- target" on
+    every dependency and again inside each blocker reason. Preserve explicit exceptions
+    and meaningful shared-dependency hold sources. Keep actual dependency blockers
+    identifiable.
+
+    - Show phase and progress once per PR: avoid repetitions such as "running/review
+    review #3 — review iteration 3" or duplicate QA counts. Keep the PR identity,
+    useful title, current state, and actionable reason easy to find.
+
+    - Add semantic highlighting. INPUT_REQUIRED, pending implementation/QA spec review,
+    and an actual wait for manual merge must have conspicuous red status text. Distinguish
+    a configured wait-for-merge policy on a still-running PR from a PR waiting for
+    the human now; inherited policy alone must not make every row red. Keep explicit
+    text labels so color is not the only cue. Use restrained contrasting styles for
+    PR identifiers, phases/progress, and secondary details.
+
+    - Aim for each rendered line to be under 100 visible characters (99 columns),
+    adapting to narrower terminals. Wrap titles, reasons, blockers, and secondary
+    metadata onto readable continuation lines instead of cutting off important information.
+    Account for indentation, Unicode display width, and styling sequences. Apply this
+    to the report header too.
+
+    - Share presentation rules between the CLI report and TUI runs popup using the
+    existing structured status model. Preserve selection/navigation and the full machine-readable
+    --json data. CLI color should work in a terminal, honor NO_COLOR, and not leak
+    ANSI codes into redirected/plain output or JSON.
+
+
+    Acceptance: demonstrate a realistic mixed report with several targets, inherited
+    and overlapping dependency holds, running review/QA, INPUT_REQUIRED, both spec-review
+    phases, and manual merge waits. Check the CLI and TUI agree on which PRs need
+    human action; show wide and narrow output, meaningful exceptions to inherited
+    policies, and plain/JSON output. Include focused regressions for duplicate suppression,
+    width/wrapping, and red human-input statuses. Keep scheduling, merge policies,
+    and lifecycle transitions unchanged.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T15:01:50.214450+00:00'
+  updated_at: '2026-10-22T15:01:50.214450+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1ab9075
+  plan: improvements
+  title: 'Bug: one failed QA worker blocks verdict collection during retry backoff'
+  branch: pm/pr-1ab9075-bug-one-failed-qa-worker-blocks-verdict-collection
+  status: pending
+  depends_on: []
+  description: 'Observed while manually recovering #236 on 2026-10-22: QA scenario
+    28 exhausted its container PID limit (2041 processes, including 1929 treesample.sh,
+    limit 2048); subsequent execs failed with Cannot fork. The host retried the vanished
+    worker ten times using time.sleep(5 * 2**retry) inside the single _poll_tmux_verdicts
+    loop. The final sleep was 2560 seconds. Healthy scenarios 27 and 29 had emitted
+    PASS and NEEDS_WORK at 15:12 UTC with valid idle hooks, yet the board remained
+    0/3 until a controller restart at ~15:29 UTC. Restarting only the failed container
+    preserved files and cleared process pressure; a native TUI restart then collected
+    both results and launched verification.
+
+
+    Make retry deadlines per scenario and nonblocking for verdict collection, verification,
+    other queued launches and cancellation. Bound retries and delays; distinguish
+    a window being created from a worker actually starting. Surface the runtime cause
+    (including PID/keyring exhaustion) without reporting it as an unexplained request
+    for human judgment. Preserve completed results and evidence across recovery. Coordinate
+    with pr-1139060 for container health/cleanup rather than duplicating its lifecycle
+    implementation. Do not change verdict criteria or skip verification.
+
+
+    Regression: one dead worker repeatedly fails launch while another finishes PASS
+    and a third NEEDS_WORK; healthy verdicts and verification advance promptly during
+    the failed worker''s retry interval, stop cancels promptly, and restart preserves
+    results and retry state. Exercise the PID-exhaustion case with bounded synthetic
+    failure rather than creating a real fork storm. Evidence: /tmp/pm-recovery-20261022.jsonl
+    and /home/matt/.pm/workdirs/qa/pr-3ae2fc3-0e4ccba946a8a6e1/.
+
+
+    Additional observed failure: #239 initial container creation hit key EDQUOT before
+    any pane existed; after quota recovery the current collector could not retry that
+    scenario. Cover creation failure, exec failure, and worker exit separately, including
+    no-pane initial failures. Existing pr-7ab0a99 records the launch-error/empty-INPUT_REQUIRED
+    reporting gap; reuse its evidence and actionable diagnostic requirements instead
+    of inventing another mechanism. Coordinate remaining scope with that backlog entry;
+    do not silently claim it closed. pr-3201ea8 owns initial-run persistence and restart
+    adoption. Keep all healthy workers/results moving while any one launch is retried.
+
+    '
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T15:34:40.862915+00:00'
+  updated_at: '2026-10-22T17:19:44.677099+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a80bde5
+  plan: bugs
+  title: 'Bug: review INPUT_REQUIRED stays visible after recovery while later iterations
+    are working'
+  branch: pm/pr-a80bde5-bug-review-input-required-stays-visible-after-reco
+  status: pending
+  depends_on: []
+  description: 'During supervised autostart on2026-10-22, #241/pr-1139060 continued
+    reporting state=waiting, reason="review INPUT_REQUIRED (iteration N)", and review.input_required=true
+    across later active review iterations, even as reviewers ran tests, committed
+    fixes and advanced. For example at17:16Z iteration12''s pane reported347 targeted
+    tests passing and was actively fixing reaper bugs; the CLI still requested human
+    input. This causes false red attention markers and can mislead watchers into restarting
+    productive work.
+
+
+    Reproduce from a review that emits INPUT_REQUIRED, then answer/recover it and
+    let the same review proceed and advance through NEEDS_WORK into another iteration.
+    Check both pm autostart status --json/text and the TUI runs/actions views while
+    the agent is actually working. Investigate the live review loop, follow-up verdict
+    handling, callback timing and restored/serialized state; do not assume this is
+    only a formatting problem. A current unresolved human request must remain visible,
+    but a resolved wait must clear when the native flow has resumed or a new review
+    iteration owns the work. TUI, CLI and scheduler should agree. Preserve true spec-review
+    and manual merge holds and do not auto-answer user decisions.
+
+
+    Regression coverage should exercise INPUT_REQUIRED -> user response -> active
+    follow-up -> NEEDS_WORK -> next active iteration, plus restart/adoption and repeated
+    genuine INPUT_REQUIRED. Verify both state and displayed reason without depending
+    solely on a timer or treating any arbitrary tool output as approval. Keep the
+    genuine-wait negative case. Existing pr-7b085a9 covers a separate permission_prompt/PaneIdleTracker
+    stale-wait path; coordinate but do not conflate that with review-loop INPUT_REQUIRED.
+
+
+    Evidence: ~/.local/state/pm-pr-shepherd/checkpoint.json actual_progress_notes.241
+    and interventions.jsonl; native review-loop debe later iterations and pm autostart
+    status in pm-project_manager-c5a1006b. Related report presentation changes are
+    in #244/pr-8700be3; this PR owns correctness of the underlying wait state, not
+    the report redesign.
+
+    '
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T17:19:46.224920+00:00'
+  updated_at: '2026-10-22T17:19:46.224920+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-592e4bd
+  plan: improvements
+  title: Route QA scenario refinement and execution through claude-mixed work models;
+    keep other sessions on main Claude
+  branch: pm/pr-592e4bd-route-qa-execution-workers-through-claude-mixed-wo
+  status: pending
+  depends_on: []
+  description: 'The user expects the main Claude subscription to run out before reset.
+    Integrate the existing claude-mixed/work-model routing promptly so autonomous
+    QA scenario refinement and execution workers use the work account; all other PM
+    sessions retain the main account and plain Claude binary for remote control. Keep
+    Opus5.5/high effort: work/claude-opus-5-5 for scenario refinement (qa_concretize)
+    and execution (qa_scenario) workers, claude-opus-5-5 for the other roles unless
+    the user changes that policy.
+
+
+    Current integration points and gaps:
+
+    - PM already resolves models/providers independently for qa_planning, qa_scenario,
+    qa_concretize, qa_verification and qa_finalize via model_config.py, pm model set,
+    and qa_loop._resolve_qa_model. Reuse this configuration and the common launcher
+    boundary rather than adding a parallel scheduler.
+
+    - claude_launcher.py currently hardcodes the claude executable. The user''s host
+    launcher is /home/matt/.local/bin/claude-mixed. It uses ~/.local/lib/claude-router/router.py
+    with ~/.config/claude-router/routes.json. The anthropic-work backend selects the
+    work/ prefix, strips it before upstream delivery and reads credentials from ~/.claude-work/.credentials.json
+    on each request. Keep account credentials on the host; do not embed them in project.yaml,
+    generated launch commands, logs or captures.
+
+    - Existing QA containers use slirp4netns. Probes from a real QA container failed
+    to connect to port8790 at both127.0.0.1 and host.containers.internal; the host
+    router is up on127.0.0.1:8790. Provide a tested container-compatible route/launcher
+    using the existing host router without publicly exposing the credential-bearing
+    router or changing global networking for unrelated sessions. Host QA must work
+    too. Do not silently fall back to the main account when work routing is unavailable.
+
+    - _launch_scenario_0 resolves qa_scenario today. Separate the persistent interactive
+    QA session from scenario-worker targeting so s0 stays on main/plain Claude and
+    remains available for remote control. Planning, verification, finalization, implementation,
+    review, sign-off and other interactive sessions also stay on main/plain Claude.
+    Preserve fake-claude behavior, hooks, transcript discovery and session identity.
+
+
+    Acceptance:
+
+    A configured project can select the launcher/model route for QA scenario refinement
+    and execution workers only, with existing overrides and resumed/relaunched workers
+    handled consistently. Normal sessions retain their current main binary/account/model;
+    no global claude replacement, global account swap, or accidental model downgrade.
+    Route selection is visible without exposing credentials. Startup/auth/router errors
+    explain the required remedy and leave a recoverable state, not an unexplained
+    human-judgment verdict or fallback billed to the main account. Validate initial
+    worker launch, replacement/retry and restart adoption, plus refinement launch/retry
+    paths and unaffected s0, planner, verifier, finalizer and review launch commands.
+    Add focused regressions and a real container/host smoke using a harmless prompt
+    through the work route when authentication is available; verify actual backend/model
+    routing and normal hooks/transcript output. Keep manual merge/spec-review gates.
+
+
+    Auth readiness updated2026-10-22: the user signed in again. A tools-disabled host
+    smoke through claude-mixed with work/claude-opus-5-5 succeeded (exit0, result
+    ok, reported model work/claude-opus-5-5). Container transport and hooks/transcript
+    smoke are still required. Do not change login credentials yourself or copy tokens
+    into containers. Host scripts claude-work-ping / claude-work-expiry document the
+    current refresh workflow; the router itself only reads the token and does not
+    refresh it.
+
+
+    Coordinate with active #241 container lifecycle changes and #245/#247 QA recovery
+    changes; keep this PR focused on role/account routing. No dependency on the larger
+    Codex integration/refactor is required. After merge, configure this project''s
+    QA scenario refinement and execution workers to the validated work route; leave
+    already running sessions intact unless the user requests migration.
+
+    '
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T17:26:01.208880+00:00'
+  updated_at: '2026-10-22T17:46:12.660339+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-da1f854
+    text: 'User scope update2026-10-22: route BOTH scenario refinement (qa_concretize)
+      and execution (qa_scenario) through the work account, retaining Opus5.5/high.
+      All other roles, including interactive QA s0, planning, verification and finalization,
+      stay on main/plain Claude for RC. User work login is complete; a host claude-mixed
+      work/claude-opus-5-5 smoke returned ok. Container/hook/transcript validation
+      remains required. Main-account session limit resets18:40UTC; supervisor will
+      nudge the blocked non-QA runs after reset and shepherd this PR to sign-off,
+      preserving manual merge/spec gates.'
+    created_at: '2026-10-22T17:46:12Z'
+    last_edited: '2026-10-22T17:46:12Z'
+- id: pr-891fd39
+  plan: plan-doc-eval
+  title: Reader-model generation with interleaved reader annotations
+  branch: pm/pr-891fd39-reader-model-generation-with-expected-reader-annot
+  status: pending
+  depends_on:
+  - pr-09c4e8e
+  description: 'Implement the reader-model generation described in pm/plans/plan-doc-eval.md.
+    The writer emits reader annotations interleaved with the document text in one
+    generation pass, in delimited markup, and the document is extracted from that
+    stream afterwards; only the extracted text is delivered or evaluated. Annotations
+    track how a human reads at that point: what the reader holds in mind and what
+    has faded, which material is salient and which is background, what they are likely
+    thinking about and expecting next, and whether the text meets that expectation.
+    The aim is to help the model inhabit human reading rather than write as though
+    all text were equally salient, as it is for the model, and so to remove jarring
+    transitions, unprepared terms and taxing non sequiturs. Survey published guidance
+    on reader expectations, audience, working memory in reading and the curse of knowledge,
+    starting from Gopen and Swan''s reader-expectation approach, Flower''s writer-based
+    versus reader-based prose and Kintsch''s construction-integration model, together
+    with work on LLM-simulated readers. Turn each reference into a seed prompt for
+    a genetic search over the interleaved-generation prompt, using pr-09c4e8e''s populations,
+    sparse cumulative evaluation, optimizer and lineage with the evaluator fixed;
+    add the production baseline and the pr-09c4e8e winner, each with an annotation
+    instruction, as further seeds. Compare the best interleaved prompt with plain
+    one-shot generation from the production baseline and from the pr-09c4e8e winner,
+    sharing cases and writers, on strong-brief whole-document cases and on continuation
+    cases as separate tracks. Report progression, clarity, concision and requirement
+    coverage in particular, by track, document family and PM task kind, with length
+    changes beside score changes and usage including annotation tokens. Retain the
+    interleaved streams with lineage. If the fixed rubric cannot register reader strain,
+    report that instead of adding a measure. Estimate the share of weekly subscription
+    limits for the planned case counts, population sizes and generation counts first
+    and keep every run under the twenty percent per-subscription single-run ceiling.
+    Environment dependency for review and QA: real runs need the claude-mixed router
+    and the routes behind each role (the ChatGPT and Grok bridges, OpenRouter, the
+    work account); when a required route is down, return INPUT_REQUIRED asking the
+    human to restore it, and record a coverage gap only for a route still unavailable
+    after that. Locally served models are out of scope here and wait for the later
+    local-model PR.
+
+
+    Tests: Verify that extraction is deterministic, that malformed interleaving is
+    an explicit failure rather than a repaired document, that no annotation text survives
+    extraction or reaches evaluator inputs, and that annotations run inline through
+    the generation rather than as a preamble or appendix. Check that every seed cites
+    the reference it came from, that lineage traces winners back to their seeds, and
+    that the optimizer cannot read final cases or edit the scoring configuration.
+    Run a real search across plans, both spec types, sign-off reports and public strong-brief
+    and continuation cases, and retain interleaved streams, extracted documents, independent
+    scores, length changes and usage against the estimate; check that extracted documents
+    preserve requirements and unresolved questions.
+
+
+    Files: experiments/plan-writing/, interleaved generation and extraction modules,
+    seed prompts with their references, relevant tests, search configuration and report'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T21:44:50.718137+00:00'
+  updated_at: '2026-10-23T21:59:19.921855+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5f50baf
+  plan: plan-doc-eval
+  title: Strengthen weak briefs held out of training
+  branch: pm/pr-5f50baf-strengthen-weak-briefs-held-out-of-training
+  status: pending
+  depends_on:
+  - pr-9f111ef
+  description: 'Recover more pre-document context for the weak briefs held out in
+    pm/plans/plan-doc-eval.md: briefs with only index or metadata context and briefs
+    whose only request text is a shared working-group charter or study call. Look
+    for records that state a specific document''s request before it was written, such
+    as bug tracker issues, mailing-list and forum threads and pre-proposal discussions
+    that the document links to or that name it before its first revision, under the
+    catalog''s existing timing rule, provenance and leak filter. Never reverse a brief
+    from the document body. Re-classify each brief by the strong-brief rule: request
+    text specific to the document, from a tracking issue, review or discussion thread
+    or similar record asking for it, written before the document; a shared charter
+    or study call and index or metadata context alone stay weak. Use the same rule
+    pr-8df6472 records in the evaluator configuration, and report by source how many
+    weak briefs became strong and why the rest did not. This PR needs only the catalog,
+    so it can run alongside the spec and sign-off case PRs; briefs strengthened before
+    pr-8df6472 calibrates join its strong pool, later ones join subsequent campaigns
+    through their existing split groups, and none enters a campaign already running.
+    Environment dependency: collection needs network access to the sources'' issue
+    trackers and archives.
+
+
+    Tests: Verify that new context predates the document under the existing timing
+    rule, that no brief shares an 8-word run with its document body, that every new
+    item records provenance, that split and duplicate groups are unchanged, and that
+    the coverage report accounts for every held-out brief.
+
+
+    Files: experiments/plan-writing/sources.json, collector and case-preparation modules
+    under experiments/plan-writing/, coverage report, relevant tests'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T21:51:16.385750+00:00'
+  updated_at: '2026-10-23T22:20:59.280800+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ff9fea2
+  plan: plan-doc-eval
+  title: Local model evaluation after the PM machine move
+  branch: pm/pr-ff9fea2-local-model-evaluation-after-the-pm-machine-move
+  status: pending
+  depends_on:
+  - pr-86c2188
+  description: 'Run the locally served models deferred from pm/plans/plan-doc-eval.md
+    once PM work has moved to another machine and this one has memory free to serve
+    them. Inventory the local routes in claude-mixed at that time (current aliases
+    include qwen3.6, qwen3.8-27b and Qwen3.8-Flash-Next). Give each a real generation
+    and judging sample through the calibrated runner with the evaluator fixed; take
+    a representative local model through the iterative comparison, including a local
+    writer with frontier-panel feedback and a local writer/critic pair; measure transfer
+    of the prompts adopted in pr-86c2188 and check the production entry point with
+    a local writer. Record requested and resolved model, quantization, serving settings
+    and memory use. Estimate the share of weekly subscription limits for the frontier
+    calls these runs need and keep every run under the twenty percent per-subscription
+    single-run ceiling. Manual testing: a human brings up the local servers as memory
+    allows; review and QA return INPUT_REQUIRED when a needed server is down rather
+    than substituting another model.
+
+
+    Tests: Verify that the model-by-role coverage report lists every configured local
+    route with a real result or an explicit gap, that provenance records quantization
+    and serving settings, that no local result comes from a substituted model, and
+    that the production entry point renders the adopted prompt with a local writer.
+    Retain real local generations, judgments and comparisons, with usage against the
+    estimate.
+
+
+    Files: experiments/plan-writing/ configuration and evidence, local-model coverage
+    report, relevant tests'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T21:51:17.100308+00:00'
+  updated_at: '2026-10-23T21:51:17.100308+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-380e0c7
+  plan: plan-doc-eval
+  title: Iterative reader-model revision from generation-time and post-generation
+    thought streams
+  branch: pm/pr-380e0c7-iterative-reader-model-revision-from-generation-ti
+  status: pending
+  depends_on:
+  - pr-891fd39
+  - pr-f440e1d
+  description: 'Extend the reader-model work in pm/plans/plan-doc-eval.md to the genetic
+    search with iterative candidates. Each candidate is a generation procedure that
+    iterates within a single generation: the writer produces pr-891fd39''s interleaved
+    generation-time stream; a separate reader model, configured for the document''s
+    audience, reads the extracted text cold without the writer''s annotations and
+    interleaves post-generation notes on what it holds in mind, finds salient, expects
+    and stumbles over; and a reviser revises from both streams for the candidate''s
+    rounds. Divergence between the writer''s predicted reader state and the reader''s
+    reported state is the writer''s theory-of-mind error and the place to revise.
+    Only the final extracted output is scored, by the fixed withheld evaluator, and
+    that score alone is fitness; streams and intermediate drafts never enter fitness
+    or evaluator inputs. Evolve the writer, reader and reviser prompts with pr-f440e1d''s
+    search, seeded from pr-891fd39''s winning prompts and references. Compare with
+    the pr-f440e1d winner, which has no thought streams, at equal rounds and comparable
+    budgets on shared cases and writers, and test each stream alone and both together.
+    Report quality and stream divergence by round, writer, track, document family
+    and PM task kind, with length changes, usage and latency, and retain both streams
+    per round with lineage. Estimate the share of weekly subscription limits for the
+    planned case counts, population sizes and generation counts first and keep every
+    run under the twenty percent per-subscription single-run ceiling. Environment
+    dependency for review and QA: real runs need the claude-mixed router and the routes
+    behind each role (the ChatGPT and Grok bridges, OpenRouter, the work account);
+    when a required route is down, return INPUT_REQUIRED asking the human to restore
+    it, and record a coverage gap only for a route still unavailable after that. Locally
+    served models are out of scope here and wait for the later local-model PR.
+
+
+    Tests: Verify that fitness comes only from the fixed evaluator''s score of the
+    final extracted output, that the reader model never sees the writer''s annotations
+    or the reference, that neither stream reaches evaluator inputs, that streams,
+    divergences and extracted drafts are retained per round, that comparisons share
+    cases and writers with the pr-f440e1d winner, that the stream-ablation arms run
+    on the same cases, and that lineage traces writer, reader and reviser prompts
+    to their seeds. Run a real search across plans, both spec types, sign-off reports
+    and public strong-brief and continuation cases, retaining independent scores,
+    divergence, length changes and usage against the estimate; check that revisions
+    preserve requirements and unresolved questions.
+
+
+    Files: experiments/plan-writing/, reader-stream and revision modules beside the
+    iterative generator, relevant tests, search configuration and comparison report'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T21:55:53.061422+00:00'
+  updated_at: '2026-10-23T22:00:23.401072+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4d116d1
+  plan: plan-doc-eval
+  title: Implementation and QA spec generation cases
+  branch: pm/pr-4d116d1-implementation-and-qa-spec-generation-cases
+  status: pending
+  depends_on:
+  - pr-9f111ef
+  - pr-44f807f
+  description: 'Add PM implementation and QA spec generation tasks to the catalog
+    for pm/plans/plan-doc-eval.md. For each PR with specs under pm/specs/, recover
+    the phase inputs available when each spec was generated: the PR request, plan,
+    notes and code context at that revision, from the spec-generation prompt and transcript
+    where they survive. QA-spec inputs may include implementation and review findings
+    already available before QA planning but exclude later scenarios and results;
+    implementation-spec inputs exclude later implementation and review artifacts.
+    Keep existing specs as production baselines, not known-good references, record
+    source revisions and provenance, and report missing phase context instead of reconstructing
+    it from the finished spec. Assign split groups so cases from one PR or plan stay
+    together, and expose cases through the catalog''s generator_input and reference_text
+    accessors. Add rubric fixtures and document_kind templates that distinguish requirements,
+    design proposals, open questions and acceptance checks. Report coverage by spec
+    type.
+
+
+    Tests: Verify that implementation-spec inputs exclude later implementation and
+    review artifacts and QA-spec inputs exclude later scenarios and results, that
+    every case records source revisions, provenance and split group, that missing
+    context is reported rather than filled from the spec, that baselines are reachable
+    only through reference_text and never through generator_input, and that the new
+    fixtures and templates render through the rubric.
+
+
+    Files: case-preparation modules under experiments/plan-writing/, spec rubric fixtures
+    and templates, coverage report, relevant tests'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T21:59:15.456549+00:00'
+  updated_at: '2026-10-23T22:00:44.565405+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-4976cf1
+    text: 'Inputs: the case catalog and its interfaces come from pr-9f111ef; see its
+      handoff notes on pr-8df6472 (cases.generator_input / reference_text, split_group,
+      PM case paths relative to data/, the data/ snapshot to copy rather than rebuild).
+      The rubric interface comes from pr-44f807f; see its notes on pr-8df6472 (render_judge,
+      document_kind, fixture format, validate_judgment). pr-8df6472 calibrates on
+      the cases this PR builds.'
+    created_at: '2026-10-23T22:00:44Z'
+    last_edited: '2026-10-23T22:00:44Z'
+- id: pr-180f697
+  plan: plan-doc-eval
+  title: Sign-off report generation cases
+  branch: pm/pr-180f697-sign-off-report-generation-cases
+  status: pending
+  depends_on:
+  - pr-9f111ef
+  - pr-44f807f
+  description: 'Add PM sign-off reports as a generation task in pm/plans/plan-doc-eval.md.
+    A sign-off report is the agent-written report.html under ~/.pm/sessions/<tag>/captures/<pr>/
+    produced by the generate_signoff_prompt session; about a dozen exist, each re-run
+    overwrites its predecessor, and newer reports record the signed-off head and base
+    in pm-signoff meta tags. For each, recover the inputs available at sign-off from
+    the sign-off transcript and the PR at the recorded head: the prompt, PR request
+    and spec, diff against base, notes, review and QA results, and the captures the
+    session read. Exclude anything written after the sign-off, report cases whose
+    inputs cannot be pinned to the signed-off revision instead of building them, and
+    never reconstruct inputs from the report. Keep each report as a production baseline,
+    not a known-good reference. Separate the report''s prose from its embedded diff
+    and media so judges score the writing, and record which captures it references.
+    Add rubric fixtures and a document_kind template for decision reports that distinguish
+    verified behaviour from claims, evidence traceable to captures, residual risks
+    and open issues, and a verdict with its reasons. So the task gains cases over
+    time, archive each newly generated sign-off report with a manifest of its inputs,
+    leaving the live report.html and the merge gate''s hash check unchanged. Manual
+    testing: confirming the archive on a real sign-off needs a sign-off run in an
+    isolated pm session; review and QA may return INPUT_REQUIRED for it.
+
+
+    Tests: Verify that inputs exclude material written after the sign-off, that every
+    case records head, base, transcript and capture provenance and its split group,
+    that unpinnable cases are reported rather than built, that prose extraction keeps
+    all report text and drops only embedded diff and media, that baselines are reachable
+    only through reference_text, that the new fixtures and template render through
+    the rubric, and that a newly generated report is archived with its inputs manifest
+    while the merge gate still accepts the unchanged report.html.
+
+
+    Files: case-preparation modules under experiments/plan-writing/, pm_core/signoff.py
+    (report archiving), sign-off rubric fixtures and template, coverage report, relevant
+    tests'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T21:59:16.193018+00:00'
+  updated_at: '2026-10-23T22:00:45.304714+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-2997c2a
+    text: 'Inputs: the case catalog and its interfaces come from pr-9f111ef; see its
+      handoff notes on pr-8df6472 (cases.generator_input / reference_text, split_group,
+      PM case paths relative to data/, the data/ snapshot to copy rather than rebuild).
+      The rubric interface comes from pr-44f807f; see its notes on pr-8df6472 (render_judge,
+      document_kind, fixture format, validate_judgment). pr-8df6472 calibrates on
+      the cases this PR builds.'
+    created_at: '2026-10-23T22:00:45Z'
+    last_edited: '2026-10-23T22:00:45Z'
+- id: pr-f440e1d
+  plan: plan-doc-eval
+  title: Genetic search with iterative candidate generation
+  branch: pm/pr-f440e1d-genetic-search-with-iterative-candidate-generation
+  status: pending
+  depends_on:
+  - pr-09c4e8e
+  - pr-eadd1b7
+  description: 'Combine the campaign and iterative generation in pm/plans/plan-doc-eval.md
+    by running the genetic prompt search with iterative candidates. Each candidate
+    is a generation procedure in which in-loop judges critique and the writer revises
+    the text for the candidate''s rounds within a single generation; only the final
+    output is scored, by the fixed withheld evaluator, and that score alone is the
+    candidate''s fitness. Intermediate drafts and critic scores never enter fitness,
+    and the withheld evaluator is never an in-loop judge. A candidate''s genome covers
+    the writer, critic and reviser prompts, with round count and critic configuration
+    drawn from those pr-eadd1b7 found useful; seed the population with pr-eadd1b7''s
+    best configuration and pr-09c4e8e''s winning prompts. Reuse pr-09c4e8e''s populations,
+    sparse cumulative evaluation, optimizer, lineage and checkpoint/resume, with its
+    two-population whole-document/continuation scheme and strong-brief case selection;
+    the optimizer may read in-loop critiques and final scores on development cases
+    only. Compare the winner with the one-shot campaign winner, the best fixed iterative
+    configuration and the production baseline on validation and reserved final cases,
+    at comparable budgets as well as equal call counts, separately for plans, both
+    spec types and sign-off reports and for each writer model; report gains, usage
+    and latency. Estimate the share of weekly subscription limits for the planned
+    case counts, population sizes and generation counts first and keep every run under
+    the twenty percent per-subscription single-run ceiling. Environment dependency
+    for review and QA: real runs need the claude-mixed router and the routes behind
+    each role (the ChatGPT and Grok bridges, OpenRouter, the work account); when a
+    required route is down, return INPUT_REQUIRED asking the human to restore it,
+    and record a coverage gap only for a route still unavailable after that. Locally
+    served models are out of scope here and wait for the later local-model PR.
+
+
+    Tests: Verify that fitness comes only from the fixed evaluator''s score of each
+    candidate''s final output, that intermediate drafts and critic scores never enter
+    fitness, that no in-loop judge is the withheld evaluator, that the optimizer never
+    reads final cases, that per-round drafts and critic feedback are retained with
+    lineage, that stored evaluations are reused and never repeated, and that comparisons
+    with the one-shot and fixed-iterative winners share cases and writers. Run an
+    actual search and retain baseline/candidate comparisons for every prompt family,
+    with usage against the estimate.
+
+
+    Files: experiments/plan-writing/, reusable evaluation/optimization modules under
+    pm_core/ as needed, relevant tests, versioned search configuration and evidence'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T22:00:22.651612+00:00'
+  updated_at: '2026-10-23T22:00:22.651612+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-70061cf
+  plan: plan-doc-eval
+  title: Survey of human reading limits for reader-model constraints
+  branch: pm/pr-70061cf-survey-of-human-reading-limits-for-reader-model-co
+  status: pending
+  depends_on: []
+  description: 'Survey research on human reading and thinking limits for the human-limit
+    constraints in pm/plans/plan-doc-eval.md before any implementation. Cover working-memory
+    capacity and what readers carry forward between passages (for example Kintsch''s
+    construction-integration model), forgetting and gist retention, fatigue and declining
+    interest over reading time, and mind-wandering while reading, which Feng, D''Mello
+    and Graesser (2013) found more frequent for difficult texts and later studies
+    found moderated by interest; include LLM work on context compaction, memory-limited
+    agents and simulated readers. For each limit, record references, what is known
+    about its size and triggers, and a candidate constraint that could impose it on
+    a reader model or writer: its parameters, how to estimate its trigger (for example
+    passage difficulty or dryness from model ratings or text features; perplexity
+    needs inference-engine access and stays deferred), the writing failure it should
+    expose and how to test it. Fully specify the two constraints already proposed,
+    extremely aggressive compaction and injection of unrelated thoughts in proportion
+    to difficulty or dryness, and rank the rest by expected value and cost. Deliver
+    a referenced survey document and a constraint specification the experiment PR
+    can implement; no model runs are required. Environment dependency: needs web access
+    to read sources.
+
+
+    Tests: Check that every constraint cites at least one source and states its parameters,
+    trigger estimate, the failure it should expose and its test, that the two proposed
+    constraints are fully specified, and that cited references resolve.
+
+
+    Files: survey document, constraint specification and references under experiments/plan-writing/'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T22:52:05.886587+00:00'
+  updated_at: '2026-10-23T22:52:05.886587+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6b1fa1f
+  plan: plan-doc-eval
+  title: Human-limit constraints on reader-model thought streams
+  branch: pm/pr-6b1fa1f-human-limit-constraints-on-reader-model-thought-st
+  status: pending
+  depends_on:
+  - pr-70061cf
+  - pr-380e0c7
+  description: 'Implement the human-limit constraints specified by pr-70061cf for
+    pm/plans/plan-doc-eval.md, at least extremely aggressive compaction and injection
+    of unrelated thoughts in proportion to difficulty or dryness, as options on pr-380e0c7''s
+    reader-model generation procedure. Apply them to the cold reader''s post-generation
+    stream and to the writer''s generation-time annotations, with constraints on the
+    writer''s own generation as an exploratory arm. Compaction replaces what the reader
+    has read with a gist at the specified ratio and schedule; injection inserts unrelated
+    thoughts into the reader''s stream at a rate driven by the estimated difficulty
+    or dryness of the passage, and the reader carries on from there. Add constraint
+    parameters to the genome of the iterative genetic search, seeded from pr-70061cf''s
+    specification, so the search can tune or drop each constraint; fitness stays the
+    fixed evaluator''s score of the final extracted output. Compare with pr-380e0c7''s
+    winner without constraints at equal rounds and comparable budgets on shared cases
+    and writers, and ablate each constraint. Report quality, the passages constrained
+    readers flag that unconstrained ones do not, length changes, usage and latency,
+    by track, document family and PM task kind, and retain constrained streams with
+    injected thoughts and compaction gists marked. Estimate the share of weekly subscription
+    limits for the planned case counts, population sizes and generation counts first
+    and keep every run under the twenty percent per-subscription single-run ceiling.
+    Environment dependency for review and QA: real runs need the claude-mixed router
+    and the routes behind each role (the ChatGPT and Grok bridges, OpenRouter, the
+    work account); when a required route is down, return INPUT_REQUIRED asking the
+    human to restore it, and record a coverage gap only for a route still unavailable
+    after that. Locally served models are out of scope here and wait for the later
+    local-model PR.
+
+
+    Tests: Verify that compaction and injection follow their configured parameters
+    and triggers and are recorded in each stream, that injected thoughts and gists
+    never reach delivered documents or evaluator inputs, that fitness comes only from
+    the fixed evaluator''s score of the final extracted output, that ablation arms
+    share cases, writers and initial drafts, and that lineage records each candidate''s
+    constraint parameters. Run a real search across plans, both spec types, sign-off
+    reports and public strong-brief and continuation cases, retaining independent
+    scores, flagged-passage differences, length changes and usage against the estimate;
+    check that revisions preserve requirements and unresolved questions.
+
+
+    Files: experiments/plan-writing/, constraint modules beside the reader-stream
+    modules, relevant tests, search configuration and comparison report'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T22:52:06.621428+00:00'
+  updated_at: '2026-10-23T22:52:06.621428+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a1be133
+  plan: plan-doc-eval
+  title: Interaction data capture for generated documents
+  branch: pm/pr-a1be133-interaction-data-capture-for-generated-documents
+  status: pending
+  depends_on: []
+  description: 'Start recording how people interact with the documents pm generates,
+    so production signals accumulate while the campaigns in pm/plans/plan-doc-eval.md
+    run. For plans, implementation and QA specs and sign-off reports, record each
+    generated version with the prompt version and model that produced it, and what
+    happened to it: edits made before acceptance (generated-to-accepted diffs, including
+    edits at spec-review pauses and in plan-review sessions), approval, rejection
+    or regeneration, sign-off returns with their reasons, review and QA findings traced
+    to the document, PR notes and INPUT_REQUIRED answers that correct it, and follow-up
+    questions asked about it in the session. Usefulness fields come only from grounded
+    outcomes such as edits, rework and downstream results; attention signals such
+    as dwell or scroll, if collected, may locate trouble spots for the reading feedback
+    loop but never fill a usefulness field. Store records locally and gitignored,
+    linked to the PR, session and document version, with inspect, export and delete
+    commands. Reuse plan-pulse''s metrics store or plan-ambient''s attention archive
+    if either has landed, otherwise keep a simple local store they can absorb later,
+    and share the archive format with pr-180f697''s sign-off report archive. Capture
+    failures are logged and never block the user''s flow. Manual testing: capture
+    hooks sit in TUI and CLI flows (plan add and review, spec-review pauses and editor
+    edits, sign-off), so review and QA need human-guided runs in an isolated pm session
+    to confirm records appear; expect INPUT_REQUIRED.
+
+
+    Tests: Verify that each in-scope document family records generated and accepted
+    versions with prompt version and model, that edits, approvals, returns and corrections
+    link to the right PR, session and document version, that no attention signal fills
+    a usefulness field, that a capture failure never blocks or alters the user''s
+    flow, that records stay out of git, and that inspect, export and delete work.
+
+
+    Files: capture hooks in pm_core plan, spec and sign-off flows, local interaction
+    store, inspect/export/delete CLI, relevant tests'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T23:04:37.163137+00:00'
+  updated_at: '2026-10-23T23:45:13.208533+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3751d57
+  plan: plan-doc-eval
+  title: Prompt optimization from interaction data
+  branch: pm/pr-3751d57-prompt-optimization-from-interaction-data
+  status: pending
+  depends_on:
+  - pr-a1be133
+  - pr-86c2188
+  description: 'Use the interaction records from pr-a1be133 to rewrite and optimize
+    PM''s production prompts as described in pm/plans/plan-doc-eval.md. Turn records
+    into production cases: the inputs available at generation time, the generated
+    document, and the human-accepted version as a production-matched reference, with
+    the edits as evidence of what the prompt missed. Check the fixed evaluator against
+    the direction of human edits and report where they disagree. Run the genetic search
+    on these cases alongside the strong-brief corpus, with an optimizer that reads
+    edit patterns, returns and corrections and separates recurring prompt faults from
+    one-off fixes. Fitness stays the fixed evaluator''s score; if the evaluator check
+    shows a grounded interaction measure, such as how well a draft anticipates the
+    edits people made, tracks quality better, introduce it only as an explicitly versioned
+    new fitness configuration, never pooled with fixed-evaluator results. Never use
+    attention signals as fitness. Select on held-out interaction cases, compare with
+    the adopted production prompts per family and writer model, and deliver improvements
+    through pr-86c2188''s adoption path. Repeat as data accrues, versioning each round''s
+    prompts, cases and results, and report too little data explicitly rather than
+    fitting a handful of records. Estimate the share of weekly subscription limits
+    for the planned case counts, population sizes and generation counts first and
+    keep every run under the twenty percent per-subscription single-run ceiling. Environment
+    dependency for review and QA: real runs need the claude-mixed router and the routes
+    behind each role (the ChatGPT and Grok bridges, OpenRouter, the work account);
+    when a required route is down, return INPUT_REQUIRED asking the human to restore
+    it, and record a coverage gap only for a route still unavailable after that. Locally
+    served models are out of scope here and wait for the later local-model PR.
+
+
+    Tests: Verify that production cases use only inputs available at generation time
+    and reach the accepted version only as reference, that cases from one PR stay
+    in one split, that the optimizer never reads held-out interaction cases, that
+    no attention signal enters fitness, that the evaluator-versus-edit check is reported,
+    and that any new fitness configuration is versioned and kept apart from fixed-evaluator
+    results. Run a real optimization round on the accumulated records and report gains
+    against the adopted prompts per family, with usage against the estimate.
+
+
+    Files: experiments/plan-writing/, interaction case builder, optimizer configuration,
+    relevant tests, evidence and report'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T23:04:37.917563+00:00'
+  updated_at: '2026-10-23T23:04:37.917563+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-66dfc08
+  plan: plan-doc-eval
+  title: 'Reading-activity feedback: rewrite plan sections where the reader struggled'
+  branch: pm/pr-66dfc08-reading-activity-feedback-rewrite-plan-sections-wh
+  status: pending
+  depends_on:
+  - pr-a1be133
+  - pr-4702a11
+  - pr-39a4e66
+  - pr-3fee106
+  description: 'Close a reading feedback loop for velocity, as described in pm/plans/plan-doc-eval.md:
+    learn from how the user actually reads plans and specs, and propose rewrites of
+    the sections where reading broke down. Read the activity plan-ambient''s surfaces
+    record for each document (viewport and scroll history from the pm rc viewer and
+    doc reader through the surface protocol and archive, gaze-based dwell and scroll-stop
+    signals from pr-34421be when available, and the Even Realities reader once it
+    implements the protocol) and map it onto sections and document versions. Derive
+    per-section signals relative to section length and difficulty: skimmed or skipped,
+    abandoned partway, slowed, re-read or scrolled back to, and questions or comments
+    about the section in the PM session. Classify each flagged section, with its evidence,
+    as a likely loss of interest or a likely loss of the thread, and treat both as
+    hypotheses: skimming can mean the text was obvious or trusted, and slow reading
+    can mean dense but necessary material. For flagged sections, have the document''s
+    PM session propose a rewrite through the existing revision and approval flow,
+    stating the evidence that triggered it, cutting padding where interest dropped
+    and adding orientation or reordering where the thread was lost, while preserving
+    every requirement, decision and open question. Never rewrite silently or drop
+    content because it was skipped. Record each proposal, its acceptance or rejection,
+    the user''s edits and later reading of the rewritten section through pr-a1be133.
+    Judge the loop by grounded outcomes, not by more dwell or engagement: time from
+    opening a document to a decision, fewer revision requests and questions on later
+    documents, rewrites accepted and requirements preserved. Start with the current
+    production revision prompt; prompts adopted from the campaigns apply as they land.
+    Reading signals stay local, follow plan-ambient''s privacy principles, and use
+    its inspect, export and delete controls (pr-7e19be4) once they exist. Manual testing:
+    the loop needs real reading sessions on the rc viewer or glasses, so review and
+    QA need human-guided runs and should expect INPUT_REQUIRED.
+
+
+    Tests: Verify that reading signals map to the right sections and document versions,
+    that each proposed rewrite cites the signals that triggered it, that rewrites
+    go through the existing revision and approval flow and never apply silently, that
+    requirements, decisions and open questions survive every accepted rewrite, that
+    proposals, decisions and later reading are recorded in the interaction store,
+    that missing or low-fidelity signals (scroll only, no gaze) yield fewer flags
+    rather than false ones, and that no dwell or engagement measure serves as the
+    success metric. Run the loop on real reading sessions of current plans and report
+    flagged sections, proposals, acceptance and outcomes.
+
+
+    Files: reading-signal and section-mapping modules, rewrite-proposal integration
+    with the plan and spec revision flow, relevant tests, report'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T23:45:13.949692+00:00'
+  updated_at: '2026-10-23T23:45:40.418995+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
