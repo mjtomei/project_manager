@@ -1763,6 +1763,65 @@ class TestScenarioRetryLogic:
         assert mock_relaunch.call_count == 2
         assert state.scenario_verdicts[1] == VERDICT_PASS
 
+    def test_relaunched_pane_is_persisted_before_the_next_tick(self, tmp_path):
+        """S43 review: one tick relaunches dead scenarios one after another,
+        each after its retry backoff, and the snapshot used to be rewritten
+        only at the next tick.  A TUI death in between (here: during
+        scenario 2's backoff, after scenario 1 was relaunched) left the dead
+        pane id on disk, so the resumed run relaunched scenario 1 again
+        while its relaunched worker kept running.  The relaunched pane must
+        be on disk as soon as the relaunch returns."""
+        import itertools
+        from pm_core.qa_loop import _poll_tmux_verdicts, _load_resume_file
+
+        class TuiDied(Exception):
+            pass
+
+        state = QALoopState(pr_id="pr-001")
+        state.loop_id = "l1"
+        state.qa_workdir = str(tmp_path)
+        state.scenario_verdicts = {}
+        state.scenarios = []
+        for i in (1, 2):
+            sc = QAScenario(index=i, title=f"S{i}", focus="t")
+            sc.window_name = f"qa-pr-001-s{i}"
+            sc.pane_id = f"%dead{i}"
+            sc.session_id = f"sid-{i}"
+            state.scenarios.append(sc)
+
+        def relaunch(scenario, *a, **kw):
+            scenario.pane_id = f"%new{scenario.index}"
+            scenario.session_id = f"sid-new-{scenario.index}"
+            return True
+
+        sleeps = []
+
+        def sleep(secs):
+            sleeps.append(secs)
+            # 1: poll interval; 2: scenario 1 backoff; 3: scenario 2 backoff
+            if len(sleeps) == 3:
+                raise TuiDied
+
+        with patch("pm_core.qa_loop._relaunch_scenario_window",
+                   side_effect=relaunch) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep", side_effect=sleep), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.tmux.pane_exists",
+                   side_effect=lambda p: p.startswith("%new")), \
+             patch("pm_core.qa_loop._is_verification_enabled",
+                   return_value=False), \
+             pytest.raises(TuiDied):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work",
+                tmp_path / "status.json", lambda *a: None,
+            )
+
+        assert mock_relaunch.call_count == 1
+        snap = _load_resume_file(tmp_path)
+        panes = {s["index"]: s.get("pane_id") for s in snap["scenarios"]}
+        assert panes == {1: "%new1", 2: "%dead2"}
+
     def test_stop_during_backoff_does_not_relaunch(self, tmp_path):
         """A stop (``z t`` fresh start) kills the scenario windows; the
         stopped loop must not relaunch them after its retry backoff."""

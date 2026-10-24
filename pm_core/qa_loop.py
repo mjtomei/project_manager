@@ -3600,6 +3600,13 @@ def _poll_tmux_verdicts(
                         scenario, state, data, pr_data,
                         session, workdir_path,
                     ):
+                        # Persist the new pane now, not at the next tick:
+                        # this tick may still sleep through other dead
+                        # scenarios' backoffs, and a TUI death meanwhile
+                        # would resume onto the dead pane id and relaunch
+                        # a second worker beside this live one (S43).
+                        _write_resume_file(state, use_containers,
+                                           concurrency_cap, _queued_indices)
                         # Reset grace period for this retry
                         grace_start = time.monotonic()
                         _last_scenario_hook_ts.pop(scenario.index, None)
