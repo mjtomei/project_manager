@@ -555,10 +555,13 @@ def _start_qa_after_review(app, pr_id: str) -> None:
                      "project.yaml %s: %s", pr_id,
                      "start" if stage == "launch" else "transition",
                      "is unlocked" if locked else "loads again", reason)
+        # Sticky: the "Review loop done … PASS" line logged just before is
+        # sticky too, and would otherwise hide this one (S48: logged only
+        # as "hidden by sticky message").  It names the review PASS itself.
         app.log_message(escape(
             f"Review PASS for {pr_id} — waiting for project.yaml "
             f"{'to be unlocked' if locked else 'to load'} to start QA: "
-            f"{reason}"))
+            f"{reason}"), sticky=10)
 
 
 def _launch_qa_after_review(app, pr_id: str) -> tuple | None:
@@ -649,11 +652,13 @@ def _maybe_start_qa(app, pr_id: str) -> tuple | None:
             # Retried every poll tick: never wait for the lock (a 2 s wait
             # per tick stalled the TUI while `pm edit` was open, RQ38).
             store.locked_update(app._root, apply_qa, timeout=store.NO_WAIT)
-        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        except store.StoreLockTimeout:
+            # Expected while the lock is held; the caller logs once.
+            return ("transition", store.LOCK_BUSY_REASON)
+        except store.ProjectYamlParseError as e:
             # The caller logs once per reason; this runs every poll tick.
             _log.debug("auto_qa: %s for %s: %s", type(e).__name__, pr_id, e)
-            return ("transition", store.LOCK_BUSY_REASON
-                    if isinstance(e, store.StoreLockTimeout) else str(e))
+            return ("transition", str(e))
         app._load_state()
         if transitioned:
             _log.info("auto_qa: transitioned %s to qa status", pr_id)

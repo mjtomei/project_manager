@@ -289,3 +289,18 @@ def test_shared_enter_qa_status_does_not_wait_for_the_hand_off(tmp_path):
         assert qa_loop_ui.start_qa(app, "pr-001", lock_timeout=store.NO_WAIT)
         bg.assert_called_once()
     assert store.get_pr(store.load(app._root), "pr-001")["status"] == "qa"
+
+
+def test_review_hand_off_wait_line_is_not_hidden_by_the_done_line(tmp_path):
+    """The "Review loop done … PASS" line is sticky; the waiting line logged
+    right after it must not be dropped by it (S48 story 2: the pm log had it
+    only as "(hidden by sticky message)")."""
+    from tests.test_review_qa_handoff_unloadable import _self_driving_app
+    from pm_core.tui import review_loop_ui
+    app = _self_driving_app(tmp_path)
+    with patch("pm_core.tui.qa_loop_ui.start_qa"), _held(app._root):
+        review_loop_ui._start_qa_after_review(app, "pr-001")
+    calls = [c for c in app.log_message.call_args_list
+             if "waiting for project.yaml to be unlocked" in c.args[0]]
+    assert len(calls) == 1
+    assert calls[0].kwargs.get("sticky", 0) > 0 or calls[0].kwargs.get("force")
