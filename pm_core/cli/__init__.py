@@ -261,7 +261,8 @@ _BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanu
                      "qa-verify-pass"}
 _INT_SETTINGS = {"min-pane-width", "mobile-width-threshold",
                  "qa-max-scenarios", "qa-verify-retries",
-                 "qa-verdict-reminder-timeout", "trust-prompt-grace-seconds"}
+                 "qa-verdict-reminder-timeout", "trust-prompt-grace-seconds",
+                 "container-launch-concurrency", "container-max-running"}
 _ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
                   "container-runtime": {"docker", "podman"}}
 _SETTING_DEFAULTS = {
@@ -277,6 +278,8 @@ _SETTING_DEFAULTS = {
     "qa-verdict-reminder-timeout": "(unset)",
     "trust-prompt-grace-seconds": str(DEFAULT_PROMPT_GRACE_SECONDS),
     "spec-mode": "prompt",
+    "container-launch-concurrency": "4",
+    "container-max-running": "0",
 }
 _LIST_ALIASES = {"list", "ls", "l"}
 
@@ -336,6 +339,12 @@ def set_cmd(setting, value):
                                   workspace-trust prompt before pm fails it (default 120)
 
       spec-mode            Spec generation mode: auto, review, or prompt (default: prompt)
+
+      container-launch-concurrency  Max containers created at once per pm process
+                                    (default 4; applies to newly started processes)
+
+      container-max-running  Cap on running pm containers when QA batches scenario
+                             launches (0 = unlimited, default 0)
     """
     if setting in _LIST_ALIASES:
         _list_settings()

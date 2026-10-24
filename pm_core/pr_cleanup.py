@@ -33,15 +33,21 @@ def _candidate_window_names(display_id: str, session: str) -> list[str]:
     return base
 
 
-def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
+def cleanup_pr_resources(session: str | None, pr: dict, *,
+                         background_containers: bool = False) -> dict:
     """Remove every live resource for *pr*.
 
-    Kills tmux windows, removes QA containers (and their push-proxy sockets
-    via remove_container), and prunes the pane registry. Safe to call when
-    no resources exist. Returns a summary dict::
+    Kills tmux windows, removes the PR's containers (and their push-proxy
+    sockets via remove_container), and prunes the pane registry. Safe to
+    call when no resources exist. Returns a summary dict::
 
         {"windows": [...], "containers": [...], "registry_windows": [...],
          "sockets": [...]}
+
+    *background_containers* (automatic callers on the TUI event loop) hands
+    the containers to a background, PR-scoped reconcile instead: removal
+    doesn't block the caller, and retained containers are kept.  The
+    summary's ``containers`` is then empty.
     """
     pr_id = pr["id"]
     display_id = _pr_display_id(pr)
@@ -55,11 +61,17 @@ def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
             _log.warning("kill_pr_windows failed: %s", e)
 
     session_tag = session.removeprefix("pm-") if session else None
-    try:
-        summary["containers"] = container_mod.cleanup_pr_containers(
-            pr_id, session_tag=session_tag)
-    except Exception as e:  # pragma: no cover
-        _log.warning("cleanup_pr_containers failed: %s", e)
+    if background_containers:
+        from pm_core import container_reaper
+        container_reaper.reconcile(
+            container_reaper.Scope(pr_id=pr_id, session_tag=session_tag),
+            wait=False, reason="pr-cleanup")
+    else:
+        try:
+            summary["containers"] = container_mod.cleanup_pr_containers(
+                pr_id, session_tag=session_tag)
+        except Exception as e:  # pragma: no cover
+            _log.warning("cleanup_pr_containers failed: %s", e)
 
     # Best-effort socket cleanup for any container we found (remove_container
     # already calls stop_push_proxy, but cover the case where a socket lingers

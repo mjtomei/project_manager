@@ -1,5 +1,7 @@
 """Container isolation CLI commands."""
 
+import subprocess
+
 import click
 
 from pm_core.cli.helpers import state_root, _get_pm_session
@@ -35,11 +37,44 @@ def container_status():
     click.echo(f"Memory limit:    {cfg.memory_limit}")
     click.echo(f"CPU limit:       {cfg.cpu_limit}")
 
+    if runtime_ok:
+        from pm_core.container import keyring_summary, running_container_count
+        running = running_container_count()
+        if running is not None:
+            click.echo(f"Running pm containers: {running}")
+        keyring = keyring_summary()
+        if keyring:
+            click.echo(f"Kernel keyring:  {keyring}")
+        from pm_core.container import pids_pressure
+        for name, pids, limit in pids_pressure(0.8):
+            click.echo(f"PID pressure:    {name} at {pids}/{limit} — "
+                       f"'pm container restart {name}' clears it")
+        _echo_reaper_state()
+
     if enabled and not runtime_ok:
         click.echo(
             f"\nWarning: Container mode is enabled but {cfg.runtime} is not available.",
             err=True,
         )
+
+
+def _echo_reaper_state() -> None:
+    from pm_core import container_reaper
+    state = container_reaper.last_state()
+    if state.get("last_run"):
+        import time as _time
+        when = _time.strftime("%Y-%m-%d %H:%M:%S",
+                              _time.localtime(state["last_run"]))
+        click.echo(f"Last cleanup:    {when} ({state.get('last_reason', '')}): "
+                   f"{state.get('last_summary', '')}")
+    failures = container_reaper.pending_failures()
+    if failures:
+        click.echo(f"Cleanup failures ({len(failures)}) — retry with 'pm container reap':")
+        for name, info in sorted(failures.items()):
+            click.echo(f"  {name}: {info.get('error', '')}")
+    retained = container_reaper.retained_names()
+    if retained:
+        click.echo(f"Retained:        {', '.join(retained)}")
 
 
 @container_group.command("enable")
@@ -270,7 +305,7 @@ on top.
 @click.option("--pr", "pr_id", default=None, help="Filter by PR ID")
 def container_cleanup(pr_id: str | None):
     """Remove stale pm containers."""
-    from pm_core.container import _run_runtime, remove_container, CONTAINER_PREFIX
+    from pm_core.container import _run_runtime, remove_containers, CONTAINER_PREFIX
 
     result = _run_runtime(
         "ps", "-a", "--filter", f"name={CONTAINER_PREFIX}",
@@ -286,15 +321,148 @@ def container_cleanup(pr_id: str | None):
         click.echo("No pm containers found.")
         return
 
-    removed = 0
+    names = []
     for line in lines:
         parts = line.split("\t", 1)
         name = parts[0].strip()
         status = parts[1].strip() if len(parts) > 1 else ""
+        # The name filter matches substrings — never touch e.g. "npm-cache".
+        if not name.startswith(CONTAINER_PREFIX):
+            continue
         if pr_id and pr_id not in name:
             continue
         click.echo(f"  Removing: {name} ({status})")
-        remove_container(name)
-        removed += 1
+        names.append(name)
 
-    click.echo(f"Removed {removed} container(s).")
+    removed, failures = remove_containers(names)
+    for name, err in sorted(failures.items()):
+        click.echo(f"  FAILED:   {name}: {err}", err=True)
+    click.echo(f"Removed {len(removed)} container(s).")
+    if failures:
+        raise SystemExit(1)
+
+
+def echo_reap_outcome(outcome) -> None:
+    """Print a reconcile preview/outcome: one line per container, then a summary."""
+    for d in outcome.decisions:
+        action = d.action
+        if not outcome.dry_run:
+            if d.info.name in outcome.removed:
+                action = "removed"
+            elif d.info.name in outcome.failures:
+                action = "FAILED"
+        state = "running" if d.info.running else (d.info.status or "stopped")
+        click.echo(f"  {action:<8} {d.info.name} [{state}] — {d.reason}")
+        if d.info.name in outcome.failures:
+            click.echo(f"           {outcome.failures[d.info.name]}")
+    for proxy in outcome.proxies_released:
+        click.echo(f"  stopped  push proxy {proxy}")
+    for name, pids, limit, why in outcome.pid_pressure:
+        click.echo(f"  WARNING  {name} at {pids}/{limit} PIDs ({why}) — run "
+                   f"'pm container restart {name}' once its session is done")
+    click.echo(outcome.summary())
+
+
+def run_reap(scope, dry_run: bool) -> None:
+    """Shared body of ``pm container reap`` and ``pm session cleanup``."""
+    from pm_core import container_reaper
+    outcome = container_reaper.reconcile(
+        scope, dry_run=dry_run, reason="dry-run" if dry_run else "manual")
+    if outcome.error or outcome.skipped:
+        click.echo(outcome.summary(), err=True)
+        raise SystemExit(1)
+    if not outcome.decisions and not outcome.proxies_released:
+        click.echo(f"No pm containers in scope ({outcome.scope}).")
+        return
+    click.echo(f"Scope: {outcome.scope}")
+    echo_reap_outcome(outcome)
+    if outcome.failures:
+        raise SystemExit(1)
+
+
+@container_group.command("reap")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Only show what would be removed and why")
+@click.option("--pr", "pr_id", default=None, help="Only this PR's containers")
+@click.option("--session", "session_tag", default=None,
+              help="Only containers of this session tag")
+@click.option("--include-retained", is_flag=True, default=False,
+              help="Also remove containers marked with 'pm container retain'")
+def container_reap(dry_run: bool, pr_id: str | None, session_tag: str | None,
+                   include_retained: bool):
+    """Remove leaked pm containers that nothing owns any more.
+
+    A container is kept while a live tmux pane runs in it, while it is being
+    launched, or when it was retained with 'pm container retain'.  Everything
+    else in scope (finished runs, merged/closed PRs, dead sessions) is
+    removed, and push proxies no container uses are stopped.  Workdirs,
+    captures and transcripts live on the host and are not touched.
+    """
+    from pm_core import container_reaper
+    run_reap(container_reaper.Scope(pr_id=pr_id, session_tag=session_tag,
+                                    include_retained=include_retained),
+             dry_run)
+
+
+@container_group.command("retain")
+@click.argument("name")
+@click.option("--release", is_flag=True, default=False,
+              help="Drop the retention so cleanup may remove it again")
+@click.option("--note", default="", help="Why the container is kept")
+def container_retain(name: str, release: bool, note: str):
+    """Keep container NAME out of automatic cleanup (e.g. for a discussion)."""
+    from pm_core import container_reaper
+    if release:
+        if container_reaper.unretain(name):
+            click.echo(f"Released {name}; cleanup may remove it once unowned.")
+        else:
+            click.echo(f"{name} was not retained.")
+        return
+    from pm_core import container as container_mod
+    try:
+        cid = container_mod.current_container_id(name)
+    except (OSError, subprocess.TimeoutExpired):
+        cid = None  # runtime unknown: retain by name
+    if cid == "":
+        click.echo(f"No container named {name}.", err=True)
+        raise SystemExit(1)
+    # Bound to this container's id: a later replacement under the same
+    # name is not retained by this marker.
+    container_reaper.retain(name, note, container_id=cid or "")
+    click.echo(f"Retained {name}. Release with 'pm container retain --release {name}'.")
+
+
+@container_group.command("restart")
+@click.argument("name")
+@click.option("--force", is_flag=True, default=False,
+              help="Restart even though a live tmux pane still uses it")
+def container_restart(name: str, force: bool):
+    """Restart container NAME in place to clear PID/memory exhaustion.
+
+    Every process inside is ended (including a Claude session running
+    there); the container's files, mounts and setup are kept.  Refuses while
+    a live pane uses the container unless --force.
+    """
+    from pm_core import container as container_mod
+    from pm_core import container_reaper
+    owners = container_reaper.live_owner_panes(name)
+    if owners and not force:
+        click.echo(f"{name} is in use by live pane(s) {', '.join(owners)}; "
+                   f"restarting would end that session. Re-run with --force "
+                   f"once it is safe.", err=True)
+        raise SystemExit(1)
+    before = (container_mod.pids_usage() or {}).get(name)
+    with container_mod.launch_lock(name, timeout=60) as locked:
+        if not locked:
+            click.echo(f"{name} is being launched right now; try again.", err=True)
+            raise SystemExit(1)
+        try:
+            container_mod.restart_container(name)
+        except container_mod.ContainerError as e:
+            click.echo(str(e), err=True)
+            raise SystemExit(1)
+    after = (container_mod.pids_usage() or {}).get(name)
+
+    def fmt(usage):
+        return f"{usage[0]}/{usage[1]}" if usage else "?"
+    click.echo(f"Restarted {name} (PIDs {fmt(before)} → {fmt(after)}).")

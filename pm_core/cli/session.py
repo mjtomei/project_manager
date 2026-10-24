@@ -632,6 +632,22 @@ def session_kill(start_dir):
     click.echo(f"Killed session '{session_name}'.")
 
 
+@session.command("cleanup")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Only show what would be removed and why")
+def session_cleanup(dry_run: bool):
+    """Remove this session's leaked containers (see 'pm container reap')."""
+    from pm_core import container_reaper
+    from pm_core.cli.container import run_reap
+    from pm_core.cli.helpers import _get_pm_session
+    pm_session = _get_pm_session()
+    tag = pm_session.removeprefix("pm-").split("~", 1)[0] if pm_session else None
+    if not tag:
+        click.echo("Not in a pm project — no session to clean up.", err=True)
+        raise SystemExit(1)
+    run_reap(container_reaper.Scope(session_tag=tag), dry_run)
+
+
 @session.command("mobile")
 @click.option("--force/--no-force", default=None, help="Force mobile mode on/off")
 def session_mobile(force: bool | None):

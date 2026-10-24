@@ -137,3 +137,20 @@ class TestCleanupPrResources:
         out = pr_cleanup.format_summary(s)
         assert "2 window" in out
         assert "1 registry" in out
+
+
+class TestBackgroundContainers:
+    def test_hands_containers_to_reaper(self):
+        from pm_core import container_reaper, pr_cleanup
+        with patch("pm_core.cli.helpers.kill_pr_windows", return_value=[]), \
+             patch("pm_core.pr_cleanup.kill_pr_windows", return_value=[]), \
+             patch("pm_core.container.cleanup_pr_containers") as sync_rm, \
+             patch.object(container_reaper, "reconcile") as rec:
+            summary = pr_cleanup.cleanup_pr_resources(
+                "pm-mysess", {"id": "pr-1", "branch": "b"},
+                background_containers=True)
+        sync_rm.assert_not_called()
+        scope = rec.call_args[0][0]
+        assert (scope.pr_id, scope.session_tag) == ("pr-1", "mysess")
+        assert rec.call_args[1]["wait"] is False
+        assert summary["containers"] == []

@@ -625,6 +625,10 @@ def start_push_proxy(container_name: str, workdir: str,
 
         # Reuse if an existing proxy is alive on this socket
         if os.path.exists(sock_path) and proxy_is_alive(sock_path):
+            if not os.path.exists(os.path.join(sock_dir, _OWNER_FILE)):
+                # Started by an older pm: record the owner so the reaper's
+                # unused-proxy sweep can find it.
+                _write_owner_file(sock_dir, session_tag, pr_id, workdir)
             with _proxy_lock:
                 _proxy_refs.setdefault(key, set()).add(container_name)
                 _container_to_proxy_key[container_name] = key
@@ -646,6 +650,7 @@ def start_push_proxy(container_name: str, workdir: str,
             pass
 
         _start_proxy_subprocess(sock_path, workdir, allowed_branch)
+        _write_owner_file(sock_dir, session_tag, pr_id, workdir)
 
         with _proxy_lock:
             _proxy_refs[key] = {container_name}
@@ -702,26 +707,155 @@ def _kill_proxy_socket(sock_path: str) -> None:
         pass
 
 
+_OWNER_FILE = "owner.json"
+
+
+def _write_owner_file(sock_dir: str, session_tag: str, pr_id: str,
+                      workdir: str) -> None:
+    """Record which (session, PR) a shared proxy dir serves.
+
+    Hashed socket dirs can't be mapped back to their tag/PR by name; the
+    reaper reads this to decide whether any container still needs the proxy.
+    """
+    try:
+        Path(sock_dir, _OWNER_FILE).write_text(json.dumps(
+            {"session_tag": session_tag, "pr_id": pr_id, "workdir": workdir}))
+    except OSError:
+        _log.debug("could not write proxy owner file in %s", sock_dir,
+                   exc_info=True)
+
+
+def list_shared_proxies() -> list[dict]:
+    """Shared proxy socket dirs on disk: ``[{session_tag, pr_id, sock_path}]``.
+
+    Entries whose owner can't be determined are skipped (left alone).
+    """
+    import glob as _glob
+    import re
+    out: list[dict] = []
+    seen: set[str] = set()
+    for d in sorted(_glob.glob(f"/tmp/{_SOCKET_DIR_PREFIX}*")):
+        real = os.path.realpath(d)
+        if real in seen or not os.path.isdir(real):
+            continue
+        owner = None
+        try:
+            owner = json.loads(Path(real, _OWNER_FILE).read_text())
+        except (OSError, ValueError):
+            # Legacy dir without owner file: only the readable long name
+            # (the dir itself, or the symlink to a hashed dir) says whose it
+            # is.  A per-container proxy dir (``pm-push-proxy-<container
+            # name>``, e.g. an untagged ``pm-impl-pr-…``) has the same shape
+            # but serves only its own container — never treat it as shared.
+            from pm_core.container import parse_container_name
+            base = os.path.basename(d)
+            if parse_container_name(base[len(_SOCKET_DIR_PREFIX):]) is None:
+                m = re.match(rf"{re.escape(_SOCKET_DIR_PREFIX)}(.+)-(pr-[0-9a-f]+)$",
+                             base)
+                if m:
+                    owner = {"session_tag": m.group(1), "pr_id": m.group(2)}
+        if not owner or not owner.get("session_tag") or not owner.get("pr_id"):
+            continue
+        seen.add(real)
+        out.append({"session_tag": owner["session_tag"],
+                    "pr_id": owner["pr_id"],
+                    "sock_path": os.path.join(real, "push.sock")})
+    return out
+
+
+def release_proxy_if_unused(session_tag: str, pr_id: str,
+                            exclude: "set[str] | frozenset[str]" = frozenset()
+                            ) -> bool | None:
+    """Stop the shared (session, PR) proxy if no container still uses it.
+
+    The decision comes from the container runtime (any container, any
+    state, any pm process), checked under the cross-process proxy lock that
+    ``create_container`` holds from proxy start until its container exists —
+    so a concurrent launch can't lose its proxy.  Returns True when stopped,
+    False when still in use (or the lock is busy), None when the runtime
+    couldn't be queried (nothing done).
+    """
+    from pm_core import container as container_mod
+    with container_mod.proxy_lock(session_tag, pr_id, timeout=30) as locked:
+        if not locked:
+            return False
+        users = container_mod.containers_for_pr(session_tag, pr_id)
+        if users is None:
+            return None
+        if users - set(exclude):
+            return False
+        key = _shared_proxy_key(session_tag, pr_id)
+        with _proxy_lock:
+            for cname in _proxy_refs.pop(key, set()):
+                _container_to_proxy_key.pop(cname, None)
+            _active_proxies.pop(key, None)
+        sock_dir = _shared_sock_dir_path(session_tag, pr_id)
+        sock_path = os.path.join(sock_dir, "push.sock")
+        existed = os.path.exists(sock_path) or os.path.isdir(sock_dir)
+        try:
+            os.unlink(os.path.join(os.path.realpath(sock_dir), _OWNER_FILE))
+        except OSError:
+            pass
+        _kill_proxy_socket(sock_path)
+        long_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-{pr_id}"
+        if os.path.islink(long_dir):
+            try:
+                os.unlink(long_dir)
+            except OSError:
+                pass
+        if existed:
+            _log.info("Stopped unused shared push proxy for %s/%s",
+                      session_tag, pr_id)
+        return existed
+
+
 def stop_push_proxy(container_name: str) -> None:
     """Stop and clean up the push proxy for a container.
 
-    For shared proxies the proxy is only stopped when the last container
-    referencing it is removed.
+    For shared proxies the proxy is only stopped when no container — in this
+    process or any other — still uses it (see :func:`release_proxy_if_unused`).
+    When the runtime can't be queried, falls back to this process's refcount.
     """
     with _proxy_lock:
         key = _container_to_proxy_key.pop(container_name, None)
-        if key is None:
-            return
-
-        # Shared proxy path — decrement refcount
-        if key in _proxy_refs:
+        local_refs_left = False
+        if key is not None and key in _proxy_refs:
             refs = _proxy_refs[key]
             refs.discard(container_name)
-            if refs:
-                return  # Other containers still using this proxy
-            del _proxy_refs[key]
+            local_refs_left = bool(refs)
 
-        _active_proxies.pop(key, None)
+    if key is None:
+        # Not started by this process — derive the shared key from the name.
+        from pm_core.container import parse_container_name
+        parsed = parse_container_name(container_name)
+        pid = parsed.pr_id() if parsed else None
+        if parsed and parsed.session_tag and pid:
+            release_proxy_if_unused(parsed.session_tag, pid,
+                                    exclude={container_name})
+        # A per-container proxy (no session tag or PR, e.g. qa-debug or
+        # legacy untagged containers) serves only this container.
+        import tempfile
+        own_sock = os.path.join(tempfile.gettempdir(),
+                                f"{_SOCKET_DIR_PREFIX}{container_name}",
+                                "push.sock")
+        if os.path.exists(own_sock):
+            _kill_proxy_socket(own_sock)
+        return
+
+    if "\0" in key:
+        if local_refs_left:
+            return  # this process still has a container on the proxy
+        stag, pid = key.split("\0", 1)
+        released = release_proxy_if_unused(stag, pid, exclude={container_name})
+        if released is not None:
+            return
+        # Runtime unknown and no local users left: legacy refcount behaviour.
+        with _proxy_lock:
+            _proxy_refs.pop(key, None)
+            _active_proxies.pop(key, None)
+    else:
+        with _proxy_lock:
+            _active_proxies.pop(key, None)
 
     # Derive the socket path from the key and remove it to stop the
     # subprocess proxy (the __main__ loop exits when socket disappears).
