@@ -707,10 +707,13 @@ class ProjectManagerApp(App):
             # again and raise, which killed the TUI at mount, and every QA
             # run it would resume with it.  Show the (empty) tree, say why,
             # and reload once the file changes (_retry_failed_load).
+            reason = (str(load_error).splitlines() or [""])[0]
+            msg = (f"project.yaml cannot be loaded: {reason} — waiting "
+                   "for it to load")
+            self.query_one("#tech-tree", TechTree).update_prs(
+                [], unavailable=msg)
             self._show_normal_view()
-            self.log_message(escape(
-                f"project.yaml cannot be loaded: {load_error} — waiting "
-                "for it to load"), sticky=30)
+            self.log_message(escape(msg), sticky=30)
             self._load_error_shown = True
         elif not prs:
             state, _ = guide.detect_state(self._root)

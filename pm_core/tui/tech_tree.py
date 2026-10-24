@@ -803,8 +803,12 @@ class TechTree(Widget):
         if "hide_merged" in project:
             self._hide_merged = bool(project["hide_merged"])
 
-    def update_prs(self, prs: list[dict]) -> None:
+    def update_prs(self, prs: list[dict], unavailable: str | None = None) -> None:
+        """*unavailable*: why there is nothing to show (project.yaml cannot
+        be loaded and there is no earlier state); drawn instead of the
+        "No PRs defined" hint."""
         self._prs = prs
+        self._unavailable = unavailable
         self._recompute()
 
     def select_pr(self, pr_id: str) -> None:
@@ -1003,6 +1007,8 @@ class TechTree(Widget):
     def _empty_message(self) -> str | None:
         """Return an empty-state message, or None if there is content to draw."""
         if not self._prs:
+            if getattr(self, "_unavailable", None):
+                return self._unavailable
             return "No PRs defined. Use 'pr add' to create PRs."
         # Hidden-plan labels still populate ``_ordered_ids`` (they are
         # navigable), so "is the grid empty?" must look only at *visible* PR

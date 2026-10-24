@@ -188,6 +188,9 @@ def test_tui_started_on_an_unloadable_file_mounts(tmp_path, how):
     assert not app._show_guide_view.called
     assert app._data == {}
     assert "cannot be loaded" in app.log_message.call_args.args[0]
+    # the tree says why it is empty (not "No PRs defined")
+    tree = app.query_one.return_value
+    assert "cannot be loaded" in tree.update_prs.call_args.kwargs["unavailable"]
 
     # Unchanged file: no reload; once it loads, the project is shown.
     ProjectManagerApp._retry_failed_load(app)
@@ -326,3 +329,13 @@ def test_pass_below_count_restart_that_hits_the_failure_is_retried(tmp_path):
     assert not snap.exists()
     assert app._self_driving_qa["pr-001"]["pass_count"] == 1
     assert len(_pr(app._root)["notes"]) == 1
+
+
+def test_tree_names_why_it_is_empty():
+    from pm_core.tui.tech_tree import TechTree
+    tree = TechTree.__new__(TechTree)
+    tree._prs = []
+    tree._unavailable = "project.yaml cannot be loaded: x — waiting for it to load"
+    assert tree._empty_message() == tree._unavailable
+    tree._unavailable = None
+    assert tree._empty_message().startswith("No PRs defined")
