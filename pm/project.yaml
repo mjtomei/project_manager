@@ -31643,7 +31643,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T11:24:04.024104+00:00'
+  updated_at: '2026-10-24T11:43:26.891597+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33234,6 +33234,32 @@ prs:
       /pm-captures/review-350f-i1.'
     created_at: '2026-10-24T11:24:03Z'
     last_edited: '2026-10-24T11:24:03Z'
+  - id: note-9d5ddde
+    text: 'Review 350f i2 (fbcb08b3, CODE CHANGE, small, needs normal re-review):
+      i1 c3c39382 (flush timer count + early-fire re-arm, one-shot parse Error forced/held)
+      and S50 4fb42e06/e60c9927/f19831c2 reviewed independently and sound. Fixed one
+      gap: auto_start.check_and_start forced "Auto-start: starting <pr>" unless _log_hold_until
+      was in the future. Since e60c9927 a hold also lasts while queued confirmations
+      wait for their flush, so in that gap the forced line dropped them. log_message
+      and auto_start now share app.log_line_held. Regression test_starting_message_waits_for_queued_confirmations_flush
+      fails with the old check. i1 guards re-mutated through the shared predicate
+      (3 mutations caught). The venv again lacked markdown, so markdown 3.10.3 was
+      installed. The first suite run was superseded mid-run and is kept and labelled.
+      Full suite 3655 passed, rc 0; /pm-captures/review-350f-i2. impl.md 39(e).'
+    created_at: '2026-10-24T11:33:04Z'
+    last_edited: '2026-10-24T11:33:04Z'
+  - id: note-d6f3a08
+    text: 'Review 350f i3 (25015d25, test + comment only, no behaviour change): i1
+      c3c39382, i2 fbcb08b3 and S50 4fb42e06/e60c9927/f19831c2 independently reviewed
+      and sound; 8 of 9 new mutations caught by existing tests. Gap: flush replays
+      judged by log_line_held instead of the hold time (M9) passed every test but
+      is not equivalent: a flush timer delayed past a later hold runs while that hold
+      timer is pending, and with 2+ queued confirmations each replay re-queued behind
+      the next forever (TUI hang). Added bounded regression test_late_flush_with_another_flush_pending_releases_the_queue
+      (fails with M9) and a comment. Venv lacked markdown again (installed 3.10.3).
+      Full suite 3656 passed, rc 0; /pm-captures/review-350f-i3. impl.md 39(f).'
+    created_at: '2026-10-24T11:43:26Z'
+    last_edited: '2026-10-24T11:43:26Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
