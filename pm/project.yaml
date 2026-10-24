@@ -22350,7 +22350,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-24T22:29:02.532598+00:00'
+  updated_at: '2026-10-24T22:52:28.816177+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22526,6 +22526,38 @@ prs:
       /pm-captures/review-4e41-i7/. (2026-10-24T22:35:00Z)'
     created_at: '2026-10-24T22:29:02Z'
     last_edited: '2026-10-24T22:29:02Z'
+  - id: note-345b2c0
+    text: 'Review-loop 4e41 i8 (88d97e37): independent re-sweep of every reachable
+      builder (count / item size / single-document size) found two listings still
+      count-capped with no byte budget — the cap-times-item-size defect i3/i7 fixed
+      everywhere else, in the two listings whose items are full filesystem paths (bounded
+      only by PATH_MAX, so a count cap does not bound them). (1) The integration overlap/conflict
+      listings (prompt_gen._signoff_integration_block, signoff.format_signoff_return)
+      measured 199,920 B in the sign-off prompt with 20 x ~4 KB paths and 200,114
+      B with 40 — over PROMPT_ARG_LIMIT, and worse than elsewhere because _signoff_integration_block
+      is part of the builder static text, not one of fit_prompt shrinkable blocks,
+      so the launcher guard had to fire for a builder this PR exists to bound. New
+      shared INTEGRATION_LIST_BUDGET = 8,000 on all four sites; re-measured 47,752
+      B. (2) The QA child prompt artifact listing inlines full {scratch}/qa-artifacts/<name>
+      paths, not basenames: 20 x ~4 KB measured 108,490 B. New ARTIFACT_PATHS_BUDGET
+      = 8,000; re-measured 31,934 B. Both markers already name a command/path for
+      the full detail (integration_pointer / pm qa list). Real-data prompts are byte-identical
+      (a 20 x 200 B integration record still 28,920 B). Checked and deliberately unchanged:
+      _build_verification_prompt recipe bullets carry Path(p).name, so NAME_MAX bounds
+      the item and the count cap does bound the listing — a byte budget there could
+      never fire (the dead-parameter defect i6 removed from mocks_for_prompt). Also
+      unchanged: build_regression_test_prompt (the body IS the prompt; the launcher
+      delivers it via file bootstrap or raises) and the watcher managed/target lists
+      (PR ids, 40 items). PromptTooLargeError remains uncaught at the pane/CLI call
+      sites — still filed as pr-a42a4f8, not re-fixed here to avoid conflicting with
+      that PR. Verification: tests/test_prompt_bounds.py 89 cases (3 new, all failing-then-passing
+      at 108-200 KB pre-fix); full suite failure set identical to an origin/master
+      worktree baseline in this sandbox (22 signoff_integration / 19+17 merge_publish
+      / 12 markdown_render / 1 hook_events / 1 git_ops, all environmental). Evidence:
+      /pm-captures/review-4e41-i8/ (sweep.py, sweep-after-i8.txt, integration-paths-before-after.txt,
+      full-suite-comparison-i8.txt). (2026-10-24T23:05:00Z)'
+    created_at: '2026-10-24T22:52:28Z'
+    last_edited: '2026-10-24T22:52:28Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
