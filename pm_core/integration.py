@@ -385,6 +385,21 @@ def integration_json_path(pr_id: str) -> Path | None:
     return croot / pr_id / "integration.json" if croot else None
 
 
+def integration_pointer(pr_id: str) -> str:
+    """Where a session can read the full integration record for *pr_id*.
+
+    Prompt builders abbreviate the overlap/conflict path lists (they grow with
+    the diff), and the marker naming what was dropped has to name a place the
+    session can actually read the rest — otherwise the abbreviation is silent
+    loss.  Falls back to ``pm pr show``, which prints the PR's integration
+    record when the captures root is unavailable.
+    """
+    path = integration_json_path(pr_id)
+    if path is not None:
+        return f"read {path}"
+    return f"run `pm pr show {pr_id}`"
+
+
 def check_integration(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
     """Run the integration check for *pr_id* and record it.
 

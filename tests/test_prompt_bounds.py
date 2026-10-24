@@ -246,6 +246,38 @@ class TestSignoffPromptBounding:
         p = prompt_gen.generate_prompt(_data(pr), "pr-x")
         _assert_bounded(p, "pm pr note list", "(+1980 more")
 
+    def test_integration_markers_name_the_full_record(self, monkeypatch):
+        """An abbreviated path list must say where the rest can be read —
+        `(+N more)` on its own is silent loss."""
+        monkeypatch.setattr(
+            "pm_core.integration.integration_json_path",
+            lambda pr_id: Path("/cap") / pr_id / "integration.json")
+        integ = {"base_branch": "master", "base_sha": "a" * 40,
+                 "target_repo": "r", "status": "clean",
+                 "overlap": [f"f{i}.py" for i in range(200)],
+                 "conflicts": [f"c{i}.py" for i in range(200)]}
+        block = prompt_gen._signoff_integration_block(_pr(integration=integ),
+                                                      "pr-x")
+        assert "(+180 more" in block
+        assert "/cap/pr-x/integration.json" in block
+
+        from pm_core.signoff import format_signoff_return
+        ret = format_signoff_return(_pr(signoff_return={
+            "verdict": "NEEDS_WORK", "hop": "impl", "reason": "conflict",
+            "reviewed_head": "b" * 40, "integration": integ}))
+        assert "(+180 more" in ret
+        assert "/cap/pr-x/integration.json" in ret
+
+    def test_integration_marker_falls_back_to_pr_show(self, monkeypatch):
+        monkeypatch.setattr("pm_core.integration.integration_json_path",
+                            lambda pr_id: None)
+        block = prompt_gen._signoff_integration_block(
+            _pr(integration={"base_branch": "master", "base_sha": "a" * 40,
+                             "target_repo": "r", "status": "clean",
+                             "conflicts": [f"c{i}.py" for i in range(100)]}),
+            "pr-x")
+        assert "(+80 more; run `pm pr show pr-x`)" in block
+
 
 class TestQaPromptsBounding:
     def test_planner_many_notes(self):
@@ -361,6 +393,16 @@ class TestQaLoopPromptsBounding:
         p = _build_verification_prompt(
             scenario, "PASS", pane_output="line\n" * 100000)
         _assert_bounded(p, "pm qa list")
+
+    def test_verification_long_lines_bounded(self):
+        """The line bound alone does not bound the prompt: a single enormous
+        line is one line.  The byte cap must catch it and name the transcript
+        so the verifier can still read the rest."""
+        scenario = QAScenario(index=1, title="S", focus="F",
+                              steps="GIVEN x\n" * 20000)
+        p = _build_verification_prompt(
+            scenario, "PASS", pane_output="y" * 400_000)
+        _assert_bounded(p, "the full scenario transcript")
 
 
 # ---------------------------------------------------------------------------
@@ -514,6 +556,60 @@ class TestPlanPromptBounding:
         assert prompt_bytes(result.output) <= PROMPT_ARG_LIMIT + 300
 
 
+def _make_big_plan_state(tmp_path, n_prs, n_plans, desc_size, plan_size):
+    """A project with large PR descriptions and many large plan files.
+
+    Realistic magnitudes taken from this repo: descriptions reach 11 KB and
+    there are 22 plan files totalling ~500 KB.  A per-item cap alone is not
+    enough for these builders — the aggregate is what blows the argv limit.
+    """
+    plans = [{"id": f"pl-{i:03d}", "name": f"Plan {i}",
+              "file": f"plans/pl-{i:03d}.md", "status": "draft"}
+             for i in range(n_plans)]
+    prs = [{"id": f"pr-{i:03d}", "title": f"PR {i}", "plan": None,
+            "status": "pending", "depends_on": [],
+            "description": "d" * desc_size, "branch": None, "workdir": None,
+            "gh_pr_number": None, "notes": []}
+           for i in range(n_prs)]
+    data = {"project": {"name": "test", "repo": "/tmp/fake",
+                        "base_branch": "master"},
+            "plans": plans, "prs": prs}
+    store.save(data, tmp_path)
+    (tmp_path / "plans").mkdir(exist_ok=True)
+    for p in plans:
+        (tmp_path / p["file"]).write_text("# Plan\n\n" + "p" * plan_size + "\n")
+    return tmp_path
+
+
+class TestPlanDepsAndFixBounding:
+    """`pm plan deps` inlines every PR description and every plan file, and
+    `pm plan fix` inlines every plan file.  Both were still unbounded after
+    the first pass: 312 KB and ~500 KB on this repo's real data, because the
+    count cap and the per-file budget do not bound their product."""
+
+    def test_plan_deps_bounds_descriptions_and_plan_files(self, tmp_path):
+        root = _make_big_plan_state(tmp_path, n_prs=60, n_plans=22,
+                                    desc_size=11_000, plan_size=40_000)
+        with patch("pm_core.cli.plan.find_claude", return_value=None):
+            result = CliRunner().invoke(cli, ["-C", str(root), "plan", "deps"])
+        assert result.exit_code == 0, result.output
+        # Bounded, and both abbreviations name where the full text lives.
+        _assert_bounded(result.output, "pm pr show", "omitted to fit the prompt")
+
+    def test_plan_fix_bounds_plan_context(self, tmp_path):
+        root = _make_big_plan_state(tmp_path, n_prs=0, n_plans=22,
+                                    desc_size=0, plan_size=40_000)
+        review = tmp_path / "review.txt"
+        review.write_text("Step: plan add\nStatus: NEEDS_FIX\n\n"
+                          "## Review Findings\nthin plan\n\n"
+                          "## Fix Command\npm plan fix --review x\n")
+        with patch("pm_core.cli.plan.find_claude", return_value=None):
+            result = CliRunner().invoke(
+                cli, ["-C", str(root), "plan", "fix", "--review", str(review)])
+        assert result.exit_code == 0, result.output
+        _assert_bounded(result.output, "plan files under", "truncated")
+
+
 class TestPrShowCommand:
     def test_prints_full_detail(self, tmp_path):
         root = _make_state(tmp_path, notes=[
@@ -532,3 +628,22 @@ class TestPrShowCommand:
             cli, ["-C", str(root), "pr", "show", "nope"])
         assert result.exit_code == 1
         assert "not found" in result.output
+
+    def test_prints_integration_record(self, tmp_path, monkeypatch):
+        """`pm pr show` is the fallback pointer for abbreviated integration
+        path lists, so it has to print that record."""
+        monkeypatch.setattr("pm_core.integration.integration_json_path",
+                            lambda pr_id: Path("/cap") / pr_id / "integration.json")
+        root = _make_state(tmp_path)
+        data = store.load(root)
+        data["prs"][0]["integration"] = {
+            "base_branch": "master", "base_sha": "a" * 40,
+            "target_repo": "r", "status": "clean",
+            "overlap": ["a.py", "b.py"], "conflicts": ["c.py"]}
+        store.save(data, root)
+        result = CliRunner().invoke(
+            cli, ["-C", str(root), "pr", "show", "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "Conflicts (1): c.py" in result.output
+        assert "Overlap (2): a.py, b.py" in result.output
+        assert "Full record: /cap/pr-001/integration.json" in result.output

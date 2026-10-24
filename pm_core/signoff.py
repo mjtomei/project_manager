@@ -40,6 +40,7 @@ from pathlib import Path
 from pm_core import store
 from pm_core import tmux as tmux_mod
 from pm_core import prompt_gen
+from pm_core import integration
 from pm_core.cli.helpers import (
     _log,
     _pr_display_id,
@@ -844,18 +845,17 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 f"`{(integ.get('base_sha') or '?')[:12]}` from "
                 f"`{integ.get('target_repo')}`")
         lines.append(f"Integration with {base}: **{integ.get('status')}**.")
+        pointer = integration.integration_pointer(pr.get("id", "???"))
         if integ.get("conflicts"):
             lines.append("Conflicting paths: " + bounded_join(
                 integ["conflicts"], lambda c: f"`{c}`",
                 max_items=INTEGRATION_MAX_PATHS, separator=", ",
-                omitted_note=lambda n: f" (+{n} more; see the integration "
-                                       f"record on the PR)"))
+                omitted_note=lambda n: f" (+{n} more; {pointer})"))
         if integ.get("overlap"):
             lines.append("Changed on both sides: " + bounded_join(
                 integ["overlap"], lambda c: f"`{c}`",
                 max_items=INTEGRATION_MAX_PATHS, separator=", ",
-                omitted_note=lambda n: f" (+{n} more; see the integration "
-                                       f"record on the PR)"))
+                omitted_note=lambda n: f" (+{n} more; {pointer})"))
     applied = rec.get("applied") or {}
     if applied.get("merge_sha"):
         lines.append(

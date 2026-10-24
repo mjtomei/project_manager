@@ -27,6 +27,16 @@ _PROMPT_ARG_LIMIT = PROMPT_ARG_LIMIT
 # without bound.  The markers point at commands that read the full detail.
 _PLAN_LIST_MAX = 40
 _PLAN_FILE_BUDGET = 20_000
+# Aggregate budget for plan-file text a builder inlines.  A per-file budget
+# alone is not enough: a project with many plans multiplies it (22 plans at
+# 20 KB each is 440 KB, well over MAX_ARG_STRLEN), so the total is bounded too.
+_PLAN_FILES_BUDGET = 30_000
+# Smallest per-file slice worth inlining; below this the plan is listed as
+# omitted instead of emitting a marker that would not fit the slice.
+_PLAN_FILE_MIN_SLICE = 500
+# One-line PR summaries inline the description; truncate it so 40 large
+# descriptions (11 KB each in this project) cannot blow the prompt budget.
+_PLAN_DESC_CHARS = 300
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -518,10 +528,16 @@ def plan_deps():
         click.echo("No PRs. Add PRs first with: pm pr add <title>", err=True)
         raise SystemExit(1)
 
+    desc_truncated = False
+
     def _dep_pr_line(p: dict) -> str:
+        nonlocal desc_truncated
         deps = p.get("depends_on") or []
         dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-        desc = p.get("description", "")
+        desc = " ".join((p.get("description") or "").split())
+        if len(desc) > _PLAN_DESC_CHARS:
+            desc = desc[:_PLAN_DESC_CHARS].rstrip() + "…"
+            desc_truncated = True
         desc_str = f" — {desc}" if desc else ""
         return (f"  {_pr_display_id(p)}: {p.get('title', '???')} "
                 f"[{p.get('status', '?')}]{dep_str}{desc_str}")
@@ -531,23 +547,41 @@ def plan_deps():
         omitted_note=lambda n: (
             f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
     )
+    if desc_truncated:
+        pr_list_str += (
+            "\n  (Descriptions above are abbreviated to fit the prompt size "
+            "limit — run `pm pr show <id>` for a PR's full description.)")
 
     # Include plan context if available.  Each plan file is bounded so a
-    # long plan cannot blow the prompt's argv budget; the marker points at
-    # the plan file for the full text.
+    # long plan cannot blow the prompt's argv budget, and the files share an
+    # aggregate budget so a project with many plans cannot either; the
+    # markers point at the plan paths for the full text.
     plan_context = ""
     plans = data.get("plans") or []
+    omitted_plans: list[str] = []
+    remaining = _PLAN_FILES_BUDGET
     for plan_entry in plans:
         plan_path = root / plan_entry["file"]
-        if plan_path.exists():
-            file_text = bounded_text(
-                plan_path.read_text(),
-                max_bytes=_PLAN_FILE_BUDGET,
-                pointer=f"the plan file at {plan_path}",
-                label=f"plan {plan_entry['name']}",
-            )
-            plan_context += f"\nPlan: {plan_entry['name']} ({plan_entry['id']})\n"
-            plan_context += file_text + "\n"
+        if not plan_path.exists():
+            continue
+        header = f"\nPlan: {plan_entry['name']} ({plan_entry['id']})\n"
+        slice_budget = min(_PLAN_FILE_BUDGET, remaining - prompt_bytes(header))
+        if slice_budget < _PLAN_FILE_MIN_SLICE:
+            omitted_plans.append(str(plan_path))
+            continue
+        file_text = bounded_text(
+            plan_path.read_text(),
+            max_bytes=slice_budget,
+            pointer=f"the plan file at {plan_path}",
+            label=f"plan {plan_entry['name']}",
+        )
+        plan_context += header + file_text + "\n"
+        remaining -= prompt_bytes(header) + prompt_bytes(file_text) + 1
+    if omitted_plans:
+        plan_context += (
+            "\n(Plan files omitted to fit the prompt size limit — read each "
+            "in full at its path:\n"
+            + "\n".join(f"  - {p}" for p in omitted_plans) + "\n)\n")
 
     notes_block = notes.notes_section(root)
 
@@ -738,6 +772,15 @@ def _run_fix_command(step_name: str, review_path_str: str):
             context_parts.append(f"Plan {p['id']} ({p['name']}):\n{pp.read_text()}")
 
     original_context = "\n".join(context_parts) if context_parts else "No plan files found."
+    # Every plan file is inlined above, so the total grows with the project
+    # (22 plans / ~500 KB in this repo).  Bound the concatenation with a
+    # pointer at the plan files for the full text.
+    original_context = bounded_text(
+        original_context,
+        max_bytes=_PLAN_FILES_BUDGET,
+        pointer=f"the plan files under {root} (see `pm plan list`)",
+        label="plan context",
+    )
     prompt = review_mod.build_fix_prompt(step_name, original_context, parsed["findings"])
 
     notes_block = notes.notes_section(root)

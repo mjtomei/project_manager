@@ -378,3 +378,48 @@ within this spec's intent (no requirement changed):
   force the "older notes are abbreviated" marker to be dropped — the
   abbreviations would then be unexplained. The reserve is now applied before
   upgrading.
+
+## 8. Review-loop follow-ups (iteration 2)
+
+Iteration 2 measured the builders against this repo's **real** `pm/project.yaml`
+(483 PRs, 619 notes, 22 plan files / ~500 KB, descriptions up to 11 KB) rather
+than synthetic fixtures, which surfaced two builders the audit still left
+unbounded. Both were fixed; the per-block budgets this spec prescribed were
+correct but insufficient on their own, because a per-item cap does not bound
+the **product** of cap × item size, and a per-file budget does not bound the
+number of files.
+
+- **`plan_deps` (R12) — measured 312,155 bytes** (2.6× the limit; the launcher
+  guard kept it from `E2BIG`, but the builder was still unbounded). Two
+  independent causes:
+  - `pr_list_str` inlined each PR's **full** description under a count cap of
+    40; real descriptions reach 11 KB, so the cap allowed ~440 KB.
+  - `plan_context` bounded each plan file to 20 KB but not the total: 22 plans
+    × 20 KB = 440 KB (277,519 bytes measured).
+  Fixed with `_PLAN_DESC_CHARS = 300` per-description truncation (with a
+  marker naming `pm pr show <id>`) and an aggregate `_PLAN_FILES_BUDGET =
+  30_000` shared across plan files, with `_PLAN_FILE_MIN_SLICE` so a plan is
+  listed as omitted rather than emitting a marker that does not fit its slice.
+  Re-measured on the real project: **47,015 bytes**.
+- **`_run_fix_command` (`pm plan fix`) — ~500 KB**, not covered by R12: it
+  concatenated **every** plan file's full text into `build_fix_prompt`. Now
+  bounded with `_PLAN_FILES_BUDGET` and a pointer at the plan files. Measured
+  on the real project: **31,159 bytes**.
+- **R6 / §5 integration markers named nothing.** `(+N more)` says what was
+  dropped but not where to read it, which the spec's own "no silent loss"
+  requirement forbids (the same defect iteration 1 fixed for R7 and R9). New
+  `integration.integration_pointer(pr_id)` names `$CAP/<pr-id>/integration.json`,
+  falling back to `pm pr show <pr-id>`; both `_signoff_integration_block` and
+  `format_signoff_return` use it. `pm pr show` now prints the integration
+  record (and the full-record path) so that fallback is not a dead end.
+- **R11 dead parameters.** `_build_verification_prompt` passed `pointer=` /
+  `label=` to `bounded_lines` without `max_bytes`; `bounded_lines` only applies
+  the byte bound when both are set, so both were silently ignored and a single
+  enormous line defeated the line count. Added
+  `_VERIFICATION_MAX_PANE_BYTES = 60_000` so the bound is real and the pointer
+  reaches the prompt.
+
+Verification: `tests/test_prompt_bounds.py` 53 cases (6 new, all
+failing-then-passing). Full suite 3410 passed, 1 pre-existing failure
+(`test_hook_events::test_installer_writes_standalone_receiver` — pr-4bde874,
+fails whenever `PM_HOST_HOME` is set).

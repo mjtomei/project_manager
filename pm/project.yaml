@@ -22350,7 +22350,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-24T13:40:58.774313+00:00'
+  updated_at: '2026-10-24T20:54:19.867819+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22417,6 +22417,31 @@ prs:
       now 47 cases.'
     created_at: '2026-10-24T13:40:58Z'
     last_edited: '2026-10-24T13:40:58Z'
+  - id: note-076bb6f
+    text: 'Review-loop 4e41 i2: the audit was still incomplete — measured against
+      this repo''s real pm/project.yaml (483 PRs, 619 notes, 22 plan files / ~500
+      KB, descriptions up to 11 KB), not synthetic fixtures. (1) `pm plan deps` built
+      a 312,155-byte prompt: `pr_list_str` inlined each PR''s FULL description under
+      a count cap of 40 (real descriptions reach 11 KB, so ~440 KB), and `plan_context`
+      bounded each plan file to 20 KB but not their total (22 x 20 KB; 277,519 B measured).
+      A per-item cap does not bound cap x item size, and a per-file budget does not
+      bound file count. Fixed with _PLAN_DESC_CHARS=300 per-description truncation
+      + aggregate _PLAN_FILES_BUDGET=30,000 across plan files; re-measured 47,015
+      B. (2) `pm plan fix` (_run_fix_command) concatenated EVERY plan file into build_fix_prompt
+      (~500 KB) — not covered by R12 at all; now bounded, re-measured 31,159 B. (3)
+      R6/§5 integration markers said only `(+N more)` with no pointer, the same defect
+      i1 fixed for R7/R9; new integration.integration_pointer() names $CAP/<pr-id>/integration.json,
+      falling back to `pm pr show <pr-id>`, and `pm pr show` now prints the integration
+      record so the fallback is not a dead end. (4) _build_verification_prompt passed
+      pointer=/label= to bounded_lines without max_bytes, so both were silently ignored
+      and one enormous line defeated the line count; added _VERIFICATION_MAX_PANE_BYTES=60,000.
+      Verification: tests/test_prompt_bounds.py 53 cases (6 new, all failing-then-passing);
+      full suite 3410 passed, 1 pre-existing failure (test_hook_events::test_installer_writes_standalone_receiver,
+      pr-4bde874, fails whenever PM_HOST_HOME is set). Max production prompt over
+      all 483 PRs after the fix: signoff 92,162 B, planner 80,649 B, review 77,613
+      B, impl 75,143 B — all under the 120,000 B limit.'
+    created_at: '2026-10-24T20:54:19Z'
+    last_edited: '2026-10-24T20:54:19Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
@@ -30998,7 +31023,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T00:51:48.437253+00:00'
-  updated_at: '2026-10-24T13:41:03.296157+00:00'
+  updated_at: '2026-10-24T20:54:30.980738+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31014,6 +31039,15 @@ prs:
       to master.'
     created_at: '2026-10-24T13:41:03Z'
     last_edited: '2026-10-24T13:41:03Z'
+  - id: note-9c87d30
+    text: 'Follow-up to note-82828e2: pr-ace66e5 iteration 2 extends `pm pr show <pr-id>`
+      with the ## Integration record (target repo, base branch, base sha, status,
+      overlap and conflict path lists, plus the full-record path). The abbreviation
+      markers in the sign-off/return prompts now point at that record, so the pointer
+      is no longer a dead end. Still missing vs this PR description: signoff / signoff_return
+      / merge_integrity records.'
+    created_at: '2026-10-24T20:54:30Z'
+    last_edited: '2026-10-24T20:54:30Z'
 - id: pr-7e00786
   plan: bugs
   title: 'Bug: review loop adopts any review-<pr> pane without checking it runs the

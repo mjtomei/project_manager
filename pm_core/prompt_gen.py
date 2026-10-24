@@ -540,11 +540,15 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
     if rec.get("overlap"):
         lines.append("- Files changed on both sides: " + bounded_join(
             rec["overlap"], lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
-            separator=", ", omitted_note=lambda n: f" (+{n} more)"))
+            separator=", ",
+            omitted_note=lambda n: (
+                f" (+{n} more; {integ.integration_pointer(pr_id)})")))
     if rec.get("conflicts"):
         lines.append("- Conflicting paths: " + bounded_join(
             rec["conflicts"], lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
-            separator=", ", omitted_note=lambda n: f" (+{n} more)"))
+            separator=", ",
+            omitted_note=lambda n: (
+                f" (+{n} more; {integ.integration_pointer(pr_id)})")))
     if rec.get("status") == integ.CONFLICT:
         lines.append(f"- A conflicted integration can only route "
                      f"**{SIGNOFF_IMPL}** (pm enforces this).")

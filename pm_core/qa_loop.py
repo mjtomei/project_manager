@@ -3084,6 +3084,10 @@ def _poll_tmux_verdicts(
 # Maximum pane output lines to include in the verification prompt.
 # Large outputs are truncated to keep the prompt manageable.
 _VERIFICATION_MAX_PANE_LINES = 500
+# Byte cap for the inlined pane output.  The line bound alone does not bound
+# the prompt: transcripts carry long lines, so 500 of them can still exceed
+# the argv limit (and one enormous line defeats the line count entirely).
+_VERIFICATION_MAX_PANE_BYTES = 60_000
 
 
 def _build_verification_prompt(scenario: QAScenario, verdict: str,
@@ -3121,10 +3125,12 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
         )
     else:
         # Head/tail truncation so the verifier sees setup AND verdict; the
-        # marker points at the transcript for the full output.
+        # byte cap keeps long transcript lines from defeating the line bound,
+        # and the marker points at the transcript for the full output.
         text = bounded_lines(
             pane_output or "",
             max_lines=_VERIFICATION_MAX_PANE_LINES,
+            max_bytes=_VERIFICATION_MAX_PANE_BYTES,
             pointer="the full scenario transcript on disk",
             label="scenario output",
         )

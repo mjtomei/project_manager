@@ -586,6 +586,29 @@ def pr_show(pr_id: str):
             ts = n.get("created_at", "")
             ts_str = f" ({ts})" if ts else ""
             click.echo(f"  {n['id']}{ts_str}: {n['text']}")
+    # Prompt builders abbreviate the integration overlap/conflict path lists
+    # and point sessions here for the rest, so print the record (and where its
+    # full form lives) rather than making that pointer a dead end.
+    integ = pr_entry.get("integration") or {}
+    if integ:
+        from pm_core.integration import integration_json_path
+        click.echo("\n## Integration")
+        for label, key in (
+            ("Target", "target_repo"),
+            ("Base branch", "base_branch"),
+            ("Base sha", "base_sha"),
+            ("Status", "status"),
+        ):
+            val = integ.get(key)
+            if val:
+                click.echo(f"{label}: {val}")
+        for label, key in (("Overlap", "overlap"), ("Conflicts", "conflicts")):
+            vals = integ.get(key) or []
+            if vals:
+                click.echo(f"{label} ({len(vals)}): {', '.join(vals)}")
+        full = integration_json_path(pr_entry.get("id", pr_id))
+        if full is not None:
+            click.echo(f"Full record: {full}")
 
 
 @pr.command("graph")
