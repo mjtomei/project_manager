@@ -259,11 +259,13 @@ class QALoopState:
     # launched, so this (not ``scenarios``) tells this run's keys apart
     # from a replaced run's.
     _ui_tracker_keys: set = field(default_factory=set, repr=False, compare=False)
-    # Completion writes (lifecycle transition, QA note) that failed because
-    # project.yaml could not be loaded; qa_loop_ui retries them, and keeps
-    # the resume snapshot, until they succeed.  The reason last reported
-    # for a completion that waits for the file (logged once per reason).
-    _ui_pending_writes: list = field(default_factory=list, repr=False, compare=False)
+    # Completion bookkeeping in qa_loop_ui while project.yaml cannot be
+    # loaded (RQ37): the result writes already made (lifecycle transition,
+    # QA note), follow-up actions (review loop start, zz t restart,
+    # sign-off, tree reload) to retry because the file broke under them,
+    # and the reason last reported for a completion that waits.
+    _ui_writes_done: set = field(default_factory=set, repr=False, compare=False)
+    _ui_pending: list = field(default_factory=list, repr=False, compare=False)
     _ui_wait_reason: str | None = field(default=None, repr=False, compare=False)
     # Orders resume-snapshot renames against :func:`supersede_run`, so a
     # write already past its stop check cannot restore a snapshot that a

@@ -117,11 +117,12 @@ def _ensure_qa_poll_timer(app) -> None:
     _ensure_poll_timer(app)
 
 
-def start_qa(app, pr_id: str) -> None:
+def start_qa(app, pr_id: str) -> bool | None:
     """Start a QA session for a PR.
 
     Creates QALoopState, starts background QA thread.
     Called by auto-start and internal callers (fresh_start, loop start).
+    Returns False when project.yaml could not be loaded or locked.
     """
     if not app._root:
         app.log_message("No project root")
@@ -131,7 +132,7 @@ def start_qa(app, pr_id: str) -> None:
         data = store.load(app._root)
     except store.ProjectYamlParseError as e:
         app.log_message(f"Error: {e}")
-        return
+        return False
     pr = store.get_pr(data, pr_id)
     if not pr:
         app.log_message(f"PR not found: {pr_id}")
@@ -159,7 +160,7 @@ def start_qa(app, pr_id: str) -> None:
         except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
             app.log_message(f"Error: {e}")
             _log.warning("start_qa: %s for %s: %s", type(e).__name__, pr_id, e)
-            return
+            return False
         app._load_state()
         _log.info("start_qa: transitioned %s to qa status", pr_id)
 
@@ -174,6 +175,7 @@ def start_qa(app, pr_id: str) -> None:
     app.log_message(f"Starting QA for {pr_id}...")
 
     start_qa_background(state, app._root, pr, on_update)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -343,11 +345,19 @@ def poll_qa_state(app) -> None:
             # snapshot and process it once it loads (RQ37).
             if _completion_waits_for_project(app, state):
                 continue
+            if app._qa_loops.get(pr_id) is not state:
+                # A retried zz t restart (below) replaced this run.
+                if state.qa_workdir:
+                    from pm_core import qa_loop
+                    qa_loop.clear_resume_file(state.qa_workdir)
+                continue
             first_completion = not state._ui_complete_notified
-            _on_qa_complete(app, state)
-            if state._ui_pending_writes:
-                # The file broke between the check and a write: the
-                # failed writes are retried, the snapshot is kept.
+            if first_completion and not _on_qa_complete(app, state):
+                # Its writes failed (the file broke after the check):
+                # nothing followed, the whole completion is retried.
+                continue
+            if first_completion and state._ui_pending:
+                # A follow-up failed the same way: retried, snapshot kept.
                 state._ui_complete_notified = True
                 continue
             # The completion has now been processed (note recorded,
@@ -421,7 +431,7 @@ def _completion_waits_for_project(app, state: QALoopState) -> bool:
     project.yaml.  Processing it while the file cannot be loaded lost both:
     the writes only logged a warning and the snapshot was cleared right
     after, so nothing retried (RQ37).  Wait instead, saying so once per
-    reason, and retry writes that failed in between.
+    reason, and retry follow-ups that failed in between.
     """
     err = _project_load_error(app)
     if err is not None:
@@ -439,12 +449,48 @@ def _completion_waits_for_project(app, state: QALoopState) -> bool:
         state._ui_wait_reason = None
         _log.info("QA %s for %s: project.yaml loads again — recording the "
                   "result", state.latest_verdict, state.pr_id)
-    if state._ui_pending_writes:
-        state._ui_pending_writes[:] = [w for w in state._ui_pending_writes
-                                       if not w()]
-        if state._ui_pending_writes:
+    if state._ui_pending:
+        state._ui_pending[:] = [f for f in state._ui_pending if f() is False]
+        if state._ui_pending:
             return True
     return False
+
+
+def _follow_up(state: QALoopState, action) -> None:
+    """Run a completion follow-up; keep it for a retry when it reports
+    (False) that project.yaml could not be loaded."""
+    if action() is False:
+        state._ui_pending.append(action)
+
+
+def _record_completion(app, state: QALoopState) -> bool:
+    """Write the run's result to project.yaml: the NEEDS_WORK → in_review
+    transition and the QA note, each once.  False when one could not be
+    written; nothing that depends on the result runs before both are."""
+    done = state._ui_writes_done
+    if (state.latest_verdict == VERDICT_NEEDS_WORK
+            and "transition" not in done):
+        if not _transition_pr_status(app, state.pr_id, "qa", "in_review"):
+            return False
+        done.add("transition")
+    if "note" not in done:
+        if not _record_qa_note(app, state):
+            return False
+        done.add("note")
+    return True
+
+
+def _reload_tree(app) -> bool:
+    """Reload and repaint, so the tree shows a status change now rather
+    than at the next 300 s background sync.  False on an unloadable file."""
+    if not app._root:
+        return True
+    try:
+        app._data = store.load(app._root)
+    except store.ProjectYamlParseError:
+        return False  # keep existing app._data
+    app._update_display()
+    return True
 
 
 def _drop_superseded(pr_id, snaps, live_workdirs) -> None:
@@ -716,14 +762,16 @@ def _resume_incomplete_qa(app) -> None:
             state.running = False
             state.latest_verdict = overall
             _log.info("Recovered completed QA from disk: %s → %s", pr_id, overall)
-            _on_qa_complete(app, state)
-            state._ui_complete_notified = True
-            if state._ui_pending_writes:
-                # A write failed (the file broke since the scan loaded it):
-                # the poll timer retries it and then clears the snapshot.
+            recorded = _on_qa_complete(app, state)
+            if not recorded or state._ui_pending:
+                # The file broke since the scan loaded it: the poll timer
+                # retries (the whole completion, or a failed follow-up)
+                # and then clears the snapshot.
+                state._ui_complete_notified = recorded
                 app._qa_loops[pr_id] = state
                 _ensure_qa_poll_timer(app)
                 continue
+            state._ui_complete_notified = True
             try:
                 from pm_core import runtime_state as _rs
                 _rs.set_action_state(pr_id, "qa", "done", verdict=overall)
@@ -757,7 +805,7 @@ def _on_qa_update(app, state: QALoopState) -> None:
         app.log_message(escape(f"QA [{state.pr_id}]: {state.latest_output}"))
 
 
-def _on_qa_complete(app, state: QALoopState) -> None:
+def _on_qa_complete(app, state: QALoopState) -> bool:
     """Handle QA completion — trigger appropriate lifecycle transition.
 
     Self-driving mode (zz t):
@@ -773,13 +821,22 @@ def _on_qa_complete(app, state: QALoopState) -> None:
       - PASS: hand off to the sign-off step when auto-start is enabled
         (only a fresh SIGNOFF_MERGE then reaches the merge / O stop).
       - NEEDS_WORK: transition to in_review, rely on auto-start.
+
+    The result (transition, QA note) is written first, and nothing that
+    depends on it runs until both writes took: False when one failed
+    because project.yaml could not be loaded or locked, and the caller
+    retries the whole completion (RQ37).  A follow-up that hits the same
+    failure afterwards is kept in ``state._ui_pending`` for a retry.
     """
     if state._ui_complete_notified:
-        return
+        return True
 
     pr_id = state.pr_id
     verdict = state.latest_verdict
     sd = app._self_driving_qa.get(pr_id)
+
+    if not _record_completion(app, state):
+        return False
 
     _log.info("QA complete for %s: verdict=%s self_driving=%s",
               pr_id, verdict, bool(sd))
@@ -800,7 +857,7 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                         f"({sd['pass_count']}/{required} consecutive) — "
                         "handing off to sign-off"
                     )
-                    _trigger_signoff(app, pr_id)
+                    _follow_up(state, lambda: _trigger_signoff(app, pr_id))
                 else:
                     app.log_message(
                         f"[green bold]QA PASS[/] for {pr_id} "
@@ -820,14 +877,14 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                 )
                 _log.info("QA self-driving: %d/%d passes, restarting QA",
                           sd["pass_count"], required)
-                start_qa(app, pr_id)
+                _follow_up(state, lambda: start_qa(app, pr_id))
         else:
             # Legacy path — sign-off hand-off only when auto-start is active
             from pm_core.tui import auto_start as _auto_start
             if _auto_start.in_scope(app, pr_id):
                 app.log_message(
                     f"[green bold]QA PASS[/] for {pr_id} — handing off to sign-off")
-                _trigger_signoff(app, pr_id)
+                _follow_up(state, lambda: _trigger_signoff(app, pr_id))
             else:
                 app.log_message(
                     f"[green bold]QA PASS[/] for {pr_id} — press i to sign off"
@@ -842,26 +899,18 @@ def _on_qa_complete(app, state: QALoopState) -> None:
             f"[yellow bold]QA NEEDS_WORK[/] for {pr_id} — returning to review",
             force=True, hold=_auto_start.CONFIRM_HOLD_SECONDS,
         )
-        if not _transition_pr_status(app, pr_id, "qa", "in_review"):
-            state._ui_pending_writes.append(
-                lambda: _transition_pr_status(app, pr_id, "qa", "in_review"))
+        # (The qa → in_review transition was written above.)
         # Clear the stale review loop entry from the previous review pass
         app._review_loops.pop(pr_id, None)
         # Reload in-memory state and repaint, so the tech tree shows
         # in_review now rather than at the next 300 s background sync.
-        if app._root:
-            try:
-                app._data = store.load(app._root)
-            except store.ProjectYamlParseError:
-                pass  # keep existing app._data
-            else:
-                app._update_display()
+        _follow_up(state, lambda: _reload_tree(app))
 
         if sd:
             # Self-driving: reset pass count and directly start review loop
             sd["pass_count"] = 0
             _log.info("QA self-driving: NEEDS_WORK — starting review loop directly")
-            _start_self_driving_review(app, pr_id)
+            _follow_up(state, lambda: _start_self_driving_review(app, pr_id))
         else:
             # Legacy: rely on auto-start
             if _auto_start.is_enabled(app):
@@ -875,14 +924,13 @@ def _on_qa_complete(app, state: QALoopState) -> None:
     else:
         app.log_message(f"QA finished for {pr_id}: {verdict}")
 
-    # Record QA results as a PR note — do this last so it captures the
-    # final state, but log failures loudly since status already transitioned.
-    if not _record_qa_note(app, state):
-        state._ui_pending_writes.append(lambda: _record_qa_note(app, state))
+    return True
 
 
-def _start_self_driving_review(app, pr_id: str) -> None:
-    """Start a review loop for a self-driving QA PR (independent of auto-start)."""
+def _start_self_driving_review(app, pr_id: str) -> bool | None:
+    """Start a review loop for a self-driving QA PR (independent of auto-start).
+
+    Returns False when project.yaml could not be loaded (retry)."""
     from pm_core.tui import review_loop_ui, auto_start as _auto_start
 
     if not app._root:
@@ -892,7 +940,7 @@ def _start_self_driving_review(app, pr_id: str) -> None:
         data = store.load(app._root)
     except store.ProjectYamlParseError as e:
         _log.warning("_start_self_driving_review: %s", e)
-        return
+        return False
     pr = store.get_pr(data, pr_id)
     if not pr:
         _log.warning("_start_self_driving_review: PR %s not found", pr_id)
@@ -905,7 +953,7 @@ def _start_self_driving_review(app, pr_id: str) -> None:
     )
 
 
-def _trigger_signoff(app, pr_id: str) -> None:
+def _trigger_signoff(app, pr_id: str) -> bool | None:
     """Hand a QA-passed PR to the sign-off step (auto-start only).
 
     Never merges: the sign-off driver (``signoff_ui``) routes the router's
@@ -913,7 +961,7 @@ def _trigger_signoff(app, pr_id: str) -> None:
     ``start_signoff`` re-checks auto-start status and scope.
     """
     from pm_core.tui import signoff_ui
-    signoff_ui.start_signoff(app, pr_id)
+    return signoff_ui.start_signoff(app, pr_id)
 
 
 def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> bool:

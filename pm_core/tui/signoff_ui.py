@@ -54,7 +54,7 @@ def _load_pr(app, pr_id: str) -> dict | None:
     return store.get_pr(data, pr_id)
 
 
-def start_signoff(app, pr_id: str) -> None:
+def start_signoff(app, pr_id: str) -> bool | None:
     """Hand a QA-passed (or skip_qa review-passed) PR to the sign-off step.
 
     Transitions ``qa`` (or ``in_review`` under ``skip_qa``) -> ``sign_off``
@@ -81,7 +81,7 @@ def start_signoff(app, pr_id: str) -> None:
     except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
         app.log_message(f"Error: {e}")
         _log.warning("start_signoff: %s for %s: %s", type(e).__name__, pr_id, e)
-        return
+        return False  # project.yaml could not be loaded or locked: retry
     if moved["from"]:
         _log.info("start_signoff: %s %s -> sign_off", pr_id, moved["from"])
         _launched_at(app).pop(pr_id, None)

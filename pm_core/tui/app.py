@@ -684,6 +684,12 @@ class ProjectManagerApp(App):
         except store.ProjectYamlParseError as e:  # incl. PlanValidationError
             _log.warning("corrupt project.yaml, keeping previous state: %s", e)
             load_error = e
+        if load_error is None and getattr(self, "_load_error_shown", False):
+            # The "cannot be loaded" line is sticky: drop it now, or it
+            # hides what the reload brings (resumed or recorded QA).
+            self._load_error_shown = False
+            self._clear_log_message()
+            _log.info("project.yaml loads again")
         self._load_error = load_error
         if load_error is not None:
             from pm_core.tui.qa_loop_ui import _project_file_stamp
@@ -705,6 +711,7 @@ class ProjectManagerApp(App):
             self.log_message(escape(
                 f"project.yaml cannot be loaded: {load_error} — waiting "
                 "for it to load"), sticky=30)
+            self._load_error_shown = True
         elif not prs:
             state, _ = guide.detect_state(self._root)
             self._show_guide_view(state)

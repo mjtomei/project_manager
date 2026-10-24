@@ -198,3 +198,131 @@ def test_tui_started_on_an_unloadable_file_mounts(tmp_path, how):
     assert len(loads) == 2
     assert _pr(app._root) == store.get_pr(app._data, "pr-001")
     assert app._load_error is None
+    # the sticky "cannot be loaded" line goes once the file loads
+    app._clear_log_message.assert_called_once_with()
+
+
+# --- the file breaks after the load check (review of a9b966ec) -------------
+
+def _fail_first_locked_update():
+    """store.locked_update raising once, as if the file broke right after
+    the completion's load check."""
+    real = store.locked_update
+    calls = []
+
+    def upd(root, fn, *a, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            raise store.ProjectYamlParseError("broke after the check")
+        return real(root, fn, *a, **kw)
+    return patch("pm_core.store.locked_update", side_effect=upd)
+
+
+def test_self_driving_needs_work_race_starts_one_review_loop(tmp_path):
+    """Transition write fails after the check: nothing follows (no message,
+    no review loop); the retry records the result and starts exactly one
+    review loop, and the tree is repainted at in_review."""
+    app = _make_app(tmp_path)
+    app._self_driving_qa["pr-001"] = {"pass_count": 1, "required_passes": 2}
+    _state, snap = _finished_run(app, tmp_path, VERDICT_NEEDS_WORK)
+    shown = []
+    app._update_display.side_effect = lambda: shown.append(
+        store.get_pr(app._data, "pr-001")["status"])
+
+    with patch("pm_core.tui.review_loop_ui._start_loop") as loop, \
+         patch("pm_core.tui.auto_start.get_transcript_dir", return_value=tmp_path):
+        with _fail_first_locked_update():
+            _poll(app, 1)
+            assert not loop.called and snap.exists()
+            assert not _logged(app, "returning to review")
+            assert _pr(app._root)["status"] == "qa"
+            _poll(app, 3)
+    loop.assert_called_once()
+    pr = _pr(app._root)
+    assert pr["status"] == "in_review"
+    assert len(pr["notes"]) == 1
+    assert len(_logged(app, "returning to review")) == 1
+    assert shown and shown[-1] == "in_review"
+    assert app._self_driving_qa["pr-001"]["pass_count"] == 0
+    assert not snap.exists() and "pr-001" not in app._qa_loops
+
+
+def test_review_start_that_hits_the_failure_is_retried_once(tmp_path):
+    """Writes succeed, then the review loop start meets the unloadable file:
+    it is retried (one loop), the snapshot is kept until then."""
+    from pm_core.tui import qa_loop_ui
+    app = _make_app(tmp_path)
+    app._self_driving_qa["pr-001"] = {"pass_count": 0, "required_passes": 2}
+    _state, snap = _finished_run(app, tmp_path, VERDICT_NEEDS_WORK)
+    starts = []
+
+    def review(a, pr_id):
+        starts.append(pr_id)
+        return False if len(starts) == 1 else None
+
+    with patch("pm_core.tui.qa_loop_ui._start_self_driving_review",
+               side_effect=review):
+        _poll(app, 1)
+        assert snap.exists() and "pr-001" in app._qa_loops
+        _poll(app, 3)
+    assert starts == ["pr-001", "pr-001"]
+    assert len(_pr(app._root)["notes"]) == 1
+    assert len(_logged(app, "returning to review")) == 1
+    assert not snap.exists() and "pr-001" not in app._qa_loops
+
+
+def test_start_self_driving_review_reports_an_unloadable_file(tmp_path):
+    from pm_core.tui.qa_loop_ui import _start_self_driving_review
+    app = _make_app(tmp_path)
+    _break(app._root, "invalid_plans")
+    with patch("pm_core.tui.review_loop_ui._start_loop") as loop:
+        assert _start_self_driving_review(app, "pr-001") is False
+    assert not loop.called
+
+
+def test_pass_below_count_note_race_restarts_qa_once(tmp_path):
+    """The note write fails after the check: no restart yet; the retry
+    records one note and restarts QA once (pass 1/2)."""
+    app = _make_app(tmp_path)
+    app._self_driving_qa["pr-001"] = {"pass_count": 0, "required_passes": 2}
+    _finished_run(app, tmp_path, VERDICT_PASS)
+    with patch("pm_core.tui.qa_loop_ui.start_qa") as start:
+        with _fail_first_locked_update():
+            _poll(app, 1)
+            assert not start.called
+            _poll(app, 1)
+    start.assert_called_once_with(app, "pr-001")
+    assert app._self_driving_qa["pr-001"]["pass_count"] == 1
+    assert len(_pr(app._root)["notes"]) == 1
+    assert len(_logged(app, "restarting QA")) == 1
+
+
+def test_pass_below_count_restart_that_hits_the_failure_is_retried(tmp_path):
+    """start_qa meets the unloadable file (returns False): the old run keeps
+    its snapshot and retries; the successful restart replaces it in
+    _qa_loops, the old snapshot is dropped and the new run is left alone."""
+    app = _make_app(tmp_path)
+    app._self_driving_qa["pr-001"] = {"pass_count": 0, "required_passes": 2}
+    _old, snap = _finished_run(app, tmp_path, VERDICT_PASS)
+    new = QALoopState(pr_id="pr-001")
+    new.running = True
+    calls = []
+
+    def start(a, pr_id):
+        calls.append(pr_id)
+        if len(calls) == 1:
+            return False
+        a._qa_loops[pr_id] = new
+        return True
+
+    with patch("pm_core.tui.qa_loop_ui.start_qa", side_effect=start):
+        _poll(app, 1)
+        assert snap.exists() and app._qa_loops["pr-001"] is _old
+        _poll(app, 1)
+        assert app._qa_loops["pr-001"] is new
+        _poll(app, 3)
+    assert calls == ["pr-001", "pr-001"]
+    assert app._qa_loops["pr-001"] is new
+    assert not snap.exists()
+    assert app._self_driving_qa["pr-001"]["pass_count"] == 1
+    assert len(_pr(app._root)["notes"]) == 1
