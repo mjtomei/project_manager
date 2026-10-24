@@ -1020,7 +1020,9 @@ class TestPollTriggersQA:
         state.iteration = 1
         app._review_loops["pr-001"] = state
 
-        with patch("pm_core.tui.review_loop_ui._maybe_start_qa") as mock_qa, \
+        # _maybe_start_qa returns None (handed off) or (stage, reason).
+        with patch("pm_core.tui.review_loop_ui._maybe_start_qa",
+                   return_value=None) as mock_qa, \
              patch("pm_core.tui.review_loop_ui._refresh_tech_tree"), \
              patch("pm_core.tui.review_loop_ui._poll_impl_idle"), \
              patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
