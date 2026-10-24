@@ -193,9 +193,9 @@ config unchanged, passed on the final implementation 75f0dde6
 (`/pm-captures/host-work-route-smoke-20261022T190834Z/`: slirp4netns
 container; host + container `…190309Z/`). After 81cebf17 it passed on the
 host from an underscore cwd and in a container
-(`…195845Z/result.json`). Live QA S1–S49 is in
+(`…195845Z/result.json`). Live QA S1–S50 is in
 `/pm-captures/scenarios/<N>/` (REPORT.md). The latest full suite is
-recorded with item 38.
+recorded with item 39.
 
 **Rules fixed during validation (index).** Commits in parentheses.
 - Live smokes 1–4. The bridge stream has no timeout after connect
@@ -758,3 +758,52 @@ recorded with item 38.
     Earlier QA19 runs: 3642 on the S47 tree (3a3dcc3e), 3641 on
     006d7b4d (S48), 3629 on b740e188 (S49), each in its REPORT.md.
     Evidence: `/pm-captures/scenarios/48` (REPORT.md).
+
+39. (S50, RQ38 one-shot hand-offs, host, one clone + a pre-fix control on
+    ca8fa055) 64b41a91 held live: a skip_qa review PASS that meets a
+    1.5 s / 0.2 s cyclic holder waits once inside a hold (~0.9 s) and
+    moves to sign_off at its release (one window); a hold past 2 s
+    (`pm edit` open) is one `Error: Could not acquire lock …` plus one
+    `start_signoff: StoreLockTimeout` warning, no "waits" line, and the
+    PR stays in_review (pr-7cf1fe4); the control says "Sign-off for X
+    waits …" and leaves X in_review (298 s).  The retried callers (QA
+    completion follow-up across a SIGNOFF_REQA round; the scheduler pass
+    after a kill -9 + `pm session` respawn and re-arm) stay non-blocking
+    and say "waits" once per wait.  Three log-line visibility defects,
+    all pre-existing on master, were fixed:
+    (a) 4fb42e06: under skip_qa the hand-off runs in the same frame as
+        the sticky "Review loop done … PASS" line (sticky=10), so
+        "Auto-start: X review passed, skipping QA", "Auto-start: X →
+        sign-off" and the one-shot "Error: …" (or a retried caller's
+        "Sign-off for X waits …") were logged only as "(hidden by sticky
+        message)".  The skipping line and `start_signoff`'s outcome lines
+        are forced and held (`CONFIRM_HOLD_SECONDS`, `signoff_ui._SHOWN`).
+        `test_skip_qa_hand_off_lines_are_painted_after_the_review_done_line`
+        (real log-line logic) and a kwargs check in
+        `test_start_signoff_waits_for_a_held_lock`.
+    (b) e60c9927: `log_message` treated a hold as over when its time ran
+        out, before its flush timer ran, so a message arriving in that gap
+        was shown at once and dropped the confirmations the hold had
+        queued (a fast sign-off's "✓ X signed off" dropped "→ sign-off").
+        While queued confirmations wait for their flush, later messages
+        are queued or deferred behind them as during the hold (flush
+        replays exempt).  `test_message_after_expiry_waits_for_the_pending_flush`.
+    (c) f19831c2: after a TUI restart the resume scan recovers a finished
+        run and says "QA PASS for K — waiting for project.yaml to be
+        unlocked to record it" once, but another run's "Resuming QA …"
+        in the same frame replaced it before it was painted.  The
+        completion wait lines (lock, load, "recorded — follow-up
+        waiting") are forced and held (`qa_loop_ui._WAIT_SHOWN`).
+        `test_completion_wait_line_is_not_replaced_by_a_same_frame_resume`.
+    10 mutations, each caught (`/pm-captures/scenarios/50/tests/mutations.log`).
+    Live runtime heads (by process, not by checkout): story 1 final run in
+    a TUI restarted in place on e60c9927; story 2 on e60c9927; story 3 on
+    e60c9927 (P2 TUI restarted in place); story 4 final run pre-kill in a
+    TUI spawned after f19831c2, post-restart in TUIs respawned after
+    f19831c2.  Full suite 3651 passed, 4 warnings, 187.29 s, rc 0 on
+    f19831c2 (`/pm-captures/scenarios/50/tests/full-suite-f19831c2.log`;
+    env -u PM_HOST_HOME, scratch venv, PYTHONPATH=/workspace).
+    Not fixed here: `pm meta` ends with `rm -rf ~/.pm/sessions/<tag>`
+    (cli/meta.py), deleting the whole shared session dir on a normal exit
+    (note-2bc73f1 on pr-7f90572).  Evidence: `/pm-captures/scenarios/50`
+    (REPORT.md).
