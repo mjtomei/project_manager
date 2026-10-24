@@ -74,11 +74,22 @@ Two bugs fixed:
 ### R6 — Interactive fallback cleans up on interrupt
 
 - **Given** a directory with no active pm tmux session, where `pm meta` falls
-  back to launching Claude interactively in the foreground,
-- **when** the user interrupts the session (Ctrl-C, or the process receives
-  SIGTERM),
-- **then** the process exits and the override file is removed, leaving the rest
-  of the session dir intact.
+  back to launching Claude interactively in the foreground (`_run_interactive`,
+  pm_core/cli/meta.py — Popen-based since the SIGNOFF_IMPL fix 2e6f8831),
+- **when** the user interrupts the session (Ctrl-C / SIGINT to the foreground
+  process group, or the process receives SIGTERM),
+- **then** the process exits (with the shell child's returncode — 130 when
+  interrupted) and the override file is removed, leaving the rest of the
+  session dir intact.
+
+Sign-off requirement (2026-10-24, HEAD 2889b14c → fixed in 2e6f8831): the
+fallback must also survive a **slow-exiting INT-handling child** — a foreground
+child whose SIGINT handler takes longer than ~0.25 s before exiting (the old
+`subprocess.run` SIGKILLed the trap-carrying shell before its INT/EXIT handler
+ran, leaving the stale override — the exact bug this PR fixes; sign-off repro
+used handler delays 0/0.1/0.5/2 s). A second Ctrl-C re-interrupts the wait but
+must never escalate to a kill before the shell's trap has run. QA scenario 4
+must be re-run including a slow-exit child.
 
 ### R7 — Cleanup is a no-op when there is nothing to clean
 
@@ -144,3 +155,22 @@ per `tui-manual-test.md`:
 - **Driving the launch** — `find_claude()` requires a `claude` binary on PATH
   even when the fake-claude config will route to the fake; scenarios allow a
   PATH shim as setup. Not user-visible behavior under test.
+- **Interactive-fallback concretization** (2026-10-24): run `pm meta` from a
+  pane in a tmux session whose name does NOT start with `pm-` (e.g.
+  `tmux new-session -d -s meta-int-driver`) with no pm session for the test
+  cwd — otherwise `_get_pm_session()` resolves to it and pm opens a tmux meta
+  window instead of the fallback. Seed `pm fake-claude config set '{"_all": {}}'`
+  from the test cwd first: the meta fake stays open like real Claude, giving
+  something to interrupt, and creates `~/.pm/sessions/<tag>/`. The meta
+  workdir is cloned from the public repo (pre-fix master) — expected: the
+  trap under test is built by the launching pm, not the workdir copy.
+  `pm meta` exits 1 with "Claude CLI not found" without setting the override
+  when claude is missing from PATH in the pane.
+
+## Re-run scope (post-SIGNOFF_IMPL, 2026-10-24)
+
+Scenarios 1–7 ran and passed before the base merge (63d5773e) and the
+`_run_interactive` fix (2e6f8831); per the sign-off they stay verified
+(S1–S3, S5–S7) except S4, which must be re-run against merged HEAD including
+a slow-exit child. Because already-run scenarios are locked, the re-run and
+any post-merge regression sweep are emitted as fresh scenarios 8+.

@@ -28962,7 +28962,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T09:20:01.185973+00:00'
-  updated_at: '2026-10-24T21:05:05.327763+00:00'
+  updated_at: '2026-10-24T22:32:15.610338+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -28994,6 +28994,75 @@ prs:
       config preserved, pm which back to /workspace/pm_core). Evidence /pm-captures/scenarios/4/{pre-fix,post-fix}/.'
     created_at: '2026-10-24T21:05:05Z'
     last_edited: '2026-10-24T21:05:05Z'
+  - id: note-be26c89
+    text: 'Sign-off (2026-10-24, HEAD 2889b14c) -> SIGNOFF_IMPL. Tmux pane trap path
+      (kill-window/normal exit/foreign guard) is solid and stays verified by S1-S3,S5-S7.
+      Gap in the interactive fallback (meta.py ~207, the try/except added by unreviewed
+      QA commit 0b3f34b9): on SIGINT, subprocess.run waits only 0.25 s for the child,
+      then SIGKILLs the sh that carries the trap, so if the foreground child takes
+      longer than ~0.25 s to exit after SIGINT the override is left stale (the exact
+      bug this PR fixes). Repro: /pm-captures/signoff/orch.py (child sleeps 0/0.1/0.5/2
+      s in its INT handler -> override GONE/GONE/EXISTS/EXISTS). Suggested fix: use
+      Popen and keep waiting on KeyboardInterrupt (do NOT set SIG_IGN before spawn:
+      sh cannot trap a signal ignored on entry), then exit with the shell child returncode;
+      add a unit test with a slow-exiting INT-handling child. Then review must cover
+      the fallback change and QA must re-run S4 (fallback interrupt) incl. a slow-exit
+      child.'
+    created_at: '2026-10-24T22:32:12Z'
+    last_edited: '2026-10-24T22:32:12Z'
+  - id: note-2bc73f1
+    text: 'Additional requirement (QA pr-592e4bd S50, 2026-10-24): the NORMAL-exit
+      path is overbroad too. cli/meta.py:190-191 runs "<claude cmd> ; rm -rf ~/.pm/sessions/<session_tag>"
+      with the pm session own tag, so when a meta Claude exits normally it deletes
+      the whole shared session dir: fake-claude config + scripted cursor, the debug
+      marker, captures/<pr>/ (QA evidence), fake-github state, and any other per-session
+      settings, not just the meta override. Seen live in S50 (scratch HOMEs, both
+      7887d772+ and ca8fa055): a meta session ended at 10:07:26/27 and ~/.pm/sessions/p2-*/
+      was emptied (dir mtime), so the next QA planner ran as real Claude and stopped
+      at the workspace-trust prompt (INPUT_REQUIRED). Evidence /pm-captures/scenarios/50/{post,control}/story4-attempt3-planner-real-claude/NOTE.md.
+      Cleanup (both normal exit and the trap fix above) should remove only the override
+      file meta owns (and only if it still points at this meta workdir), preserving
+      all other session state.'
+    created_at: '2026-10-24T22:32:13Z'
+    last_edited: '2026-10-24T22:32:13Z'
+  - id: note-abc3864
+    text: 'SIGNOFF_IMPL addressed in 2e6f8831 (merged base into branch in 63d5773e,
+      data-level 3-way yaml merge after textual resolution kept corrupting project.yaml).
+      The interactive fallback no longer uses subprocess.run: new _run_interactive()
+      (pm_core/cli/meta.py) waits on the Popen and keeps waiting across repeated KeyboardInterrupts
+      — never SIGKILLs the trap-carrying shell — then exits with the shell child returncode
+      (130 when interrupted); no SIG_IGN set before spawn. New test test_fallback_interrupt_waits_out_slow_int_handler
+      (driver process, process-group SIGINT, 1 s slow-exiting INT-handling child):
+      red on pre-fix code, green post-fix. Post-fix sweep of the sign-off repro (child
+      INT-handler delays 0/0.1/0.5/2 s): override GONE at every delay, debug kept,
+      pm_rc=130 — captures /pm-captures/impl/{pre-fix,post-fix}/ (pre-fix = sign-off
+      orch.py baseline). Spec updated: R4 added to pm/specs/pr-7f90572/impl.md. Full
+      suite 3691 passed + 1 pre-existing env failure (test_installer_writes_standalone_receiver,
+      fails identically with the change stashed). Review must cover the fallback change
+      per sign-off; QA must re-run S4 (fallback interrupt) incl. slow-exit child.'
+    created_at: '2026-10-24T22:32:14Z'
+    last_edited: '2026-10-24T22:32:14Z'
+  - id: note-3638416
+    text: 'Sign-off (2026-10-24, HEAD 7a7e018b, base master@6d70b5fe) -> SIGNOFF_IMPL,
+      for branch scope only; the code is fine. Merge commit 63d5773e merged origin/pm/pr-592e4bd-...
+      (an unrelated in_review PR, NOT the base; base_branch is master) into this branch.
+      As a result git diff origin/master...HEAD is 69 files/+16.6k lines, and merging
+      this PR would publish all of pr-592e4bd to master without its own sign-off.
+      pr-7f90572 has no depends_on on it. Fix: rebuild the branch so it carries only
+      this PR. Reset it to 2e6f8831 (its parent chain is c98fa96e + this PR only),
+      re-apply only the pm/specs/pr-7f90572/{impl,qa}.md content from 7a7e018b and
+      re-add the pr-7f90572 notes, then merge origin/master (6d70b5fe) and force-push
+      (gh_pr is unset). Do NOT git revert -m 1 63d5773e: a reverted merge would make
+      a later pr-592e4bd merge into master silently drop those commits. Acceptance:
+      git diff origin/master...HEAD --name-only lists only pm_core/cli/meta.py, tests/test_meta_override_cleanup.py,
+      pm/specs/pr-7f90572/*, pm/project.yaml, and project.yaml changes only the pr-7f90572
+      entry. Sign-off checked this in a scratch worktree: 2e6f8831 + origin/master
+      merges cleanly (5 files), the 7 tests in test_meta_override_cleanup.py pass,
+      and meta.py and the test file are byte-identical to HEAD. Review 3e95 and QA
+      S8/S9 (and S1-S7 for the tmux path) therefore carry over as long as those two
+      files stay byte-identical. Report: /pm-captures/report.html.'
+    created_at: '2026-10-24T22:32:15Z'
+    last_edited: '2026-10-24T22:32:15Z'
 - id: pr-19990de
   plan: bugs
   title: 'Bug: vanilla/GitHub merge propagation still resolves in the project root
