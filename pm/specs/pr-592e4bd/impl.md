@@ -966,3 +966,12 @@ recorded with item 41.
     3682 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
     PYTHONPATH=/workspace; markdown 3.10.3 installed first;
     `/pm-captures/review-e0e8-i3/full-suite.log`).
+    (d) Review loop e0e8 i4: s0's legacy fallback (a plain-model
+        `qa_scenario` from configs before `qa_interactive`) also read the
+        PR's `session_models`, so `session_models: {qa_scenario: haiku}`
+        on a PR without `model` moved s0 to haiku, contrary to the rule
+        above.  That step now reads project/global settings only.
+        `test_plain_worker_exception_does_not_move_s0` fails with the PR
+        passed to it (`/pm-captures/review-e0e8-i4/mutation-checks.log`).
+        Full suite 3683 passed, rc 0 (markdown 3.10.3 installed first;
+        `/pm-captures/review-e0e8-i4/full-suite.log`).

@@ -219,6 +219,23 @@ class TestGetPrModelOverride:
         s0 = qa_loop._resolve_interactive_model(pr, {})
         assert (s0.model, s0.provider) == ("sonnet", None)
 
+    def test_plain_worker_exception_does_not_move_s0(self, monkeypatch):
+        """The s0 legacy fallback (a plain-model ``qa_scenario`` from before
+        ``qa_interactive``) is for project config: a PR's worker exception
+        to a plain model leaves s0 on the project/default model."""
+        from pm_core import qa_loop
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.setattr("pm_core.model_config.get_global_setting_value",
+                            lambda *a, **k: "")
+        pr = {"session_models": {"qa_scenario": "haiku"}}
+        assert qa_loop._resolve_qa_model(
+            pr, {}, session_type="qa_scenario").model == "haiku"
+        s0 = qa_loop._resolve_interactive_model(pr, {})
+        assert (s0.model, s0.provider) == (None, None)
+        legacy = {"project": {"model_config": {
+            "session_models": {"qa_scenario": "sonnet"}}}}
+        assert qa_loop._resolve_interactive_model(pr, legacy).model == "sonnet"
+
     def test_merge_window_resolves_its_pr_exception(self, tmp_path,
                                                     monkeypatch):
         from types import SimpleNamespace

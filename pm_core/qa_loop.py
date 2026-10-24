@@ -2326,11 +2326,15 @@ def _resolve_interactive_model(pr_data: dict, data: dict):
     Scenario 0 is the session the user drives / remote-controls, so it
     never follows ``qa_scenario`` onto a worker route.  Configs from
     before ``qa_interactive`` that set only ``qa_scenario`` to a plain
-    model keep that model for s0.
+    model keep that model for s0.  A PR's ``session_models`` worker
+    exception is not such a config, so that step reads project/global
+    settings only.
     """
     res = _resolve_qa_model(pr_data, data, session_type="qa_interactive")
     if not res.model and not res.provider:
-        legacy = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
+        # No PR override reached qa_interactive here (the PR ``model`` and
+        # a ``qa``/``qa_interactive`` exception would have).
+        legacy = _resolve_qa_model({}, data, session_type="qa_scenario")
         if legacy.model and not legacy.provider:
             res.model = legacy.model
             res.effort = res.effort or legacy.effort
