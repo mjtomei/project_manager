@@ -21,6 +21,8 @@ def model_show():
     from pm_core import store
     from pm_core.model_config import (
         SESSION_TYPES,
+        config_block,
+        project_model_config,
         resolve_model_and_provider,
     )
 
@@ -30,9 +32,9 @@ def model_show():
     # A model_config (or block) that is not a mapping cannot be resolved
     # per type.  Still list the PR overrides and the problems below: this
     # is where a model setting problem is meant to be found.
-    mc = data.get("project", {}).get("model_config", {})
+    mc = project_model_config(data)
     resolvable = isinstance(mc, dict) and all(
-        isinstance(mc.get(block, {}), dict)
+        isinstance(config_block(mc, block), dict)
         for block in ("session_models", "session_effort"))
 
     if resolvable:
@@ -57,11 +59,9 @@ def model_show():
                    "(see the problems below).")
     elif mc:
         click.echo("Project-level overrides (project.yaml):")
-        session_models = mc.get("session_models", {})
-        for st, val in session_models.items():
+        for st, val in config_block(mc, "session_models").items():
             click.echo(f"  {st:14s} model  -> {val}")
-        session_effort = mc.get("session_effort", {})
-        for st, val in session_effort.items():
+        for st, val in config_block(mc, "session_effort").items():
             click.echo(f"  {st:14s} effort -> {val}")
     else:
         click.echo("No project-level model_config in project.yaml (using defaults).")
@@ -125,12 +125,17 @@ def model_set(session_type: str, model_value: str, effort: str, use_project: boo
     """
     if use_project:
         from pm_core import store
+        from pm_core.model_config import config_block, project_model_config
         root = state_root()
 
         def apply(data):
-            mc = data.setdefault("project", {}).setdefault("model_config", {})
-            mc.setdefault("session_models", {})[session_type] = model_value
-            mc.setdefault("session_effort", {})[session_type] = effort
+            # A blank block (entries all commented out) is filled in.
+            mc = project_model_config(data)
+            data.setdefault("project", {})["model_config"] = mc
+            for block, value in (("session_models", model_value),
+                                 ("session_effort", effort)):
+                mc[block] = config_block(mc, block)
+                mc[block][session_type] = value
 
         store.locked_update(root, apply)
         click.echo(f"Set project model for '{session_type}' to '{model_value}' (effort: {effort})")
@@ -149,14 +154,15 @@ def model_unset(session_type: str, use_project: bool):
     """Remove the model and effort override for a session type."""
     if use_project:
         from pm_core import store
+        from pm_core.model_config import config_block, project_model_config
         root = state_root()
         removed = False
 
         def apply(data):
             nonlocal removed
-            mc = data.get("project", {}).get("model_config", {})
+            mc = project_model_config(data)
             for key in ("session_models", "session_effort"):
-                mapping = mc.get(key, {})
+                mapping = config_block(mc, key)
                 if session_type in mapping:
                     del mapping[session_type]
                     removed = True

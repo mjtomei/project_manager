@@ -87,8 +87,48 @@ class TestResolveModel:
             res = resolve_model_and_provider("signoff", project_data=data)
             assert (res.model, res.provider) == (None, None)
 
+    @pytest.mark.parametrize("mc", [None, {"session_models": None},
+                                    {"session_effort": None}],
+                             ids=["model_config", "session_models",
+                                  "session_effort"])
+    @patch("pm_core.model_config.get_global_setting_value", return_value=None)
+    def test_blank_blocks_count_as_empty(self, _gsv, mc, monkeypatch):
+        """A block whose entries are all commented out loads as None.  It
+        selects nothing, so no launch may raise on it: every type, also
+        under a PR override (effort is resolved for every launch)."""
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.delenv("PM_EFFORT", raising=False)
+        data = {"project": {"model_config": mc}}
+        for st in SESSION_TYPES:
+            res = resolve_model_and_provider(st, project_data=data)
+            assert (res.model, res.provider, res.effort) == (None, None, None)
+        res = resolve_model_and_provider("impl", pr_model="provider:claude-work",
+                                         project_data=data)
+        assert res.provider == "claude-work"
+
+    @patch("pm_core.model_config.get_global_setting_value", return_value=None)
+    def test_blank_block_keeps_the_other_block(self, _gsv, monkeypatch):
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.delenv("PM_EFFORT", raising=False)
+        data = {"project": {"model_config": {
+            "session_models": None, "session_effort": {"qa": "high"}}}}
+        res = resolve_model_and_provider("qa_scenario", project_data=data)
+        assert (res.model, res.effort) == (None, "high")
+
 
 class TestEffortResolution:
+    @patch("pm_core.model_config.get_global_setting_value", return_value=None)
+    def test_blank_or_non_string_effort_entries_count_as_absent(self, _gsv,
+                                                                monkeypatch):
+        """As for model entries: a blank level must not hide the parent
+        type's, and a non-string one must not reach --effort."""
+        monkeypatch.delenv("PM_EFFORT", raising=False)
+        for bad in (None, "", "  ", 5):
+            data = {"project": {"model_config": {"session_effort": {
+                "signoff": bad, "review": "high"}}}}
+            res = resolve_model_and_provider("signoff", project_data=data)
+            assert res.effort == "high"
+
     def test_defaults_are_none(self):
         """With no config, effort is None (use CLI default)."""
         result = resolve_model_and_provider("review")
@@ -435,6 +475,13 @@ class TestValidateModelConfig:
         assert validate_model_config(None) == []
         assert validate_model_config({}) == []
 
+    def test_blank_blocks_are_valid(self):
+        """A blank block selects nothing; it is not malformed."""
+        from pm_core.model_config import validate_model_config
+        for mc in (None, {"session_models": None, "session_effort": None}):
+            assert validate_model_config(
+                {"project": {"model_config": mc}}) == []
+
     def test_unknown_session_type_in_models_flagged(self):
         from pm_core.model_config import validate_model_config
         data = {"project": {"model_config": {
@@ -526,9 +573,9 @@ def test_model_show_lists_pr_overrides_and_their_problems(tmp_path,
     assert "prs[pr-a].session_models: unknown session type 'sign_off'" in out
 
 
-@pytest.mark.parametrize("mc", ["opus", None, {"session_models": "impl"},
+@pytest.mark.parametrize("mc", ["opus", {"session_models": "impl"},
                                 {"session_effort": "review"}],
-                         ids=["string", "blank", "models_block", "effort_block"])
+                         ids=["string", "models_block", "effort_block"])
 def test_model_show_reports_a_malformed_model_config(tmp_path, monkeypatch, mc):
     """`pm model show` is where the model setting problems are listed (and
     what a provider error points to), so a model_config that cannot be
@@ -571,3 +618,54 @@ def test_model_show_reports_a_blank_project_entry(tmp_path, monkeypatch):
     assert any(line.split()[:2] == ["signoff", "opus"]
                for line in out.splitlines())
     assert "model_config.session_models['signoff']: None is not a model" in out
+
+
+
+def _blank_block_project(tmp_path, monkeypatch, mc):
+    from pm_core import store
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    monkeypatch.delenv("PM_EFFORT", raising=False)
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "model_config": mc},
+                "prs": []}, tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    return model_cli
+
+
+_BLANK_BLOCKS = pytest.mark.parametrize(
+    "mc", [None, {"session_models": None, "session_effort": None}],
+    ids=["model_config", "blocks"])
+
+
+@_BLANK_BLOCKS
+def test_model_show_resolves_blank_blocks(tmp_path, monkeypatch, mc):
+    from click.testing import CliRunner
+    model_cli = _blank_block_project(tmp_path, monkeypatch, mc)
+    result = CliRunner().invoke(model_cli.model, ["show"])
+    out = result.output
+    assert result.exit_code == 0, (out, result.exception)
+    assert "Effective config per session type:" in out
+    assert "malformed" not in out and "Problems" not in out
+
+
+@_BLANK_BLOCKS
+def test_model_set_and_unset_fill_a_blank_block(tmp_path, monkeypatch, mc):
+    """`pm model set ... --project`, which the route remedies name, raised
+    TypeError on a blank block; unset raised AttributeError."""
+    from click.testing import CliRunner
+    from pm_core import store
+    model_cli = _blank_block_project(tmp_path, monkeypatch, mc)
+    runner = CliRunner()
+    result = runner.invoke(model_cli.model, ["unset", "signoff", "--project"])
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert "No project overrides set for 'signoff'" in result.output
+    result = runner.invoke(model_cli.model, ["set", "signoff", "opus",
+                                             "--effort", "high", "--project"])
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert store.load(tmp_path)["project"]["model_config"] == {
+        "session_models": {"signoff": "opus"},
+        "session_effort": {"signoff": "high"}}
+    result = runner.invoke(model_cli.model, ["unset", "signoff", "--project"])
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert "model_config" not in store.load(tmp_path)["project"]

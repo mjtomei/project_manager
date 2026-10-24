@@ -1101,3 +1101,26 @@ recorded with item 41.
         `test_model_show_reports_a_blank_project_entry` (2 mutations
         caught, `/pm-captures/review-e0e8-i13/mutation-checks.log`).  Full
         suite: `/pm-captures/review-e0e8-i13/full-suite.log`.
+    (m) Review loop e0e8 i14: a blank block (`model_config:`,
+        `session_models:` or `session_effort:` with every entry commented
+        out, e.g. after commenting out the last route entry) loads as
+        None.  Every launch of every type raised (the effort block is
+        read even under a PR override), and so did `pm model set
+        --project`, the remedy the route errors name, and `pm model
+        unset --project` (pre-existing on master; (k) reported a blank
+        `model_config` as malformed).  A blank block selects nothing, so
+        it now reads as empty (`project_model_config`, `config_block`) in
+        resolution, validation, `pm model show`, `set` and `unset`; a
+        non-mapping block is still malformed and still fails launches.
+        A blank or non-string `session_effort` level counts as absent like
+        a model entry (parent type, then global; it reached `--effort`
+        before) and stays reported.
+        `test_blank_blocks_count_as_empty[model_config|session_models|session_effort]`,
+        `test_blank_block_keeps_the_other_block`,
+        `test_blank_or_non_string_effort_entries_count_as_absent`,
+        `test_blank_blocks_are_valid`,
+        `test_model_show_resolves_blank_blocks`,
+        `test_model_set_and_unset_fill_a_blank_block` (all 10 fail
+        pre-fix; 6 mutations caught,
+        `/pm-captures/review-e0e8-i14/mutation-checks.log`).  Full suite:
+        `/pm-captures/review-e0e8-i14/full-suite.log`.

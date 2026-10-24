@@ -160,10 +160,8 @@ def resolve_model_and_provider(
     # 3. Project-level config (try specific type, then fallback)
     else:
         resolution = None
-        session_models = (
-            project_data.get("project", {}).get("model_config", {}).get("session_models", {})
-            if project_data else {}
-        )
+        session_models = config_block(project_model_config(project_data),
+                                      "session_models")
         for st in type_chain:
             # A blank or non-string entry (hand-edited YAML) counts as
             # absent, as for a PR's role entries: it must not raise at
@@ -195,13 +193,14 @@ def resolve_model_and_provider(
     else:
         # 2. Project-level effort config (try specific type, then fallback)
         effort = None
-        if project_data:
-            mc = project_data.get("project", {}).get("model_config", {})
-            effort_map = mc.get("session_effort", {})
-            for st in type_chain:
-                if st in effort_map:
-                    effort = effort_map[st]
-                    break
+        effort_map = config_block(project_model_config(project_data),
+                                  "session_effort")
+        for st in type_chain:
+            # A blank or non-string level counts as absent, as for models
+            # (validate_model_config reports it).
+            if _is_model_value(effort_map.get(st)):
+                effort = effort_map[st]
+                break
         # 3. Global setting (~/.pm/settings/effort-<type>)
         if not effort:
             for st in type_chain:
@@ -258,14 +257,14 @@ def validate_model_config(project_data: dict | None) -> list[str]:
     """
     if not project_data:
         return []
-    mc = project_data.get("project", {}).get("model_config", {})
+    mc = project_model_config(project_data)
     errors: list[str] = []
     if not isinstance(mc, dict):
         errors.append("model_config must be a mapping")
         mc = {}
     known = sorted(SESSION_TYPES)
     for block in ("session_models", "session_effort"):
-        entries = mc.get(block, {})
+        entries = config_block(mc, block)
         if not isinstance(entries, dict):
             errors.append(f"model_config.{block} must be a mapping")
             continue
@@ -279,7 +278,7 @@ def validate_model_config(project_data: dict | None) -> list[str]:
                 errors.append(
                     f"model_config.session_models[{st!r}]: {entries[st]!r} "
                     "is not a model name or 'provider:<name>' (ignored)")
-    effort_entries = mc.get("session_effort", {})
+    effort_entries = config_block(mc, "session_effort")
     if isinstance(effort_entries, dict):
         for st, level in effort_entries.items():
             if level not in EFFORT_LEVELS:
@@ -328,5 +327,29 @@ def get_pr_model_override(pr_entry: dict,
 
 
 def _is_model_value(value) -> bool:
-    """A usable model value: a model name or ``provider:<name>``."""
+    """A usable model value: a model name or ``provider:<name>`` (also
+    used for effort levels: a non-blank string)."""
     return isinstance(value, str) and bool(value.strip())
+
+
+def project_model_config(project_data: dict | None):
+    """``project.model_config`` of *project_data*; ``{}`` when absent.
+
+    A blank block (``model_config:`` or ``session_models:`` whose entries
+    are all commented out) loads as None.  It selects nothing, so it reads
+    as empty here and in ``config_block``, like a blank entry, rather than
+    failing every launch and ``pm model set`` (the remedy route errors
+    name).  Any other non-mapping is returned as is: it is malformed
+    (``validate_model_config``) and launches fail rather than guess.
+    """
+    if not project_data:
+        return {}
+    mc = (project_data.get("project") or {}).get("model_config")
+    return {} if mc is None else mc
+
+
+def config_block(mc: dict, block: str):
+    """``mc[block]`` (``session_models`` / ``session_effort``); ``{}`` when
+    absent or blank."""
+    entries = mc.get(block)
+    return {} if entries is None else entries
