@@ -26,7 +26,7 @@ import pytest
 from pm_core import store
 from pm_core.qa_loop import VERDICT_NEEDS_WORK, VERDICT_PASS
 from tests.test_qa_completion_unloadable import (
-    _finished_run, _logged, _make_app, _poll, _pr)
+    _finished_run, _logged, _make_app, _poll, _pr, _write)
 
 
 @contextmanager
@@ -398,7 +398,7 @@ def _painting(app):
     shown, timers = [], []
     app._log_sticky_until = app._log_hold_until = 0.0
     app._log_held = app._log_held_queue = None
-    app._log_seq = app._log_shown_seq = 0
+    app._log_seq = app._log_shown_seq = app._log_flush_timers = 0
     app._last_logged_message = None
     app.query_one = lambda *a, **k: SimpleNamespace(update=shown.append)
     app.call_after_refresh = lambda *a, **k: None
@@ -417,7 +417,8 @@ def _painting(app):
     return shown, end_hold
 
 
-@pytest.mark.parametrize("held", [False, True], ids=["free", "held_past_wait"])
+@pytest.mark.parametrize("held", [False, True, "unloadable"],
+                         ids=["free", "held_past_wait", "unloadable"])
 def test_skip_qa_hand_off_lines_are_painted_after_the_review_done_line(
         tmp_path, held):
     """S50: under skip_qa the review PASS hands off in the same frame as the
@@ -435,21 +436,29 @@ def test_skip_qa_hand_off_lines_are_painted_after_the_review_done_line(
     store.locked_update(app._root, skip_qa)
     app._data = store.load(app._root)
     shown, end_hold = _painting(app)
+    yaml_path = app._root / "project.yaml"
+    good = yaml_path.read_text()
+    if held == "unloadable":  # review loop 350f i1: its Error: too
+        _write(yaml_path, "<<<<<<< HEAD\n" + good)
     app.log_message("Review loop done for pr-001: ✓ PASS (1 iteration)",
                     sticky=10)
     with patch.object(auto_start, "is_enabled", return_value=True), \
             patch.object(auto_start, "in_scope", return_value=True), \
             patch.object(signoff_ui, "_driven", return_value=True), \
             patch.object(signoff_ui, "step"), \
-            (_held(app._root) if held else nullcontext()):
+            (_held(app._root) if held is True else nullcontext()):
         review_loop_ui._start_qa_after_review(app, "pr-001")
+    if held == "unloadable":
+        _write(yaml_path, good)
     # The outcome waits behind the "skipping QA" line's hold instead of
     # replacing it in the same frame.
     assert shown[-1] == (
         " Auto-start: pr-001 review passed, skipping QA (skip_qa enabled)")
     end_hold()
     end_hold()
-    outcome = "Error: Could not acquire lock" if held else "pr-001 → sign-off"
+    outcome = {False: "pr-001 → sign-off",
+               True: "Error: Could not acquire lock",
+               "unloadable": "Error: "}[held]
     assert [s for s in shown if "pr-001" in s or "Error:" in s] == [
         " Review loop done for pr-001: ✓ PASS (1 iteration)",
         " Auto-start: pr-001 review passed, skipping QA (skip_qa enabled)",

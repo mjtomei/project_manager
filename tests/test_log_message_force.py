@@ -554,3 +554,39 @@ def test_message_after_expiry_waits_for_the_pending_flush():
     app._log_hold_until = 0.0
     app.timers.pop(0)()
     assert shown[-1] == " Selected: pr-y"
+
+
+# Review loop 350f i1 (pr-592e4bd): since the S50 fix above, a non-empty
+# queue keeps holding the line until its flush runs.  Textual sleeps 0.5 ms
+# short of a timer's delay, so the flush can fire just before the hold ends
+# and find it still active; it returned "a newer hold is active" with no
+# other timer pending, and the queue then held the line for good: every
+# later unforced or held message was deferred and never painted.
+
+def test_flush_timer_firing_just_before_the_hold_ends_rearms():
+    import time
+    app, shown = _stub_app()
+    _log(app, "A held", force=True, hold=3)
+    _log(app, "B queued", force=True, hold=3)
+    app._log_hold_until = time.monotonic() + 0.0005
+    app.timers.pop(0)()  # fires early: the hold is still active
+    assert len(app.timers) == 1  # re-armed for the rest of the hold
+    time.sleep(0.001)
+    _log(app, "C plain")
+    _log(app, "D confirmation", force=True, hold=3)
+    for _ in range(3):
+        app._log_hold_until = 0.0
+        if app.timers:
+            app.timers.pop(0)()
+    assert shown == [" A held", " B queued", " D confirmation"]
+    assert not app.timers and not app._log_held_queue
+
+
+def test_queue_without_a_pending_flush_holds_nothing():
+    app, shown = _stub_app()
+    _log(app, "A held", force=True, hold=3)
+    _log(app, "B queued", force=True, hold=3)
+    app._log_hold_until = 0.0
+    app._log_flush_timers = 0  # its flush timer is gone
+    _log(app, "C plain")
+    assert shown[-1] == " C plain"

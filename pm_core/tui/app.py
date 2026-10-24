@@ -361,6 +361,7 @@ class ProjectManagerApp(App):
         self._log_hold_until: float = 0.0  # see log_message(hold=)
         self._log_held: tuple | None = None  # latest message deferred by a hold
         self._log_held_queue: list = []  # held messages waiting for the line
+        self._log_flush_timers: int = 0  # hold flush timers not yet run
         self._log_seq: int = 0  # arrival number of the latest log message
         self._log_shown_seq: int = 0  # arrival number of the one on the line
         # z modifier key state (vim-style prefix, supports z/zz)
@@ -922,9 +923,11 @@ class ProjectManagerApp(App):
         # hold expired but before its timer fired must not jump (and so
         # drop) the confirmations it queued (S50: a fast sign-off's "✓ …
         # signed off" dropped the queued "→ sign-off").  Replays come from
-        # that flush.
+        # that flush.  With no flush pending nothing would ever release the
+        # queue, so it then holds nothing.
         holding = now < self._log_hold_until or (
-            not replay and bool(getattr(self, "_log_held_queue", None)))
+            not replay and bool(getattr(self, "_log_held_queue", None))
+            and getattr(self, "_log_flush_timers", 0) > 0)
         held = hold <= 0 and holding and not force
         suppressed = held or (
             sticky <= 0 and now < self._log_sticky_until and not force)
@@ -960,6 +963,7 @@ class ProjectManagerApp(App):
         if hold > 0:
             # Only a message that is actually shown holds the line.
             self._log_hold_until = now + hold
+            self._log_flush_timers = getattr(self, "_log_flush_timers", 0) + 1
             self.set_timer(hold, self._flush_held_log_message)
         try:
             log = self.query_one("#log-line", LogLine)
@@ -976,7 +980,16 @@ class ProjectManagerApp(App):
         confirmations first (oldest first), then the latest deferred
         message."""
         import time as _time
-        if _time.monotonic() < self._log_hold_until:
+        pending = self._log_flush_timers = max(
+            0, getattr(self, "_log_flush_timers", 0) - 1)
+        remaining = self._log_hold_until - _time.monotonic()
+        if remaining > 0:
+            if not pending:
+                # This hold's own timer fired early (Textual sleeps 0.5 ms
+                # short of the delay); without another flush the queued
+                # confirmations would hold the line for good.
+                self._log_flush_timers = 1
+                self.set_timer(remaining, self._flush_held_log_message)
             return  # a newer hold is active; its own timer flushes
         queue = getattr(self, "_log_held_queue", None)
         while queue:

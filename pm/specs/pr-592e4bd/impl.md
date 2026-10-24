@@ -795,6 +795,30 @@ recorded with item 39.
         completion wait lines (lock, load, "recorded — follow-up
         waiting") are forced and held (`qa_loop_ui._WAIT_SHOWN`).
         `test_completion_wait_line_is_not_replaced_by_a_same_frame_resume`.
+    (d) Review loop 350f i1.  Since (b), a non-empty queue holds the line
+        until a flush runs.  Textual sleeps 0.5 ms short of a timer's
+        delay, so a flush can fire just before `_log_hold_until`.  It then
+        returned ("a newer hold is active") although no other flush timer
+        was pending, and the queue held the line for good: every later
+        unforced or held message was deferred or queued and never painted,
+        until a forced, unheld one.  Measured here, the timer fired 51–68
+        µs after the deadline at minimum (idle and under full CPU load).
+        That margin comes from Textual's internals, not a guarantee.  The
+        flush now counts its pending timers (`_log_flush_timers`).  A timer
+        that fires early with no other one pending re-arms for the time
+        left, and a queue with no flush pending holds nothing.  Also, the
+        one-shot skip_qa hand-off's `Error:` for an unloadable file is
+        forced and held like the lock `Error:` from (a).  Unforced, the
+        sticky "Review loop done" line hid it, so the loss (pr-7cf1fe4)
+        went unseen.  A retried caller meets the same file on every tick,
+        so its line stays unforced.
+        `test_flush_timer_firing_just_before_the_hold_ends_rearms`,
+        `test_queue_without_a_pending_flush_holds_nothing` and the
+        `[unloadable]` case of
+        `test_skip_qa_hand_off_lines_are_painted_after_the_review_done_line`
+        each fail with their fix reverted
+        (`/pm-captures/review-350f-i1/mutation-checks.log`).  Full suite
+        3654 passed, rc 0 (`/pm-captures/review-350f-i1/full-suite.log`).
     10 mutations, each caught (`/pm-captures/scenarios/50/tests/mutations.log`).
     Live runtime heads (by process, not by checkout): story 1 final run in
     a TUI restarted in place on e60c9927; story 2 on e60c9927; story 3 on

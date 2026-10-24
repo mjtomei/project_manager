@@ -122,7 +122,10 @@ def start_signoff(app, pr_id: str,
         return False
     except store.ProjectYamlParseError as e:
         waiting.discard(pr_id)
-        app.log_message(f"Error: {e}")
+        # Forced only for the one-shot caller: a retried one meets the same
+        # unloadable file on every tick.
+        app.log_message(f"Error: {e}",
+                        **(_SHOWN if lock_timeout != store.NO_WAIT else {}))
         _log.warning("start_signoff: %s for %s: %s", type(e).__name__, pr_id, e)
         return False  # project.yaml could not be loaded: retry
     waiting.discard(pr_id)
