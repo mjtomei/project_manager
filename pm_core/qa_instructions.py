@@ -18,6 +18,8 @@ import yaml
 
 from pm_core.prompt_bounds import (
     LIBRARY_ITEMS_MAX as _LIBRARY_ITEMS_MAX,
+    LIBRARY_LIST_BUDGET as _LIBRARY_LIST_BUDGET,
+    LIBRARY_TOTAL_BUDGET as _LIBRARY_TOTAL_BUDGET,
     MOCKS_BUDGET as _MOCKS_BUDGET,
     bounded_join, bounded_text,
 )
@@ -310,6 +312,7 @@ def instruction_summary_for_prompt(pm_root: Path,
 
         lines.append(bounded_join(
             items, _item_line, max_items=_LIBRARY_ITEMS_MAX,
+            max_bytes=_LIBRARY_LIST_BUDGET,
             omitted_note=lambda n: (
                 f"- ... (+{n} more; run `pm qa list` to see the library)"),
         ))
@@ -318,7 +321,15 @@ def instruction_summary_for_prompt(pm_root: Path,
     if not lines:
         return "No QA instructions found."
 
-    return "\n".join(lines)
+    # Aggregate bound: the per-category budgets bound each listing, but three
+    # categories still multiply them, and the descriptions are user-authored
+    # free text.  The marker names `pm qa list`, which lists every item.
+    return bounded_text(
+        "\n".join(lines),
+        max_bytes=_LIBRARY_TOTAL_BUDGET,
+        pointer="`pm qa list`",
+        label="QA library summary",
+    )
 
 
 def mocks_for_prompt(pm_root: Path) -> str:

@@ -762,7 +762,7 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
         spec,
         max_bytes=SPEC_BUDGET,
         pointer=f"`pm pr spec {pr_id} {phase}` (file: {file_path})",
-        label=f"{label} spec",
+        label=label,
     )
 
     return f"""

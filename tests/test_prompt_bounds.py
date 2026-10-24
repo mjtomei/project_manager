@@ -312,6 +312,127 @@ class TestSignoffPromptBounding:
         assert "(+80 more; run `pm pr show pr-x`)" in block
 
 
+class TestFitPrompt:
+    def test_passthrough_when_it_fits(self):
+        from pm_core.prompt_bounds import fit_prompt
+        blocks = {"a": ("aaa", "`pm a`", "a block")}
+        out = fit_prompt(lambda p: f"S|{p['a']}|E", blocks)
+        assert out == "S|aaa|E"
+
+    def test_shrinks_largest_block_with_a_pointer(self):
+        from pm_core.prompt_bounds import fit_prompt
+        blocks = {
+            "small": ("s" * 100, "`pm small`", "small block"),
+            "big": ("b" * 5000, "`pm big`", "big block"),
+        }
+        out = fit_prompt(lambda p: f"S|{p['small']}|{p['big']}|E", blocks,
+                         limit=3_000)
+        assert prompt_bytes(out) <= 3_000
+        # The small block is untouched; the big one carries a pointer.
+        assert "s" * 100 in out
+        assert "`pm big`" in out
+        assert "truncated" in out
+
+    def test_never_shrinks_a_block_below_min_bytes(self):
+        from pm_core.prompt_bounds import fit_prompt
+        blocks = {"a": ("a" * 4_000, "`pm a`", "a block")}
+        # Static text alone is over the limit, so nothing can fix it here and
+        # the render is left for the launcher guard.
+        out = fit_prompt(lambda p: "S" * 10_000 + p["a"], blocks, limit=5_000)
+        assert prompt_bytes(out) > 5_000
+        # A block shrinks towards the floor and no further.
+        out = fit_prompt(lambda p: p["a"], blocks, limit=2_000)
+        assert 1_500 < prompt_bytes(out) <= 2_000
+
+    def test_empty_blocks_are_left_alone(self):
+        from pm_core.prompt_bounds import fit_prompt
+        blocks = {"a": ("", "`pm a`", "a block"),
+                  "b": ("b" * 5_000, "`pm b`", "b block")}
+        out = fit_prompt(lambda p: p["a"] + "|" + p["b"], blocks, limit=3_000)
+        assert prompt_bytes(out) <= 3_000
+        assert "`pm b`" in out
+        assert "`pm a`" not in out
+
+
+# ---------------------------------------------------------------------------
+# builders whose per-block budgets sum past the limit
+# ---------------------------------------------------------------------------
+
+class TestBudgetCoordination:
+    """Every block at its own budget at once must still fit one argv entry.
+
+    The per-block budgets bound each block individually, but a PR that is
+    large in several dimensions at once (many notes, a big spec, many
+    scenarios, a long description, a big notes.txt) can sum past
+    PROMPT_ARG_LIMIT — the sign-off prompt's static text alone is ~19 KB.
+    """
+
+    def _pathological(self, _isolated_pm_root, monkeypatch,
+                      desc_bytes=40_000):
+        status = _isolated_pm_root / "qa_status.json"
+        status.write_text(json.dumps({
+            "overall": "PASS",
+            "scenarios": [{"index": i, "title": "T" * 400, "verdict": "PASS",
+                           "verdict_reason": "r" * 4000} for i in range(200)],
+        }))
+        monkeypatch.setattr("pm_core.paths.latest_qa_status_path",
+                            lambda _pr_id: status)
+        monkeypatch.setattr(spec_gen, "get_spec", lambda pr, phase: "s" * 200000)
+        (_isolated_pm_root / "notes.txt").write_text(
+            "## General\n" + "g" * 60000 + "\n")
+        pr = _pr(
+            description="D" * desc_bytes,
+            notes=[_note(i) for i in range(400)],
+            plan="pl-1",
+            integration={"base_branch": "master", "base_sha": "a" * 40,
+                         "target_repo": "r", "status": "conflict",
+                         "overlap": [f"f{i}.py" for i in range(500)],
+                         "conflicts": [f"c{i}.py" for i in range(500)]},
+        )
+        siblings = [_pr(f"pr-s{i:03d}", plan="pl-1",
+                        title="LONGTITLE " * 600) for i in range(200)]
+        return pr, _data(pr, siblings)
+
+    def test_signoff_fits_when_every_block_is_large(self, _isolated_pm_root,
+                                                    monkeypatch):
+        pr, data = self._pathological(_isolated_pm_root, monkeypatch)
+        p = prompt_gen.generate_signoff_prompt(data, "pr-x")
+        _assert_bounded(p, "pm pr note list pr-x")
+        # The sign-off routing contract must survive the shrink.
+        assert "pm-signoff-verdict" in p
+
+    def test_review_fits_when_every_block_is_large(self, _isolated_pm_root,
+                                                   monkeypatch):
+        pr, data = self._pathological(_isolated_pm_root, monkeypatch)
+        p = prompt_gen.generate_review_prompt(data, "pr-x")
+        _assert_bounded(p)
+
+    def test_impl_fits_when_every_block_is_large(self, _isolated_pm_root,
+                                                 monkeypatch):
+        # A long PR description alone can push the impl prompt over.
+        pr, data = self._pathological(_isolated_pm_root, monkeypatch,
+                                      desc_bytes=80_000)
+        p = prompt_gen.generate_prompt(data, "pr-x")
+        _assert_bounded(p, "pm pr show pr-x")
+
+    def test_planner_fits_when_every_block_is_large(self, _isolated_pm_root,
+                                                    monkeypatch):
+        pr, data = self._pathological(_isolated_pm_root, monkeypatch)
+        p = prompt_gen.generate_qa_planner_prompt(data, "pr-x")
+        _assert_bounded(p, "pm pr show pr-x")
+
+    def test_small_prompts_are_byte_identical(self, _isolated_pm_root,
+                                              monkeypatch):
+        """The fit path must not touch prompts that already fit."""
+        monkeypatch.setattr("pm_core.paths.latest_qa_status_path",
+                            lambda _pr_id: None)
+        pr = _pr(notes=[_note(i) for i in range(3)])
+        data = _data(pr)
+        p = prompt_gen.generate_signoff_prompt(data, "pr-x")
+        assert "truncated to fit the prompt size limit" not in p
+        assert prompt_bytes(p) < 40_000
+
+
 class TestQaPromptsBounding:
     def test_planner_many_notes(self):
         pr = _pr(notes=[_note(i) for i in range(300)])
@@ -379,11 +500,12 @@ class TestSpecBounding:
 
 
 class TestQaInstructionsBounding:
-    def _write_items(self, directory, n, body="body"):
+    def _write_items(self, directory, n, body="body", desc=None):
         directory.mkdir(parents=True, exist_ok=True)
         for i in range(n):
+            description = desc(i) if desc else f"desc {i}"
             (directory / f"item-{i:03d}.md").write_text(
-                f"---\ntitle: Item {i}\ndescription: desc {i}\n---\n{body}\n")
+                f"---\ntitle: Item {i}\ndescription: {description}\n---\n{body}\n")
 
     def test_instruction_summary_caps_each_category(self, _isolated_pm_root):
         from pm_core import qa_instructions
@@ -392,6 +514,50 @@ class TestQaInstructionsBounding:
         out = qa_instructions.instruction_summary_for_prompt(_isolated_pm_root)
         assert out.count("- **Item ") <= 40  # 20 per category
         assert "more; run `pm qa list`" in out
+
+    def test_instruction_summary_bounds_long_descriptions(self,
+                                                          _isolated_pm_root):
+        """A count cap alone does not bound the listing.
+
+        Descriptions are user-authored free text: 20 items per category with
+        multi-KB descriptions measured ~300 KB (over PROMPT_ARG_LIMIT) before
+        the byte budgets were added.  This is the block the QA planner prompt
+        (the one that hit E2BIG in the field) inlines.
+        """
+        from pm_core import qa_instructions
+        from pm_core.prompt_bounds import LIBRARY_TOTAL_BUDGET
+        for category in ("instructions", "regression", "artifacts"):
+            self._write_items(_isolated_pm_root / "qa" / category, 50,
+                              desc=lambda i: "d" * 5000)
+        out = qa_instructions.instruction_summary_for_prompt(
+            _isolated_pm_root, include_regression=True)
+        # Bounded by the aggregate budget (plus the truncation marker).
+        assert prompt_bytes(out) <= LIBRARY_TOTAL_BUDGET + 400
+        assert "pm qa list" in out
+        assert prompt_bytes(out) < PROMPT_ARG_LIMIT
+
+    def test_instruction_summary_small_library_unchanged(self,
+                                                         _isolated_pm_root):
+        """A realistic library passes through with no markers."""
+        from pm_core import qa_instructions
+        for category in ("instructions", "regression", "artifacts"):
+            self._write_items(_isolated_pm_root / "qa" / category, 5)
+        out = qa_instructions.instruction_summary_for_prompt(
+            _isolated_pm_root, include_regression=True)
+        assert out.count("- **Item ") == 15
+        assert "truncated" not in out
+        assert "more; run" not in out
+
+    def test_planner_prompt_bounded_with_pathological_library(
+            self, _isolated_pm_root):
+        """The assembled planner prompt stays argv-safe too."""
+        self._write_items(_isolated_pm_root / "qa" / "instructions", 50,
+                          desc=lambda i: "d" * 5000)
+        self._write_items(_isolated_pm_root / "qa" / "artifacts", 50,
+                          desc=lambda i: "d" * 5000)
+        pr = _pr(notes=[_note(i) for i in range(60)])
+        prompt = prompt_gen.generate_qa_planner_prompt(_data(pr), "pr-x")
+        _assert_bounded(prompt, "pm qa list")
 
     def test_mocks_for_prompt_bounded(self, _isolated_pm_root):
         from pm_core import qa_instructions

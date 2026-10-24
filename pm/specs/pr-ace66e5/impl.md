@@ -37,9 +37,17 @@ limits and bounding helpers:
   `SESSION_NOTES_BUDGET = 8_000`, `QA_CHILD_STEPS_BUDGET = 20_000`,
   `CONCRETIZE_INSTRUCTION_BUDGET = 20_000`, `MOCKS_BUDGET = 12_000`,
   `PLAN_CONTEXT_MAX_SIBLINGS = 25`, `LIBRARY_ITEMS_MAX = 20`,
-  `QA_SCENARIOS_MAX = 40`, `INTEGRATION_MAX_PATHS = 20`,
+  `LIBRARY_LIST_BUDGET = 6_000`, `LIBRARY_TOTAL_BUDGET = 12_000`,
+  `PLAN_LIST_BUDGET = 20_000`, `QA_SCENARIOS_MAX = 40`,
+  `INTEGRATION_MAX_PATHS = 20`,
   `ARTIFACT_PATHS_MAX = 20`, `WATCHER_MANAGED_MAX = 40`,
   `MERGE_ERROR_MAX_LINES = 60`, `DEPS_MAX = 40`.
+  (Iterations 2-4 added `PLAN_LIST_BUDGET`, `LIBRARY_LIST_BUDGET` and
+  `LIBRARY_TOTAL_BUDGET` as the probes found count caps that did not bound
+  their listings; the plan-builder-local budgets —
+  `_PLAN_BRIEF_BUDGET`, `_PLAN_FILE_BUDGET`, `_PLAN_FILES_BUDGET`,
+  `_PLAN_DESC_CHARS` — stay in `pm_core/cli/plan.py` next to their only
+  users.)
 - `prompt_bytes(text) -> int` — `len(text.encode("utf-8"))`; measures bytes,
   not characters (multi-byte text matters).
 - `bounded_join(items, formatter, *, max_items=None, max_bytes=None,
@@ -472,3 +480,79 @@ test_installer_writes_standalone_receiver` — pr-4bde874, fails whenever
 `PM_HOST_HOME` is set). Evidence: `/pm-captures/review-4e41-i3/`
 (`full-suite-i3.txt`, `prompt-bounds-tests-i3.txt`, `baseline-*.txt` /
 `after*-*.txt` real-data measurements).
+
+## 10. Review-loop follow-ups (iteration 4)
+
+Iteration 4 re-ran the i2/i3 probes (real project, then pathological counts,
+then pathological item sizes) and probed the one dimension none of them had
+covered — the *sum* of the blocks. Two gaps, both the same theme: a bound that
+is correct per item but not for the whole prompt.
+
+- **`instruction_summary_for_prompt` (R7) was count-capped but not
+  byte-bounded.** It caps each category at `LIBRARY_ITEMS_MAX = 20` but
+  inlines each item's user-authored frontmatter `description` verbatim, so 20
+  items with multi-KB descriptions measured **303,973 bytes** — over
+  `PROMPT_ARG_LIMIT` on their own — and the QA planner prompt built from them
+  measured **212,671 bytes**. The library is user-authored free text and
+  already at the 20-item cap in this repo (20 regression tests), so neither
+  the count cap nor the real-data size (3.1 KB today) bounds it.
+  Fixed with a new `LIBRARY_LIST_BUDGET = 6_000` per category plus an
+  aggregate `LIBRARY_TOTAL_BUDGET = 12_000` on the joined block (a per-category
+  budget alone would let three categories multiply it — the plan-file lesson
+  from iteration 2). Both markers name `pm qa list`, which lists every item.
+  Real library output is byte-identical (3,101 / 747 bytes); the pathological
+  case drops to 12,000 bytes and the planner prompt to 20,295 bytes.
+- **`build_regression_test_prompt` inlines its test body unbounded**
+  (considered, deliberately not bounded). The body *is* the prompt — the test
+  session executes it — so truncating it would silently corrupt the test
+  rather than abbreviate a listing. Real bodies run 7-12 KB, and the launcher
+  guard delivers an over-limit one intact via file-backed bootstrap, which is
+  the right degradation for this case.
+- **`get_spec_mocks_section`'s legacy fallback** extracts a `## Mocks` section
+  from the QA spec unbounded. It has no production caller (only
+  `tests/test_spec_gen.py`); the live path is `qa_instructions.mocks_for_prompt`,
+  which is bounded. Left as-is to keep this PR scoped to reachable builders.
+
+- **The per-block budgets did not compose (R1/R4/R15, §2 "Budget
+  coordination").** Every block was bounded *individually*, but nothing
+  checked their **sum** against the builder's static text. Probing every
+  collection at its own budget simultaneously (400 PR notes, a 200 KB spec,
+  200 QA scenarios, 200 long-title siblings, a 40 KB description, a 60 KB
+  notes.txt) measured **review 136,261 B, sign-off 158,350 B and the QA
+  planner 130,755 B — all over `PROMPT_ARG_LIMIT`**, so the launcher guard had
+  to fire for exactly the builders this PR exists to bound. The spec's §2
+  estimate that sign-off's static text is "~12 KB" was wrong: it is ~19 KB
+  (and ~47 KB once the always-inlined description and plan context are
+  counted), so no per-block constant can make the sum fit.
+  Fixed with a new shared `fit_prompt(render, blocks)` in `prompt_bounds.py`:
+  the builder keeps its own static text and block placement, and when the
+  render exceeds the limit the largest blocks are abbreviated (head+tail,
+  each with a marker naming a command that reads the full text) until it
+  fits. `generate_prompt`, `generate_review_prompt`,
+  `generate_signoff_prompt` and `generate_qa_planner_prompt` now assemble
+  through it, with the PR description, PR notes, spec, plan context, session
+  notes, QA library summary and QA scenario summary as the shrinkable blocks.
+  Blocks are never shrunk below 2 KB, and if the static text alone is over
+  the limit the render is returned unchanged for the launcher's file-backed
+  bootstrap to carry intact. Real prompts are unchanged: the sweep over all
+  483 real PRs still measures impl 75,143 / review 77,613 / sign-off 92,162 /
+  qa_planner 80,649, and a full-text diff for three real PRs x four builders
+  shows the only difference is the spec truncation marker wording below —
+  every real listing sits far under the budgets, so the fit path only runs
+  when a PR is large in several dimensions at once. After: 119,700 B for each
+  of review / sign-off / planner.
+- **`generate_qa_interactive_prompt` (Scenario 0) and
+  `generate_qa_child_prompt` are not wired through `fit_prompt`**: under the
+  same pathological inputs they measure 42,051 B and 65,464 B — well under
+  the limit, and they inline fewer blocks than the four builders above.
+- **Marker wording.** The spec truncation marker read "Implementation Spec
+  spec truncated" (`label=f"{label} spec"` where `label` was already
+  "Implementation Spec"); it now reads "Implementation Spec truncated". The
+  block size is unchanged (`bounded_text` keeps head+tail within the budget),
+  so only the marker's bytes shift between the slices.
+
+Verification: `tests/test_prompt_bounds.py` 72 cases (12 new: 4 `fit_prompt`
+unit tests, 5 budget-coordination tests — the 4 builder ones fail without the
+fix at 121-158 KB — and 3 for the library bound above). Full suite 3429 passed, 1 pre-existing failure
+(`test_hook_events::test_installer_writes_standalone_receiver` — pr-4bde874,
+fails whenever `PM_HOST_HOME` is set). Evidence: `/pm-captures/review-4e41-i4/`.

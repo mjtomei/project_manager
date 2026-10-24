@@ -43,6 +43,14 @@ PLAN_CONTEXT_MAX_SIBLINGS = 25
 # bites on pathological titles.
 PLAN_LIST_BUDGET = 20_000
 LIBRARY_ITEMS_MAX = 20
+# The QA library summary is count-capped per category, but the items carry
+# user-authored descriptions, so a count cap does not bound the listing — the
+# same cap-times-item-size defect the plan listings had (20 items with long
+# descriptions measured 300 KB, and the QA planner prompt that E2BIG'd in the
+# field inlines this block).  Each category gets a byte budget, and the joined
+# block gets an aggregate one so three categories cannot multiply it.
+LIBRARY_LIST_BUDGET = 6_000
+LIBRARY_TOTAL_BUDGET = 12_000
 MOCKS_BUDGET = 12_000
 QA_SCENARIOS_MAX = 40
 QA_SCENARIO_REASON_CHARS = 200
@@ -142,6 +150,11 @@ def bounded_join(
     *omitted_note* may be a string or a callable taking the omitted count; it
     is appended after the joined text when anything was dropped.  ``None``
     uses a generic marker.  An empty collection returns ``""`` with no marker.
+
+    The marker is appended *after* the budget is exhausted, so the result can
+    exceed ``max_bytes`` by the marker's length.  Callers that need an exact
+    ceiling (e.g. accumulating a shared budget) should use
+    :func:`bounded_text`, which subtracts the marker's bytes first.
     """
     seq = list(items)
     if keep == "newest":
@@ -242,3 +255,55 @@ def bounded_lines(
                             pointer=pointer or "the full output on disk",
                             label=label)
     return text
+
+
+# Slack added to each shrink step in fit_prompt so the re-render lands under
+# the limit even if a block's own marker shifts the byte count slightly.
+_FIT_MARKER_SLACK = 300
+
+
+def fit_prompt(
+    render: Callable[[dict[str, str]], str],
+    blocks: dict[str, tuple[str, str, str]],
+    *,
+    limit: int = PROMPT_ARG_LIMIT,
+    min_bytes: int = 2_000,
+) -> str:
+    """Assemble a prompt, abbreviating blocks until it fits one argv entry.
+
+    The per-block budgets in this module bound each block on its own, but
+    their *sum* plus a builder's static text can still exceed the limit: a PR
+    that is large in several dimensions at once (many PR notes, a big spec,
+    many QA scenarios, a long description) can push a builder whose static
+    text is already ~19 KB over the cap, even though every block is within its
+    own budget.
+
+    *render* takes a mapping of block name to (possibly abbreviated) text and
+    returns the finished prompt, so the caller keeps its own static text and
+    block placement.  *blocks* maps each shrinkable name to ``(text, pointer,
+    label)``.  The largest blocks are shrunk first, each with a head+tail
+    marker naming its *pointer*, until the render fits.
+
+    Blocks are never shrunk below *min_bytes*.  If the static text alone is
+    over the limit this returns the render unchanged — the launcher's
+    file-backed bootstrap then carries the complete prompt, so nothing is
+    lost.
+    """
+    texts = {name: text for name, (text, _pointer, _label) in blocks.items()}
+    prompt = render(texts)
+    if prompt_bytes(prompt) <= limit:
+        return prompt
+
+    for name in sorted(blocks, key=lambda n: -prompt_bytes(texts[n])):
+        over = prompt_bytes(prompt) - limit
+        if over <= 0:
+            break
+        current = prompt_bytes(texts[name])
+        target = max(min_bytes, current - over - _FIT_MARKER_SLACK)
+        if target >= current:
+            continue
+        _text, pointer, label = blocks[name]
+        texts[name] = bounded_text(texts[name], max_bytes=target,
+                                   pointer=pointer, label=label)
+        prompt = render(texts)
+    return prompt

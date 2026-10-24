@@ -9,7 +9,7 @@ from pm_core.prompt_bounds import (
     PR_NOTE_SUMMARY_CHARS, PR_NOTES_BUDGET,
     QA_CHILD_STEPS_BUDGET, QA_SCENARIO_REASON_CHARS, QA_SCENARIOS_MAX,
     WATCHER_MANAGED_MAX, bounded_join, bounded_lines, bounded_text,
-    prompt_bytes,
+    fit_prompt, prompt_bytes,
 )
 from pm_core.spec_gen import (format_spec_for_prompt,
                                spec_generation_preamble)
@@ -306,7 +306,13 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
 
     pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
-    prompt = f"""You're working on PR {pr_id}: "{title}"
+    def _assemble(parts: dict[str, str]) -> str:
+        description = parts["description"]
+        deps_section = parts["deps"]
+        pr_notes_block = parts["notes"]
+        impl_spec_block = parts["spec"]
+        general_notes_block = parts["session_notes"]
+        prompt = f"""You're working on PR {pr_id}: "{title}"
 
 This session is managed by `pm`. Run `pm help` to see available commands.
 
@@ -327,7 +333,33 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 ## Workflow
 {instructions}
 {tui_block}{general_notes_block}{impl_specific_block}{beginner_block}{cleanup_block}"""
-    return prompt.strip()
+        return prompt.strip()
+
+    # Per-block budgets bound each block; fit_prompt abbreviates the largest
+    # when their sum plus this builder's static text would exceed the argv
+    # limit (a PR description can be large on its own).
+    return fit_prompt(
+        _assemble,
+        {
+            "description": (description, f"`pm pr show {pr_id}`",
+                            "PR description"),
+            "deps": (deps_section, "`pm pr graph`", "dependency list"),
+            "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
+            "spec": (impl_spec_block, f"`pm pr spec {pr_id} impl`",
+                     "implementation spec"),
+            "session_notes": (general_notes_block, "`pm notes`",
+                              "session notes"),
+        },
+    )
+
+
+def _plan_sibling_line(p: dict) -> str:
+    """One-line listing of a sibling PR for the plan-context block.
+
+    Shared by the review and sign-off prompts; both bound the listing with
+    ``PLAN_LIST_BUDGET`` because the lines carry user-authored titles.
+    """
+    return f"- {p['id']}: {p.get('title', '???')} [{p.get('status', 'pending')}]"
 
 
 def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = None,
@@ -364,11 +396,8 @@ def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = No
     if plan:
         sibling_prs = [p for p in all_prs if p.get("plan") == plan_ref and p["id"] != pr_id]
         if sibling_prs:
-            def _sibling_line(p: dict) -> str:
-                status = p.get("status", "pending")
-                return f"- {p['id']}: {p.get('title', '???')} [{status}]"
             lines = bounded_join(
-                sibling_prs, _sibling_line,
+                sibling_prs, _plan_sibling_line,
                 max_items=_PLAN_CONTEXT_MAX_SIBLINGS,
                 max_bytes=_PLAN_LIST_BUDGET,
                 omitted_note=lambda n: (
@@ -429,7 +458,26 @@ implementation has significant gaps, consider requesting re-implementation
 with spec generation enabled.
 """.replace("{pr_id}", pr_id)
 
-    prompt = f"""You are reviewing PR {pr_id}: "{title}"
+    # Everything appended after the main body is static for this build, so
+    # compute it once: fit_prompt may re-render several times.
+    tail = ""
+    if _is_bug_pr(pr):
+        tail += _bug_fix_review_block(pr)
+    tail += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
+    tail += "\n" + _pr_notes_handoff_block(pr_id)
+    tail += review_specific_block
+    tail += _beginner_addendum()
+    if review_loop:
+        tail += _review_loop_addendum(pr.get("branch", ""), review_iteration,
+                                      review_loop_id)
+
+    def _assemble(parts: dict[str, str]) -> str:
+        description = parts["description"]
+        pr_notes_block = parts["notes"]
+        impl_spec_block = parts["spec"]
+        plan_context = parts["plan"]
+        general_notes_block = parts["session_notes"]
+        prompt = f"""You are reviewing PR {pr_id}: "{title}"
 
 ## Task
 Review the code changes in this PR for quality, correctness, and architectural fit.
@@ -455,17 +503,29 @@ Review the code changes in this PR for quality, correctness, and architectural f
    - **NEEDS_WORK** — Blocking issues or non-blocking suggestions found — either way, fix them in this iteration. Separate code-quality fixes from architectural concerns.
    - **INPUT_REQUIRED** — Any issue that needs the user's attention before the PR can proceed: ambiguities in the PR spec, architectural decisions you can't make alone, something that looks broken but you can't tell if it's intentional, a dependency or environmental problem you can't resolve, or anything else you'd want a human to look at before moving on. If in doubt between NEEDS_WORK and INPUT_REQUIRED, prefer INPUT_REQUIRED — an unresolved concern silently rolled into a PASS is the worst outcome. Do NOT use INPUT_REQUIRED for manual testing — QA handles testing separately. Include specific questions that need the user's decision."""
 
-    base = prompt.strip()
-    if _is_bug_pr(pr):
-        base += _bug_fix_review_block(pr)
-    base += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
-    base += "\n" + _pr_notes_handoff_block(pr_id)
-    base += review_specific_block
-    base += _beginner_addendum()
-    if review_loop:
-        base += _review_loop_addendum(pr.get("branch", ""), review_iteration,
-                                      review_loop_id)
-    return base
+        base = prompt.strip()
+        return base + tail
+
+    # The per-block budgets above bound each block on its own, but their sum
+    # plus this builder's static text can still exceed the argv limit when a
+    # PR is large in several dimensions at once.  fit_prompt abbreviates the
+    # largest blocks — each marker names where to read the full text — until
+    # the whole prompt fits.
+    return fit_prompt(
+        _assemble,
+        {
+            "description": (description, f"`pm pr show {pr_id}`",
+                            "PR description"),
+            "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
+            "spec": (impl_spec_block, f"`pm pr spec {pr_id} impl`",
+                     "implementation spec"),
+            "plan": (plan_context,
+                     f"`pm pr list --plan {plan_ref}`" if plan_ref
+                     else "`pm pr list`", "plan context"),
+            "session_notes": (general_notes_block,
+                              "`pm notes`", "session notes"),
+        },
+    )
 
 
 def _signoff_qa_scenarios_block(pr_id: str) -> str:
@@ -597,11 +657,8 @@ def generate_signoff_prompt(data: dict, pr_id: str,
         sibling_prs = [p for p in all_prs
                        if p.get("plan") == plan_ref and p["id"] != pr_id]
         if sibling_prs:
-            def _sibling_line(p: dict) -> str:
-                return (f"- {p['id']}: {p.get('title', '???')} "
-                        f"[{p.get('status', 'pending')}]")
             lines = bounded_join(
-                sibling_prs, _sibling_line,
+                sibling_prs, _plan_sibling_line,
                 max_items=_PLAN_CONTEXT_MAX_SIBLINGS,
                 max_bytes=_PLAN_LIST_BUDGET,
                 omitted_note=lambda n: (
@@ -635,7 +692,22 @@ def generate_signoff_prompt(data: dict, pr_id: str,
             "PR's behavior)."
         )
 
-    prompt = f"""You are performing the **sign-off review** for PR {pr_id}: "{title}"
+    # The per-block budgets above bound each block on its own, but their sum
+    # plus this builder's static text (~19 KB) can still exceed the argv
+    # limit when a PR is large in several dimensions at once.  fit_prompt
+    # abbreviates the largest blocks — each marker names where to read the
+    # full text — until the whole prompt fits.
+    plan_pointer = (f"`pm pr list --plan {plan_ref}`" if plan_ref
+                    else "`pm pr list`")
+    tail = "\n" + _pr_notes_handoff_block(pr_id) + _beginner_addendum()
+
+    def _assemble(parts: dict[str, str]) -> str:
+        description = parts["description"]
+        pr_notes_block = parts["notes"]
+        impl_spec_block = parts["spec"]
+        plan_context = parts["plan"]
+        qa_block = parts["qa"]
+        prompt = f"""You are performing the **sign-off review** for PR {pr_id}: "{title}"
 
 Sign-off is the dedicated lifecycle step between QA and merge. Your job is a
 PR-level *comprehensive* review and a routing decision.
@@ -957,11 +1029,21 @@ run any command that spawns an agent session (e.g. `pm pr start`).
 
 IMPORTANT: end your response with exactly one of {SIGNOFF_MERGE}, {SIGNOFF_REQA},
 {SIGNOFF_REVIEW}, {SIGNOFF_IMPL}, or {SIGNOFF_BLOCKED} on its own line."""
+        return prompt.strip() + tail
 
-    base = prompt.strip()
-    base += "\n" + _pr_notes_handoff_block(pr_id)
-    base += _beginner_addendum()
-    return base
+    return fit_prompt(
+        _assemble,
+        {
+            "description": (description, f"`pm pr show {pr_id}`",
+                            "PR description"),
+            "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
+            "spec": (impl_spec_block, f"`pm pr spec {pr_id} impl`",
+                     "implementation spec"),
+            "plan": (plan_context, plan_pointer, "plan context"),
+            "qa": (qa_block, f"`pm qa captures-path {pr_id}`",
+                   "QA scenario summary"),
+        },
+    )
 
 
 def _review_loop_addendum(branch: str, iteration: int = 0,
@@ -1971,7 +2053,14 @@ worker's prompt names the exact path)."""
         if has_artifact_recipes else ""
     )
 
-    prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
+    def _assemble(parts: dict[str, str]) -> str:
+        description = parts["description"]
+        library_summary = parts["library"]
+        pr_notes_block = parts["notes"]
+        qa_spec_block = parts["spec"]
+        general_notes_block = parts["session_notes"]
+        qa_specific_block = parts["qa_notes"]
+        prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
 
 ## Task
 
@@ -2114,7 +2203,24 @@ project. Any step that does things a user wouldn't do, like directly
 importing sub-sections of code or searching for strings in code, is likely
 not accomplishing this goal.
 """
-    return prompt.strip()
+        return prompt.strip()
+
+    # Per-block budgets bound each block; fit_prompt abbreviates the largest
+    # when their sum plus this builder's static text would exceed the argv
+    # limit — the planner prompt is the one that hit E2BIG in the field.
+    return fit_prompt(
+        _assemble,
+        {
+            "description": (description, f"`pm pr show {pr_id}`",
+                            "PR description"),
+            "library": (library_summary, "`pm qa list`", "QA library summary"),
+            "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
+            "spec": (qa_spec_block, f"`pm pr spec {pr_id} qa`", "QA spec"),
+            "session_notes": (general_notes_block, "`pm notes`",
+                              "session notes"),
+            "qa_notes": (qa_specific_block, "`pm notes`", "QA session notes"),
+        },
+    )
 
 
 def generate_qa_interactive_prompt(data: dict, pr_id: str,
