@@ -77,14 +77,19 @@ def test_normal_exit_removes_only_override(pane_cmd):
 
 
 def test_kill_window_sighup_removes_override(pane_cmd):
-    built, home = pane_cmd
+    _, home = pane_cmd
     state = _seed_session_dir(home)
     # Fake claude that stays alive until the "kill-window" HUP arrives.
-    cmd = built.replace("true", "sleep 60", 1)
+    # Build the command directly rather than .replace()ing the fixture's
+    # claude_cmd: "true" also occurs in the handler's `|| true`, so a
+    # positional replace would rewrite the handler body instead.
+    cmd = _build_meta_pane_cmd("sleep 60", TAG, pathlib.Path(META_WORKDIR))
     proc = subprocess.Popen(
         ["/bin/sh", "-c", cmd], start_new_session=True,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(0.5)
+    # Pane genuinely mid-flight: nothing has cleaned up yet
+    assert state["override"].exists()
     # tmux kill-window: SIGHUP to the pane's process group (shell + claude)
     os.killpg(proc.pid, signal.SIGHUP)
     proc.wait(timeout=15)
