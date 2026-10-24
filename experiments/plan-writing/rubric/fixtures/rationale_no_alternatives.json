@@ -11,6 +11,7 @@
     "better": "strong",
     "dimension": "rationale_and_alternatives"
   },
+  "also_moves": [],
   "held_constant": "The section heading and the 'do nothing' alternative.",
   "notes": "The weaker draft asserts there are no alternatives; the stronger one weighs the alternative a reviewer raised.",
   "pair_kind": "revision_history",
@@ -28,6 +29,11 @@
       "locator": "Rationale and alternatives, ad8ba5ef"
     }
   },
-  "direction_evidence": "I wondered about `#[cfg_attr(predicate, [attr1, attr2, ...])]` (reviewer comment; fixed within the hour)",
+  "direction_source": "reviewer_then_revision",
+  "source_framing": {
+    "text": "I wondered about `#[cfg_attr(predicate, [attr1, attr2, ...])]`",
+    "ref": "rust-rfc-2539",
+    "locator": "review comment raising the alternative the draft said did not exist"
+  },
   "length_confound": true
 }

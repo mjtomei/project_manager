@@ -12,6 +12,10 @@
     "better": "strong",
     "dimension": "concision"
   },
+  "also_moves": [
+    "clarity_and_precision",
+    "risks_and_open_questions"
+  ],
   "held_constant": "The claim that more night jobs would keep young people off the streets.",
   "notes": "Length differs by design: a judge preferring the padded variant is rewarding length. The padded version is a published parody and also carries hedges the short one drops.",
   "pair_kind": "before_after",
@@ -25,5 +29,10 @@
       "locator": "same page (plain version)"
     }
   },
-  "direction_evidence": "The Federal Plain Language Guidelines present the short version as the plain rewrite."
+  "direction_source": "source_author_rewrite",
+  "source_framing": {
+    "text": "Use short, simple words",
+    "ref": "fplg",
+    "locator": "III. Write clearly, 3. Other word issues, heading i (the example sits under this heading)"
+  }
 }

@@ -13,6 +13,7 @@
     "better": "strong",
     "dimension": "continuity"
   },
+  "also_moves": [],
   "held_constant": "The section heading, its first and last paragraphs.",
   "notes": "The weaker section re-explains the protocol and re-expands DAG, both already in the prefix. Length differs by design.",
   "pair_kind": "revision_history",
@@ -30,5 +31,10 @@
       "locator": "Section 4.2.3 opening, revision -16"
     }
   },
-  "direction_evidence": "This section repeats a lot of explanations about RIFT that were already stated earlier. It also re-expands DAG, which was already done."
+  "direction_source": "reviewer_then_revision",
+  "source_framing": {
+    "text": "This section repeats a lot of explanations about RIFT that were already stated earlier. It also re-expands DAG, which was already done.",
+    "ref": "rift-applicability-drafts",
+    "locator": "IESG ballot comment on -15, Section 4.2.3"
+  }
 }

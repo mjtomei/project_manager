@@ -92,7 +92,7 @@ The runner and calibration PR decides which of these measures are usable. For ea
 - Agreement between frontier and JEV judges, and with automatic candidates where they exist.
 - Sensitivity to length (the `length_ratio` covariate, length-controlled AlpacaEval), to formatting (the `format_density` covariate, format bias), to source identity and, for continuations, to style match (the `style_distance` covariate).
 - Agreement between paired preferences and single-document scores on the same documents, so each mode is used only where it is reliable.
-- Whether the fixtures come out in the expected direction on their target dimension without moving the other dimensions as much. This is the check that dimensions stay distinct. A judge that scores every dimension from one overall impression will fail it. Huang et al. find that fine-tuned judges generalise poorly beyond the evaluation scheme they were trained on, so this has to be checked for each judge.
+- Whether the fixtures come out in the expected direction on their target dimension without moving the other dimensions as much. Dimensions listed in a fixture's `also_moves` are allowed to move and are left out of that comparison; read a judge that moves them as consistent with the source's framing, not as confusing dimensions. This is the check that dimensions stay distinct. A judge that scores every dimension from one overall impression will fail it. Huang et al. find that fine-tuned judges generalise poorly beyond the evaluation scheme they were trained on, so this has to be checked for each judge.
 
 Measures marked `deferred` need inference-engine access (classifier or NLI probabilities). Plan-doc-eval places them outside the first PRs.
 
@@ -105,7 +105,12 @@ Each file in [fixtures/](fixtures/) holds a `strong` and a `weak` text, the targ
 - **revision_history**: two revisions of a real document, usually with a reviewer comment naming the fault (PEPs, Rust RFCs, KEPs, Internet-Drafts, Go release notes).
 - **annotated_dataset**: two summaries of one article with human faithfulness labels (XSum).
 
-`direction_evidence` quotes or cites why the strong text is the better one: the reviewer comment, the erratum, the source's own commentary or the annotators' labels. Two fixtures join two verbatim passages of one document with `[...]` so that a contradiction between sections fits in one case; their notes say so.
+Two things in a fixture have different standing, and the files keep them apart:
+
+- **Which text is better** is never our call. `direction_source` records who made it: an independent verifier (a verified erratum), annotators, an oversight body, a maintainer's fix, a reviewer whose comment the next revision answers, the source's author presenting a rewrite, or, weakest, only the author's own label. In revision pairs "strong" means the revision that answered the comment; nobody necessarily re-reviewed it.
+- **Which dimension the pair tests** is our reading. Sources say "this is better" in their own terms, which do not always match a rubric dimension: Berry et al. call the "up to 12" pair ambiguity, filed here under verifiability; the SEC calls its pair abstraction, filed here under clarity. So `source_framing` quotes the source's own words for the fault, with its reference and locator, and `also_moves` lists the other dimensions the pair can legitimately move (because of confounds or because the source's framing points there). `dimension` stays the target.
+
+Two fixtures join two verbatim passages of one document with `[...]` so that a contradiction between sections fits in one case; their notes say so.
 
 Published pairs cannot be held to one difference. Each fixture's notes say what else changes, and pairs whose lengths differ by more than 1.6 times carry `length_confound` so calibration can keep them apart from verbosity bias. The padding pairs are long on the weak side by design and double as a verbosity-bias probe: a judge that prefers the padded text is rewarding length. Some sources give no brief; those whole-document fixtures render with `no_brief`. `fidelity_report_nonexistent_api` is a report judged against material: release notes that named a function the shipped code does not define, with the code's exported declarations as the material.
 
@@ -169,7 +174,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 - `judge_purpose` (judge, needs_calibration): Rubric judge score and paired preference on this dimension.
 
-**Fixtures.** `fixtures/purpose_irrelevant_intro.json`
+**Fixtures.** `fixtures/purpose_irrelevant_intro.json`. May also move: `clarity_terms_of_art`, `progression_opening_sentence`, `salience_buried_warning`
 
 ### salience_and_synthesis — Salience and synthesis
 
@@ -214,7 +219,7 @@ The dimensions come from published guidance and are not yet validated against pr
 - `lead_coverage` (deterministic, automatic_candidate): Content-word recall of the brief's obligation items (for reports, of headline facts in the material such as failing tests or changed interfaces) within the first fifth of the document, compared with the reference distribution for the document kind; flags buried core constraints.
 - `emphasis_allocation` (model_assisted, needs_calibration): A prompted model ranks the brief's or material's items by importance; words spent on each item in the document are compared with that ranking.
 
-**Fixtures.** `fixtures/salience_buried_warning.json`, `fixtures/salience_report_finding_last.json`
+**Fixtures.** `fixtures/salience_buried_warning.json`, `fixtures/salience_report_finding_last.json`. May also move: `progression_opening_sentence`, `purpose_irrelevant_intro`
 
 ### fidelity — Fidelity to brief, prefix or described material
 
@@ -309,7 +314,7 @@ The dimensions come from published guidance and are not yet validated against pr
 - `pm_plan_field_preservation` (deterministic, automatic_candidate): For PM plan cases, parse PR blocks with pm_core.plans.parser.parse_plan_prs and check that titles and depends_on named in the conversation's accepted structure survive.
 - `brief_question_answering` (model_assisted, needs_calibration): QAGS-style: generate questions from the brief, answer them from the draft only, compare with answers from the brief.
 
-**Fixtures.** `fixtures/coverage_lost_requirement.json`
+**Fixtures.** `fixtures/coverage_lost_requirement.json`. May also move: `fidelity_summary_contradiction`
 
 ### scope_and_abstraction — Scope and level of abstraction
 
@@ -417,7 +422,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 - `judge_rationale` (judge, needs_calibration): Rubric judge score and paired preference.
 
-**Fixtures.** `fixtures/rationale_no_alternatives.json`
+**Fixtures.** `fixtures/rationale_no_alternatives.json`. May also move: `risks_caveats_removed`
 
 ### organization_and_progression — Organization and progression
 
@@ -463,7 +468,7 @@ The dimensions come from published guidance and are not yet validated against pr
 - `list_fragmentation` (deterministic, automatic_candidate): Share of words in list items, and share of list items with no clause connective, compared with the reference distribution for the document kind.
 - `format_density` (deterministic, automatic_candidate, bias covariate): Headings, list items and bold spans per 1000 words; recorded to measure how much judges reward formatting, never scored as quality.
 
-**Fixtures.** `fixtures/progression_known_to_new.json`, `fixtures/progression_opening_sentence.json`, `fixtures/progression_stacked_headings.json`
+**Fixtures.** `fixtures/progression_known_to_new.json`, `fixtures/progression_opening_sentence.json`, `fixtures/progression_stacked_headings.json`. May also move: `salience_report_finding_last`
 
 ### concision — Concision and information density
 
@@ -505,7 +510,7 @@ The dimensions come from published guidance and are not yet validated against pr
 - `filler_lexicon_rate` (deterministic, automatic_candidate): Vale-style lexicon of filler and throat-clearing phrases ('it is important to note', 'as mentioned above', 'in other words') per 1000 words.
 - `length_ratio` (deterministic, automatic_candidate, bias covariate): Draft length over reference length; recorded to measure judge length sensitivity, never scored as quality.
 
-**Fixtures.** `fixtures/concision_padding.json`
+**Fixtures.** `fixtures/concision_padding.json`. May also move: `purpose_irrelevant_intro`, `salience_report_finding_last`, `scope_spec_impl_detail`
 
 ### clarity_and_precision — Clarity and precision
 
@@ -545,7 +550,7 @@ The dimensions come from published guidance and are not yet validated against pr
 - `undefined_acronyms` (deterministic, automatic_candidate): Acronyms never expanded in the document or input.
 - `unglossed_identifiers` (deterministic, automatic_candidate): Code identifiers, paths and ids (snake_case, CamelCase, dotted or slashed tokens, PR/issue ids) whose first occurrence has no accompanying plain description in the same sentence, per 1000 words; read against the document kind, since specs legitimately name identifiers.
 
-**Fixtures.** `fixtures/clarity_terms_of_art.json`, `fixtures/clarity_vague_quantity.json`
+**Fixtures.** `fixtures/clarity_terms_of_art.json`, `fixtures/clarity_vague_quantity.json`. May also move: `concision_padding`, `fidelity_summary_contradiction`, `progression_stacked_headings`, `verifiability_boundary`, `verifiability_rollback_metrics`
 
 ### internal_consistency — Internal consistency
 
@@ -589,7 +594,7 @@ The dimensions come from published guidance and are not yet validated against pr
 - `term_variant_detection` (deterministic, automatic_candidate): Near-duplicate identifiers and terms (case, hyphenation, pluralisation, edit distance) used for what may be one concept.
 - `pm_dependency_agreement` (deterministic, automatic_candidate): For PM plans, depends_on entries resolve to PR titles in the same plan (pm_core.plans.parser.parse_plan_prs).
 
-**Fixtures.** `fixtures/consistency_count_contradiction.json`
+**Fixtures.** `fixtures/consistency_count_contradiction.json`. May also move: `salience_report_finding_last`
 
 ### risks_and_open_questions — Risks, uncertainty and open questions
 
@@ -637,7 +642,7 @@ The dimensions come from published guidance and are not yet validated against pr
 - `judge_risks` (judge, needs_calibration): Rubric judge score and paired preference.
 - `evidence_pointer_rate` (deterministic, automatic_candidate): For reports, share of sentences that assert code or test behaviour and carry an evidence pointer (test name, command, log excerpt, path, commit) or an explicit inference marker; low rates flag unmarked guesses.
 
-**Fixtures.** `fixtures/risks_caveats_removed.json`, `fixtures/risks_no_drawbacks.json`
+**Fixtures.** `fixtures/risks_caveats_removed.json`, `fixtures/risks_no_drawbacks.json`. May also move: `concision_padding`, `genre_missing_pep_sections`, `salience_buried_warning`, `verifiability_rollback_metrics`
 
 ### verifiability — Verifiability and success criteria
 
@@ -674,7 +679,7 @@ The dimensions come from published guidance and are not yet validated against pr
 - `judge_verifiability` (judge, needs_calibration): Rubric judge score and paired preference.
 - `pm_tests_field_present` (deterministic, automatic_candidate): For PM plans, share of PR blocks with a non-empty tests field that names more than restated feature words (content-word overlap with the description below a threshold).
 
-**Fixtures.** `fixtures/verifiability_boundary.json`, `fixtures/verifiability_rollback_metrics.json`
+**Fixtures.** `fixtures/verifiability_boundary.json`, `fixtures/verifiability_rollback_metrics.json`. May also move: `clarity_vague_quantity`
 
 ### genre_conventions — Genre and template conformance
 

@@ -11,6 +11,10 @@
     "better": "strong",
     "dimension": "verifiability"
   },
+  "also_moves": [
+    "clarity_and_precision",
+    "risks_and_open_questions"
+  ],
   "held_constant": "The first two paragraphs; the stronger version adds the observable event, two metrics and the rollback condition.",
   "notes": "A rollback criterion a reader cannot check versus named events and metrics. The stronger version is much longer.",
   "pair_kind": "revision_history",
@@ -28,6 +32,11 @@
       "locator": "README.md at b64d85b2"
     }
   },
-  "direction_evidence": "This puts the pod into Failed state, right?\n\nSo the number of Failed pods is effectively what we can look at, right?\n\n[Not a native metric, but something measurable] (reviewer; the author then added the metrics)",
+  "direction_source": "reviewer_then_revision",
+  "source_framing": {
+    "text": "[Not a native metric, but something measurable]",
+    "ref": "kep127-pr4439",
+    "locator": "review comment on 'What specific metrics should inform a rollback?'"
+  },
   "length_confound": true
 }

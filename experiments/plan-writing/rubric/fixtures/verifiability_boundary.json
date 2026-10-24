@@ -10,6 +10,9 @@
     "better": "strong",
     "dimension": "verifiability"
   },
+  "also_moves": [
+    "clarity_and_precision"
+  ],
   "held_constant": "Both requirements; only 'up to' becomes 'up to and including'.",
   "notes": "The weaker requirement cannot be tested at 12 aircraft.",
   "pair_kind": "before_after",
@@ -23,5 +26,10 @@
       "locator": "Section 5.1, example E39"
     }
   },
-  "direction_evidence": "Assuming that small and large display formats are defined previously, the ambiguity lies in the phrase for up to 12.\nIt can mean for up to and including 12 or for up to and excluding 12. The sentence should be rewritten to have\nthe fuller term."
+  "direction_source": "source_author_rewrite",
+  "source_framing": {
+    "text": "the ambiguity lies in the phrase for up to 12. It can mean for up to and including 12 or for up to and excluding 12.",
+    "ref": "berry-ambiguity",
+    "locator": "Section 5.1 'Ambiguous, Vague, and Uncertain Words', examples E38-E39"
+  }
 }

@@ -10,6 +10,7 @@
     "better": "strong",
     "dimension": "internal_consistency"
   },
+  "also_moves": [],
   "held_constant": "Section 4's statement; Section 3.1 differs in one word.",
   "notes": "Assembled from two verbatim passages of the same RFC, joined by [...]: the weaker document says 'one or more' in one section and 'zero or more' in the other.",
   "pair_kind": "erratum",
@@ -23,5 +24,10 @@
       "locator": "RFC 5792 Section 3.1 as corrected, then Section 4"
     }
   },
-  "direction_evidence": "Verified IETF erratum 3935."
+  "direction_source": "independent_verifier",
+  "source_framing": {
+    "text": "This contradicts the text in section 3.1, which says “one or more”. The correct text is “zero or more”.",
+    "ref": "rfc5792-erratum-3935",
+    "locator": "erratum notes"
+  }
 }

@@ -13,6 +13,7 @@
     "better": "strong",
     "dimension": "requirement_coverage"
   },
+  "also_moves": [],
   "held_constant": "The section's description of MKCOL; the stronger version restores the brief's MUST-support requirement. The [...] is in the erratum.",
   "notes": "A revised specification that dropped a requirement of the document it replaced.",
   "pair_kind": "erratum",
@@ -30,6 +31,11 @@
       "locator": "RFC 4918 Section 9.3, corrected"
     }
   },
-  "direction_evidence": "Verified IETF erratum 1430.",
+  "direction_source": "independent_verifier",
+  "source_framing": {
+    "text": "The statement, that support for MKCOL is a MUST-requirement has unintentionally been dropped.",
+    "ref": "rfc4918-erratum-1430",
+    "locator": "erratum notes"
+  },
   "length_confound": true
 }

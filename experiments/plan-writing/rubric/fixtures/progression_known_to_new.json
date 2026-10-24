@@ -12,6 +12,7 @@
     "better": "strong",
     "dimension": "organization_and_progression"
   },
+  "also_moves": [],
   "held_constant": "The same information in the same order of sentences; only what each sentence opens with changes.",
   "notes": "In the weaker version each sentence starts on something new, so the reader has to supply the links.",
   "pair_kind": "before_after",
@@ -25,5 +26,10 @@
       "locator": "Known-to-new sequencing, version 2"
     }
   },
-  "direction_evidence": "The handout says both versions 'contain the same information' and recommends version 2."
+  "direction_source": "source_author_rewrite",
+  "source_framing": {
+    "text": "The second version flows better because it follows the known-to-new strategy.",
+    "ref": "unc-flow",
+    "locator": "Known-to-new sequencing"
+  }
 }

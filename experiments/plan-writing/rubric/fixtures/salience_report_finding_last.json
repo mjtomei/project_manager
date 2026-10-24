@@ -13,6 +13,11 @@
     "better": "strong",
     "dimension": "salience_and_synthesis"
   },
+  "also_moves": [
+    "organization_and_progression",
+    "concision",
+    "internal_consistency"
+  ],
   "held_constant": "The same investigation and evidence; the weaker version narrates and states the finding last, the stronger one states it first. The weaker excerpt is shortened with [...] as marked.",
   "notes": "A report whose verdict arrives only at the end versus one that leads with it, close in genre to a QA or sign-off verdict. Source errors (the wrong soldier named, $433.50 vs $433.40) are kept as printed and also bear on fidelity and consistency.",
   "pair_kind": "before_after",
@@ -30,5 +35,10 @@
       "locator": "Figure 5-6 (good), printed p. 9"
     }
   },
-  "direction_evidence": "DA PAM 600-67 para 5-2d presents Figure 5-6 as the good version: the finding first, then the evidence."
+  "direction_source": "source_author_rewrite",
+  "source_framing": {
+    "text": "Although the example at figure 5–5 is short, it has a more\nbasic problem – packaging.\n[...]\nIt’s much improved, however,\nbecause the “bottom line” is up front and the paragraphs are short.",
+    "ref": "da-pam-600-67",
+    "locator": "para 5-2d"
+  }
 }

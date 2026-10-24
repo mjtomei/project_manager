@@ -88,7 +88,7 @@ def test_references_well_formed():
     cited = {ref for d in DIMS for ref in d["references"] + [r for m in d["candidate_measures"] for r in m.get("references", [])]
              + [d["examples"][side]["ref"] for side in ("strong", "weak")]}
     cited |= {f["provenance"][part]["ref"] for f in FIXTURES for part in f["provenance"]}
-    cited |= {f["direction_evidence_ref"] for f in FIXTURES if "direction_evidence_ref" in f}
+    cited |= {f["source_framing"]["ref"] for f in FIXTURES}
     assert set(RUBRIC["judge_design_references"]) <= set(REFS)
     cited |= set(RUBRIC["judge_design_references"])
     assert set(REFS) <= cited, "uncited references: " + ", ".join(sorted(set(REFS) - cited))
@@ -145,6 +145,8 @@ def test_fixtures_cover_both_case_types():
 
 
 FIXTURE_TEXT_PARTS = ("brief", "prefix", "material", "strong", "weak")
+DIRECTION_SOURCES = {"independent_verifier", "annotators", "oversight_body", "maintainer_fix",
+                     "reviewer_then_revision", "source_author_rewrite", "author_label"}
 
 
 @pytest.mark.parametrize("fixture", FIXTURES, ids=[f["id"] for f in FIXTURES])
@@ -156,14 +158,23 @@ class TestFixture:
         assert fixture["case_type"] in dim["applies_to"]
         assert fixture["strong"].strip() and fixture["weak"].strip() and fixture["strong"] != fixture["weak"]
         assert fixture["expected"] == {"better": "strong", "dimension": fixture["dimension"]}
-        assert fixture["held_constant"].strip() and fixture["notes"].strip() and fixture["direction_evidence"].strip()
-        assert fixture.get("direction_evidence_ref", "sec-plain-english") in REFS
+        assert fixture["held_constant"].strip() and fixture["notes"].strip()
         assert fixture["pair_kind"] in {"before_after", "erratum", "revision_history", "annotated_dataset"}
         assert set(fixture["concerns"]) <= set(CONCERN_IDS)
         if fixture["case_type"] == "whole_document":
             assert "prefix" not in fixture
         else:
             assert fixture.get("prefix") and "brief" not in fixture and "material" not in fixture
+
+    def test_direction_and_dimension_labels(self, fixture):
+        # Which side is better comes from outside the project; which dimensions the pair tests is our
+        # reading, so the source's own words for the fault are kept next to it.
+        assert fixture["direction_source"] in DIRECTION_SOURCES
+        framing = fixture["source_framing"]
+        assert framing["text"].strip() and framing["ref"] in REFS and framing["locator"].strip()
+        applicable = {d["id"] for d in rubric.dimensions_for(fixture["case_type"])}
+        also = fixture["also_moves"]
+        assert len(also) == len(set(also)) and set(also) <= applicable - {fixture["dimension"]}
 
     def test_every_text_is_quoted_from_a_cited_source(self, fixture):
         # Fixture texts are published passages, never written for the rubric: each one names its source.
@@ -207,7 +218,10 @@ class TestFixture:
         for part in fixture["provenance"].values():
             ref = REFS[part["ref"]]
             assert ref["url"] not in prompt and part["ref"] not in prompt
-        assert fixture["id"] not in prompt and fixture["direction_evidence"] not in prompt
+        assert fixture["id"] not in prompt
+        framing = fixture["source_framing"]["text"]
+        if not any(framing in fixture[p] for p in FIXTURE_TEXT_PARTS if fixture.get(p)):
+            assert framing not in prompt
 
 
 def test_fixtures_include_a_report_judged_against_material():

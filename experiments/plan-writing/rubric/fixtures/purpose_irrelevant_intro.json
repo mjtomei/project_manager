@@ -11,6 +11,10 @@
     "better": "strong",
     "dimension": "purpose_and_audience"
   },
+  "also_moves": [
+    "concision",
+    "salience_and_synthesis"
+  ],
   "held_constant": "Every sentence except two: the weaker version carries the founding year and industry adoption, the stronger one the prerequisite tutorial.",
   "notes": "Near-minimal published rewrite: facts irrelevant to the guide's reader are removed and the missing prerequisite is added.",
   "pair_kind": "before_after",
@@ -28,5 +32,10 @@
       "locator": "Introduction exercise, 'one possible solution'"
     }
   },
-  "direction_evidence": "The exercise asks to 'Remove any information you feel is irrelevant in this context and add any information you feel is missing'; the stronger text is the course's solution."
+  "direction_source": "source_author_rewrite",
+  "source_framing": {
+    "text": "Remove any\ninformation you feel is irrelevant in this context and add any information you\nfeel is missing.",
+    "ref": "google-tw2",
+    "locator": "Introduce a document > Introduction exercise"
+  }
 }

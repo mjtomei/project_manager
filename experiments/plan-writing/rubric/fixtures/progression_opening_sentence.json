@@ -12,6 +12,10 @@
     "better": "strong",
     "dimension": "organization_and_progression"
   },
+  "also_moves": [
+    "salience_and_synthesis",
+    "purpose_and_audience"
+  ],
   "held_constant": "Everything but the opening sentence.",
   "notes": "The weaker opening defines a term the paragraph is not about; the source says it 'sends readers in the wrong direction'.",
   "pair_kind": "before_after",
@@ -25,5 +29,10 @@
       "locator": "Paragraphs > Write a great opening sentence (stronger)"
     }
   },
-  "direction_evidence": "Google Technical Writing One presents the stronger opening as the fix."
+  "direction_source": "source_author_rewrite",
+  "source_framing": {
+    "text": "Good opening sentences establish the paragraph's central point.",
+    "ref": "google-tw1",
+    "locator": "Paragraphs > Write a great opening sentence"
+  }
 }

@@ -12,6 +12,9 @@
     "better": "strong",
     "dimension": "risks_and_open_questions"
   },
+  "also_moves": [
+    "rationale_and_alternatives"
+  ],
   "held_constant": "The same judgments published in the same month; the weaker version drops 'We judge', the pointer to the dissenting view and the stated evidence gap.",
   "notes": "Assessments turned into statements of fact. The weaker version also rewords one judgment into a stronger claim, and the stronger one was itself criticised for not explaining uncertainty enough, so it is stronger only relatively.",
   "pair_kind": "before_after",
@@ -25,6 +28,10 @@
       "locator": "Key Judgments, first paragraphs"
     }
   },
-  "direction_evidence": "Conclusion 85. The Intelligence Community's elimination of the caveats from the unclassified White Paper misrepresented their judgments to the public which did not have access to the classified National Intelligence Estimate containing the more carefully worded assessments. (SSCI 2004, Conclusion 85)",
-  "direction_evidence_ref": "ssci-2004-prewar"
+  "direction_source": "oversight_body",
+  "source_framing": {
+    "text": "Removing caveats such as \"we judge\" or \"we assess\" changed many sentences in the unclassified paper to statements of fact rather than assessments.",
+    "ref": "ssci-2004-prewar",
+    "locator": "Section X, p. 286"
+  }
 }

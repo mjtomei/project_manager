@@ -10,6 +10,9 @@
     "better": "strong",
     "dimension": "clarity_and_precision"
   },
+  "also_moves": [
+    "verifiability"
+  ],
   "held_constant": "The sentence; only the quantity changes.",
   "notes": "A subjective intensifier versus a measured range.",
   "pair_kind": "before_after",
@@ -23,5 +26,10 @@
       "locator": "same section (stronger)"
     }
   },
-  "direction_evidence": "The course says the revision 'gains accuracy and credibility'."
+  "direction_source": "source_author_rewrite",
+  "source_framing": {
+    "text": "Instead of vague adjectives or adverbs, use objective numerical data to maintain accuracy and credibility in technical writing.",
+    "ref": "google-tw1",
+    "locator": "Clear sentences, page summary"
+  }
 }

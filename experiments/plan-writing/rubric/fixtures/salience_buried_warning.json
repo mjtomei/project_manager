@@ -12,6 +12,10 @@
     "better": "strong",
     "dimension": "salience_and_synthesis"
   },
+  "also_moves": [
+    "purpose_and_audience",
+    "risks_and_open_questions"
+  ],
   "held_constant": "The abstract's description of the generator; the stronger version adds the not-for-cryptography warning and a comparison sentence.",
   "notes": "The constraint that matters most to a reader choosing a generator was only in the middle of the introduction; review moved it into the abstract. The revision also drops a citation and adds a comparison, so it is not a pure move.",
   "pair_kind": "revision_history",
@@ -25,5 +29,10 @@
       "locator": "Abstract, revision -04"
     }
   },
-  "direction_evidence": "This seems a bit more buried than it should be, as it’s important.  I suggest putting some version of this in the Abstract, and also moving it more toward the beginning of the Introduction (probably in the first paragraph."
+  "direction_source": "reviewer_then_revision",
+  "source_framing": {
+    "text": "This seems a bit more buried than it should be, as it’s important.",
+    "ref": "tinymt32-drafts",
+    "locator": "IESG ballot comment on -03"
+  }
 }

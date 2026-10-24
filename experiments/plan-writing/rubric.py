@@ -197,9 +197,11 @@ def reference_markdown(rubric=None, references=None):
     """The generated per-dimension part of rubric.md, between the GENERATED markers."""
     rubric = rubric or load_rubric()
     refs = references or load_references()
-    fixtures = {}
+    fixtures, also = {}, {}
     for f in load_fixtures():
         fixtures.setdefault(f["dimension"], []).append(f["id"])
+        for dim in f["also_moves"]:
+            also.setdefault(dim, []).append(f["id"])
     out = ["| Dimension | Case types | Readiness | Automatic candidates | Concerns |", "|---|---|---|---|---|"]
     for d in rubric["dimensions"]:
         auto = [m["name"] + (" (bias covariate)" if m.get("role") == "bias_covariate" else "")
@@ -226,6 +228,8 @@ def reference_markdown(rubric=None, references=None):
             role = ", bias covariate" if m.get("role") == "bias_covariate" else ""
             out.append("- `" + m["name"] + "` (" + m["kind"] + ", " + m["status"] + role + "): " + m["description"])
         out += ["", "**Fixtures.** " + ", ".join("`fixtures/" + i + ".json`" for i in fixtures.get(d["id"], []))]
+        if also.get(d["id"]):
+            out[-1] += ". May also move: " + ", ".join("`" + i + "`" for i in also[d["id"]])
     return "\n".join(out) + "\n"
 
 

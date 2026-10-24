@@ -11,6 +11,7 @@
     "better": "strong",
     "dimension": "risks_and_open_questions"
   },
+  "also_moves": [],
   "held_constant": "The section heading; the commit changed only this section.",
   "notes": "'No known drawbacks' versus named costs with a mitigation.",
   "pair_kind": "revision_history",
@@ -28,6 +29,11 @@
       "locator": "Drawbacks, 1788dd4d"
     }
   },
-  "direction_evidence": "I'm not suggesting anything to fix it. Merely to document it. Drawbacks are inherent in almost any proposal and they should be documented in the RFC.\n\nUsually, when I see a drawbacks section that says \"None\", it signals to me that the author hasn't thought hard enough about what the tradeoffs they are making actually are. I just posted the first drawback I could think of, but there are probably others, though nothing RFC-stopping to me.",
+  "direction_source": "reviewer_then_revision",
+  "source_framing": {
+    "text": "Usually, when I see a drawbacks section that says \"None\", it signals to me that the author hasn't thought hard enough about what the tradeoffs they are making actually are.",
+    "ref": "rust-rfc-3013",
+    "locator": "review comment"
+  },
   "length_confound": true
 }

@@ -11,6 +11,9 @@
     "better": "strong",
     "dimension": "genre_conventions"
   },
+  "also_moves": [
+    "risks_and_open_questions"
+  ],
   "held_constant": "The text either side of the inserted sections.",
   "notes": "The added sections also carry new content, so the pair differs in substance as well as structure.",
   "pair_kind": "revision_history",
@@ -28,6 +31,11 @@
       "locator": "pep-0661.rst at e45f7cb6"
     }
   },
-  "direction_evidence": "The pull request is titled 'Add missing sections'.",
+  "direction_source": "author_label",
+  "source_framing": {
+    "text": "PEP 661: Add missing sections and correctly populate Post-History",
+    "ref": "pep661-pr4050",
+    "locator": "pull request title (by the PEP's author)"
+  },
   "length_confound": true
 }

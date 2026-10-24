@@ -13,6 +13,9 @@
     "better": "strong",
     "dimension": "scope_and_abstraction"
   },
+  "also_moves": [
+    "concision"
+  ],
   "held_constant": "The section up to 'older versions of Python.'; the stronger version is the weaker one truncated where the reviewer said.",
   "notes": "The removed text explains a runtime metaclass workaround that no decision in the PEP depends on.",
   "pair_kind": "revision_history",
@@ -30,6 +33,11 @@
       "locator": "pep-0705.rst Backwards Compatibility at 88d6ed86"
     }
   },
-  "direction_evidence": "This is a bit too much implementation detail. We may well be able to work around this restriction with some creative work in typing_extensions. I would suggest taking out everything starting with \"Users wanting to inherit\". Such limitations can then be explained in the `typing_extensions` documentation.",
+  "direction_source": "reviewer_then_revision",
+  "source_framing": {
+    "text": "This is a bit too much implementation detail.",
+    "ref": "pep705-pr2997",
+    "locator": "review comment"
+  },
   "length_confound": true
 }

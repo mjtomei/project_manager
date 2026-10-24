@@ -12,6 +12,9 @@
     "better": "strong",
     "dimension": "clarity_and_precision"
   },
+  "also_moves": [
+    "purpose_and_audience"
+  ],
   "held_constant": "The same fact about the spin-off.",
   "notes": "Defined terms and terms of art ('consideration', 'surrender', 'the Distribution') used as if the shareholder knew them; the rewrite says what they mean. It also switches to second person.",
   "pair_kind": "before_after",
@@ -25,5 +28,10 @@
       "locator": "same page (after)"
     }
   },
-  "direction_evidence": "The SEC handbook presents the second version as the plain-English rewrite."
+  "direction_source": "source_author_rewrite",
+  "source_framing": {
+    "text": "Bring abstractions down to earth\n[...]\nMost people don’t have an image in their minds when they hear abstract words like these.",
+    "ref": "sec-plain-english",
+    "locator": "Chapter 6, 'Bring abstractions down to earth'"
+  }
 }

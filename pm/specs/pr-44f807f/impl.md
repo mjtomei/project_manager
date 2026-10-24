@@ -56,7 +56,11 @@
    sources** (user request 2026-10-23: no self-generated examples): before/after
    rewrites, verified IETF errata, reviewed revisions of PEPs/RFCs/KEPs/drafts,
    annotated summarisation datasets. Each text part records its source in
-   `provenance`; `direction_evidence` says why the strong text is better.
+   `provenance`. Direction is external and typed (`direction_source`); the
+   target dimension is our reading, so each fixture also quotes the source's own
+   framing of the fault (`source_framing`) and lists `also_moves`, the other
+   dimensions it may legitimately move, which calibration excludes from the
+   dimension-separation comparison (user request 2026-10-24).
 
 8. **Reports and reader-reported concerns** (user request 2026-10-23). Reports
    about existing work (architecture digests, sign-off and QA reports) are

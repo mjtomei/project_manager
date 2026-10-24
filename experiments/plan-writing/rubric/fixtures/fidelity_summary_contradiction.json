@@ -13,6 +13,10 @@
     "better": "strong",
     "dimension": "fidelity"
   },
+  "also_moves": [
+    "clarity_and_precision",
+    "requirement_coverage"
+  ],
   "held_constant": "Two model summaries of the same article.",
   "notes": "All three annotators mark 'world war one' as contradicting the article (VJ Day, World War Two) and '70th anniversary' as unsupported; the stronger summary is hallucination-free but less specific.",
   "pair_kind": "annotated_dataset",
@@ -30,6 +34,11 @@
       "locator": "bbcid 33945697, BERTS2S summary"
     }
   },
-  "direction_evidence": "Maynez et al. annotations and FRANK labels for bbcid 33945697.",
+  "direction_source": "annotators",
+  "source_framing": {
+    "text": "intrinsic: \"one\"; extrinsic: \"70th anniversary\" (all three annotators; the other summary has no hallucinated spans)",
+    "ref": "xsum-hallucinations",
+    "locator": "hallucination span labels for bbcid 33945697, rendered from the annotation fields"
+  },
   "length_confound": true
 }

@@ -14,6 +14,7 @@
     "better": "strong",
     "dimension": "fidelity"
   },
+  "also_moves": [],
   "held_constant": "The whole paragraph; the weaker version lists Uint, which the shipped code does not define.",
   "notes": "A report about shipped code, judged against the code: no brief exists, so the case renders with material only. The notes matched the proposal they were written from, not the code.",
   "pair_kind": "revision_history",
@@ -31,5 +32,10 @@
       "locator": "corrected go1.22.md (CL 578295)"
     }
   },
-  "direction_evidence": "The fix made 'the docs consistent with the code (ground truth)' (issue 66693)."
+  "direction_source": "maintainer_fix",
+  "source_framing": {
+    "text": "x/website: release notes for Go 1.22 mentions inexistent math/rand/v2.Uint()",
+    "ref": "go-issue-66693",
+    "locator": "issue title"
+  }
 }
