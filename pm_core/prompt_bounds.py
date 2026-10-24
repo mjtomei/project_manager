@@ -35,6 +35,13 @@ SESSION_NOTES_BUDGET = 8_000
 QA_CHILD_STEPS_BUDGET = 20_000
 CONCRETIZE_INSTRUCTION_BUDGET = 20_000
 PLAN_CONTEXT_MAX_SIBLINGS = 25
+# One-line listings (sibling PRs, a PR's dependencies, the plan/other-PR
+# lists the plan builders inline) are count-capped, but a count cap alone does
+# not bound the listing: the lines carry user-authored titles, so 25 siblings
+# with long titles measured 180 KB (over PROMPT_ARG_LIMIT).  This byte budget
+# bounds the product; real listings in this repo run 0.4-14.5 KB, so it only
+# bites on pathological titles.
+PLAN_LIST_BUDGET = 20_000
 LIBRARY_ITEMS_MAX = 20
 MOCKS_BUDGET = 12_000
 QA_SCENARIOS_MAX = 40
@@ -216,7 +223,9 @@ def bounded_lines(
     Mirrors the verification prompt's existing head/tail behaviour: keep the
     setup at the top and the verdict at the bottom.  When *max_bytes* is set
     the result is passed through :func:`bounded_text` so long lines cannot
-    defeat the line bound.
+    defeat the line bound; *pointer* names where the full text lives (a
+    generic fallback is used when the caller has none), so the byte bound is
+    never silently dropped.
     """
     lines = text.splitlines()
     if len(lines) > max_lines:
@@ -228,7 +237,8 @@ def bounded_lines(
             + f"\n\n[... {omitted} lines omitted ...]\n\n"
             + "\n".join(lines[-tail:])
         )
-    if max_bytes is not None and pointer is not None:
-        text = bounded_text(text, max_bytes=max_bytes, pointer=pointer,
+    if max_bytes is not None:
+        text = bounded_text(text, max_bytes=max_bytes,
+                            pointer=pointer or "the full output on disk",
                             label=label)
     return text

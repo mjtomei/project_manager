@@ -595,25 +595,36 @@ def _materialize_oversized_prompt(
     it, the full prompt is written to a file and a short bootstrap prompt is
     returned; the caller must delete *temp_path* after the process exits.
     Raises :class:`PromptTooLargeError` when no writable location exists.
+
+    The file lands on the host path (*write_dir*) while the bootstrap names
+    the path claude sees at runtime (*cwd*) — in a container those differ,
+    because the host workdir is mounted at the container path (the same split
+    ``build_claude_shell_cmd`` uses).  With only one of the two given, that
+    one is used for both.
     """
     if not _prompt_is_oversized(prompt):
         return prompt, None
-    for base in (write_dir, cwd):
-        if not base:
-            continue
+    candidates: list[tuple[str, str]] = []
+    if write_dir:
+        candidates.append((write_dir, cwd or write_dir))
+    if cwd and cwd != write_dir:
+        candidates.append((cwd, cwd))
+    for write_base, ref_base in candidates:
         try:
-            b = Path(base)
+            b = Path(write_base)
             if not b.is_dir():
                 continue
             d = b / "pm" / "prompts"
             d.mkdir(parents=True, exist_ok=True)
-            f = d / f"pm_prompt_{session_id or uuid.uuid4()}.txt"
+            fname = f"pm_prompt_{session_id or uuid.uuid4()}.txt"
+            f = d / fname
             f.write_text(prompt)
+            ref = Path(ref_base) / "pm" / "prompts" / fname
             _log.warning(
                 "prompt is %d bytes, over the %d-byte argv limit; using "
                 "file-backed bootstrap %s", prompt_bytes(prompt),
-                PROMPT_ARG_LIMIT, f)
-            return _bootstrap_prompt(str(f)), str(f)
+                PROMPT_ARG_LIMIT, ref)
+            return _bootstrap_prompt(str(ref)), str(f)
         except OSError:
             continue
     try:

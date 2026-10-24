@@ -13,7 +13,8 @@ from pm_core.plans.parser import parse_plan_prs
 from pm_core.plans import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
 from pm_core.prompt_bounds import (
-    PROMPT_ARG_LIMIT, bounded_join, bounded_text, prompt_bytes,
+    PLAN_LIST_BUDGET, PROMPT_ARG_LIMIT, bounded_join, bounded_text,
+    prompt_bytes,
 )
 from pm_core.prompt_gen import tui_section
 
@@ -26,6 +27,13 @@ _PROMPT_ARG_LIMIT = PROMPT_ARG_LIMIT
 # Cap collection listings so cross-plan / existing-PR context cannot grow
 # without bound.  The markers point at commands that read the full detail.
 _PLAN_LIST_MAX = 40
+# A count cap alone does not bound a listing whose lines carry user-authored
+# titles; this bounds the product.  Real listings here run 0.4-14.5 KB.
+_PLAN_LIST_BUDGET = PLAN_LIST_BUDGET
+# The plan-review fallback lists every PR one line each (no count cap, as
+# before the audit); this byte budget only trims it when titles make the lines
+# huge.  Sized above the largest real listing so the fallback is unchanged.
+_PLAN_BRIEF_BUDGET = 40_000
 _PLAN_FILE_BUDGET = 20_000
 # Aggregate budget for plan-file text a builder inlines.  A per-file budget
 # alone is not enough: a project with many plans multiplies it (22 plans at
@@ -215,6 +223,7 @@ def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
                     f"[{pr.get('status', '?')}]{dep_str}")
         existing_context = "\nExisting PRs in this project:\n" + bounded_join(
             existing_prs, _existing_line, max_items=_PLAN_LIST_MAX,
+            max_bytes=_PLAN_LIST_BUDGET,
             omitted_note=lambda n: (
                 f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
         )
@@ -344,6 +353,7 @@ def plan_review(plan_id: str | None, fresh: bool):
             "\nPRs from other plans (for cross-plan reference):\n"
             + bounded_join(
                 other_prs, _other_plan_line, max_items=_PLAN_LIST_MAX,
+                max_bytes=_PLAN_LIST_BUDGET,
                 omitted_note=lambda n: (
                     f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
             )
@@ -416,27 +426,32 @@ After fixing, summarize what was changed.
         # Inline full per-PR detail by default, but if doing so pushes the
         # prompt past the argv size limit (large plans), fall back to a brief
         # one-line listing and let the session pull detail with `pm pr show`.
+        # The brief form keeps listing every PR (it is already one line each);
+        # the byte budget only trims it when titles make the lines huge, which
+        # is why it is far more generous than _PLAN_LIST_BUDGET.
+        def _brief_list(prs: list[dict], budget: int = _PLAN_BRIEF_BUDGET) -> str:
+            return bounded_join(
+                prs, _format_pr_brief, max_bytes=budget,
+                omitted_note=lambda n: (
+                    f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
+            )
+
         prompt = _post_load_prompt(pr_list, "")
         if prompt_bytes(prompt) > _PROMPT_ARG_LIMIT:
-            brief = "\n".join(_format_pr_brief(pr) for pr in plan_prs)
             note = (
                 "\n(This plan has too many PRs to inline each description here. "
                 "The list above is abbreviated — run `pm pr show <id>` to read "
                 "the full description, tests, and files of any PR before "
                 "reviewing it.)\n"
             )
-            prompt = _post_load_prompt(brief, note)
+            prompt = _post_load_prompt(_brief_list(plan_prs), note)
             # Second safety net: even the brief form can exceed the limit when
             # the static prompt text plus the bounded other-PR context is
-            # large.  Fall back to a minimal listing and defer everything to
-            # the on-demand commands.
+            # large.  Shrink the listing further and defer everything to the
+            # on-demand commands.
             if prompt_bytes(prompt) > _PROMPT_ARG_LIMIT:
-                minimal = "\n".join(
-                    _format_pr_brief(pr) for pr in plan_prs[:_PLAN_LIST_MAX])
-                more = len(plan_prs) - _PLAN_LIST_MAX
-                if more > 0:
-                    minimal += f"\n  ... (+{more} more; run `pm pr list`)"
-                prompt = _post_load_prompt(minimal, note)
+                prompt = _post_load_prompt(
+                    _brief_list(plan_prs, _PLAN_BRIEF_BUDGET // 4), note)
     else:
         # Pre-load: no PRs in project.yaml yet — review the plan file's PR section
         prompt = f"""\
@@ -544,6 +559,7 @@ def plan_deps():
 
     pr_list_str = bounded_join(
         prs, _dep_pr_line, max_items=_PLAN_LIST_MAX,
+        max_bytes=_PLAN_LIST_BUDGET,
         omitted_note=lambda n: (
             f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
     )

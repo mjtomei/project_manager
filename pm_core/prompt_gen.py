@@ -5,7 +5,7 @@ from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
 from pm_core.prompt_bounds import (
     ARTIFACT_PATHS_MAX, DEPS_MAX, INTEGRATION_MAX_PATHS,
-    MERGE_ERROR_MAX_LINES, PLAN_CONTEXT_MAX_SIBLINGS,
+    MERGE_ERROR_MAX_LINES, PLAN_CONTEXT_MAX_SIBLINGS, PLAN_LIST_BUDGET,
     PR_NOTE_SUMMARY_CHARS, PR_NOTES_BUDGET,
     QA_CHILD_STEPS_BUDGET, QA_SCENARIO_REASON_CHARS, QA_SCENARIOS_MAX,
     WATCHER_MANAGED_MAX, bounded_join, bounded_lines, bounded_text,
@@ -26,6 +26,7 @@ from pm_core.bug_fix_prompts import (
 _PR_NOTES_BUDGET = PR_NOTES_BUDGET
 _PR_NOTE_SUMMARY_CHARS = PR_NOTE_SUMMARY_CHARS
 _PLAN_CONTEXT_MAX_SIBLINGS = PLAN_CONTEXT_MAX_SIBLINGS
+_PLAN_LIST_BUDGET = PLAN_LIST_BUDGET
 _QA_SCENARIOS_MAX = QA_SCENARIOS_MAX
 _QA_SCENARIO_REASON_CHARS = QA_SCENARIO_REASON_CHARS
 _INTEGRATION_MAX_PATHS = INTEGRATION_MAX_PATHS
@@ -264,6 +265,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     if dep_lines:
         deps_section = "It depends on:\n" + bounded_join(
             dep_lines, str, max_items=_DEPS_MAX,
+            max_bytes=_PLAN_LIST_BUDGET,
             omitted_note=lambda n: (
                 f"... (+{n} more; run `pm pr graph` for the full tree)"),
         )
@@ -368,6 +370,7 @@ def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = No
             lines = bounded_join(
                 sibling_prs, _sibling_line,
                 max_items=_PLAN_CONTEXT_MAX_SIBLINGS,
+                max_bytes=_PLAN_LIST_BUDGET,
                 omitted_note=lambda n: (
                     f"... (+{n} more; run `pm pr list --plan {plan['id']}`)"),
             )
@@ -600,6 +603,7 @@ def generate_signoff_prompt(data: dict, pr_id: str,
             lines = bounded_join(
                 sibling_prs, _sibling_line,
                 max_items=_PLAN_CONTEXT_MAX_SIBLINGS,
+                max_bytes=_PLAN_LIST_BUDGET,
                 omitted_note=lambda n: (
                     f"... (+{n} more; run `pm pr list --plan {plan['id']}`)"),
             )

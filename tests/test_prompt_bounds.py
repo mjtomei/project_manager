@@ -151,6 +151,14 @@ class TestBoundedLines:
         assert prompt_bytes(out) <= 300
         assert "file X" in out
 
+    def test_byte_bound_applies_without_a_pointer(self):
+        """A caller that passes max_bytes but no pointer must still get a real
+        byte bound — silently ignoring max_bytes is the bug the line bound was
+        supposed to prevent (one enormous line defeats the line count)."""
+        out = bounded_lines("y" * 400_000, max_lines=500, max_bytes=1_000)
+        assert prompt_bytes(out) <= 1_000
+        assert "truncated" in out
+
 
 # ---------------------------------------------------------------------------
 # prompt_gen builders
@@ -193,6 +201,23 @@ class TestReviewPromptBounding:
         p = prompt_gen.generate_review_prompt(_data(pr, siblings), "pr-x")
         _assert_bounded(p, "pm pr list --plan pl-1", "pm pr note list")
 
+    def test_sibling_titles_are_byte_bounded_too(self):
+        """The sibling cap is a *count* cap, and the lines carry user-authored
+        titles: 25 siblings with long titles measured 180 KB — over the argv
+        limit — so the listing needs a byte budget as well."""
+        pr = _pr(notes=[_note(i) for i in range(300)], plan="pl-1")
+        siblings = [_pr(f"pr-s{i:03d}", plan="pl-1", title="LONGTITLE " * 800)
+                    for i in range(200)]
+        p = prompt_gen.generate_review_prompt(_data(pr, siblings), "pr-x")
+        _assert_bounded(p, "pm pr list --plan pl-1")
+
+    def test_dependency_titles_are_byte_bounded(self):
+        deps = [f"pr-d{i:03d}" for i in range(40)]
+        pr = _pr(depends_on=deps)
+        others = [_pr(d, title="LONGTITLE " * 800) for d in deps]
+        p = prompt_gen.generate_prompt(_data(pr, others), "pr-x")
+        _assert_bounded(p, "pm pr graph")
+
 
 class TestSignoffPromptBounding:
     def test_many_notes_scenarios_and_integration(self, tmp_path, monkeypatch):
@@ -213,6 +238,14 @@ class TestSignoffPromptBounding:
         )
         p = prompt_gen.generate_signoff_prompt(_data(pr), "pr-x")
         _assert_bounded(p, "pm pr note list")
+
+    def test_sibling_titles_are_byte_bounded_too(self):
+        """Same count-cap-only defect as the review prompt's sibling block."""
+        pr = _pr(notes=[_note(i) for i in range(300)], plan="pl-1")
+        siblings = [_pr(f"pr-s{i:03d}", plan="pl-1", title="LONGTITLE " * 800)
+                    for i in range(200)]
+        p = prompt_gen.generate_signoff_prompt(_data(pr, siblings), "pr-x")
+        _assert_bounded(p, "pm pr list --plan pl-1")
 
     def test_signoff_return_block_bounds_integration_paths(self):
         """The return block (appended to impl/review/QA prompts) inlines the
@@ -471,6 +504,29 @@ class TestLauncherGuard:
         assert prompt_bytes(argv) < 1000
         Path(tmp).unlink()
 
+    def test_materialize_writes_to_write_dir_but_names_cwd(self, tmp_path):
+        """In container mode the file lands on the host workdir (write_dir)
+        while claude reads it through the container path (cwd); the bootstrap
+        must name the path claude can actually open."""
+        host = tmp_path / "host"
+        host.mkdir()
+        huge = "y" * (PROMPT_ARG_LIMIT + 5)
+        argv, tmp = _materialize_oversized_prompt(
+            huge, cwd="/container/wd", write_dir=str(host))
+        assert tmp is not None and tmp.startswith(str(host))
+        assert "/container/wd/pm/prompts/" in argv
+        assert str(host) not in argv
+        assert Path(tmp).read_text() == huge
+        Path(tmp).unlink()
+
+    def test_materialize_falls_back_to_cwd_when_write_dir_unusable(self, tmp_path):
+        huge = "y" * (PROMPT_ARG_LIMIT + 5)
+        argv, tmp = _materialize_oversized_prompt(
+            huge, cwd=str(tmp_path), write_dir=str(tmp_path / "missing"))
+        assert tmp is not None and tmp.startswith(str(tmp_path))
+        assert str(tmp_path) in argv
+        Path(tmp).unlink()
+
     def test_materialize_no_location_raises(self, monkeypatch, tmp_path):
         monkeypatch.chdir(tmp_path)
         # No cwd/write_dir and mkstemp fails -> clear error, not OSError.
@@ -506,16 +562,17 @@ def _make_state(tmp_path, notes=None):
 # pm_core/cli/plan.py builders
 # ---------------------------------------------------------------------------
 
-def _make_plan_state(tmp_path, plan_prs, other_prs):
+def _make_plan_state(tmp_path, plan_prs, other_prs, title_size=0):
     plan = {"id": "pl-001", "name": "Plan", "file": "plans/pl-001.md"}
+    pad = "T" * title_size
     prs = []
     for i in range(plan_prs):
-        prs.append({"id": f"pr-p{i:03d}", "title": f"Plan PR {i}",
+        prs.append({"id": f"pr-p{i:03d}", "title": f"Plan PR {i}{pad}",
                     "plan": "pl-001", "status": "pending", "depends_on": [],
                     "description": "d" * 500, "branch": None, "workdir": None,
                     "gh_pr_number": None, "notes": []})
     for i in range(other_prs):
-        prs.append({"id": f"pr-o{i:03d}", "title": f"Other PR {i}",
+        prs.append({"id": f"pr-o{i:03d}", "title": f"Other PR {i}{pad}",
                     "plan": "pl-002", "status": "pending", "depends_on": [],
                     "description": "d" * 500, "branch": None, "workdir": None,
                     "gh_pr_number": None, "notes": []})
@@ -554,6 +611,18 @@ class TestPlanPromptBounding:
                 cli, ["-C", str(root), "plan", "breakdown", "pl-001"])
         assert result.exit_code == 0, result.output
         assert prompt_bytes(result.output) <= PROMPT_ARG_LIMIT + 300
+
+    def test_plan_lists_bound_long_titles_too(self, tmp_path):
+        """The plan listings are count-capped, but their lines carry
+        user-authored titles — a byte budget has to bound the product."""
+        root = _make_plan_state(tmp_path, plan_prs=40, other_prs=300,
+                                title_size=4_000)
+        for argv in (["plan", "review", "pl-001"], ["plan", "breakdown", "pl-001"],
+                     ["plan", "deps"]):
+            with patch("pm_core.cli.plan.find_claude", return_value=None):
+                result = CliRunner().invoke(cli, ["-C", str(root)] + argv)
+            assert result.exit_code == 0, (argv, result.output)
+            assert prompt_bytes(result.output) <= PROMPT_ARG_LIMIT + 300, argv
 
 
 def _make_big_plan_state(tmp_path, n_prs, n_plans, desc_size, plan_size):

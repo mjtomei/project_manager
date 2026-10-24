@@ -423,3 +423,52 @@ Verification: `tests/test_prompt_bounds.py` 53 cases (6 new, all
 failing-then-passing). Full suite 3410 passed, 1 pre-existing failure
 (`test_hook_events::test_installer_writes_standalone_receiver` — pr-4bde874,
 fails whenever `PM_HOST_HOME` is set).
+
+## 9. Review-loop follow-ups (iteration 3)
+
+Iteration 3 probed the builders with **pathological item sizes** rather than
+pathological counts, which is the same defect class iteration 2 found for
+descriptions — a count cap does not bound `cap × item size`, and iteration 2
+only fixed the *description* half of it. The count-capped one-line listings
+still inlined user-authored **titles** unbounded: 25 sibling PRs with long
+titles measured 180 KB in the review prompt (247 KB total) and 180 KB in the
+sign-off prompt (277 KB total) — both over `PROMPT_ARG_LIMIT`, so the launcher
+guard had to fire for builders this PR set out to bound.
+
+- **R4 / R12 listings now carry a byte budget.** New shared
+  `PLAN_LIST_BUDGET = 20_000` in `prompt_bounds.py` (used by
+  `bounded_join`'s `max_bytes`, which until now no production caller passed)
+  bounds the sibling-PR blocks (`generate_review_prompt`,
+  `generate_signoff_prompt`), the dependency block (`generate_prompt`), and the
+  plan builders' PR listings (`plan_review`'s other-PR context,
+  `plan_breakdown`'s existing-PR context, `plan_deps`'s PR list). Real listings
+  in this repo run 0.4-14.5 KB, so the budget only bites on pathological
+  titles — every real prompt measured byte-identical before and after
+  (`/pm-captures/review-4e41-i3/`).
+- **R12 plan-review fallback cascade was a no-op at ≤40 PRs.** The fallback
+  capped the brief listing at `_PLAN_LIST_MAX = 40`, but a plan with 40 or
+  fewer PRs and long titles produced the same oversized listing in both the
+  first and the "minimal" pass. The brief listing now goes through
+  `_brief_list()` with `_PLAN_BRIEF_BUDGET = 40_000` — deliberately generous
+  and *uncapped by count*, so the fallback still lists every PR one line each
+  exactly as before the audit (all 22 real plans produce byte-identical
+  `pm plan review` output) — and the second safety net re-runs it with a
+  quarter of the budget so the cascade actually shrinks.
+- **R15 container path split.** `_materialize_oversized_prompt` accepted
+  `write_dir` but returned a bootstrap naming *that* path, contradicting the
+  spec's container edge case ("write on the host path, reference the
+  container-visible path"): a container caller (`write_dir=<host>`,
+  `cwd=/workspace`) would have handed claude an unreadable path. It now writes
+  to `write_dir` and names `cwd`, falling back to `cwd` when `write_dir` is
+  unusable — the same split `build_claude_shell_cmd` uses.
+- **`bounded_lines` silently ignored `max_bytes` without `pointer`** (the trap
+  iteration 2 recorded): a future caller passing `max_bytes` alone got no byte
+  bound at all. The byte bound now always applies, with a generic pointer
+  fallback.
+
+Verification: `tests/test_prompt_bounds.py` 60 cases (7 new). Full suite 3417
+passed, 1 pre-existing failure (`test_hook_events::
+test_installer_writes_standalone_receiver` — pr-4bde874, fails whenever
+`PM_HOST_HOME` is set). Evidence: `/pm-captures/review-4e41-i3/`
+(`full-suite-i3.txt`, `prompt-bounds-tests-i3.txt`, `baseline-*.txt` /
+`after*-*.txt` real-data measurements).
