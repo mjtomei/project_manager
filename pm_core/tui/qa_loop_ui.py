@@ -24,6 +24,7 @@ from pm_core.qa_loop import (
     qa_outcome_detail,
 )
 from pm_core.loop_shared import get_pm_session
+from pm_core.tui.auto_start import CONFIRM_HOLD_SECONDS
 
 _log = configure_logger("pm.tui.qa_loop_ui")
 
@@ -458,6 +459,13 @@ def _project_load_error(app) -> Exception | None:
     return None
 
 
+# A finished run's "waiting for project.yaml" line is said once per wait, so
+# it is forced and held: after a TUI restart the resume scan recovers it in
+# the same frame as other runs' "Resuming QA …" lines, which replaced it
+# before it was ever painted (S50 story 4).
+_WAIT_SHOWN = {"force": True, "hold": CONFIRM_HOLD_SECONDS}
+
+
 def _completion_waits_for_project(app, state: QALoopState) -> bool:
     """True while a finished run's result cannot be recorded yet.
 
@@ -482,13 +490,15 @@ def _completion_waits_for_project(app, state: QALoopState) -> bool:
                              state.pr_id, reason)
                 app.log_message(escape(
                     f"QA {verdict} for {state.pr_id} recorded — follow-up "
-                    f"waiting for project.yaml to load: {reason}"))
+                    f"waiting for project.yaml to load: {reason}"),
+                    **_WAIT_SHOWN)
             else:
                 _log.warning("QA %s for %s: result kept until project.yaml "
                              "loads again: %s", verdict, state.pr_id, reason)
                 app.log_message(escape(
                     f"QA {verdict} for {state.pr_id} — waiting for "
-                    f"project.yaml to load to record it: {reason}"))
+                    f"project.yaml to load to record it: {reason}"),
+                    **_WAIT_SHOWN)
         return True
     if state._ui_wait_reason not in (None, store.LOCK_BUSY_REASON):
         # (A held lock is only seen by trying a write: _record_completion
@@ -541,7 +551,7 @@ def _record_completion(app, state: QALoopState) -> bool:
                          "lock is released: %s", verdict, state.pr_id, reason)
             app.log_message(escape(
                 f"QA {verdict} for {state.pr_id} — waiting for project.yaml "
-                f"to be unlocked to record it: {reason}"))
+                f"to be unlocked to record it: {reason}"), **_WAIT_SHOWN)
         return False
     if state._ui_wait_reason == store.LOCK_BUSY_REASON:
         state._ui_wait_reason = None

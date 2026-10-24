@@ -455,3 +455,26 @@ def test_skip_qa_hand_off_lines_are_painted_after_the_review_done_line(
         " Auto-start: pr-001 review passed, skipping QA (skip_qa enabled)",
         next(s for s in shown if outcome in s)]
     assert _pr(app._root)["status"] == ("in_review" if held else "sign_off")
+
+
+def test_completion_wait_line_is_not_replaced_by_a_same_frame_resume(
+        tmp_path):
+    """S50 story 4: after a TUI restart the resume scan recovered a finished
+    run and said "QA PASS for K — waiting for project.yaml to be unlocked to
+    record it" once, then another run's "Resuming QA … after restart"
+    replaced it in the same frame, so the line was never painted.  Said once
+    per wait, it holds the line instead; the next message follows it."""
+    from pm_core.tui import qa_loop_ui
+    app = _make_app(tmp_path)
+    _finished_run(app, tmp_path, VERDICT_PASS)
+    shown, end_hold = _painting(app)
+    with _held(app._root):
+        _poll(app, 1)
+        app.log_message("Resuming QA for pr-002 after restart...")
+        _poll(app, 2)
+    wait = (" QA PASS for pr-001 — waiting for project.yaml to be unlocked "
+            "to record it: " + store.LOCK_BUSY_REASON)
+    assert shown[-1] == wait
+    assert shown.count(wait) == 1
+    end_hold()
+    assert shown[-1] == " Resuming QA for pr-002 after restart..."
