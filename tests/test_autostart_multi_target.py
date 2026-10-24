@@ -1415,6 +1415,40 @@ class TestCursorFollowsActivePr:
         start()
         assert len(failures) == 2 and failures[1] == failures[0]
 
+    def test_rearming_a_target_says_its_dependencys_shown_failure_again(self):
+        """The pass an explicit re-arm asks for starts the target's whole
+        closure, so a dependency whose start failed (route down) is retried
+        too.  Its reason was shown once; the retry must say it again, not
+        only the targets line (the target itself never started)."""
+        app = FakeApp([_pr("d", status="in_progress"),
+                       _pr("t", deps=["d"])])
+        app._quiet_activations = {}
+        failures = []
+        app.log_message = lambda msg, **kw: (
+            failures.append(msg) if "failed" in msg else None)
+        reason = "work route 'claude-work' unavailable: x. Remedy: y"
+
+        class _P:
+            returncode = 1
+
+            async def communicate(self):
+                return b"", reason.encode()
+
+        async def fake_shell(*a, **k):
+            return _P()
+
+        def start_d():
+            with patch("pm_core.tui.auto_start._run_shell_async", fake_shell):
+                asyncio.run(auto_start._start_pr_quiet(app, "d"))
+
+        auto_start.add_targets(app, ["t"])
+        start_d()
+        start_d()
+        assert len(failures) == 1 and "pm pr start d failed" in failures[0]
+        auto_start.add_targets(app, ["t"])  # re-arm the target, not d
+        start_d()
+        assert len(failures) == 2 and failures[1] == failures[0]
+
 
 def test_predates_open_return_accepts_z_suffix():
     """runtime_state / return timestamps may end in "Z" (Python 3.10's

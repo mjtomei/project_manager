@@ -1064,3 +1064,14 @@ recorded with item 41.
         (`/pm-captures/review-e0e8-i10/mutation-checks.log`).  Full suite
         3698 passed, rc 0 (markdown 3.10.3 installed first;
         `/pm-captures/review-e0e8-i10/full-suite.log`).
+    (j) Review loop e0e8 i11: (h)'s re-arm forgot the shown reason only
+        for the PRs named as targets, but the pass it asks for starts the
+        whole target closure, and the PR that fails is usually a
+        dependency (a target waits for its dependencies).  Re-adding the
+        target while the route was still down then left only the targets
+        line, which is what (h)'s i9 fix was for.  An explicit re-add now
+        forgets every shown reason, as `autostart all` does.
+        `test_rearming_a_target_says_its_dependencys_shown_failure_again`
+        fails with the i9 per-target clear
+        (`/pm-captures/review-e0e8-i11/mutation-checks.log`).  Full suite:
+        `/pm-captures/review-e0e8-i11/full-suite.log`.

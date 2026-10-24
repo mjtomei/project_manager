@@ -608,11 +608,11 @@ def add_targets(app, ids: list[str], policy: str | None = None,
         _log.info("auto_start: target %s %s policy=%s source=%s", pr_id,
                   "added" if is_new else "re-armed", current, source)
     _sync_enabled(app)
-    # An explicit (re-)add asks for a start now: a start failure already
-    # shown for these PRs is said again, or a retry that fails the same
-    # way would leave only the targets line.
-    for pr in found:
-        _start_failures_shown(app).pop(pr["id"], None)
+    # An explicit (re-)add asks for a scheduler pass now, which retries
+    # every in-scope start, the targets' dependencies included: a start
+    # failure already shown is said again, or a retry that fails the same
+    # way (route still down) would leave only the targets line.
+    _start_failures_shown(app).clear()
     released = sorted(held_before - set(merge_holds(app)))
     if released:
         _log.info("auto_start: released merge holds on %s", released)
