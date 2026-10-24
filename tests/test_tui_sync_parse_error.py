@@ -21,10 +21,21 @@ class TestStoreLoadParseError:
             store.load(tmp_path)
 
 
-class TestBackgroundSyncParseError:
-    """background_sync catches ProjectYamlParseError and leaves app unchanged."""
+_UNLOADABLE = [
+    store.ProjectYamlParseError("corrupt"),
+    # A clean merge whose plans do not validate (S44): the background
+    # sync timer re-raised it and the TUI exited.
+    store.PlanValidationError("corrupt: Plan plan-child references "
+                              "non-existent parent 'plan-base'"),
+]
 
-    def test_corrupt_yaml_skips_sync(self):
+
+class TestBackgroundSyncParseError:
+    """background_sync skips an unloadable project.yaml and leaves app unchanged."""
+
+    @pytest.mark.parametrize("error", _UNLOADABLE,
+                             ids=lambda e: type(e).__name__)
+    def test_corrupt_yaml_skips_sync(self, error):
         app = types.SimpleNamespace(
             _root="/original/root",
             _data={"original": True},
@@ -40,7 +51,7 @@ class TestBackgroundSyncParseError:
         ), patch.object(
             store,
             "load",
-            side_effect=store.ProjectYamlParseError("corrupt"),
+            side_effect=error,
         ), patch(
             "pm_core.tui.frame_capture.load_capture_config",
         ), patch("pm_core.tui.sync._log") as mock_log:
@@ -78,9 +89,11 @@ class TestKillMergedPrWindows:
 
 
 class TestLoadStateParseError:
-    """app._load_state catches ProjectYamlParseError and keeps previous state."""
+    """app._load_state keeps previous state on an unloadable project.yaml."""
 
-    def test_corrupt_yaml_keeps_previous_data(self):
+    @pytest.mark.parametrize("error", _UNLOADABLE,
+                             ids=lambda e: type(e).__name__)
+    def test_corrupt_yaml_keeps_previous_data(self, error):
         """_load_state should log a warning and keep app._data unchanged on corrupt YAML."""
         from pm_core.tui.app import ProjectManagerApp
 
@@ -93,7 +106,7 @@ class TestLoadStateParseError:
         ), patch.object(
             store,
             "load",
-            side_effect=store.ProjectYamlParseError("corrupt"),
+            side_effect=error,
         ), patch("pm_core.tui.app._log") as mock_log:
             app = types.SimpleNamespace(
                 _root="/some/root",
