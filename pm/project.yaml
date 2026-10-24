@@ -31620,7 +31620,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T03:26:00.086567+00:00'
+  updated_at: '2026-10-24T03:50:56.112825+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32947,6 +32947,19 @@ prs:
       so a zz t NEEDS_WORK transition is a no-op.'
     created_at: '2026-10-24T03:26:00Z'
     last_edited: '2026-10-24T03:26:00Z'
+  - id: note-4681536
+    text: 'S46 (in progress) pushed a9b966ec (completion retention, RQ37): a finished
+      QA run is processed only once project.yaml loads (run, snapshot, transition,
+      note, zz t restart, [done] mirror wait; failed writes retried; one "waiting
+      for project.yaml" line per reason), and a TUI started/restarted on an unloadable
+      file shows an empty tree instead of dying in guide.detect_state at mount (reload
+      on file change via the 5 s idle timer). Pre-fix live on 4d8f968a: adopted X
+      + own P (conflict) and X3 (missing file) got 0 notes with snapshots cleared;
+      pm tui restart on conflict markers / invalid plans -> RuntimeError at mount
+      + TUI unmount. Regressions tests/test_qa_completion_unloadable.py (7, all fail
+      pre-fix). S45 may reuse it; post-fix S46 replay pending.'
+    created_at: '2026-10-24T03:50:56Z'
+    last_edited: '2026-10-24T03:50:56Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
