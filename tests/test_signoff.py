@@ -3,6 +3,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from pm_core import signoff
 from pm_core.signoff import (
     SIGNOFF_MERGE, SIGNOFF_REQA, SIGNOFF_REVIEW, SIGNOFF_IMPL, SIGNOFF_BLOCKED,
@@ -220,7 +222,7 @@ class TestPrListLine:
 
 
 class TestSignoffCommand:
-    def _invoke(self, tmp_path, pr, skip_qa=False):
+    def _invoke(self, tmp_path, pr, skip_qa=False, launch_error=None):
         from click.testing import CliRunner
         from pm_core.cli.pr import pr_signoff
         data = {"project": {"active_pr": pr["id"], "base_branch": "master",
@@ -232,9 +234,26 @@ class TestSignoffCommand:
              patch("pm_core.cli.pr.store.locked_update",
                    side_effect=_patch_locked_update_fn(data)), \
              patch("pm_core.cli.pr.trigger_tui_refresh"), \
-             patch("pm_core.signoff.launch_signoff_window") as mock_launch:
+             patch("pm_core.signoff.launch_signoff_window",
+                   side_effect=launch_error) as mock_launch:
             result = CliRunner().invoke(pr_signoff, [pr["id"]])
         return result, mock_launch, data
+
+    def test_container_error_is_a_failed_launch_on_stderr(self, tmp_path):
+        """A routed sign-off whose work route is down raises ContainerError
+        in container mode.  It printed the remedy to stdout and exited 0,
+        so the TUI sign-off driver (stdout discarded, last stderr line shown
+        on failure) logged "launched" and never showed the remedy."""
+        from pm_core.container import ContainerError
+        msg = ("work route 'claude-work' unavailable: router down. "
+               "Remedy: start it, then launch the session again")
+        pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+              "branch": "pm/pr-001"}
+        result, mock_launch, _ = self._invoke(
+            tmp_path, pr, launch_error=ContainerError(msg))
+        assert result.exit_code == 1
+        assert result.stderr.strip().splitlines()[-1] == msg
+        assert msg not in result.stdout
 
     def test_wrong_status_rejected(self, tmp_path):
         pr = {"id": "pr-001", "title": "T", "status": "in_progress",
@@ -673,7 +692,8 @@ class TestWindowLaunchWorkdir:
     """
 
     def _launch(self, tmp_path, *, transcript=None, existing=None,
-                head="abc", routed=False, model_settings=None):
+                head="abc", routed=False, model_settings=None,
+                wrap_error=None):
         from types import SimpleNamespace
         from contextlib import ExitStack
         from unittest.mock import MagicMock
@@ -713,7 +733,8 @@ class TestWindowLaunchWorkdir:
             self.build = p(patch("pm_core.claude_launcher.build_claude_shell_cmd",
                     return_value="CLAUDE_CMD"))
             self.wrap = p(patch("pm_core.container.wrap_claude_cmd",
-                    return_value=("WRAPPED", "signoff-test")))
+                    return_value=("WRAPPED", "signoff-test"),
+                    side_effect=wrap_error))
             self.remove = p(patch("pm_core.container.remove_container"))
             p(patch("pm_core.container.is_container_mode_enabled",
                     return_value=routed))
@@ -765,6 +786,14 @@ class TestWindowLaunchWorkdir:
         self.remove.assert_called_once()
         name = self.remove.call_args.args[0]
         assert name == "pm-x-signoff-" + self.wrap.call_args.kwargs["pr_id"]
+
+    def test_unavailable_route_propagates_and_opens_no_window(self, tmp_path):
+        """The ContainerError reaches `pm pr signoff`, which reports it on
+        stderr with rc 1 (see TestSignoffCommand); nothing is launched."""
+        from pm_core.container import ContainerError
+        with pytest.raises(ContainerError, match="work route"):
+            self._launch(tmp_path, routed=True, wrap_error=ContainerError(
+                "work route 'claude-work' unavailable: x. Remedy: y"))
 
     def test_window_creation_uses_workdir_cwd(self, tmp_path):
         new_window, workdir = self._launch(tmp_path)

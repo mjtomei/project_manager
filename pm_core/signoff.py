@@ -499,7 +499,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         # mounted host path via write_dir.
         from pm_core.container import (
             is_container_mode_enabled, _CONTAINER_WORKDIR,
-            wrap_claude_cmd, ContainerError, remove_container, _make_container_name,
+            wrap_claude_cmd, remove_container, _make_container_name,
         )
         if is_container_mode_enabled():
             _claude_cwd = _CONTAINER_WORKDIR
@@ -525,17 +525,15 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         if is_container_mode_enabled():
             remove_container(_make_container_name(f"signoff-{pr_id}",
                                                   session_tag=_stag))
-            try:
-                claude_cmd, _cname = wrap_claude_cmd(
-                    claude_cmd, workdir, label=f"signoff-{pr_id}",
-                    allowed_push_branch=branch,
-                    session_tag=_stag,
-                    pr_id=pr_id,
-                    provider=_resolution.provider,
-                    session_type="signoff")
-            except ContainerError as e:
-                print(str(e))
-                return
+            # A ContainerError (e.g. the selected work route is down)
+            # propagates: `pm pr signoff` reports it on stderr with rc 1.
+            claude_cmd, _cname = wrap_claude_cmd(
+                claude_cmd, workdir, label=f"signoff-{pr_id}",
+                allowed_push_branch=branch,
+                session_tag=_stag,
+                pr_id=pr_id,
+                provider=_resolution.provider,
+                session_type="signoff")
 
         # background -> don't steal focus (auto-sequence); explicit switch below
         # moves exactly the sessions that were watching the old window.

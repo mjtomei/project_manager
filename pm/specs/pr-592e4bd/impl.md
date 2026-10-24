@@ -1010,3 +1010,18 @@ recorded with item 41.
         caught (`/pm-captures/review-e0e8-i6/mutation-checks.log`).
         Full suite 3690 passed, rc 0 (markdown 3.10.3 installed first;
         `/pm-captures/review-e0e8-i6/full-suite.log`).
+    (g) Review loop e0e8 i7: a routed sign-off whose route is unavailable
+        in container mode (item 40's `ContainerError`) was caught in
+        `launch_signoff_window`, printed to stdout, and `pm pr signoff`
+        exited 0 (pre-existing handling, now reached by route failures).
+        The TUI sign-off driver (`signoff_ui._launch_quiet`) discards
+        stdout and shows a failed launch's last stderr line, so it logged
+        "launched" and the remedy was never shown; only the 60 s relaunch
+        backoff retried it silently.  The error now propagates to
+        `pm pr signoff`, which prints it on stderr with rc 1, like
+        `pm pr start`/`pm pr review`, so the TUI shows "Sign-off launch
+        failed for <pr>: work route … Remedy: …".
+        `test_container_error_is_a_failed_launch_on_stderr`,
+        `test_unavailable_route_propagates_and_opens_no_window`; 3
+        mutations caught (`/pm-captures/review-e0e8-i7/mutation-checks.log`).
+        Full suite: `/pm-captures/review-e0e8-i7/full-suite.log`.

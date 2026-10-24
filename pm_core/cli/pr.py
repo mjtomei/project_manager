@@ -1531,9 +1531,17 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
         click.echo(f"PR {_pr_display_id(pr_entry)} marked as sign_off.")
         trigger_tui_refresh()
 
-    signoff_mod.launch_signoff_window(
-        data, pr_entry, fresh=fresh, background=background,
-        transcript=transcript)
+    from pm_core.container import ContainerError
+    try:
+        signoff_mod.launch_signoff_window(
+            data, pr_entry, fresh=fresh, background=background,
+            transcript=transcript)
+    except ContainerError as e:
+        # Like impl/review: the TUI's sign-off driver discards stdout and
+        # shows a failed launch's last stderr line, so a route remedy
+        # printed to stdout with rc 0 was never seen (it logged "launched").
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
 
 
 @pr_signoff_group.command("record")
