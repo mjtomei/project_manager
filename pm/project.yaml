@@ -22350,7 +22350,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-24T21:13:55.104891+00:00'
+  updated_at: '2026-10-24T21:30:58.539865+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22459,6 +22459,44 @@ prs:
       pr-4bde874). Evidence /pm-captures/review-4e41-i3/. (2026-10-24T21:35:00Z)'
     created_at: '2026-10-24T21:13:55Z'
     last_edited: '2026-10-24T21:13:55Z'
+  - id: note-7a4c289
+    text: 'Review-loop 4e41 i4 (commit eabdb9df): the audit still left two gaps, both
+      the same theme — a bound correct per item but not for the whole prompt. (1)
+      qa_instructions.instruction_summary_for_prompt capped each category at LIBRARY_ITEMS_MAX=20
+      but inlined each item''s user-authored frontmatter description verbatim: 20
+      items with multi-KB descriptions measured 303,973 B and the QA planner prompt
+      built from them 212,671 B — the prompt that hit E2BIG in the field on #229.
+      Now bounded per category (LIBRARY_LIST_BUDGET=6,000) plus an aggregate LIBRARY_TOTAL_BUDGET=12,000;
+      both markers name ''pm qa list''; real library output unchanged (3,101/747 B).
+      (2) The per-block budgets never composed: with every collection at its own budget
+      at once, review measured 136,261 B, sign-off 158,350 B and the planner 130,755
+      B — over PROMPT_ARG_LIMIT, so the launcher guard fired for the very builders
+      this PR exists to bound. The spec''s ''~12 KB static text'' estimate for sign-off
+      was wrong (it is ~19 KB, ~47 KB once the always-inlined description and plan
+      context are counted), so no per-block constant could make the sum fit. New shared
+      prompt_bounds.fit_prompt(render, blocks): the builder keeps its own static text
+      and block placement and the largest blocks are abbreviated head+tail (each marker
+      naming a command for the full text) until the prompt fits; blocks never shrink
+      below 2 KB, and if the static text alone is over the limit the render is returned
+      unchanged for the launcher''s file-backed bootstrap. Wired into generate_prompt,
+      generate_review_prompt, generate_signoff_prompt and generate_qa_planner_prompt.
+      Real prompts are unchanged: identical sizes over all 483 real PRs and a full-text
+      diff for 3 PRs x 4 builders shows only the spec marker wording fix (''Implementation
+      Spec spec truncated'' -> ''Implementation Spec truncated''). Also deduplicated
+      the identical sibling-PR line formatter (_plan_sibling_line) and documented
+      that bounded_join''s omission marker can push its result past max_bytes. Considered
+      and NOT changed: build_regression_test_prompt''s body (the body IS the prompt
+      the test executes — truncating it corrupts the test; the launcher bootstrap
+      delivers an over-limit one intact) and get_spec_mocks_section''s legacy ''##
+      Mocks'' extraction (no production caller). QA interactive/child prompts measured
+      42,051/65,464 B under the same pathological inputs, so they are not wired through
+      fit_prompt. Tests: tests/test_prompt_bounds.py 72 cases (12 new; 4 coordination
+      tests fail without the fix at 121-158 KB). Full suite 3429 passed, 1 pre-existing
+      failure (test_hook_events, pr-4bde874). Evidence /pm-captures/review-4e41-i4/
+      (probe_library.py, probe_coordination.py, measure_all.py, real-prompts-*.txt).
+      (2026-10-24T21:35:00Z)'
+    created_at: '2026-10-24T21:30:58Z'
+    last_edited: '2026-10-24T21:30:58Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
