@@ -31649,7 +31649,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T22:51:21.777158+00:00'
+  updated_at: '2026-10-24T23:04:02.926844+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33422,6 +33422,21 @@ prs:
       final full suite 3698 passed, rc 0; impl.md 41(i); /pm-captures/review-e0e8-i10.'
     created_at: '2026-10-24T22:51:21Z'
     last_edited: '2026-10-24T22:51:21Z'
+  - id: note-712bb50
+    text: 'Review e0e8 i11 (620327fa, CODE CHANGE, small, needs normal re-review):
+      i10 5fbbedad (sign-off failure line escaped), i9 d361858c, i8 d76cc9d5 and the
+      e0e8 deltas (c1c08d83, 9c42bb6e, 3748691e, c08c7627, f1865615, 32df2893, 0c577dd2,
+      021f2810, 97a77383, 2d58dea4, 57f04ee6) re-reviewed independently, sound. Gap
+      fixed: i9''s re-arm forgot the shown auto-start failure only for the PRs named
+      as targets, but the pass starts the whole target closure and the failing PR
+      is usually a dependency, so re-adding the target while the route was down again
+      showed only the targets line. A re-add now forgets every shown reason (as autostart
+      all). Regression test_rearming_a_target_says_its_dependencys_shown_failure_again
+      fails with the i9 per-target clear (2 mutations caught). Venv lacked markdown
+      again (3.10.3 installed). Baseline 3698, final full suite 3699 passed, rc 0;
+      impl.md 41(j); /pm-captures/review-e0e8-i11.'
+    created_at: '2026-10-24T23:04:02Z'
+    last_edited: '2026-10-24T23:04:02Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
