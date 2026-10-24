@@ -31620,7 +31620,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T03:50:56.112825+00:00'
+  updated_at: '2026-10-24T04:00:56.300082+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32960,6 +32960,18 @@ prs:
       pre-fix). S45 may reuse it; post-fix S46 replay pending.'
     created_at: '2026-10-24T03:50:56Z'
     last_edited: '2026-10-24T03:50:56Z'
+  - id: note-c953c14
+    text: 'S46: pushed 54c88ad8 on top of a9b966ec (review of the a9b966ec race path).
+      A completion now writes its transition + QA note first (each once); until both
+      took, nothing else runs and the whole completion is retried. Follow-ups that
+      meet an unloadable file (review loop start, zz t start_qa, sign-off, tree reload)
+      report False and are retried individually with the snapshot kept; a retried
+      zz t restart that replaces the run only drops the old snapshot. Also clears
+      the sticky "project.yaml cannot be loaded" line once the file loads (it hid
+      "QA PASS ... press i" live). 5 caller-level race regressions in tests/test_qa_completion_unloadable.py
+      fail on a9b966ec. S45 can validate its completion matrix on 54c88ad8.'
+    created_at: '2026-10-24T04:00:56Z'
+    last_edited: '2026-10-24T04:00:56Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
