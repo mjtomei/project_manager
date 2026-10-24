@@ -28962,7 +28962,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T09:20:01.185973+00:00'
-  updated_at: '2026-10-24T23:31:03.981952+00:00'
+  updated_at: '2026-10-24T23:40:06.450804+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29184,6 +29184,23 @@ prs:
       no tmux session named pm-<cwd-tag> exists — a plain non-pm- session works.'
     created_at: '2026-10-24T23:29:56Z'
     last_edited: '2026-10-24T23:29:56Z'
+  - id: note-2722cb6
+    text: 'QA S15 (foreign ownership guard + concurrent actors on the shared override,
+      now with the sh -c pane wrapper) PASS at db87bba2: (1) foreign rewrite of ~/.pm/sessions/<tag>/override
+      survives kill-window byte-for-byte and pm which resolves through it; (2) kill-window
+      + zero-delay pm meta relaunch settles to exactly one meta window, override =
+      meta workdir, workdir reused and same meta/session branch resumed; (3) a background
+      actor alternating the override every 0.4 s through kill-window leaves exactly
+      one complete path, zero pane errors; (4) plain/HUP/INT/TERM exit modes with
+      the session dir rm -rf-ed are silent no-ops that never recreate the override,
+      and a supplemental hup-with-override-present run shows the deferred HUP trap
+      removing the owned override. tests/test_meta_override_cleanup.py 10 passed,
+      1 skipped (fish absent here). Evidence /pm-captures/scenarios/15/. Harness notes
+      for future runs: tmux commands from a scaffold pane on its own -L socket must
+      use -S /tmp/tmux-1000/default to reach the default server; strip ps pgid whitespace
+      before kill -TERM -<pgid>.'
+    created_at: '2026-10-24T23:40:06Z'
+    last_edited: '2026-10-24T23:40:06Z'
 - id: pr-19990de
   plan: bugs
   title: 'Bug: vanilla/GitHub merge propagation still resolves in the project root
