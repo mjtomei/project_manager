@@ -31628,7 +31628,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T06:18:55.738285+00:00'
+  updated_at: '2026-10-24T07:13:35.510946+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33054,6 +33054,28 @@ prs:
       (one run, two notes).'
     created_at: '2026-10-24T06:18:55Z'
     last_edited: '2026-10-24T06:18:55Z'
+  - id: note-6060b10
+    text: 'QA S49 (2026-10-24, two clones, host; captures /pm-captures/scenarios/49,
+      REPORT.md). The QA19 point (b) prediction reproduced live on 3ebe4d7a. A adopted
+      B run X, wrote note-1905316 (06:35:48), and the auto-start sign-off hand-off
+      then failed on the held lock, so the snapshot was kept. A was killed -9. B,
+      started first, recovered X as its own (session_tag B, dead owner) and wrote
+      a second, separately created note-1905316 (06:35:52) in B project.yaml. CODE
+      CHANGE b740e188 needs normal re-review: _record_completion marks the snapshot
+      result_recorded_by=<session> under the claim lock; the resume scan and claim_resume_file
+      leave a run recorded elsewhere to that session; a run recorded here is processed
+      here (dedupe "already recorded"). 6 mutation-checked tests in tests/test_qa_resume.py;
+      full suite 3629 on b740e188. Post-fix and on combined 716d6ce1 (S47+S48): gap
+      reached on attempt 1 each time; B silent; A after the resolve logged Recovered
+      1 + already recorded 1; one note (A only before sync, the same id/created_at
+      replicated after); one finalizer in pm-b:qa-X; no sign-off. Story 2 (adopted
+      run resumed after an A restart) held twice. Test-only 5da5ea11: the planner-note
+      mock lacked locked_update timeout= after 716d6ce1; suite 3640. Observations:
+      pm session refuses (Error, rc 1) while project.yaml is unloadable, so a killed
+      TUI stays down until the file is fixed; the combined-head line "waiting for
+      project.yaml to load to record it" shows although only the follow-up waits.'
+    created_at: '2026-10-24T07:13:35Z'
+    last_edited: '2026-10-24T07:13:35Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
