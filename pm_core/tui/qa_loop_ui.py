@@ -473,11 +473,22 @@ def _completion_waits_for_project(app, state: QALoopState) -> bool:
         if state._ui_wait_reason != reason:
             state._ui_wait_reason = reason
             verdict = state.latest_verdict
-            _log.warning("QA %s for %s: result kept until project.yaml "
-                         "loads again: %s", verdict, state.pr_id, reason)
-            app.log_message(escape(
-                f"QA {verdict} for {state.pr_id} — waiting for project.yaml "
-                f"to load to record it: {reason}"))
+            if "note" in state._ui_writes_done:
+                # Recorded already; only a follow-up (sign-off hand-off,
+                # zz t restart, review loop, tree reload) waits.  Saying
+                # "to record it" here read as a lost result (S49).
+                _log.warning("QA %s for %s: recorded; follow-up kept until "
+                             "project.yaml loads again: %s", verdict,
+                             state.pr_id, reason)
+                app.log_message(escape(
+                    f"QA {verdict} for {state.pr_id} recorded — follow-up "
+                    f"waiting for project.yaml to load: {reason}"))
+            else:
+                _log.warning("QA %s for %s: result kept until project.yaml "
+                             "loads again: %s", verdict, state.pr_id, reason)
+                app.log_message(escape(
+                    f"QA {verdict} for {state.pr_id} — waiting for "
+                    f"project.yaml to load to record it: {reason}"))
         return True
     if state._ui_wait_reason not in (None, store.LOCK_BUSY_REASON):
         # (A held lock is only seen by trying a write: _record_completion
@@ -1039,7 +1050,8 @@ def _trigger_signoff(app, pr_id: str) -> bool | None:
     ``start_signoff`` re-checks auto-start status and scope.
     """
     from pm_core.tui import signoff_ui
-    return signoff_ui.start_signoff(app, pr_id)
+    # A completion follow-up, retried every poll tick while it fails.
+    return signoff_ui.start_signoff(app, pr_id, lock_timeout=store.NO_WAIT)
 
 
 def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str,

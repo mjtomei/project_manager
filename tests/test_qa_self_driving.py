@@ -843,7 +843,9 @@ class TestEdgeCases:
              patch("pm_core.tui.review_loop_ui._maybe_auto_merge") as mock_merge:
             _trigger_signoff(app, "pr-001")
 
-        mock_so.assert_called_once_with(app, "pr-001")
+        # A completion follow-up, retried per tick: never waits (RQ38).
+        mock_so.assert_called_once_with(app, "pr-001",
+                                        lock_timeout=store.NO_WAIT)
         mock_merge.assert_not_called()
 
     def test_manual_zz_t_pass_does_not_trigger_merge(self, tmp_path):

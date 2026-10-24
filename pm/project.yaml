@@ -33715,3 +33715,36 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-7cf1fe4
+  plan: bugs
+  title: 'Bug: skip_qa review PASS -> sign-off hand-off is lost (never retried) when
+    project.yaml stays locked >2 s or cannot be loaded'
+  branch: pm/pr-7cf1fe4-bug-skip-qa-review-pass-sign-off-hand-off-is-lost-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/review_loop_ui.py _maybe_start_qa skip_qa branch
+    -> _maybe_auto_merge -> signoff_ui.start_signoff (default 2 s lock wait). Pre-existing
+    on master. With skip_qa=true and auto-start on, a review PASS hands the PR to
+    sign-off exactly once. If the project lock is held for longer than the 2 s wait
+    (e.g. an open `pm edit`), or project.yaml cannot be loaded (conflict markers,
+    plans that do not validate, file missing), start_signoff logs "Error: ..." and
+    returns False, _maybe_start_qa returns None, so nothing is kept pending: the PR
+    stays in_review with a review PASS and no sign-off. signoff_ui.advance_all retries
+    only status==qa PRs with a recorded QA PASS, so it never picks this up. Repro:
+    skip_qa: true, auto-start target X in_review, hold project.yaml.lock (flock) for
+    5 s from another process when X review loop reports PASS; X stays in_review indefinitely.
+    The non-skip_qa review -> QA hand-off already keeps a pending entry (app._pending_auto_qa,
+    S45 be8f23d1/85463cfe) and retries it each poll tick with NO_WAIT (S48 716d6ce1);
+    the fix is a matching "signoff" stage (NO_WAIT, said once, dropped when auto-start
+    no longer covers the PR or it left in_review). Found in pr-592e4bd review 679d
+    i1 (which kept the 2 s wait on this one-shot path so a brief holder no longer
+    loses it). Related, not a duplicate: pr-dd4f07b (skip_qa routing through sign-off).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-24T08:22:51.208138+00:00'
+  updated_at: '2026-10-24T08:22:51.208138+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

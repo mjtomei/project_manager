@@ -383,3 +383,31 @@ def test_qa_notes_of_different_runs_are_all_recorded(tmp_path):
         s.qa_workdir = wd
         assert qa_loop_ui._record_qa_note(app, s)
     assert len(_pr(app._root)["notes"]) == 4
+
+
+def test_wait_line_after_the_result_was_recorded_names_the_follow_up(tmp_path):
+    """Result written, a follow-up pending, then the file breaks: the wait
+    line says the result is recorded and only the follow-up waits.  It read
+    "waiting for project.yaml to load to record it" (S49), as if the result
+    were not yet recorded."""
+    from pm_core.tui import qa_loop_ui
+    app = _make_app(tmp_path)
+    state, snap = _finished_run(app, tmp_path, VERDICT_PASS)
+    state._ui_writes_done.add("note")
+    state._ui_complete_notified = True
+    calls = []
+    state._ui_pending.append(lambda: calls.append(1) or True)
+    good = _break(app._root, "conflict")
+
+    for _ in range(3):
+        assert qa_loop_ui._completion_waits_for_project(app, state)
+    waits = _logged(app, "waiting for project.yaml")
+    assert len(waits) == 1
+    assert "recorded — follow-up waiting" in waits[0]
+    assert "to record it" not in waits[0]
+    assert not calls
+
+    _write(app._root / "project.yaml", good)
+    assert not qa_loop_ui._completion_waits_for_project(app, state)
+    assert calls == [1]
+    assert snap.exists()  # cleared by poll_qa_state, not here

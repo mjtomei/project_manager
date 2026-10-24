@@ -193,9 +193,9 @@ config unchanged, passed on the final implementation 75f0dde6
 (`/pm-captures/host-work-route-smoke-20261022T190834Z/`: slirp4netns
 container; host + container `…190309Z/`). After 81cebf17 it passed on the
 host from an underscore cwd and in a container
-(`…195845Z/result.json`). Live QA S1–S46 is in
+(`…195845Z/result.json`). Live QA S1–S49 is in
 `/pm-captures/scenarios/<N>/` (REPORT.md). The latest full suite is
-recorded with item 33(d).
+recorded with item 38.
 
 **Rules fixed during validation (index).** Commits in parentheses.
 - Live smokes 1–4. The bridge stream has no timeout after connect
@@ -693,3 +693,50 @@ recorded with item 33(d).
     written; it fails with the write after the publish and without it.
     This fixes only the note text.  The interrupted finalizer itself is
     still not re-run or adopted on recovery (pr-0f85376, unchanged).
+38. (S48, RQ38: `pm edit` held open, project lock held until the editor
+    quits) Live on 3ebe4d7a, a finished NEEDS_WORK run retried
+    `_transition_pr_status` on every poll tick, and each try waited the
+    full 2 s lock timeout on the TUI loop: keys took ~2 s, the spinner
+    and cast had 4 s gaps, and a StoreLockTimeout warning was logged
+    every ~4 s (15 in 154 s).  The result itself was kept (RQ37).
+    (a) 716d6ce1: TUI writes retried per poll tick make one non-blocking
+        attempt (`store.NO_WAIT`): the completion transition + note, the
+        review → QA hand-off status write, the launch's
+        `clear_return_awaiting` and the shared `_enter_qa_status` via
+        `start_qa(lock_timeout=)`, and the recovered completion.  A held
+        lock keeps the result / follow-up / hand-off pending with its
+        snapshot, says so once (`store.LOCK_BUSY_REASON`, "waiting for
+        project.yaml to be unlocked …") and lands on the first tick after
+        the release.  There is no separate lock probe (no check-then-act
+        race).  User keys and the CLI keep the 2 s wait.
+        `tests/test_project_lock_held.py`.
+    (b) 006d7b4d: the hand-off waiting line is sticky, so the sticky
+        "Review loop done … PASS" line logged just before no longer hides
+        it; the expected NO_WAIT timeout is not logged per tick.
+    (c) Review loop 679d i1: `start_signoff` takes `lock_timeout`; only
+        its retried callers (the QA completion follow-up
+        `_trigger_signoff`, the `advance_all` scheduler pass) pass
+        `NO_WAIT`.  716d6ce1 made every call non-blocking, including the
+        skip_qa review PASS hand-off (`_maybe_auto_merge`), which nothing
+        retries, so a pm process holding the lock for a moment (a
+        `pm pr note add` from a pane) lost that hand-off and the TUI said
+        it "waits".  That one-shot path keeps the 2 s wait and reports a
+        longer hold as `Error:` (as on master).  Residual, pre-existing on
+        master and not fixed here: a holder past 2 s (an open `pm edit`)
+        or an unloadable file still loses that skip_qa hand-off, since
+        nothing retries it (filed pr-7cf1fe4).  The "already said it
+        waits" set is cleared on every other outcome.  Also: once the
+        result is recorded and only a follow-up waits for an unloadable
+        file, the wait line says "recorded — follow-up waiting for
+        project.yaml to load" instead of "… to load to record it" (S49
+        observation).  `test_one_shot_sign_off_hand_off_rides_out_a_brief_holder`,
+        `test_scheduler_pass_hands_off_without_waiting`,
+        `test_wait_line_after_the_result_was_recorded_names_the_follow_up`,
+        each fails with its fix reverted
+        (`/pm-captures/review-679d-i1/mutation-checks.log`).
+        `test_review_pass_waits_and_starts_qa_once_the_file_loads` read
+        warnings through caplog, which sees nothing from a pm module
+        logger (`configure_logger` sets `propagate = False`) unless an
+        earlier test reset it: it failed on its own and passed only in
+        suite order.  It now patches the module `_log`.
+    Evidence: `/pm-captures/scenarios/48` (REPORT.md).

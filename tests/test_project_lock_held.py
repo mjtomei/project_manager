@@ -174,14 +174,67 @@ def test_start_signoff_waits_for_a_held_lock(tmp_path):
         with _held(app._root):
             t0 = time.monotonic()
             for _ in range(3):  # scheduler passes
-                assert signoff_ui.start_signoff(app, "pr-001") is False
+                assert signoff_ui.start_signoff(
+                    app, "pr-001", lock_timeout=store.NO_WAIT) is False
             assert time.monotonic() - t0 < 1.0
             assert not _logged(app, "Error:")
             assert len(_logged(app, "waits for project.yaml to be unlocked")) == 1
             step.assert_not_called()
-        signoff_ui.start_signoff(app, "pr-001")
+        signoff_ui.start_signoff(app, "pr-001", lock_timeout=store.NO_WAIT)
     assert _pr(app._root)["status"] == "sign_off"
     step.assert_called_once()
+
+
+def test_one_shot_sign_off_hand_off_rides_out_a_brief_holder(tmp_path):
+    """The skip_qa review PASS hands off through ``_maybe_auto_merge`` once;
+    nothing retries it.  It keeps the default lock wait, so a pm process
+    holding the lock for a moment (a `pm pr note add` from a pane) does not
+    lose the hand-off, and a lock held past the wait is an "Error:" line,
+    not a "waits" line that promises a retry."""
+    from pm_core.tui import signoff_ui
+    app = _make_app(tmp_path)
+    with patch.object(signoff_ui, "_driven", return_value=True), \
+            patch.object(signoff_ui, "step") as step:
+        t = _release_later(app._root, 0.3)
+        signoff_ui.start_signoff(app, "pr-001")
+        t.join()
+        step.assert_called_once()
+    assert _pr(app._root)["status"] == "sign_off"
+    assert not _logged(app, "waits for project.yaml")
+
+    (tmp_path / "held").mkdir()
+    app = _make_app(tmp_path / "held")
+    with patch.object(signoff_ui, "_driven", return_value=True), \
+            patch.object(signoff_ui, "step") as step, _held(app._root):
+        assert signoff_ui.start_signoff(app, "pr-001") is False
+        step.assert_not_called()
+    assert len(_logged(app, "Error:")) == 1
+    assert not _logged(app, "waits for project.yaml")
+
+
+def test_scheduler_pass_hands_off_without_waiting(tmp_path):
+    """advance_all retries a QA-passed PR on every pass: one non-blocking
+    attempt each, said once."""
+    from pm_core.tui import auto_start, signoff_ui
+    app = _make_app(tmp_path)
+    app._data = store.load(app._root)
+    with patch.object(auto_start, "is_enabled", return_value=True), \
+            patch.object(auto_start, "in_scope", return_value=True), \
+            patch.object(auto_start, "recorded_qa_verdict",
+                         return_value="PASS"), \
+            patch.object(signoff_ui, "_driven", return_value=True), \
+            patch.object(signoff_ui, "step") as step:
+        with _held(app._root):
+            t0 = time.monotonic()
+            for _ in range(3):
+                signoff_ui.advance_all(app)
+            assert time.monotonic() - t0 < 1.0
+            step.assert_not_called()
+        signoff_ui.advance_all(app)
+    step.assert_called_once()
+    assert _pr(app._root)["status"] == "sign_off"
+    assert len(_logged(app, "waits for project.yaml to be unlocked")) == 1
+    assert not _logged(app, "Error:")
 
 
 def test_review_hand_off_transition_waits_for_a_held_lock(tmp_path):

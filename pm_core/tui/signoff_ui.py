@@ -63,14 +63,25 @@ def _lock_waits(app) -> set:
     return s
 
 
-def start_signoff(app, pr_id: str) -> bool | None:
+def start_signoff(app, pr_id: str,
+                  lock_timeout: float = store.LOCK_TIMEOUT_SECONDS
+                  ) -> bool | None:
     """Hand a QA-passed (or skip_qa review-passed) PR to the sign-off step.
 
     Transitions ``qa`` (or ``in_review`` under ``skip_qa``) -> ``sign_off``
     and runs one :func:`step`, which adopts an existing fresh verdict or
     launches the router window in the background.
+
+    Callers that retry on the poll timer (a QA completion follow-up, the
+    scheduler pass) pass ``lock_timeout=store.NO_WAIT``: while another pm
+    process holds the lock (an open ``pm edit``) it says so once and
+    returns False, without a 2 s wait or an "Error:" line per retry
+    (RQ38).  A one-shot caller (the skip_qa review PASS, which nothing
+    retries) keeps the default wait, so a brief holder does not lose the
+    hand-off.
     """
     if not _driven(app, pr_id):
+        _lock_waits(app).discard(pr_id)
         return
     project = (app._data or {}).get("project") or {}
     entry = ("qa", "in_review") if project.get("skip_qa") else ("qa",)
@@ -85,28 +96,29 @@ def start_signoff(app, pr_id: str) -> bool | None:
             p["status"] = "sign_off"
             _record_status_timestamp(p, "sign_off")
 
+    waiting = _lock_waits(app)
     try:
-        # Retried by its callers on the poll timer (a QA completion
-        # follow-up, the scheduler pass), so it never waits for the lock:
-        # while another pm process holds it (an open `pm edit`) it says so
-        # once and retries, without a 2 s wait or an "Error:" line per
-        # retry (RQ38).
-        store.locked_update(app._root, apply, timeout=store.NO_WAIT)
-    except store.StoreLockTimeout:
-        waiting = _lock_waits(app)
-        if pr_id not in waiting:
-            waiting.add(pr_id)
-            _log.warning("start_signoff: %s waits for the project.yaml "
-                         "lock", pr_id)
-            app.log_message(
-                f"Sign-off for {pr_id} waits for project.yaml to be "
-                f"unlocked: {store.LOCK_BUSY_REASON}")
+        store.locked_update(app._root, apply, timeout=lock_timeout)
+    except store.StoreLockTimeout as e:
+        if lock_timeout == store.NO_WAIT:
+            if pr_id not in waiting:
+                waiting.add(pr_id)
+                _log.warning("start_signoff: %s waits for the project.yaml "
+                             "lock", pr_id)
+                app.log_message(
+                    f"Sign-off for {pr_id} waits for project.yaml to be "
+                    f"unlocked: {store.LOCK_BUSY_REASON}")
+            return False
+        waiting.discard(pr_id)
+        app.log_message(f"Error: {e}")
+        _log.warning("start_signoff: StoreLockTimeout for %s: %s", pr_id, e)
         return False
     except store.ProjectYamlParseError as e:
+        waiting.discard(pr_id)
         app.log_message(f"Error: {e}")
         _log.warning("start_signoff: %s for %s: %s", type(e).__name__, pr_id, e)
-        return False  # project.yaml could not be loaded or locked: retry
-    _lock_waits(app).discard(pr_id)
+        return False  # project.yaml could not be loaded: retry
+    waiting.discard(pr_id)
     if moved["from"]:
         _log.info("start_signoff: %s %s -> sign_off", pr_id, moved["from"])
         _launched_at(app).pop(pr_id, None)
@@ -409,6 +421,7 @@ def advance_all(app, prs: list[dict] | None = None) -> None:
                   and signoff_mod.return_awaiting(pr) != "qa"):
                 # (A sign-off REQA return still waiting for its QA run must
                 # not be handed back to sign-off on the old PASS.)
-                start_signoff(app, pr_id)
+                # Retried on the next pass, so never wait for the lock.
+                start_signoff(app, pr_id, lock_timeout=store.NO_WAIT)
         except Exception:
             _log.exception("signoff_ui: advance failed for %s", pr_id)
