@@ -31649,7 +31649,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T23:20:54.876316+00:00'
+  updated_at: '2026-10-24T23:36:17.987743+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33454,6 +33454,21 @@ prs:
       3703 passed, rc 0; impl.md 41(k); /pm-captures/review-e0e8-i12.'
     created_at: '2026-10-24T23:20:54Z'
     last_edited: '2026-10-24T23:20:54Z'
+  - id: note-0805c7c
+    text: 'Review e0e8 i13 (52ec17f3, CODE CHANGE, small, needs normal re-review):
+      i12 7a437b79 (pm model show reports a malformed model_config) and the e0e8 deltas
+      (c1c08d83, 9c42bb6e, 3748691e, c08c7627, f1865615, 32df2893, 0c577dd2, 021f2810,
+      97a77383, 2d58dea4, 57f04ee6, d76cc9d5, d361858c, 5fbbedad, 620327fa) re-reviewed
+      independently, sound; rich escape checked against Textual 8 markup. Gap fixed
+      (pre-existing on master; project-level twin of i5): a blank or non-string model_config.session_models
+      value (signoff: with no value) raised AttributeError at every launch of that
+      type and in pm model show (the block is a mapping, so i12 did not apply), and
+      validate_model_config said nothing. It now counts as absent (parent type, then
+      global) and is reported. 3 regressions, 2 mutations caught. Venv lacked markdown
+      again (3.10.3 installed). Baseline 3703, final full suite 3706 passed, rc 0;
+      impl.md 41(l); /pm-captures/review-e0e8-i13.'
+    created_at: '2026-10-24T23:36:17Z'
+    last_edited: '2026-10-24T23:36:17Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
