@@ -731,7 +731,11 @@ recorded with item 38.
         master and not fixed here: a holder past 2 s (an open `pm edit`)
         or an unloadable file still loses that skip_qa hand-off, since
         nothing retries it (filed pr-7cf1fe4).  The "already said it
-        waits" set is cleared on every other outcome.  Also: once the
+        waits" set is cleared on every other outcome, so a later
+        hand-off of the same PR that meets a held lock says so again
+        (review loop 679d i4,
+        `test_later_sign_off_wait_of_the_same_pr_is_said_again`; it fails
+        when a hand-off that went through keeps the PR in the set).  Also: once the
         result is recorded and only a follow-up waits for an unloadable
         file, the wait line says "recorded — follow-up waiting for
         project.yaml to load" instead of "… to load to record it" (S49
@@ -748,8 +752,9 @@ recorded with item 38.
     Full suite 3645 passed on 64b41a91 (`/pm-captures/review-679d-i1`)
     and again on 82f22b1f in review loop 679d i2
     (`/pm-captures/review-679d-i2`; env -u PM_HOST_HOME, /usr/bin first),
-    and 3646 in review loop 679d i3 (item 35 guard test added;
-    `/pm-captures/review-679d-i3`).
+    3646 in review loop 679d i3 (item 35 guard test added;
+    `/pm-captures/review-679d-i3`), and 3647 in review loop 679d i4
+    (sign-off wait-set test added; `/pm-captures/review-679d-i4`).
     Earlier QA19 runs: 3642 on the S47 tree (3a3dcc3e), 3641 on
     006d7b4d (S48), 3629 on b740e188 (S49), each in its REPORT.md.
     Evidence: `/pm-captures/scenarios/48` (REPORT.md).

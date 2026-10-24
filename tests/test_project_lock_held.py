@@ -185,6 +185,29 @@ def test_start_signoff_waits_for_a_held_lock(tmp_path):
     step.assert_called_once()
 
 
+def test_later_sign_off_wait_of_the_same_pr_is_said_again(tmp_path):
+    """The "waits" line is said once per wait, not once per PR: a hand-off
+    that went through forgets it, so the PR's next hand-off (a later QA
+    PASS, e.g. after a sign-off REQA round) that meets a held lock says so
+    again instead of waiting silently."""
+    from pm_core.tui import signoff_ui
+    app = _make_app(tmp_path)
+
+    def _back_to_qa(d):
+        store.get_pr(d, "pr-001")["status"] = "qa"
+    with patch.object(signoff_ui, "_driven", return_value=True), \
+            patch.object(signoff_ui, "step") as step:
+        for _ in range(2):
+            with _held(app._root):
+                assert signoff_ui.start_signoff(
+                    app, "pr-001", lock_timeout=store.NO_WAIT) is False
+            signoff_ui.start_signoff(app, "pr-001", lock_timeout=store.NO_WAIT)
+            assert _pr(app._root)["status"] == "sign_off"
+            store.locked_update(app._root, _back_to_qa)
+    assert step.call_count == 2
+    assert len(_logged(app, "waits for project.yaml to be unlocked")) == 2
+
+
 def test_one_shot_sign_off_hand_off_rides_out_a_brief_holder(tmp_path):
     """The skip_qa review PASS hands off through ``_maybe_auto_merge`` once;
     nothing retries it.  It keeps the default lock wait, so a pm process
