@@ -117,13 +117,17 @@ def _ensure_qa_poll_timer(app) -> None:
     _ensure_poll_timer(app)
 
 
-def _enter_qa_status(app, pr_id: str, pr: dict, caller: str) -> bool:
+def _enter_qa_status(app, pr_id: str, pr: dict, caller: str,
+                     lock_timeout: float = store.LOCK_TIMEOUT_SECONDS) -> bool:
     """Move an ``in_review`` PR to ``qa`` before its QA run starts.
 
     The resume scan only resumes or recovers runs of PRs in ``qa``, and
     drops the snapshot of any other: a run started at ``in_review`` was
     silently lost at the next TUI restart, mid-run or finished (S47).
-    False when project.yaml could not be loaded or locked.
+    False when project.yaml could not be loaded or locked.  With
+    ``lock_timeout=store.NO_WAIT`` (a caller retrying on the poll timer)
+    a held lock fails at once and quietly: the caller reports the wait
+    once instead of an "Error:" line per retry (RQ38).
     """
     if pr.get("status") != "in_review":
         return True
@@ -133,22 +137,30 @@ def _enter_qa_status(app, pr_id: str, pr: dict, caller: str) -> bool:
         if p and p.get("status") == "in_review":
             p["status"] = "qa"
     try:
-        store.locked_update(app._root, _set_qa)
+        store.locked_update(app._root, _set_qa, timeout=lock_timeout)
     except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
-        app.log_message(f"Error: {e}")
-        _log.warning("%s: %s for %s: %s", caller, type(e).__name__, pr_id, e)
+        if lock_timeout == store.NO_WAIT and isinstance(
+                e, store.StoreLockTimeout):
+            _log.debug("%s: %s waits for the lock", caller, pr_id)
+        else:
+            app.log_message(f"Error: {e}")
+            _log.warning("%s: %s for %s: %s", caller, type(e).__name__,
+                         pr_id, e)
         return False
     app._load_state()
     _log.info("%s: transitioned %s to qa status", caller, pr_id)
     return True
 
 
-def start_qa(app, pr_id: str) -> bool | None:
+def start_qa(app, pr_id: str,
+             lock_timeout: float = store.LOCK_TIMEOUT_SECONDS) -> bool | None:
     """Start a QA session for a PR.
 
     Creates QALoopState, starts background QA thread.
     Called by auto-start and internal callers (fresh_start, loop start).
-    Returns False when project.yaml could not be loaded or locked.
+    Returns False when project.yaml could not be loaded or locked.  A
+    caller retrying on the poll timer passes ``lock_timeout=store.NO_WAIT``
+    and reports the wait itself (no "Error:" line per retry, RQ38).
     """
     if not app._root:
         app.log_message("No project root")
@@ -173,9 +185,12 @@ def start_qa(app, pr_id: str) -> bool | None:
 
     # A sign-off REQA return is now being re-verified.
     from pm_core.signoff import clear_return_awaiting
-    clear_return_awaiting(app._root, pr_id, "qa")
+    if clear_return_awaiting(app._root, pr_id, "qa",
+                             timeout=lock_timeout) is False:
+        return False
 
-    if not _enter_qa_status(app, pr_id, pr, "start_qa"):
+    if not _enter_qa_status(app, pr_id, pr, "start_qa",
+                            lock_timeout=lock_timeout):
         return False
 
     state = QALoopState(pr_id=pr_id)
@@ -464,7 +479,9 @@ def _completion_waits_for_project(app, state: QALoopState) -> bool:
                 f"QA {verdict} for {state.pr_id} — waiting for project.yaml "
                 f"to load to record it: {reason}"))
         return True
-    if state._ui_wait_reason is not None:
+    if state._ui_wait_reason not in (None, store.LOCK_BUSY_REASON):
+        # (A held lock is only seen by trying a write: _record_completion
+        # clears that reason once its writes took.)
         state._ui_wait_reason = None
         _log.info("QA %s for %s: project.yaml loads again — recording the "
                   "result", state.latest_verdict, state.pr_id)
@@ -485,17 +502,40 @@ def _follow_up(state: QALoopState, action) -> None:
 def _record_completion(app, state: QALoopState) -> bool:
     """Write the run's result to project.yaml: the NEEDS_WORK → in_review
     transition and the QA note, each once.  False when one could not be
-    written; nothing that depends on the result runs before both are."""
+    written; nothing that depends on the result runs before both are.
+
+    Retried on every poll tick, so the writes never wait for the project
+    lock: while another pm process holds it (an open ``pm edit``) the result
+    waits, said once, and is written on the first tick after it is
+    released (RQ38).
+    """
     done = state._ui_writes_done
-    if (state.latest_verdict == VERDICT_NEEDS_WORK
-            and "transition" not in done):
-        if not _transition_pr_status(app, state.pr_id, "qa", "in_review"):
-            return False
-        done.add("transition")
-    if "note" not in done:
-        if not _record_qa_note(app, state):
-            return False
-        done.add("note")
+    try:
+        if (state.latest_verdict == VERDICT_NEEDS_WORK
+                and "transition" not in done):
+            if not _transition_pr_status(app, state.pr_id, "qa",
+                                         "in_review", lock_timeout=store.NO_WAIT):
+                return False
+            done.add("transition")
+        if "note" not in done:
+            if not _record_qa_note(app, state, lock_timeout=store.NO_WAIT):
+                return False
+            done.add("note")
+    except store.StoreLockTimeout:
+        reason = store.LOCK_BUSY_REASON
+        if state._ui_wait_reason != reason:
+            state._ui_wait_reason = reason
+            verdict = state.latest_verdict
+            _log.warning("QA %s for %s: result kept until the project.yaml "
+                         "lock is released: %s", verdict, state.pr_id, reason)
+            app.log_message(escape(
+                f"QA {verdict} for {state.pr_id} — waiting for project.yaml "
+                f"to be unlocked to record it: {reason}"))
+        return False
+    if state._ui_wait_reason == store.LOCK_BUSY_REASON:
+        state._ui_wait_reason = None
+        _log.info("QA %s for %s: project.yaml lock released — result "
+                  "recorded", state.latest_verdict, state.pr_id)
     # The snapshot may outlive this for a pending follow-up: say which
     # clone's project.yaml holds the result, so only this session's TUI
     # re-processes it (S49).
@@ -1002,10 +1042,13 @@ def _trigger_signoff(app, pr_id: str) -> bool | None:
     return signoff_ui.start_signoff(app, pr_id)
 
 
-def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> bool:
+def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str,
+                          lock_timeout: float | None = None) -> bool:
     """Transition PR status if it's currently in the expected state.
 
     False when project.yaml could not be loaded or locked (worth a retry).
+    With *lock_timeout* the lock is tried for that long and
+    ``StoreLockTimeout`` propagates: the caller waits for the holder.
     """
     if not app._root:
         return True
@@ -1019,10 +1062,17 @@ def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> 
                 pr["status"] = to_status
                 transitioned = True
 
-        store.locked_update(app._root, apply)
+        store.locked_update(app._root, apply, timeout=(
+            store.LOCK_TIMEOUT_SECONDS if lock_timeout is None
+            else lock_timeout))
         if transitioned:
             _log.info("Transitioned %s: %s → %s", pr_id, from_status, to_status)
-    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+    except store.StoreLockTimeout:
+        if lock_timeout is not None:
+            raise
+        _log.warning("_transition_pr_status: StoreLockTimeout for %s", pr_id)
+        return False
+    except store.ProjectYamlParseError as e:
         _log.warning("_transition_pr_status: %s for %s: %s", type(e).__name__, pr_id, e)
         return False
     except Exception:
@@ -1030,10 +1080,13 @@ def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> 
     return True
 
 
-def _record_qa_note(app, state: QALoopState) -> bool:
+def _record_qa_note(app, state: QALoopState,
+                    lock_timeout: float | None = None) -> bool:
     """Record QA results as a note on the PR.
 
     False when project.yaml could not be loaded or locked (worth a retry).
+    With *lock_timeout* the lock is tried for that long and
+    ``StoreLockTimeout`` propagates: the caller waits for the holder.
     """
     if not app._root:
         _log.warning("Cannot record QA note: no project root")
@@ -1071,8 +1124,15 @@ def _record_qa_note(app, state: QALoopState) -> bool:
                            "created_at": now, "last_edited": now})
             pr["notes"] = notes
 
-        store.locked_update(app._root, apply)
-    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        store.locked_update(app._root, apply, timeout=(
+            store.LOCK_TIMEOUT_SECONDS if lock_timeout is None
+            else lock_timeout))
+    except store.StoreLockTimeout as e:
+        if lock_timeout is not None:
+            raise
+        _log.warning("_record_qa_note: StoreLockTimeout for %s: %s", state.pr_id, e)
+        return False
+    except store.ProjectYamlParseError as e:
         _log.warning("_record_qa_note: %s for %s: %s", type(e).__name__, state.pr_id, e)
         return False
     except Exception:

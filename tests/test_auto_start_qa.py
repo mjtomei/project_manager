@@ -370,7 +370,8 @@ class TestMaybeStartQA:
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
             _maybe_start_qa(app, "pr-001")
 
-        mock_start.assert_called_once_with(app, "pr-001")
+        mock_start.assert_called_once_with(
+            app, "pr-001", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
 
     def test_no_transition_when_auto_start_disabled(self, tmp_path):
         """Without auto-start (and no self-driving), no transition occurs."""
@@ -428,7 +429,8 @@ class TestMaybeStartQA:
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
             _maybe_start_qa(app, "pr-001")
 
-        mock_start.assert_called_once_with(app, "pr-001")
+        mock_start.assert_called_once_with(
+            app, "pr-001", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
         data = store.load(app._root)
         pr = store.get_pr(data, "pr-001")
         assert pr["status"] == "qa"

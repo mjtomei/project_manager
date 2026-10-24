@@ -146,13 +146,13 @@ def test_a_note_write_that_fails_after_the_check_is_retried(tmp_path):
     real = qa_loop_ui._record_qa_note
     calls = []
 
-    def flaky(a, s):
+    def flaky(a, s, **kw):
         calls.append(1)
         if len(calls) == 1:
             with patch("pm_core.store.locked_update",
                        side_effect=store.ProjectYamlParseError("broke")):
-                return real(a, s)
-        return real(a, s)
+                return real(a, s, **kw)
+        return real(a, s, **kw)
 
     with patch("pm_core.tui.qa_loop_ui._record_qa_note", side_effect=flaky):
         _poll(app, 1)

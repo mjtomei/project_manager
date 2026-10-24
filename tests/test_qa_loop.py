@@ -814,7 +814,8 @@ class TestMaybeStartQA:
         data = store.load(app._root)
         pr = store.get_pr(data, "pr-001")
         assert pr["status"] == "qa"
-        mock_start.assert_called_once_with(app, "pr-001")
+        mock_start.assert_called_once_with(
+            app, "pr-001", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
 
     def test_no_transition_without_auto_start_or_self_driving(self, tmp_path):
         """Without auto-start or self-driving, _maybe_start_qa should be a no-op."""
@@ -885,7 +886,8 @@ class TestMaybeStartQAScoping:
         data = store.load(app._root)
         pr = store.get_pr(data, "pr-a")
         assert pr["status"] == "qa"
-        mock_start.assert_called_once_with(app, "pr-a")
+        mock_start.assert_called_once_with(
+            app, "pr-a", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
 
     def test_transitions_target_pr_itself(self, tmp_path):
         """The auto-start target PR itself transitions to qa."""
@@ -906,7 +908,8 @@ class TestMaybeStartQAScoping:
         data = store.load(app._root)
         pr = store.get_pr(data, "pr-b")
         assert pr["status"] == "qa"
-        mock_start.assert_called_once_with(app, "pr-b")
+        mock_start.assert_called_once_with(
+            app, "pr-b", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
 
     def test_skips_pr_outside_target_dep_tree(self, tmp_path):
         """PR NOT in the target's dependency tree is NOT transitioned."""
@@ -949,7 +952,8 @@ class TestMaybeStartQAScoping:
         data = store.load(app._root)
         pr = store.get_pr(data, "pr-x")
         assert pr["status"] == "qa"
-        mock_start.assert_called_once_with(app, "pr-x")
+        mock_start.assert_called_once_with(
+            app, "pr-x", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
 
     def test_skips_pr_not_in_review_status(self, tmp_path):
         """PR that is not in_review status is not transitioned even if in tree."""

@@ -550,12 +550,15 @@ def _start_qa_after_review(app, pr_id: str) -> None:
     if pending.get(pr_id) != result:
         pending[pr_id] = result
         stage, reason = result
+        locked = reason == store.LOCK_BUSY_REASON
         _log.warning("auto_qa: %s review passed; QA %s waits until "
-                     "project.yaml loads again: %s", pr_id,
-                     "start" if stage == "launch" else "transition", reason)
+                     "project.yaml %s: %s", pr_id,
+                     "start" if stage == "launch" else "transition",
+                     "is unlocked" if locked else "loads again", reason)
         app.log_message(escape(
-            f"Review PASS for {pr_id} — waiting for project.yaml to load "
-            f"to start QA: {reason}"))
+            f"Review PASS for {pr_id} — waiting for project.yaml "
+            f"{'to be unlocked' if locked else 'to load'} to start QA: "
+            f"{reason}"))
 
 
 def _launch_qa_after_review(app, pr_id: str) -> tuple | None:
@@ -576,10 +579,10 @@ def _launch_qa_after_review(app, pr_id: str) -> tuple | None:
     loop = app._qa_loops.get(pr_id)
     if loop is not None and loop.running:
         return None
-    if qa_loop_ui.start_qa(app, pr_id) is False:
+    if qa_loop_ui.start_qa(app, pr_id, lock_timeout=store.NO_WAIT) is False:
         try:
             store.load(app._root)
-            reason = "project.yaml could not be locked"
+            reason = store.LOCK_BUSY_REASON
         except store.ProjectYamlParseError as e:
             reason = str(e)
         return ("launch", reason)
@@ -643,11 +646,14 @@ def _maybe_start_qa(app, pr_id: str) -> tuple | None:
                 transitioned = True
 
         try:
-            store.locked_update(app._root, apply_qa)
+            # Retried every poll tick: never wait for the lock (a 2 s wait
+            # per tick stalled the TUI while `pm edit` was open, RQ38).
+            store.locked_update(app._root, apply_qa, timeout=store.NO_WAIT)
         except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
             # The caller logs once per reason; this runs every poll tick.
             _log.debug("auto_qa: %s for %s: %s", type(e).__name__, pr_id, e)
-            return ("transition", str(e))
+            return ("transition", store.LOCK_BUSY_REASON
+                    if isinstance(e, store.StoreLockTimeout) else str(e))
         app._load_state()
         if transitioned:
             _log.info("auto_qa: transitioned %s to qa status", pr_id)

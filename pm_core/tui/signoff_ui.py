@@ -54,6 +54,15 @@ def _load_pr(app, pr_id: str) -> dict | None:
     return store.get_pr(data, pr_id)
 
 
+def _lock_waits(app) -> set:
+    """PR ids whose sign-off hand-off already said it waits for the lock."""
+    s = getattr(app, "_signoff_lock_waits", None)
+    if not isinstance(s, set):
+        s = set()
+        app._signoff_lock_waits = s
+    return s
+
+
 def start_signoff(app, pr_id: str) -> bool | None:
     """Hand a QA-passed (or skip_qa review-passed) PR to the sign-off step.
 
@@ -77,11 +86,27 @@ def start_signoff(app, pr_id: str) -> bool | None:
             _record_status_timestamp(p, "sign_off")
 
     try:
-        store.locked_update(app._root, apply)
-    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        # Retried by its callers on the poll timer (a QA completion
+        # follow-up, the scheduler pass), so it never waits for the lock:
+        # while another pm process holds it (an open `pm edit`) it says so
+        # once and retries, without a 2 s wait or an "Error:" line per
+        # retry (RQ38).
+        store.locked_update(app._root, apply, timeout=store.NO_WAIT)
+    except store.StoreLockTimeout:
+        waiting = _lock_waits(app)
+        if pr_id not in waiting:
+            waiting.add(pr_id)
+            _log.warning("start_signoff: %s waits for the project.yaml "
+                         "lock", pr_id)
+            app.log_message(
+                f"Sign-off for {pr_id} waits for project.yaml to be "
+                f"unlocked: {store.LOCK_BUSY_REASON}")
+        return False
+    except store.ProjectYamlParseError as e:
         app.log_message(f"Error: {e}")
         _log.warning("start_signoff: %s for %s: %s", type(e).__name__, pr_id, e)
         return False  # project.yaml could not be loaded or locked: retry
+    _lock_waits(app).discard(pr_id)
     if moved["from"]:
         _log.info("start_signoff: %s %s -> sign_off", pr_id, moved["from"])
         _launched_at(app).pop(pr_id, None)

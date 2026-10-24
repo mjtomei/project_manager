@@ -75,7 +75,8 @@ def test_review_pass_waits_and_starts_qa_once_the_file_loads(
 
         _write(app._root / "project.yaml", good)
         review_loop_ui._start_qa_after_review(app, "pr-001")
-    start.assert_called_once_with(app, "pr-001")
+    start.assert_called_once_with(
+        app, "pr-001", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
     assert _status(app) == "qa"
     assert app._pending_auto_qa == {}
 
@@ -100,7 +101,8 @@ def test_poll_tick_retries_a_pending_hand_off(tmp_path):
         start.assert_not_called()
         _write(app._root / "project.yaml", good)
         review_loop_ui._poll_loop_state_inner(app)   # next tick
-    start.assert_called_once_with(app, "pr-001")
+    start.assert_called_once_with(
+        app, "pr-001", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
     assert _status(app) == "qa"
 
 

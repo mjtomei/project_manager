@@ -262,6 +262,16 @@ class StoreLockTimeout(Exception):
     """Raised when the project.yaml lock cannot be acquired within the timeout."""
 
 
+# Writers retried on the TUI's poll timer pass ``timeout=NO_WAIT``: a single
+# non-blocking lock attempt.  Waiting the default 2 s on every tick while the
+# user keeps ``pm edit`` open (lock held until the editor quits) blocked the
+# TUI for most of every tick (RQ38); such a caller keeps its write pending,
+# says once that it waits (``LOCK_BUSY_REASON``) and retries next tick.
+NO_WAIT = 0.0
+LOCK_BUSY_REASON = ("project.yaml is locked by another pm process "
+                    "(e.g. an open `pm edit`)")
+
+
 @contextmanager
 def _lock(root: Path, timeout: float = LOCK_TIMEOUT_SECONDS):
     """Acquire an exclusive advisory lock on project.yaml.lock.
@@ -382,7 +392,7 @@ def locked_update(
     ``locked_update`` and pass the results into ``fn`` via a closure.
 
     Raises ``StoreLockTimeout`` if the lock cannot be acquired within
-    *timeout* seconds (default 2).
+    *timeout* seconds (default 2); ``NO_WAIT`` tries exactly once.
     """
     with _lock(root, timeout):
         data = load(root, validate=validate)

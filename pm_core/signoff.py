@@ -801,8 +801,13 @@ def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
     return won["ok"]
 
 
-def clear_return_awaiting(root: Path, pr_id: str, hop: str) -> None:
-    """The routed *hop* launched a fresh session: stop forcing a relaunch."""
+def clear_return_awaiting(root: Path, pr_id: str, hop: str,
+                          timeout: float = store.LOCK_TIMEOUT_SECONDS) -> bool:
+    """The routed *hop* launched a fresh session: stop forcing a relaunch.
+
+    False when the lock was not acquired within *timeout* (a caller that
+    must not wait passes ``store.NO_WAIT`` and retries), else True.
+    """
     def _apply(data):
         pr = store.get_pr(data, pr_id)
         rec = (pr or {}).get("signoff_return")
@@ -813,10 +818,15 @@ def clear_return_awaiting(root: Path, pr_id: str, hop: str) -> None:
     try:
         data = store.load(root)
         if return_awaiting(store.get_pr(data, pr_id)) != hop:
-            return
-        store.locked_update(root, _apply)
+            return True
+        store.locked_update(root, _apply, timeout=timeout)
+    except store.StoreLockTimeout as e:
+        if timeout == store.NO_WAIT:
+            return False
+        _log.warning("clear sign-off return for %s: %s", pr_id, e)
     except Exception as e:
         _log.warning("clear sign-off return for %s: %s", pr_id, e)
+    return True
 
 
 def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:

@@ -393,7 +393,8 @@ class TestReviewToQAAutoRestart:
         data = store.load(app._root)
         pr = store.get_pr(data, "pr-001")
         assert pr["status"] == "qa"
-        mock_start.assert_called_once_with(app, "pr-001")
+        mock_start.assert_called_once_with(
+            app, "pr-001", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
 
     def test_self_driving_bypasses_auto_start_off(self, tmp_path):
         """Step 8: Self-driving QA restarts even with auto-start disabled."""
