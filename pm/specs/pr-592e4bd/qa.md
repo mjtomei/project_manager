@@ -553,6 +553,28 @@ env-by-name).
   loads, so each tick may block for 2 s. On master the same completion
   blocked once and lost its note. The scenarios decide, with a
   pre-existing control.
+  Decided live (S48, 716d6ce1 + 006d7b4d; impl.md §5 item 38(a)/(b)):
+  writes retried on the poll timer make one non-blocking lock attempt
+  (`store.NO_WAIT`), say "waiting for project.yaml to be unlocked …"
+  once per wait and land on the first tick after the editor quits. User
+  keys and the CLI keep the 2 s wait. *One-shot hand-offs* (review loop
+  679d i1, 64b41a91, item 38(c)): a hand-off that nothing retries keeps
+  the 2 s wait instead. That is the skip_qa review PASS → sign-off
+  hand-off (`_maybe_auto_merge`). So a pm process that holds the lock
+  for a moment (a `pm pr note add` from a pane, a CLI write) does not
+  lose it, and a hold past 2 s is reported once as `Error: …`. The TUI
+  never shows a "waits" line that promises a retry nobody makes. That
+  longer hold, or an unloadable file, still loses the skip_qa hand-off.
+  This is pre-existing on master and filed as pr-7cf1fe4: record it as
+  an observation, not a pr-592e4bd failure. The retried callers (the QA
+  completion's sign-off follow-up, the scheduler pass `advance_all`)
+  stay non-blocking. The "waits" line is said once per wait, not once
+  per PR, so a later hand-off of the same PR (for example after a
+  sign-off REQA round) that meets a held lock says so again (679d i4).
+  Once the result is recorded and only a follow-up waits for an
+  unloadable file, the completion line reads "QA <V> for <pr> recorded —
+  follow-up waiting for project.yaml to load: …", not "… to load to
+  record it" (S49 observation, 64b41a91).
 
 ## 2. Setup
 
@@ -820,6 +842,53 @@ env-by-name).
     `-nostdin`), stop every recorder and wait until its cast stops
     growing before rendering, and never use `/scratch/qa-artifacts`.
     Same scratch-only limits as the fourteenth pass.
+  - Twentieth pass (S50+), delta-only. S47–S49 ran live, fixed
+    b740e188, 13eb925b, 716d6ce1, 006d7b4d and 3a3dcc3e, and replayed
+    their stories post-fix, S49 also on the combined head (REPORT.md in
+    `/pm-captures/scenarios/47`, `48`, `49`). That evidence stands and is
+    not rerun. Review loop 679d ended PASS in i5 on 300aa1a3 with 3647
+    tests (`/pm-captures/review-679d-i1` … `-i5`, each with README.md,
+    full-suite.log and mutation-checks.log). i2–i5 changed only tests,
+    spec and notes. The only product delta never run live is i1 64b41a91
+    (RQ38 *One-shot hand-offs*):
+    - (a) the skip_qa review PASS hand-off waits up to 2 s for the lock
+      again;
+    - (b) the retried sign-off callers stay non-blocking;
+    - (c) the "waits" set is cleared on every outcome;
+    - (d) the "recorded — follow-up waiting" completion line.
+    Live checks needed:
+    - S50, host, one clone, scratch TUI, S47/S48 harness:
+      - a skip_qa auto-start review PASS whose hand-off meets a brief
+        holder (under 2 s): it goes through, with no "waits" line. Then
+        a hold past 2 s: one `Error:`, no "waits" line, the TUI stalls
+        once for at most ~2 s, and the loss is pr-7cf1fe4 (observation);
+      - a routed QA PASS hand-off with `pm edit` open, and again after a
+        sign-off REQA round of the same PR: each hand-off says it waits
+        exactly once, keys stay fast and nothing stalls;
+      - a hand-off after a TUI restart (recovery or the scheduler pass)
+        with `pm edit` open is handed off once, with one note;
+      - a pre-fix control on ca8fa055 (64b41a91^), where the brief-holder
+        skip_qa hand-off says "waits" and is lost, so the story
+        discriminates.
+    - S51, two clones, S49 harness: the recorded-result line on the
+      cross-clone gap (adopted run, note written, sign-off hand-off
+      fails on the lock and leaves conflict markers) and on a
+      one-clone run, against a completion that meets the markers before
+      its note ("… to load to record it"). One note per run across both
+      clones. The pre-fix control on ca8fa055 shows the old wording.
+    Harness: copy `/pm-captures/scenarios/47/scripts` or
+    `/48/scripts` (one clone) or `/49/scripts` (two clones) and change
+    S, ports and paths. A lock holder is any second pm process or a
+    plain `flock` on `pm/project.yaml.lock`. Measure how long it holds
+    the lock and the TUI key latency (S48 `keyprobe.py`, `wchanmon.py`).
+    Render with this branch's `/workspace/pm/qa/artifacts` `render_cast`
+    (VFR, `ffmpeg -nostdin`, atomic `.partial` → `recording.mp4`), stop
+    every recorder and wait until its cast stops growing first, and
+    never use `/scratch/qa-artifacts`. Known separate limitations stay
+    observations: pr-7cf1fe4 (skip_qa hand-off lost past 2 s or on an
+    unloadable file), pr-0f85376 (an interrupted finalizer is not
+    re-run), pr-235f465, pr-43b14d2, pr-1139060. Same scratch-only
+    limits as the fourteenth pass.
 
 ## 3. Edge cases
 
