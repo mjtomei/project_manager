@@ -31649,7 +31649,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T21:56:29.987693+00:00'
+  updated_at: '2026-10-24T22:09:20.953314+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33357,6 +33357,23 @@ prs:
       first); impl.md 41(f); /pm-captures/review-e0e8-i6.'
     created_at: '2026-10-24T21:56:29Z'
     last_edited: '2026-10-24T21:56:29Z'
+  - id: note-7a5f9b9
+    text: 'Review e0e8 i7 (57f04ee6, CODE CHANGE, small, needs normal re-review):
+      i6 2d58dea4 (unconfigured provider -> one Error: line / "QA stopped: ...") and
+      the e0e8 deltas re-reviewed, sound; TUI in-process panes (discuss, watcher,
+      qa_author) pass no provider, so strict get_provider cannot raise there. Gap
+      fixed: in container mode a routed sign-off whose route is unavailable raised
+      ContainerError, which launch_signoff_window printed to stdout before returning,
+      so `pm pr signoff` exited 0. The TUI sign-off driver discards stdout, so it
+      logged "launched" and never showed the remedy; it retried silently every 60
+      s. It now propagates and `pm pr signoff` prints it on stderr with rc 1, like
+      pm pr start/review, so the TUI shows "Sign-off launch failed for <pr>: work
+      route ... Remedy: ...". 3 mutations caught; baseline 3690, final full suite
+      3692 passed rc 0 (markdown 3.10.3 installed first); impl.md 41(g); /pm-captures/review-e0e8-i7.
+      Observation, unchanged: an auto-start `pm pr start` failure (route down included)
+      reaches only the pm log (pre-existing for every start failure).'
+    created_at: '2026-10-24T22:09:20Z'
+    last_edited: '2026-10-24T22:09:20Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
