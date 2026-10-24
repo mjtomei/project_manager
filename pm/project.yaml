@@ -33286,6 +33286,23 @@ prs:
   merged_at: null
   notes: []
 - id: pr-4296808
+  - id: note-5bc90b3
+    text: 'Review e0e8 i1 (3748691e, CODE CHANGE, small, needs normal re-review):
+      c1c08d83 (impl/review/sign-off containers on the work route: container= build,
+      provider to wrap_claude_cmd, check_route before create, bridge mount) and 9c42bb6e
+      (350f i4 tests; all 11 i4 mutations now caught) reviewed, sound. Gap fixed:
+      create_container reuses a running container by name, and one created before
+      the route was selected has no bridge mount, so the ensure step would refuse
+      Claude with a QA-worded remedy; wrap_claude_cmd now refuses that reuse with
+      a remedy (matters for impl; review/sign-off remove theirs first). Added impl
+      pm pr start wiring test + unrouted reuse test; docstring; sign-off tag hoisted;
+      impl.md R5/section 3/item 40 reconciled with the all-role scope. Not gated (by
+      design, documented): host-mode impl/review/sign-off and host QA planner/s0/verifier/finalizer
+      show an API error on a down router, never a main fallback. 9 mutations caught;
+      full suite 3669 passed (markdown installed first); live: this review ran in
+      a routed review container. /pm-captures/review-e0e8-i1.'
+    created_at: '2026-10-24T12:14:33Z'
+    last_edited: '2026-10-24T12:14:33Z'
   plan: bugs
   title: 'Bug: after z t replaces a QA run, the TUI recovers the superseded run from
     disk and logs INPUT_REQUIRED right after the new run PASS'
