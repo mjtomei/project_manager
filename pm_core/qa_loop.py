@@ -4881,15 +4881,33 @@ def _resume_session(state: QALoopState) -> str | None:
     session is used when the run's session is gone (its windows with it).
     """
     own = get_pm_session()
-    if state.session_tag:
-        run_session = f"pm-{state.session_tag}"
-        if run_session != own:
-            from pm_core import tmux as tmux_mod
-            if tmux_mod.session_exists(f"={run_session}"):
-                _log.info("QA resume for %s: driving its windows in session "
-                          "%s (this TUI: %s)", state.pr_id, run_session, own)
-                return run_session
+    run_session = _live_other_session(state.session_tag)
+    if run_session:
+        _log.info("QA resume for %s: driving its windows in session "
+                  "%s (this TUI: %s)", state.pr_id, run_session, own)
+        return run_session
     return own
+
+
+def _live_other_session(session_tag: str | None) -> str | None:
+    """``pm-<session_tag>`` when it is a live tmux session other than this
+    process's pm session (a run launched from another clone), else None."""
+    if not session_tag or not launched_elsewhere(session_tag):
+        return None
+    from pm_core import tmux as tmux_mod
+    run_session = f"pm-{session_tag}"
+    return run_session if tmux_mod.session_exists(f"={run_session}") else None
+
+
+def launched_elsewhere(session_tag: str | None) -> bool:
+    """True when a run with this session tag was launched from another pm
+    session (another clone of the project), alive or not.
+
+    Where a run came from does not change when its session dies: a clone
+    that has not seen the PR reach QA must not treat that run as obsolete.
+    A run with no recorded tag is attributed to this session.
+    """
+    return bool(session_tag) and f"pm-{session_tag}" != get_pm_session()
 
 
 def resume_qa_sync(

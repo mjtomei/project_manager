@@ -250,6 +250,8 @@ def test_resume_skips_non_qa_pr(tmp_path):
     qa_dir = _seed_run(tmp_path, overall="")
 
     with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "get_pm_session",
+                      return_value="pm-project_manager-deadbeef"), \
          patch.object(qa_loop, "resume_qa_background") as resume_bg, \
          patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
         qa_loop_ui._resume_incomplete_qa(app)
@@ -259,6 +261,60 @@ def test_resume_skips_non_qa_pr(tmp_path):
     # Recorded so it isn't rechecked every tick.
     assert "pr-001" in app._resumed_qa_pr_ids
     # The PR left QA, so its stale snapshot is dropped from disk.
+    assert not _resume_file_path(qa_dir).exists()
+
+
+@pytest.mark.parametrize("other_session_live", [True, False])
+def test_stale_status_keeps_another_clones_snapshot(tmp_path,
+                                                    other_session_live):
+    """Two clones of one project: clone B moved the PR to QA and its TUI
+    died mid-run (with or without its whole tmux session), while this
+    clone's project.yaml still has the PR at an older status.  Where the
+    run came from decides, not whether B's session is up: the snapshot is
+    kept until this project.yaml changes, adopted once a pull brings the
+    PR here in QA, and then driven in B's session if it is up, else in
+    this TUI's own."""
+    app = _make_app(tmp_path, pr_status="in_review")
+    qa_dir = _seed_run(tmp_path, overall="")
+    run_session = "pm-project_manager-deadbeef"
+    live = {"pm-clone-a"} | ({run_session} if other_session_live else set())
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "get_pm_session", return_value="pm-clone-a"), \
+         patch("pm_core.tmux.session_exists",
+               side_effect=lambda name, *a, **k: name.lstrip("=") in live), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+        resume_bg.assert_not_called()
+        assert _resume_file_path(qa_dir).is_file()
+        assert "pr-001" not in app._resumed_qa_pr_ids
+
+        data = store.load(app._root)
+        data["prs"][0]["status"] = "qa"
+        store.save(data, app._root)
+        qa_loop_ui._resume_incomplete_qa(app)
+
+        resume_bg.assert_called_once()
+        state = resume_bg.call_args.args[0]
+        assert qa_loop._resume_session(state) == (
+            run_session if other_session_live else "pm-clone-a")
+    assert _resume_file_path(qa_dir).is_file()
+
+
+def test_stale_status_drops_this_sessions_own_snapshot(tmp_path):
+    """A run launched from this session whose PR has left QA here is
+    cleaned up."""
+    app = _make_app(tmp_path, pr_status="in_review")
+    qa_dir = _seed_run(tmp_path, overall="")
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "get_pm_session",
+                      return_value="pm-project_manager-deadbeef"), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_not_called()
+    assert "pr-001" in app._resumed_qa_pr_ids
     assert not _resume_file_path(qa_dir).exists()
 
 

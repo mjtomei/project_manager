@@ -436,6 +436,23 @@ recorded with item 29.
         the claim, shown by a deterministic barrier regression (fails
         without the claim) and a two-process regression (fails 4/4 with
         the lock removed).
+    (e) *Stale status in this clone.* A PR present here at an older
+        status while the other clone moved it to QA was treated as "left
+        QA" and its snapshot deleted once that clone's TUI died, so its
+        restart had nothing to resume (S39's loss, between clones). The
+        "left QA" cleanup now applies only to runs launched from this
+        TUI's own pm session (snapshot `session_tag`, or none recorded).
+        A run from another session is left alone until this project.yaml
+        changes, whether or not that session is still up: provenance, not
+        liveness, decides (`qa_loop.launched_elsewhere`). If a pull then
+        brings the PR here in QA it is adopted and driven in its own
+        session, or in this TUI's when that session is gone
+        (`_resume_session`). Cost: a snapshot from another clone whose PR
+        really left QA stays on disk until that clone's TUI drops it.
+        Review loop 2b8a i2; `test_stale_status_keeps_another_clones_snapshot`
+        (live and gone session; fails with no guard, and its gone-session
+        case fails with a liveness-only guard),
+        `test_stale_status_drops_this_sessions_own_snapshot`.
     Regressions in `tests/test_qa_resume.py` (each fails with its fix
     reverted): `test_resume_of_a_pulled_pr_reloads_the_tree`,
     `test_resumed_run_is_driven_in_the_session_that_holds_its_windows`,

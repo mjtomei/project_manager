@@ -575,6 +575,16 @@ def _resume_incomplete_qa(app) -> None:
                 return
         pr = store.get_pr(project_data, pr_id)
         if not pr or pr.get("status") != "qa":
+            # A run launched from another clone (its own pm session) may
+            # be in QA in that clone's project.yaml but not in this one
+            # yet: dropping its snapshot would leave nothing to resume (as
+            # in S39), whether or not that session is still up — a pull
+            # can still bring the PR here in QA and this TUI then adopts
+            # it.  Only this session's own runs are cleaned up here.
+            # Leave it until this project.yaml changes.
+            if qa_loop.launched_elsewhere(rdata.get("session_tag")):
+                foreign.add(pr_id)
+                continue
             # The PR has left QA, so this snapshot can never be validly
             # resumed (resume requires status == "qa").  Drop it so it
             # doesn't linger on disk or get mistakenly picked up if the
