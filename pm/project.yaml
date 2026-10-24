@@ -31628,7 +31628,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T06:02:10.608489+00:00'
+  updated_at: '2026-10-24T06:18:55.738285+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33036,6 +33036,24 @@ prs:
       Fixed stale impl.md index (S1-S46, suite pointer 33(d)).'
     created_at: '2026-10-24T06:02:10Z'
     last_edited: '2026-10-24T06:02:10Z'
+  - id: note-f4e5cae
+    text: 'QA19 planner (2026-10-24): spec a8ab7d98 adds a nineteenth pass (S47+),
+      delta-only, for ba5dd6e7 (one QA note per run when a TUI restart re-processes
+      a completion whose follow-up was pending; load-error line cleared by its seq).
+      S45/S46 evidence stands. The gap (note written, follow-up pending, snapshot
+      kept) is reached reliably only through the auto-start sign-off hand-off, whose
+      locked_update waits on the project lock: a helper takes the lock the instant
+      the note lands and leaves the file unloadable. start_qa/review start/tree reload
+      only store.load (sub-ms race). Pre-fix control 5de77fe7. Two open points from
+      code reading, which the scenarios decide: (a) RQ38: with `pm edit` open (lock
+      held until quit), _transition_pr_status/_record_qa_note/start_signoff/the pending
+      hand-off retry StoreLockTimeout every poll tick on the TUI thread, 2 s each,
+      so the TUI may stay busy (master: one block, note lost). (b) Two clones: if
+      the adopting TUI dies in the gap and the launching clone restarts first, it
+      may recover the run into its own project.yaml, which lacks the adopter note
+      (one run, two notes).'
+    created_at: '2026-10-24T06:18:55Z'
+    last_edited: '2026-10-24T06:18:55Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
