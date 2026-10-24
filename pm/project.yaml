@@ -22350,7 +22350,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-13T03:40:41.462348+00:00'
+  updated_at: '2026-10-24T13:27:03.207128+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22370,6 +22370,37 @@ prs:
       in session project_manager-c5a1006b.'
     created_at: '2026-10-13T03:40:41Z'
     last_edited: '2026-10-13T03:40:41Z'
+  - id: note-afe67d8
+    text: 'Audit complete + fix landed (518b130d). Every prompt builder that inlined
+      a collection is now bounded; new pm_core/prompt_bounds.py is the single source
+      of truth (PROMPT_ARG_LIMIT, shared budgets, bounded_join/bounded_text/bounded_lines
+      with explicit omission markers naming a command/path — no silent truncation).
+
+
+      Bounded: PR notes (newest full, older summarized), impl/QA specs + prior-spec
+      context, sibling-PR plan context, deps, QA scenarios, integration overlap/conflicts,
+      QA instruction library + mocks, concretization instruction file, QA child/verification
+      steps + artifact listings, QA finalize listing, merge error output, watcher
+      managed set, session notes (notes_for_prompt/notes_section), and plan review/breakdown/deps
+      PR + plan-file listings.
+
+
+      Launcher guard (defense in depth): build_claude_shell_cmd / launch_claude /
+      launch_claude_print[_background] detect an over-limit prompt, write the COMPLETE
+      prompt to a file, and pass a short bootstrap argv pointing at it (preserving
+      every instruction); with no writable dir they raise PromptTooLargeError instead
+      of a raw E2BIG. The old "$(cat file)" path is NOT used for oversized prompts.
+
+
+      Also added `pm pr show <pr-id>` (read-only) — the plan-review fallback referenced
+      a command that did not exist.
+
+
+      Evidence: /pm-captures/impl/pre-fix (615411-byte review prompt, errno 7 repro)
+      and /pm-captures/impl/post-fix (39714 bytes + launcher bootstrap). Tests: tests/test_prompt_bounds.py
+      (43 cases; full suite 3400 passed, 1 pre-existing hook_events failure).'
+    created_at: '2026-10-24T13:27:03Z'
+    last_edited: '2026-10-24T13:27:03Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
