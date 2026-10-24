@@ -245,7 +245,8 @@ def validate_model_config(project_data: dict | None) -> list[str]:
     - ``session_models`` / ``session_effort`` keys are known session types
       (``SESSION_TYPES``);
     - ``session_effort`` values are valid effort levels (``EFFORT_LEVELS``);
-    - each PR's ``session_models`` is a mapping keyed by known session types.
+    - each PR's ``session_models`` is a mapping keyed by known session types,
+      with model-name values (other values are ignored).
 
     Unknown keys are silently ignored by ``resolve_model_and_provider`` — a
     typo'd session type would otherwise just never take effect — so this is
@@ -288,10 +289,13 @@ def validate_model_config(project_data: dict | None) -> list[str]:
         if not isinstance(entries, dict):
             errors.append(f"{where} must be a mapping")
             continue
-        for st in entries:
+        for st, val in entries.items():
             if st not in SESSION_TYPES:
                 errors.append(f"{where}: unknown session type {st!r}. "
                               f"Valid types: {known}")
+            elif not _is_model_value(val):
+                errors.append(f"{where}[{st!r}]: {val!r} is not a model "
+                              "name or 'provider:<name>' (ignored)")
     return errors
 
 
@@ -307,6 +311,14 @@ def get_pr_model_override(pr_entry: dict,
     models = pr_entry.get("session_models")
     if session_type and isinstance(models, dict):
         for role in (session_type, _FALLBACK_TYPES.get(session_type)):
-            if role and role in models:
+            # A blank or non-string entry (hand-edited YAML) counts as
+            # absent: it must neither drop the PR model for that role nor
+            # raise at every launch of it.
+            if role and _is_model_value(models.get(role)):
                 return models[role]
     return pr_entry.get("model")
+
+
+def _is_model_value(value) -> bool:
+    """A usable model value: a model name or ``provider:<name>``."""
+    return isinstance(value, str) and bool(value.strip())

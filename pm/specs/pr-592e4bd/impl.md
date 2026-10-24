@@ -975,3 +975,15 @@ recorded with item 41.
         passed to it (`/pm-captures/review-e0e8-i4/mutation-checks.log`).
         Full suite 3683 passed, rc 0 (markdown 3.10.3 installed first;
         `/pm-captures/review-e0e8-i4/full-suite.log`).
+    (e) Review loop e0e8 i5: a role entry that is blank (`signoff:` with
+        no value) or not a string was taken as the role's value.  A blank
+        one silently dropped the PR `model` for that role (sign-off on the
+        project default), and a non-string one raised `AttributeError` at
+        every launch of the role.  Such entries now count as absent (the
+        parent role, then the PR `model` apply), and
+        `validate_model_config` reports them.
+        `test_blank_or_non_string_role_entries_count_as_absent`,
+        `test_pr_session_models_bad_values_flagged` (each fails with its
+        fix reverted; `/pm-captures/review-e0e8-i5/mutation-checks.log`).
+        Full suite 3685 passed, rc 0 (markdown 3.10.3 installed first;
+        `/pm-captures/review-e0e8-i5/full-suite.log`).

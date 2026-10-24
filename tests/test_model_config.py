@@ -203,6 +203,25 @@ class TestGetPrModelOverride:
             pr = {"model": "opus", "session_models": bad}
             assert get_pr_model_override(pr, "qa") == "opus"
 
+    def test_blank_or_non_string_role_entries_count_as_absent(self,
+                                                              monkeypatch):
+        """``signoff:`` left blank must not drop the PR model (silently
+        moving sign-off to the project default), and a non-string entry
+        must not raise at every launch of the role."""
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        for bad in (None, "", "  ", 5, {"model": "x"}):
+            pr = {"model": "provider:deepseek-flash",
+                  "session_models": {"signoff": bad}}
+            assert get_pr_model_override(pr, "signoff") == \
+                "provider:deepseek-flash"
+            res = resolve_model_and_provider(
+                "signoff", pr_model=get_pr_model_override(pr, "signoff"))
+            assert res.provider == "deepseek-flash"
+            # The parent role's entry still applies over the PR model.
+            pr["session_models"]["review"] = "provider:claude-work"
+            assert get_pr_model_override(pr, "signoff") == \
+                "provider:claude-work"
+
     def test_qa_roles_resolve_their_pr_exception(self, monkeypatch):
         """QA launches resolve through qa_loop._resolve_qa_model.  A worker
         exception reaches only the worker: s0 (qa_interactive) and the
@@ -438,6 +457,17 @@ class TestValidateModelConfig:
         assert len(errors) == 2
         assert "prs[pr-a].session_models" in errors[0] and "sign_off" in errors[0]
         assert errors[1] == "prs[pr-b].session_models must be a mapping"
+
+    def test_pr_session_models_bad_values_flagged(self):
+        """Blank or non-string role entries are ignored, so say so."""
+        from pm_core.model_config import validate_model_config
+        data = {"prs": [{"id": "pr-a", "session_models": {
+            "signoff": None, "review": 5, "impl": "sonnet"}}]}
+        errors = validate_model_config(data)
+        assert len(errors) == 2
+        assert errors[0].startswith("prs[pr-a].session_models['signoff']")
+        assert "None is not a model name" in errors[0]
+        assert errors[1].startswith("prs[pr-a].session_models['review']")
 
     def test_non_mapping_model_config_still_checks_prs(self):
         from pm_core.model_config import validate_model_config
