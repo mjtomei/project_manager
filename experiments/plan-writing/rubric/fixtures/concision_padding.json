@@ -1,0 +1,38 @@
+{
+  "id": "concision_padding",
+  "dimension": "concision",
+  "concerns": [
+    "padding"
+  ],
+  "case_type": "whole_document",
+  "document_kind": "policy statement",
+  "strong": "More night jobs would keep youths off the streets.",
+  "weak": "There is no escaping the fact that it is considered very important to note that a number of various available applicable studies ipso facto have generally identified the fact that additional appropriate nocturnal employment could usually keep juvenile adolescents off thoroughfares during the night hours, including but not limited to the time prior to midnight on weeknights and/or 2 a.m. on weekends.",
+  "expected": {
+    "better": "strong",
+    "dimension": "concision"
+  },
+  "also_moves": [
+    "clarity_and_precision",
+    "risks_and_open_questions"
+  ],
+  "held_constant": "The claim that more night jobs would keep young people off the streets.",
+  "notes": "Length differs by design: a judge preferring the padded variant is rewarding length. The padded version is a published parody and also carries hedges the short one drops.",
+  "pair_kind": "before_after",
+  "provenance": {
+    "weak": {
+      "ref": "fplg",
+      "locator": "III. Write clearly, 'Use short, simple words', printed p. 36 (padded version)"
+    },
+    "strong": {
+      "ref": "fplg",
+      "locator": "same page (plain version)"
+    }
+  },
+  "direction_source": "source_author_rewrite",
+  "source_framing": {
+    "text": "Use short, simple words",
+    "ref": "fplg",
+    "locator": "III. Write clearly, 3. Other word issues, heading i (the example sits under this heading)"
+  }
+}

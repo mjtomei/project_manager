@@ -1,0 +1,37 @@
+{
+  "id": "clarity_terms_of_art",
+  "dimension": "clarity_and_precision",
+  "concerns": [
+    "unintroduced_terms"
+  ],
+  "case_type": "whole_document",
+  "document_kind": "disclosure document sentence",
+  "strong": "You will not have to turn in your shares of Beco stock or pay any money to receive your shares of Unis common stock from the spin-off.",
+  "weak": "No consideration or surrender of Beco Stock will be required of shareholders of Beco in return for the shares of Unis Common Stock issued pursuant to the Distribution.",
+  "expected": {
+    "better": "strong",
+    "dimension": "clarity_and_precision"
+  },
+  "also_moves": [
+    "purpose_and_audience"
+  ],
+  "held_constant": "The same fact about the spin-off.",
+  "notes": "Defined terms and terms of art ('consideration', 'surrender', 'the Distribution') used as if the shareholder knew them; the rewrite says what they mean. It also switches to second person.",
+  "pair_kind": "before_after",
+  "provenance": {
+    "weak": {
+      "ref": "sec-plain-english",
+      "locator": "Chapter 6, 'Bring abstractions down to earth', printed p. 24 (before)"
+    },
+    "strong": {
+      "ref": "sec-plain-english",
+      "locator": "same page (after)"
+    }
+  },
+  "direction_source": "source_author_rewrite",
+  "source_framing": {
+    "text": "Bring abstractions down to earth\n[...]\nMost people don’t have an image in their minds when they hear abstract words like these.",
+    "ref": "sec-plain-english",
+    "locator": "Chapter 6, 'Bring abstractions down to earth'"
+  }
+}

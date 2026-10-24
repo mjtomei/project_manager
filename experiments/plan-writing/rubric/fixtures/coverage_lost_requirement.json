@@ -1,0 +1,41 @@
+{
+  "id": "coverage_lost_requirement",
+  "dimension": "requirement_coverage",
+  "concerns": [
+    "lost_requirements"
+  ],
+  "case_type": "whole_document",
+  "document_kind": "protocol specification revision",
+  "brief": "8.3 MKCOL Method\n\n   The MKCOL method is used to create a new collection. All DAV\n   compliant resources MUST support the MKCOL method.",
+  "strong": "9.3 MKCOL Method\n\n   The MKCOL method is used to create a new collection. All DAV compliant\n   resources MUST support the MKCOL method.\n\n   MKCOL creates a new collection resource at the location specified by\n   the Request-URI. [...]",
+  "weak": "9.3.  MKCOL Method\n\n   MKCOL creates a new collection resource at the location specified by\n   the Request-URI. [...]",
+  "expected": {
+    "better": "strong",
+    "dimension": "requirement_coverage"
+  },
+  "also_moves": [],
+  "held_constant": "The section's description of MKCOL; the stronger version restores the brief's MUST-support requirement. The [...] is in the erratum.",
+  "notes": "A revised specification that dropped a requirement of the document it replaced.",
+  "pair_kind": "erratum",
+  "provenance": {
+    "brief": {
+      "ref": "rfc4918-erratum-1430",
+      "locator": "RFC 2518 Section 8.3"
+    },
+    "weak": {
+      "ref": "rfc4918-erratum-1430",
+      "locator": "RFC 4918 Section 9.3, published"
+    },
+    "strong": {
+      "ref": "rfc4918-erratum-1430",
+      "locator": "RFC 4918 Section 9.3, corrected"
+    }
+  },
+  "direction_source": "independent_verifier",
+  "source_framing": {
+    "text": "The statement, that support for MKCOL is a MUST-requirement has unintentionally been dropped.",
+    "ref": "rfc4918-erratum-1430",
+    "locator": "erratum notes"
+  },
+  "length_confound": true
+}

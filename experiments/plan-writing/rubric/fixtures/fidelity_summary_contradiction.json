@@ -1,0 +1,44 @@
+{
+  "id": "fidelity_summary_contradiction",
+  "dimension": "fidelity",
+  "concerns": [
+    "fidelity"
+  ],
+  "case_type": "whole_document",
+  "document_kind": "one-sentence news summary",
+  "brief": "The service, held to mark the surrender of Japan at the end of World War Two, was led by Reverend Canon Bob White.The event included readings from Burma veterans and a performance from the Portsmouth Military Wives Choir.The service saw wreaths laid at the war memorial, including one on behalf of the city placed by the Lord Mayor of Portsmouth, councillor Frank Jonas.Council leader Donna Jones said: \"It's important for communities to commemorate events such as these.\"The ceremonies in the city provide a poignant opportunity to reflect and remember.\"A special VJ Day Choral Evensong was due to take place from 18:00 BST at Portsmouth Cathedral on Sunday.",
+  "strong": "a service of remembrance has taken place in portsmouth.",
+  "weak": "a service has taken place in portsmouth to mark the 70th anniversary of world war one.",
+  "expected": {
+    "better": "strong",
+    "dimension": "fidelity"
+  },
+  "also_moves": [
+    "clarity_and_precision",
+    "requirement_coverage"
+  ],
+  "held_constant": "Two model summaries of the same article.",
+  "notes": "All three annotators mark 'world war one' as contradicting the article (VJ Day, World War Two) and '70th anniversary' as unsupported; the stronger summary is hallucination-free but less specific.",
+  "pair_kind": "annotated_dataset",
+  "provenance": {
+    "brief": {
+      "ref": "xsum-hallucinations",
+      "locator": "XSum article 33945697"
+    },
+    "weak": {
+      "ref": "xsum-hallucinations",
+      "locator": "bbcid 33945697, TranS2S summary"
+    },
+    "strong": {
+      "ref": "xsum-hallucinations",
+      "locator": "bbcid 33945697, BERTS2S summary"
+    }
+  },
+  "direction_source": "annotators",
+  "source_framing": {
+    "text": "intrinsic: \"one\"; extrinsic: \"70th anniversary\" (all three annotators; the other summary has no hallucinated spans)",
+    "ref": "xsum-hallucinations",
+    "locator": "hallucination span labels for bbcid 33945697, rendered from the annotation fields"
+  },
+  "length_confound": true
+}

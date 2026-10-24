@@ -1,0 +1,42 @@
+{
+  "id": "verifiability_rollback_metrics",
+  "dimension": "verifiability",
+  "concerns": [],
+  "case_type": "whole_document",
+  "document_kind": "Kubernetes enhancement proposal section",
+  "brief": "###### What specific metrics should inform a rollback?\n\n<!--\nWhat signals should users be paying attention to when the feature is young\nthat might indicate a serious problem?\n-->",
+  "strong": "###### What specific metrics should inform a rollback?\n\nOn Kubernetes side, the kubelet should start correctly.\n\nOn the node runtime side, a pod created with pod.spec.hostUsers=false should be on RUNNING state if\nall node requirements are met. If the CRI runtime or the handler do not support the feature, the\nkubelet returns an error.\n\nWhen a pod hits this error returned by the kubelet, the status in `kubectl` is shown as\n`ContainerCreating` and the pod events shows:\n\n```\n  Warning  FailedCreatePodSandBox  12s (x23 over 5m6s)  kubelet            Failed to create pod sandbox: user namespaces is not supported by the runtime\n```\n\nThe following kubelet metrics are useful to check:\n - `kubelet_running_pods`: Shows the actual number of pods running\n - `kubelet_desired_pods`: The number of pods the kubelet is _trying_ to run\n\nIf these metrics are very different, it means there are desired pods that can't be set to running.\nIf that is the case, checking the pod events to see if they are failing for user namespaces reasons\n(like the errors shown in this KEP) is advised, in which case it is recommended to rollback or\ndisable the feature gate.",
+  "weak": "###### What specific metrics should inform a rollback?\n\nOn Kubernetes side, the kubelet should start correctly.\n\nOn the node runtime side, a pod created with pod.spec.hostUsers=false should be on RUNNING state if\nall node requirements are met. If the CRI runtime or the handler do not support the feature, the kubelet\nreturns an error.",
+  "expected": {
+    "better": "strong",
+    "dimension": "verifiability"
+  },
+  "also_moves": [
+    "clarity_and_precision",
+    "risks_and_open_questions"
+  ],
+  "held_constant": "The first two paragraphs; the stronger version adds the observable event, two metrics and the rollback condition.",
+  "notes": "A rollback criterion a reader cannot check versus named events and metrics. The stronger version is much longer.",
+  "pair_kind": "revision_history",
+  "provenance": {
+    "brief": {
+      "ref": "kep127-pr4439",
+      "locator": "KEP template prompt for the section"
+    },
+    "weak": {
+      "ref": "kep127-pr4439",
+      "locator": "README.md at fc5ea6ee"
+    },
+    "strong": {
+      "ref": "kep127-pr4439",
+      "locator": "README.md at b64d85b2"
+    }
+  },
+  "direction_source": "reviewer_then_revision",
+  "source_framing": {
+    "text": "[Not a native metric, but something measurable]",
+    "ref": "kep127-pr4439",
+    "locator": "review comment on 'What specific metrics should inform a rollback?'"
+  },
+  "length_confound": true
+}

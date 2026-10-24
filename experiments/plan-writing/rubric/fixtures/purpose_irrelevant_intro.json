@@ -1,0 +1,41 @@
+{
+  "id": "purpose_irrelevant_intro",
+  "dimension": "purpose_and_audience",
+  "concerns": [],
+  "case_type": "whole_document",
+  "document_kind": "best-practices guide introduction",
+  "brief": "review and revise the following introduction for a best practices guide for a hypothetical programming language called F@. Remove any information you feel is irrelevant in this context and add any information you feel is missing.",
+  "strong": "This guide lists best practices for working with the F@ programming language. Before you review this guide, complete the introductory tutorial for new F@ developers. This guide supplements the F@ style guide. In addition to the best practices in this guide, make sure you also install the F@ command-line linter and run it on your code. If you have suggestions for additions to the list of best practices, file an issue in the F@ documentation repository.",
+  "weak": "This guide lists best practices for working with the F@ programming language. F@ was developed in 2011 as an open source community project. This guide supplements the F@ style guide. In addition to the best practices in this guide, make sure you also install the F@ command-line linter and run it on your code. The programming language is widely adopted in the health industry. If you have suggestions for additions to the list of best practices, file an issue in the F@ documentation repository.",
+  "expected": {
+    "better": "strong",
+    "dimension": "purpose_and_audience"
+  },
+  "also_moves": [
+    "concision",
+    "salience_and_synthesis"
+  ],
+  "held_constant": "Every sentence except two: the weaker version carries the founding year and industry adoption, the stronger one the prerequisite tutorial.",
+  "notes": "Near-minimal published rewrite: facts irrelevant to the guide's reader are removed and the missing prerequisite is added.",
+  "pair_kind": "before_after",
+  "provenance": {
+    "brief": {
+      "ref": "google-tw2",
+      "locator": "Introduce a document > Introduction exercise (prompt)"
+    },
+    "weak": {
+      "ref": "google-tw2",
+      "locator": "Introduction exercise (original)"
+    },
+    "strong": {
+      "ref": "google-tw2",
+      "locator": "Introduction exercise, 'one possible solution'"
+    }
+  },
+  "direction_source": "source_author_rewrite",
+  "source_framing": {
+    "text": "Remove any\ninformation you feel is irrelevant in this context and add any information you\nfeel is missing.",
+    "ref": "google-tw2",
+    "locator": "Introduce a document > Introduction exercise"
+  }
+}

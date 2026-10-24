@@ -30195,11 +30195,248 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677739+00:00'
-  updated_at: '2026-10-21T00:15:38.677739+00:00'
+  updated_at: '2026-10-23T22:52:11.302759+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-e967b4c
+    text: 'Refiner S5 (concurrency) probe on dd4f97ef: 34 parallel --render + 16-thread
+      runner (240 renders) all matched baseline; 10 parallel --write-doc + 6 pytest
+      + renders x4 waves left rubric.md == committed, but ~1 in 40 --write-doc crashed
+      "ValueError: not enough values to unpack" at text.split(GENERATED_START) after
+      reading a mid-write (truncated) rubric.md from a sibling writer — expected non-atomic-write
+      race, report as low-severity. pytest needs a venv: python3 -m venv V && V/bin/pip
+      install pytest pyyaml; run V/bin/python -m pytest from repo root (tests import
+      pm_core).'
+    created_at: '2026-10-21T03:15:12Z'
+    last_edited: '2026-10-21T03:15:12Z'
+  - id: note-e85b796
+    text: 'QA S5: write_doc now replaces rubric.md via mkstemp+os.replace (85cd00e9);
+      before this, 5/80 concurrent --write-doc runs crashed with ValueError at the
+      GENERATED split. tests/test_doc_rubric.py is now 149 tests, not 148.'
+    created_at: '2026-10-21T03:19:23Z'
+    last_edited: '2026-10-21T03:19:23Z'
+  - id: note-271b84e
+    text: 'Refiner S8: pm plan add launches the REAL /usr/local/bin/claude (also ~/.local/bin/claude).
+      Run it as env PATH=$HOME/.local/share/pm/venv/bin:/usr/bin:/bin pm plan add
+      ... so it prints "Claude CLI not found" instead; then overwrite pm/plans/<plan-id>.md
+      with the fixture text and pm plan load. Verified on 354a4a19: strong -> 2 PRs
+      (2nd <- 1st), weak -> "No PRs found in plan file..." exit 1. validate_judgment
+      duplicate-row message is generic ("duplicate or malformed dimension rows"),
+      and prompts contain double spaces from the JSON schema indent, so check doubled
+      spaces only in the opening paragraph.'
+    created_at: '2026-10-21T03:38:50Z'
+    last_edited: '2026-10-21T03:38:50Z'
+  - id: note-eb96a68
+    text: 'QA S8 (runner integration) PASS on 354a4a19. Spec gotcha: PATH="$HOME/.local/share/pm/venv/bin:/usr/bin:/bin"
+      has no pm in the review container (pm=/usr/local/bin/pm, which sits beside /usr/local/bin/claude),
+      so use a dir holding only a pm symlink to keep pm plan add from launching claude.'
+    created_at: '2026-10-21T03:43:14Z'
+    last_edited: '2026-10-21T03:43:14Z'
+  - id: note-73c2ff5
+    text: 'S6 refiner (2026-10-21, head 354a4a19): tests/test_doc_rubric.py now has
+      150 tests (not 149). In a smoke run of 3 waves (12 --write-doc + 20 --render
+      each), plus 40 SIGINT and 40 SIGKILL interrupts, there were 0 failures, no leftover
+      .rubric.md.* files, and git status stayed clean. The mkstemp-to-replace window
+      is tiny, so a SIGKILL temp leftover is hard to hit. .gitignore does not cover
+      .rubric.md.*, so a leftover file would show as untracked in git status. The
+      S5 drivers in /pm-captures/scenarios/5/scripts can be reused.'
+    created_at: '2026-10-21T03:34:29Z'
+    last_edited: '2026-10-21T03:34:29Z'
+  - id: note-a5dc82b
+    text: 'QA S6 (2026-10-21): concurrency held at 354a4a19 (12 waves: 612 renders,
+      144 write-docs, 36 pytest; 6000 threaded jobs with 126 background write-docs;
+      all clean). But SIGINT could leave a 0-byte .rubric.md.XXXX (10/2000 interrupts
+      at 11-17 ms) because KeyboardInterrupt fired as mkstemp os.open returned, before
+      the cleanup try started. Fixed in 6324448d: the temp name .rubric.md.<pid>.<tid>
+      is chosen before the file is created inside the try, and the text is built first.
+      Post-fix 0/2000. Tests are now 151. SIGKILL can still rarely leave a .rubric.md.*
+      file (1/271 dense kills), which git shows as untracked; consider a .gitignore
+      rule. SIGINT during CPython startup exits 1 (init_import_site) and never reaches
+      rubric.py.'
+    created_at: '2026-10-21T03:43:52Z'
+    last_edited: '2026-10-21T03:43:52Z'
+  - id: note-e3f6c48
+    text: 'S7 refine (rubric maintenance): every "### <dim> — " heading in rubric.md
+      lives inside the GENERATED block (lines ~90-555), so "heading deleted outside
+      the block" cannot happen; a deleted heading fails test_rubric_doc_has_every_dimension_and_is_current
+      and --write-doc restores it. Leak checks must compare against fixture fields
+      (id/notes/held_constant/"expected" key/URLs), not bare words: the whole_document
+      template itself says "which is expected to be better", and fixture text plus
+      the continuity definition contain "notes"/"generated"/"original". Read-only-dir
+      check needs a non-root user. Run pytest with PYTHONPATH=<clone root> (env has
+      PYTHONPATH=/opt/pm-src).'
+    created_at: '2026-10-21T03:35:48Z'
+    last_edited: '2026-10-21T03:35:48Z'
+  - id: note-3b51061
+    text: 'QA S7 maintenance loop PASS on 354a4a19 (captures /pm-captures/scenarios/7).
+      On 6324448d spec counts drift +1: baseline 151 passed; unknown-ref case is 4
+      failed/147 passed (new test_write_doc_interrupt_after_temp_created_leaves_no_temp
+      also fails); heading-damage first run is 2 failed/149 passed (test_write_doc_replaces_file_by_rename
+      also fails, expected). Update qa spec counts.'
+    created_at: '2026-10-21T03:44:41Z'
+    last_edited: '2026-10-21T03:44:41Z'
+  - id: note-5190062
+    text: 'S9 refiner (542cde34): every triple reproduced in a scratch clone. The
+      baseline is 151 passed, and also passes under unshare -rn. Truncated dimensions.json
+      makes pytest stop at collection ("1 error during collection", rc 2, zero tests
+      run) because the module loads RUBRIC at import. The JSONDecodeError gives line,
+      column and char but not the filename; the traceback shows dimensions.json. Unknown
+      ref gives write-doc KeyError and pytest 4 failed/147 passed. Deleted heading
+      gives 2 failed/149 passed. A read-only dir gives PermissionError on .rubric.md.<pid>.<tid>,
+      rc 1. .gitignore now hides .rubric.md.*, so check for temp files with ls -a,
+      not git status. Edit dimensions.json in place (sed/editor): json.dumps reformats
+      the whole file.'
+    created_at: '2026-10-21T03:59:09Z'
+    last_edited: '2026-10-21T03:59:09Z'
+  - id: note-c10d673
+    text: 'QA S12 PASS on 542cde34 (captures /pm-captures/scenarios/12): 5 waves (170
+      renders, 600 threaded, 60 write-doc, 20 pytest) clean; 3000 SIGINT 0 temp leftovers;
+      2057 SIGKILL left 11 real .rubric.md.* (9 empty, 2 partial 32K/48K) all gitignored
+      via .gitignore:4, rubric.md never changed. Spec drift: fresh umask-022 clone
+      has rubric.md mode 644, not 664. SIGINT no-output exit 130 (~12%) comes from
+      default SIGINT disposition at startup/shutdown, not rubric.py.'
+    created_at: '2026-10-21T04:03:53Z'
+    last_edited: '2026-10-21T04:03:53Z'
+  - id: note-cfb5ff7
+    text: 'Sign-off 2026-10-21 on 5e5c1646: SIGNOFF_MERGE. 151 tests pass; final code
+      c56b4403 was reviewed (cf10) and QA r3 S9-S12 all PASS on 542cde34. Report:
+      /pm-captures/report.html. 37/46 reference URLs return 200; the other 9 are bot-blocked
+      ISO/IEEE/DOI pages, verified via doi.org/Crossref. Automatic-candidate measures
+      are specified only; implementing and calibrating them is pr-8df6472 work.'
+    created_at: '2026-10-21T04:19:57Z'
+    last_edited: '2026-10-21T04:19:57Z'
+  - id: note-42f82f4
+    text: 'Sign-off re-run 2026-10-21 on 0d1a6bf3: SIGNOFF_MERGE re-confirmed. Only
+      change since 5e5c1646 is the prior sign-off note in pm/project.yaml; 151 tests
+      pass, --write-doc leaves tree clean. Report /pm-captures/report.html refreshed
+      (head, diff, notes).'
+    created_at: '2026-10-21T04:21:10Z'
+    last_edited: '2026-10-21T04:21:10Z'
+  - id: note-962d60c
+    text: 'Sign-off re-run 2026-10-21 on b33f48f3: SIGNOFF_MERGE re-confirmed. Only
+      change since 0d1a6bf3 is the previous re-run note in pm/project.yaml; code unchanged
+      since c56b4403. 151 tests pass, --write-doc leaves tree clean. Report /pm-captures/report.html
+      refreshed (head, commit log, project.yaml diff, notes).'
+    created_at: '2026-10-21T04:22:21Z'
+    last_edited: '2026-10-21T04:22:21Z'
+  - id: note-9e8d183
+    text: 'Sign-off re-run 2026-10-21 on 93883ea9: SIGNOFF_MERGE re-confirmed. Only
+      change since b33f48f3 is the previous re-run note in pm/project.yaml; code unchanged
+      since c56b4403. 151 tests pass, --write-doc leaves tree clean. Report /pm-captures/report.html
+      refreshed (head, commit log, project.yaml diff, notes).'
+    created_at: '2026-10-21T04:23:31Z'
+    last_edited: '2026-10-21T04:23:31Z'
+  - id: note-53ec438
+    text: 'Sign-off 2026-10-22 on 1a6d63b2: SIGNOFF_IMPL (forced by the integration
+      conflict, not a code gap). Merging master@337d1266 conflicts only in pm/project.yaml,
+      in one hunk: updated_at on pr-8df6472 (ours 2026-10-21T03:24:58, master 2026-10-21T19:18:18).
+      Take master''s timestamp and keep both sides'' notes and description. Nothing
+      under experiments/plan-writing/ or tests/test_doc_rubric.py changed on the base.
+      After the merge, run tests/test_doc_rubric.py (151 expected) and --write-doc
+      (tree stays clean), then return to sign-off. The base revised plan-doc-eval.md
+      to add impl/QA spec cases and cross-lab/open-model judge panels. The existing
+      dimensions already cover these (requirement_coverage, rationale_and_alternatives,
+      risks_and_open_questions, verifiability), so no rubric change is required. A
+      spec required-section list for template_section_presence is optional and better
+      left to pr-8df6472. Code review (c56b4403) and QA r3 S9-S12 PASS (542cde34)
+      still hold. Report: /pm-captures/report.html.'
+    created_at: '2026-10-22T14:12:38Z'
+    last_edited: '2026-10-22T14:12:38Z'
+  - id: note-e57026c
+    text: 'Impl 2026-10-22: merged master@337d1266 (only conflict pm/project.yaml
+      pr-8df6472 updated_at; took master timestamp, kept both sides notes/description).
+      tests/test_doc_rubric.py 151 passed; --write-doc leaves tree clean. Ready for
+      sign-off again.'
+    created_at: '2026-10-22T14:14:21Z'
+    last_edited: '2026-10-22T14:14:21Z'
+  - id: note-9b6b0e2
+    text: 'QA S16 PASS on b3529c34 (captures /pm-captures/scenarios/16, scripts reusable):
+      5 waves (170 renders, 60 write-doc, 20 pytest 151 passed, 5x 16-thread importlib
+      runner) clean; 3000 SIGINT 0 temp leftovers, rubric.md never changed; 968 SIGKILL
+      at 10-40 ms left 8 real .rubric.md.* (4 empty, 2x32K, 2 full), all gitignored
+      via .gitignore:4, write-doc/pytest fine with them present. Spec drift: on Python
+      3.10 an unhandled KeyboardInterrupt from rubric.py exits 130 (SIGINT re-raised),
+      not 1; exit 1 comes from init_import_site/init_sys_streams or KeyboardInterrupt
+      chained to RuntimeError during import pathlib; rare exit 0 with stderr "Exception
+      ignored in threading._shutdown" or a KeyboardInterrupt in the argv[0] zipimport
+      check (CPython swallows the signal). None of these involve rubric.py.'
+    created_at: '2026-10-22T14:27:12Z'
+    last_edited: '2026-10-22T14:27:12Z'
+  - id: note-8f0b52d
+    text: 'Sign-off 2026-10-22 on 4ec71d0d: SIGNOFF_IMPL again, forced by an integration
+      conflict only. Base moved to master@f939f06a (3 commits, pm/project.yaml only).
+      Conflict: both sides appended a PR record at the end of prs: (ours pr-9ca240a
+      BrokenPipe bug filed by QA S14, master pr-24f022e popup pm_core bug). Merge
+      master and keep BOTH records; optionally reset project.active_pr to master value
+      pr-446cb83 (3429a3d0 moved it to pr-9ca240a as a pm pr add side effect). Nothing
+      under experiments/plan-writing/, tests/test_doc_rubric.py, plan-doc-eval.md
+      or pm_core/plans changed on the base. Then run tests/test_doc_rubric.py (151
+      expected; re-ran at 4ec71d0d: 151 passed) and --write-doc (tree stays clean),
+      and return to sign-off. Review c56b4403 and QA round 4 S13-S16 PASS (b3529c34)
+      still hold if the merge touches only pm/project.yaml. Report: /pm-captures/report.html.'
+    created_at: '2026-10-22T14:38:43Z'
+    last_edited: '2026-10-22T14:38:43Z'
+  - id: note-80084fb
+    text: 'Sign-off 2026-10-22 on e2f18667: SIGNOFF_IMPL a third time, forced by the
+      integration conflict only. The previous IMPL return (4ec71d0d vs master@f939f06a)
+      was never acted on; the branch still has merged master only up to 337d1266.
+      The base is now master@660e43a2 (4 commits since 337d1266, pm/project.yaml only;
+      660e43a2 just adds a note to pr-8409c64). The conflict is the same single hunk:
+      both sides appended a PR record at the end of prs: (ours pr-9ca240a, master
+      pr-24f022e). Merge master, keep BOTH records, optionally reset project.active_pr
+      to master value. Re-ran at e2f18667: tests/test_doc_rubric.py 151 passed; --write-doc
+      leaves tree clean. Review c56b4403 and QA round 4 S13-S16 PASS (b3529c34) still
+      hold if the merge only touches pm/project.yaml. Report: /pm-captures/report.html.'
+    created_at: '2026-10-22T14:40:01Z'
+    last_edited: '2026-10-22T14:40:01Z'
+  - id: note-ea208cf
+    text: 'Sign-off 2026-10-22 on 701898f0: SIGNOFF_IMPL for the fourth time, again
+      caused only by the integration conflict. The two previous IMPL returns (4ec71d0d,
+      e2f18667) were never acted on: the branch has merged master only up to 337d1266,
+      and everything after 48266e09 is notes in pm/project.yaml and pm/specs/pr-44f807f/qa.md.
+      The base is still master@660e43a2. A trial merge shows the same single hunk:
+      both sides appended a PR record at the end of prs: (ours pr-9ca240a, master
+      pr-24f022e). IMPL: run git merge master, keep BOTH records, optionally set project.active_pr
+      back to master value, commit, push. Do not just add a note: unless the merge
+      happens, sign-off will keep returning IMPL. Re-ran at 701898f0: tests/test_doc_rubric.py
+      151 passed; --write-doc leaves the tree clean. Review c56b4403 and QA r4 S13-S16
+      (b3529c34) still hold if the merge only touches pm/project.yaml. Report: /pm-captures/report.html.'
+    created_at: '2026-10-22T14:40:56Z'
+    last_edited: '2026-10-22T14:40:56Z'
+  - id: note-a5ce2cc
+    text: 'Impl 2026-10-22: merged master@660e43a2 (032aff53). Only conflict pm/project.yaml:
+      kept both appended PR records (pr-9ca240a, pr-24f022e) and reset project.active_pr
+      to master value pr-446cb83. Diff vs master now touches only this PR files plus
+      its own project.yaml records. tests/test_doc_rubric.py 151 passed; --write-doc
+      leaves tree clean. No rubric code change. Ready for sign-off.'
+    created_at: '2026-10-22T14:44:07Z'
+    last_edited: '2026-10-22T14:44:07Z'
+  - id: note-8f8ce86
+    text: 'QA S19 PASS on 1f65a6ee (captures /pm-captures/scenarios/19, drivers reusable):
+      runner T1-T5 0 failed checks (30 order + 15 subset renders, hostile slots verbatim,
+      qa.md spec pair w/ document_kind "PM QA spec", 11 ValueErrors exact, 17 malformed
+      replies flagged); genre fixture strong->2 PRs, weak->exit 1; merged project.yaml
+      lists pr-9ca240a + pr-24f022e, active_pr pr-446cb83, pr-8df6472 notes 4106e20/c30ff7b
+      present. Spec gotcha: `pm pr show` does not exist; build the brief from the
+      PR title+description. Start the recording tmux with cwd outside /workspace,
+      or `pm which` resolves /workspace/pm_core via cwd walk.'
+    created_at: '2026-10-22T15:01:05Z'
+    last_edited: '2026-10-22T15:01:05Z'
+  - id: note-89a3468
+    text: 'Impl 2026-10-23 (5ab0280b, user-requested rework): every example and fixture
+      is now quoted from published sources (provenance per text part, direction_evidence,
+      length_confound flag); the 15 synthetic fixtures were replaced by 23 published
+      pairs, so pm/specs/pr-44f807f/qa.md scenarios that name old fixture ids (genre_pm_plan_fields,
+      consistency_dependency_mismatch, concision_padding_plan, continuity_restart...)
+      need regenerating. New: render_single/validate_judgment(single=True) + *_single.md
+      templates; material= for reports; no_brief=True for sourceless whole-document
+      cases; salience_and_synthesis dimension (14 dims); 5 reader-reported concerns.
+      tests/test_doc_rubric.py: 303 passed. Push proxy socket was missing at commit
+      time.'
+    created_at: '2026-10-23T22:52:11Z'
+    last_edited: '2026-10-23T22:52:11Z'
 - id: pr-8df6472
   plan: plan-doc-eval
   title: Document evaluation runner and evaluator calibration
@@ -30276,6 +30513,26 @@ prs:
   reviewed_at: null
   merged_at: null
   notes:
+  - id: note-4106e20
+    text: 'Rubric interface from pr-44f807f: import experiments/plan-writing/rubric.py
+      via importlib (hyphenated dir; stdlib only). render_judge(case_type, document_a=,
+      document_b=, brief=|prefix=, section_request=, document_kind=, dimensions=)
+      renders blinded A/B prompts; caller owns order randomisation/swaps. validate_judgment(obj,
+      ids) checks the per-dimension JSON reply (score_a/score_b 1-5, preference A|B|tie,
+      separate overall_preference) -> treat non-empty problems as failed evaluation.
+      rubric/fixtures/*.json: strong/weak pairs, one target dimension each; padding
+      pairs double as verbosity-bias probes. length_ratio and style_distance measures
+      are bias covariates, never quality. Automatic candidate measures are specified
+      in dimensions.json but not implemented.'
+    created_at: '2026-10-21T02:42:30Z'
+    last_edited: '2026-10-21T02:42:30Z'
+  - id: note-c30ff7b
+    text: 'From pr-44f807f review: render_judge has only whole_document/continuation.
+      Catalog (pr-9f111ef) pm_plan cases render as case_type="whole_document" with
+      brief = instruction + conversation turns, document_kind="PM plan"; append whole-document
+      brief attachments (label + text) to the brief string. dimensions=[] now raises.'
+    created_at: '2026-10-21T03:24:58Z'
+    last_edited: '2026-10-21T03:24:58Z'
   - id: note-05a46e8
     text: 'Deferred to this PR''s start (user, 2026-10-23): (1) ox-stack.service,
       which runs the claude-router plus the ChatGPT/Grok subscription bridges, was
@@ -31123,6 +31380,28 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T13:47:46.255021+00:00'
   updated_at: '2026-10-22T13:48:29.542174+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9ca240a
+  plan: bugs
+  title: 'Bug: rubric.py --render piped to head prints BrokenPipeError and exits 120'
+  branch: pm/pr-9ca240a-bug-rubric-py-render-piped-to-head-prints-brokenpi
+  status: pending
+  depends_on: []
+  description: 'experiments/plan-writing/rubric.py --render: when stdout is closed
+    early (python3 rubric.py --render continuity_restart | head -1), about 2 in 3
+    runs print "Exception ignored in: <_io.TextIOWrapper name=<stdout>...> BrokenPipeError:
+    [Errno 32] Broken pipe" on stderr and exit 120. Found during pr-44f807f QA scenario
+    14 at b3529c34. Low severity, cosmetic. A fix is to catch BrokenPipeError around
+    the print in main (redirect stdout to devnull and exit 0, or exit 141), as the
+    Python docs suggest.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T14:25:18.863482+00:00'
+  updated_at: '2026-10-22T14:25:18.863482+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

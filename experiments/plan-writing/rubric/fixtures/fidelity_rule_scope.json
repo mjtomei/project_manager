@@ -1,0 +1,40 @@
+{
+  "id": "fidelity_rule_scope",
+  "dimension": "fidelity",
+  "concerns": [
+    "fidelity"
+  ],
+  "case_type": "whole_document",
+  "document_kind": "URN namespace registration",
+  "brief": "Two URNs are lexically equivalent if they are octet-by-octet equal\n   after the following preprocessing:\n\n           1. normalize the case of the leading \"urn:\" token\n           2. normalize the case of the NID\n           3. normalizing the case of any %-escaping\n\n   Note that %-escaping MUST NOT be removed.",
+  "strong": "Rules for Lexical Equivalence:\n\n         The namespace-specific part of the URN is case-sensitive.",
+  "weak": "Rules for Lexical Equivalence:\n\n         The entire URN is case-sensitive.",
+  "expected": {
+    "better": "strong",
+    "dimension": "fidelity"
+  },
+  "also_moves": [],
+  "held_constant": "The heading and sentence; only the scope phrase differs.",
+  "notes": "The published registration says the entire URN is case-sensitive; the brief normalizes the case of 'urn:' and the namespace id.",
+  "pair_kind": "erratum",
+  "provenance": {
+    "brief": {
+      "ref": "rfc5134-erratum-1325",
+      "locator": "RFC 2141 Section 5"
+    },
+    "weak": {
+      "ref": "rfc5134-erratum-1325",
+      "locator": "RFC 5134 Section 2, published"
+    },
+    "strong": {
+      "ref": "rfc5134-erratum-1325",
+      "locator": "RFC 5134 Section 2, corrected"
+    }
+  },
+  "direction_source": "independent_verifier",
+  "source_framing": {
+    "text": "The original rule contradicts Section 5 of RFC 2141 [1],\nwhich requests case-insensitive comparison after downcasing\nof \"urn:\" and the NID, and normalization of %-escaping.",
+    "ref": "rfc5134-erratum-1325",
+    "locator": "erratum notes"
+  }
+}

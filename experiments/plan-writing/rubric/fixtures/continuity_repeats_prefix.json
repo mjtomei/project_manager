@@ -1,0 +1,40 @@
+{
+  "id": "continuity_repeats_prefix",
+  "dimension": "continuity",
+  "concerns": [
+    "padding"
+  ],
+  "case_type": "continuation",
+  "document_kind": "protocol applicability document",
+  "prefix": "Directed Acyclic Graph (DAG): A finite directed graph with no directed cycles (loops).  If links in a Clos are considered as either being all directed towards the top or vice versa, each of such two graphs is a DAG.\n\n[...]\n\n4.1.  Overview of RIFT\n\nRIFT is a dynamic routing protocol that is tailored for use in Clos, Fat-Tree, and other anisotropic topologies.  A core property therefore of RIFT is that its operation is sensitive to the structure of the fabric - it is anisotropic.  RIFT acts as a link-state protocol when \"pointing north\", advertising southwards routes to northwards peers (parents) through flooding and database synchronization.  When \"pointing south\", RIFT operates hop-by-hop like a distance- vector protocol, typically advertising a fabric default route towards the Top of Fabric (ToF, aka superspine) to southwards peers (children).",
+  "strong": "4.2.3.  Generalizing to any Directed Acyclic Graph\n\nRIFT is an anisotropic routing protocol, meaning that it has a sense of direction (northbound, southbound, east-west) and that it operates differently depending on the direction.\n\nSince a DAG provides a sense of north (the direction of the DAG) and of south (the reverse), it can be used to apply RIFT——an edge in the DAG that has only incoming vertices is a ToF node.",
+  "weak": "4.2.3.  Generalizing to any Directed Acyclic Graph\n\nRIFT is an anisotropic routing protocol, meaning that it has a sense of direction (northbound, southbound, east-west) and that it operates differently depending on the direction.\n\n*  Northbound, RIFT operates as a link-state protocol, whereby the control packets are reflooded first all the way north and only interpreted later.  All the individual fine grained routes are advertised.\n\n*  Southbound, RIFT operates as a distance-vector protocol, whereby the control packets are flooded only one-hop, interpreted, and the consequence of that computation is what gets flooded one more hop south.  In the most common use-cases, a ToF node can reach most of the prefixes in the fabric.  If that is the case, the ToF node advertises the fabric default and negatively disaggregates the prefixes that it cannot reach.  On the other hand, a ToF node that can reach only a small subset of the prefixes in the fabric will preferably advertise those prefixes and refrain from aggregating.\n\nIn the general case, what gets advertised south are:\n\n1.  A fabric default that aggregates all the prefixes that are reachable within the fabric, and that could be a default route or a prefix that is dedicated to this particular fabric.\n\n2.  The loopback addresses of the northbound nodes, e.g., for inband management.\n\n3.  The disaggregated prefixes for the dynamic exceptions to the fabric default, advertised to route around the black hole that may form.\n\n*  East-West routing can optionally be used, with specific restrictions.  It is used when a sibling has access to the fabric default but this node does not.\n\nSince a Directed Acyclic Graph (DAG) provides a sense of north (the direction of the DAG) and of south (the reverse), it can be used to apply RIFT——an edge in the DAG that has only incoming vertices is a ToF node.",
+  "expected": {
+    "better": "strong",
+    "dimension": "continuity"
+  },
+  "also_moves": [],
+  "held_constant": "The section heading, its first and last paragraphs.",
+  "notes": "The weaker section re-explains the protocol and re-expands DAG, both already in the prefix. Length differs by design.",
+  "pair_kind": "revision_history",
+  "provenance": {
+    "prefix": {
+      "ref": "rift-applicability-drafts",
+      "locator": "revision -15, Section 2 DAG definition and Section 4.1 first paragraph"
+    },
+    "weak": {
+      "ref": "rift-applicability-drafts",
+      "locator": "Section 4.2.3 opening, revision -15"
+    },
+    "strong": {
+      "ref": "rift-applicability-drafts",
+      "locator": "Section 4.2.3 opening, revision -16"
+    }
+  },
+  "direction_source": "reviewer_then_revision",
+  "source_framing": {
+    "text": "This section repeats a lot of explanations about RIFT that were already stated earlier. It also re-expands DAG, which was already done.",
+    "ref": "rift-applicability-drafts",
+    "locator": "IESG ballot comment on -15, Section 4.2.3"
+  }
+}

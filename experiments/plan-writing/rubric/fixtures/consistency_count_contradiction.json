@@ -1,0 +1,33 @@
+{
+  "id": "consistency_count_contradiction",
+  "dimension": "internal_consistency",
+  "concerns": [],
+  "case_type": "whole_document",
+  "document_kind": "protocol specification excerpt",
+  "strong": "Each PA-TNC message may\ncontain zero or more attributes associated with the functional\ncomponent identified in the component type (PA Subtype) of the\nPosture Broker (PB) protocol.\n\n[...]\n\n   A PA-TNC message MUST contain a PA-TNC header (defined in section\n   3.6.  followed by a sequence of zero or more PA-TNC attributes.  All\n   PA-TNC attributes MUST begin with a standard PA-TNC attribute header,",
+  "weak": "Each PA-TNC message may\ncontain one or more attributes associated with the functional\ncomponent identified in the component type (PA Subtype) of the\nPosture Broker (PB) protocol.\n\n[...]\n\n   A PA-TNC message MUST contain a PA-TNC header (defined in section\n   3.6.  followed by a sequence of zero or more PA-TNC attributes.  All\n   PA-TNC attributes MUST begin with a standard PA-TNC attribute header,",
+  "expected": {
+    "better": "strong",
+    "dimension": "internal_consistency"
+  },
+  "also_moves": [],
+  "held_constant": "Section 4's statement; Section 3.1 differs in one word.",
+  "notes": "Assembled from two verbatim passages of the same RFC, joined by [...]: the weaker document says 'one or more' in one section and 'zero or more' in the other.",
+  "pair_kind": "erratum",
+  "provenance": {
+    "weak": {
+      "ref": "rfc5792-erratum-3935",
+      "locator": "RFC 5792 Section 3.1 as published, then Section 4"
+    },
+    "strong": {
+      "ref": "rfc5792-erratum-3935",
+      "locator": "RFC 5792 Section 3.1 as corrected, then Section 4"
+    }
+  },
+  "direction_source": "independent_verifier",
+  "source_framing": {
+    "text": "This contradicts the text in section 3.1, which says “one or more”. The correct text is “zero or more”.",
+    "ref": "rfc5792-erratum-3935",
+    "locator": "erratum notes"
+  }
+}
