@@ -31620,7 +31620,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T05:53:35.496101+00:00'
+  updated_at: '2026-10-24T06:02:10.608489+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33019,6 +33019,15 @@ prs:
       fail reverted; full suite 3624 passed; /pm-captures/review-7026-i1.'
     created_at: '2026-10-24T05:53:35Z'
     last_edited: '2026-10-24T05:53:35Z'
+  - id: note-f4b4eb0
+    text: 'Review 7026 i2 (a815e12e, spec-only): i1 ba5dd6e7 independently reviewed
+      and sound. Note dedupe (same verdict + run workdir) matches the real recovery
+      path (build_resume_state restores qa_workdir; each start gets a new loop_id/workdir,
+      _record_qa_note is the only QA-note writer). Load-error line cleared by seq
+      is correct. 3 mutations caught; focused 178, full suite 3624 passed; /pm-captures/review-7026-i2.
+      Fixed stale impl.md index (S1-S46, suite pointer 33(d)).'
+    created_at: '2026-10-24T06:02:10Z'
+    last_edited: '2026-10-24T06:02:10Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
