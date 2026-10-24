@@ -174,3 +174,14 @@ Scenarios 1–7 ran and passed before the base merge (63d5773e) and the
 (S1–S3, S5–S7) except S4, which must be re-run against merged HEAD including
 a slow-exit child. Because already-run scenarios are locked, the re-run and
 any post-merge regression sweep are emitted as fresh scenarios 8+.
+
+## Fresh scenarios 10+ (post-rebuild planning pass, 2026-10-24)
+
+The branch was rebuilt to d967ccfa (2e6f8831 + origin/master 6d70b5fe +
+specs/notes); meta.py and tests/test_meta_override_cleanup.py are
+byte-identical to 7a7e018b, so S1–S9 evidence carries over. Fresh
+scenarios 10+ target the remaining thin edges and act as the end-to-end
+gate on the rebuilt HEAD: multi-signal teardown idempotency and
+nothing-to-clean under stacked signals, meta-workdir preservation/reuse
+across the lifecycle, and concurrent actors on the shared override
+(~/.pm/sessions/<tag>/override) at the rebuilt HEAD.
