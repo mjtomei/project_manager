@@ -22350,7 +22350,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-24T23:10:44.784861+00:00'
+  updated_at: '2026-10-24T23:40:24.054867+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22585,6 +22585,50 @@ prs:
       which also fails on master). Evidence /pm-captures/review-4e41-i9/.'
     created_at: '2026-10-24T23:10:44Z'
     last_edited: '2026-10-24T23:10:44Z'
+  - id: note-213699d
+    text: 'Review-loop 4e41 i11 (8a2259ae): the session-notes omission marker named
+      no usable reader. (1) It pointed at `pm notes`, which opens the interactive
+      section editor (cli/guide.py notes_cmd -> run_watched_editor, plus a splash
+      that waits for a raw-mode keypress) — a session following "Read the full text:
+      `pm notes`" gets an editor or a blocked read and no text at all. (2) The file
+      path beside it was a host absolute path (f"file: {root / NOTES_FILENAME}", resolved
+      through store.find_project_root() in the host pm process that *builds* the prompt),
+      while the sessions this block feeds (impl/review/QA planner) run inside a container
+      where the workdir is mounted at /workspace and the host path does not exist
+      — the same host-vs-container split i5 fixed for integration_pointer and i6 for
+      the QA-scenario marker. So both halves of the marker failed in the common case:
+      the truncation was unrecoverable, the silent loss R3b forbids.
+
+
+      Fixed with a shared notes.notes_pointer() naming the notes files relative to
+      the project root — `pm/notes.txt` and `pm/notes-local.txt` — which resolves
+      both on the host and in the container (matching the precedent spec_gen already
+      sets for its paths via file_path.relative_to(root.parent)). The four fit_prompt
+      block pointers (session_notes x3, qa_notes) now call the helper instead of hard-coding
+      `pm notes`, so the block-level and block-internal markers agree.
+
+
+      Deliberately unchanged: the two pre-existing human-facing `pm notes` mentions
+      in generate_watcher_review_prompt (that session is a chat-driven human surface
+      and both offer the direct-edit alternative), and the truncated-scenario-steps
+      marker ("the QA plan in the QA planner transcript") — qa_loop holds the planner
+      transcript_path but the child/concretization builders are not passed it, and
+      the degradation needs a >20 KB single scenario steps.
+
+
+      Verification: tests/test_prompt_bounds.py 93 cases (1 new, failing-then-passing
+      on `assert "`pm notes`" not in block`). Independent sweep of every reachable
+      builder with realistic maxima: all under PROMPT_ARG_LIMIT (max 92 KB). Marker
+      sweep over the four builders with pathological inputs: no absolute host path
+      in any marker. Launcher bootstrap re-exercised end to end with a PATH shim:
+      199-byte argv, complete 125,011-byte prompt on disk, file removed after the
+      command. Real-data prompts (80 PRs x 4 builders) all far under the limit and
+      the marker never fires (this repo notes.txt is 211 B). Full suite failure set
+      is the documented environmental one (22 signoff_integration / 19+17 merge_publish
+      / 12 markdown_render / 1 hook_events, plus the known-flaky test_git_ops::test_keeps_unpushed_merge
+      which also fails standalone). Evidence /pm-captures/review-4e41-i11/.'
+    created_at: '2026-10-24T23:40:24Z'
+    last_edited: '2026-10-24T23:40:24Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
