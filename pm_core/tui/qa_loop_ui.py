@@ -338,8 +338,18 @@ def poll_qa_state(app) -> None:
             tracker.poll(key)
 
         if not state.running and state.latest_verdict:
+            # The result is recorded in project.yaml (transition, note).
+            # While the file cannot be loaded, keep the run and its
+            # snapshot and process it once it loads (RQ37).
+            if _completion_waits_for_project(app, state):
+                continue
             first_completion = not state._ui_complete_notified
             _on_qa_complete(app, state)
+            if state._ui_pending_writes:
+                # The file broke between the check and a write: the
+                # failed writes are retried, the snapshot is kept.
+                state._ui_complete_notified = True
+                continue
             # The completion has now been processed (note recorded,
             # lifecycle transition done).  Drop the resume snapshot
             # immediately rather than waiting for the tick-2 cleanup
@@ -388,6 +398,53 @@ def poll_qa_state(app) -> None:
     if app._qa_resume_poll_counter % 5 == 0:
         _resume_incomplete_qa(app)
     app._qa_resume_poll_counter += 1
+
+
+def _project_load_error(app) -> Exception | None:
+    """Why project.yaml cannot be loaded now (conflict markers, plans that
+    do not validate, the file missing), or None when it loads."""
+    if not app._root:
+        return None
+    try:
+        store.load(app._root)
+    except store.ProjectYamlParseError as e:  # incl. invalid plans, missing
+        return e
+    except Exception:
+        return None
+    return None
+
+
+def _completion_waits_for_project(app, state: QALoopState) -> bool:
+    """True while a finished run's result cannot be recorded yet.
+
+    A completion writes its lifecycle transition and QA note to
+    project.yaml.  Processing it while the file cannot be loaded lost both:
+    the writes only logged a warning and the snapshot was cleared right
+    after, so nothing retried (RQ37).  Wait instead, saying so once per
+    reason, and retry writes that failed in between.
+    """
+    err = _project_load_error(app)
+    if err is not None:
+        reason = str(err)
+        if state._ui_wait_reason != reason:
+            state._ui_wait_reason = reason
+            verdict = state.latest_verdict
+            _log.warning("QA %s for %s: result kept until project.yaml "
+                         "loads again: %s", verdict, state.pr_id, reason)
+            app.log_message(escape(
+                f"QA {verdict} for {state.pr_id} — waiting for project.yaml "
+                f"to load to record it: {reason}"))
+        return True
+    if state._ui_wait_reason is not None:
+        state._ui_wait_reason = None
+        _log.info("QA %s for %s: project.yaml loads again — recording the "
+                  "result", state.latest_verdict, state.pr_id)
+    if state._ui_pending_writes:
+        state._ui_pending_writes[:] = [w for w in state._ui_pending_writes
+                                       if not w()]
+        if state._ui_pending_writes:
+            return True
+    return False
 
 
 def _drop_superseded(pr_id, snaps, live_workdirs) -> None:
@@ -661,6 +718,18 @@ def _resume_incomplete_qa(app) -> None:
             _log.info("Recovered completed QA from disk: %s → %s", pr_id, overall)
             _on_qa_complete(app, state)
             state._ui_complete_notified = True
+            if state._ui_pending_writes:
+                # A write failed (the file broke since the scan loaded it):
+                # the poll timer retries it and then clears the snapshot.
+                app._qa_loops[pr_id] = state
+                _ensure_qa_poll_timer(app)
+                continue
+            try:
+                from pm_core import runtime_state as _rs
+                _rs.set_action_state(pr_id, "qa", "done", verdict=overall)
+            except Exception:
+                _log.debug("runtime_state qa verdict mirror failed",
+                           exc_info=True)
             if state.qa_workdir:
                 qa_loop.clear_resume_file(state.qa_workdir)
             continue
@@ -773,7 +842,9 @@ def _on_qa_complete(app, state: QALoopState) -> None:
             f"[yellow bold]QA NEEDS_WORK[/] for {pr_id} — returning to review",
             force=True, hold=_auto_start.CONFIRM_HOLD_SECONDS,
         )
-        _transition_pr_status(app, pr_id, "qa", "in_review")
+        if not _transition_pr_status(app, pr_id, "qa", "in_review"):
+            state._ui_pending_writes.append(
+                lambda: _transition_pr_status(app, pr_id, "qa", "in_review"))
         # Clear the stale review loop entry from the previous review pass
         app._review_loops.pop(pr_id, None)
         # Reload in-memory state and repaint, so the tech tree shows
@@ -806,7 +877,8 @@ def _on_qa_complete(app, state: QALoopState) -> None:
 
     # Record QA results as a PR note — do this last so it captures the
     # final state, but log failures loudly since status already transitioned.
-    _record_qa_note(app, state)
+    if not _record_qa_note(app, state):
+        state._ui_pending_writes.append(lambda: _record_qa_note(app, state))
 
 
 def _start_self_driving_review(app, pr_id: str) -> None:
@@ -844,10 +916,13 @@ def _trigger_signoff(app, pr_id: str) -> None:
     signoff_ui.start_signoff(app, pr_id)
 
 
-def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> None:
-    """Transition PR status if it's currently in the expected state."""
+def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> bool:
+    """Transition PR status if it's currently in the expected state.
+
+    False when project.yaml could not be loaded or locked (worth a retry).
+    """
     if not app._root:
-        return
+        return True
     try:
         transitioned = False
 
@@ -863,15 +938,20 @@ def _transition_pr_status(app, pr_id: str, from_status: str, to_status: str) -> 
             _log.info("Transitioned %s: %s → %s", pr_id, from_status, to_status)
     except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
         _log.warning("_transition_pr_status: %s for %s: %s", type(e).__name__, pr_id, e)
+        return False
     except Exception:
         _log.exception("Failed to transition PR status for %s", pr_id)
+    return True
 
 
-def _record_qa_note(app, state: QALoopState) -> None:
-    """Record QA results as a note on the PR."""
+def _record_qa_note(app, state: QALoopState) -> bool:
+    """Record QA results as a note on the PR.
+
+    False when project.yaml could not be loaded or locked (worth a retry).
+    """
     if not app._root:
         _log.warning("Cannot record QA note: no project root")
-        return
+        return True
     try:
         from datetime import datetime, timezone
         note_text = f"QA {state.latest_verdict}: " + qa_outcome_detail(state)
@@ -896,5 +976,7 @@ def _record_qa_note(app, state: QALoopState) -> None:
         store.locked_update(app._root, apply)
     except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
         _log.warning("_record_qa_note: %s for %s: %s", type(e).__name__, state.pr_id, e)
+        return False
     except Exception:
         _log.exception("Failed to record QA note for %s", state.pr_id)
+    return True

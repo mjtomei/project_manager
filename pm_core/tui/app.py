@@ -21,6 +21,7 @@ from textual.containers import Container, Vertical
 from textual.timer import Timer
 
 from pm_core import store, guide
+from rich.markup import escape
 
 from pm_core import tmux as tmux_mod
 from pm_core.tui.tech_tree import TechTree, PRSelected
@@ -653,6 +654,7 @@ class ProjectManagerApp(App):
                         for p in (self._data or {}).get("prs") or []}
         old_deps = {p.get("id"): list(p.get("depends_on") or [])
                     for p in (self._data or {}).get("prs") or []}
+        load_error = None
         try:
             # Only search for root on first load; reuse existing root for refreshes
             if self._root is None:
@@ -674,12 +676,18 @@ class ProjectManagerApp(App):
                 # is briefly missing (checkout/rebase): keep the previous
                 # state, as for a conflicted file.
                 _log.warning("project.yaml missing, keeping previous state: %s", e)
+                load_error = e
             else:
                 _log.warning("no project.yaml found")
                 self._root = None
                 self._data = {}
         except store.ProjectYamlParseError as e:  # incl. PlanValidationError
             _log.warning("corrupt project.yaml, keeping previous state: %s", e)
+            load_error = e
+        self._load_error = load_error
+        if load_error is not None:
+            from pm_core.tui.qa_loop_ui import _project_file_stamp
+            self._load_error_stamp = _project_file_stamp(self._root)
 
         # Decide which view to show based on whether PRs exist
         prs = self._data.get("prs") or []
@@ -687,6 +695,16 @@ class ProjectManagerApp(App):
             self._show_plans_view()
         elif self._qa_visible:
             self._show_qa_view()
+        elif not prs and load_error is not None:
+            # No previous state to keep: a TUI started or restarted while
+            # project.yaml cannot be loaded.  The guide would load the file
+            # again and raise, which killed the TUI at mount, and every QA
+            # run it would resume with it.  Show the (empty) tree, say why,
+            # and reload once the file changes (_retry_failed_load).
+            self._show_normal_view()
+            self.log_message(escape(
+                f"project.yaml cannot be loaded: {load_error} — waiting "
+                "for it to load"), sticky=30)
         elif not prs:
             state, _ = guide.detect_state(self._root)
             self._show_guide_view(state)
@@ -995,8 +1013,23 @@ class ProjectManagerApp(App):
 
     # --- Sync delegates (see tui/sync.py) ---
 
+    def _retry_failed_load(self) -> None:
+        """Reload once project.yaml changes after a load with no previous
+        state failed, so a TUI started on an unloadable file shows the
+        project when it loads, not at the next 5 minute sync."""
+        if (getattr(self, "_load_error", None) is None
+                or (self._data or {}).get("prs")):
+            return
+        from pm_core.tui.qa_loop_ui import _project_file_stamp
+        if _project_file_stamp(self._root) != self._load_error_stamp:
+            self._load_state()
+
     def _idle_qa_resume_scan(self) -> None:
         """QA resume scan while the shared poll timer (which scans) is off."""
+        try:
+            self._retry_failed_load()
+        except Exception:
+            _log.warning("reload after a failed load failed", exc_info=True)
         if self._review_loop_timer:
             return
         try:
