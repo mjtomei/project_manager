@@ -49,6 +49,24 @@ from pm_core.tui import review_loop_ui
 _LOG_HELD_QUEUE_MAX = 3
 
 
+def log_line_held(app, now: float | None = None) -> bool:
+    """True while a ``log_message`` hold keeps the log line.
+
+    A hold lasts until its time is up and, while held confirmations are
+    queued, until a pending flush has run: a message arriving after the
+    hold expired but before its timer fired must not jump (and so drop)
+    the confirmations it queued (S50: a fast sign-off's "✓ … signed off"
+    dropped the queued "→ sign-off").  With no flush pending nothing
+    would ever release the queue, so it then holds nothing.
+    """
+    if now is None:
+        import time as _time
+        now = _time.monotonic()
+    return now < getattr(app, "_log_hold_until", 0.0) or (
+        bool(getattr(app, "_log_held_queue", None))
+        and getattr(app, "_log_flush_timers", 0) > 0)
+
+
 def _record_log_message(app, msg: str, suppressed: bool) -> None:
     """Append a log-line message (markup stripped) to the command log."""
     try:
@@ -919,15 +937,10 @@ class ProjectManagerApp(App):
         replay = _seq is not None
         if not replay:
             _seq = self._log_seq = getattr(self, "_log_seq", 0) + 1
-        # A hold lasts until its flush has run: a message arriving after the
-        # hold expired but before its timer fired must not jump (and so
-        # drop) the confirmations it queued (S50: a fast sign-off's "✓ …
-        # signed off" dropped the queued "→ sign-off").  Replays come from
-        # that flush.  With no flush pending nothing would ever release the
-        # queue, so it then holds nothing.
-        holding = now < self._log_hold_until or (
-            not replay and bool(getattr(self, "_log_held_queue", None))
-            and getattr(self, "_log_flush_timers", 0) > 0)
+        # Replays come from the flush that releases the queue, so for them
+        # only the hold's own time counts.
+        holding = (now < self._log_hold_until if replay
+                   else log_line_held(self, now))
         held = hold <= 0 and holding and not force
         suppressed = held or (
             sticky <= 0 and now < self._log_sticky_until and not force)

@@ -819,6 +819,15 @@ recorded with item 39.
         each fail with their fix reverted
         (`/pm-captures/review-350f-i1/mutation-checks.log`).  Full suite
         3654 passed, rc 0 (`/pm-captures/review-350f-i1/full-suite.log`).
+    (e) Review loop 350f i2.  `auto_start.check_and_start` forces
+        "Auto-start: starting <pr>" unless a hold is active, and judged
+        that from `_log_hold_until` alone.  Since (b) a hold also lasts
+        while its queued confirmations wait for their flush, so in that gap
+        the forced line dropped them.  Both now use one predicate,
+        `app.log_line_held` (hold time, or a queue with a flush pending).
+        `test_starting_message_waits_for_queued_confirmations_flush` fails
+        with the old check
+        (`/pm-captures/review-350f-i2/mutation-checks.log`).
     10 mutations, each caught (`/pm-captures/scenarios/50/tests/mutations.log`).
     Live runtime heads (by process, not by checkout): story 1 final run in
     a TUI restarted in place on e60c9927; story 2 on e60c9927; story 3 on

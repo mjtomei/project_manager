@@ -590,3 +590,51 @@ def test_queue_without_a_pending_flush_holds_nothing():
     app._log_flush_timers = 0  # its flush timer is gone
     _log(app, "C plain")
     assert shown[-1] == " C plain"
+
+
+# Review loop 350f i2 (pr-592e4bd): auto-start's "starting <pr>" decided
+# whether a hold was active from the hold's time alone.  Since S50 a hold
+# also lasts while its queued confirmations wait for their flush, so in
+# that gap the line was forced and dropped them.
+
+def test_starting_message_waits_for_queued_confirmations_flush(tmp_path):
+    import asyncio
+    app, shown = _stub_app()
+    app._data = {"project": {"name": "t", "repo": "/r",
+                             "base_branch": "master"},
+                 "prs": [{"id": "pr-x", "title": "X", "status": "pending",
+                          "branch": "b", "depends_on": []}]}
+    app._root = tmp_path
+    for attr, val in (("_auto_start", False), ("_auto_start_targets", {}),
+                      ("_auto_start_all", False), ("_auto_start_run_id", None),
+                      ("_auto_start_launching", set()),
+                      ("_stop_before_merge", set()), ("_review_loops", {}),
+                      ("_qa_loops", {}), ("_self_driving_qa", {}),
+                      ("_pending_merge_prs", set()),
+                      ("_merge_input_required_prs", set()),
+                      ("_session_name", None)):
+        setattr(app, attr, val)
+    app._watcher_manager = MagicMock()
+    app._watcher_manager.find_by_type.return_value = None
+    app._pane_idle_tracker = MagicMock()
+    app._pane_idle_tracker.is_tracked.return_value = False
+    app._update_display = app._load_state = lambda: None
+    app.run_worker = lambda coro, *a, **k: coro.close()
+
+    async def _noop(*a, **k):
+        return None
+
+    auto_start.add_targets(app, ["pr-x"], default_policy=None,
+                           source="key:A")
+    _log(app, "Auto-start: pr-y → sign-off", force=True, hold=3)  # queued
+    app._log_hold_until = 0.0  # the hold expired; its flush has not run
+    with patch("pm_core.tui.watcher_ui.is_running", return_value=False), \
+            patch.object(auto_start, "_start_pr_quiet", _noop):
+        asyncio.run(auto_start.check_and_start(app))
+    assert shown[-1] == " Auto-start: targets += pr-x (1 total)"
+    assert app._log_held[0] == "Auto-start: starting pr-x"
+    app.timers.pop(0)()  # the hold's flush
+    assert shown[-1] == " Auto-start: pr-y → sign-off"
+    app._log_hold_until = 0.0
+    app.timers.pop(0)()
+    assert shown[-1] == " Auto-start: starting pr-x"

@@ -887,8 +887,10 @@ async def check_and_start(app) -> None:
         if pr.get("status") == "pending":
             _log.info("auto_start: starting ready PR %s", pr_id)
             # Forced past sticky messages, but not past the "targets +="
-            # confirmation's hold: then it's deferred until the hold ends.
-            held = time.monotonic() < getattr(app, "_log_hold_until", 0.0)
+            # confirmation's hold (nor its queued confirmations waiting
+            # for their flush): then it's deferred until the hold ends.
+            from pm_core.tui.app import log_line_held
+            held = log_line_held(app)
             app.log_message(f"Auto-start: starting {pr_id}", force=not held)
         else:
             # ``pm pr start --background`` no-ops when the window exists.
