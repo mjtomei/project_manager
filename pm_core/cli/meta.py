@@ -4,6 +4,7 @@ Registers the ``meta`` command for working on pm itself.
 """
 
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -193,7 +194,7 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     if pm_session:
         if tmux_mod.session_exists(pm_session):
             try:
-                tmux_mod.new_window(pm_session, window_name, cmd, str(work_path))
+                tmux_mod.new_window(pm_session, window_name, _tmux_shell_cmd(cmd), str(work_path))
                 win = tmux_mod.find_window_by_name(pm_session, window_name)
                 if win:
                     tmux_mod.set_shared_window_size(pm_session, win["id"])
@@ -233,6 +234,24 @@ def _run_interactive(cmd: str) -> int:
                 return proc.wait()
             except KeyboardInterrupt:
                 continue
+
+
+def _tmux_shell_cmd(cmd: str) -> str:
+    """Pin a tmux pane command to an explicit POSIX shell.
+
+    tmux runs ``new-window`` commands as ``<default-shell> -c <cmd>``, and
+    ``default-shell`` defaults to ``$SHELL`` — often fish, which rejects
+    the POSIX function/trap syntax of the meta pane command at parse time
+    (rc 127: "command substitutions not allowed in command position"), so
+    the window dies without starting Claude and the override stays stale.
+    Explicitly handing the command to ``sh`` matches how pm pins its other
+    trap-carrying pane commands (pm_core/cli/session.py ``bash -c``,
+    pm_core/container.py ``bash -c {shlex.quote(...)}``).  The interactive
+    fallback must NOT get this extra outer shell: ``Popen(shell=True)`` is
+    already /bin/sh, and an extra layer there could die on SIGINT before
+    the inner trap finishes and break the 130 exit status.
+    """
+    return f"sh -c {shlex.quote(cmd)}"
 
 
 def _build_meta_pane_cmd(claude_cmd: str, session_tag: str, work_path: Path) -> str:

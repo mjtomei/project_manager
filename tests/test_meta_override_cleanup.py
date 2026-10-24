@@ -9,6 +9,8 @@ fake-claude config, debug markers and captures/ evidence on normal exit).
 
 import os
 import pathlib
+import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -16,7 +18,7 @@ import time
 
 import pytest
 
-from pm_core.cli.meta import _build_meta_pane_cmd
+from pm_core.cli.meta import _build_meta_pane_cmd, _tmux_shell_cmd
 from pm_core.shell import shell_quote
 
 TAG = "repro-tag"
@@ -178,3 +180,80 @@ def test_fallback_interrupt_waits_out_slow_int_handler(tmp_path):
     # And the trap still ran: override cleared, other state preserved
     assert not override.exists()
     assert debug.exists()
+
+
+# The tmux launch path must pin the POSIX pane command to an explicit shell:
+# tmux runs new-window commands as ``<default-shell> -c <cmd>`` and
+# default-shell defaults to $SHELL — fish rejects the POSIX function/trap
+# syntax at parse time (rc 127), so Claude never starts and the override
+# stays stale.  The interactive fallback is deliberately NOT wrapped
+# (Popen(shell=True) is already /bin/sh; an extra layer could die on SIGINT
+# before the inner trap finishes).
+
+def test_tmux_cmd_is_sh_c_wrapper():
+    inner = _build_meta_pane_cmd("true", TAG, pathlib.Path(META_WORKDIR))
+    assert _tmux_shell_cmd(inner) == f"sh -c {shlex.quote(inner)}"
+
+
+def _outer_shell() -> str:
+    """The shell tmux would run a pane command with: default-shell ($SHELL).
+
+    fish when available (the non-POSIX case the ``sh -c`` wrap exists
+    for), /bin/sh otherwise.
+    """
+    return shutil.which("fish") or "/bin/sh"
+
+
+def test_tmux_wrapper_clears_override_on_normal_exit(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    inner = _build_meta_pane_cmd("true", TAG, pathlib.Path(META_WORKDIR))
+    state = _seed_session_dir(tmp_path)
+    # Exactly what tmux does: <default-shell> -c <pane command>
+    subprocess.run([_outer_shell(), "-c", _tmux_shell_cmd(inner)], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    assert not state["override"].exists()
+    assert state["debug"].exists()
+    assert state["fake-claude"].exists()
+    assert state["captures"].exists()
+
+
+def test_tmux_wrapper_clears_override_on_hup(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    inner = _build_meta_pane_cmd("sleep 60", TAG, pathlib.Path(META_WORKDIR))
+    state = _seed_session_dir(tmp_path)
+    proc = subprocess.Popen(
+        [_outer_shell(), "-c", _tmux_shell_cmd(inner)], start_new_session=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(0.5)
+    assert state["override"].exists()  # still mid-flight, nothing cleaned up
+    # tmux kill-window: SIGHUP to the pane's process group (shell + claude)
+    os.killpg(proc.pid, signal.SIGHUP)
+    # The direct child (outer default-shell) has no trap and dies at once,
+    # orphaning the inner trap-carrying sh, which still has to run its
+    # deferred handler after sleep dies — so proc.wait() alone would race
+    # the cleanup.  Wait for the group to settle instead.
+    deadline = time.time() + 15
+    while state["override"].exists() and time.time() < deadline:
+        time.sleep(0.1)
+    assert not state["override"].exists()
+    assert state["debug"].exists()
+    assert state["fake-claude"].exists()
+    assert state["captures"].exists()
+
+
+@pytest.mark.skipif(shutil.which("fish") is None, reason="fish not installed")
+def test_fish_rejects_inner_but_accepts_wrapper(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    inner = _build_meta_pane_cmd("true", TAG, pathlib.Path(META_WORKDIR))
+    state = _seed_session_dir(tmp_path)
+    fish = shutil.which("fish")
+    # The unwrapped command is the regression: fish dies at parse time
+    unwrapped = subprocess.run([fish, "-c", inner], capture_output=True)
+    assert unwrapped.returncode != 0
+    assert state["override"].exists()
+    # The wrapper is what ships: fish only needs to parse `sh -c <...>`
+    wrapped = subprocess.run([fish, "-c", _tmux_shell_cmd(inner)], check=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    assert wrapped.returncode == 0
+    assert not state["override"].exists()
+    assert state["debug"].exists()

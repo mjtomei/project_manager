@@ -32,9 +32,12 @@ The meta pane command must register the cleanup via a shell trap
   after the foreground child dies (POSIX: trapped signals are deferred until
   the foreground command completes; the kernel delivers SIGHUP to the whole
   pane's process group, so the child dies first, then the shell traps).
-- Interactive fallback (`subprocess.run(..., shell=True)` when no tmux
+- Interactive fallback (`_run_interactive`, `Popen(shell=True)` when no tmux
   session) → Ctrl-C (INT) / TERM also trigger cleanup.
   Source: pm_core/cli/meta.py:186-210 (`clear_cmd`, pane launch and fallback).
+- (added after sign-off 2026-10-24, fish default-shell) The tmux launch must
+  wrap the pane command as `sh -c {shlex.quote(cmd)}` — see the implicit
+  "POSIX-sh compatible / explicit shell pin" requirement below for why.
 
 ### R2 — Cleanup must remove only the override file
 Never `rm -rf ~/.pm/sessions/<tag>`. Remove only
@@ -77,9 +80,19 @@ Source: sign-off 2026-10-24; QA scenario 4 re-run required after this change.
 - Missing override file at cleanup time must be a no-op, not an error
   (EXIT trap runs on every exit path, including launches that never got to
   write state).
-- The generated snippet must be POSIX-sh compatible (tmux runs the pane
-  command via the default shell as `sh -c`; dash, bash and zsh all support
-  `trap name EXIT HUP INT TERM`). The existing `claude_cmd` already relies on
+- The generated snippet must be POSIX-sh compatible, and the tmux launch
+  path must pin it to an explicit shell: tmux runs `new-window` commands as
+  `<default-shell> -c <cmd>` and `default-shell` defaults to `$SHELL` —
+  often fish, which rejects POSIX function/trap syntax at parse time
+  (sign-off 2026-10-24, HEAD ebfbe438: rc 127, "command substitutions not
+  allowed in command position" — Claude never starts, override left stale).
+  So meta_cmd wraps the pane command as `sh -c {shlex.quote(cmd)}` when
+  handing it to `tmux_mod.new_window` (matching session.py `bash -c` and
+  container.py `bash -c {shlex.quote(...)}`); the interactive fallback is
+  NOT wrapped (`Popen(shell=True)` is already /bin/sh, and an extra outer
+  shell there could die on SIGINT before the inner trap finishes and break
+  the 130 exit status). dash, bash and zsh all support
+  `trap name EXIT HUP INT TERM`. The existing `claude_cmd` already relies on
   POSIX syntax (`$(cat …)`, `&&`), so no new assumption is introduced.
 - When the meta window already exists, `pm meta` only selects it
   (pm_core/cli/meta.py:164-170) and must not touch the override.
