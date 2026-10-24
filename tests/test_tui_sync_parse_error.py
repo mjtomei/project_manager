@@ -8,6 +8,7 @@ import pytest
 
 from pm_core import store
 from pm_core.tui.sync import background_sync
+from pm_core.tui.sync import guide as sync_guide
 
 
 class TestStoreLoadParseError:
@@ -125,3 +126,55 @@ class TestLoadStateParseError:
         # Warning was logged
         mock_log.warning.assert_called_once()
         assert "corrupt" in str(mock_log.warning.call_args[0][1])
+
+
+class TestMissingProjectFileKeepsRoot:
+    """A checkout or rebase briefly unlinks project.yaml (S44).
+
+    While the project's pm dir still exists, neither the background sync
+    nor a state reload may drop the root: the QA resume scan stops adopting
+    orphaned runs while ``app._root`` is None.
+    """
+
+    def test_background_sync_skips_while_pm_dir_exists(self, tmp_path):
+        app = types.SimpleNamespace(
+            _root=tmp_path, _data={"prs": [{"id": "pr-001"}]},
+            _current_guide_step=None)
+        with patch.object(store, "find_project_root",
+                          side_effect=FileNotFoundError("No project.yaml found")), \
+             patch("pm_core.tui.frame_capture.load_capture_config"), \
+             patch("pm_core.tui.sync._log") as mock_log:
+            asyncio.run(background_sync(app))
+        assert app._root == tmp_path
+        assert app._data == {"prs": [{"id": "pr-001"}]}
+        assert "Skipping sync" in mock_log.warning.call_args[0][0]
+
+    def test_background_sync_without_a_root_still_resets(self, tmp_path):
+        app = types.SimpleNamespace(
+            _root=tmp_path / "gone", _data={"prs": [{"id": "pr-001"}]},
+            _current_guide_step="no_project")
+        with patch.object(store, "find_project_root",
+                          side_effect=FileNotFoundError("No project.yaml found")), \
+             patch("pm_core.tui.frame_capture.load_capture_config"), \
+             patch.object(sync_guide, "detect_state",
+                          return_value=("no_project", None)):
+            asyncio.run(background_sync(app))
+        assert app._root is None
+        assert app._data == {}
+
+    def test_load_state_keeps_previous_data_while_pm_dir_exists(self, tmp_path):
+        from pm_core.tui.app import ProjectManagerApp
+
+        previous = {"project": {"name": "test"}, "prs": [{"id": "pr-001"}]}
+        app = types.SimpleNamespace(
+            _root=tmp_path, _data=dict(previous),
+            _plans_visible=False, _qa_visible=False,
+            _update_display=MagicMock(), _show_normal_view=MagicMock())
+        with patch.object(store, "load",
+                          side_effect=FileNotFoundError(
+                              f"[Errno 2] No such file or directory: "
+                              f"'{tmp_path}/project.yaml'")):
+            ProjectManagerApp._load_state(app)
+        assert app._root == tmp_path
+        assert app._data == previous
+        app._show_normal_view.assert_called_once()

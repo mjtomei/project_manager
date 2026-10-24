@@ -11,6 +11,7 @@ and never saves to disk — the main thread reloads and applies results.
 
 import asyncio
 import copy
+from pathlib import Path
 
 from pm_core.paths import configure_logger
 from pm_core import store, guide, pr_sync
@@ -61,7 +62,14 @@ async def background_sync(app) -> None:
     try:
         root = store.find_project_root()
         data = store.load(root)
-    except FileNotFoundError:
+    except FileNotFoundError as e:
+        if app._root is not None and Path(app._root).is_dir():
+            # Only project.yaml is missing: a checkout or rebase unlinks
+            # it before writing the new one.  Dropping the root here left
+            # the TUI without a project until the next sync, so the QA
+            # resume scan stopped adopting orphaned runs (S44).
+            _log.warning("Skipping sync: %s", e)
+            return
         app._root = None
         app._data = {}
     except (store.ProjectYamlParseError, store.PlanValidationError) as e:

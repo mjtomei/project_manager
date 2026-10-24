@@ -668,10 +668,16 @@ class ProjectManagerApp(App):
             # newly-unblocked or newly-in-scope PRs.
             from pm_core.tui import auto_start as _auto_start
             _auto_start.on_state_loaded(self, old_statuses, old_deps)
-        except FileNotFoundError:
-            _log.warning("no project.yaml found")
-            self._root = None
-            self._data = {}
+        except FileNotFoundError as e:
+            if self._root is not None and Path(self._root).is_dir():
+                # The project's pm dir is still there and only project.yaml
+                # is briefly missing (checkout/rebase): keep the previous
+                # state, as for a conflicted file.
+                _log.warning("project.yaml missing, keeping previous state: %s", e)
+            else:
+                _log.warning("no project.yaml found")
+                self._root = None
+                self._data = {}
         except (store.ProjectYamlParseError, store.PlanValidationError) as e:
             _log.warning("corrupt project.yaml, keeping previous state: %s", e)
 
