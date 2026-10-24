@@ -282,9 +282,8 @@ class TestSignoffPromptBounding:
     def test_integration_markers_name_the_full_record(self, monkeypatch):
         """An abbreviated path list must say where the rest can be read —
         `(+N more)` on its own is silent loss."""
-        monkeypatch.setattr(
-            "pm_core.integration.integration_json_path",
-            lambda pr_id: Path("/cap") / pr_id / "integration.json")
+        monkeypatch.setattr("pm_core.paths.captures_dir",
+                            lambda pr_id: Path("/cap") / pr_id)
         integ = {"base_branch": "master", "base_sha": "a" * 40,
                  "target_repo": "r", "status": "clean",
                  "overlap": [f"f{i}.py" for i in range(200)],
@@ -302,14 +301,24 @@ class TestSignoffPromptBounding:
         assert "/cap/pr-x/integration.json" in ret
 
     def test_integration_marker_falls_back_to_pr_show(self, monkeypatch):
-        monkeypatch.setattr("pm_core.integration.integration_json_path",
-                            lambda pr_id: None)
+        monkeypatch.setattr("pm_core.paths.captures_dir", lambda pr_id: None)
         block = prompt_gen._signoff_integration_block(
             _pr(integration={"base_branch": "master", "base_sha": "a" * 40,
                              "target_repo": "r", "status": "clean",
                              "conflicts": [f"c{i}.py" for i in range(100)]}),
             "pr-x")
         assert "(+80 more; run `pm pr show pr-x`)" in block
+
+    def test_integration_marker_resolves_the_container_mount(self, monkeypatch):
+        """impl / review / QA-planner prompts run in containers, where the
+        captures dir is bind-mounted at /pm-captures and the host
+        `~/.pm/sessions/...` path does not exist.  The marker must resolve
+        through the container-aware `captures_dir`, not `captures_root`."""
+        from pm_core import integration
+        monkeypatch.setattr("pm_core.paths.captures_dir",
+                            lambda pr_id: Path("/pm-captures"))
+        assert (integration.integration_pointer("pr-x")
+                == "read /pm-captures/integration.json")
 
 
 class TestFitPrompt:
@@ -789,6 +798,35 @@ class TestPlanPromptBounding:
                 result = CliRunner().invoke(cli, ["-C", str(root)] + argv)
             assert result.exit_code == 0, (argv, result.output)
             assert prompt_bytes(result.output) <= PROMPT_ARG_LIMIT + 300, argv
+
+
+class TestGuidePromptBounding:
+    """`pm guide`'s assist prompt inlines one line per plan (the same
+    count-times-item-size listing the PR/plan builders bound)."""
+
+    def _plans(self, n, name_size):
+        return [{"id": f"pl-{i:03d}", "name": "PLANNAME " * (name_size // 9),
+                 "file": f"plans/pl-{i:03d}.md"} for i in range(n)]
+
+    def test_assist_prompt_bounds_the_plan_listing(self):
+        from pm_core import guide
+        data = _data(_pr(), plans=self._plans(200, 4_000))
+        p = guide.build_assist_prompt(data, None)
+        _assert_bounded(p, "pm plan list")
+
+    def test_assist_prompt_small_plan_list_is_unchanged(self):
+        from pm_core import guide
+        plans = [{"id": f"pl-{i:03d}", "name": f"Plan {i}",
+                  "file": f"plans/pl-{i:03d}.md"} for i in range(3)]
+        p = guide.build_assist_prompt(_data(_pr(), plans=plans), None)
+        for plan in plans:
+            assert f"  - {plan['id']}: {plan['name']}" in p
+        assert "more; run `pm plan list`" not in p
+
+    def test_assist_prompt_without_plans(self):
+        from pm_core import guide
+        p = guide.build_assist_prompt(_data(_pr(), plans=[]), None)
+        assert "  (no plans yet)" in p
 
 
 def _make_big_plan_state(tmp_path, n_prs, n_plans, desc_size, plan_size):

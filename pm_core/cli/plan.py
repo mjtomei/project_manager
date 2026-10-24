@@ -13,8 +13,8 @@ from pm_core.plans.parser import parse_plan_prs
 from pm_core.plans import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
 from pm_core.prompt_bounds import (
-    PLAN_LIST_BUDGET, PROMPT_ARG_LIMIT, bounded_join, bounded_text,
-    prompt_bytes,
+    PLAN_LIST_BUDGET, PLAN_LIST_MAX, PROMPT_ARG_LIMIT, bounded_join,
+    bounded_text, prompt_bytes,
 )
 from pm_core.prompt_gen import tui_section
 
@@ -26,7 +26,7 @@ _PROMPT_ARG_LIMIT = PROMPT_ARG_LIMIT
 
 # Cap collection listings so cross-plan / existing-PR context cannot grow
 # without bound.  The markers point at commands that read the full detail.
-_PLAN_LIST_MAX = 40
+_PLAN_LIST_MAX = PLAN_LIST_MAX
 # A count cap alone does not bound a listing whose lines carry user-authored
 # titles; this bounds the product.  Real listings here run 0.4-14.5 KB.
 _PLAN_LIST_BUDGET = PLAN_LIST_BUDGET

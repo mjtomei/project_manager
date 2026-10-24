@@ -392,11 +392,19 @@ def integration_pointer(pr_id: str) -> str:
     the diff), and the marker naming what was dropped has to name a place the
     session can actually read the rest — otherwise the abbreviation is silent
     loss.  Falls back to ``pm pr show``, which prints the PR's integration
-    record when the captures root is unavailable.
+    record when no captures directory can be resolved.
+
+    Resolved through :func:`pm_core.paths.captures_dir`, not
+    :func:`integration_json_path`: the latter is the *host* root, and these
+    markers reach impl / review / QA-planner prompts, which run inside
+    containers where the captures dir is bind-mounted at
+    ``/pm-captures`` and the host path does not exist.  ``captures_dir`` is
+    the resolver that knows about that mount.
     """
-    path = integration_json_path(pr_id)
-    if path is not None:
-        return f"read {path}"
+    from pm_core.paths import captures_dir
+    cap = captures_dir(pr_id)
+    if cap is not None:
+        return f"read {cap / 'integration.json'}"
     return f"run `pm pr show {pr_id}`"
 
 

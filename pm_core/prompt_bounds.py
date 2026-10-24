@@ -42,6 +42,8 @@ PLAN_CONTEXT_MAX_SIBLINGS = 25
 # bounds the product; real listings in this repo run 0.4-14.5 KB, so it only
 # bites on pathological titles.
 PLAN_LIST_BUDGET = 20_000
+# Count cap for the same listings; the byte budget above bounds the product.
+PLAN_LIST_MAX = 40
 LIBRARY_ITEMS_MAX = 20
 # The QA library summary is count-capped per category, but the items carry
 # user-authored descriptions, so a count cap does not bound the listing — the

@@ -505,9 +505,19 @@ is correct per item but not for the whole prompt.
 - **`build_regression_test_prompt` inlines its test body unbounded**
   (considered, deliberately not bounded). The body *is* the prompt — the test
   session executes it — so truncating it would silently corrupt the test
-  rather than abbreviate a listing. Real bodies run 7-12 KB, and the launcher
-  guard delivers an over-limit one intact via file-backed bootstrap, which is
-  the right degradation for this case.
+  rather than abbreviate a listing. Real bodies run 7-12 KB, so a bound would
+  never bite in practice and truncation is the wrong degradation.
+  Correction (iteration 5): the guard does **not** deliver an over-limit body
+  intact on this path. `pm_core/tui/pane_ops.py` launches both the regression
+  and the non-regression QA-instruction panes through
+  `build_claude_shell_cmd(prompt=..., session_type="qa_author")` with no `cwd`
+  and no `write_dir`, so there is no host dir to write the prompt into and the
+  guard **raises** `PromptTooLargeError` (§4's "no writable host dir" case)
+  instead of falling back to a file. That is still the right degradation — an
+  explicit error beats a truncated test — but it is a hard pane-launch failure,
+  not the file-backed delivery claimed above, and it is the same no-`cwd`
+  situation that made `guide.build_assist_prompt` a hard failure until this
+  iteration bounded its plan listing.
 - **`get_spec_mocks_section`'s legacy fallback** extracts a `## Mocks` section
   from the QA spec unbounded. It has no production caller (only
   `tests/test_spec_gen.py`); the live path is `qa_instructions.mocks_for_prompt`,
@@ -556,3 +566,48 @@ unit tests, 5 budget-coordination tests — the 4 builder ones fail without the
 fix at 121-158 KB — and 3 for the library bound above). Full suite 3429 passed, 1 pre-existing failure
 (`test_hook_events::test_installer_writes_standalone_receiver` — pr-4bde874,
 fails whenever `PM_HOST_HOME` is set). Evidence: `/pm-captures/review-4e41-i4/`.
+
+## 11. Review-loop follow-ups (iteration 5)
+
+Iteration 5 swept every *reachable* prompt builder the audit never touched
+(not just the four wired through `fit_prompt`) under one pathological fixture,
+and re-checked the "name a working pointer" requirement in the environment the
+pointer is read in. Two gaps, both the same class as earlier iterations: a
+listing with no bound at all (R4/R12), and a marker naming a location that does
+not exist where the session runs (R6/§8).
+
+- **`guide.build_assist_prompt` inlined the plan list with no bound at all**
+  — no count cap, no byte budget, the one listing the audit missed entirely
+  (R4/R12 bound the sibling-PR, dependency, existing-PR and other-plan lists,
+  but `pm guide`'s "Current plans:" block kept joining every plan name
+  verbatim). 200 plans with long names measured **228,293 B** (1.9x
+  `PROMPT_ARG_LIMIT`), and the test fixture's 200 x 4 KB names measured
+  805,371 B — 6.7x `MAX_ARG_STRLEN`. The guide pane is launched with no `cwd`,
+  so `build_claude_shell_cmd` has no writable location and the launcher guard
+  **raises** `PromptTooLargeError` rather than degrading, i.e. this builder was
+  a hard launch failure, not just an oversized prompt. Now bounded with the
+  shared `PLAN_LIST_MAX` (new in `prompt_bounds.py`; `pm_core/cli/plan.py`'s
+  local `_PLAN_LIST_MAX` is now an alias of it) plus `PLAN_LIST_BUDGET`, with
+  the marker naming `pm plan list`. Re-measured: **29,693 B**.
+- **`integration.integration_pointer` named the host captures path.** It
+  built the path from `integration_json_path` (`captures_root()`, i.e.
+  `~/.pm/sessions/<tag>/captures/<pr>/integration.json`) and is what the
+  abbreviated overlap/conflict markers name. Those markers reach impl, review
+  and QA-planner prompts via `signoff.format_signoff_return`, and all three run
+  inside containers, where the captures dir is bind-mounted at `/pm-captures`
+  and the host path does not exist — a pointer the session cannot follow, the
+  exact defect iteration 1 fixed for the R7/R9 markers. Reachable: the
+  project.yaml record keeps up to `_YAML_LIST_LIMIT` (40) paths while
+  `INTEGRATION_MAX_PATHS` is 20, so a record with 21-40 paths fires the marker.
+  It now resolves through `captures_dir` (the resolver that knows about the
+  container mount), falling back to `pm pr show`; on the host the result is
+  unchanged. Evidence: `/pm-captures/review-4e41-i5/`.
+
+Checked and deliberately unchanged: `bounded_join`'s `keep="newest"` has no
+production caller (the PR-notes bound is implemented separately in
+`_render_pr_notes_bounded`), but R1 specifies it and it is covered by a unit
+test; `generate_merge_prompt` uses `bounded_lines`'s default 0.25 head ratio
+(15 head / 45 tail for 60 lines) rather than R13's "head 40 / tail 20" — the
+tail is where git prints the failure, so tail-heavy is the better degradation
+and it matches the verification prompt's ratio.
+
