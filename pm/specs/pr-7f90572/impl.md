@@ -53,6 +53,21 @@ override file is shared state — `qa_loop._setup_clone_override`
 the running pm_core parent; a meta pane's cleanup must not clobber an override
 someone else owns.
 
+### R4 — Interactive fallback must wait out a slow interrupting child
+(added after sign-off SIGNOFF_IMPL, 2026-10-24, HEAD 2889b14c) The
+interactive-fallback launch (no tmux session, `subprocess.run(..., shell=True)`,
+pm_core/cli/meta.py ~207 as of commit 0b3f34b9) left the override stale when
+the foreground child took longer than ~0.25 s to exit after SIGINT:
+`subprocess.run` responds to KeyboardInterrupt by SIGKILLing the shell child
+~0.25 s in, which beats the shell's deferred INT/EXIT trap — the same
+staleness R1 fixes for the tmux path (sign-off repro
+`/pm-captures/signoff/orch.py`: child INT-handler delays 0.5/2 s → override
+EXISTS). The fallback must instead wait on the Popen and keep waiting across
+repeated KeyboardInterrupts, never escalating to a kill, and exit with the
+shell child's returncode (130 when interrupted). No SIG_IGN may be set
+before spawning (a shell cannot trap a signal that is ignored on entry).
+Source: sign-off 2026-10-24; QA scenario 4 re-run required after this change.
+
 ## Implicit requirements
 
 - The shell guard compares `$(cat override)` (trailing newline stripped by
@@ -109,3 +124,11 @@ someone else owns.
   only the override; SIGHUP (process-group kill, mirroring tmux kill-window)
   removes only the override; foreign-owned override preserved; other session
   state preserved in all cases.
+- R4 (fallback wait): `_run_interactive()` helper in pm_core/cli/meta.py +
+  `test_fallback_interrupt_waits_out_slow_int_handler` — a driver subprocess
+  runs the real helper with a slow-exiting (1 s) INT-handling child, takes a
+  process-group SIGINT, and asserts the override is cleared, the child's 130
+  propagates, and other session state survives. Red on pre-fix `subprocess.run`
+  code, green post-fix. Post-fix sweep capture:
+  `/pm-captures/impl/post-fix/slow-child-sigint.txt` (pre-fix baseline in
+  `/pm-captures/impl/pre-fix/`, from the sign-off repro).

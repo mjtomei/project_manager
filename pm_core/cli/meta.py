@@ -204,15 +204,35 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
 
     # Fallback: launch interactively
     click.echo("Launching Claude...")
-    try:
-        result = subprocess.run(f"cd {shell_quote(str(work_path))} && {cmd}", shell=True)
-    except KeyboardInterrupt:
-        # Ctrl-C reaches this process too; the EXIT/INT/TERM trap in the shell
-        # command handles the cleanup.  Exit 130 the way a shell reports an
-        # interrupt instead of click's generic "Aborted!" status 1.
-        raise SystemExit(128 + 2) from None
+    rc = _run_interactive(f"cd {shell_quote(str(work_path))} && {cmd}")
     # The EXIT/INT/TERM trap in the shell command handles cleanup
-    raise SystemExit(result.returncode)
+    raise SystemExit(rc)
+
+
+def _run_interactive(cmd: str) -> int:
+    """Run *cmd* through the shell, waiting it out across Ctrl-C.
+
+    ``subprocess.run`` only gives the child ~0.25 s after a KeyboardInterrupt
+    before SIGKILLing it — often before the trap-carrying shell gets to run
+    its deferred INT/EXIT handler, which is what clears the session override
+    (a handler that takes longer than that, e.g. Claude flushing state before
+    exiting, would leave the stale override this module exists to prevent).
+    Waiting on the Popen directly instead lets the shell finish its trap and
+    exit on its own; a second Ctrl-C just re-interrupts the wait, it never
+    escalates to a kill.  Returns the shell child's returncode (130 when it
+    was interrupted).
+    """
+    proc = subprocess.Popen(cmd, shell=True)
+    try:
+        return proc.wait()
+    except KeyboardInterrupt:
+        # The SIGINT reached the shell child too; its trap runs once the
+        # foreground command dies.  Keep waiting for it to exit.
+        while True:
+            try:
+                return proc.wait()
+            except KeyboardInterrupt:
+                continue
 
 
 def _build_meta_pane_cmd(claude_cmd: str, session_tag: str, work_path: Path) -> str:
