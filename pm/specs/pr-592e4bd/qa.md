@@ -478,6 +478,39 @@ env-by-name).
   left QA here is still dropped and never revived. Accepted cost: a
   foreign snapshot whose PR really left QA stays until its own clone
   drops it.
+- **RQ37** Given a TUI driving routed QA (own runs and adopted ones),
+  When project.yaml cannot be loaded (conflict markers, plans that do
+  not validate, or the file absent) while a run is in any phase or
+  finishes, or while the user presses a QA key, Then (QA18 planner
+  decision, 2026-10-24, extends RQ36 after review c1d4 i1/i2 made every
+  keep-state handler survive invalid plans and a missing file):
+  - *No run is ended by the load failure.* A run in planning (its
+    periodic merge guard, `qa_loop.py` ~4537, and the post-planning
+    spec-gate load ~4687) or in execution keeps going and is not ended
+    "QA thread crashed" / ERROR. It continues once the file loads again.
+  - *No result is lost.* A run that finishes during the failure keeps
+    its result. Its lifecycle transition (NEEDS_WORK → `in_review`), its
+    one QA note, a `zz t` restart or self-driving review loop, and the
+    `[done <VERDICT>]` picker state are applied once the file loads
+    again (processing may simply wait for it). The TUI never reports
+    "returning to review", "restarting QA" or "press i to sign off" for
+    a step that did not take effect without saying so. The snapshot
+    stays until the result is recorded, so a TUI restart in between
+    still recovers it once (no second note).
+  - *Keys refuse cleanly.* `t`, `z t`, `zz t` and the other QA actions
+    pressed during the failure show an `Error: …` line and start nothing
+    (no `qa-<pr>` window without a loop). They work normally once the
+    file loads.
+  - The CLI is unchanged: `pm` commands print `Error: <reason>` and exit
+    1, and a missing file still reads as "no project" where it did
+    before.
+  Code reading (QA18 planner) for the first two points: the planning
+  guards call `store.load` unguarded, so the QA thread raises.
+  `_on_qa_complete` → `_transition_pr_status` / `_record_qa_note`
+  only log a warning, and `poll_qa_state` then clears the snapshot, so
+  the PR stays `qa` with no note, and nothing retries. That was already
+  true on master for conflict markers. Before c1d4 it was a TUI exit for
+  invalid plans. The scenarios decide, with a pre-existing control.
 
 ## 2. Setup
 
@@ -678,6 +711,35 @@ env-by-name).
     keys from the router log. Use `git pull --no-edit` and check its
     rc. Re-select the merge-base `active_pr` before committing in a
     clone whose TUI moved it.
+  - Eighteenth pass (S45+), delta-only. S42–S44 ran live and each fixed
+    bugs: bb39b92e, af2278e5, e0f74e2b, deb23fea, a4a45ffa and 67ea18e8.
+    All their post-fix Thens held (REPORT.md in `/pm-captures/scenarios/
+    42`, `43`, `44`), including the S44 story 4 replay on the combined
+    head. The full suite passed 3573 tests on 67ea18e8. Product changes
+    since then were never run live: review c1d4 i1 96555732
+    (`PlanValidationError` subclasses `ProjectYamlParseError`) and i2
+    129cf5d2 (`ProjectYamlMissingError`). Review c1d4 i3 passed on
+    37c0c8f1 with 3577 tests (`/pm-captures/review-c1d4-i3`). The
+    resume scan, sync and `_load_state` sites behave as before, since
+    they already caught both. What changed is how the ~40 other
+    keep-state handlers behave, so RQ37 is the delta. Earlier evidence
+    stands, and S42–S44 are not rerun.
+    - S45 runs host mode, one clone, in a scratch TUI. Each of the three
+      failure kinds hits a run in planning, a run in execution, and
+      completions (plain `t` NEEDS_WORK, PASS and INPUT_REQUIRED; `zz t`
+      PASS below the count and NEEDS_WORK). QA keys are pressed during
+      the failure. The pre-existing control is conflict markers on
+      master behaviour.
+    - S46 runs two clones (S41–S44 harness). An adopted run and B's own
+      run finish while A's file is unloadable, and a TUI restart happens
+      during the failure (invalid plans and conflict markers at a fresh
+      start; S44 covered only the missing file).
+    Harness: copy `/pm-captures/scenarios/44/scripts` and change S, the
+    ports and the paths. Render with `pm/qa/artifacts` from this branch
+    (`/workspace/pm/qa/artifacts`), never `/scratch/qa-artifacts`.
+    Planners need to be slow enough for the failure to land during
+    planning: a fake planner with a delay, or real Claude on the main
+    stub with a hold. Same scratch-only limits as the fourteenth pass.
 
 ## 3. Edge cases
 
