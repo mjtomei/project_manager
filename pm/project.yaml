@@ -22350,7 +22350,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-24T22:52:28.816177+00:00'
+  updated_at: '2026-10-24T23:10:44.784861+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22558,6 +22558,33 @@ prs:
       full-suite-comparison-i8.txt). (2026-10-24T23:05:00Z)'
     created_at: '2026-10-24T22:52:28Z'
     last_edited: '2026-10-24T22:52:28Z'
+  - id: note-8db727a
+    text: 'Review-loop 4e41 i9 (8b5a6f31): one defect, in the markers themselves —
+      the four omission markers passed with separator=", " also began with a space,
+      so bounded_join rendered them as ",  (+10 more; ...)" (double space) in the
+      sign-off integration block (both lists), signoff.format_signoff_return (both
+      lists) and generate_watcher_prompt managed/target lists. Leading space dropped;
+      the "\n"-separated markers keep theirs (deliberate indentation). tests/test_prompt_bounds.py
+      90 cases (1 new, failing-then-passing); real-data prompts byte-identical before/after.
+
+
+      Independent re-verification this iteration (the audit itself is complete): (1)
+      swept every reachable builder with *realistic* per-item maxima (NAME_MAX for
+      basenames, PATH_MAX for paths, the largest real description) rather than unbounded
+      synthetic strings — every builder is under PROMPT_ARG_LIMIT except build_regression_test_prompt
+      (body IS the prompt, filed pr-a42a4f8); (2) exercised the launcher file-backed
+      bootstrap end-to-end with a stub claude (261-byte argv, complete 220 KB prompt
+      on disk at run time, removed after); (3) confirmed the container write_dir/cwd
+      split (file on the host workdir, bootstrap naming /workspace/pm/prompts/...,
+      rm -f on the container path); (4) measured real prompts for 80 PRs x 4 builders
+      against origin/master — sizes all far under the limit, and the only differences
+      are the intended caps (notes abbreviation, 25-sibling plan context), which the
+      spec requires; (5) full-suite failure set identical to an origin/master worktree
+      baseline in this sandbox (54-55 failed / 17 errors, all environmental: signoff_integration,
+      merge_publish, markdown_render, hook_events, and the flaky test_git_ops::test_keeps_unpushed_merge
+      which also fails on master). Evidence /pm-captures/review-4e41-i9/.'
+    created_at: '2026-10-24T23:10:44Z'
+    last_edited: '2026-10-24T23:10:44Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
