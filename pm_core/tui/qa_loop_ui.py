@@ -1014,6 +1014,18 @@ def _record_qa_note(app, state: QALoopState) -> bool:
                 _log.warning("Cannot record QA note: PR %s not found", state.pr_id)
                 return
             notes = pr.get("notes") or []
+            run_tail = f" (workdir: {state.qa_workdir})"
+            if state.qa_workdir and any(
+                    (n.get("text") or "").startswith(
+                        f"QA {state.latest_verdict}: ")
+                    and (n.get("text") or "").endswith(run_tail)
+                    for n in notes):
+                # This run's note is already there (its workdir names the
+                # run): a TUI restart re-processed a completion whose
+                # snapshot was kept for a pending follow-up.  The summary
+                # is rebuilt from the snapshot, so match the run, not it.
+                _log.info("QA note for %s already recorded", state.pr_id)
+                return
             existing_ids = {n["id"] for n in notes}
             note_id = store.generate_note_id(state.pr_id, note_text, existing_ids)
             now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

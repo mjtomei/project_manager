@@ -684,11 +684,13 @@ class ProjectManagerApp(App):
         except store.ProjectYamlParseError as e:  # incl. PlanValidationError
             _log.warning("corrupt project.yaml, keeping previous state: %s", e)
             load_error = e
-        if load_error is None and getattr(self, "_load_error_shown", False):
+        shown_seq = getattr(self, "_load_error_seq", None)
+        if load_error is None and shown_seq:
             # The "cannot be loaded" line is sticky: drop it now, or it
-            # hides what the reload brings (resumed or recorded QA).
-            self._load_error_shown = False
-            self._clear_log_message()
+            # hides what the reload brings (resumed or recorded QA).  Only
+            # that line: a newer message keeps the log line.
+            self._load_error_seq = None
+            self._clear_log_message(shown_seq)
             _log.info("project.yaml loads again")
         self._load_error = load_error
         if load_error is not None:
@@ -713,8 +715,7 @@ class ProjectManagerApp(App):
             self.query_one("#tech-tree", TechTree).update_prs(
                 [], unavailable=msg)
             self._show_normal_view()
-            self.log_message(escape(msg), sticky=30)
-            self._load_error_shown = True
+            self._load_error_seq = self.log_message(escape(msg), sticky=30)
         elif not prs:
             state, _ = guide.detect_state(self._root)
             self._show_guide_view(state)

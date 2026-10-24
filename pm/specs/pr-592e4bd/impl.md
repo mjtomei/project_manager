@@ -601,3 +601,38 @@ recorded with item 32.
     adopted logs only the completion's wait line; release to "QA
     complete" takes ~90 s in the S41-S46 harness, longer than S46 story
     3's 60 s cap.  Evidence: `/pm-captures/scenarios/46` (REPORT.md).
+    (d) Review loop 7026 i1: a follow-up that fails after both writes
+        keeps the snapshot for its retry, so a TUI restart in that gap
+        re-processed the completion from the snapshot and wrote the QA
+        note a second time.  `_record_qa_note` now skips a note this run
+        already has (same verdict, ending in this run's `(workdir: …)`;
+        the summary is rebuilt from the snapshot, so it is not compared).
+        Runs with no QA workdir are not deduplicated.  The sticky "cannot
+        be loaded" line is cleared by its arrival number, so a newer
+        message keeps the log line.
+        `test_restart_while_a_follow_up_is_pending_records_no_second_note`
+        (fails with no guard and with an exact-text guard),
+        `test_qa_notes_of_different_runs_are_all_recorded`.
+34. (S45, RQ37 one clone, every QA phase) Live on 4d8f968a, a run in
+    planning died "QA thread crashed" 9 s after a conflicting pull (the
+    mid-planning merge guard's `store.load`), and a review PASS during the
+    failure dropped the zz t / auto-start review → QA hand-off for good.
+    (a) e11b952a: the three merge guards skip a round
+        (`_live_pr_status`, one warning per reason, then "loads again");
+        the start, spec-gate and resume loads wait until the file loads
+        (`_load_project_waiting`, 5 s retry, "Waiting for project.yaml to
+        load again (…)" on the TUI).  `tests/test_qa_load_failures.py`.
+    (b) 8400faf7: a stop during that wait ends the run quietly (no
+        verdict from the stale data, no launch).
+    (c) 0454edaf: the sync skip for an absent file names
+        `<root>/project.yaml`, not the cwd lookup's "cd into your repo".
+    (d) be8f23d1, 85463cfe, 195889a5: the review → QA hand-off is kept
+        pending at the step that failed (`app._pending_auto_qa`: the
+        in_review → qa write, or the QA start after it) and retried every
+        poll tick, which stays on while one is pending; it launches once
+        and is dropped when zz t is stopped, auto-start no longer covers
+        the PR, the PR left qa or a QA run started.  One warning per
+        reason.  `tests/test_review_qa_handoff_unloadable.py`.
+    Observation (unchanged): zz t on an in_review PR does not move it to
+    qa.  Full suite 3622 passed on 8ff5e7a2.  Evidence:
+    `/pm-captures/scenarios/45` (REPORT.md).

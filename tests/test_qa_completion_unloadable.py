@@ -201,8 +201,10 @@ def test_tui_started_on_an_unloadable_file_mounts(tmp_path, how):
     assert len(loads) == 2
     assert _pr(app._root) == store.get_pr(app._data, "pr-001")
     assert app._load_error is None
-    # the sticky "cannot be loaded" line goes once the file loads
-    app._clear_log_message.assert_called_once_with()
+    # the sticky "cannot be loaded" line goes once the file loads (only
+    # that line, by its arrival number)
+    app._clear_log_message.assert_called_once_with(
+        app.log_message.return_value)
 
 
 # --- the file breaks after the load check (review of a9b966ec) -------------
@@ -339,3 +341,45 @@ def test_tree_names_why_it_is_empty():
     assert tree._empty_message() == tree._unavailable
     tree._unavailable = None
     assert tree._empty_message().startswith("No PRs defined")
+
+
+def test_restart_while_a_follow_up_is_pending_records_no_second_note(tmp_path):
+    """The note is written, then the zz t restart meets the failure: the
+    snapshot is kept for the retry.  A TUI restart in that gap recovers the
+    run from the snapshot and re-processes it; the run's QA note is not
+    written a second time, although the recovered summary differs."""
+    from pm_core.tui import qa_loop_ui
+    app = _make_app(tmp_path)
+    app._self_driving_qa["pr-001"] = {"pass_count": 0, "required_passes": 2}
+    old, snap = _finished_run(app, tmp_path, VERDICT_PASS)
+    old.planner_code_changes = ["pm_core/x.py"]
+    with patch("pm_core.tui.qa_loop_ui.start_qa", return_value=False):
+        _poll(app, 1)
+    assert snap.exists() and old._ui_pending
+    assert len(_pr(app._root)["notes"]) == 1
+
+    # TUI restart: in-memory state is gone; the resume scan rebuilds the
+    # finished run from its snapshot and processes the completion again.
+    app._qa_loops = {}
+    app._self_driving_qa = {}
+    recovered = QALoopState(pr_id="pr-001")
+    recovered.running = False
+    recovered.latest_verdict = VERDICT_PASS
+    recovered.qa_workdir = old.qa_workdir
+    with patch("pm_core.tui.auto_start.is_enabled", return_value=False), \
+         patch("pm_core.tui.auto_start.in_scope", return_value=False):
+        assert qa_loop_ui._on_qa_complete(app, recovered)
+    assert len(_pr(app._root)["notes"]) == 1
+
+
+def test_qa_notes_of_different_runs_are_all_recorded(tmp_path):
+    """The per-run guard keys on the run's workdir and verdict: other runs
+    (and runs with no workdir) still get their own notes."""
+    from pm_core.tui import qa_loop_ui
+    app = _make_app(tmp_path)
+    for wd in ("/qa/run-1", "/qa/run-2", None, None):
+        s = QALoopState(pr_id="pr-001")
+        s.latest_verdict = VERDICT_PASS
+        s.qa_workdir = wd
+        assert qa_loop_ui._record_qa_note(app, s)
+    assert len(_pr(app._root)["notes"]) == 4
