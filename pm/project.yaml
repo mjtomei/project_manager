@@ -31610,7 +31610,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T01:52:17.239355+00:00'
+  updated_at: '2026-10-24T02:26:45.533969+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32815,6 +32815,23 @@ prs:
       not re-run live on the merged tree. Suite 3567 passed on 8061ea7e.'
     created_at: '2026-10-24T01:52:17Z'
     last_edited: '2026-10-24T01:52:17Z'
+  - id: note-0ef48df
+    text: 'QA S44 (2026-10-24, two clones, host, captures /pm-captures/scenarios/44
+      REPORT.md): CODE CHANGES needing normal re-review, pushed deb23fea, a4a45ffa,
+      67ea18e8 (tested as 6a4886d5/21900e9c/4b9eedca; full suite 3573 passed on combined
+      67ea18e8 over S43 4b702017). (1) A merge whose plans do not validate killed
+      the TUI at the 300 s background sync (_background_sync raised PlanValidationError,
+      TUI unmount; db1eb982 only covered the scan): sync + _load_state now skip it
+      like a parse error. (2) A sync (or reload) while a checkout had project.yaml
+      absent silently set app._root=None, so the resume scan stopped and an orphan
+      was adopted 4 min 55 s late: root/state kept while the pm dir exists. (3) A
+      fresh TUI never logged the absent-file scan skip (None stamp == default): sentinel.
+      Each regression fails reverted on the combined tree. Story 4 stale in_review
+      node after adoption = S42 bb39b92e (my duplicate dropped); combined replay qa
+      +<1 s. All four story Thens held post-fix; router only work/ refiner+worker;
+      0 secrets.'
+    created_at: '2026-10-24T02:26:45Z'
+    last_edited: '2026-10-24T02:26:45Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
