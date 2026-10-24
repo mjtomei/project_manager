@@ -5030,6 +5030,14 @@ def _execute_and_finalize(
     else:
         state.latest_verdict = VERDICT_PASS
 
+    # Snapshot the final scenario verdicts BEFORE publishing overall: a
+    # restart recovers a run whose status file has an overall from this
+    # snapshot, and the blocking finalizer below may never return (its
+    # driver or TUI dies).  Published first, the recovered QA note read "?"
+    # for every scenario (S47).  A restart between the two writes resumes
+    # the run with every verdict in hand, which then aggregates again.
+    _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
+
     # Write final status file with overall verdict
     _write_status_file(status_path, state.pr_id, state.scenarios,
                        state.scenario_verdicts, overall=state.latest_verdict,

@@ -680,3 +680,16 @@ recorded with item 33(d).
     `TestZZTStart::test_moves_an_in_review_pr_to_qa` and
     `test_unlockable_project_starts_nothing` (both fail with the call
     removed).  Evidence: `/pm-captures/scenarios/47`.
+37. (S47) A run whose driver died during the blocking finalizer (the S12
+    method, `pm pr qa-run-bg` killed once `qa_status.json` had `overall`)
+    was recovered once with one note, but the note read
+    "QA PASS: S47 one: ?; S47 two: ?": `run_qa_sync` refreshed the resume
+    snapshot with the final scenario verdicts only after the finalizer,
+    while recovery rebuilds the summary from the snapshot (pre-existing on
+    master).  The snapshot is now written before `overall` is published
+    (a restart between the two writes resumes the run with every verdict
+    in hand, which aggregates again).  Regression
+    `TestSnapshotBeforeOverall` reads the snapshot when `overall` is
+    written; it fails with the write after the publish and without it.
+    This fixes only the note text.  The interrupted finalizer itself is
+    still not re-run or adopted on recovery (pr-0f85376, unchanged).

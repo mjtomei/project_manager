@@ -2183,3 +2183,38 @@ class TestStoppedRunAggregation:
                            QAScenario(index=4, title="B", focus="b")]
         state.scenario_verdicts = {3: VERDICT_PASS, 4: VERDICT_PASS}
         assert self._finalize(state, tmp_path) == VERDICT_PASS
+
+
+class TestSnapshotBeforeOverall:
+    """S47: the snapshot carries the final verdicts before overall is
+    published (a restart recovers a run with an overall from it)."""
+
+    def test_snapshot_has_verdicts_when_overall_is_published(self, tmp_path):
+        from pm_core import qa_loop
+        state = QALoopState(pr_id="pr-001")
+        state.qa_workdir = str(tmp_path)
+        state.scenarios = [QAScenario(index=3, title="A", focus="a"),
+                           QAScenario(index=4, title="B", focus="b")]
+        seen = {}
+
+        def poll(st, *a, **k):  # the verdicts land during the poll
+            st.scenario_verdicts.update({3: VERDICT_PASS, 4: VERDICT_PASS})
+
+        def status(*a, overall=None, **k):  # the driver may die right after
+            if overall:
+                seen.update(qa_loop._load_resume_file(tmp_path) or {})
+
+        with patch("pm_core.qa_loop._poll_tmux_verdicts", side_effect=poll), \
+             patch("pm_core.qa_loop._write_status_file", side_effect=status), \
+             patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+             patch("pm_core.qa_loop._run_qa_finalize_pane", return_value=None):
+            qa_loop._execute_and_finalize(
+                state, tmp_path, {"branch": "b"}, {}, "pm-test", "qa-w",
+                str(tmp_path), tmp_path / "status.json", None,
+                use_containers=False, concurrency_cap=0,
+                queued_scenarios=[], notify=lambda: None)
+
+        assert seen.get("scenario_verdicts") == {"3": VERDICT_PASS,
+                                                 "4": VERDICT_PASS}
+        rebuilt = qa_loop.build_resume_state(seen)
+        assert qa_loop.qa_outcome_detail(rebuilt) == "A: PASS; B: PASS"
