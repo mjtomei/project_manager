@@ -569,8 +569,11 @@ def test_flush_timer_firing_just_before_the_hold_ends_rearms():
     _log(app, "A held", force=True, hold=3)
     _log(app, "B queued", force=True, hold=3)
     app._log_hold_until = time.monotonic() + 0.0005
+    delays, set_timer = [], app.set_timer
+    app.set_timer = lambda delay, cb: delays.append(delay) or set_timer(delay, cb)
     app.timers.pop(0)()  # fires early: the hold is still active
     assert len(app.timers) == 1  # re-armed for the rest of the hold
+    assert 0 < delays[0] <= 0.0005  # only the rest, not a whole new hold
     time.sleep(0.001)
     _log(app, "C plain")
     _log(app, "D confirmation", force=True, hold=3)

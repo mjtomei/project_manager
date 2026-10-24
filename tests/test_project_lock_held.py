@@ -26,7 +26,7 @@ import pytest
 from pm_core import store
 from pm_core.qa_loop import VERDICT_NEEDS_WORK, VERDICT_PASS
 from tests.test_qa_completion_unloadable import (
-    _finished_run, _logged, _make_app, _poll, _pr, _write)
+    _break, _finished_run, _logged, _make_app, _poll, _pr, _write)
 
 
 @contextmanager
@@ -487,3 +487,51 @@ def test_completion_wait_line_is_not_replaced_by_a_same_frame_resume(
     assert shown.count(wait) == 1
     end_hold()
     assert shown[-1] == " Resuming QA for pr-002 after restart..."
+
+
+@pytest.mark.parametrize("recorded", [False, True],
+                         ids=["to_record_it", "follow_up"])
+def test_completion_load_wait_line_is_not_replaced_by_a_same_frame_resume(
+        tmp_path, recorded):
+    """Review loop 350f i4: f19831c2 forced and held both "waiting for
+    project.yaml to load" variants as well as the lock one, but only the
+    lock line was tested.  Either load line is said once per wait, so a
+    same-frame "Resuming QA …" must not replace it before it is painted."""
+    from pm_core.tui import qa_loop_ui
+    app = _make_app(tmp_path)
+    state, _snap = _finished_run(app, tmp_path, VERDICT_PASS)
+    if recorded:
+        state._ui_writes_done.add("note")
+        state._ui_pending.append(lambda: True)
+    _break(app._root, "conflict")
+    shown, end_hold = _painting(app)
+    assert qa_loop_ui._completion_waits_for_project(app, state)
+    app.log_message("Resuming QA for pr-002 after restart...")
+    assert qa_loop_ui._completion_waits_for_project(app, state)
+    text = ("recorded — follow-up waiting for project.yaml to load"
+            if recorded else "waiting for project.yaml to load to record it")
+    assert text in shown[-1]
+    assert sum(text in s for s in shown) == 1
+    end_hold()
+    assert shown[-1] == " Resuming QA for pr-002 after restart..."
+
+
+@pytest.mark.parametrize("one_shot", [True, False],
+                         ids=["one_shot", "retried"])
+def test_sign_off_parse_error_is_forced_only_for_the_one_shot_caller(
+        tmp_path, one_shot):
+    """Review loop 350f i1: the one-shot skip_qa hand-off's "Error:" on an
+    unloadable file is forced and held (nothing retries it, so it must be
+    seen).  A retried caller meets the same file on every pass, so its line
+    stays a plain one rather than taking the log line each time."""
+    from pm_core.tui import signoff_ui
+    app = _make_app(tmp_path)
+    _break(app._root, "conflict")
+    kw = {} if one_shot else {"lock_timeout": store.NO_WAIT}
+    with patch.object(signoff_ui, "_driven", return_value=True), \
+            patch.object(signoff_ui, "step") as step:
+        assert signoff_ui.start_signoff(app, "pr-001", **kw) is False
+    step.assert_not_called()
+    err = next(c for c in app.log_message.call_args_list
+               if c.args[0].startswith("Error:"))
+    assert err.kwargs == (signoff_ui._SHOWN if one_shot else {})
