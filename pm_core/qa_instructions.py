@@ -351,12 +351,12 @@ def mocks_for_prompt(pm_root: Path) -> str:
         mocks, _mock_block, separator="\n",
         omitted_note=lambda n: (
             f"... ({n} more mock definition(s) omitted to fit the prompt "
-            f"size limit — run `pm qa list` to read them.)"),
+            f"size limit — run `pm qa mocks list` to read them.)"),
     )
     text = header + body + "\n"
     return bounded_text(
         text,
         max_bytes=_MOCKS_BUDGET,
-        pointer="`pm qa list` (mock definitions under pm/qa/mocks/)",
+        pointer="`pm qa mocks list` (mock definitions under pm/qa/mocks/)",
         label="mock definitions",
     )

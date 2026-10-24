@@ -160,7 +160,7 @@ def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
     header = "\n## PR Notes\n"
     full = _render_pr_notes(all_notes)
     if prompt_bytes(header + full) <= _PR_NOTES_BUDGET:
-        return header + full
+        return header + full + "\n"
     budget = _PR_NOTES_BUDGET - prompt_bytes(header)
     return header + _render_pr_notes_bounded(all_notes, budget) + "\n"
 
@@ -211,7 +211,10 @@ def _render_pr_notes_bounded(notes: list[dict], budget: int) -> str:
         )
         return sep.join(kept + [marker])
 
-    remaining = budget - total
+    # Reserve the marker's room up front: without it the newest notes would
+    # fill the budget exactly and the "older notes are abbreviated" marker
+    # would have to be dropped, leaving the abbreviations unexplained.
+    remaining = budget - total - marker_budget
     rendered = list(summaries)
     for i in range(len(notes) - 1, -1, -1):
         full = full_line(notes[i])

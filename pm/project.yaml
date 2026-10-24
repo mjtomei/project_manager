@@ -22350,7 +22350,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-24T13:27:03.207128+00:00'
+  updated_at: '2026-10-24T13:40:58.774313+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22401,6 +22401,22 @@ prs:
       (43 cases; full suite 3400 passed, 1 pre-existing hook_events failure).'
     created_at: '2026-10-24T13:27:03Z'
     last_edited: '2026-10-24T13:27:03Z'
+  - id: note-421f271
+    text: 'Review-loop 4e41 i1 refinements on top of 518b130d: (1) the QA finalize
+      omission marker named `pm qa status`, which does not exist — it now resolves
+      the QA run qa_status.json via latest_qa_status_path (qa_resume.json beside it
+      carries each scenario worktree path), falling back to the run-dir glob; (2)
+      the mocks marker pointed at `pm qa list`, which lists instructions/regression/artifacts
+      but NOT mocks — now `pm qa mocks list`; (3) signoff.format_signoff_return still
+      joined integration conflicts/overlap unbounded (it feeds impl/review/QA prompts
+      via _signoff_return_block) — now bounded with INTEGRATION_MAX_PATHS like R6;
+      (4) _format_pr_notes under-budget path had dropped the trailing newline the
+      pre-PR builder emitted (the bounded path kept it) — restored; (5) _render_pr_notes_bounded
+      now reserves the marker bytes before upgrading notes to full text so the "older
+      notes are abbreviated" marker is no longer dropped. tests/test_prompt_bounds.py
+      now 47 cases.'
+    created_at: '2026-10-24T13:40:58Z'
+    last_edited: '2026-10-24T13:40:58Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
@@ -30982,11 +30998,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T00:51:48.437253+00:00'
-  updated_at: '2026-10-22T00:51:48.437253+00:00'
+  updated_at: '2026-10-24T13:41:03.296157+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-82828e2
+    text: 'pr-ace66e5 (pending review) adds the read-only `pm pr show <pr-id>` command
+      this PR asks for: it prints display id, title, status, plan, branch, workdir,
+      gh_pr, depends_on, description, tests, files and notes — which is what the plan-review
+      fallback and the QA-planner prompt point at. Still missing vs this PR description:
+      the signoff / signoff_return / integration / merge_integrity records. So the
+      remaining work here is either extending `pm pr show` with those records or closing
+      this PR once pr-ace66e5 merges. The note reaches you after pr-ace66e5 merges
+      to master.'
+    created_at: '2026-10-24T13:41:03Z'
+    last_edited: '2026-10-24T13:41:03Z'
 - id: pr-7e00786
   plan: bugs
   title: 'Bug: review loop adopts any review-<pr> pane without checking it runs the

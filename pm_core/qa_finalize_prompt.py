@@ -19,6 +19,23 @@ from pm_core.prompt_bounds import bounded_join
 _SCENARIO_LINES_MAX = 40
 
 
+def _scenarios_pointer(pr_id: str) -> str:
+    """Where to read the scenarios an abbreviated listing left out.
+
+    The QA run's ``qa_status.json`` lists every scenario and
+    ``qa_resume.json`` beside it carries each worktree path, so the
+    resolved status file (or the run directory when no run exists yet) is
+    the on-demand source the omission marker names.
+    """
+    from pm_core.paths import latest_qa_status_path, workdirs_base
+    latest = latest_qa_status_path(pr_id)
+    if latest is not None:
+        return (f"read `{latest}` for every scenario "
+                f"(qa_resume.json beside it lists each worktree)")
+    return (f"the QA run's qa_status.json / qa_resume.json under "
+            f"{workdirs_base() / 'qa' / (pr_id + '-*')} list every scenario")
+
+
 def build_qa_finalize_prompt(
     *,
     pr_id: str,
@@ -41,7 +58,7 @@ def build_qa_finalize_prompt(
                        f"worktree={t[2] or '(none)'}"),
             max_items=_SCENARIO_LINES_MAX,
             omitted_note=lambda n: (
-                f"- ... (+{n} more scenarios; run `pm qa status`)"),
+                f"- ... (+{n} more scenarios; {_scenarios_pointer(pr_id)})"),
         )
     else:
         scenario_lines = "- (no scenarios ran)"

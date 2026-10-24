@@ -168,6 +168,22 @@ class TestPrNotesBounding:
         assert "keepme" in p
         assert "pm pr note list" not in p
 
+    def test_full_and_bounded_renders_both_end_with_newline(self):
+        """The block is embedded in prompts; both renderings must terminate
+        the section so following blocks cannot run into the last note."""
+        small = prompt_gen._format_pr_notes(
+            _pr(notes=[{"id": "n1", "text": "hi", "created_at": ""}]))
+        big = prompt_gen._format_pr_notes(_pr(notes=[_note(i) for i in range(300)]))
+        assert small.endswith("\n") and big.endswith("\n")
+
+    def test_abbreviated_notes_say_so(self):
+        """Newest notes are kept in full and older ones summarized; the
+        summary must be explained, not silent."""
+        pr = _pr(notes=[_note(i, size=300) for i in range(120)])
+        block = prompt_gen._format_pr_notes(pr)
+        assert "abbreviated" in block
+        assert "pm pr note list" in block
+
 
 class TestReviewPromptBounding:
     def test_many_siblings_and_notes(self):
@@ -197,6 +213,38 @@ class TestSignoffPromptBounding:
         )
         p = prompt_gen.generate_signoff_prompt(_data(pr), "pr-x")
         _assert_bounded(p, "pm pr note list")
+
+    def test_signoff_return_block_bounds_integration_paths(self):
+        """The return block (appended to impl/review/QA prompts) inlines the
+        same overlap/conflict path lists; bound them like the sign-off one."""
+        from pm_core.signoff import format_signoff_return
+        pr = _pr(signoff_return={
+            "verdict": "NEEDS_WORK", "hop": "impl", "reason": "conflict",
+            "reviewed_head": "b" * 40,
+            "integration": {
+                "base_branch": "master", "base_sha": "a" * 40,
+                "target_repo": "r", "status": "conflict",
+                "conflicts": [f"c{i}.py" for i in range(500)],
+                "overlap": [f"f{i}.py" for i in range(500)],
+            },
+        })
+        block = format_signoff_return(pr)
+        assert prompt_bytes(block) < 5_000
+        assert "(+480 more" in block
+
+    def test_signoff_return_block_bounds_when_embedded_in_prompts(self):
+        pr = _pr(notes=[_note(i) for i in range(300)], signoff_return={
+            "verdict": "NEEDS_WORK", "hop": "impl", "reason": "r" * 200,
+            "reviewed_head": "b" * 40,
+            "integration": {
+                "base_branch": "master", "base_sha": "a" * 40,
+                "target_repo": "r", "status": "conflict",
+                "conflicts": [f"c{i}.py" for i in range(2000)],
+                "overlap": [f"f{i}.py" for i in range(2000)],
+            },
+        })
+        p = prompt_gen.generate_prompt(_data(pr), "pr-x")
+        _assert_bounded(p, "pm pr note list", "(+1980 more")
 
 
 class TestQaPromptsBounding:
@@ -294,7 +342,7 @@ class TestQaFinalizeBounding:
         p = build_qa_finalize_prompt(
             pr_id="pr-x", pr_title="T", branch="b", pr_workdir="/tmp/w",
             scenario_worktrees=worktrees, overall_verdict="PASS")
-        _assert_bounded(p, "pm qa status")
+        _assert_bounded(p, "qa_resume.json")
 
 
 class TestQaLoopPromptsBounding:

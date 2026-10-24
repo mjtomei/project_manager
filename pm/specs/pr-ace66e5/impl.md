@@ -350,3 +350,31 @@ New `tests/test_prompt_bounds.py` plus additions to existing prompt tests:
 - Regression: existing prompt tests (`test_bug_fix_flow_prompts.py`,
   `test_plan_review.py`, `test_claude_launcher.py`,
   `test_regression_prompts.py`) stay green.
+
+## 7. Review-loop follow-ups (iteration 1)
+
+The implementation landed in 518b130d; review found five refinements, all
+within this spec's intent (no requirement changed):
+
+- **R9 pointer.** The finalize marker named `pm qa status`, which does not
+  exist (violating the "name a working command/path" requirement that R16
+  exists to enforce). It now resolves the QA run's `qa_status.json` via
+  `latest_qa_status_path` (whose directory also holds `qa_resume.json`, the
+  only place each scenario's worktree path is recorded), falling back to the
+  run-directory glob when no run exists yet.
+- **R7 pointer.** The mocks marker pointed at `pm qa list`, which lists
+  instructions / regression tests / artifact recipes but **not** mocks; it now
+  names `pm qa mocks list`.
+- **§5 signoff.py.** `format_signoff_return` still joined the integration
+  `conflicts` / `overlap` path lists unbounded — the same class of bug R6
+  fixes in `_signoff_integration_block`, and it feeds impl / review / QA
+  prompts via `_signoff_return_block`. Both are now bounded with
+  `INTEGRATION_MAX_PATHS`.
+- **R2 newline.** The under-budget PR-notes path dropped the trailing newline
+  the pre-PR builder emitted (the bounded path kept it). Both paths now
+  terminate the section.
+- **R2 marker.** `_render_pr_notes_bounded`'s upgrade path did not reserve the
+  marker's bytes, so newest-notes-in-full could fill the budget exactly and
+  force the "older notes are abbreviated" marker to be dropped — the
+  abbreviations would then be unexplained. The reserve is now applied before
+  upgrading.
