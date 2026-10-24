@@ -981,7 +981,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
     _resolution = resolve_model_and_provider(
         "impl",
-        pr_model=get_pr_model_override(pr_entry),
+        pr_model=get_pr_model_override(pr_entry, "impl"),
         project_data=data,
     )
     resolved_model = _resolution.model
@@ -1174,7 +1174,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
     _resolution = resolve_model_and_provider(
         "review",
-        pr_model=get_pr_model_override(pr_entry),
+        pr_model=get_pr_model_override(pr_entry, "review"),
         project_data=data,
     )
 
@@ -1773,7 +1773,7 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
     _resolution = resolve_model_and_provider(
         "merge",
-        pr_model=get_pr_model_override(pr_entry),
+        pr_model=get_pr_model_override(pr_entry, "merge"),
         project_data=data,
     )
 

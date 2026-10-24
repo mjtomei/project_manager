@@ -673,7 +673,7 @@ class TestWindowLaunchWorkdir:
     """
 
     def _launch(self, tmp_path, *, transcript=None, existing=None,
-                head="abc", routed=False):
+                head="abc", routed=False, model_settings=None):
         from types import SimpleNamespace
         from contextlib import ExitStack
         from unittest.mock import MagicMock
@@ -688,6 +688,9 @@ class TestWindowLaunchWorkdir:
         pr_entry = {"id": "pr-001", "title": "T", "status": "sign_off",
                     "branch": "pm/pr-001", "workdir": str(workdir)}
 
+        if model_settings is not None:
+            pr_entry.update(model_settings)
+
         new_window = MagicMock(return_value="cl_pane")
         with ExitStack() as es:
             p = es.enter_context
@@ -699,11 +702,12 @@ class TestWindowLaunchWorkdir:
             p(patch("pm_core.tmux.select_window"))
             p(patch("pm_core.paths.workdirs_base", return_value=wdirs))
             p(patch("pm_core.signoff.head_sha", return_value=head))
-            p(patch("pm_core.model_config.resolve_model_and_provider",
-                    return_value=SimpleNamespace(model=None, provider="claude-work" if routed else None,
-                                                 effort="high" if routed else None)))
-            p(patch("pm_core.model_config.get_pr_model_override",
-                    return_value=None))
+            if model_settings is None:
+                p(patch("pm_core.model_config.resolve_model_and_provider",
+                        return_value=SimpleNamespace(model=None, provider="claude-work" if routed else None,
+                                                     effort="high" if routed else None)))
+                p(patch("pm_core.model_config.get_pr_model_override",
+                        return_value=None))
             p(patch("pm_core.prompt_gen.generate_signoff_prompt",
                     return_value="PROMPT"))
             self.build = p(patch("pm_core.claude_launcher.build_claude_shell_cmd",
@@ -734,6 +738,14 @@ class TestWindowLaunchWorkdir:
                 data, pr_entry, background=True,
                 transcript=str(transcript) if transcript else None)
         return new_window, workdir
+
+    def test_signoff_launch_honors_pr_role_exception(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        self._launch(tmp_path, routed=True, model_settings={
+            "model": "provider:deepseek-flash",
+            "session_models": {"signoff": "provider:claude-work"}})
+        assert self.build.call_args.kwargs["provider"] == "claude-work"
+        assert self.wrap.call_args.kwargs["provider"] == "claude-work"
 
     def test_signoff_container_uses_selected_route(self, tmp_path):
         self._launch(tmp_path, routed=True)

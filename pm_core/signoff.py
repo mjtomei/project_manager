@@ -487,7 +487,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
 
         _resolution = resolve_model_and_provider(
             "signoff",
-            pr_model=get_pr_model_override(pr_entry),
+            pr_model=get_pr_model_override(pr_entry, "signoff"),
             project_data=data,
         )
 

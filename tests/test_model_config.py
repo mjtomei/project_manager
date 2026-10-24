@@ -173,6 +173,29 @@ class TestGetPrModelOverride:
     def test_absent(self):
         assert get_pr_model_override({}) is None
 
+    def test_signoff_exception_keeps_other_roles_on_pr_model(self, monkeypatch):
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        pr = {"model": "provider:deepseek-flash",
+              "session_models": {"signoff": "provider:claude-work"}}
+        for role in SESSION_TYPES:
+            res = resolve_model_and_provider(
+                role, pr_model=get_pr_model_override(pr, role))
+            expected = "claude-work" if role == "signoff" else "deepseek-flash"
+            assert res.provider == expected
+        monkeypatch.setenv("PM_MODEL", "provider:environment")
+        assert resolve_model_and_provider(
+            "signoff", pr_model=get_pr_model_override(pr, "signoff")
+        ).provider == "environment"
+
+    def test_pr_role_inheritance_and_specific_precedence(self):
+        pr = {"model": "opus", "session_models": {
+            "review": "provider:claude-work", "qa": "sonnet",
+            "qa_scenario": "provider:glm-flash"}}
+        assert get_pr_model_override(pr, "signoff") == "provider:claude-work"
+        assert get_pr_model_override(pr, "qa_planning") == "sonnet"
+        assert get_pr_model_override(pr, "qa_scenario") == "provider:glm-flash"
+        assert get_pr_model_override(pr, "impl") == "opus"
+
 
 class TestBuildClaudeShellCmd:
     def test_model_flag_included(self):

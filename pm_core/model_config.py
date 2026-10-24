@@ -3,7 +3,7 @@
 Resolves which model to use for a given session type based on a
 configuration hierarchy:
 
-    PM_MODEL env var  >  PR-level override  >  project.yaml model_config
+    PM_MODEL env var  >  PR session_models  >  PR model  >  project.yaml model_config
     >  global ~/.pm/settings  >  (no default — use CLI setting)
 
 Effort level resolution:
@@ -279,6 +279,18 @@ def validate_model_config(project_data: dict | None) -> list[str]:
     return errors
 
 
-def get_pr_model_override(pr_entry: dict) -> str | None:
-    """Extract per-PR model override from a PR entry."""
+def get_pr_model_override(pr_entry: dict,
+                          session_type: str | None = None) -> str | None:
+    """Select a PR's role override, falling back to its all-role model.
+
+    For example, ``model: provider:deepseek-flash`` with
+    ``session_models: {signoff: provider:claude-work}`` keeps the experimental
+    model for development while routing sign-off to Claude. Role inheritance
+    matches project configuration (e.g. qa_scenario -> qa, signoff -> review).
+    """
+    if session_type:
+        models = pr_entry.get("session_models") or {}
+        for role in (session_type, _FALLBACK_TYPES.get(session_type)):
+            if role and role in models:
+                return models[role]
     return pr_entry.get("model")

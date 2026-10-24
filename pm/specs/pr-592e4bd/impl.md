@@ -10,6 +10,14 @@ The per-PR `model: provider:claude-work` override selects all these roles;
 project defaults can still keep other roles on plain Claude for remote control.
 Manual merge/spec gates are unchanged.
 
+The user subsequently requested Claude sign-off for the DeepSeek and GLM bug
+trials. A PR's `session_models` mapping selects exceptions to its `model`:
+`model: provider:deepseek-flash` plus
+`session_models: {signoff: provider:claude-work}`. Role-specific values and
+their parent-role fallbacks take precedence over the PR-wide model;
+`PM_MODEL` remains the highest-priority override. Implementation, review,
+all QA roles, sign-off, and merge resolve through this same rule.
+
 ## 1. Requirements (grounded)
 
 R1. **Selective routing, with an all-role override.** The original split is selected through the

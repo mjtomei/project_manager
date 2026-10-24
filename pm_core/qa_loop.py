@@ -1800,7 +1800,7 @@ def _resolve_qa_model(pr_data: dict, project_data: dict | None = None,
     from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
     return resolve_model_and_provider(
         session_type,
-        pr_model=get_pr_model_override(pr_data),
+        pr_model=get_pr_model_override(pr_data, session_type),
         project_data=project_data,
     )
 
