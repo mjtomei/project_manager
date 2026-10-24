@@ -4754,8 +4754,16 @@ def run_qa_sync(
     # Reload data from disk — the planner may have updated state
     # during execution, which writes to disk but doesn't update our copy.
     if pm_root:
-        data = _load_project_waiting(pm_root, state, "the spec check",
-                                     on_update) or data
+        loaded = _load_project_waiting(pm_root, state, "the spec check",
+                                       on_update)
+        if loaded is None:
+            # Stopped while waiting: launch nothing and record no verdict
+            # from the data loaded before the file became unloadable.
+            _log.info("QA for %s stopped while waiting for project.yaml "
+                      "after planning; no scenarios launched", state.pr_id)
+            state.running = False
+            return state
+        data = loaded
     pr_entry = store.get_pr(data, state.pr_id) if data else None
     if pr_entry and not _get_qa_spec(pr_entry, "qa") and not state._error:
         _log.warning("QA spec missing for %s after planning — "

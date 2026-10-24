@@ -123,3 +123,48 @@ def test_waiting_is_shown_once_per_reason(tmp_path, monkeypatch):
             on_update=lambda s: updates.append(s.latest_output)) == {"prs": []}
     assert len(updates) == 2
     assert "not valid YAML" in updates[0] and "plan-child" in updates[1]
+
+
+@pytest.mark.parametrize("has_spec", [False, True])
+def test_stop_during_the_spec_gate_wait_ends_the_run_quietly(
+        tmp_path, monkeypatch, has_spec):
+    """A stop (z t / zz t) while the spec gate waits for project.yaml ends
+    the run: no spec INPUT_REQUIRED verdict, no planner publication, no
+    scenario launch from the stale data loaded before the failure."""
+    from unittest.mock import MagicMock
+    data = _data(tmp_path)
+    loads = []
+    holder = {}
+
+    def load(*a, **kw):
+        loads.append(1)
+        if len(loads) == SPEC_GATE + 1:
+            holder["state"].stop_requested = True
+            raise FAILURES["missing_file"]()
+        return data
+
+    real_init = qa_loop.QALoopState.__init__
+
+    def capture_init(self, *a, **kw):
+        real_init(self, *a, **kw)
+        holder["state"] = self
+
+    publish = MagicMock(return_value="abc123")
+    launch = MagicMock(side_effect=AssertionError("worker launched"))
+    with patch.object(qa_loop.QALoopState, "__init__", capture_init):
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content="",
+            transcript_turns=[("user", TEMPLATE_PROMPT), ("assistant", FULL_PLAN)],
+            extra_patches=(
+                patch("pm_core.store.load", side_effect=load),
+                patch("pm_core.qa_loop._get_qa_spec",
+                      return_value="spec" if has_spec else None),
+                patch("pm_core.qa_loop._publish_planner_head", publish),
+                patch("pm_core.tmux.new_window_get_pane", launch),
+            ))
+    assert len(loads) == SPEC_GATE + 1          # no retry after the stop
+    assert state.running is False
+    assert state.latest_verdict == ""
+    assert "QA spec was not generated" not in state._error
+    publish.assert_not_called()
+    launch.assert_not_called()
