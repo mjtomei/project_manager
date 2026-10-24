@@ -31610,7 +31610,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T01:18:07.694567+00:00'
+  updated_at: '2026-10-24T01:52:17.239355+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32795,6 +32795,26 @@ prs:
       /workspace.'
     created_at: '2026-10-24T01:18:07Z'
     last_edited: '2026-10-24T01:18:07Z'
+  - id: note-bd2627d
+    text: 'QA S43 (2026-10-24, two clones, host; captures /pm-captures/scenarios/43,
+      REPORT.md). CODE CHANGES needing normal re-review, pushed af2278e5 + e0f74e2b
+      (tested as a817f5c9/b8c111eb, rebased onto S42 bb39b92e), impl.md item 31: (a)
+      an idle TUI ran the resume scan only on the 300 s sync, so a pulled orphan was
+      adopted 53 s late; a 5 s idle scan timer fixes it (live +4 s). (b) a run resumed
+      after its session died (own session killed+restarted, or another clone gone)
+      had no qa-<pr> window and ended PASS (finalize=None), pre-existing (single-clone
+      control same); the finalizer now opens the window. (c) runs of one PR from two
+      clones superseded/adopted each other (pre-fix Z1: A drove B run, 2 notes in
+      A, 0 in B); now per-session supersede, and no adoption while this clone QAd
+      the PR alongside it, from a retained qa_run.json record (survives TUI restart;
+      RAM-only version failed the fresh-app regression). (d) a relaunched pane reached
+      qa_resume.json only at the next tick (10 s+ with backoffs), so a TUI death then
+      could relaunch a duplicate; now written at once (bounded regression; live X4
+      covered only the steady state). Post-fix all X3P/C1P/X4/Z1P/Z2/Z3 Thens held
+      except the existing-PR tree box, stale 32.4 s after the pull: S42 bb39b92e,
+      not re-run live on the merged tree. Suite 3567 passed on 8061ea7e.'
+    created_at: '2026-10-24T01:52:17Z'
+    last_edited: '2026-10-24T01:52:17Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
