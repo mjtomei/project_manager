@@ -644,20 +644,22 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
     # Count-capped *and* byte-bounded: the lines are filesystem paths, so 20
     # long ones measured 200 KB — over PROMPT_ARG_LIMIT, in static text
     # fit_prompt cannot shrink.  The pointer names the full record.
+    # The marker carries no leading space: bounded_join appends it after
+    # ``separator`` (", "), so one here would render as a double space.
     if rec.get("overlap"):
         lines.append("- Files changed on both sides: " + bounded_join(
             rec["overlap"], lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
             max_bytes=_INTEGRATION_LIST_BUDGET,
             separator=", ",
             omitted_note=lambda n: (
-                f" (+{n} more; {integ.integration_pointer(pr_id)})")))
+                f"(+{n} more; {integ.integration_pointer(pr_id)})")))
     if rec.get("conflicts"):
         lines.append("- Conflicting paths: " + bounded_join(
             rec["conflicts"], lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
             max_bytes=_INTEGRATION_LIST_BUDGET,
             separator=", ",
             omitted_note=lambda n: (
-                f" (+{n} more; {integ.integration_pointer(pr_id)})")))
+                f"(+{n} more; {integ.integration_pointer(pr_id)})")))
     if rec.get("status") == integ.CONFLICT:
         lines.append(f"- A conflicted integration can only route "
                      f"**{SIGNOFF_IMPL}** (pm enforces this).")
@@ -1323,16 +1325,18 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
         targets.append(auto_start_target)
     if targets:
         from pm_core.autostart_state import managed_ids as _managed_ids
+        # Markers carry no leading space: bounded_join appends them after
+        # ``separator`` (", "), so one here would render as a double space.
         managed_list = bounded_join(
             sorted(_managed_ids(all_prs, targets)), str,
             max_items=_WATCHER_MANAGED_MAX, separator=", ",
-            omitted_note=lambda n: f" (+{n} more; run `pm pr list`)",
+            omitted_note=lambda n: f"(+{n} more; run `pm pr list`)",
         )
         target_list = bounded_join(
             targets, lambda t: f"**{t}**",
             max_items=_WATCHER_MANAGED_MAX, separator=", ",
             omitted_note=lambda n: (
-                f" (+{n} more; run `pm autostart list`)"),
+                f"(+{n} more; run `pm autostart list`)"),
         )
 
         auto_start_scope_block = f"""

@@ -646,6 +646,35 @@ class TestMergeAndWatcherBounding:
         assert "(+80 more; run `pm autostart list`)" in line
         assert "**pr-119**" not in line
 
+    def test_comma_separated_markers_do_not_double_space(self, monkeypatch):
+        """bounded_join appends the marker after ``separator`` (", "), so a
+        marker that also starts with a space renders as ",  (+N more" — one
+        stray space in the prompt text the session reads."""
+        targets = [f"pr-{i:03d}" for i in range(120)]
+        prs = [_pr(t) for t in targets]
+        data = {"project": {"name": "p", "base_branch": "master"},
+                "prs": prs, "plans": []}
+        p = prompt_gen.generate_watcher_prompt(data, auto_start_targets=targets)
+        for line in p.splitlines():
+            if "(+" in line and "more" in line:
+                assert ",  (+" not in line, line
+
+        monkeypatch.setattr("pm_core.paths.captures_dir",
+                            lambda pr_id: Path("/cap") / pr_id)
+        integ = {"base_branch": "master", "base_sha": "a" * 40,
+                 "target_repo": "r", "status": "clean",
+                 "overlap": [f"f{i}.py" for i in range(200)],
+                 "conflicts": [f"c{i}.py" for i in range(200)]}
+        block = prompt_gen._signoff_integration_block(_pr(integration=integ),
+                                                      "pr-x")
+        assert ",  (+" not in block
+
+        from pm_core.signoff import format_signoff_return
+        ret = format_signoff_return(_pr(signoff_return={
+            "verdict": "NEEDS_WORK", "hop": "impl", "reason": "conflict",
+            "reviewed_head": "b" * 40, "integration": integ}))
+        assert ",  (+" not in ret
+
 
 # ---------------------------------------------------------------------------
 # spec_gen / qa_instructions / qa_finalize / qa_loop

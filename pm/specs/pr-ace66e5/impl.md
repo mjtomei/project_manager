@@ -781,3 +781,45 @@ block, and the QA child artifact list; each measured 108-200 KB before the
 fix). Real-data sweep unchanged. Evidence:
 `/pm-captures/review-4e41-i8/` (`sweep.py`, `sweep-after-i8.txt`,
 `integration-paths-before-after.txt`).
+
+## 15. Review-loop follow-ups (iteration 9)
+
+Iteration 9 re-ran the i7/i8 sweep independently, but with **realistic per-item
+maxima** instead of unbounded synthetic strings (a real file name is capped by
+`NAME_MAX` 255, a real absolute path by `PATH_MAX` 4096, the largest real PR
+description in this repo is ~11 KB). Under those inputs every reachable
+builder is under `PROMPT_ARG_LIMIT`; the only exception is
+`build_regression_test_prompt` (the test body *is* the prompt, §10/§14). The
+sweep also confirmed the two i8 classifications: `_build_verification_prompt`'s
+recipe bullets (basenames) and the finalize/QA-child path listings (paths)
+behave as recorded.
+
+One defect, in the markers themselves: **the comma-separated omission markers
+rendered with a double space.** `bounded_join` appends the marker *after*
+`separator`, and the four markers passed with `separator=", "` also began with
+a space, so an abbreviated listing read
+```... f19.py`,  (+10 more; run `pm pr show pr-x`)``` — one stray space in the
+prompt text the session reads. The redundant leading space is gone from
+`_signoff_integration_block` (both lists), `signoff._integ_note` (both lists)
+and `generate_watcher_prompt`'s managed/target lists. The `"\n"`-separated
+markers are unaffected: their leading indentation is deliberate (it aligns the
+note with the two-space-indented listing in the plan builders).
+
+Checked and deliberately unchanged:
+
+- **`integration.summary()`** truncates a `CONFLICT` record's path list to five
+  files with a bare ` ...`. It is bounded, and in its only prompt use
+  (`_signoff_integration_block`'s "Result:" line) the bounded *and pointed*
+  path lists follow immediately, so nothing is dropped without a pointer. Its
+  other callers are CLI displays.
+- **The `_X = X` constant aliases** in `prompt_gen.py` (and the `PLAN_LIST_MAX`
+  alias in `cli/plan.py`) keep the builders' local names stable; no test
+  references them. Left as-is.
+
+Verification: `tests/test_prompt_bounds.py` 90 cases (1 new,
+failing-then-passing: the marker spacing). Real-data sweep over 80 PRs × 4
+builders is byte-identical before and after (the fix only touches abbreviated
+listings, which this repo's real data never triggers). Full suite failure set
+byte-identical to an `origin/master` worktree baseline in this sandbox
+(54 failed / 17 errors / 3376 passed vs 54 / 17 / 3287 — the delta is this
+PR's new tests). Evidence: `/pm-captures/review-4e41-i9/`.

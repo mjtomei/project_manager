@@ -851,8 +851,10 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
         # PR's captures directory as a side effect.  Building a prompt must not
         # touch the filesystem, and the pointer is only needed when a path list
         # is actually abbreviated.
+        # No leading space in the marker: bounded_join appends it after
+        # ``separator`` (", "), so one here would render as a double space.
         def _integ_note(n: int) -> str:
-            return (f" (+{n} more; "
+            return (f"(+{n} more; "
                     f"{integration.integration_pointer(pr.get('id', '???'))})")
 
         # Byte-bounded as well as count-capped: the lines are filesystem
