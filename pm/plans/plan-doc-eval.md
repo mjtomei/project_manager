@@ -2,6 +2,8 @@
 
 Build and run a document-only improvement loop, then carry measured improvements into PM's existing planning prompts. This is the first bootstrap: generate documents, evaluate their quality, edit the generation prompt and repeat. Code execution benchmarks and full PM evaluation follow afterward.
 
+The broader improvement flow covers all PM use cases, including project import/discovery, automatic plans and recipes, execution/recovery, research, living documents and Radar; see [plan-delivery](plan-delivery.md) and [plan-self-improve](plan-self-improve.md). Document quality supplies the first measure, not proof of downstream usefulness. Keep this bootstrap document-only; add outcome and human-effort measures as those capabilities become runnable.
+
 ## Experiment
 
 Use the [collected corpus](../../experiments/plan-writing/sources.json) as known-good writing without manual quality curation. Automatically sample across sources, document types and lengths, so the largest collections do not dominate; keep duplicates and documents from the same project together when splitting development, validation and final evaluation sets.
