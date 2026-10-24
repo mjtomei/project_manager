@@ -29495,7 +29495,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T18:57:33.967457+00:00'
-  updated_at: '2026-10-23T01:40:53.806179+00:00'
+  updated_at: '2026-10-24T06:09:32.589046+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29538,6 +29538,14 @@ prs:
       line.'
     created_at: '2026-10-23T01:40:53Z'
     last_edited: '2026-10-23T01:40:53Z'
+  - id: note-5286839
+    text: 'pr-592e4bd (once merged) also covers the finalizer part: 2ff602fc skips
+      _run_qa_finalize_pane when the run is stopped or superseded (S22/S25 live),
+      with 1b6e2c68 (no route gate/relaunch for dead windows on stop) and ea78b9d1.
+      Still open after merge: zz t during the finalizer poll ends PASS (finalize=None)
+      (pr-592e4bd impl.md item 21). Re-check the repros after merge.'
+    created_at: '2026-10-24T06:09:32Z'
+    last_edited: '2026-10-24T06:09:32Z'
 - id: pr-c9e69fb
   plan: bugs
   title: 'Bug: shell `pm pr start` impl panes are never trust-watched (no --session-id
@@ -33073,7 +33081,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T20:39:48.696543+00:00'
-  updated_at: '2026-10-22T22:50:54.517722+00:00'
+  updated_at: '2026-10-24T06:09:31.624041+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33086,6 +33094,13 @@ prs:
       Fixing them together keeps a stopped or superseded run from finalizing or reporting.'
     created_at: '2026-10-22T22:50:54Z'
     last_edited: '2026-10-22T22:50:54Z'
+  - id: note-6ed6d26
+    text: 'Likely fixed by pr-592e4bd once merged: ea78b9d1 makes z t drop the superseded
+      run qa_resume.json under _resume_lock, and a stopped loop never rewrites it,
+      so no later "Recovered completed QA from disk" for the old run (held live in
+      pr-592e4bd QA S12/S14/S22/S25). Re-check the repro after merge, then close.'
+    created_at: '2026-10-24T06:09:31Z'
+    last_edited: '2026-10-24T06:09:31Z'
 - id: pr-3c7ce04
   plan: bugs
   title: 'Bug: QA loop waits silently forever when a Claude pane is blocked on login
