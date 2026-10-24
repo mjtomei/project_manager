@@ -1510,6 +1510,23 @@ def test_claim_refuses_a_run_recorded_by_another_session(tmp_path):
         assert qa_loop.claim_resume_file(qa_dir, loop) is not None
 
 
+def test_mark_result_recorded_touches_only_its_own_runs_snapshot(tmp_path):
+    """The mark goes only into the snapshot of the run whose result was
+    recorded, and only when this process has a pm session to name."""
+    qa_dir = _seed_run(tmp_path, overall=VERDICT_PASS)
+    f = _resume_file_path(qa_dir)
+    loop = json.loads(f.read_text())["loop_id"]
+    before = f.read_text()
+    qa_loop.mark_result_recorded(qa_dir, "another-loop")
+    assert f.read_text() == before
+    with patch.object(qa_loop, "get_pm_session", return_value=None):
+        qa_loop.mark_result_recorded(qa_dir, loop)
+    assert f.read_text() == before
+    qa_loop.mark_result_recorded(qa_dir, loop)
+    assert (json.loads(f.read_text())["result_recorded_by"]
+            == "project_manager-deadbeef")
+
+
 def test_completion_marks_its_snapshot_and_the_launching_clone_records_no_second_note(
         tmp_path):
     """End to end over two project.yaml files sharing ~/.pm: clone A

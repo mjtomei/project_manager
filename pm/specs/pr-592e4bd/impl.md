@@ -654,8 +654,14 @@ recorded with item 38.
     another session to that session (kept, treated as foreign until
     project.yaml changes), and `claim_resume_file` refuses it.  A run this
     session recorded is processed here wherever it was launched: this
-    session's own-run cleanup applies to it, and so does the same-PR
-    overlap gate.  Cost: if the recording clone never returns, its
+    session's own-run cleanup applies to it, and the same-PR overlap
+    gate (which leaves another clone's run to that clone) does not hold
+    it back.  `mark_result_recorded` writes only into the snapshot of the
+    recorded run (same `loop_id`) and only when the process has a pm
+    session; both guards are defensive, since every run has its own QA
+    workdir (review loop 679d i3,
+    `test_mark_result_recorded_touches_only_its_own_runs_snapshot`).
+    Cost: if the recording clone never returns, its
     pending follow-up stays undone, as for any foreign snapshot.  Tests
     (each mutation-checked) are in `tests/test_qa_resume.py`:
     `test_run_recorded_by_another_clone_is_left_to_it`,
@@ -741,7 +747,9 @@ recorded with item 38.
         suite order.  It now patches the module `_log`.
     Full suite 3645 passed on 64b41a91 (`/pm-captures/review-679d-i1`)
     and again on 82f22b1f in review loop 679d i2
-    (`/pm-captures/review-679d-i2`; env -u PM_HOST_HOME, /usr/bin first).
+    (`/pm-captures/review-679d-i2`; env -u PM_HOST_HOME, /usr/bin first),
+    and 3646 in review loop 679d i3 (item 35 guard test added;
+    `/pm-captures/review-679d-i3`).
     Earlier QA19 runs: 3642 on the S47 tree (3a3dcc3e), 3641 on
     006d7b4d (S48), 3629 on b740e188 (S49), each in its REPORT.md.
     Evidence: `/pm-captures/scenarios/48` (REPORT.md).
