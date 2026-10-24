@@ -247,6 +247,8 @@ class QALoopState:
     scenario_start: int = 0
     # Error message for status display (e.g. missing spec, no scenarios)
     _error: str = ""
+    # Last project.yaml load failure a merge guard skipped on (logged once).
+    _guard_load_problem: str = ""
     # Progress callback (run_qa_sync / resume_qa_sync ``_notify``) so
     # launch helpers can surface waits, e.g. on the worker route.
     _notify_cb: Callable[[], None] | None = None
@@ -584,6 +586,67 @@ def _setup_clone_override(clone_path: Path) -> None:
     set_override_path(tag, pm_core_parent)
     _log.info("Set override for clone %s (tag=%s) → %s",
               clone_path, tag, pm_core_parent)
+
+
+# ---------------------------------------------------------------------------
+# project.yaml reads while the file cannot be loaded
+# ---------------------------------------------------------------------------
+
+_PROJECT_LOAD_RETRY = 5.0  # seconds between project.yaml load attempts
+
+
+def _load_project_waiting(pm_root: Path, state: "QALoopState", what: str,
+                          on_update: Callable[["QALoopState"], None] | None = None,
+                          ) -> dict | None:
+    """``store.load(pm_root)``, waiting while project.yaml cannot be loaded.
+
+    A pull or merge can leave conflict markers or plans that do not
+    validate, and a checkout or rebase removes the file for a moment.  None
+    of that may end a QA run (RQ37): wait until the file loads again and
+    return its data.  Returns None only when a stop is requested meanwhile.
+    """
+    from pm_core import store
+    shown = None
+    while True:
+        try:
+            data = store.load(pm_root)
+        except store.ProjectYamlParseError as e:
+            if str(e) != shown:
+                shown = str(e)
+                _log.warning("QA for %s: %s waits until project.yaml loads "
+                             "again: %s", state.pr_id, what, e)
+                state.latest_output = (
+                    f"Waiting for project.yaml to load again ({what}): {e}")
+                if on_update:
+                    on_update(state)
+            if state.stop_requested:
+                return None
+            time.sleep(_PROJECT_LOAD_RETRY)
+            continue
+        if shown is not None:
+            _log.info("QA for %s: project.yaml loads again; %s continues",
+                      state.pr_id, what)
+        return data
+
+
+def _live_pr_status(pm_root: Path, pr_id: str, state: "QALoopState") -> str:
+    """The PR's status on disk for the merge guards, or "" (no verdict on
+    merged/closed) while project.yaml cannot be loaded: the guard is skipped
+    for that round instead of ending the run.  Logged once per reason."""
+    from pm_core import store
+    try:
+        live = store.get_pr(store.load(pm_root), pr_id) or {}
+    except store.ProjectYamlParseError as e:
+        if str(e) != state._guard_load_problem:
+            state._guard_load_problem = str(e)
+            _log.warning("QA for %s: merge check skipped while project.yaml "
+                         "cannot be loaded: %s", pr_id, e)
+        return ""
+    if state._guard_load_problem:
+        state._guard_load_problem = ""
+        _log.info("QA for %s: project.yaml loads again; merge check resumed",
+                  pr_id)
+    return live.get("status") or ""
 
 
 # ---------------------------------------------------------------------------
@@ -4288,9 +4351,13 @@ def run_qa_sync(
     from pm_core import tmux as tmux_mod, prompt_gen, git_ops, store
     from pm_core import pane_layout, pane_registry
     from pm_core.claude_launcher import build_claude_shell_cmd
-    _qa_planning_resolution = _resolve_qa_model(pr_data, store.load(pm_root), session_type="qa_planning")
-
     state.running = True
+    data = _load_project_waiting(pm_root, state, "QA start", on_update)
+    if data is None:
+        state.running = False
+        return state
+    _qa_planning_resolution = _resolve_qa_model(pr_data, data, session_type="qa_planning")
+
     session = get_pm_session()
     if not session:
         _log.error("No pm session found")
@@ -4307,7 +4374,10 @@ def run_qa_sync(
     state.session_tag = session.removeprefix("pm-") if session else None
 
     window_name = _compute_qa_window_name(pr_data)
-    data = store.load(pm_root)
+    data = _load_project_waiting(pm_root, state, "QA start", on_update)
+    if data is None:
+        state.running = False
+        return state
 
     # Find the PR entry inside the freshly loaded data so _ensure_workdir
     # updates the same dict that gets saved.
@@ -4421,10 +4491,10 @@ def run_qa_sync(
         # the residual race where the detached driver passed the earlier
         # status checks but the merge landed before the window appeared —
         # never leave a qa-<id> window/loop running against a merged PR.
-        _live = store.get_pr(store.load(pm_root), pr_id) or {}
-        if (_live.get("status") or "") in ("merged", "closed"):
+        _live_status = _live_pr_status(pm_root, pr_id, state)
+        if _live_status in ("merged", "closed"):
             _log.info("QA aborted before window creation: %s is %s",
-                      pr_id, _live.get("status"))
+                      pr_id, _live_status)
             state.running = False
             return state
 
@@ -4459,10 +4529,10 @@ def run_qa_sync(
         # status checks passed.  Re-check once more and, if the PR merged/
         # closed in the meantime, tear the just-created window(s) back down so
         # no QA window/loop is left running against the merged PR.
-        _live = store.get_pr(store.load(pm_root), pr_id) or {}
-        if (_live.get("status") or "") in ("merged", "closed"):
+        _live_status = _live_pr_status(pm_root, pr_id, state)
+        if _live_status in ("merged", "closed"):
             _log.info("QA aborted after window creation: %s is %s; tearing "
-                      "down qa window", pr_id, _live.get("status"))
+                      "down qa window", pr_id, _live_status)
             _cleanup_stale_scenario_windows(session, pr_data)
             state.running = False
             return state
@@ -4534,10 +4604,10 @@ def run_qa_sync(
             # planner is still running (after the pre/post-creation checks) and
             # tear the QA window down so it isn't left running against a now-
             # merged PR.
-            _live = store.get_pr(store.load(pm_root), pr_id) or {}
-            if (_live.get("status") or "") in ("merged", "closed"):
+            _live_status = _live_pr_status(pm_root, pr_id, state)
+            if _live_status in ("merged", "closed"):
                 _log.info("QA aborted mid-planning: %s is %s; tearing down "
-                          "qa window", pr_id, _live.get("status"))
+                          "qa window", pr_id, _live_status)
                 _cleanup_stale_scenario_windows(session, pr_data)
                 state.running = False
                 return state
@@ -4684,7 +4754,8 @@ def run_qa_sync(
     # Reload data from disk — the planner may have updated state
     # during execution, which writes to disk but doesn't update our copy.
     if pm_root:
-        data = store.load(pm_root)
+        data = _load_project_waiting(pm_root, state, "the spec check",
+                                     on_update) or data
     pr_entry = store.get_pr(data, state.pr_id) if data else None
     if pr_entry and not _get_qa_spec(pr_entry, "qa") and not state._error:
         _log.warning("QA spec missing for %s after planning — "
@@ -5016,7 +5087,10 @@ def resume_qa_sync(
         state.session_tag = session.removeprefix("pm-")
 
     window_name = _compute_qa_window_name(pr_data)
-    data = store.load(pm_root)
+    data = _load_project_waiting(pm_root, state, "QA resume", on_update)
+    if data is None:
+        state.running = False
+        return state
 
     pr_id = pr_data.get("id", state.pr_id)
     live_pr = next((p for p in data.get("prs", []) if p.get("id") == pr_id), None)
