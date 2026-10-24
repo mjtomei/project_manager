@@ -28962,7 +28962,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T09:20:01.185973+00:00'
-  updated_at: '2026-10-24T23:21:05.766334+00:00'
+  updated_at: '2026-10-24T23:31:03.981952+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29155,6 +29155,24 @@ prs:
       first on PATH.'
     created_at: '2026-10-24T23:21:05Z'
     last_edited: '2026-10-24T23:21:05Z'
+  - id: note-4ba3870
+    text: 'QA S13 (2026-10-25): post-sh -c-wrapper lifecycle re-run PASS at HEAD db87bba2
+      — all four stories green through the real tmux surface with fake-claude. Launch:
+      meta window runs fake output, override = meta workdir path, pm which resolves
+      <meta workdir>/pm_core, fresh GitHub clone on meta/session-20261024-232809.
+      Kill-window: override gone in <3 s (HUP trap through the wrapper), pm which
+      back to /workspace/pm_core, debug/fake-claude config/captures evidence md5-identical,
+      workdir preserved. Relaunch: Using existing workdir + Resuming in-progress branch,
+      no re-clone; second invocation Switched to existing window, one meta window,
+      override unchanged, fake undisturbed (pane PID stable). Normal exit (hold=15):
+      override removed ~1-3 s after fake exit (EXIT trap), only the override removed
+      — S50 overbroad cleanup did not recur, fake-claude config incl. hold entry survived,
+      window self-closed, no tracebacks. Direct process-tree evidence: pane PID cmd
+      is sh -c pm_meta_clear_override(){...}; trap ... EXIT HUP INT TERM; fake-claude.
+      Unit tests on the tree: test_meta_override_cleanup.py 10 passed + 1 skipped
+      (fish absent). Evidence /pm-captures/scenarios/13/{1-launch,2-kill-window,3-relaunch,4-normal-exit}/.'
+    created_at: '2026-10-24T23:31:03Z'
+    last_edited: '2026-10-24T23:31:03Z'
 - id: pr-19990de
   plan: bugs
   title: 'Bug: vanilla/GitHub merge propagation still resolves in the project root
