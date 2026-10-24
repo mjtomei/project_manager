@@ -739,4 +739,9 @@ recorded with item 38.
         logger (`configure_logger` sets `propagate = False`) unless an
         earlier test reset it: it failed on its own and passed only in
         suite order.  It now patches the module `_log`.
+    Full suite 3645 passed on 64b41a91 (`/pm-captures/review-679d-i1`)
+    and again on 82f22b1f in review loop 679d i2
+    (`/pm-captures/review-679d-i2`; env -u PM_HOST_HOME, /usr/bin first).
+    Earlier QA19 runs: 3642 on the S47 tree (3a3dcc3e), 3641 on
+    006d7b4d (S48), 3629 on b740e188 (S49), each in its REPORT.md.
     Evidence: `/pm-captures/scenarios/48` (REPORT.md).

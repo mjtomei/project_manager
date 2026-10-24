@@ -31628,7 +31628,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T08:23:21.770485+00:00'
+  updated_at: '2026-10-24T08:32:35.282547+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33148,6 +33148,16 @@ prs:
       38. 4 mutations caught; full suite 3645 passed; /pm-captures/review-679d-i1.'
     created_at: '2026-10-24T08:23:21Z'
     last_edited: '2026-10-24T08:23:21Z'
+  - id: note-0e6b806
+    text: 'Review 679d i2 (spec-only): QA19 commits b740e188, 13eb925b, 716d6ce1,
+      5da5ea11, 006d7b4d, 3a3dcc3e and i1 64b41a91 reviewed independently, all sound.
+      6 mutations (claim ignores result_recorded_by, no mark, zz t without _enter_qa_status,
+      snapshot after overall, sign-off/note follow-ups with the 2 s wait) each fail
+      their regression. The only fix: the impl.md section 5 index said item 38 records
+      the latest full suite, but it did not; it now does. Full suite 3645 passed on
+      82f22b1f; /pm-captures/review-679d-i2.'
+    created_at: '2026-10-24T08:32:35Z'
+    last_edited: '2026-10-24T08:32:35Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
