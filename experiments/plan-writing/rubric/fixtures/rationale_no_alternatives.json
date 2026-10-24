@@ -3,7 +3,6 @@
   "dimension": "rationale_and_alternatives",
   "concerns": [],
   "case_type": "whole_document",
-  "document_kind": "Rust RFC section",
   "brief": "`#[cfg_attr(predicate, attr1, attr2, ...)]` expands to each attribute instead of only taking one attribute.",
   "strong": "# Rationale and alternatives [rationale-and-alternatives]: #rationale-and-alternatives\n\nWe could require that multiple attributes must be within in a delimiter to make it so that it's always two arguments at the top level. E.g., `#[cfg_attr(predicate, [attr, attr])]`. While this could increase clarity, it mostly seems like it would just add noise. In the multiline case, it already reads pretty clear with the predicate on the first line and each attribute indented.\n\nThe default alternative of not doing this is a possibility. It would just mean that conditionally including attributes is slightly less ergonomic than it could be.",
   "weak": "# Rationale and alternatives [rationale-and-alternatives]: #rationale-and-alternatives\n\nThere are no other alternatives.\n\nBy not doing this, conditionally including attributes is slightly less ergonomic than it can be.",

@@ -3,7 +3,6 @@
   "dimension": "verifiability",
   "concerns": [],
   "case_type": "whole_document",
-  "document_kind": "requirements specification",
   "strong": "For up to and including 12 aircraft, the small display format shall be used. Otherwise, the large display format shall be used.",
   "weak": "For up to 12 aircraft, the small display format shall be used. Otherwise, the large display format shall be used.",
   "expected": {

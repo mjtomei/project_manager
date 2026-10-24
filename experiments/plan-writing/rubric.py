@@ -68,17 +68,13 @@ def fill(template, values):
 
 
 def dimension_block(dims, case_type):
+    # Judges see only each dimension's definition and score anchors. Detection guidance, track notes
+    # and not-a-fault lists are reference material for people (rubric.md), kept out of the prompt so
+    # that the measure carries as little of the rubric authors' own elaboration as possible.
     parts = []
     for d in dims:
-        lines = ["### " + d["id"] + " — " + d["name"], "", d["definition"]]
-        note = d.get("track_notes", {}).get(case_type)
-        if note:
-            lines.append("For this case type: " + note)
-        lines += ["", "Question: " + d["judge_question"], "", "Look for:"]
-        lines += ["- " + g for g in d["detection_guidance"]]
-        if d.get("not_a_defect"):
-            lines += ["", "Not a fault:"] + ["- " + g for g in d["not_a_defect"]]
-        lines += ["", "Score anchors:"] + ["- " + k + ": " + v for k, v in sorted(d["score_anchors"].items())]
+        lines = ["### " + d["id"] + " — " + d["name"], "", d["definition"], "", "Score anchors:"]
+        lines += ["- " + k + ": " + v for k, v in sorted(d["score_anchors"].items())]
         parts.append("\n".join(lines))
     return "\n\n".join(parts)
 
@@ -110,10 +106,9 @@ def _common_values(case_type, single, brief, prefix, section_request, document_k
         if brief:
             values["brief_block"] = "## Brief\n\n<brief>\n" + brief + "\n</brief>\n"
         else:
-            values["brief_block"] = ("## Brief\n\nNo brief is available for this case. Where the rules or dimensions below"
-                                     " refer to the brief, judge against what the document itself establishes"
+            values["brief_block"] = ("## Brief\n\nNo brief is available. Where a definition refers to the brief, judge"
+                                     " against what the document itself establishes"
                                      + (" and the material it describes" if material else "") + ".\n")
-        values["material_rule"] = " and the material the document describes" if material else ""
         values["material_block"] = ("\n## Material the document describes\n\n<material>\n" + material
                                     + "\n</material>\n" if material else "")
     else:
@@ -122,7 +117,7 @@ def _common_values(case_type, single, brief, prefix, section_request, document_k
         if material:
             raise ValueError("continuation cases take no material; the prefix is their input")
         values["prefix"] = prefix
-        values["section_request_line"] = (" The writers were asked: " + section_request if section_request else "")
+        values["section_request_line"] = (" The request for this section: " + section_request if section_request else "")
     return values
 
 

@@ -3,7 +3,6 @@
   "dimension": "clarity_and_precision",
   "concerns": [],
   "case_type": "whole_document",
-  "document_kind": "technical documentation sentence",
   "strong": "Setting this flag makes the application run 225-250% faster.",
   "weak": "Setting this flag makes the application run screamingly fast.",
   "expected": {

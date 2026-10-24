@@ -5,7 +5,6 @@
     "fidelity"
   ],
   "case_type": "continuation",
-  "document_kind": "protocol requirements document",
   "prefix": "6.1.2.2  QCLASS Values: RFC-1035 Section 3.2.5\n\n            A query with \"QCLASS=*\" SHOULD NOT be used unless the\n            requestor is seeking data from more than one class.  In\n            particular, if the requestor is only interested in Internet\n            data types, QCLASS=IN MUST be used.",
   "strong": "                                               |           |S|L|A|N|N|t\n                                               |           |T|D|Y|O|O|t\nFEATURE                                        |SECTION    | | | |T|T|e\n-----------------------------------------------|-----------|-|-|-|-|-|--\n[...]\nUse QCLASS=* unnecessarily                     |6.1.2.2    | | | |x| |",
   "weak": "                                               |           |S|L|A|N|N|t\n                                               |           |T|D|Y|O|O|t\nFEATURE                                        |SECTION    | | | |T|T|e\n-----------------------------------------------|-----------|-|-|-|-|-|--\n[...]\nUse QCLASS=* unnecessarily                     |6.1.2.2    | |x| | | |",

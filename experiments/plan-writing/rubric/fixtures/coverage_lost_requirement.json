@@ -5,7 +5,6 @@
     "lost_requirements"
   ],
   "case_type": "whole_document",
-  "document_kind": "protocol specification revision",
   "brief": "8.3 MKCOL Method\n\n   The MKCOL method is used to create a new collection. All DAV\n   compliant resources MUST support the MKCOL method.",
   "strong": "9.3 MKCOL Method\n\n   The MKCOL method is used to create a new collection. All DAV compliant\n   resources MUST support the MKCOL method.\n\n   MKCOL creates a new collection resource at the location specified by\n   the Request-URI. [...]",
   "weak": "9.3.  MKCOL Method\n\n   MKCOL creates a new collection resource at the location specified by\n   the Request-URI. [...]",

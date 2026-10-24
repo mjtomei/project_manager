@@ -17,21 +17,20 @@
       "name": "Purpose, context and audience",
       "applies_to": ["whole_document", "continuation"],
       "definition": "The document states what problem it addresses, why now, for whom, and what decision or action it asks of the reader, and its content is selected for that reader's needs.",
-      "track_notes": {"continuation": "The section serves the purpose the prefix has established and the role the section's position implies; re-introducing the document's purpose is scored under continuity, not here."},
+      "track_notes": {"continuation": "The section serves the purpose the prefix has established and the role the section's position implies."},
       "references": ["aacu-value", "iso24495", "fplg", "pep1", "kep-template", "shapeup-pitch", "google-design-docs", "grice"],
       "derived_from": "AAC&U 'context of and purpose for writing'; ISO 24495 'relevant'; PEP motivation, KEP motivation/goals, Shape Up problem and appetite, Google 'context and scope'; Grice's maxim of relation.",
       "detection_guidance": [
         "Can a reader state the problem, the intended reader and the requested decision after the first screen?",
         "Is there material that serves no identifiable reader need (history of the author's process, general tutorials, marketing)?",
         "Does the document address a different problem than the brief asks for, or a generic version of it?",
-        "For reports about existing work (digests, sign-off and QA reports), can the reader tell what the report asks of them: a decision, an approval, something to watch? Whether the details carry weight in proportion to that is scored under salience_and_synthesis."
+        "For reports about existing work (digests, sign-off and QA reports), can the reader tell what the report asks of them: a decision, an approval, something to watch?"
       ],
       "not_a_defect": ["A short motivation when the brief already establishes shared context.", "Background that a reviewer needs to evaluate the decision."],
       "examples": {
         "strong": {"text": "Because this is a summary, it does not contain all the information that may be important to you. You should read the entire proxy statement and its appendices carefully before you decide how to vote.", "ref": "sec-plain-english", "locator": "Chapter 6, 'Try personal pronouns', printed p. 22", "note": "The rewrite names the reader and the decision the summary serves ('before you decide how to vote')."},
         "weak": {"text": "This Summary does not purport to be complete and is qualified in its entirety by the more detailed information contained in the Proxy Statement and the Appendices hereto, all of which should be carefully reviewed.", "ref": "sec-plain-english", "locator": "Chapter 6, 'Try personal pronouns', printed p. 22"}
       },
-      "judge_question": "Does the document make its problem, intended reader and requested decision clear, and select content for that reader?",
       "score_anchors": {
         "1": "Purpose absent or wrong; content generic or aimed at no identifiable reader.",
         "3": "Purpose recoverable but late or vague; some content serves no reader need.",
@@ -47,23 +46,21 @@
       "id": "salience_and_synthesis",
       "name": "Salience and synthesis",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "Emphasis follows importance: what the reader most needs (the main conclusion, the decisions, the core constraints) comes early and gets the most weight, details are subordinated to the points they support, and the document pulls them together into an overview the reader can act on rather than an inventory of facts.",
-      "track_notes": {"continuation": "Within the section: its main point is clear and its details serve it. Repeating the prefix is scored under continuity, not here."},
+      "definition": "What the reader most needs (the main conclusion, the decisions, the core constraints) comes first and gets the most weight, and the details add up to an overview the reader can act on rather than a list of facts.",
+      "track_notes": {"continuation": "Within the section: its main point is clear and its details serve it."},
       "references": ["summeval", "minto", "da-pam-600-67", "gov-uk", "fplg", "grice"],
       "derived_from": "SummEval 'relevance' (selection of the important content of a source); Minto's governing thought and pyramid; the Army's bottom line up front (DA PAM 600-67); GOV.UK front-loading; plain-language 'put the main point first'; Grice's maxims of quantity and relation.",
       "detection_guidance": [
         "After the first screen, can the reader state the main conclusion and what needs their decision?",
         "Compare space with importance: flag details that get more words than the core constraints or decisions, and core constraints mentioned once in passing.",
         "Flag details introduced without saying what they mean for the reader (why this matters here).",
-        "Flag inventories: lists of facts, components or changes with no statement of what they add up to.",
-        "Filler and restatement are scored under concision and the order of sections under organization_and_progression; this dimension is about what gets weight and whether the parts are synthesised."
+        "Flag inventories: lists of facts, components or changes with no statement of what they add up to."
       ],
       "not_a_defect": ["Reference sections or appendices that hold detail on purpose, after the main points.", "Genre-mandated order that puts background first, when the main point is still stated where readers of that genre look (abstract, summary, executive summary)."],
       "examples": {
         "strong": {"text": "Abstract\n\nThis document describes the TinyMT32 Pseudo Random Number Generator (PRNG) that produces 32-bit pseudo-random unsigned integers and aims at having a simple-to-use and deterministic solution.  This PRNG is a small-sized variant of Mersenne Twister (MT) PRNG.  The main advantage of TinyMT32 over MT is the use of a small internal state, compatible with most target platforms that include embedded devices, while keeping a reasonably good randomness that represents a sigificant improvement compared to the Park-Miller Linear Congruential PRNG.  However, neither the TinyMT nor MT PRNG are meant to be used for cryptographic applications.", "ref": "tinymt32-drafts", "locator": "Abstract, revision -03 (weaker) and -04 (stronger)", "note": "An IESG reviewer said the not-for-cryptography warning was 'more buried than it should be'; the next revision put it in the abstract."},
         "weak": {"text": "Abstract\n\nThis document describes the TinyMT32 Pseudo Random Number Generator (PRNG) that produces 32-bit pseudo-random unsigned integers and aims at having a simple-to-use and deterministic solution.  This PRNG is a small-sized variant of Mersenne Twister (MT) PRNG [MT98].  The main advantage of TinyMT32 over MT is the use of a small internal state, compatible with most target platforms including embedded devices, while keeping a reasonably good randomness.", "ref": "tinymt32-drafts", "locator": "Abstract, revision -03 (weaker) and -04 (stronger)"}
       },
-      "judge_question": "Does the document give the earliest place and the most weight to what matters most to its reader, and pull its details together into an overview the reader can act on?",
       "score_anchors": {
         "1": "Main point and core constraints buried or missing; an inventory of details with no synthesis.",
         "3": "Main point findable; some core constraints underweighted or details left unconnected to what they mean.",
@@ -81,7 +78,7 @@
       "id": "fidelity",
       "name": "Fidelity to brief, prefix or described material",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "Every claim, decision and constraint the document attributes to the brief (or, for continuations, to the prefix) is supported by it and none contradicts it; elaboration beyond the input is consistent with it and recognisable as the writer's proposal rather than presented as agreed fact. For reports about existing work, every claim about the material the report describes (code, diffs, logs, test results) is supported by that material.",
+      "definition": "Nothing in the document contradicts the brief, the prefix or the material it describes, and nothing is presented as given by them that they do not support. Additions beyond them read as the writer's proposal, not as agreed fact.",
       "track_notes": {"continuation": "Judge against the prefix: no contradiction of decisions, names, numbers or scope established earlier in the document."},
       "references": ["iso29148", "factscore", "summac", "factcc", "qags", "summeval", "grice"],
       "derived_from": "ISO 29148 'correct'; summarisation consistency literature (FActScore atomic claims, SummaC/FactCC entailment, QAGS question answering, SummEval 'consistency'); Grice's maxim of quality.",
@@ -97,7 +94,6 @@
         "strong": {"text": "Rules for Lexical Equivalence:\n\n         The namespace-specific part of the URN is case-sensitive.", "ref": "rfc5134-erratum-1325", "locator": "RFC 5134 Section 2 as published (weaker) and as corrected (stronger)", "note": "The source rule (RFC 2141) compares 'urn:' and the namespace id case-insensitively; the published text claimed the entire URN is case-sensitive."},
         "weak": {"text": "Rules for Lexical Equivalence:\n\n         The entire URN is case-sensitive.", "ref": "rfc5134-erratum-1325", "locator": "RFC 5134 Section 2 as published (weaker) and as corrected (stronger)"}
       },
-      "judge_question": "Is everything the document states about the brief, prefix or described material supported by it, with no contradictions and with new material presented as proposal rather than agreed fact?",
       "score_anchors": {
         "1": "Contradicts the input on a material point or invents agreed decisions.",
         "3": "No material contradiction, but some unsupported specifics are stated as given.",
@@ -130,7 +126,6 @@
         "strong": {"text": "9.3 MKCOL Method\n\n   The MKCOL method is used to create a new collection. All DAV compliant\n   resources MUST support the MKCOL method.\n\n   MKCOL creates a new collection resource at the location specified by\n   the Request-URI. [...]", "ref": "rfc4918-erratum-1430", "locator": "RFC 4918 Section 9.3 as published (weaker) and as corrected (stronger)", "note": "The predecessor (RFC 2518 Section 8.3) required every DAV-compliant resource to support MKCOL; the revision dropped that requirement."},
         "weak": {"text": "9.3.  MKCOL Method\n\n   MKCOL creates a new collection resource at the location specified by\n   the Request-URI. [...]", "ref": "rfc4918-erratum-1430", "locator": "RFC 4918 Section 9.3 as published (weaker) and as corrected (stronger)"}
       },
-      "judge_question": "Are all of the brief's (or prefix's) requirements, constraints and promised topics present where a reader would look for them?",
       "score_anchors": {
         "1": "Several explicit requirements missing or diluted beyond recognition.",
         "3": "Most present; one material requirement missing, diluted or misplaced.",
@@ -164,7 +159,6 @@
         "strong": {"text": "Backwards Compatibility\n=======================\n\nThis PEP changes the rules for how ``TypedDict`` behaves (allowing subclasses to\ninherit from ``TypedMapping`` protocols in a way that changes the resulting\noverloads), so code that inspects ``TypedDict`` types will have to change. This\nis expected to mainly affect type-checkers.\n\nThe ``TypedMapping`` type will be added to the ``typing_extensions`` module,\nenabling its use in older versions of Python.", "ref": "pep705-pr2997", "locator": "PEP 705 Backwards Compatibility, reviewed draft (weaker) and next revision (stronger)", "note": "The reviewer called the metaclass workaround 'a bit too much implementation detail' and asked to cut everything from 'Users wanting to inherit'."},
         "weak": {"text": "Backwards Compatibility\n=======================\n\nThis PEP changes the rules for how ``TypedDict`` behaves (allowing subclasses to\ninherit from ``TypedMapping`` protocols in a way that changes the resulting\noverloads), so code that inspects ``TypedDict`` types will have to change. This\nis expected to mainly affect type-checkers.\n\nThe ``TypedMapping`` type will be added to the ``typing_extensions`` module,\nenabling its use in older versions of Python. Users wanting to inherit from\nboth ``TypedDict`` and ``TypedMapping`` will need to use\n``typing_extensions.TypedDict`` in these versions, as the existing ``typing`` implementation\nof ``TypedDict`` does an ``is`` check on the metaclass of all base classes and raises\nan error if any other metaclass is found. This would cause any subclass of both\nthat implementation and a ``TypedMapping`` protocol to trigger an error at runtime.", "ref": "pep705-pr2997", "locator": "PEP 705 Backwards Compatibility, reviewed draft (weaker) and next revision (stronger)"}
       },
-      "judge_question": "Is the level of detail right for this document's kind and stage, deciding what must be reviewed now without fixing implementation choices that no stated decision depends on?",
       "score_anchors": {
         "1": "Mostly implementation steps or so abstract that nothing is decided.",
         "3": "Right level overall with notable stretches of unmotivated implementation detail or vagueness.",
@@ -181,7 +175,7 @@
       "id": "rationale_and_alternatives",
       "name": "Rationale, trade-offs and alternatives",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "Decisions come with the reasons for them, the trade-offs accepted and the credible alternatives rejected, so a reviewer can disagree with a specific step rather than with the whole.",
+      "definition": "Decisions come with the reasons for them, the trade-offs accepted and the credible alternatives rejected.",
       "track_notes": {"continuation": "Applies when the section makes or defends decisions; a purely descriptive section is judged on whether it supports decisions made elsewhere."},
       "references": ["iso42010", "rust-rfc-template", "pep1", "google-design-docs", "kep-template", "nasa-se-handbook", "aacu-value"],
       "derived_from": "ISO 42010 decision rationale; Rust RFC 'drawbacks' and 'rationale and alternatives'; PEP rationale and rejected ideas; Google 'alternatives considered'; KEP alternatives; NASA trade studies; AAC&U 'sources and evidence'.",
@@ -195,7 +189,6 @@
         "strong": {"text": "# Rationale and alternatives [rationale-and-alternatives]: #rationale-and-alternatives\n\nWe could require that multiple attributes must be within in a delimiter to make it so that it's always two arguments at the top level. E.g., `#[cfg_attr(predicate, [attr, attr])]`. While this could increase clarity, it mostly seems like it would just add noise. In the multiline case, it already reads pretty clear with the predicate on the first line and each attribute indented.\n\nThe default alternative of not doing this is a possibility. It would just mean that conditionally including attributes is slightly less ergonomic than it could be.", "ref": "rust-rfc-2539", "locator": "Rationale and alternatives, before and after commit ad8ba5ef", "note": "The draft said 'There are no other alternatives'; after a reviewer raised the bracket syntax, the author added it with a reason for rejecting it."},
         "weak": {"text": "# Rationale and alternatives [rationale-and-alternatives]: #rationale-and-alternatives\n\nThere are no other alternatives.\n\nBy not doing this, conditionally including attributes is slightly less ergonomic than it can be.", "ref": "rust-rfc-2539", "locator": "Rationale and alternatives, before and after commit ad8ba5ef"}
       },
-      "judge_question": "Are consequential decisions justified with reasons, trade-offs and credible rejected alternatives?",
       "score_anchors": {
         "1": "Decisions asserted without reasons.",
         "3": "Reasons for main decisions; trade-offs or alternatives thin or straw-man.",
@@ -211,8 +204,8 @@
       "id": "organization_and_progression",
       "name": "Organization and progression",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "The document moves from context to decision to detail in an order a reader can follow: overview before specifics, terms defined before use, dependencies before what depends on them, and each part building on what came before, down to each sentence picking up from the one before it, without formatting that cuts the links between connected ideas.",
-      "track_notes": {"continuation": "Judge order within the section; restarting the prefix, looping back over it or jumping ahead of material it has not yet introduced is scored under continuity, not here."},
+      "definition": "The document moves from context to detail in an order a reader can follow: overview before specifics, terms introduced before use, dependencies before what depends on them, and each sentence following from the one before. Formatting does not cut the links between connected ideas.",
+      "track_notes": {},
       "references": ["gopen-swan", "williams-style", "minto", "rfc4101", "rust-rfc-template", "six-traits", "aacu-value", "fplg", "gov-uk", "coh-metrix", "barzilay-lapata", "format-bias"],
       "derived_from": "Gopen and Swan reader expectations (old before new, stress position); Williams on cohesion and coherence; Minto governing idea first; RFC 4101 model before detail; Rust RFC guide-level before reference-level; 6+1 'organization'; AAC&U 'content development'; plain-language 'organize to meet readers' needs'; GOV.UK front-loading; Coh-Metrix cohesion and the entity-grid model of local coherence; format-bias findings for the judge-side risk of rewarding lists and bold.",
       "detection_guidance": [
@@ -228,11 +221,10 @@
         "strong": {"text": "The compact fluorescent bulb has become the standard bulb for household lamps. Until recently, most lamps used incandescent bulbs. This type of bulb operates by heating a tungsten filament until it glows, throwing off light. Unfortunately, heating the filament wastes approximately 90% of the energy used to produce the light.", "ref": "unc-flow", "locator": "Cohesion, known-to-new sequencing, versions 1 and 2", "note": "The source says both versions contain the same information; in the stronger one each sentence opens on what the previous one ended with."},
         "weak": {"text": "The compact fluorescent bulb has become the standard bulb for household lamps. Until recently, most people used incandescent bulbs in their lamps. Heating a tungsten filament until it glows, throwing off light, is how this type of bulb operates. Unfortunately, approximately 90% of the energy used to produce the light is wasted by heating the filament.", "ref": "unc-flow", "locator": "Cohesion, known-to-new sequencing, versions 1 and 2"}
       },
-      "judge_question": "Can a reader follow the document front to back, with context before detail, terms before use, each part building on the last and each sentence following from the one before?",
       "score_anchors": {
         "1": "Order obstructs understanding; frequent use-before-introduction, loops, non-sequiturs or fragments that leave the reader to supply the connections.",
         "3": "Generally ordered with some jumps, forward references, repeated returns or unconnected sentences.",
-        "5": "Clear progression at every level; headings alone tell the argument and sentences follow from one another."
+        "5": "Clear progression throughout; sentences follow from one another."
       },
       "candidate_measures": [
         {"name": "judge_progression", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference."},
@@ -250,7 +242,7 @@
       "name": "Concision and information density",
       "applies_to": ["whole_document", "continuation"],
       "definition": "Each passage adds information the reader needs; the document omits filler, restatement, obvious material and generic advice that would hold for any project, while keeping elaboration and repetition that help the reader.",
-      "track_notes": {"continuation": "Judge filler and restatement within the section; repetition of the prefix itself is scored under continuity, not here."},
+      "track_notes": {},
       "references": ["grice", "fplg", "williams-style", "ms-style", "google-style", "wtd-principles", "verbosity-bias", "lc-alpacaeval"],
       "derived_from": "Grice's maxim of quantity; plain-language 'omit excess words'; Williams on redundant and implied words; Microsoft 'get to the point fast'; Write the Docs ARID as the counterweight (useful repetition is allowed); verbosity-bias literature for the judge-side risk.",
       "detection_guidance": [
@@ -264,7 +256,6 @@
         "strong": {"text": "More night jobs would keep youths off the streets.", "ref": "fplg", "locator": "III. Write clearly, 'Use short, simple words', printed p. 36", "note": "A published parody of padded prose and its one-line rewrite; the long version also carries hedges the short one drops."},
         "weak": {"text": "There is no escaping the fact that it is considered very important to note that a number of various available applicable studies ipso facto have generally identified the fact that additional appropriate nocturnal employment could usually keep juvenile adolescents off thoroughfares during the night hours, including but not limited to the time prior to midnight on weeknights and/or 2 a.m. on weekends.", "ref": "fplg", "locator": "III. Write clearly, 'Use short, simple words', printed p. 36"}
       },
-      "judge_question": "Does every passage add information this reader needs, without filler, restatement or generic material, while useful elaboration is kept?",
       "score_anchors": {
         "1": "Much of the text is filler, restatement or generic advice.",
         "3": "Mostly informative with noticeable padding in places.",
@@ -283,14 +274,14 @@
       "id": "clarity_and_precision",
       "name": "Clarity and precision",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "Statements have one reasonable reading: obligations are explicit, quantities and conditions are specific, terms are defined, and sentences are readable for the intended audience.",
-      "track_notes": {"continuation": "Terms the section introduces are defined; renaming or redefining terms the prefix established is scored under continuity, not here."},
+      "definition": "Statements have one reasonable reading: obligations are explicit, quantities and conditions are specific, terms and shorthand are introduced, and sentences are readable for the intended audience.",
+      "track_notes": {},
       "references": ["iso29148", "incose-gtwr", "rfc8174", "rfc7322", "google-style", "iso24495", "six-traits", "aacu-value"],
       "derived_from": "ISO 29148 'unambiguous'; INCOSE rules against vague terms, escape clauses and open-ended lists; RFC 8174 requirement keywords; RFC 7322 editorial clarity; Google style; ISO 24495 'understandable'; 6+1 'word choice' and 'conventions'; AAC&U 'control of syntax and mechanics'.",
       "detection_guidance": [
         "Flag vague qualifiers (appropriate, as needed, fast, robust, user-friendly, etc., and/or) where a reviewer needs a specific value or condition.",
         "Flag obligations whose force is unclear (should vs must) when it matters.",
-        "Flag pronouns or 'this' with more than one plausible referent, and undefined acronyms. One concept named several ways is scored under internal_consistency, not here.",
+        "Flag pronouns or 'this' with more than one plausible referent, and undefined acronyms.",
         "Flag shorthand from the writer's working context (internal names, ticket or PR ids, code identifiers, jargon) used as if the reader shared that context. A report for a reader who does not read the code needs each such term introduced or described in plain words."
       ],
       "not_a_defect": ["Deliberate openness that is labelled as an open question."],
@@ -298,7 +289,6 @@
         "strong": {"text": "You must apply at least 30 days before you need the certification. a. If you are an individual, apply at the State office in the State where you reside. b. If you are an organization, apply at the State office in the State where your headquarters is located.", "ref": "fplg", "locator": "II. Organize, 'Address one person, not a group', printed p. 10", "note": "'Appropriate offices' and 'in a timely manner' become a 30-day deadline and a named office for each kind of applicant."},
         "weak": {"text": "Individuals and organizations wishing to apply must file applications with the appropriate offices in a timely manner.", "ref": "fplg", "locator": "II. Organize, 'Address one person, not a group', printed p. 10"}
       },
-      "judge_question": "Does each statement have one reasonable reading, with explicit obligations, specific conditions and defined terms?",
       "score_anchors": {
         "1": "Key statements ambiguous; obligations and conditions vague.",
         "3": "Mostly clear; some vague qualifiers or unclear obligations on material points.",
@@ -318,7 +308,7 @@
       "name": "Internal consistency",
       "applies_to": ["whole_document", "continuation"],
       "definition": "The document does not contradict itself: names, numbers, scope, decisions and dependency statements agree across sections.",
-      "track_notes": {"continuation": "Consistency within the section and with the prefix overlaps fidelity; record contradictions of the prefix under fidelity and contradictions inside the new section here."},
+      "track_notes": {},
       "references": ["iso29148", "incose-gtwr", "rfc7322", "summeval"],
       "derived_from": "ISO 29148 and INCOSE set-level consistency; RFC 7322 consistent terminology; SummEval 'consistency' adapted to self-consistency.",
       "detection_guidance": [
@@ -331,7 +321,6 @@
         "strong": {"text": "Each PA-TNC message may\ncontain zero or more attributes associated with the functional\ncomponent identified in the component type (PA Subtype) of the\nPosture Broker (PB) protocol.", "ref": "rfc5792-erratum-3935", "locator": "RFC 5792 Section 3.1 as published (weaker) and as corrected (stronger)", "note": "Section 4 of the same RFC says a message carries 'zero or more' attributes; the published Section 3.1 said 'one or more'."},
         "weak": {"text": "Each PA-TNC message may\ncontain one or more attributes associated with the functional\ncomponent identified in the component type (PA Subtype) of the\nPosture Broker (PB) protocol.", "ref": "rfc5792-erratum-3935", "locator": "RFC 5792 Section 3.1 as published (weaker) and as corrected (stronger)"}
       },
-      "judge_question": "Do names, numbers, scope and decisions agree everywhere they recur in the document?",
       "score_anchors": {
         "1": "Material contradictions between sections.",
         "3": "Minor inconsistencies in naming or secondary values.",
@@ -349,13 +338,13 @@
       "id": "risks_and_open_questions",
       "name": "Risks, uncertainty and open questions",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "The document states what could go wrong, what is unknown, and which questions remain for reviewers, instead of presenting an uncertain plan as settled. Claims carry the confidence their evidence supports, and reports about existing work say what was verified and what is inferred or assumed.",
+      "definition": "The document states what could go wrong, what is unknown and which questions remain open. Claims carry the confidence their evidence supports, and what was verified is distinguished from what is inferred or assumed.",
       "track_notes": {"continuation": "Applies when the section's role includes risks or unresolved questions, or when it makes claims whose uncertainty the prefix has flagged."},
       "references": ["kep-template", "rust-rfc-template", "pep1", "shapeup-pitch", "rfc3552", "oxide-rfd1", "google-design-docs", "icd203", "kent-wep", "ipcc-uncertainty"],
       "derived_from": "KEP risks and mitigations; Rust unresolved questions; PEP open issues and security implications; Shape Up rabbit holes; RFC 3552 security considerations; Oxide RFD discussion states; Google cross-cutting concerns; ICD 203 analytic standards (express uncertainty, separate information from assumptions and judgments); Kent's words of estimative probability and the IPCC uncertainty guidance for calibrated language.",
       "detection_guidance": [
         "Look for named risks with consequences and mitigations, not a generic 'risks: bugs may occur'.",
-        "Check that genuinely unknown things are marked as unknown. Exclusions and non-goals are scored under scope_and_abstraction, not here.",
+        "Check that genuinely unknown things are marked as unknown.",
         "Flag false certainty: claims about performance, adoption or compatibility without evidence or caveat.",
         "For reports, check that claims about the system's state or behaviour say how they are known (run, tested, read, inferred) where that is not obvious, and that inferences and untested assumptions are labelled. A report that sounds equally sure of everything fails here.",
         "Flag hedges that carry no information (\"should be fine\", \"likely\") where the writer could say what was checked."
@@ -365,7 +354,6 @@
         "strong": {"text": "## Drawbacks\n\n* Adds complexity, in the form of additional command-line options.\n* As with all lints, correct code may be trigger lints. Developers will need to take time to\n  examine them and see whether they are legitimate or not.\n* To take full advantage of this, build systems (including but not limited to Cargo) must be\n  updated. However, for those systems that are not updated, there is no penalty or drawback,\n  since `--check-cfg` is opt-in.", "ref": "rust-rfc-3013", "locator": "Drawbacks, before and after commit 1788dd4d", "note": "A reviewer wrote that a drawbacks section saying 'None' signals the author 'hasn't thought hard enough' about the trade-offs."},
         "weak": {"text": "## Drawbacks\n\nThere are no known drawbacks to this proposal.", "ref": "rust-rfc-3013", "locator": "Drawbacks, before and after commit 1788dd4d"}
       },
-      "judge_question": "Are specific risks, unknowns and reviewer questions stated, with confidence matched to the evidence and verified claims told apart from inferred ones?",
       "score_anchors": {
         "1": "No risks or open questions where clearly needed; false certainty, or guesses stated as findings.",
         "3": "Some specific risks; others generic or missing; confidence not always matched to evidence.",
@@ -396,7 +384,6 @@
         "strong": {"text": "For up to and including 12 aircraft, the small display format shall be used. Otherwise, the large display format shall be used.", "ref": "berry-ambiguity", "locator": "Section 5.1, examples E38 and E39, p. 20", "note": "Whether 12 aircraft get the small or the large format cannot be tested from the weaker sentence."},
         "weak": {"text": "For up to 12 aircraft, the small display format shall be used. Otherwise, the large display format shall be used.", "ref": "berry-ambiguity", "locator": "Section 5.1, examples E38 and E39, p. 20"}
       },
-      "judge_question": "Can a reader tell from the document how success will be checked, with concrete, testable criteria?",
       "score_anchors": {
         "1": "No checkable criteria.",
         "3": "Some concrete tests; key requirements lack checks.",
@@ -427,7 +414,6 @@
         "strong": {"text": "Ordering comparisons are undefined for sentinel objects.\n\n\nBackwards Compatibility\n=======================\n\nWhile not breaking existing code, adding a new \"sentinels\" stdlib module could\ncause some confusion with regard to existing modules named \"sentinels\", and\nspecifically with the \"sentinels\" package on PyPI.\n\nThe existing \"sentinels\" package on PyPI [10]_ appears to be abandoned, with\nthe latest release being made on Aug. 2016.  Therefore, using this name for a\nnew stdlib module seems reasonable.\n\nIf and when this PEP is accepted, it may be worth verifying if this has indeed\nbeen abandoned, and if so asking to transfer ownership to the CPython\nmaintainers to reduce the potential for confusion with the new stdlib module.\n\n\nHow to Teach This\n=================\n\nThe normal types of documentation of new stdlib modules and features, namely\ndoc-strings, module docs and a section in \"What's New\", should suffice.\n\n\nSecurity Implications\n=====================\n\nThis proposal should have no security implications.\n\n\nReference Implementation\n========================", "ref": "pep661-pr4050", "locator": "PEP 661 between Specification and Reference Implementation, before and after the pull request", "note": "The pull request, titled 'Add missing sections', adds sections PEP 1 requires."},
         "weak": {"text": "Ordering comparisons are undefined for sentinel objects.\n\n\nReference Implementation\n========================", "ref": "pep661-pr4050", "locator": "PEP 661 between Specification and Reference Implementation, before and after the pull request"}
       },
-      "judge_question": "Does the document follow the conventions and required structure of its kind?",
       "score_anchors": {
         "1": "Required structure missing; tools or readers relying on it would fail.",
         "3": "Mostly conformant; some required fields or sections missing.",
@@ -451,7 +437,7 @@
       "derived_from": "Halliday and Hasan cohesion ties; Coh-Metrix referential overlap; Gopen and Swan old-before-new; stylometry (Burrows's Delta) and judge self-preference findings for the bias this dimension must exclude.",
       "detection_guidance": [
         "Check that the first paragraph connects to the end of the prefix and that the section fills the role its position implies.",
-        "Flag re-introductions of the document's purpose, redefinitions of established terms and content duplicated from the prefix. Contradictions of prefix decisions are scored under fidelity, not here.",
+        "Flag re-introductions of the document's purpose, redefinitions of established terms and content duplicated from the prefix.",
         "Do not reward matching the prefix author's idiosyncratic style (sentence rhythm, favourite words, punctuation habits): that favours the original author and is measured as a bias, not scored as quality."
       ],
       "not_a_defect": ["A different but clear writing style.", "A short bridge sentence that recalls a point from much earlier in the prefix."],
@@ -459,7 +445,6 @@
         "strong": {"text": "The message formats in this document are specified using RBNF encoding as specified in [RFC5511].", "ref": "pce-vendor-drafts", "locator": "Section 2, revision -10 (weaker) and -11 (stronger)", "note": "Section 1.2 already expanded RBNF; a reviewer flagged the repetition and the next revision stopped re-expanding it (it kept the sentence, so the fix is partial)."},
         "weak": {"text": "The message formats in this document are specified using Routing Backus-Naur Format (RBNF) encoding as specified in [RFC5511].", "ref": "pce-vendor-drafts", "locator": "Section 2, revision -10 (weaker) and -11 (stronger)"}
       },
-      "judge_question": "Does the section continue the prefix, using its terms and decisions, without repeating it or skipping ahead, judged on content and structure rather than stylistic resemblance?",
       "score_anchors": {
         "1": "Restarts or repeats the prefix, or ignores the terms and decisions it established.",
         "3": "Continues but with some repetition, redefinition or a gap.",

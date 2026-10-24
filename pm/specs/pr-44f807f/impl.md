@@ -102,8 +102,14 @@
   neutral A/B slots (order randomization is the runner's job).
 - Substitution must be single-pass so `{{…}}` or `$` inside document text is
   never re-expanded; unknown or missing placeholders raise.
-- Elaboration must be protected: fidelity and concision guidance must state
-  that consistent, useful elaboration beyond the brief is not penalised.
+- Elaboration must be protected: the templates state that material the brief
+  (or prefix) does not mention is not a fault by itself (the user's criterion).
+- Minimal prompts (user request 2026-10-24: minimise the rubric authors'
+  influence outside sourced pairs and cited concerns). Judges see each
+  dimension's name, definition and anchors only; detection guidance,
+  not-a-fault lists and track notes are reference material in rubric.md. Every
+  other prompt instruction is mechanics or listed with its basis in rubric.md's
+  ledger. Fixtures carry no `document_kind`, since the strings would be ours.
 - Continuation judges see the prefix; the continuity dimension rewards content
   and structural continuity, and explicitly tells judges not to reward
   idiosyncratic stylistic mimicry (the plan flags stylistic continuity as a bias

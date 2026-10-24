@@ -5,7 +5,6 @@
     "non_sequiturs"
   ],
   "case_type": "whole_document",
-  "document_kind": "explanatory paragraph",
   "strong": "The compact fluorescent bulb has become the standard bulb for household lamps. Until recently, most lamps used incandescent bulbs. This type of bulb operates by heating a tungsten filament until it glows, throwing off light. Unfortunately, heating the filament wastes approximately 90% of the energy used to produce the light.",
   "weak": "The compact fluorescent bulb has become the standard bulb for household lamps. Until recently, most people used incandescent bulbs in their lamps. Heating a tungsten filament until it glows, throwing off light, is how this type of bulb operates. Unfortunately, approximately 90% of the energy used to produce the light is wasted by heating the filament.",
   "expected": {

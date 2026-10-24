@@ -72,15 +72,28 @@ Each concern has at least one concern-tagged fixture whose target is its primary
 
 ## Judge templates
 
-[templates/whole_document.md](templates/whole_document.md) shows the brief and two documents. [templates/continuation.md](templates/continuation.md) shows the prefix, the optional section request given to the generator, and two candidate next sections. [templates/whole_document_single.md](templates/whole_document_single.md) and [templates/continuation_single.md](templates/continuation_single.md) show one document or section, for cases with nothing to compare against, such as a single report. All four follow the same contract:
+[templates/whole_document.md](templates/whole_document.md) shows the brief and two documents. [templates/continuation.md](templates/continuation.md) shows the prefix, the optional section request given to the generator, and two candidate next sections. [templates/whole_document_single.md](templates/whole_document_single.md) and [templates/continuation_single.md](templates/continuation_single.md) show one document or section, for cases with nothing to compare against, such as a single report.
 
-- **Blinded pairs.** Candidates appear only as A and B. The templates take no origin, source, URL or provenance fields, and they tell the judge that order and labels carry no information. Randomising order and running swapped pairs is the runner's job.
-- **One dimension at a time, evidence first.** This follows G-Eval and Prometheus. For each dimension the judge cites passages, then gives a 1–5 score per candidate against the anchors and a per-dimension preference. The overall preference is asked for separately and is never computed from the dimension scores, so disagreements between dimensions stay visible.
-- **Bias instructions.** Length is not quality (verbosity bias). Consistent elaboration is not a fidelity fault. For continuations, a candidate is not rewarded for imitating the prefix author's style.
-- **Track separation.** `render_judge()` lists only the dimensions that apply to the case type. Track notes tell continuation judges to measure coverage against what the prefix promised and fidelity against what the prefix established. The two tracks use different templates and are never pooled.
-- **Single-document judging.** `render_single()` takes the same inputs as `render_judge()` with one document. The judge scores each dimension against its anchors with no comparison and is told to use the whole scale, since single scores tend to bunch at 4 and 5. Whether paired preferences and single scores agree is itself a calibration question.
+The prompts are kept short so that the measure carries as little of the rubric authors' own judgment as possible. A judge sees each applicable dimension's name, definition and score anchors, and nothing else from the dimension reference below: detection guidance, not-a-fault lists and continuation notes are for people reading the rubric. Every other line of the prompt is either mechanics or one of the instructions in this table, each with what it rests on:
+
+| Prompt instruction | Basis |
+|---|---|
+| The labels A and B and their order say nothing about who wrote the documents. | plan-doc-eval: "Randomize pair order and hide origin labels." |
+| Score each dimension by its definition and anchors; quote or point to the passages first. | G-Eval and Prometheus: per-criterion scoring against a rubric, with the evidence before the score. |
+| Judge content, not length. | Verbosity bias (Saito et al.) and length-controlled AlpacaEval; plan-doc-eval asks for length sensitivity to be measured. |
+| Material the brief (or prefix) does not mention is not a fault by itself. | The user's criterion in [plan-session-sources-2026-10-19.md](../../../pm/docs/plan-session-sources-2026-10-19.md): "additional material not explicitly discussed is not automatically wrong." |
+| Continuations: do not reward imitating the prefix author's personal style. | plan-doc-eval: stylistic continuity with the prefix "favors the original author". |
+| Continuations: read "the brief" in a definition as the prefix plus the section request. | Mechanics: continuation cases have no brief. |
+| No brief: judge against what the document establishes (and the material it describes). | Mechanics: some published pairs have no recoverable brief. |
+| The overall preference or score is made separately from the dimension scores. | Keeps dimensions distinct, so disagreements between them stay visible (plan-doc-eval reports results by rubric dimension). |
+
+The definitions and anchors are still the rubric authors' wording of the cited sources; the dimension reference gives each one's sources. The rest of the contract:
+
+- **Blinded pairs.** Candidates appear only as A and B. The templates take no origin, source, URL or provenance fields. Randomising order and running swapped pairs is the runner's job.
+- **Track separation.** `render_judge()` lists only the dimensions that apply to the case type. The two tracks use different templates and are never pooled.
+- **Single-document judging.** `render_single()` takes the same inputs as `render_judge()` with one document. Whether paired preferences and single scores agree is itself a calibration question.
 - **Output contract.** Paired: a JSON object with one row per dimension (`dimension`, `evidence`, `rationale`, `score_a`, `score_b`, `preference`), plus `overall_preference` and `overall_rationale`. Single: rows with `score` instead, plus `overall_score` and `overall_rationale`. `validate_judgment()` checks either (`single=True` for the second), so the runner can treat a malformed reply as a failed evaluation rather than a score.
-- **Case mapping.** The case catalog's `pm_plan` cases are whole-document cases: the runner passes the instruction and the recovered conversation as the brief, with `document_kind` "PM plan", so fidelity is judged against the human turns. Brief attachments are appended to the brief text for the same reason. Reports are whole-document cases too: the brief is the request and `material` holds what the report describes (diffs, code excerpts, logs, test output), shown in its own section so that fidelity is judged against it. A case with no brief at all must say so with `no_brief=True`; the judge is then told that no brief exists rather than shown an empty one.
+- **Case mapping.** The case catalog's `pm_plan` cases are whole-document cases: the runner passes the instruction and the recovered conversation as the brief, with `document_kind` "PM plan", so fidelity is judged against the human turns. Brief attachments are appended to the brief text for the same reason. Reports are whole-document cases too: the brief is the request and `material` holds what the report describes (diffs, code excerpts, logs, test output), shown in its own section; fidelity's definition covers it. A case with no brief at all must say so with `no_brief=True`.
 
 Render a fixture's prompt with `python3 experiments/plan-writing/rubric.py --render whole_document`, `--render continuation` or `--render <fixture id>`, and add `--single strong` or `--single weak` for the single-document prompt; `--write-doc` regenerates the dimension reference below.
 
@@ -90,7 +103,7 @@ The runner and calibration PR decides which of these measures are usable. For ea
 
 - Consistency across repeated judgments and across swapped order (position bias, MT-Bench).
 - Agreement between frontier and JEV judges, and with automatic candidates where they exist.
-- Sensitivity to length (the `length_ratio` covariate, length-controlled AlpacaEval), to formatting (the `format_density` covariate, format bias), to source identity and, for continuations, to style match (the `style_distance` covariate).
+- Sensitivity to length (the `length_ratio` covariate, length-controlled AlpacaEval), to formatting (the `format_density` covariate, format bias), to source identity and, for continuations, to style match (the `style_distance` covariate). The prompts tell judges not to reward length or style imitation, so these measure what is left after the instruction.
 - Agreement between paired preferences and single-document scores on the same documents, so each mode is used only where it is reliable.
 - Whether the fixtures come out in the expected direction on their target dimension without moving the other dimensions as much. Dimensions listed in a fixture's `also_moves` are allowed to move and are left out of that comparison; read a judge that moves them as consistent with the source's framing, not as confusing dimensions. This is the check that dimensions stay distinct. A judge that scores every dimension from one overall impression will fail it. Huang et al. find that fine-tuned judges generalise poorly beyond the evaluation scheme they were trained on, so this has to be checked for each judge.
 
@@ -142,7 +155,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 **Definition.** The document states what problem it addresses, why now, for whom, and what decision or action it asks of the reader, and its content is selected for that reader's needs.
 
-**Continuation.** The section serves the purpose the prefix has established and the role the section's position implies; re-introducing the document's purpose is scored under continuity, not here.
+**Continuation.** The section serves the purpose the prefix has established and the role the section's position implies.
 
 **Derived from.** AAC&U 'context of and purpose for writing'; ISO 24495 'relevant'; PEP motivation, KEP motivation/goals, Shape Up problem and appetite, Google 'context and scope'; Grice's maxim of relation.
 
@@ -153,7 +166,7 @@ The dimensions come from published guidance and are not yet validated against pr
 - Can a reader state the problem, the intended reader and the requested decision after the first screen?
 - Is there material that serves no identifiable reader need (history of the author's process, general tutorials, marketing)?
 - Does the document address a different problem than the brief asks for, or a generic version of it?
-- For reports about existing work (digests, sign-off and QA reports), can the reader tell what the report asks of them: a decision, an approval, something to watch? Whether the details carry weight in proportion to that is scored under salience_and_synthesis.
+- For reports about existing work (digests, sign-off and QA reports), can the reader tell what the report asks of them: a decision, an approval, something to watch?
 
 **Not a fault.**
 
@@ -178,9 +191,9 @@ The dimensions come from published guidance and are not yet validated against pr
 
 ### salience_and_synthesis — Salience and synthesis
 
-**Definition.** Emphasis follows importance: what the reader most needs (the main conclusion, the decisions, the core constraints) comes early and gets the most weight, details are subordinated to the points they support, and the document pulls them together into an overview the reader can act on rather than an inventory of facts.
+**Definition.** What the reader most needs (the main conclusion, the decisions, the core constraints) comes first and gets the most weight, and the details add up to an overview the reader can act on rather than a list of facts.
 
-**Continuation.** Within the section: its main point is clear and its details serve it. Repeating the prefix is scored under continuity, not here.
+**Continuation.** Within the section: its main point is clear and its details serve it.
 
 **Derived from.** SummEval 'relevance' (selection of the important content of a source); Minto's governing thought and pyramid; the Army's bottom line up front (DA PAM 600-67); GOV.UK front-loading; plain-language 'put the main point first'; Grice's maxims of quantity and relation.
 
@@ -192,7 +205,6 @@ The dimensions come from published guidance and are not yet validated against pr
 - Compare space with importance: flag details that get more words than the core constraints or decisions, and core constraints mentioned once in passing.
 - Flag details introduced without saying what they mean for the reader (why this matters here).
 - Flag inventories: lists of facts, components or changes with no statement of what they add up to.
-- Filler and restatement are scored under concision and the order of sections under organization_and_progression; this dimension is about what gets weight and whether the parts are synthesised.
 
 **Not a fault.**
 
@@ -223,7 +235,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 ### fidelity — Fidelity to brief, prefix or described material
 
-**Definition.** Every claim, decision and constraint the document attributes to the brief (or, for continuations, to the prefix) is supported by it and none contradicts it; elaboration beyond the input is consistent with it and recognisable as the writer's proposal rather than presented as agreed fact. For reports about existing work, every claim about the material the report describes (code, diffs, logs, test results) is supported by that material.
+**Definition.** Nothing in the document contradicts the brief, the prefix or the material it describes, and nothing is presented as given by them that they do not support. Additions beyond them read as the writer's proposal, not as agreed fact.
 
 **Continuation.** Judge against the prefix: no contradiction of decisions, names, numbers or scope established earlier in the document.
 
@@ -382,7 +394,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 ### rationale_and_alternatives — Rationale, trade-offs and alternatives
 
-**Definition.** Decisions come with the reasons for them, the trade-offs accepted and the credible alternatives rejected, so a reviewer can disagree with a specific step rather than with the whole.
+**Definition.** Decisions come with the reasons for them, the trade-offs accepted and the credible alternatives rejected.
 
 **Continuation.** Applies when the section makes or defends decisions; a purely descriptive section is judged on whether it supports decisions made elsewhere.
 
@@ -426,9 +438,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 ### organization_and_progression — Organization and progression
 
-**Definition.** The document moves from context to decision to detail in an order a reader can follow: overview before specifics, terms defined before use, dependencies before what depends on them, and each part building on what came before, down to each sentence picking up from the one before it, without formatting that cuts the links between connected ideas.
-
-**Continuation.** Judge order within the section; restarting the prefix, looping back over it or jumping ahead of material it has not yet introduced is scored under continuity, not here.
+**Definition.** The document moves from context to detail in an order a reader can follow: overview before specifics, terms introduced before use, dependencies before what depends on them, and each sentence following from the one before. Formatting does not cut the links between connected ideas.
 
 **Derived from.** Gopen and Swan reader expectations (old before new, stress position); Williams on cohesion and coherence; Minto governing idea first; RFC 4101 model before detail; Rust RFC guide-level before reference-level; 6+1 'organization'; AAC&U 'content development'; plain-language 'organize to meet readers' needs'; GOV.UK front-loading; Coh-Metrix cohesion and the entity-grid model of local coherence; format-bias findings for the judge-side risk of rewarding lists and bold.
 
@@ -457,7 +467,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 > The compact fluorescent bulb has become the standard bulb for household lamps. Until recently, most people used incandescent bulbs in their lamps. Heating a tungsten filament until it glows, throwing off light, is how this type of bulb operates. Unfortunately, approximately 90% of the energy used to produce the light is wasted by heating the filament.
 
-**Score anchors.** 1: Order obstructs understanding; frequent use-before-introduction, loops, non-sequiturs or fragments that leave the reader to supply the connections. 3: Generally ordered with some jumps, forward references, repeated returns or unconnected sentences. 5: Clear progression at every level; headings alone tell the argument and sentences follow from one another.
+**Score anchors.** 1: Order obstructs understanding; frequent use-before-introduction, loops, non-sequiturs or fragments that leave the reader to supply the connections. 3: Generally ordered with some jumps, forward references, repeated returns or unconnected sentences. 5: Clear progression throughout; sentences follow from one another.
 
 **Candidate measures** (readiness: automatic_candidate).
 
@@ -473,8 +483,6 @@ The dimensions come from published guidance and are not yet validated against pr
 ### concision — Concision and information density
 
 **Definition.** Each passage adds information the reader needs; the document omits filler, restatement, obvious material and generic advice that would hold for any project, while keeping elaboration and repetition that help the reader.
-
-**Continuation.** Judge filler and restatement within the section; repetition of the prefix itself is scored under continuity, not here.
 
 **Derived from.** Grice's maxim of quantity; plain-language 'omit excess words'; Williams on redundant and implied words; Microsoft 'get to the point fast'; Write the Docs ARID as the counterweight (useful repetition is allowed); verbosity-bias literature for the judge-side risk.
 
@@ -514,9 +522,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 ### clarity_and_precision — Clarity and precision
 
-**Definition.** Statements have one reasonable reading: obligations are explicit, quantities and conditions are specific, terms are defined, and sentences are readable for the intended audience.
-
-**Continuation.** Terms the section introduces are defined; renaming or redefining terms the prefix established is scored under continuity, not here.
+**Definition.** Statements have one reasonable reading: obligations are explicit, quantities and conditions are specific, terms and shorthand are introduced, and sentences are readable for the intended audience.
 
 **Derived from.** ISO 29148 'unambiguous'; INCOSE rules against vague terms, escape clauses and open-ended lists; RFC 8174 requirement keywords; RFC 7322 editorial clarity; Google style; ISO 24495 'understandable'; 6+1 'word choice' and 'conventions'; AAC&U 'control of syntax and mechanics'.
 
@@ -526,7 +532,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 - Flag vague qualifiers (appropriate, as needed, fast, robust, user-friendly, etc., and/or) where a reviewer needs a specific value or condition.
 - Flag obligations whose force is unclear (should vs must) when it matters.
-- Flag pronouns or 'this' with more than one plausible referent, and undefined acronyms. One concept named several ways is scored under internal_consistency, not here.
+- Flag pronouns or 'this' with more than one plausible referent, and undefined acronyms.
 - Flag shorthand from the writer's working context (internal names, ticket or PR ids, code identifiers, jargon) used as if the reader shared that context. A report for a reader who does not read the code needs each such term introduced or described in plain words.
 
 **Not a fault.**
@@ -555,8 +561,6 @@ The dimensions come from published guidance and are not yet validated against pr
 ### internal_consistency — Internal consistency
 
 **Definition.** The document does not contradict itself: names, numbers, scope, decisions and dependency statements agree across sections.
-
-**Continuation.** Consistency within the section and with the prefix overlaps fidelity; record contradictions of the prefix under fidelity and contradictions inside the new section here.
 
 **Derived from.** ISO 29148 and INCOSE set-level consistency; RFC 7322 consistent terminology; SummEval 'consistency' adapted to self-consistency.
 
@@ -598,7 +602,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 ### risks_and_open_questions — Risks, uncertainty and open questions
 
-**Definition.** The document states what could go wrong, what is unknown, and which questions remain for reviewers, instead of presenting an uncertain plan as settled. Claims carry the confidence their evidence supports, and reports about existing work say what was verified and what is inferred or assumed.
+**Definition.** The document states what could go wrong, what is unknown and which questions remain open. Claims carry the confidence their evidence supports, and what was verified is distinguished from what is inferred or assumed.
 
 **Continuation.** Applies when the section's role includes risks or unresolved questions, or when it makes claims whose uncertainty the prefix has flagged.
 
@@ -609,7 +613,7 @@ The dimensions come from published guidance and are not yet validated against pr
 **Detection guidance.**
 
 - Look for named risks with consequences and mitigations, not a generic 'risks: bugs may occur'.
-- Check that genuinely unknown things are marked as unknown. Exclusions and non-goals are scored under scope_and_abstraction, not here.
+- Check that genuinely unknown things are marked as unknown.
 - Flag false certainty: claims about performance, adoption or compatibility without evidence or caveat.
 - For reports, check that claims about the system's state or behaviour say how they are known (run, tested, read, inferred) where that is not obvious, and that inferences and untested assumptions are labelled. A report that sounds equally sure of everything fails here.
 - Flag hedges that carry no information ("should be fine", "likely") where the writer could say what was checked.
@@ -768,7 +772,7 @@ The dimensions come from published guidance and are not yet validated against pr
 **Detection guidance.**
 
 - Check that the first paragraph connects to the end of the prefix and that the section fills the role its position implies.
-- Flag re-introductions of the document's purpose, redefinitions of established terms and content duplicated from the prefix. Contradictions of prefix decisions are scored under fidelity, not here.
+- Flag re-introductions of the document's purpose, redefinitions of established terms and content duplicated from the prefix.
 - Do not reward matching the prefix author's idiosyncratic style (sentence rhythm, favourite words, punctuation habits): that favours the original author and is measured as a bias, not scored as quality.
 
 **Not a fault.**

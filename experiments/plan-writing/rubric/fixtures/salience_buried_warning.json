@@ -5,7 +5,6 @@
     "misplaced_salience"
   ],
   "case_type": "whole_document",
-  "document_kind": "protocol specification abstract",
   "strong": "Abstract\n\nThis document describes the TinyMT32 Pseudo Random Number Generator (PRNG) that produces 32-bit pseudo-random unsigned integers and aims at having a simple-to-use and deterministic solution.  This PRNG is a small-sized variant of Mersenne Twister (MT) PRNG.  The main advantage of TinyMT32 over MT is the use of a small internal state, compatible with most target platforms that include embedded devices, while keeping a reasonably good randomness that represents a sigificant improvement compared to the Park-Miller Linear Congruential PRNG.  However, neither the TinyMT nor MT PRNG are meant to be used for cryptographic applications.",
   "weak": "Abstract\n\nThis document describes the TinyMT32 Pseudo Random Number Generator (PRNG) that produces 32-bit pseudo-random unsigned integers and aims at having a simple-to-use and deterministic solution.  This PRNG is a small-sized variant of Mersenne Twister (MT) PRNG [MT98].  The main advantage of TinyMT32 over MT is the use of a small internal state, compatible with most target platforms including embedded devices, while keeping a reasonably good randomness.",
   "expected": {

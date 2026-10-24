@@ -3,7 +3,6 @@
   "dimension": "internal_consistency",
   "concerns": [],
   "case_type": "whole_document",
-  "document_kind": "protocol specification excerpt",
   "strong": "Each PA-TNC message may\ncontain zero or more attributes associated with the functional\ncomponent identified in the component type (PA Subtype) of the\nPosture Broker (PB) protocol.\n\n[...]\n\n   A PA-TNC message MUST contain a PA-TNC header (defined in section\n   3.6.  followed by a sequence of zero or more PA-TNC attributes.  All\n   PA-TNC attributes MUST begin with a standard PA-TNC attribute header,",
   "weak": "Each PA-TNC message may\ncontain one or more attributes associated with the functional\ncomponent identified in the component type (PA Subtype) of the\nPosture Broker (PB) protocol.\n\n[...]\n\n   A PA-TNC message MUST contain a PA-TNC header (defined in section\n   3.6.  followed by a sequence of zero or more PA-TNC attributes.  All\n   PA-TNC attributes MUST begin with a standard PA-TNC attribute header,",
   "expected": {

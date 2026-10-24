@@ -5,7 +5,6 @@
     "fragmenting_format"
   ],
   "case_type": "whole_document",
-  "document_kind": "procedure document outline",
   "brief": "suppose you are documenting the process for creating a new website. To create the site, the reader must initialize the Froobus framework. To initialize the Froobus framework, the reader must run the carambola command-line tool.",
   "strong": "## Creating the site\nTo create the site, you run the `carambola` command-line tool. The command displays a series of prompts to help you configure the site.\n### Running the carambola command",
   "weak": "## Creating the site\n### Running the carambola command",

@@ -5,7 +5,6 @@
     "fidelity"
   ],
   "case_type": "whole_document",
-  "document_kind": "URN namespace registration",
   "brief": "Two URNs are lexically equivalent if they are octet-by-octet equal\n   after the following preprocessing:\n\n           1. normalize the case of the leading \"urn:\" token\n           2. normalize the case of the NID\n           3. normalizing the case of any %-escaping\n\n   Note that %-escaping MUST NOT be removed.",
   "strong": "Rules for Lexical Equivalence:\n\n         The namespace-specific part of the URN is case-sensitive.",
   "weak": "Rules for Lexical Equivalence:\n\n         The entire URN is case-sensitive.",

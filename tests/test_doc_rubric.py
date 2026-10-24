@@ -29,7 +29,6 @@ class TestDimension:
         strong, weak = dim["examples"]["strong"], dim["examples"]["weak"]
         assert strong["text"].strip() and weak["text"].strip() and strong["text"] != weak["text"]
         assert dim["detection_guidance"] and all(g.strip() for g in dim["detection_guidance"])
-        assert dim["judge_question"].strip()
         assert set(dim["score_anchors"]) == {"1", "3", "5"}
 
     def test_examples_are_external_quotations(self, dim):
@@ -250,11 +249,10 @@ def test_continuation_template_renders_with_prefix():
     prompt = rubric.render_judge("continuation", prefix="PREFIX TEXT", document_a="NEXT ONE",
                                  document_b="NEXT TWO", section_request="Write the migration section.")
     assert prompt.index("PREFIX TEXT") < prompt.index("NEXT ONE") < prompt.index("NEXT TWO")
-    assert "The writers were asked: Write the migration section." in prompt
+    assert "The request for this section: Write the migration section." in prompt
     assert not rubric.PLACEHOLDER.search(prompt)
     for d in DIMS:
         assert "### " + d["id"] + " — " in prompt
-    assert "For this case type:" in prompt
     assert "imitating the prefix author's personal style" in prompt
 
 
@@ -278,14 +276,14 @@ def test_single_templates_render():
     assert "Document kind: sign-off report." in prompt
     assert "Document A" not in prompt and "preference" not in prompt and "<material>" not in prompt
     assert not rubric.PLACEHOLDER.search(prompt)
-    schema = json.loads(prompt.split("in this shape:\n\n", 1)[1].split("\n\nScores use", 1)[0])
+    schema = json.loads(prompt.split("in this shape:\n\n", 1)[1].split("\n\nScores are integers", 1)[0])
     assert set(schema) == {"dimensions", "overall_score", "overall_rationale"}
     assert all(set(r) == {"dimension", "evidence", "rationale", "score"} for r in schema["dimensions"])
     assert "### continuity — " not in prompt
     prompt = rubric.render_single("continuation", prefix="PREFIX TEXT", document="NEXT ONLY",
                                   section_request="Write the migration section.")
     assert prompt.index("PREFIX TEXT") < prompt.index("NEXT ONLY")
-    assert "The writers were asked: Write the migration section." in prompt
+    assert "The request for this section: Write the migration section." in prompt
     assert "### continuity — " in prompt and "imitating the prefix author's personal style" in prompt
     assert not rubric.PLACEHOLDER.search(prompt)
 
@@ -296,7 +294,7 @@ def test_material_for_reports():
                    rubric.render_single("whole_document", brief="B", document="a", material="MATERIAL TEXT {{brief}}")):
         assert prompt.index("</brief>") < prompt.index("<material>\nMATERIAL TEXT {{brief}}\n</material>") \
             < prompt.index("<document")
-        assert "against the brief and the material the document describes" in prompt
+        assert "## Material the document describes" in prompt
     with pytest.raises(ValueError):
         rubric.render_judge("continuation", prefix="p", document_a="a", document_b="b", material="m")
     with pytest.raises(ValueError):
@@ -312,6 +310,18 @@ def test_render_single_rejects_wrong_inputs():
         rubric.render_single("continuation", brief="b", document="a")
     with pytest.raises(ValueError):
         rubric.render_single("whole_document", brief="b", document="a", dimensions=[])
+
+
+def test_prompt_carries_only_definitions_and_anchors():
+    # Detection guidance, track notes and not-a-fault lists are reference material, not judge input.
+    for case_type in rubric.CASE_TYPES:
+        kw = {"brief": "b"} if case_type == "whole_document" else {"prefix": "p"}
+        prompt = rubric.render_judge(case_type, document_a="a", document_b="c", **kw)
+        for d in rubric.dimensions_for(case_type):
+            assert d["definition"] in prompt
+            assert all(v in prompt for v in d["score_anchors"].values())
+            texts = d["detection_guidance"] + d["not_a_defect"] + list(d.get("track_notes", {}).values())
+            assert not any(t in prompt for t in texts), d["id"]
 
 
 def test_document_text_is_not_re_expanded():
@@ -344,7 +354,7 @@ def test_render_rejects_wrong_inputs():
 
 def test_no_brief_rendering():
     prompt = rubric.render_judge("whole_document", no_brief=True, document_a="a", document_b="b")
-    assert "No brief is available for this case." in prompt and "<brief>" not in prompt
+    assert "No brief is available." in prompt and "<brief>" not in prompt
     prompt = rubric.render_single("whole_document", no_brief=True, document="a", material="m")
     assert "establishes and the material it describes." in prompt and "<material>\nm\n</material>" in prompt
 
@@ -354,7 +364,7 @@ def test_dimension_subset():
                                  dimensions=["concision", "fidelity"])
     assert "### concision — " in prompt and "### fidelity — " in prompt
     assert "### clarity_and_precision — " not in prompt
-    schema = json.loads(prompt.split("in this shape:\n\n", 1)[1].split("\n\nScores use", 1)[0])
+    schema = json.loads(prompt.split("in this shape:\n\n", 1)[1].split("\n\nScores are integers", 1)[0])
     assert [r["dimension"] for r in schema["dimensions"]] == ["fidelity", "concision"]
 
 
