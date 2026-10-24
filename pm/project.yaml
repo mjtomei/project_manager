@@ -28962,7 +28962,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T09:20:01.185973+00:00'
-  updated_at: '2026-10-24T22:52:14.780145+00:00'
+  updated_at: '2026-10-24T23:04:54.727517+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29095,6 +29095,38 @@ prs:
       (cast+mp4+transcripts+manifests).'
     created_at: '2026-10-24T22:52:14Z'
     last_edited: '2026-10-24T22:52:14Z'
+  - id: note-28f0874
+    text: 'Sign-off (2026-10-24, HEAD 4a02d59a, base master@6d70b5fe) -> SIGNOFF_IMPL.
+      Branch scope is now correct (5 files; pr-592e4bd not an ancestor; meta.py and
+      the test are byte-identical to 2e6f8831; 7/7 tests pass). New gap: the tmux
+      pane command is not portable. tmux runs new-window commands as `<default-shell>
+      -c <cmd>`, and default-shell defaults to $SHELL, not sh, so the spec premise
+      "tmux runs the pane command ... as sh -c" is wrong. _build_meta_pane_cmd defines
+      a POSIX function `pm_meta_clear_override() { ...; }`, which fish rejects at
+      parse time ("command substitutions not allowed in command position", rc 127).
+      For a fish user, pm meta writes the override and opens a window that dies at
+      once without starting Claude, and the override stays stale: the exact bug this
+      PR fixes, and a regression, since the pre-PR `cmd ; rm -rf ...` runs under fish
+      3.4+. Repro and matrix: /pm-captures/signoff/fish-default-shell/ (README.md,
+      repro.py, matrix.txt). Shipped cmd under fish: Claude never started, override
+      stays. The same string wrapped in `sh -c <shlex.quote(cmd)>`: started, and kill-window
+      removes the override under fish, bash and dash. Fix: in the tmux branch of meta_cmd,
+      pass `sh -c {shlex.quote(cmd)}` to new_window. This matches pm_core/cli/session.py
+      and container.py, which pin trap-carrying pane commands to an explicit `bash
+      -c`. Leave the interactive fallback as is: Popen(shell=True) is already /bin/sh,
+      and an extra outer shell there could die on SIGINT before the inner trap finishes
+      and break the 130 return. Add a unit test that the tmux command is the `sh -c`
+      wrapper, plus a behavior test that the wrapped command still clears the override
+      on HUP and on a normal exit; optionally a skip-if-no-fish test. Update spec
+      R1 and its implicit requirements (premise correction). Harness caveat for repros:
+      on kill-window the kernel SIGHUPs only the pty session leader. A trapped shell
+      survives it, so the child must be tty-reading (claude, fake-claude, or cat)
+      for the deferred trap to fire. A sleep stand-in falsely shows a stale override.
+      Afterwards, review must re-pass meta.py, and QA must re-run the tmux lifecycle
+      (kill-window, normal exit, relaunch, foreign guard) on the new HEAD, because
+      the pane process tree changes.'
+    created_at: '2026-10-24T23:04:54Z'
+    last_edited: '2026-10-24T23:04:54Z'
 - id: pr-19990de
   plan: bugs
   title: 'Bug: vanilla/GitHub merge propagation still resolves in the project root
