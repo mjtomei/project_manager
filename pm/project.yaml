@@ -31643,7 +31643,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T08:44:05.860497+00:00'
+  updated_at: '2026-10-24T10:47:20.038618+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33183,6 +33183,26 @@ prs:
       gate (the old text said the gate applied). Full suite 3646 passed; /pm-captures/review-679d-i3.'
     created_at: '2026-10-24T08:44:05Z'
     last_edited: '2026-10-24T08:44:05Z'
+  - id: note-8cb8f56
+    text: 'QA S50 (2026-10-24, RQ38 one-shot hand-offs, host; captures /pm-captures/scenarios/50,
+      REPORT.md): 64b41a91 held live vs control ca8fa055. skip_qa review PASS with
+      a 1.5 s/0.2 s cyclic holder: one 0.9 s wait inside a hold, sign_off at its release,
+      one window (control: "Sign-off … waits", X left in_review 298 s). pm edit held
+      past 2 s: one Error + one StoreLockTimeout warning, X2 left in_review (pr-7cf1fe4).
+      Retried QA PASS hand-offs (J two runs with SIGNOFF_REQA; K across kill -9 +
+      `pm session` respawn + re-arm) stay non-blocking (keys ~0.057 s, 0 stalls),
+      say waits once per wait, record once. Three CODE CHANGES need normal re-review,
+      all pre-existing visibility defects on the TUI log line: 4fb42e06 skip_qa "skipping
+      QA"/"→ sign-off"/one-shot "Error:"/"waits" lines forced+held (were hidden by
+      the sticky "Review loop done" line); e60c9927 a log-line hold lasts until its
+      flush runs (a fast "✓ signed off" dropped the queued "→ sign-off"); f19831c2
+      a finished run once-said project.yaml wait line forced+held (a same-frame "Resuming
+      QA" replaced it after restart). 10 mutations caught; full suite 3651 passed
+      on f19831c2. Harness: `pm session` typed in a pane attaches a nested client
+      (detach before typing more); a respawned TUI is window 0 "python3", not "main";
+      `pm meta` exit rm -rf the session dir (note-2bc73f1 on pr-7f90572).'
+    created_at: '2026-10-24T10:47:19Z'
+    last_edited: '2026-10-24T10:47:19Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
