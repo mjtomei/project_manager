@@ -458,6 +458,26 @@ env-by-name).
   writes the one note. The adopted PR's node shows within seconds of the
   pull. A conflicted pull does not kill the TUI. Adoption is an atomic
   claim, so two TUIs never both adopt one run.
+  *Load failures* (db1eb982, review loop 2b8a i1): a project.yaml that
+  cannot be loaded for any reason (conflict markers, a plan whose parent
+  or hierarchy does not validate after a merge, the file briefly absent
+  during a checkout or rebase) never escapes the scan. The TUI and every
+  QA loop it drives keep running, the pm log has one "QA resume scan
+  skipped until project.yaml loads again: …" per file state (not one
+  per 5 s scan), and the orphan is adopted on the first scan after the
+  file loads again.
+  *Provenance, not status* (59d15fea, review loop 2b8a i2, impl.md §5
+  item 30(e)): a snapshot whose `session_tag` names another pm session
+  (another clone) is never deleted by this TUI's "left QA" cleanup when
+  this clone has the PR at a non-`qa` status, whether that session is up
+  or gone. It is left until this project.yaml changes. The clone that
+  launched the run resumes it after its own TUI restart. If a pull or
+  edit brings the PR here in `qa`, this TUI adopts it, driven in the
+  launching session if it is still up, else in this TUI's own session.
+  A snapshot from this TUI's own session (or with no tag) whose PR has
+  left QA here is still dropped and never revived. Accepted cost: a
+  foreign snapshot whose PR really left QA stays until its own clone
+  drops it.
 
 ## 2. Setup
 
@@ -615,6 +635,49 @@ env-by-name).
       - A queued launch's refiner idles about 60 s before its worker
         launches.
     Same scratch-only limits as the fourteenth pass.
+  - Seventeenth pass (S42+), delta-only. S41's live evidence on
+    f22e6f4c/c8ab2f4c/ec227cf0 stands (`/pm-captures/scenarios/41`,
+    REPORT.md). Product changes since then, never run live: db1eb982
+    (scan survives every project.yaml load failure) and 59d15fea
+    (another clone's snapshot is kept when this clone's status is stale;
+    `qa_loop.launched_elsewhere`, `_live_other_session`). Review 5e15 i1
+    passed 59d15fea. Live checks needed, two clones of one project in
+    one scratch HOME and tmux server (S41 harness):
+    - The S39-between-clones loss is gone: B's run, with B's TUI dead
+      and A at a stale status for dozens of scans, is resumed by B's
+      restart. A pre-fix replay on 59d15fea^ must show the loss, so the
+      story discriminates.
+    - The same run is adopted by A after a pull while B's session is up
+      (driven in B's session) and while B's whole tmux session is gone
+      (driven in A's).
+    - A's own stale snapshot is still dropped.
+    - Each load failure kind leaves A's TUI and its own routed QA
+      running.
+    Open from code reading; the scenarios decide:
+    - (a) After B's session is gone, A drives the run in its own session.
+      That session has no `qa-<pr>` window, and `_run_qa_finalize_pane`
+      finds windows by name, so an all-PASS adopted run may end
+      `finalize=None` (RQ28 says it must finalize). The snapshot keeps
+      B's `session_tag`, so after A's TUI dies a restarted B session
+      would drive the run in `pm-B` while its relaunched panes are in
+      `pm-A`. Compare with one clone whose own session is killed and
+      restarted, to tell whether this is pre-existing.
+    - (b) The superseded-snapshot drop still decides on liveness only
+      (`live_workdirs`, `resume_owned_elsewhere`). If both clones QA the
+      same PR id, A's scan can drop B's older run as superseded once B's
+      TUI dies, so B's restart has nothing to resume. That is the same
+      loss through another path.
+    Harness: copy `/pm-captures/scenarios/41/scripts` to the new
+    capture dir and change S, the ports and the output paths. Render
+    recordings with the current `/workspace/pm/qa/artifacts/`
+    `cli-recording.md` / `tmux-screen-recording.md` `render_cast`
+    (`-vsync vfr -enc_time_base 1/100 -video_track_timescale 100`,
+    last frame held, atomic `.partial` rename). Do not use S41's
+    `render_cast.sh` or the production copies in `/scratch/qa-artifacts`.
+    Keep holds under Claude's ~360 s request timeout, and take release
+    keys from the router log. Use `git pull --no-edit` and check its
+    rc. Re-select the merge-base `active_pr` before committing in a
+    clone whose TUI moved it.
 
 ## 3. Edge cases
 
