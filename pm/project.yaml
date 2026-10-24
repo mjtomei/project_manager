@@ -31610,7 +31610,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-23T23:44:17.000098+00:00'
+  updated_at: '2026-10-24T01:18:07.694567+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32775,6 +32775,26 @@ prs:
       3 attempt 1 is kept as invalid (the A TUI died from the harness-committed conflict).'
     created_at: '2026-10-23T23:44:16Z'
     last_edited: '2026-10-23T23:44:16Z'
+  - id: note-81d5495
+    text: 'QA S42 (2026-10-24, two clones, host; captures /pm-captures/scenarios/42,
+      REPORT.md). CODE CHANGE bb39b92e needs normal re-review and reconciliation with
+      S43 a817f5c9 (both edit pm_core/tui/qa_loop_ui.py): the f22e6f4c tree reload
+      after adoption ran only for a PR with no node, so a PR pulled earlier at in_review
+      and later pulled in QA stayed in_review in the adopting TUI until the 300 s
+      sync (live: qa at +57 s, on the sync tick). The scan now reloads whenever the
+      shown status differs from project.yaml (_shown_status); regression test_resume_of_a_pr_shown_at_a_stale_status_reloads_the_tree
+      fails reverted; full suite 3555 passed. Replay on bb39b92e: qa at +2 s after
+      the pull. Held live: 59d15fea provenance (X snapshot kept 157 s of A scans with
+      dead B owner, only B restart resumed it, PASS FINALIZE_DONE, finalizer in B
+      qa-X, 1 note); pre-fix (59d15fea reverted) deleted it 2.2 s after the kill,
+      silently, and X stayed qa uncollected; pull adoption drives windows in B session
+      (one finalizer there, B restart does not resume); own stale snapshot dropped
+      0.9 s after A restart, B never touches it, second restart logs nothing. Session-gone
+      adoption (spec point a) not covered. Harness: active_pr is indented in project.yaml
+      (awk ^active_pr misses it); run pm from cwd outside /workspace or pm which reports
+      /workspace.'
+    created_at: '2026-10-24T01:18:07Z'
+    last_edited: '2026-10-24T01:18:07Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
