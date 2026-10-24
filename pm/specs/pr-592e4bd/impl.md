@@ -664,3 +664,19 @@ recorded with item 33(d).
     `test_completion_marks_its_snapshot_and_the_launching_clone_records_no_second_note`,
     `test_recorded_here_run_is_processed_even_beside_this_clones_own_run`.
     Full suite 3629 passed.  Evidence: `/pm-captures/scenarios/49`.
+36. (S47, RQ37 one note per run, one clone) Live on 3ebe4d7a: the
+    `zz t` gap (note written, "restarting QA" `start_qa` failed on an
+    unloadable file, snapshot kept) was reached, the TUI was killed, and
+    after the restart the run was neither recovered nor reported.  The
+    first `zz t` pass never moved an `in_review` PR to `qa` (later passes
+    go through `start_qa`, which does), and `_resume_incomplete_qa` drops
+    the snapshot of a run whose PR is not in `qa`.  So any first-pass `zz
+    t` run of an `in_review` PR was lost silently at a TUI restart,
+    mid-run or finished (pre-existing on master; the S45 observation
+    "zz t on an in_review PR does not move it to qa").  Fix:
+    `start_or_stop_qa_loop` makes the same in_review -> qa transition as
+    `start_qa` (shared `_enter_qa_status`; on a lock timeout or an
+    unloadable file it shows `Error: ...` and starts nothing).  Tests
+    `TestZZTStart::test_moves_an_in_review_pr_to_qa` and
+    `test_unlockable_project_starts_nothing` (both fail with the call
+    removed).  Evidence: `/pm-captures/scenarios/47`.

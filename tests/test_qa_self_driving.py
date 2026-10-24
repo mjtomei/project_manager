@@ -74,6 +74,39 @@ class TestZZTStart:
         mock_bg.assert_called_once()
         assert "pr-001" in app._qa_loops
 
+    def test_moves_an_in_review_pr_to_qa(self, tmp_path):
+        """S47: the first pass, like start_qa and every later pass, puts an
+        in_review PR in qa; the resume scan drops runs of PRs not in qa, so
+        a TUI restart lost the run (mid-run or finished)."""
+        from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
+
+        app = _make_app(tmp_path, pr_status="in_review")
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background") as mock_bg, \
+             patch("pm_core.tui.qa_loop_ui._get_qa_pass_count", return_value=3):
+            start_or_stop_qa_loop(app, "pr-001")
+
+        assert store.get_pr(store.load(app._root), "pr-001")["status"] == "qa"
+        mock_bg.assert_called_once()
+
+    def test_unlockable_project_starts_nothing(self, tmp_path):
+        """The transition cannot be written: an Error line, no loop."""
+        from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
+
+        app = _make_app(tmp_path, pr_status="in_review")
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background") as mock_bg, \
+             patch("pm_core.tui.qa_loop_ui.store.locked_update",
+                   side_effect=store.StoreLockTimeout("held")):
+            start_or_stop_qa_loop(app, "pr-001")
+
+        mock_bg.assert_not_called()
+        assert "pr-001" not in app._qa_loops
+        assert "pr-001" not in app._self_driving_qa
+        assert any("Error: held" in str(c)
+                   for c in app.log_message.call_args_list)
+        assert store.get_pr(store.load(app._root), "pr-001")["status"] == "in_review"
+
 
 # ---------------------------------------------------------------------------
 # PASS increments pass_count; reaching required passes clears state and

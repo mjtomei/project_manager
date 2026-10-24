@@ -117,6 +117,32 @@ def _ensure_qa_poll_timer(app) -> None:
     _ensure_poll_timer(app)
 
 
+def _enter_qa_status(app, pr_id: str, pr: dict, caller: str) -> bool:
+    """Move an ``in_review`` PR to ``qa`` before its QA run starts.
+
+    The resume scan only resumes or recovers runs of PRs in ``qa``, and
+    drops the snapshot of any other: a run started at ``in_review`` was
+    silently lost at the next TUI restart, mid-run or finished (S47).
+    False when project.yaml could not be loaded or locked.
+    """
+    if pr.get("status") != "in_review":
+        return True
+
+    def _set_qa(d):
+        p = store.get_pr(d, pr_id)
+        if p and p.get("status") == "in_review":
+            p["status"] = "qa"
+    try:
+        store.locked_update(app._root, _set_qa)
+    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        app.log_message(f"Error: {e}")
+        _log.warning("%s: %s for %s: %s", caller, type(e).__name__, pr_id, e)
+        return False
+    app._load_state()
+    _log.info("%s: transitioned %s to qa status", caller, pr_id)
+    return True
+
+
 def start_qa(app, pr_id: str) -> bool | None:
     """Start a QA session for a PR.
 
@@ -149,20 +175,8 @@ def start_qa(app, pr_id: str) -> bool | None:
     from pm_core.signoff import clear_return_awaiting
     clear_return_awaiting(app._root, pr_id, "qa")
 
-    # Transition status to "qa" if currently in_review
-    if pr.get("status") == "in_review":
-        def _set_qa(d):
-            p = store.get_pr(d, pr_id)
-            if p and p.get("status") == "in_review":
-                p["status"] = "qa"
-        try:
-            store.locked_update(app._root, _set_qa)
-        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
-            app.log_message(f"Error: {e}")
-            _log.warning("start_qa: %s for %s: %s", type(e).__name__, pr_id, e)
-            return False
-        app._load_state()
-        _log.info("start_qa: transitioned %s to qa status", pr_id)
+    if not _enter_qa_status(app, pr_id, pr, "start_qa"):
+        return False
 
     state = QALoopState(pr_id=pr_id)
 
@@ -258,6 +272,11 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
         app._self_driving_qa.pop(pr_id, None)
         app.log_message(f"[bold]QA loop stopping[/] for {pr_id} (finishing current run)...")
         _log.info("qa_loop_ui: stopping QA loop for %s", pr_id)
+        return
+
+    # Like start_qa (and every later pass, which goes through it): a run
+    # of a PR left at in_review is not resumed after a TUI restart.
+    if not _enter_qa_status(app, pr_id, pr, "start_or_stop_qa_loop"):
         return
 
     # Remove stale loop state — run_qa_sync will clean up old windows
