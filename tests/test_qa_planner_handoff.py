@@ -1004,7 +1004,7 @@ class TestPlannerCodeChangesForceReview:
         data = {"prs": [{"id": "pr-001", "notes": []}]}
         app = MagicMock(_root=tmp_path)
         with patch.object(store, "locked_update",
-                          side_effect=lambda root, fn: fn(data)):
+                          side_effect=lambda root, fn, **kw: fn(data)):
             qa_loop_ui._record_qa_note(app, state)
         note = data["prs"][0]["notes"][0]["text"]
         assert note.startswith("QA NEEDS_WORK:")
