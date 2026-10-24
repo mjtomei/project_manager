@@ -30214,20 +30214,28 @@ prs:
   status: pending
   depends_on:
   - pr-8df6472
+  - pr-7d68898
   description: 'Add the optimization loop described in pm/plans/plan-doc-eval.md and
-    run it against the production planning-prompt baseline on both case types. Design
-    and version the optimizer prompt that reads scores and judge rationales, separates
-    general guidance from case-specific fixes, names probable harms in the current
-    prompt and returns an edited prompt with reasoning. Maintain the two candidate
+    run it against the production planning-prompt baseline on both case types. Engineer
+    prompt changes as distinct types and measure success per type: ad hoc optimizer
+    edits; verbatim insertion of writing-guidance excerpts and of small or large exemplary
+    passages from pr-7d68898''s library; and further types such as removing instructions
+    or paraphrasing guidance instead of quoting it. Record each candidate''s change
+    type, size and source in its lineage, evaluate a child with its parent on shared
+    cases, give each type enough applications to compare, and report gain, survival,
+    share of winning ancestry and prompt-length cost per type and size with uncertainty.
+    Design and version the optimizer prompt that reads scores and judge rationales,
+    separates general guidance from case-specific fixes, names probable harms in the
+    current prompt and returns an edited prompt with reasoning. Maintain the two candidate
     populations with the genetic scheme in the plan: one evaluated only on whole-document
     cases, one evaluated on continuation cases as well, with cross-breeding allowed
     and re-scoring on entry to the whole-document population; sparse cumulative evaluation
     with stored scores reused, a few new case evaluations per candidate each generation
     and fitness as the mean of all accumulated evaluations; selection with diversity,
-    mutation through optimizer edits, crossover between strong candidates, recorded
-    lineage. Report the best of each population on whole-document validation cases
-    as the measured benefit of continuations. Select using validation, and reserve
-    final cases and an independent evaluator for the chosen candidate. Include checkpoint/resume,
+    typed mutation, crossover between strong candidates, recorded lineage. Report
+    the best of each population on whole-document validation cases as the measured
+    benefit of continuations. Select using validation, and reserve final cases and
+    an independent evaluator for the chosen candidate. Include checkpoint/resume,
     resource accounting and panel continuation or stop decisions. Estimate the share
     of weekly subscription limits taken by campaigns of different population sizes
     and generation counts, and pick the campaign shape from that estimate before running,
@@ -30271,7 +30279,10 @@ prs:
     panel membership/aggregation, and that fitness never pools incompatible scoring
     configurations. Retain real open-model baseline/candidate comparisons and the
     panel-feedback comparison. Check that no weak-brief case enters whole-document
-    fitness, validation or final evaluation.
+    fitness, validation or final evaluation. Check that every candidate records its
+    change type, size and source, that per-type results come from parent-child comparisons
+    on shared cases, that each type receives its configured share of applications,
+    and that withheld exemplar documents never appear as evaluation cases.
 
 
     Files: experiments/plan-writing/, reusable evaluation/optimization modules under
@@ -30280,7 +30291,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677755+00:00'
-  updated_at: '2026-10-23T22:00:43.801990+00:00'
+  updated_at: '2026-10-24T22:07:20.813644+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31541,26 +31552,26 @@ prs:
     on reader expectations, audience, working memory in reading and the curse of knowledge,
     starting from Gopen and Swan''s reader-expectation approach, Flower''s writer-based
     versus reader-based prose and Kintsch''s construction-integration model, together
-    with work on LLM-simulated readers. Turn each reference into a seed prompt for
-    a genetic search over the interleaved-generation prompt, using pr-09c4e8e''s populations,
-    sparse cumulative evaluation, optimizer and lineage with the evaluator fixed;
-    add the production baseline and the pr-09c4e8e winner, each with an annotation
-    instruction, as further seeds. Compare the best interleaved prompt with plain
-    one-shot generation from the production baseline and from the pr-09c4e8e winner,
-    sharing cases and writers, on strong-brief whole-document cases and on continuation
-    cases as separate tracks. Report progression, clarity, concision and requirement
-    coverage in particular, by track, document family and PM task kind, with length
-    changes beside score changes and usage including annotation tokens. Retain the
-    interleaved streams with lineage. If the fixed rubric cannot register reader strain,
-    report that instead of adding a measure. Estimate the share of weekly subscription
-    limits for the planned case counts, population sizes and generation counts first
-    and keep every run under the twenty percent per-subscription single-run ceiling.
-    Environment dependency for review and QA: real runs need the claude-mixed router
-    and the routes behind each role (the ChatGPT and Grok bridges, OpenRouter, the
-    work account); when a required route is down, return INPUT_REQUIRED asking the
-    human to restore it, and record a coverage gap only for a route still unavailable
-    after that. Locally served models are out of scope here and wait for the later
-    local-model PR.
+    with work on LLM-simulated readers. Turn each reference into a seed prompt, quoting
+    the variation library''s verbatim excerpts where available, for a genetic search
+    over the interleaved-generation prompt, using pr-09c4e8e''s populations, sparse
+    cumulative evaluation, optimizer and lineage with the evaluator fixed; add the
+    production baseline and the pr-09c4e8e winner, each with an annotation instruction,
+    as further seeds. Compare the best interleaved prompt with plain one-shot generation
+    from the production baseline and from the pr-09c4e8e winner, sharing cases and
+    writers, on strong-brief whole-document cases and on continuation cases as separate
+    tracks. Report progression, clarity, concision and requirement coverage in particular,
+    by track, document family and PM task kind, with length changes beside score changes
+    and usage including annotation tokens. Retain the interleaved streams with lineage.
+    If the fixed rubric cannot register reader strain, report that instead of adding
+    a measure. Estimate the share of weekly subscription limits for the planned case
+    counts, population sizes and generation counts first and keep every run under
+    the twenty percent per-subscription single-run ceiling. Environment dependency
+    for review and QA: real runs need the claude-mixed router and the routes behind
+    each role (the ChatGPT and Grok bridges, OpenRouter, the work account); when a
+    required route is down, return INPUT_REQUIRED asking the human to restore it,
+    and record a coverage gap only for a route still unavailable after that. Locally
+    served models are out of scope here and wait for the later local-model PR.
 
 
     Tests: Verify that extraction is deterministic, that malformed interleaving is
@@ -31581,7 +31592,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-23T21:44:50.718137+00:00'
-  updated_at: '2026-10-23T21:59:19.921855+00:00'
+  updated_at: '2026-10-24T22:07:22.466709+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31860,21 +31871,22 @@ prs:
     the writer, critic and reviser prompts, with round count and critic configuration
     drawn from those pr-eadd1b7 found useful; seed the population with pr-eadd1b7''s
     best configuration and pr-09c4e8e''s winning prompts. Reuse pr-09c4e8e''s populations,
-    sparse cumulative evaluation, optimizer, lineage and checkpoint/resume, with its
-    two-population whole-document/continuation scheme and strong-brief case selection;
-    the optimizer may read in-loop critiques and final scores on development cases
-    only. Compare the winner with the one-shot campaign winner, the best fixed iterative
-    configuration and the production baseline on validation and reserved final cases,
-    at comparable budgets as well as equal call counts, separately for plans, both
-    spec types and sign-off reports and for each writer model; report gains, usage
-    and latency. Estimate the share of weekly subscription limits for the planned
-    case counts, population sizes and generation counts first and keep every run under
-    the twenty percent per-subscription single-run ceiling. Environment dependency
-    for review and QA: real runs need the claude-mixed router and the routes behind
-    each role (the ChatGPT and Grok bridges, OpenRouter, the work account); when a
-    required route is down, return INPUT_REQUIRED asking the human to restore it,
-    and record a coverage gap only for a route still unavailable after that. Locally
-    served models are out of scope here and wait for the later local-model PR.
+    sparse cumulative evaluation, optimizer, typed changes with per-type reporting,
+    lineage and checkpoint/resume, with its two-population whole-document/continuation
+    scheme and strong-brief case selection; the optimizer may read in-loop critiques
+    and final scores on development cases only. Compare the winner with the one-shot
+    campaign winner, the best fixed iterative configuration and the production baseline
+    on validation and reserved final cases, at comparable budgets as well as equal
+    call counts, separately for plans, both spec types and sign-off reports and for
+    each writer model; report gains, usage and latency. Estimate the share of weekly
+    subscription limits for the planned case counts, population sizes and generation
+    counts first and keep every run under the twenty percent per-subscription single-run
+    ceiling. Environment dependency for review and QA: real runs need the claude-mixed
+    router and the routes behind each role (the ChatGPT and Grok bridges, OpenRouter,
+    the work account); when a required route is down, return INPUT_REQUIRED asking
+    the human to restore it, and record a coverage gap only for a route still unavailable
+    after that. Locally served models are out of scope here and wait for the later
+    local-model PR.
 
 
     Tests: Verify that fitness comes only from the fixed evaluator''s score of each
@@ -31893,7 +31905,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-23T22:00:22.651612+00:00'
-  updated_at: '2026-10-23T22:00:22.651612+00:00'
+  updated_at: '2026-10-24T22:07:21.702566+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32153,6 +32165,50 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-23T23:45:13.949692+00:00'
   updated_at: '2026-10-23T23:45:40.418995+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7d68898
+  plan: plan-doc-eval
+  title: 'Prompt-variation library: writing-guidance excerpts and exemplary technical
+    writing'
+  branch: pm/pr-7d68898-prompt-variation-library-writing-guidance-excerpts
+  status: pending
+  depends_on:
+  - pr-44f807f
+  - pr-9f111ef
+  description: 'Build the material for typed prompt changes in pm/plans/plan-doc-eval.md.
+    Collect excerpts from the writing-guidance sources behind the rubric (pr-44f807f''s
+    references.json: requirement standards, plain-language and style guides, process
+    templates, reader-expectation guidance) and passages of lauded technical writing,
+    chosen by a recorded criterion for their standing, such as being cited as exemplary
+    by a style guide or by a community''s own process documents, rather than by preference.
+    Size each item small (a sentence or paragraph), medium (a section) or large (a
+    whole document), tag it with the rubric dimensions it illustrates, and record
+    source, location, licence and the evidence for its standing. Leave out exemplars
+    whose documents are evaluation cases, or mark those documents and their split
+    groups so every evaluation split withholds them. Keep verbatim text in gitignored
+    data/ unless its licence allows committing it, and commit the index. Define the
+    operator interface pr-09c4e8e uses to insert an item into a prompt, attributed
+    and labelled as guidance or as an example. Environment dependency: needs web access
+    to fetch sources.
+
+
+    Tests: Verify that every item records source, location, licence, standing evidence,
+    size and dimension tags, that no item''s document remains in an evaluation split
+    unless withheld, that verbatim text of non-redistributable sources is not committed,
+    and that the insertion operator renders guidance and example items with attribution
+    at each size.
+
+
+    Files: library index and builder under experiments/plan-writing/, gitignored excerpt
+    store, insertion operator, relevant tests'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-24T22:07:19.975334+00:00'
+  updated_at: '2026-10-24T22:07:19.975334+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
