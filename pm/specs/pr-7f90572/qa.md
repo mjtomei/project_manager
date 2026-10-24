@@ -185,3 +185,29 @@ gate on the rebuilt HEAD: multi-signal teardown idempotency and
 nothing-to-clean under stacked signals, meta-workdir preservation/reuse
 across the lifecycle, and concurrent actors on the shared override
 (~/.pm/sessions/<tag>/override) at the rebuilt HEAD.
+
+## Fresh scenarios 13+ (post-fish-fix planning pass, 2026-10-25)
+
+The returned sign-off flagged that tmux runs `new-window` commands as
+`<default-shell> -c <cmd>` and `default-shell` defaults to `$SHELL` — with
+fish, the POSIX function/trap pane command was rejected at parse time
+(rc 127), so Claude never started and the override stayed stale (the
+original bug, and a regression vs the pre-PR command). Fixed in 6f6fee32:
+the tmux branch now passes `sh -c {shlex.quote(cmd)}` to `new_window`
+(`_tmux_shell_cmd`); the interactive fallback is deliberately NOT wrapped
+(`Popen(shell=True)` is already /bin/sh; an extra outer shell could break
+the 130 exit status). This changed `meta.py`'s tmux branch and the pane
+process tree, so the S10–S12 evidence does not automatically carry over:
+scenarios 13+ re-run the tmux lifecycle (kill-window, normal exit,
+relaunch, foreign guard), cover the non-POSIX default-shell (fish)
+end-to-end with a POSIX control, re-check the shared-override concurrency
+edges, and sanity-check the unwrapped interactive fallback at final HEAD.
+
+Harness concretization for kill-window repros: on kill-window the kernel
+SIGHUPs only the pty session leader; a trap-carrying shell survives it and
+runs the deferred trap, so the foreground child must be tty-reading
+(fake-claude with a hold, or `cat`) for the trap to fire — a `sleep`
+stand-in falsely shows a stale override. If fish is unavailable in the
+container (static fish binary or `apt install fish` both acceptable), run
+the same lifecycle under dash as the POSIX control and record the fish
+skip; the wrapper itself is shell-agnostic POSIX passed to explicit `sh`.
