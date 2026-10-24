@@ -546,6 +546,17 @@ recorded with item 32.
         `tests/test_qa_self_driving.py::test_needs_work_survives_plans_that_do_not_validate`;
         with the subclass reverted these and the (a)/item 30(c)
         regressions fail (5 tests).
+    (e) Review loop c1d4 i2: since (b) keeps the root while project.yaml
+        is missing, those handlers then called `store.load` on a missing
+        file and `FileNotFoundError` escaped the poll timer the same way
+        (reproduced: QA NEEDS_WORK completion during the absence). `load`
+        now raises `ProjectYamlMissingError`, both a
+        `ProjectYamlParseError` and a `FileNotFoundError`: "no project"
+        callers (the `_load_state`/`background_sync` root checks, the
+        CLI) are unchanged, and keep-state handlers survive.
+        `tests/test_store.py::TestMissingProjectFile`,
+        `tests/test_qa_self_driving.py::test_needs_work_survives_a_missing_project_file`
+        (both fail with the subclass reverted).
     Not fixed here: a TUI never resumes a later orphaned run of a PR it
     already resumed or dropped once (`_resumed_qa_pr_ids` is never
     cleared; pre-existing, filed pr-43b14d2).

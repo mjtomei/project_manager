@@ -276,6 +276,25 @@ class TestNeedsWorkStrict:
 
         assert app._data is before
 
+    def test_needs_work_survives_a_missing_project_file(self, tmp_path):
+        """A checkout can have project.yaml unlinked while a run finishes,
+        and the TUI keeps its root meanwhile (S44); the completion reload
+        keeps the previous data instead of raising FileNotFoundError out of
+        the poll timer."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = _make_app(tmp_path, auto_start=False)
+        (app._root / "project.yaml").unlink()
+        before = app._data
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.auto_start.is_enabled", return_value=False):
+            _on_qa_complete(app, state)
+
+        assert app._data is before
+
     def test_needs_work_message_holds_the_log_line(self, tmp_path):
         """The NEEDS_WORK line is held and forced against the self-driving
         review loop's sticky "Review loop started" in the same frame, so it

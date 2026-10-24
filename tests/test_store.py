@@ -211,6 +211,20 @@ class TestPlanValidationEdgeCases:
         assert data["plans"] is None
 
 
+class TestMissingProjectFile:
+    def test_missing_file_is_an_unloadable_file_and_still_not_found(
+            self, tmp_pm_root):
+        """A checkout or rebase unlinks project.yaml before writing the new
+        one: callers that keep their state on an unloadable file must catch
+        it as ProjectYamlParseError, and "no project" callers still see a
+        FileNotFoundError with the usual message."""
+        with pytest.raises(store.ProjectYamlParseError) as exc:
+            store.load(tmp_pm_root)
+        assert isinstance(exc.value, FileNotFoundError)
+        assert exc.value.filename == str(tmp_pm_root / "project.yaml")
+        assert "No such file or directory" in str(exc.value)
+
+
 # ---------------------------------------------------------------------------
 # YAML backend (libyaml C loader/dumper + project.libyaml flag)
 # see pm_core/store.py:_yaml_loader / _yaml_dumper

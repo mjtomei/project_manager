@@ -77,6 +77,17 @@ class PlanValidationError(ProjectYamlParseError):
     """
 
 
+class ProjectYamlMissingError(ProjectYamlParseError, FileNotFoundError):
+    """Raised by load() when project.yaml does not exist.
+
+    Still a FileNotFoundError for callers that treat a missing file as "no
+    project".  Also an unloadable file for callers that keep their previous
+    state: a checkout or rebase unlinks project.yaml before writing the new
+    one, and the TUI keeps its root meanwhile (S44), so a handler catching
+    only ProjectYamlParseError would raise out of a TUI timer.
+    """
+
+
 VALID_PLAN_STATUSES = {"draft", "active", "done"}
 
 
@@ -116,6 +127,8 @@ def load(root: Optional[Path] = None, validate: bool = True) -> dict:
     try:
         with open(path) as f:
             data = yaml.load(f, Loader=_yaml_loader())
+    except FileNotFoundError as e:
+        raise ProjectYamlMissingError(e.errno, e.strerror, e.filename) from e
     except yaml.YAMLError as e:
         raise ProjectYamlParseError(f"project.yaml is not valid YAML: {e}") from e
 
