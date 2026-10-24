@@ -29173,6 +29173,17 @@ prs:
       (fish absent). Evidence /pm-captures/scenarios/13/{1-launch,2-kill-window,3-relaunch,4-normal-exit}/.'
     created_at: '2026-10-24T23:31:03Z'
     last_edited: '2026-10-24T23:31:03Z'
+  - id: note-c8c7b75
+    text: 'QA scenario 16 (meta fallback interrupt) concretizer finding: the bundled
+      fake-claude swallows Ctrl-C — KeyboardInterrupt is caught in _hold_open stdin.read
+      (pm_core/fake_claude.py:414) and the fake exits 0, so `pm meta` exits 0, not
+      130. The 130/override-cleared THEN requires a PATH shim that installs a SIGINT
+      handler (sleep ~1 s, exit 130) before runpy-ing the real fake; the refined steps
+      include that shim. Also: pm meta clones the pm repo from GitHub on first run
+      (network reachable in the QA container) and the fallback triggers only when
+      no tmux session named pm-<cwd-tag> exists — a plain non-pm- session works.'
+    created_at: '2026-10-24T23:29:56Z'
+    last_edited: '2026-10-24T23:29:56Z'
 - id: pr-19990de
   plan: bugs
   title: 'Bug: vanilla/GitHub merge propagation still resolves in the project root
