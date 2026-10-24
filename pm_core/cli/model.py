@@ -27,24 +27,35 @@ def model_show():
     root = state_root()
     data = store.load(root)
 
-    click.echo("Effective config per session type:")
-    click.echo(f"  {'type':14s}   {'model':40s} {'effort':8s}")
-    click.echo(f"  {'─'*14}   {'─'*40} {'─'*8}")
-    for st in SESSION_TYPES:
-        res = resolve_model_and_provider(st, project_data=data)
-        if res.provider:
-            model_str = f"provider:{res.provider}"
-        elif res.model:
-            model_str = res.model
-        else:
-            model_str = "(default)"
-        effort_str = res.effort or "(default)"
-        click.echo(f"  {st:14s}   {model_str:40s} {effort_str:8s}")
-    click.echo()
+    # A model_config (or block) that is not a mapping cannot be resolved
+    # per type.  Still list the PR overrides and the problems below: this
+    # is where a model setting problem is meant to be found.
+    mc = data.get("project", {}).get("model_config", {})
+    resolvable = isinstance(mc, dict) and all(
+        isinstance(mc.get(block, {}), dict)
+        for block in ("session_models", "session_effort"))
+
+    if resolvable:
+        click.echo("Effective config per session type:")
+        click.echo(f"  {'type':14s}   {'model':40s} {'effort':8s}")
+        click.echo(f"  {'─'*14}   {'─'*40} {'─'*8}")
+        for st in SESSION_TYPES:
+            res = resolve_model_and_provider(st, project_data=data)
+            if res.provider:
+                model_str = f"provider:{res.provider}"
+            elif res.model:
+                model_str = res.model
+            else:
+                model_str = "(default)"
+            effort_str = res.effort or "(default)"
+            click.echo(f"  {st:14s}   {model_str:40s} {effort_str:8s}")
+        click.echo()
 
     # Show project-level overrides if any
-    mc = data.get("project", {}).get("model_config", {})
-    if mc:
+    if not resolvable:
+        click.echo("Effective config not shown: model_config is malformed "
+                   "(see the problems below).")
+    elif mc:
         click.echo("Project-level overrides (project.yaml):")
         session_models = mc.get("session_models", {})
         for st, val in session_models.items():
@@ -73,7 +84,7 @@ def model_show():
     # Router providers (worker routes): where those sessions actually go.
     from pm_core import worker_route
     shown = False
-    for st in SESSION_TYPES:
+    for st in SESSION_TYPES if resolvable else ():
         res = resolve_model_and_provider(st, project_data=data)
         if not res.provider:
             continue

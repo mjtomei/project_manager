@@ -1075,3 +1075,17 @@ recorded with item 41.
         fails with the i9 per-target clear
         (`/pm-captures/review-e0e8-i11/mutation-checks.log`).  Full suite:
         `/pm-captures/review-e0e8-i11/full-suite.log`.
+    (k) Review loop e0e8 i12: (c) keeps checking PRs when `model_config`
+        is not a mapping, but its only caller, `pm model show` (where a
+        provider error points the user), resolved every type first and
+        crashed on that file (`AttributeError`/`TypeError` for a string or
+        blank `model_config`, or a string `session_models`/`session_effort`
+        block), so the problems were never printed.  It now says "Effective
+        config not shown: model_config is malformed", skips the per-type
+        table and Routes, and still lists the PR overrides and the
+        problems.  Launches with such a file still fail (pre-existing;
+        never a silent fallback).
+        `test_model_show_reports_a_malformed_model_config[string|blank|models_block|effort_block]`
+        (all four crash pre-fix; 2 mutations caught,
+        `/pm-captures/review-e0e8-i12/mutation-checks.log`).  Full suite:
+        `/pm-captures/review-e0e8-i12/full-suite.log`.

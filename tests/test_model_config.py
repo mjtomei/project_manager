@@ -497,3 +497,28 @@ def test_model_show_lists_pr_overrides_and_their_problems(tmp_path,
     assert "pr-b" not in out
     assert "Problems in project.yaml model settings" in out
     assert "prs[pr-a].session_models: unknown session type 'sign_off'" in out
+
+
+@pytest.mark.parametrize("mc", ["opus", None, {"session_models": "impl"},
+                                {"session_effort": "review"}],
+                         ids=["string", "blank", "models_block", "effort_block"])
+def test_model_show_reports_a_malformed_model_config(tmp_path, monkeypatch, mc):
+    """`pm model show` is where the model setting problems are listed (and
+    what a provider error points to), so a model_config that cannot be
+    resolved per type is reported there, not a traceback."""
+    from click.testing import CliRunner
+    from pm_core import store
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "model_config": mc},
+                "prs": [{"id": "pr-a",
+                         "session_models": {"bogus": "x"}}]}, tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    result = CliRunner().invoke(model_cli.model, ["show"])
+    out = result.output
+    assert result.exit_code == 0, (out, result.exception)
+    assert "Effective config not shown: model_config is malformed" in out
+    assert "must be a mapping" in out
+    assert "pr-a  bogus model  -> x" in out
+    assert "prs[pr-a].session_models: unknown session type 'bogus'" in out
