@@ -163,7 +163,7 @@ def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
     if prompt_bytes(header + full) <= _PR_NOTES_BUDGET:
         return header + full + "\n"
     budget = _PR_NOTES_BUDGET - prompt_bytes(header)
-    return header + _render_pr_notes_bounded(all_notes, budget) + "\n"
+    return header + _render_pr_notes_bounded(all_notes, budget, pr.get("id")) + "\n"
 
 
 def _render_pr_notes(notes: list[dict]) -> str:
@@ -176,14 +176,21 @@ def _render_pr_notes(notes: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _render_pr_notes_bounded(notes: list[dict], budget: int) -> str:
+def _render_pr_notes_bounded(notes: list[dict], budget: int,
+                             pr_id: str | None = None) -> str:
     """Render notes within *budget*, newest in full and older as summaries.
 
     Every note stays represented while the budget allows; a closing marker
     names the count omitted (if any) and the command to read the full text.
     Newer notes supersede older ones for handoff purposes, so they get the
     full text first.
+
+    *pr_id* is interpolated into the marker so the command is directly
+    runnable — the same block carries the concrete id from ``fit_prompt``'s
+    pointer, so a literal placeholder here would be inconsistent.
     """
+    read_cmd = f"pm pr note list {pr_id}" if pr_id else "pm pr note list <pr-id>"
+
     def full_line(n: dict) -> str:
         ts = n.get("created_at", "")
         ts_str = f" ({ts})" if ts else ""
@@ -208,7 +215,7 @@ def _render_pr_notes_bounded(notes: list[dict], budget: int) -> str:
         omitted = len(notes) - len(kept)
         marker = (
             f"... ({omitted} older note(s) omitted to fit the prompt size "
-            f"limit — run `pm pr note list <pr-id>` to read all notes.)"
+            f"limit — run `{read_cmd}` to read all notes.)"
         )
         return sep.join(kept + [marker])
 
@@ -226,7 +233,7 @@ def _render_pr_notes_bounded(notes: list[dict], budget: int) -> str:
         remaining -= delta
     marker = (
         "... (older notes are abbreviated to fit the prompt size limit — "
-        "run `pm pr note list <pr-id>` to read them in full.)"
+        f"run `{read_cmd}` to read them in full.)"
     )
     if prompt_bytes(sep.join(rendered + [marker])) <= budget:
         return sep.join(rendered + [marker])
@@ -528,6 +535,26 @@ Review the code changes in this PR for quality, correctness, and architectural f
     )
 
 
+def _qa_scenarios_pointer(pr_id: str) -> str:
+    """Where a session reads the QA verdicts an abbreviated listing left out.
+
+    The live ``qa_status.json`` lives in an ephemeral workdir under the *host*
+    ``~/.pm/workdirs/qa/``, which does not exist inside the container the
+    sign-off session runs in — the same host-vs-container split
+    :func:`pm_core.integration.integration_pointer` handles.  Per-scenario
+    verdicts are persisted under the captures dir
+    (``$CAP/scenarios/<n>/verdict.md`` + ``scenario.json``, see
+    ``qa_loop._persist_scenario_verdicts``), and that dir is bind-mounted at
+    ``/pm-captures`` inside a container — so name it, not the workdir file.
+    """
+    from pm_core.paths import captures_dir
+    cap = captures_dir(pr_id)
+    if cap is not None:
+        return f"read `{cap}/scenarios/<n>/verdict.md` for all verdicts"
+    return (f"run `pm qa captures-path {pr_id}` and read "
+            f"`scenarios/<n>/verdict.md` for all verdicts")
+
+
 def _signoff_qa_scenarios_block(pr_id: str) -> str:
     """Render every QA scenario's verdict + reason from the latest qa_status.json.
 
@@ -573,7 +600,7 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
         lines.append(bounded_join(
             valid, _scenario_line, max_items=_QA_SCENARIOS_MAX,
             omitted_note=lambda n: (
-                f"... (+{n} more scenarios; read `{latest}` for all verdicts)"),
+                f"... (+{n} more scenarios; {_qa_scenarios_pointer(pr_id)})"),
         ))
     return "\n" + "\n".join(lines) + "\n"
 
@@ -1282,7 +1309,12 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
             max_items=_WATCHER_MANAGED_MAX, separator=", ",
             omitted_note=lambda n: f" (+{n} more; run `pm pr list`)",
         )
-        target_list = ", ".join(f"**{t}**" for t in targets)
+        target_list = bounded_join(
+            targets, lambda t: f"**{t}**",
+            max_items=_WATCHER_MANAGED_MAX, separator=", ",
+            omitted_note=lambda n: (
+                f" (+{n} more; run `pm autostart list`)"),
+        )
 
         auto_start_scope_block = f"""
 ### Auto-Start Scope

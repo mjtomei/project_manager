@@ -611,3 +611,57 @@ test; `generate_merge_prompt` uses `bounded_lines`'s default 0.25 head ratio
 tail is where git prints the failure, so tail-heavy is the better degradation
 and it matches the verification prompt's ratio.
 
+
+## 12. Review-loop follow-ups (iteration 6)
+
+Iteration 6 continued iteration 5's method — check each omission marker in the
+environment the session actually reads it in — and re-swept the one remaining
+join over a collection that had no bound. Three of the four findings are the
+same host-path/placeholder class the earlier iterations kept hitting; none of
+the per-block budgets or the launcher guard changed.
+
+- **`_signoff_qa_scenarios_block`'s marker named a host-only path.** It named
+  `latest_qa_status_path(pr_id)` — the live `qa_status.json` under the *host*
+  `~/.pm/workdirs/qa/<pr>-*/`. Sign-off runs inside a container
+  (`signoff.py`: `_claude_cwd = _CONTAINER_WORKDIR`, host workdir as
+  `write_dir`), and the container mounts only the workdir, `~/.claude`,
+  `~/.pm/hooks`, the pm source and the captures dir — `~/.pm/workdirs` does not
+  exist there, so the marker was unreadable, the same defect iteration 5 fixed
+  for `integration_pointer`. Reachable whenever a QA run has more than
+  `QA_SCENARIOS_MAX` (40) scenarios. It now resolves through `captures_dir`
+  (the container-aware resolver) to the per-scenario verdicts
+  `qa_loop._persist_scenario_verdicts` writes at
+  `$CAP/scenarios/<n>/verdict.md` + `scenario.json` — the structured record
+  exists precisely so the sign-off agent does not need the ephemeral
+  `qa_status.json` — falling back to `pm qa captures-path <pr-id>`. On the
+  host the path is the same captures dir the prompt's own evidence step
+  already tells the reviewer to use (`CAP="$(pm qa captures-path <pr-id>)"`).
+- **`_render_pr_notes_bounded`'s markers used a literal `<pr-id>`.**
+  `run `pm pr note list <pr-id>`` is not directly runnable, and the same block
+  already carries the concrete id from `fit_prompt`'s pointer (`pm pr note
+  list <pr-id>`), so the two forms disagreed inside one prompt section. The
+  function now takes the PR id and interpolates it. Real prompts change only
+  by that: a full-text diff for 3 PRs x 4 builders shows the notes marker line
+  and +3 bytes on the builders that abbreviate notes, nothing else.
+- **`generate_watcher_prompt`'s `target_list` was the last unbounded join.**
+  It sat directly beside `managed_list`, which R14 bounds, and was built from
+  the same user-set collection: `", ".join(f"**{t}**" for t in targets)` with
+  no count cap and no byte budget. Now bounded by `WATCHER_MANAGED_MAX` with a
+  marker naming `pm autostart list` (the command that lists targets). Both
+  lists are display-only — the scope the watcher acts on still comes from
+  `managed_ids`.
+- **`mocks_for_prompt` passed an `omitted_note` to `bounded_join` with no
+  `max_items`/`max_bytes`,** so the note could never fire (dead code that read
+  as if a per-mock marker existed). Removed; the aggregate `bounded_text` owns
+  the degradation and its marker already names `pm qa mocks list`.
+
+Verification: `tests/test_prompt_bounds.py` 80 cases (4 new, all
+failing-then-passing: the container-mount and `captures-path`-fallback markers,
+the concrete PR id, and the bounded target list). Real-data sweep over all 483
+PRs x 4 builders: impl 75,146 / review 77,616 / sign-off 92,165 / planner
+80,652 B — all under `PROMPT_ARG_LIMIT`, the +3 B being the notes marker's
+concrete id. Full suite 3366 passed, 55 failed + 17 errors — a failure set
+byte-identical to `origin/master` in this sandbox (all environmental: the
+sandbox git shim forwards pull/push to a host workdir, so
+`test_signoff_integration` / `test_merge_publish` cannot reach a real remote).
+Evidence: `/pm-captures/review-4e41-i6/`.

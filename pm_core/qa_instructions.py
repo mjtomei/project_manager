@@ -358,12 +358,11 @@ def mocks_for_prompt(pm_root: Path) -> str:
         desc = f" — {mock['description']}" if mock["description"] else ""
         return f"### {mock['title']}{desc}\n\n{body.strip()}\n"
 
-    body = bounded_join(
-        mocks, _mock_block, separator="\n",
-        omitted_note=lambda n: (
-            f"... ({n} more mock definition(s) omitted to fit the prompt "
-            f"size limit — run `pm qa mocks list` to read them.)"),
-    )
+    # No per-mock bound here: bounded_join only omits when given max_items /
+    # max_bytes, and the aggregate bound below owns the degradation (it drops
+    # the middle of the listing and names `pm qa mocks list`).  An
+    # omitted_note passed without a bound would never fire.
+    body = bounded_join(mocks, _mock_block, separator="\n")
     text = header + body + "\n"
     return bounded_text(
         text,

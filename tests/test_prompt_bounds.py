@@ -320,6 +320,49 @@ class TestSignoffPromptBounding:
         assert (integration.integration_pointer("pr-x")
                 == "read /pm-captures/integration.json")
 
+    def _many_scenarios(self, tmp_path, monkeypatch, n=60):
+        status = tmp_path / "qa_status.json"
+        status.write_text(json.dumps({
+            "overall": "PASS",
+            "scenarios": [{"index": i, "title": f"S{i}", "verdict": "PASS",
+                           "verdict_reason": "r" * 300} for i in range(n)],
+        }))
+        monkeypatch.setattr("pm_core.paths.latest_qa_status_path",
+                            lambda pr_id: status)
+        return status
+
+    def test_qa_scenario_marker_resolves_the_container_mount(self, tmp_path,
+                                                             monkeypatch):
+        """The sign-off session runs in a container, where the live
+        qa_status.json (a host path under ~/.pm/workdirs/qa/) does not exist.
+        The marker must name the per-scenario verdicts under the captures dir,
+        which is bind-mounted at /pm-captures — naming the workdir file is the
+        same host-path defect the integration marker had."""
+        status = self._many_scenarios(tmp_path, monkeypatch)
+        monkeypatch.setattr("pm_core.paths.captures_dir",
+                            lambda pr_id: Path("/pm-captures"))
+        block = prompt_gen._signoff_qa_scenarios_block("pr-x")
+        assert "(+20 more scenarios" in block
+        assert "/pm-captures/scenarios/" in block
+        assert str(status) not in block
+
+    def test_qa_scenario_marker_falls_back_to_the_captures_path_command(
+            self, tmp_path, monkeypatch):
+        self._many_scenarios(tmp_path, monkeypatch)
+        monkeypatch.setattr("pm_core.paths.captures_dir", lambda pr_id: None)
+        block = prompt_gen._signoff_qa_scenarios_block("pr-x")
+        assert "(+20 more scenarios" in block
+        assert "pm qa captures-path pr-x" in block
+
+    def test_pr_notes_markers_name_the_concrete_pr_id(self):
+        """The omission marker is the only recovery path for the abbreviated
+        notes; a literal `<pr-id>` placeholder is not runnable, and the same
+        block already carries the concrete id from fit_prompt's pointer."""
+        pr = _pr(notes=[_note(i, size=300) for i in range(120)])
+        block = prompt_gen._format_pr_notes(pr)
+        assert "pm pr note list pr-x" in block
+        assert "<pr-id>" not in block
+
 
 class TestFitPrompt:
     def test_passthrough_when_it_fits(self):
@@ -484,6 +527,19 @@ class TestMergeAndWatcherBounding:
             data, auto_start_targets=["pr-199"])
         _assert_bounded(p, "pm pr list")
 
+    def test_watcher_target_list_is_bounded_too(self):
+        """The target list sits right beside the bounded managed list and is
+        built from the same user-set collection, so it needs the same cap."""
+        targets = [f"pr-{i:03d}" for i in range(120)]
+        prs = [_pr(t) for t in targets]
+        data = {"project": {"name": "p", "base_branch": "master"},
+                "prs": prs, "plans": []}
+        p = prompt_gen.generate_watcher_prompt(data, auto_start_targets=targets)
+        line = next(l for l in p.splitlines()
+                    if l.startswith("Auto-start targets:"))
+        assert "(+80 more; run `pm autostart list`)" in line
+        assert "**pr-119**" not in line
+
 
 # ---------------------------------------------------------------------------
 # spec_gen / qa_instructions / qa_finalize / qa_loop
@@ -574,6 +630,10 @@ class TestQaInstructionsBounding:
                           body="m" * 3000)
         out = qa_instructions.mocks_for_prompt(_isolated_pm_root)
         assert prompt_bytes(out) <= 12_000 + 400
+        # The aggregate bound owns the degradation and names the command that
+        # lists every mock (a per-mock omission note could never fire, since
+        # the listing passes no max_items/max_bytes).
+        assert "pm qa mocks list" in out
 
 
 class TestQaFinalizeBounding:
