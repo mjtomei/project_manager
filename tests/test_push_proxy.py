@@ -311,6 +311,31 @@ class TestPushProxyLifecycle:
         assert kwargs.get("stderr") is subprocess.DEVNULL
         assert kwargs.get("start_new_session") is True
 
+    def test_proxy_subprocess_ignores_shadow_pm_core_in_cwd(self, tmp_path,
+                                                            monkeypatch):
+        """A project's own top-level pm_core/ must not shadow pm.
+
+        ``python -m`` puts the cwd first on sys.path; the TUI's cwd is the
+        project, so the real proxy daemon imported the project's package
+        and never came up.  Spawns the real subprocess.
+        """
+        from pm_core.push_proxy import _start_proxy_subprocess, proxy_is_alive
+
+        proj = tmp_path / "proj"
+        (proj / "pm_core").mkdir(parents=True)
+        (proj / "pm_core" / "__init__.py").write_text(
+            "open(__file__ + '.imported', 'w').close()\n"
+            "raise ImportError('SHADOW pm_core imported')\n")
+        sock = str(tmp_path / "push.sock")
+        monkeypatch.chdir(proj)
+        _start_proxy_subprocess(sock, str(tmp_path), "pm/pr-x")
+        try:
+            assert proxy_is_alive(sock)
+            assert not (proj / "pm_core" / "__init__.py.imported").exists()
+        finally:
+            if os.path.exists(sock):
+                os.unlink(sock)  # the daemon exits once its socket is gone
+
     def test_container_socket_path(self):
         assert container_socket_path() == _CONTAINER_SOCKET_PATH
         assert container_socket_path() == "/run/pm-push-proxy/push.sock"
@@ -337,6 +362,58 @@ class TestPushProxyLifecycle:
         assert not proxy._thread.is_alive()
         # Clean up (stop is safe to call even after thread exited)
         proxy.stop()
+
+    def test_replaced_daemon_exits_and_keeps_the_new_socket(self, tmp_path):
+        """A shared proxy stopped and started again at once: the old daemon
+        must exit although the path exists again, and its exit cleanup
+        must not unlink the newer proxy's socket (that left the new
+        container without a proxy).  Spawns the real daemon."""
+        import sys
+        import time
+        from pm_core.push_proxy import proxy_is_alive
+
+        sock = str(tmp_path / "push.sock")
+        pm_root = str(Path(__file__).resolve().parent.parent)
+        old = subprocess.Popen(
+            [sys.executable, "-m", "pm_core.push_proxy", sock,
+             str(tmp_path), "pm/pr-x"],
+            cwd=pm_root, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            for _ in range(50):
+                if os.path.exists(sock) and proxy_is_alive(sock):
+                    break
+                time.sleep(0.1)
+            else:
+                pytest.fail("old proxy daemon never came up")
+            new = PushProxy(sock, str(tmp_path), "pm/pr-x")
+            new.start()  # unlinks the old socket and binds the path again
+            try:
+                assert old.wait(timeout=10) == 0
+                assert new.owns_socket()
+                assert proxy_is_alive(sock)
+            finally:
+                new.stop()
+            assert not os.path.exists(sock)
+        finally:
+            if old.poll() is None:
+                old.kill()
+                old.wait()
+
+    def test_stop_of_a_replaced_proxy_leaves_the_new_socket(self, sock_path):
+        from pm_core.push_proxy import proxy_is_alive
+
+        old = PushProxy(sock_path, "/w", "branch")
+        old.start()
+        new = PushProxy(sock_path, "/w", "branch")
+        new.start()
+        try:
+            assert not old.owns_socket()
+            old.stop()
+            assert proxy_is_alive(sock_path)
+        finally:
+            new.stop()
+        assert not os.path.exists(sock_path)
 
     @patch("subprocess.run")
     def test_socket_is_world_writable(self, mock_run, sock_path):
@@ -381,6 +458,97 @@ class TestSharedProxy:
             # Stopping c2 should stop the proxy
             stop_push_proxy("c2")
             assert get_proxy_socket_path("c2") is None
+
+    def test_concurrent_starts_spawn_one_proxy_and_keep_both_refs(self):
+        """Two containers of one PR created at once (QA scenarios launch in
+        parallel threads) share one proxy subprocess and both stay
+        referenced, so removing one does not stop the other's proxy."""
+        import threading
+        import time
+        spawned = []
+
+        def slow_start(sock_path, workdir, branch):
+            spawned.append(sock_path)
+            time.sleep(0.3)  # the real spawn waits for the socket
+            os.makedirs(os.path.dirname(sock_path), exist_ok=True)
+            Path(sock_path).touch()
+
+        sock_dir = "/tmp/pm-push-proxy-repo-race-pr-race"
+        if os.path.exists(os.path.join(sock_dir, "push.sock")):
+            os.unlink(os.path.join(sock_dir, "push.sock"))
+        barrier = threading.Barrier(2)
+
+        def start(name):
+            barrier.wait()
+            start_push_proxy(name, "/w", "pm/pr-race",
+                             session_tag="repo-race", pr_id="pr-race")
+
+        with patch("pm_core.push_proxy._start_proxy_subprocess",
+                   side_effect=slow_start), \
+             patch("pm_core.push_proxy.proxy_is_alive",
+                   side_effect=os.path.exists):
+            threads = [threading.Thread(target=start, args=(n,))
+                       for n in ("c1", "c2")]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
+            try:
+                assert len(spawned) == 1
+                stop_push_proxy("c1")
+                assert get_proxy_socket_path("c2") is not None
+            finally:
+                stop_push_proxy("c1")
+                stop_push_proxy("c2")
+            assert get_proxy_socket_path("c2") is None
+
+    def test_start_during_last_stop_spawns_a_new_proxy(self):
+        """The last container's stop is removing the shared proxy while a
+        new container of the PR starts: the start must not reuse the proxy
+        being killed (it would be left without one), but spawn a new one."""
+        import threading
+        spawned = []
+        killing = threading.Event()
+        release = threading.Event()
+        from pm_core import push_proxy as push_proxy_mod
+        real_kill = push_proxy_mod._kill_proxy_socket
+
+        def fake_start(sock_path, workdir, branch):
+            spawned.append(sock_path)
+            os.makedirs(os.path.dirname(sock_path), exist_ok=True)
+            Path(sock_path).touch()
+
+        def slow_kill(sock_path):
+            killing.set()
+            release.wait(5)
+            real_kill(sock_path)
+
+        with patch("pm_core.push_proxy._start_proxy_subprocess",
+                   side_effect=fake_start), \
+             patch("pm_core.push_proxy.proxy_is_alive",
+                   side_effect=os.path.exists), \
+             patch("pm_core.push_proxy._kill_proxy_socket",
+                   side_effect=slow_kill):
+            sock = start_push_proxy("c1", "/w", "pm/pr-stop",
+                                    session_tag="repo-stop", pr_id="pr-stop")
+            stopper = threading.Thread(target=stop_push_proxy, args=("c1",))
+            stopper.start()
+            assert killing.wait(5)
+            starter = threading.Thread(
+                target=start_push_proxy,
+                args=("c2", "/w", "pm/pr-stop"),
+                kwargs={"session_tag": "repo-stop", "pr_id": "pr-stop"})
+            starter.start()
+            starter.join(0.3)
+            release.set()
+            stopper.join(5)
+            starter.join(5)
+            try:
+                assert len(spawned) == 2
+                assert os.path.exists(sock)
+            finally:
+                stop_push_proxy("c2")
+        assert not os.path.exists(sock)
 
     def test_shared_proxy_deterministic_path(self):
         """Shared proxy socket is at a deterministic path."""

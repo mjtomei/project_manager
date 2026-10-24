@@ -23,14 +23,35 @@ def _tmux_cmd(*args: str, socket_path: str | None = None) -> list[str]:
     return cmd
 
 
+class TmuxCommandError(subprocess.CalledProcessError):
+    """A failed tmux command whose message ends with tmux's own stderr
+    (e.g. "no space for new pane"), so a logged traceback says why."""
+
+    def __str__(self) -> str:
+        err = self.stderr
+        if isinstance(err, bytes):
+            err = err.decode(errors="replace")
+        err = (err or "").strip() if isinstance(err, str) else ""
+        base = super().__str__()
+        return f"{base} tmux: {err}" if err else base
+
+
 def _run(*args, **kwargs) -> subprocess.CompletedProcess:
     """Run subprocess.run with capture_output=True by default.
 
     Suppresses tmux's stderr (e.g. "can't find pane: %5") from leaking
-    into the TUI terminal when targeting stale pane IDs.
+    into the TUI terminal when targeting stale pane IDs.  With
+    ``check=True`` a failure raises :class:`TmuxCommandError` (a
+    ``CalledProcessError``) that names that stderr.
     """
     kwargs.setdefault("capture_output", True)
-    return subprocess.run(*args, **kwargs)
+    try:
+        return subprocess.run(*args, **kwargs)
+    except subprocess.CalledProcessError as e:
+        if isinstance(e, TmuxCommandError):
+            raise
+        raise TmuxCommandError(e.returncode, e.cmd, e.output,
+                               e.stderr) from None
 
 
 def has_tmux() -> bool:
@@ -170,10 +191,26 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     active window (useful for background operations like the review loop).
     """
     target = f"{session}:"
-    _run(
-        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
-        check=True,
+    result = _run(
+        _tmux_cmd("new-window", "-d", "-P", "-F",
+                  "#{pane_id} #{window_id} #{window_index}",
+                  "-t", target, "-n", name, "-c", cwd, cmd),
+        check=True, text=True,
     )
+    # Use the pane tmux reports for the window it just made: a lookup by
+    # name finds an older window of the same name first (e.g. a QA
+    # scenario window that its refiner pane keeps alive after the worker
+    # pane died) and would return that window's first pane instead.
+    out = result.stdout.split() if isinstance(result.stdout, str) else []
+    if len(out) == 3 and out[0].startswith("%"):
+        pane_id, win_id, win_index = out
+        _log.info("new_window_get_pane: session=%s name=%s id=%s index=%s "
+                  "pane=%s switch=%s", session, name, win_id, win_index,
+                  pane_id, switch)
+        if switch:
+            current = current_or_base_session(session)
+            _run(_tmux_cmd("select-window", "-t", f"{current}:{win_index}"))
+        return pane_id
     win = find_window_by_name(session, name)
     _log.info("new_window_get_pane: session=%s name=%s id=%s index=%s switch=%s",
               session, name,
@@ -614,6 +651,16 @@ def pane_start_command(pane_id: str) -> str:
     result = _run(_tmux_cmd("display-message", "-p", "-t", pane_id,
                             "#{pane_start_command}"), text=True)
     return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def live_pane_start_commands(session: str) -> list[str]:
+    """Start commands of the live (not dead) panes in *session*'s windows."""
+    result = _run(_tmux_cmd("list-panes", "-s", "-t", session, "-F",
+                            "#{pane_dead} #{pane_start_command}"), text=True)
+    if result.returncode != 0:
+        return []
+    return [line[2:] for line in result.stdout.splitlines()
+            if line.startswith("0 ")]
 
 
 def capture_pane(pane_id: str, full_scrollback: bool = False) -> str:

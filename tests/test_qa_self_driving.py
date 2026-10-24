@@ -74,6 +74,39 @@ class TestZZTStart:
         mock_bg.assert_called_once()
         assert "pr-001" in app._qa_loops
 
+    def test_moves_an_in_review_pr_to_qa(self, tmp_path):
+        """S47: the first pass, like start_qa and every later pass, puts an
+        in_review PR in qa; the resume scan drops runs of PRs not in qa, so
+        a TUI restart lost the run (mid-run or finished)."""
+        from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
+
+        app = _make_app(tmp_path, pr_status="in_review")
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background") as mock_bg, \
+             patch("pm_core.tui.qa_loop_ui._get_qa_pass_count", return_value=3):
+            start_or_stop_qa_loop(app, "pr-001")
+
+        assert store.get_pr(store.load(app._root), "pr-001")["status"] == "qa"
+        mock_bg.assert_called_once()
+
+    def test_unlockable_project_starts_nothing(self, tmp_path):
+        """The transition cannot be written: an Error line, no loop."""
+        from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
+
+        app = _make_app(tmp_path, pr_status="in_review")
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background") as mock_bg, \
+             patch("pm_core.tui.qa_loop_ui.store.locked_update",
+                   side_effect=store.StoreLockTimeout("held")):
+            start_or_stop_qa_loop(app, "pr-001")
+
+        mock_bg.assert_not_called()
+        assert "pr-001" not in app._qa_loops
+        assert "pr-001" not in app._self_driving_qa
+        assert any("Error: held" in str(c)
+                   for c in app.log_message.call_args_list)
+        assert store.get_pr(store.load(app._root), "pr-001")["status"] == "in_review"
+
 
 # ---------------------------------------------------------------------------
 # PASS increments pass_count; reaching required passes clears state and
@@ -104,6 +137,30 @@ class TestPassCountAndAutoMerge:
         assert app._self_driving_qa["pr-001"]["pass_count"] == 1
         mock_merge.assert_not_called()
         mock_restart.assert_called_once_with(app, "pr-001")
+
+    def test_restart_message_holds_the_log_line(self, tmp_path):
+        """The "restarting QA" line is held against start_qa's messages in
+        the same frame, so it is painted at all (S26: never shown live)."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = _make_app(tmp_path)
+        app._self_driving_qa["pr-001"] = {
+            "pass_count": 0, "required_passes": 2
+        }
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_PASS
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.qa_loop_ui.start_qa"):
+            _on_qa_complete(app, state)
+
+        restart = [c for c in app.log_message.call_args_list
+                   if "restarting QA" in c.args[0]]
+        assert len(restart) == 1
+        assert restart[0].kwargs.get("hold", 0) > 0
+        # Forced, like the other held confirmations: an unforced message is
+        # dropped outright while another PR's sticky line is showing.
+        assert restart[0].kwargs.get("force") is True
 
     def test_pass_triggers_auto_merge_when_enough(self, tmp_path):
         """Step 5: pass_count reaching required_passes triggers auto-merge."""
@@ -212,6 +269,88 @@ class TestNeedsWorkStrict:
         pr = store.get_pr(data, "pr-001")
         assert pr["status"] == "in_review"
 
+    def test_needs_work_repaints_tree_with_reloaded_status(self, tmp_path):
+        """The tree is repainted from the reloaded in_review data at once,
+        not left showing qa until the 300 s background sync (S26)."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = _make_app(tmp_path, auto_start=False)
+        seen = []
+        app._update_display.side_effect = lambda: seen.append(
+            store.get_pr(app._data, "pr-001")["status"])
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.auto_start.is_enabled", return_value=False):
+            _on_qa_complete(app, state)
+
+        assert seen == ["in_review"]
+
+    def test_needs_work_survives_plans_that_do_not_validate(self, tmp_path):
+        """A merge or pull can leave plans that do not validate while QA
+        runs; the completion reload keeps the previous data instead of
+        raising PlanValidationError out of the poll timer, which would kill
+        the TUI and every QA loop it drives (S44 class)."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = _make_app(tmp_path, auto_start=False)
+        data = store.load(app._root)
+        data["plans"] = [{"id": "plan-child", "name": "c",
+                          "parent": "plan-base"}]
+        store.save(data, app._root)
+        before = app._data
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.auto_start.is_enabled", return_value=False):
+            _on_qa_complete(app, state)
+
+        assert app._data is before
+
+    def test_needs_work_survives_a_missing_project_file(self, tmp_path):
+        """A checkout can have project.yaml unlinked while a run finishes,
+        and the TUI keeps its root meanwhile (S44); the completion reload
+        keeps the previous data instead of raising FileNotFoundError out of
+        the poll timer."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = _make_app(tmp_path, auto_start=False)
+        (app._root / "project.yaml").unlink()
+        before = app._data
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.auto_start.is_enabled", return_value=False):
+            _on_qa_complete(app, state)
+
+        assert app._data is before
+
+    def test_needs_work_message_holds_the_log_line(self, tmp_path):
+        """The NEEDS_WORK line is held and forced against the self-driving
+        review loop's sticky "Review loop started" in the same frame, so it
+        is painted at all (S28: never shown live after a zz t NEEDS_WORK)."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = _make_app(tmp_path)
+        app._self_driving_qa["pr-001"] = {
+            "pass_count": 1, "required_passes": 2
+        }
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_NEEDS_WORK
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+             patch("pm_core.tui.qa_loop_ui._start_self_driving_review"):
+            _on_qa_complete(app, state)
+
+        nw = [c for c in app.log_message.call_args_list
+              if "returning to review" in c.args[0]]
+        assert len(nw) == 1
+        assert nw[0].kwargs.get("hold", 0) > 0
+        assert nw[0].kwargs.get("force") is True
+
     def test_needs_work_starts_review_loop_directly(self, tmp_path):
         """Step 7: NEEDS_WORK starts review loop via _start_self_driving_review."""
         from pm_core.tui.qa_loop_ui import _on_qa_complete
@@ -254,7 +393,8 @@ class TestReviewToQAAutoRestart:
         data = store.load(app._root)
         pr = store.get_pr(data, "pr-001")
         assert pr["status"] == "qa"
-        mock_start.assert_called_once_with(app, "pr-001")
+        mock_start.assert_called_once_with(
+            app, "pr-001", lock_timeout=0.0)  # store.NO_WAIT: retried per tick (RQ38)
 
     def test_self_driving_bypasses_auto_start_off(self, tmp_path):
         """Step 8: Self-driving QA restarts even with auto-start disabled."""
@@ -703,7 +843,9 @@ class TestEdgeCases:
              patch("pm_core.tui.review_loop_ui._maybe_auto_merge") as mock_merge:
             _trigger_signoff(app, "pr-001")
 
-        mock_so.assert_called_once_with(app, "pr-001")
+        # A completion follow-up, retried per tick: never waits (RQ38).
+        mock_so.assert_called_once_with(app, "pr-001",
+                                        lock_timeout=store.NO_WAIT)
         mock_merge.assert_not_called()
 
     def test_manual_zz_t_pass_does_not_trigger_merge(self, tmp_path):
@@ -744,3 +886,83 @@ class TestEdgeCases:
         new_state = app._qa_loops["pr-001"]
         assert new_state is not stale
         assert "pr-001" in app._self_driving_qa
+
+
+# ---------------------------------------------------------------------------
+# A started QA run must have the poll timer that processes its completion
+# ---------------------------------------------------------------------------
+
+class TestQAPollTimer:
+    """Only the shared poll timer (poll_qa_state) handles a finished QA run.
+    The TUI otherwise starts it only when an active PR already has a
+    workdir, so a PR's first QA run (no workdir yet) waited for the next
+    300 s background sync before "QA PASS ... press i" (S24 story 1)."""
+
+    def _app(self, tmp_path):
+        app = _make_app(tmp_path, pr_status="in_review", auto_start=False)
+        app._review_loop_timer = None
+        return app
+
+    def test_start_qa_starts_poll_timer(self, tmp_path):
+        from pm_core.tui.qa_loop_ui import start_qa
+
+        app = self._app(tmp_path)
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background"):
+            start_qa(app, "pr-001")
+
+        app.set_interval.assert_called_once()
+        assert app._review_loop_timer is app.set_interval.return_value
+
+    def test_zz_t_starts_poll_timer(self, tmp_path):
+        from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
+
+        app = self._app(tmp_path)
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background"), \
+             patch("pm_core.tui.qa_loop_ui._get_qa_pass_count", return_value=1):
+            start_or_stop_qa_loop(app, "pr-001")
+
+        app.set_interval.assert_called_once()
+
+    def test_running_timer_is_not_restarted(self, tmp_path):
+        from pm_core.tui.qa_loop_ui import start_qa
+
+        app = self._app(tmp_path)
+        timer = app._review_loop_timer = MagicMock()
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background"):
+            start_qa(app, "pr-001")
+
+        app.set_interval.assert_not_called()
+        assert app._review_loop_timer is timer
+
+    def test_timer_outlives_running_until_completion_is_processed(self, tmp_path):
+        # poll_qa_state processes a finished run over two ticks; stopping
+        # the timer on the first (running already False) skipped the
+        # runtime_state verdict record and the _qa_loops removal.
+        from pm_core.tui.review_loop_ui import _poll_loop_state_inner
+
+        app = self._app(tmp_path)
+        app._data["prs"][0]["workdir"] = None  # no active PR keeps the timer
+        app._impl_poll_counter = 0
+        app._watcher_manager.is_any_running.return_value = False
+        timer = app._review_loop_timer = MagicMock()
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_PASS
+        app._qa_loops["pr-001"] = state
+
+        with patch("pm_core.tui.qa_loop_ui._on_qa_complete"), \
+             patch("pm_core.tui.qa_loop_ui._resume_incomplete_qa"), \
+             patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
+             patch("pm_core.tui.review_loop_ui._refresh_tech_tree"), \
+             patch("pm_core.runtime_state.set_action_state") as set_state:
+            _poll_loop_state_inner(app)
+            assert app._review_loop_timer is timer
+            timer.stop.assert_not_called()
+
+            _poll_loop_state_inner(app)
+            assert "pr-001" not in app._qa_loops
+            set_state.assert_called_once_with("pr-001", "qa", "done",
+                                              verdict=VERDICT_PASS)
+
+            _poll_loop_state_inner(app)
+        timer.stop.assert_called_once()
+        assert app._review_loop_timer is None

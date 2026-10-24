@@ -429,6 +429,40 @@ class TestNewWindowGetPane:
         result = new_window_get_pane("sess", "review", "bash", "/tmp")
         assert result is None
 
+    def test_returns_the_new_pane_when_the_name_is_taken(self, monkeypatch):
+        """A window of the same name already exists (a QA scenario window
+        that its refiner keeps alive after the worker pane died): the
+        pane returned is the new window's, not the old window's first
+        pane.  Real tmux on a private socket."""
+        import shutil
+        import subprocess
+        import tempfile
+        if not shutil.which("tmux"):
+            import pytest
+            pytest.skip("tmux not installed")
+        d = tempfile.mkdtemp(prefix="pmtmux", dir="/tmp")
+        sock = os.path.join(d, "s")
+        monkeypatch.setenv("PM_TMUX_SOCKET", sock)
+        t = ["tmux", "-S", sock]
+        try:
+            subprocess.run(t + ["new-session", "-d", "-s", "sess", "-n", "main",
+                                "sleep 60"], check=True)
+            old = subprocess.run(
+                t + ["new-window", "-d", "-P", "-F", "#{pane_id}", "-t",
+                     "sess:", "-n", "qa-s1", "sleep 60"],
+                check=True, capture_output=True, text=True).stdout.strip()
+            new = new_window_get_pane("sess", "qa-s1", "sleep 60", d,
+                                      switch=False)
+            panes = subprocess.run(
+                t + ["list-panes", "-s", "-t", "sess", "-F",
+                     "#{window_name} #{pane_id}"],
+                check=True, capture_output=True, text=True).stdout.split("\n")
+            assert new and new != old
+            assert f"qa-s1 {new}" in panes and f"qa-s1 {old}" in panes
+        finally:
+            subprocess.run(t + ["kill-server"], capture_output=True)
+            shutil.rmtree(d, ignore_errors=True)
+
     @patch("pm_core.tmux.get_pane_indices", return_value=[("%5", 0)])
     @patch("pm_core.tmux.current_or_base_session", return_value="sess")
     @patch("pm_core.tmux.find_window_by_name", return_value={"id": "@1", "index": "1", "name": "review"})

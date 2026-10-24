@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-089af69
+  active_pr: pr-2a44020
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -2437,9 +2437,33 @@ prs:
   started_at: '2026-03-01T17:48:54.305206+00:00'
   reviewed_at: '2026-03-02T00:28:30.910840+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-512dbfa
+    text: 'Concrete QA instance of the pane-index-0 assumption: pr-592e4bd QA S15
+      found flag follow-ups and route nudges typed into the refiner (pane 0 of qa-<pr>-sN).
+      Fresh runs fixed in 32961096 (pr-592e4bd); the old-snapshot resume path remains,
+      filed as pr-d1d0139.'
+    created_at: '2026-10-23T05:12:00Z'
+    last_edited: '2026-10-23T05:12:00Z'
+  - id: note-18c906b
+    text: 'S29 repro (pr-592e4bd QA, 2026-10-23, head 1d51bcef; evidence /pm-captures/scenarios/29/story2-attempt1-given-not-met
+      + story2/dead-review-pane-evidence). A review loop waiting on INPUT_REQUIRED
+      never ends when its Claude pane exits. review_loop._wait_for_follow_up_verdict
+      calls loop_shared.wait_for_follow_up_verdict without pane_id, so the liveness
+      check is find_claude_pane(session, window) = panes[0][0]. After the Claude pane
+      dies, that is the review diff pane, which stays alive. Live repro: fake review
+      pane %136 ended by Ctrl+C at 14:00:46. The loop kept waiting (TUI box ⏸1) and
+      never logged "pane gone during follow-up wait" or KILLED "Review pane disappeared
+      during INPUT_REQUIRED wait"; the fake only stands in for a Claude process that
+      exits (/exit, double Ctrl+C). The native stop (z d) still works. A candidate
+      fix (record the polled pane on ReviewLoopState in _run_claude_review/_adopt_in_flight_review
+      and pass pane_id=) plus a real-tmux regression is in dead-review-pane-evidence/review_pane_id.patch:
+      2 tests pass, and fail with either mutation. Not committed on #249 by request;
+      it belongs to this PR scope item 2.'
+    created_at: '2026-10-23T14:11:43Z'
+    last_edited: '2026-10-23T14:11:43Z'
   created_at: '2026-03-01T17:48:54.305206+00:00'
-  updated_at: '2026-03-23T13:13:26.308098+00:00'
+  updated_at: '2026-10-23T14:11:43.647718+00:00'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-89296d3-harden-window-management-against-une-ab512a43
 - id: pr-eee190a
   plan: null
@@ -11830,7 +11854,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-22T14:17:54.192707+00:00'
+  updated_at: '2026-10-23T19:59:21.119473+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -11866,6 +11890,33 @@ prs:
       WIP; preserve its work and finish integrations/tests.'
     created_at: '2026-10-22T15:34:41Z'
     last_edited: '2026-10-22T15:34:41Z'
+  - id: note-ed3de18
+    text: 'Fresh repro of the -sN suffix collision (pr-592e4bd QA S10, 2026-10-22;
+      was filed as pr-f4db036, closed as a duplicate of this PR): container.py cleanup_orphaned_qa_containers
+      (run at QA start, qa_loop.py ~4046) keeps a container when ANY qa-* window ends
+      with its -sN suffix. Two PRs A=pr-89fb8fc / B=pr-569831e in container mode both
+      ran scenarios s3/s4; z t on A at 22:35:24 while B still had qa-pr-569831e-s3/-s4
+      windows left A''s old pm-proj-add15215-qa-pr-89fb8fc-37bf502b0dd5cf70-s3/-s4
+      Up (never removed, still Up 10+ min after A''s new run completed), while B''s
+      own z t at 22:35:26 removed its old s3/s4. Fix idea: match the window name for
+      this PR (qa-<display_id>-s<N>), not any qa-* window with that suffix. Evidence:
+      /pm-captures/scenarios/10/story2 (app.log 22:35:24-27, before.txt/qa-ids-before.txt).'
+    created_at: '2026-10-22T23:00:47Z'
+    last_edited: '2026-10-22T23:00:47Z'
+  - id: note-ec6e744
+    text: 'Repro from pr-592e4bd QA S12 (post-fix/story4): z t on pr C left the stopped
+      run containers …-<loop>-s3/-s4 running because another PR (B) still had windows
+      qa-<B>-s3/-s4; the -sN suffix match in cleanup_orphaned_qa_containers kept them.'
+    created_at: '2026-10-23T01:40:54Z'
+    last_edited: '2026-10-23T01:40:54Z'
+  - id: note-20b801e
+    text: 'Related evidence 2026-10-23 (pr-592e4bd QA S36): idle panes of finished
+      QA runs (about 60 `podman exec -it` clients at 17-25 threads each) plus unreaped
+      zombies pushed a pm-created QA container to its 2048 PID cap. The zombie and
+      PID 1 part is pr-2111fa0 (note added there). The retention part (finished-run
+      windows/containers kept) is this PR. Evidence: /pm-captures/scenarios/36/post-fix/infra-failure/.'
+    created_at: '2026-10-23T19:59:21Z'
+    last_edited: '2026-10-23T19:59:21Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -14465,11 +14516,37 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-05-04T11:58:45.935220+00:00'
+  updated_at: '2026-10-23T06:53:57.654048+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-ee59da7
+    text: 'S11 observation (pr-592e4bd QA, 2026-10-23): after z t, the new QA loop
+      reused the live shared push proxy started by the superseded loop, whose argv
+      repo is the old loop clone (workdirs/qa/<pr>-<oldloop>/s-1/repo). Pushes/fetches
+      from the new loops containers go through a clone of a finished run; if that
+      workdir is cleaned, the proxy points at a deleted repo. Same root cause as the
+      (session_tag, pr_id) key.'
+    created_at: '2026-10-23T01:53:52Z'
+    last_edited: '2026-10-23T01:53:52Z'
+  - id: note-6b474ce
+    text: 'pr-592e4bd QA S18 (2026-10-23, live, container mode, /pm-captures/scenarios/18/story34):
+      `pm pr start A` (separate process) reused the QA-owned shared proxy (Reusing
+      live shared push proxy ... container pm-<tag>-impl-A). After A QA completed,
+      `z t` swept the old QA containers in the TUI process, dropped that process last
+      refs, and the TUI removed the socket and rmdir-ed /tmp/pm-push-proxy-<tag>-A.
+      The old daemon exited ("Push proxy stopped"), and the new run spawned a new
+      daemon in a recreated dir. The impl container bind-mounts the old (deleted)
+      dir at /run/pm-push-proxy, so its git push failed with "git-proxy: cannot connect:
+      [Errno 2] No such file or directory" from 06:51:24 onward and STAYED failing
+      after the new daemon came up at 06:51:37 (32/32 failures, ls /run/pm-push-proxy
+      empty in the container). A fix must keep the socket dir (or count refs across
+      processes); restarting the daemon alone does not heal impl containers. Proxy
+      pushes use the requesting container HOST_WORKDIR (impl push ran git -C <impl
+      workdir>), so the wrong-workdir part of this bug did not reproduce here.'
+    created_at: '2026-10-23T06:53:57Z'
+    last_edited: '2026-10-23T06:53:57Z'
 - id: pr-48cb564
   plan: improvements
   title: 'Picker popup: indicate per-session window-selected state with ● vs ○'
@@ -22321,7 +22398,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-13T03:40:41.462348+00:00'
+  updated_at: '2026-10-24T00:14:43.598248+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22341,6 +22418,26 @@ prs:
       in session project_manager-c5a1006b.'
     created_at: '2026-10-13T03:40:41Z'
     last_edited: '2026-10-13T03:40:41Z'
+  - id: note-5b15e1d
+    text: 'Repro 2 on #249 (pr-592e4bd), 2026-10-23: the native review-loop a183 launch
+      failed with E2BIG. The prompt was 131310 bytes (PR notes ~57 KB + impl spec
+      49 KB). Production builders: review 131175, sign-off 144144, QA planner 134900.
+      Docs workaround f4108fbf archived spec history verbatim, with PR notes unchanged.
+      Host measurement after it: review 103592, sign-off 117479, planner 116120. Still
+      unbounded: PR notes and spec are inlined whole. Evidence /pm-captures/review-a183-i1
+      (measure_prompts.py, sizes-*.txt).'
+    created_at: '2026-10-23T18:33:51Z'
+    last_edited: '2026-10-23T18:33:51Z'
+  - id: note-62c9b82
+    text: 'Evidence from pr-592e4bd review 5e15 i1 (head 59d15fea, production builders,
+      host-only notes merged; /pm-captures/review-5e15-i1/sizes-before.txt): the review
+      prompt is over MAX_ARG_STRLEN (131101 B measured, 131236 B actual), and so are
+      sign-off (144070 B) and the QA planner (143767 B). The next sign-off launch
+      will hit E2BIG too. PR notes are ~83.5 KB of each prompt (101 notes), so archiving
+      the spec cannot bring sign-off or the planner under the limit. A notes bound
+      is needed.'
+    created_at: '2026-10-24T00:14:43Z'
+    last_edited: '2026-10-24T00:14:43Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
@@ -29398,7 +29495,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T18:57:33.967457+00:00'
-  updated_at: '2026-10-13T22:18:20.648960+00:00'
+  updated_at: '2026-10-24T06:09:32.589046+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29411,6 +29508,44 @@ prs:
       This time no QA PASS PR note was persisted. Captures pr-b53bfe2/scenarios/10/W3-interrupted-QA/pm-log-stale-run.txt.'
     created_at: '2026-10-13T22:18:20Z'
     last_edited: '2026-10-13T22:18:20Z'
+  - id: note-935e8a3
+    text: 'More evidence 2026-10-22 (pr-592e4bd QA S8, b6cec11a, local backend; captures
+      /pm-captures/scenarios/8, see story3/debug-log-excerpt.log + snapshots.log).
+      (1) Stop during the work-route wait: zz t at 22:18:03.9 while scenarios 3/4
+      waited (router down). The stopping loop still logged "Running 2 scenario(s)...",
+      launched a qa-finalize pane (fake-claude FINALIZE_DONE pid 3975 stayed alive
+      in the qa-<pr> window), then "QA finalize: pane vanished or stop_check fired"
+      and "QA complete: INPUT_REQUIRED (finalize=None)". The 0b1edfca unverdicted
+      state still held. (2) A z t superseding a waiting run did the same (orphan finalize
+      pane pid 9589 seen in story8 snapshots). (3) Production, operator report: in
+      the real parent PM session at 18:56Z 2026-10-22, native QA stop was sent for
+      #236 #237 #243 #244 #239 #234 (pause every QA except #249). Finalizer turns
+      started anyway and had to be interrupted separately after the scenario workers
+      were paused. Pre-stop snapshots are on the host at /home/matt/.local/state/pm-pr-shepherd/qa-pause-20261022T185639Z;
+      recorded in checkpoint.qa_pause.native_stop_side_effect. The fix should skip
+      _run_qa_finalize_pane (and the "Running N scenario(s)" phase) when state.stop_requested.
+      Related: pr-4296808, pr-31413e8 (superseded-run reporting).'
+    created_at: '2026-10-22T22:50:53Z'
+    last_edited: '2026-10-22T22:50:53Z'
+  - id: note-5655e2e
+    text: 'pr-592e4bd QA S12 (1b6e2c68): the stopped loop after z t ran the work-route
+      relaunch gate on its killed windows (podman exec into the container being removed)
+      and surfaced "Scenario N worker relaunch deferred — in-container forwarder failed"
+      on the TUI, or logged "window died — retry 1/10" and slept the backoff; the
+      dead-window branch now breaks on stop_requested before the gate. ea78b9d1: z
+      t also drops the superseded run snapshot (no later Recovered/QA note for it).
+      The stopped run still announces "QA complete: INPUT_REQUIRED — …: ?" as a progress
+      line.'
+    created_at: '2026-10-23T01:40:53Z'
+    last_edited: '2026-10-23T01:40:53Z'
+  - id: note-5286839
+    text: 'pr-592e4bd (once merged) also covers the finalizer part: 2ff602fc skips
+      _run_qa_finalize_pane when the run is stopped or superseded (S22/S25 live),
+      with 1b6e2c68 (no route gate/relaunch for dead windows on stop) and ea78b9d1.
+      Still open after merge: zz t during the finalizer poll ends PASS (finalize=None)
+      (pr-592e4bd impl.md item 21). Re-check the repros after merge.'
+    created_at: '2026-10-24T06:09:32Z'
+    last_edited: '2026-10-24T06:09:32Z'
 - id: pr-c9e69fb
   plan: bugs
   title: 'Bug: shell `pm pr start` impl panes are never trust-watched (no --session-id
@@ -29495,11 +29630,29 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T14:08:28.137551+00:00'
-  updated_at: '2026-10-14T14:08:28.137551+00:00'
+  updated_at: '2026-10-23T19:59:20.239905+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-76c738e
+    text: 'Fresh repro 2026-10-23 (pr-592e4bd QA S36, container-mode two-PR routed
+      QA with nested rootless podman; NOT test-script process substitution this time):
+      the pm-created QA scenario container (PID 1 = sleep infinity) reached pids.current
+      2018/2048 with 210 zombies (203 parented to PID 1: 130 conmon, 49 fuse-overlayfs,
+      23 podman, 14 claude) left by nested podman exec/run children, plus about 1000
+      live threads from 60 idle `podman exec -it` pane clients of finished QA runs
+      (pr-1139060 retention). pids.events max=42. Consequence: a fork in the nested
+      TUI poll timer (tmux pane_exists) got EAGAIN, and _poll_loop_state re-raises
+      every BaseException, so the whole TUI exited and every running QA loop thread
+      with it (a PASS that was already emitted was never collected). Evidence: /pm-captures/scenarios/36/post-fix/infra-failure/
+      (pids-at-diagnosis.txt, zombies.txt, process-table.txt, tui-death-traceback.log).
+      Recovery used: close completed S36 fixture windows/containers only (pids 1934
+      -> 1170); zombies stay until the container restarts. Suggest the fix also covers
+      podman-in-container children (podman run --init or a real subreaper) and that
+      a transient fork failure in the TUI poll timer is logged, not fatal.'
+    created_at: '2026-10-23T19:59:20Z'
+    last_edited: '2026-10-23T19:59:20Z'
 - id: pr-0c3659d
   plan: bugs
   title: 'Bug: pm set list shows qa-verify-pass "off" when unset (effective default
@@ -29639,11 +29792,35 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T15:49:43.888654+00:00'
-  updated_at: '2026-10-22T17:19:43.945696+00:00'
+  updated_at: '2026-10-23T05:11:59.250470+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-203b0c1
+    text: 'From pr-592e4bd QA S14 (2026-10-23, container mode, captures /pm-captures/scenarios/14/final-resume/s13-queued-launch/README.md):
+      kill -9 TUI restart 10 s into a DEQUEUED launch (s13 refiner fcc4a2fe running,
+      loop thread blocked in the synchronous _launch_next_queued) resumes from the
+      previous tick snapshot: s13 still queued, verified_scenarios [] although s11/s12
+      were verified. Effects: (1) s11/s12 re-verified; reused dead verifier panes
+      -> "Verification thread crashed" -> FLAGGED -> extra worker turn (self-recovers);
+      (2) s13 dequeued again: reclone s-13/repo, "Reusing existing container" whose
+      /workspace bind mount now points at the deleted pre-reclone dir (empty, getcwd
+      fails), new_window_get_pane returns the OLD same-named window/pane %84 (old
+      finished refiner), loop polls for new session 57b4a303 whose transcript never
+      appears -> run stuck. Same structure on master (not a pr-592e4bd regression).
+      Fix should persist the dequeue/refiner phase before the blocking launch (or
+      write the snapshot from inside it), and on relaunch kill the stale window/container
+      instead of reusing them.'
+    created_at: '2026-10-23T03:12:32Z'
+    last_edited: '2026-10-23T03:12:32Z'
+  - id: note-4e9c20f
+    text: 'Related resume case filed as pr-d1d0139 (pr-592e4bd QA S15): a qa_resume.json
+      written by pre-32961096 pm holds pane_id null for a dead worker; resuming it
+      takes the window first pane (live refiner) as the worker and sends it the route
+      nudge. Not startup ownership, but the same refiner-vs-worker identity on resume.'
+    created_at: '2026-10-23T05:11:59Z'
+    last_edited: '2026-10-23T05:11:59Z'
 - id: pr-62fdd54
   plan: bugs
   title: 'Bug: synchronize the PR branch before QA planning and recover stale handoffs'
@@ -31305,11 +31482,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-22T17:19:44.677099+00:00'
+  updated_at: '2026-10-22T19:28:01.060108+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-8a985a7
+    text: 'From pr-592e4bd review (2026-10-22): route-gate waits in queued launches
+      are now nonblocking there (defer/requeue + per-tick queue retry). Remaining,
+      not route-specific: _launch_next_queued still runs the queued scenario refiner
+      synchronously (_concretize_scenario/poll_for_verdict) inside _poll_tmux_verdicts,
+      so a long or stalled queued refiner (incl. a routed refiner held by _RouteStallWatch
+      during a mid-run route outage) blocks verdict collection, retries, verification
+      and stop for its duration. Cover this with the nonblocking retry/launch work.'
+    created_at: '2026-10-22T19:28:01Z'
+    last_edited: '2026-10-22T19:28:01Z'
 - id: pr-a80bde5
   plan: bugs
   title: 'Bug: review INPUT_REQUIRED stays visible after recovery while later iterations
@@ -31441,7 +31628,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T17:46:12.660339+00:00'
+  updated_at: '2026-10-24T08:44:05.860497+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31457,3 +31644,2142 @@ prs:
       preserving manual merge/spec gates.'
     created_at: '2026-10-22T17:46:12Z'
     last_edited: '2026-10-22T17:46:12Z'
+  - id: note-52f983d
+    text: 'Impl state 2026-10-22: router provider type + worker_route preflight/bridge
+      + qa_interactive for s0; refiner (qa_concretize) and worker (qa_scenario) routed
+      via provider:<route>, gated at initial/queued/retry launch and idle-stall (no
+      verdict, no fallback). Bridge fixes from supervisor: stream has no timeout after
+      connect; bridge runs as python3 -I <file> (shadow pm_core in cwd). tests/test_worker_route.py.
+      Sandbox e2e (fake router, real claude, nested podman slirp4netns) PASS. Pending:
+      supervisor host container smoke on latest commit, then pm model set qa_concretize/qa_scenario
+      provider:claude-work --effort high --project after merge. Do not set launcher:
+      claude-mixed falls back to main when router down.'
+    created_at: '2026-10-22T18:59:19Z'
+    last_edited: '2026-10-22T18:59:19Z'
+  - id: note-30d537f
+    text: 'Live work-account validation (supervisor, isolated provider, prod config
+      unchanged): host PASS /pm-captures/host-work-route-smoke-20261022T184915Z; real
+      slirp4netns container PASS from main checkout on dbf8878b /pm-captures/host-work-route-smoke-20261022T185245Z
+      (requested work/claude-opus-5-5, transcript, Stop hook); 12s idle-stream host
+      repro passes post-fix. Bugs + regressions (both mutation-checked): (1) bridge
+      stream timeout -> TestBridge::test_stream_survives_pause_longer_than_connect_timeout,
+      test_unix_side_has_no_stream_timeout; (2) -m shadow pm_core -> TestBridge::test_host_bridge_and_container_forwarder_end_to_end,
+      TestBuildShellCmd::test_container_cmd_ensures_bridge_first. Details in pm/specs/pr-592e4bd/impl.md
+      section 5. User paused other PR QA to prioritize #249; manual merge gate stays.'
+    created_at: '2026-10-22T19:03:22Z'
+    last_edited: '2026-10-22T19:03:22Z'
+  - id: note-3914bc5
+    text: 'Fixed in scope: container create passed host env vars as -e NAME=value,
+      so API keys/tokens reached the pm.container debug/error logs and raised CalledProcessError
+      text whenever a container command ran or failed. Now -e NAME with values via
+      the runtime process env (_run_runtime(env=)); real podman verified; regressions
+      test_passes_env_vars + test_failed_create_does_not_expose_env_values (mutation-checked).
+      Older pm.container log files may still hold such values and were not rewritten.'
+    created_at: '2026-10-22T19:08:00Z'
+    last_edited: '2026-10-22T19:08:00Z'
+  - id: note-4ed7792
+    text: 'Review 99cf i2: queued-launch route gate no longer blocks the verdict loop
+      (route failure after the queue check → scenario restored and requeued, refiner
+      window closed, no verdict); queue retried every poll tick so a route-deferred
+      queue launches after recovery even with no other verdict events. 3 mutation-checked
+      regressions. Residual synchronous queued-refiner blocking noted on pr-1ab9075
+      (#247).'
+    created_at: '2026-10-22T19:28:01Z'
+    last_edited: '2026-10-22T19:28:01Z'
+  - id: note-d7cae2e
+    text: 'QA planner 2026-10-22: fixed supervisor finding host-work-route-smoke-20261022T194946Z/transcript-lookup-finding.json
+      in 81cebf17 (CODE CHANGE, needs normal re-review before sign-off). Real Claude
+      mangles every non-alphanumeric cwd char to "-"; claude_launcher._claude_project_dir
+      (pre-existing on master) only mapped "/" and ".", so probe cwd /tmp/pm-route-probe-020ea4s_
+      was looked up in the wrong dir and live_probe still printed Live OK with Transcript
+      (none), because an empty transcript model list passed vacuously. Fix: Claude-matching
+      mangling in launcher + fake-claude, session-id glob fallback, and live_probe
+      now fails with "missing evidence: ..." (naming expected paths) when the transcript,
+      its model or the pm hook event is missing. 5 mutation-checked regressions in
+      tests/test_worker_route.py (TestLiveProbe, test_transcript_path_matches_claude_mangling);
+      full suite 3412 passed. The mangling fix also affects every pm transcript lookup
+      whose cwd contains "_", spaces etc. (most already tolerated via verdict_transcript
+      session-id glob). QA plan covers it (RQ3a, E9a). Supervisor: rerun host --live
+      probe on the new head.'
+    created_at: '2026-10-22T19:57:06Z'
+    last_edited: '2026-10-22T19:57:06Z'
+  - id: note-aa9f287
+    text: 'QA s3 (2026-10-22): fixed in 0b1edfca (CODE CHANGE, needs re-review) —
+      _poll_tmux_verdicts no-window INPUT_REQUIRED marking overwrote scenarios stopped
+      during the initial route wait (verdict INPUT_REQUIRED + verdict.md written);
+      now they stay unverdicted with reason "stopped while waiting for the work route",
+      overall INPUT_REQUIRED. Regression TestPollLoopRouteGating::test_stop_during_route_wait_leaves_scenario_unverdicted
+      (fails on 81cebf17). Live pre/post captures /pm-captures/scenarios/3/story3.'
+    created_at: '2026-10-22T20:33:29Z'
+    last_edited: '2026-10-22T20:33:29Z'
+  - id: note-1ffc925
+    text: 'QA s4 2026-10-22: live real-Claude run vs stub router found the _RouteStallWatch
+      resume nudge typed but never submitted (single send-keys text+Enter is taken
+      as a paste). Fixed c5d7d64f with the two follow-up Enters the verdict follow-up
+      paths use; regression test asserts [NUDGE, "", ""] (mutation-checked). CODE
+      CHANGE, needs normal re-review. Queued deferral + window-death retry deferral
+      held live. Evidence /pm-captures/scenarios/4. Note: z t runs continue scenario
+      numbering (4-6, 7-9, ...), so marker-based holds must target the real index.'
+    created_at: '2026-10-22T20:54:31Z'
+    last_edited: '2026-10-22T20:54:31Z'
+  - id: note-f7c9ff7
+    text: 'QA S5 2026-10-22: all 6 triples held on 81cebf17 (captures /pm-captures/scenarios/5).
+      Observation for supervisor: routed containers still authenticate to the router
+      with the main-account OAuth from the bind-mounted ~/.claude. If that login cannot
+      refresh, routed refiners/workers idle at "Login expired · Please run /login"
+      with no verdict and nothing surfaced (the route stall watch only checks the
+      router, which is healthy), and pm provider test --live still printed Live OK
+      in the same minute (-p run). Seen only because a nested test HOME held a copied
+      OAuth file (forked refresh token); on the real host it needs an expired main
+      login. Triple 6 spec slip: pm model set <t> sonnet applies the --effort medium
+      default, so the log shows effort=medium, not high.'
+    created_at: '2026-10-22T20:59:02Z'
+    last_edited: '2026-10-22T20:59:02Z'
+  - id: note-c0320d1
+    text: 'QA S5 follow-up to note-f7c9ff7: filed pr-3c7ce04 (pending, not started)
+      for the reproducible product behavior: the QA loop waits silently (no log, no
+      TUI notice, no verdict/timeout) when a Claude pane is idle on "Login expired
+      · Please run /login" (7 min observed, 20:37:41→20:44:31; the route stall watch
+      only rechecks the healthy router). Test-setup artifacts, NOT product bugs: (a)
+      the expired login itself came from copying ~/.claude/.credentials.json into
+      a nested test HOME, which forked the rotating refresh token, so the in-container
+      refresh was rejected and the copy wiped; (b) the "Live OK in the same minute"
+      remark in note-f7c9ff7 is withdrawn: the -p probe finished before the refresh
+      side effect, and a probe cannot predict a later refresh failure. Routed checks
+      themselves all held on 81cebf17.'
+    created_at: '2026-10-22T21:04:04Z'
+    last_edited: '2026-10-22T21:04:04Z'
+  - id: note-8681b52
+    text: 'QA S6 (2026-10-22): all 6 triples held on 81cebf17, captures /pm-captures/scenarios/6.
+      Sandbox /etc/containers/containers.conf sets netns=host, so in-container 127.0.0.1:<router
+      port> IS the host router and route_bridge ensure exits 0 -- container traffic
+      bypasses the bridge and bridge tests pass vacuously. Put [containers] netns="slirp4netns"
+      in the scratch HOME ~/.config/containers/containers.conf for container-route
+      QA. Also: overlay fs reuses socket inode numbers (check birth time, not stat
+      %i); fake-claude list shorthand for qa_scenario is rejected (use {"verdicts":[...]}).'
+    created_at: '2026-10-22T21:15:00Z'
+    last_edited: '2026-10-22T21:15:00Z'
+  - id: note-cc5706e
+    text: 'S1 concretizer (2026-10-22): route refresh cooldown (_last_refresh) is
+      per-process, so back-to-back `pm provider test` CLI runs each re-run refresh_command;
+      the "no second refresh (cooldown)" Then is only observable inside one long-lived
+      process (QA loop/TUI), not via the CLI, so it was dropped from S1. Live probe
+      in a review container needs a scratch HOME (host ~/.claude is bind-mounted rw)
+      with PM_HOST_HOME unset, pm hooks installed by `pm session`, and a dummy apiKeyHelper
+      in the scratch settings.json (probe unsets ANTHROPIC_API_KEY; otherwise "Not
+      logged in"). Host smoke /pm-captures/host-work-route-smoke-20261022T195845Z
+      source hashes match 81cebf17.'
+    created_at: '2026-10-22T20:02:41Z'
+    last_edited: '2026-10-22T20:02:41Z'
+  - id: note-42e237e
+    text: 'QA S8 (2026-10-22): all 11 triples held on b6cec11a, no code changes, captures
+      /pm-captures/scenarios/8. Covered: router-down/expired/bad-launcher/unconfigured-worker-provider
+      waits with auto-recovery; 0b1edfca stop-during-wait rechecked live (no verdict,
+      no verdict.md); refresh_command cooldown 300 s exact; two PRs released by one
+      router start. Harness gotcha: never record via an extra grouped tmux session
+      (tmux new-session -t <pm session>); pm then resolves that session, fake-claude
+      config stops applying, and killing it crashes running QA loops.'
+    created_at: '2026-10-22T22:50:38Z'
+    last_edited: '2026-10-22T22:50:38Z'
+  - id: note-f72e392
+    text: 'QA S9 2026-10-22: all route Thens held live on b6cec11a (queued deferral
+      + drain, relaunch deferral w/o retry, worker and refiner stall -> nudge SUBMITTED
+      and resumed, c5d7d64f confirmed; captures /pm-captures/scenarios/9). Fixed in
+      b97c0e3d (CODE CHANGE, needs re-review; pre-existing on master): QA status dashboard
+      dropped queued scenarios after the initial capped launch ("0/1 complete") and
+      showed still-queued ones as pending during a queued launch; both launch paths
+      now pass the full list + queued indices (_status_queued). 3 mutation-checked
+      regressions. Note: with qa-max-scenarios 1 the QA spinner is (by design) absent
+      during a queued deferral since no pane is mid-turn.'
+    created_at: '2026-10-22T23:19:21Z'
+    last_edited: '2026-10-22T23:19:21Z'
+  - id: note-8ffaafc
+    text: 'QA S10 (2026-10-22): all 7 stories held after fixes; captures /pm-captures/scenarios/10
+      (REPORT.md). CODE CHANGES needing normal re-review: dbb88ea8 push proxy spawned
+      with python -m from the project cwd imported a project-level pm_core/ and never
+      came up (now cwd=/ + own pm_core root on PYTHONPATH; real-daemon regression);
+      60574f28+aea1fb8a TUI resume took the first qa_resume.json per PR, so after
+      z t superseded a run, Ctrl+R recovered the stale run and orphaned the live one
+      (now unfinished-first then newest; a non-chosen snapshot is cleared only if
+      finished, not an in-memory loop workdir, not owned elsewhere; regressions in
+      tests/test_qa_resume.py). Filed pr-09f01da (in-container pm shim imports shadow
+      pm_core; blocks faked workers in shadow projects). -sN orphan-sweep repro noted
+      on pr-1139060 (dup pr-f4db036 closed). Story 2 recovery path: Claude own retry.
+      TUI does not name a missing-image failure (pm log only).'
+    created_at: '2026-10-22T23:34:19Z'
+    last_edited: '2026-10-22T23:34:19Z'
+  - id: note-8e03dbc
+    text: 'S12 refine (RQ19, 2026-10-23): the TUI cannot be closed with a key, because
+      quit only detaches. "TUI down" means kill -9 the pid in ~/.pm/tui-<session>.pid,
+      then `pm session </dev/null` to respawn it. `pm pr qa-run-bg` (the detached
+      driver that auto-sequence uses) deletes its own qa_resume.json when it finishes.
+      So "newer run completed while the TUI was down" only leaves a snapshot if the
+      driver dies after qa_status gets `overall`. That status is written before the
+      blocking finalizer, so S12 kills the driver during a slow fake finalizer. A
+      newer run with an empty plan has a snapshot that lives for less than a second,
+      so S12 drives that case with a live `z t`. Code reading only: the stopped older
+      run snapshot may outlive the empty-plan run snapshot, and the next TUI scan
+      might then recover it ("Recovered completed QA from disk"). Not part of S12:
+      an older orphan beside a qa-run-bg run that finished cleanly would be the only
+      snapshot left and would be revived. Only the hidden command reaches this; auto-sequence
+      does not start a run while the orphan qa window exists.'
+    created_at: '2026-10-23T00:26:59Z'
+    last_edited: '2026-10-23T00:26:59Z'
+  - id: note-1da413e
+    text: 'QA S12 (2026-10-23): resume selection + adopted routed gating live on dac9c537→ea78b9d1,
+      captures /pm-captures/scenarios/12 (REPORT.md). Held: Ctrl+R resumes A-new not
+      A-old (Dropping at restart), adoption + queued routed s5; adopted run router
+      outage → one deferral, retry 1/10 only after recovery, same container; dead
+      driver after PASS → Recovered PASS, B-old dropped (finalization was INTERRUPTED:
+      filed pr-0f85376); live qa-run-bg driver run left alone; unrouted adopted container
+      → missing-mount deferral, nothing launched. CODE CHANGES needing normal re-review:
+      1b6e2c68 stopped loop skipped route gate for dead windows (no stray "relaunch
+      deferred"/retry after z t); ea78b9d1 z t drops the superseded run qa_resume.json
+      and stopped loops no longer rewrite it — pre-fix an empty-plan z t over a mid-turn
+      run let the live scan "Recover" the old run and record a QA INPUT_REQUIRED note
+      naming the old workdir (and a restart during the new run planning would resume
+      the old run). Empty structured-less plan waits up to _PLANNER_TIMEOUT (60 min)
+      by design; closed the planner pane to reach the no-scenarios path.'
+    created_at: '2026-10-23T01:41:05Z'
+    last_edited: '2026-10-23T01:41:05Z'
+  - id: note-72fda31
+    text: 'QA S11 (2026-10-23): RQ16/17/18 held live in container mode (2 PR A deferrals
+      at the refiner and worker gates, PR B sharing bridge+podman+proxy untouched)
+      and in host mode (PR C). CODE CHANGES needing normal re-review: 7c401141 (1)
+      a repeat queued deferral with the same message after recovery was never re-surfaced
+      on the TUI (_RouteStallWatch._shown only cleared by the stall nudge; remember()
+      now clears it on a healthy status); (2) a routed worker whose turn ended on
+      "API Error: Connection dropped" was never resumed when the route recovered within
+      the ~60 s before its idle_prompt hook (healthy-route idle, reminder off -> stuck
+      forever; seen live 00:42->00:50). Now an idle turn whose latest assistant record
+      has isApiErrorMessage on a healthy route is resumed with the same nudge, once
+      per error record, max 3 per session. 6 mutation-checked regressions (test_worker_route,
+      test_verdict_transcript). Incidental c23a2021: "Reusing live shared push proxy"
+      log line wrote the NUL key separator into the pm log (grep -> binary). Captures
+      /pm-captures/scenarios/11 (REPORT.md).'
+    created_at: '2026-10-23T01:53:51Z'
+    last_edited: '2026-10-23T01:53:51Z'
+  - id: note-9c0c6fd
+    text: 'QA S13 (2026-10-23): RQ20-23 held live on 7b765217, captures /pm-captures/scenarios/13
+      (REPORT.md). Routed A resumed once at idle; unrouted B got no route nudge /
+      no "work route None"; cap 3 then reminder; relaunched worker (new session id)
+      resumed again (fresh budget); router-down stall -> deferral (no retry spent)
+      -> one retry 1/10 + one relaunch on restart, no stray "recovered — resumed".
+      CODE CHANGE needing normal re-review: 7b765217 the verdict-format reminder (pre-existing
+      single send-keys, 0d7e0758) sat unsent in Claude prompt box, so an unrouted
+      worker idle on an API error never finished; now sent with the two follow-up
+      Enters like the c5d7d64f nudge (regression test_unrouted_api_error_idle_gets_submitted_reminder).
+      Harness: Claude 2.1.309 re-sends a 400 turn as 3 variants per tool set before
+      "API Error: 400", so stub fail N=1 is absorbed; fail "always" until the pane
+      shows the error, then heal. First `t` before any commit leaves branchless PR
+      workdirs (recover with pm pr cleanup).'
+    created_at: '2026-10-23T03:37:00Z'
+    last_edited: '2026-10-23T03:37:00Z'
+  - id: note-42ae406
+    text: 'QA S14 (2026-10-23): all z t/restart/stop/push-proxy/secret Thens held
+      live (captures /pm-captures/scenarios/14, REPORT.md). The verifier flagged triple
+      3: "next scenario_start > stopped run last index" failed as written (stopped
+      18-21 launched only 18/19, next started 20). Per impl.md section 5 item 9 numbering
+      follows launched indices, so product numbering was left unchanged. QA-spec clarification
+      590a39ab (RQ23 + harness note) needs independent review. Restart inside a dequeued
+      refiner = pr-3201ea8 (note-203b0c1).'
+    created_at: '2026-10-23T03:47:27Z'
+    last_edited: '2026-10-23T03:47:27Z'
+  - id: note-99483be
+    text: 'Review 590d i2 (ff2c2474, CODE CHANGE, needs normal re-review): fixed the
+      i1 residual race and two related ones. (1) If the worker pane died between its
+      liveness check and the flagged-verification follow-up, the send error ended
+      the QA thread ("QA thread crashed", workers left unsupervised). That scenario
+      is now INPUT_REQUIRED (window gone). (2) If the verifier pane died before the
+      re-verify message, a fresh verifier now runs instead of "verification thread
+      crashed" flagging the worker. (3) A verifier pane dying during the re-verify
+      wait hung the wait forever, because the worker pane keeps the window alive.
+      wait_for_follow_up_verdict(pane_id=) fixes it. 4 mutation-checked regressions;
+      suite 3453 passed; logs /pm-captures/review-590d-i2. Filed pr-04dfffb: a verifier
+      death still counts as FLAGGED against the worker.'
+    created_at: '2026-10-23T04:08:54Z'
+    last_edited: '2026-10-23T04:08:54Z'
+  - id: note-0c67a0e
+    text: 'QA5 planner (2026-10-23): CODE CHANGE 5432f736 on top of 96a4e5a8 (prior
+      reviewed head, review 590d i3 PASS), needs independent review via the normal
+      NEEDS_WORK/finalization path. Confirmed review i3 observation: _RouteStallWatch._resume
+      announced "recovered — resumed" / "turn ended on ... — resumed" when the pane
+      was gone or the nudge send failed (nothing sent). Now it announces only after
+      the nudge is typed; otherwise it logs "pane gone — not resumed" and the dead-pane
+      relaunch takes over. Regressions test_recovered_route_does_not_claim_resume_of_a_dead_pane
+      and test_nudge_send_failure_does_not_claim_resume, both fail with the fix reverted.
+      Raw output in /pm-captures/qa5-planner-route-resume-dead-pane (env -u PM_HOST_HOME,
+      PATH=/usr/bin, markdown 3.5.2): focused rc 0, mutation rc 1, related files rc
+      0. Full suite 3455 passed, run once before the capture request in the default
+      shell. Only the summary line was kept and it was not rerun, so the reviewer
+      should rerun it under the declared env. Also spec RQ24 (110b7b0e). Possible
+      issue for S15: a flag follow-up after only the worker pane dies may land in
+      the verifier pane via find_claude_pane.'
+    created_at: '2026-10-23T04:21:14Z'
+    last_edited: '2026-10-23T04:21:14Z'
+  - id: note-5fcf8c5
+    text: 'QA5 planner clarification for S15/S16 refiners (spec e28ff299): (1) container
+      inspect Config.Env holds the -e NAME values by design (RQ15/S14). Assert no
+      secrets in generated argv, pm logs, pane output and captures; if container env
+      is inspected, record a count only, not an absence requirement. (2) In S16 (two
+      PRs, same -sN), a dead-window container that lingers, or a sweep that touches
+      the other PR''s same-sN container, is known pr-1139060 (#241): record it as
+      an observation, not a new pr-592e4bd failure. The pane-loss and recovery Thens
+      stay required.'
+    created_at: '2026-10-23T04:23:17Z'
+    last_edited: '2026-10-23T04:23:17Z'
+  - id: note-52a773c
+    text: 'S15 refine (RQ24/25 host, 2026-10-23): qa.md fifth-pass advice to drive
+      the verifier with a fake-claude qa_verification sequence does not work for re-verification.
+      A held fake exits as soon as anything is typed into its pane (checked live:
+      the fake exits rc=0 right after send-keys), so a re-verify request kills a fake
+      verifier and yields "verifier pane disappeared". S15 therefore runs the verifier
+      as real Claude on a main stub (ANTHROPIC_BASE_URL, S13 stub.py --main) that
+      answers FLAGGED/VERIFIED/slow from a control file. Also from code reading: in
+      host mode pane 0 of qa-<pr>-sN is the still-live refiner, so when only the worker
+      pane dies the flag follow-up fallback (find_claude_pane = first pane) targets
+      the refiner pane, not the verifier. S15 story 3 asserts the follow-up reaches
+      neither pane.'
+    created_at: '2026-10-23T04:26:42Z'
+    last_edited: '2026-10-23T04:26:42Z'
+  - id: note-06ec44c
+    text: 'QA S15 (2026-10-23, host/tmux, real Claude vs router+main stubs; captures
+      /pm-captures/scenarios/15, REPORT.md). Two CODE CHANGES need normal re-review:
+      (1) 32961096: a flag follow-up after only the worker pane died was typed into
+      the live refiner (pane 0) through the find_claude_pane fallback, and a dead
+      worker whose relaunch was route-deferred was then taken for the refiner and
+      never relaunched (hang). Fix: no first-pane fallback for a recorded dead pane_id,
+      and the dead id is kept. (2) 296c08a7: the relaunch re-found the old same-named
+      window by name and recorded the refiner as the worker (S16 container, and S15
+      story 4 on 32961096). Fix: new_window_get_pane returns the created pane (-P
+      -F), and the relaunch splits into the surviving scenario window. Real-tmux regressions;
+      full suite 3459 passed. Filed pr-d1d0139 (pending): resuming a pre-32961096
+      snapshot with pane_id null still sends the route nudge to the refiner. Story
+      3 Then sub-clause failed as written: the reason "window gone during PASS verification"
+      is in qa_status.json, not in the pm log (qa.md RQ24 clarified). Stories 1-2
+      ran on 50200a21, 3-5 on 32961096, 6 and the 4 rerun on 296c08a7.'
+    created_at: '2026-10-23T05:46:54Z'
+    last_edited: '2026-10-23T05:46:54Z'
+  - id: note-99d9ed8
+    text: 'QA S16 (2026-10-23): container-mode two-PR RQ24/RQ25 held live; captures
+      /pm-captures/scenarios/16 (REPORT.md). Story1 on 50200a21, story2 on 32961096,
+      story3 replayed PASS on 296c08a7 (S15 relaunch fix; snapshot pane_id = actual
+      worker, one window per scenario). Story3 attempt on 75649ae4 kept as INTERRUPTED
+      (relaunch bound surviving refiner %7, nudge went to refiner, real worker idle).
+      CODE CHANGE needing normal re-review: 75649ae4 start_push_proxy check-then-spawn
+      now under a per-key lock. Pre-fix, parallel s1/s2 container creates spawned
+      two shared proxies at one socket (orphan + refs reset to one container, so removing
+      it would stop the other container proxy); seen live in S16 stories 1-2. Regression
+      TestSharedProxy::test_concurrent_starts_spawn_one_proxy_and_keep_both_refs (fails
+      reverted); full suite 3460 passed on 296c08a7. Harness: pm logs container create
+      argv (podman run -d) only with ~/.pm/sessions/<tag>/debug; detached push proxies
+      outlive tmux, stop by exact argv.'
+    created_at: '2026-10-23T05:51:31Z'
+    last_edited: '2026-10-23T05:51:31Z'
+  - id: note-a6b28ea
+    text: 'Review b62f i1 (8a3d3412, CODE CHANGE, needs normal re-review): reviewed
+      5432f736/32961096/75649ae4/296c08a7, all sound. Fixed a residual race in the
+      75649ae4 lock: stop_push_proxy dropped the last ref and removed the socket without
+      the per-key spawn lock, so a start in between reused the proxy being killed.
+      Regression test_start_during_last_stop_spawns_a_new_proxy (fails without the
+      lock). Spec items 14-17 added. Full suite 3461 passed.'
+    created_at: '2026-10-23T06:01:21Z'
+    last_edited: '2026-10-23T06:01:21Z'
+  - id: note-ec55f9e
+    text: 'Review b62f i2 (130e8ab9, CODE CHANGE, needs normal re-review): 8a3d3412
+      stop lock is sound, but the push-proxy daemon only checked that its socket path
+      existed. After a stop then immediate start of a PR shared proxy, the old daemon
+      kept running (orphan on an unlinked socket; reproduced 60/60 cycles), and its
+      exit cleanup unlinked the path whatever was there, which could delete the newer
+      proxy socket. PushProxy now checks its socket inode (owns_socket, as route_bridge
+      does): it exits when the path is removed or replaced and unlinks only its own
+      socket. Regressions test_replaced_daemon_exits_and_keeps_the_new_socket (real
+      daemon) and test_stop_of_a_replaced_proxy_leaves_the_new_socket, each mutation-checked.
+      Full suite 3463 passed; logs /pm-captures/review-b62f-i2.'
+    created_at: '2026-10-23T06:16:17Z'
+    last_edited: '2026-10-23T06:16:17Z'
+  - id: note-ee1d8a3
+    text: 'S18 refine (RQ26, 2026-10-23): (1) In-container pushes need a non-local
+      upstream: the proxy refuses a local-path origin, and a bare `pm init` project
+      has none (S16 had none). Use a bare repo with a file:// URL as origin and project.repo;
+      verified live that a proxied push of the allowed branch succeeds and another
+      branch is refused. (2) The detached daemon runs with cwd=/, so its own lines
+      ("Push proxy started/stopped", "socket removed, exiting", "Push proxy push:")
+      go to ~/.pm/debug/default.log. The parent process lines ("subprocess started",
+      "Reusing live shared push proxy") go to the session <tag>.log. (3) A finished
+      QA run does not remove its scenario containers or windows (pr-1139060), so QA
+      finish never drops proxy refs. The teardown that drops them is the orphan sweep
+      on the next z t, in the TUI process. With another PR holding the same -sN windows,
+      the old containers are kept and the daemon is reused. (4) QA started from the
+      TUI runs in TUI threads (one ref table). `pm pr start` from a CLI pane is a
+      separate process: pr-748e708.'
+    created_at: '2026-10-23T06:30:04Z'
+    last_edited: '2026-10-23T06:30:04Z'
+  - id: note-fc16f80
+    text: 'S17 refiner (RQ26): (1) push-proxy daemons run with cwd=/ so their own
+      lines ("Push proxy started/stopped", "socket removed, exiting", "Push proxy
+      push") go to ~/.pm/debug/default.log, not the session log; "socket removed,
+      exiting" races with the main loop, "Push proxy stopped: <path>" is always logged.
+      (2) QA scenario containers are not removed on scenario completion or on stop
+      (only the next run''s orphan sweep, a route-gate deferral, or Y cleanup), so
+      a queued deferral with an earlier scenario container still up only drops a ref:
+      same daemon, relaunch logs "Reusing live shared push proxy". Last-container
+      restarts come from z t sweeps and Y. (3) In-container push probes that add commits
+      leave the PR workdir behind origin; fast-forward it before the next QA start
+      or the planner handoff stops with "is behind upstream". (4) The proxy rejects
+      local-path origins: use a file:// bare origin.'
+    created_at: '2026-10-23T06:31:25Z'
+    last_edited: '2026-10-23T06:31:25Z'
+  - id: note-5bed7f3
+    text: 'QA S17 (2026-10-23): RQ26 + RQ16 push-proxy Thens all held live in container
+      mode (captures /pm-captures/scenarios/17, REPORT.md). Story 1: one daemon, proxied
+      push + refused branch. Story 2: z t sweep of the last container -> old daemon
+      exits by itself ("Push proxy stopped"), new one sole LISTEN owner. Story 3 (+replay):
+      queued refiner-gate deferral during a 60 s router outage removes only -sM, same
+      daemon throughout, relaunch "Reusing live shared push proxy". Story 4: 5 z t/zz
+      t cycles max 1 daemon per 0.5 s sample; Y/y removes daemon, socket and dir.
+      CODE CHANGE needing normal re-review: a2ff954c. Y cleanup during a stopping
+      (zz t) run killed the refiner window, and _concretize_and_launch logged a qa_loop
+      Traceback splitting the worker off the dead pane, then a false "Launched scenario
+      N ... in container" (window_name is set during refinement). Pre-existing on
+      master, both host and container paths. Now only a created pane counts as a launch,
+      and a gone refiner pane is a plain warning. 3 regressions (2 mutation-checked);
+      suite 3466 passed. Harness: S17 env.sh unsets all vars, so whitelist any you
+      pass (CDIR).'
+    created_at: '2026-10-23T07:17:03Z'
+    last_edited: '2026-10-23T07:17:03Z'
+  - id: note-1748d0d
+    text: 'Review ab29 i2 (ded27fcd, CODE CHANGE, needs normal re-review): a2ff954c
+      is sound for the closed-window case. Remaining edge fixed: a worker split that
+      failed with the refiner pane still alive left window_name set and pane_id None,
+      so the poll loop first-pane fallback polled the refiner as the worker (and could
+      remind it into a verdict). _split_worker_pane now kills that refiner pane (refinement
+      done; QA exec panes use cleanup=False so the container stays), and the scenario
+      takes the dead-worker path (route-gated relaunch with retries). Real-tmux regression
+      test_worker_split_failure_with_live_refiner_keeps_traceback, mutation-checked;
+      suite 3466 passed. Spec item 18 updated.'
+    created_at: '2026-10-23T07:30:04Z'
+    last_edited: '2026-10-23T07:30:04Z'
+  - id: note-6388592
+    text: 'QA S20 (2026-10-23, RQ27 container two-PR): CODE CHANGE 2314f1a8 needs
+      normal re-review. (1) A worker split refused by tmux logged a Traceback ending
+      "returned non-zero exit status 1." (tmux stderr "no space for new pane" captured
+      by tmux._run and dropped); tmux._run now raises TmuxCommandError (CalledProcessError
+      subclass) whose message ends with the stderr. (2) Y cleanup during a stopping
+      zz t run with held refiners: after the refiner panes died, the worker route
+      gate checked the containers being removed and logged + showed "Scenario N worker
+      waiting — work route ... unavailable ... Remedy: pm provider test" (S17 rerun
+      Then failed). Both launch paths now skip the worker route gate when the refiner
+      pane is gone (_refiner_gone) and take the dead-worker path. 3 mutation-checked
+      regressions in tests/test_worker_route.py; suite 3469 passed. All three stories
+      replayed post-fix with every Then held (A s1 relaunched into the same container,
+      one push proxy per PR with unchanged PID/birth, B untouched). Captures /pm-captures/scenarios/20
+      (REPORT.md, pre-fix/, post-fix/).'
+    created_at: '2026-10-23T08:25:26Z'
+    last_edited: '2026-10-23T08:25:26Z'
+  - id: note-0d066d5
+    text: 'QA S19 (2026-10-23): RQ27 host mode PASS on ba37e36b, no code change; captures
+      /pm-captures/scenarios/19 (REPORT.md). Live refiner split refused (2-line window,
+      tmux 3.2a "no space for new pane") for initial parallel s2, queued s5, and s7
+      with the router stopped 15 ms after the warning: one traceback warning, refiner
+      pane closed, no Launched, retry 1/10 then Relaunched at normal height (s7: one
+      "worker relaunch deferred" during the 60 s outage, no retry spent, retry 4 s
+      after recovery). Closed refiner window (s10) and zz t + Y/y (s13-15): plain
+      "refiner pane %X is gone" warning, no Traceback; running loop relaunched s10
+      on planner draft steps, stopping loop relaunched nothing. Router saw only refiner/worker
+      work/ requests.'
+    created_at: '2026-10-23T08:33:40Z'
+    last_edited: '2026-10-23T08:33:40Z'
+  - id: note-9a22792
+    text: 'QA S19 follow-up to note-0d066d5: stories 1, 4, 5 (+clean z t) replayed
+      in a fresh session on d9338561 (includes S20 2314f1a8), all Thens held; captures
+      /pm-captures/scenarios/19/replay. Only wording drift: the live-refiner split
+      traceback now ends in pm_core.tmux.TmuxCommandError (CalledProcessError subclass)
+      "... tmux: no space for new pane" instead of literal subprocess.CalledProcessError;
+      closed-refiner paths no longer log "Worker for scenario N: route=..." before
+      "refiner pane %X is gone".'
+    created_at: '2026-10-23T08:49:40Z'
+    last_edited: '2026-10-23T08:49:40Z'
+  - id: note-acf79ab
+    text: 'S22 refiner (2026-10-23): on the current head a killed stalled worker (or
+      refiner) normally gets NO "pane … gone — not resumed" log line. The poll loop
+      and poll_for_verdict check pane_exists before _RouteStallWatch.tick(), so a
+      dead pane takes the dead-window path ("relaunch deferred" → "window died — retry
+      1/10" → "Relaunched") and its watch is popped. The "not resumed" line only appears
+      when the pane dies in the sub-second gap between the liveness check and the
+      nudge. RQ25 parenthetical in qa.md overstates it; S22 Then treats that line
+      as optional (absence of "resumed" is the requirement). Also: there is no CLI/TUI
+      surface for a PR-level model override (only project.yaml prs[].model or PM_MODEL);
+      S22 sets it as bootstrap.'
+    created_at: '2026-10-23T09:09:06Z'
+    last_edited: '2026-10-23T09:09:06Z'
+  - id: note-b3c1df5
+    text: 'QA S22 (2026-10-23, host mode, real Claude vs router/main stubs; captures
+      /pm-captures/scenarios/22, REPORT.md): all Thens held for flag follow-up + worker
+      killed on held verifier (INPUT_REQUIRED window gone), stall then pane kill with
+      router down (deferred, retry 1/10, relaunch into same window), z t supersede
+      + 2 TUI restarts (only newest run resumed; B starts at M+1; snapshots removed
+      <150 ms), zz t during route wait, PR B model override on main. CODE CHANGE 2ff602fc
+      needs normal re-review: after z t over a mid-turn run the stopped loop ran _run_qa_finalize_pane,
+      found the NEW run qa-<pr> window by name and split a finalizer into it at pane
+      0; the new run logged "Planner pane: %35" (the stray finalizer) and the finalizer
+      session ran unsupervised. Pre-existing on master. Now skipped when stop_check()
+      is true; regression test_run_qa_finalize_pane_spawns_nothing_when_stopped (fails
+      reverted); full suite 3471 passed. Spec note: S22 story 3 Given ("Queued scenario
+      launch deferred" with both slots held) cannot occur: _launch_next_queued checks
+      the cap before the route.'
+    created_at: '2026-10-23T09:57:53Z'
+    last_edited: '2026-10-23T09:57:53Z'
+  - id: note-26bff10
+    text: 'S23 refiner: two-PR container regression refined into 4 stories on d4710225.
+      Dropped the RQ14 "created without the route socket mount" remedy Then: every
+      container in a two-routed-PR run has the mount, so it cannot occur (S10 story4
+      evidence stands); story 4 checks the gate on adopted mounted containers instead.
+      zz t = stop (finishing current run), not a fresh start. A killed bridge restarts
+      only on a routed check with the router up (check_route tests the router first),
+      or at a queued container create (container_mounts). "retry 1/10" is logged only
+      after the route recovers.'
+    created_at: '2026-10-23T09:08:55Z'
+    last_edited: '2026-10-23T09:08:55Z'
+  - id: note-6fe7d20
+    text: 'QA S23 (2026-10-23): all 4 stories held live in container mode, no code
+      change; captures /pm-captures/scenarios/23 (REPORT.md). Two PRs concurrent t
+      + provider test --container --live mid-run (exit 0, throwaway container removed,
+      no A/B events); bridge kill restarted by the route watch on an API-error idle
+      turn (same path, new birth), queued refiner-gate deferral + killed-worker relaunch
+      deferral during a 60 s router outage, then retry 1/10 + relaunch into the same
+      container and queue drain reusing the proxy; zz t + Y on held refiners quiet
+      (no gate notice), one new daemon after z t; TUI kill -9 + pm session resumes
+      both PRs, killed adopted B worker relaunched into its adopted container; both
+      PASS. Spec slip: the resume log reports total scenarios ("3 scenario(s), 1 queued"
+      for 2 live + 1 queued), not 2. Stories 1-3 on d4710225, story 4 attempt 2 TUI
+      on 2ff602fc. Observation (pr-1139060): z t leaves older same-sN containers when
+      the other PR holds same-sN windows; one lingered after its push proxy stopped.'
+    created_at: '2026-10-23T10:08:33Z'
+    last_edited: '2026-10-23T10:08:33Z'
+  - id: note-a9323bf
+    text: 'S21 refiner: "Queued scenario launch deferred" only appears when a slot
+      frees during the outage (_launch_next_queued returns on cap before the route
+      check). With every slot held by stalled/dead workers it never shows. S21 therefore
+      uses cap 3 with 5 fake-planned scenarios, and one worker PASSes just before
+      the router stop. RQ22 (repeat deferral) is a cap-1 run with two router stops,
+      each right after a worker PASS reply. The S19 stub needs the S13 fail control
+      ported (key "<pr> <N> worker") for the API-error story.'
+    created_at: '2026-10-23T09:10:46Z'
+    last_edited: '2026-10-23T09:10:46Z'
+  - id: note-dbdd358
+    text: 'QA S21 (2026-10-23, host consolidated regression): CODE CHANGE ee3d0644
+      needs normal re-review. With qa-verify-pass off no PASS is ever verified, so
+      _run_qa_finalize_pane skipped finalize on every all-PASS run ("QA finalize:
+      skipping — PASS verdicts [...] have not been verified yet", finalize=None);
+      pre-existing since 09760b7e. The unverified gate now applies only while verification
+      is enabled; regression test_run_qa_finalize_pane_runs_unverified_pass_when_verification_off
+      (fails reverted); suite 3470 passed. All 6 triples held post-fix (startup +
+      mid-run outages, API-error resume, repeat queued deferral on the TUI, refused
+      split + closed refiner, FINALIZE_DONE). Captures /pm-captures/scenarios/21 (REPORT.md,
+      pre-fix/, post-fix/). Observation: resume/retry after a router restart can lag
+      ~60-75 s while the loop refines a queued launch (pr-1ab9075).'
+    created_at: '2026-10-23T10:17:58Z'
+    last_edited: '2026-10-23T10:17:58Z'
+  - id: note-1853ad0
+    text: 'QA9 planner (2026-10-23): spec 738272ed adds a ninth pass (S24+), delta-only,
+      for the three _run_qa_finalize_pane changes since S21-S23 (ee3d0644, 2ff602fc,
+      54ff5a68; 54ff5a68 has never run live). New RQ28 covers the finalize gate against
+      qa-verify-pass: off, switched mid-run either way, another PR started after the
+      switch, and a TUI resume after the switch. New RQ29: a stopped or superseded
+      run spawns no finalizer. A possible gap from code reading, which S24 checks:
+      a run that accepts PASS unverified with verification off, is switched on and
+      is then resumed after a TUI restart reads "on" again. The resumed poll drops
+      scenarios that already have a verdict without verifying them (qa_loop.py ~3443),
+      so the finalize gate may skip with finalize=None.'
+    created_at: '2026-10-23T11:07:52Z'
+    last_edited: '2026-10-23T11:07:52Z'
+  - id: note-36fbf1e
+    text: 'S25 refiner (RQ29): no /pm-captures/scenarios/24 harness exists here, so
+      S25 builds on the S21 host scripts (stub.py with "<pr> * worker" wildcard holds,
+      560 s hold cap) extended to two PRs as in S22. Restarting a completed A run
+      needs z t (plain t only focuses the existing qa-<pr> window). zz t during the
+      finalizer poll (story 3) is pre-existing behaviour: the run still ends "QA complete
+      for <pr>: PASS (finalize=None)" and the TUI says "QA PASS ... press i to sign
+      off". Treat it as an observation alongside impl.md §5 item 21. The finalize
+      polling line carries no PR id, so attribute it by the PR workdir name in its
+      transcript path.'
+    created_at: '2026-10-23T11:14:00Z'
+    last_edited: '2026-10-23T11:14:00Z'
+  - id: note-c7f1677
+    text: 'QA S25 (2026-10-23, host, real Claude vs router/main stubs, head dab74e81;
+      captures /pm-captures/scenarios/25, REPORT.md): RQ29/RQ23/RQ28 held live with
+      no code change. Fresh start z t over A (workers held) while B finalizer ran:
+      no A finalizer, new qa-A first listing = own planner, s3/s4 PASS+VERIFIED, one
+      finalize, PASS [finalize: FINALIZE_DONE]; B untouched; old qa_resume.json gone
+      0.09 s after z t. zz t with held workers: skipped + INPUT_REQUIRED (finalize=None)
+      in 4 s, no resume/recover after TUI restart. zz t during finalizer (item 21
+      observation): PASS (finalize=None), stray finalizer kept in old window until
+      the next z t cleanup, never taken for a new pane. One Then failed as written:
+      the old loop "skipped … QA was stopped" line came 2 s AFTER the new run "Planner
+      pane:" (z t does not wait for the old loop; order is a race). qa.md RQ29 clarified
+      in 16964d91 (also: GET /api/hello in the router log is Claude startup, not a
+      messages request); needs independent review.'
+    created_at: '2026-10-23T11:43:33Z'
+    last_edited: '2026-10-23T11:43:33Z'
+  - id: note-a8fbbb1
+    text: 'QA S24 (2026-10-23, RQ28 host, real Claude refiners/workers on router stub;
+      captures /pm-captures/scenarios/24, REPORT.md): every finalize-gate Then held.
+      Verify off -> FINALIZE_DONE with no verifier. Switch on mid-run: A kept "disabled"
+      and finalized, B started after the switch verified both PASS before finalize.
+      Switch off mid-run: C kept verifying. Off -> on + TUI restart: the resumed run
+      re-verified the earlier unverified s5 PASS, then FINALIZE_DONE, so the QA9 possible
+      finalize=None gap did not reproduce. Router saw only work/ refiner/worker requests,
+      no secrets. CODE CHANGE 89414241 needs normal re-review: a PR first QA run (no
+      workdir yet) never started the TUI shared poll timer, so "QA PASS for <pr> -
+      press i to sign off" (completion handling, lifecycle transition, qa_resume cleanup)
+      waited for the 300 s background sync (95 s late live). start_qa, zz t and restart
+      resume now ensure the timer. 3 mutation-checked regressions, full suite 3476
+      passed.'
+    created_at: '2026-10-23T11:45:45Z'
+    last_edited: '2026-10-23T11:45:45Z'
+  - id: note-a55b2fd
+    text: 'Review 433b i1 (fb7af748, CODE CHANGE, needs normal re-review): 89414241
+      sound for starting the timer, but the poll timer stop check still keyed on s.running,
+      so on a finished run''s completion tick it stopped before tick 2 (runtime_state
+      done verdict, _qa_loops removal; a lingering entry with a verdict also holds
+      back auto-start) when no active PR has a workdir. Timer now runs while a QA
+      loop is running or has an unprocessed verdict (review_loop_ui._qa_needs_poll).
+      Regression TestQAPollTimer::test_timer_outlives_running_until_completion_is_processed
+      (mutation-checked). 54ff5a68 and spec 16964d91 (z t does not join the old loop)
+      re-checked, sound. Full suite 3477 passed; logs /pm-captures/review-433b-i1.'
+    created_at: '2026-10-23T11:53:39Z'
+    last_edited: '2026-10-23T11:53:39Z'
+  - id: note-8d4c153
+    text: 'QA10 planner (2026-10-23): spec 023d9cf6 adds a tenth pass (S26+), delta-only,
+      for the TUI poll-timer fixes 89414241 and fb7af748 (RQ30: a finished QA run
+      is processed within seconds, not at the 300 s sync, when nothing else keeps
+      the timer alive). QA never sets the PR workdir, so a PR stays eligible for the
+      no-workdir condition across runs. Do not use auto-start or start an impl: either
+      can give a PR a workdir or start loops that keep the timer alive and hide the
+      bug. S26 covers one PR (t PASS / NEEDS_WORK / INPUT_REQUIRED, zz t with qa-pass-count
+      2). S27 covers two PRs at once plus scratch-TUI restart resume. The QA10 harness
+      handoff (VFR renderer from the S24/S25 scripts, scratch TUI only, no production
+      settings) is recorded in the spec.'
+    created_at: '2026-10-23T12:00:10Z'
+    last_edited: '2026-10-23T12:00:10Z'
+  - id: note-16dbbdb
+    text: 'QA S27 (2026-10-23, RQ30 two-PR + TUI-restart resume, host, head 023d9cf6;
+      captures /pm-captures/scenarios/27, REPORT.md): every Then held, with each finish
+      processed about 1 s after "QA complete" (A, B while the other was held, C resumed
+      after kill -9 + pm session, same panes and PIDs, no reprocessing on a third
+      restart, one note each, [done PASS]). Main finding: the QA10 premise "QA never
+      sets the PR workdir" is wrong. run_qa_sync -> _ensure_workdir (qa_loop.py ~4212)
+      persists prs[].workdir at the start of a PR first run, so story 2 Given ("no
+      other active PR has a workdir") was false on disk. A pre-fix replay on the same
+      flow (89414241 + fb7af748 reverted, /pm-captures/scenarios/27/pre-fix) was ALSO
+      prompt for A, B and resumed C. The timer reads cached app._data, and _load_state
+      -> ensure_animation_timer starts it once any active PR workdir is cached (B
+      start_qa reload, TUI restart). So these stories do not discriminate the fixes.
+      That shows neither that they work nor that they are unneeded; the discriminating
+      case stays a single first run with no cached workdir (S24). Spec clarification
+      8ae55361 (qa.md RQ30 + tenth pass) needs independent review. No product change.'
+    created_at: '2026-10-23T12:30:43Z'
+    last_edited: '2026-10-23T12:30:43Z'
+  - id: note-8178f35
+    text: 'S26 refiner (RQ30): `pm set qa-pass-count 2` fails with "Unknown setting"
+      because it is not in cli _INT_SETTINGS. The TUI reads it from ~/.pm/settings/qa-pass-count
+      (_get_qa_pass_count), so the S26 Given writes that file in the scratch HOME.
+      The S24/S25 stub.py worker answers only pass|noverdict, so S26 extends it with
+      needs_work|input_required. Scenario indices keep counting up across runs (s1,s2
+      then s3,s4, and so on). Plain t on a PR whose qa-<pr> window still exists only
+      focuses that window, so re-runs use z t.'
+    created_at: '2026-10-23T12:04:31Z'
+    last_edited: '2026-10-23T12:04:31Z'
+  - id: note-1624544
+    text: 'QA S26 (2026-10-23, RQ30 one PR host, real Claude refiners/workers on router
+      stub; captures /pm-captures/scenarios/26, REPORT.md). Two CODE CHANGES need
+      normal re-review, both pre-existing on master: (1) f57c500c after QA NEEDS_WORK
+      the TUI moved qa->in_review and reloaded app._data without _update_display,
+      so the tech-tree box showed qa for 111 s until the 300 s background sync; (2)
+      991addf9 zz t "QA PASS (1/2 consecutive) - restarting QA" was replaced by start_qa
+      messages in the same frame and never painted (absent from pane output and cast);
+      now held CONFIRM_HOLD_SECONDS. Regressions in tests/test_qa_self_driving.py,
+      each fails reverted; suite 3479 passed. All other Thens held: verdict line 0.5-1.0
+      s after QA complete, snapshot removed, one note per run, [done VERDICT] written
+      1 s later, router only work/ refiner+worker, restart reprocessed nothing. Coverage
+      (agrees with S27 8ae55361): only story 1 discriminates 89414241/fb7af748 (cache
+      loaded at start_qa before _ensure_workdir, no reload until the 12:12:30 sync,
+      tick 2 at +1 s). Stories 2-4 had A workdir cached (background sync, TUI restarts),
+      so the persisted no-workdir Given was NOT met there and they do not test the
+      timer fixes.'
+    created_at: '2026-10-23T12:43:09Z'
+    last_edited: '2026-10-23T12:43:09Z'
+  - id: note-c7a66a6
+    text: 'Review 1298 i1 (0697e450, CODE CHANGE, needs normal re-review): f57c500c
+      (NEEDS_WORK repaint) sound. 991addf9 held the zz t "restarting QA" line but
+      did not force it, so it was still dropped while another PR sticky line showed
+      (e.g. review loop sticky=30); now force=True like every other held confirmation.
+      Test assertion added (fails with force removed). Spec 8ae55361 checked against
+      _ensure_workdir: accurate. qa-related tests 548 passed.'
+    created_at: '2026-10-23T12:47:56Z'
+    last_edited: '2026-10-23T12:47:56Z'
+  - id: note-423bbe9
+    text: 'QA S28 (2026-10-23, RQ31 one PR, host, real Claude refiners/workers on
+      router stub; captures /pm-captures/scenarios/28, REPORT.md). CODE CHANGE 1098813c
+      needs normal re-review (pre-existing on master): after a zz t NEEDS_WORK, the
+      "QA NEEDS_WORK for <pr> — returning to review" line was replaced in the same
+      frame by the self-driving review loop sticky "Review loop started" and never
+      painted (only in L). It is now force=True, hold=CONFIRM_HOLD_SECONDS like the
+      restart line. Regression test_needs_work_message_holds_the_log_line (fails reverted);
+      full suite 3484 passed on 1098813c (summary tail only). Post-fix the line stayed
+      3.00 s on the cast, with the box in_review 0.04 s after it. impl.md §5 item
+      23(c) in 65d53fdb. Held: plain t NEEDS_WORK line + in_review box in the same
+      0.5 s sample; zz t 1/3 and 2/3 restart lines 3.00/3.01 s; 3/3 press i, no restart
+      or sign-off; NEEDS_WORK resets the count to 1/3; INPUT_REQUIRED pauses; restart
+      resumes nothing; router only work/ refiner+worker. Harness: the S26 stub read
+      answers before a hold (answers set during a hold were ignored); fixed in the
+      S28 stub.py.'
+    created_at: '2026-10-23T13:58:56Z'
+    last_edited: '2026-10-23T13:58:56Z'
+  - id: note-6a2a546
+    text: 'QA S29 (2026-10-23, RQ31 two PRs, host, scratch TUI; captures /pm-captures/scenarios/29,
+      REPORT.md). The RQ31 Thens held live once the Givens were met. Story 1 (1d51bcef):
+      B sticky IR painted 4.01 s before A forced "(1/2) restarting QA", which held
+      81 s. Story 2: two restart lines 1.00 s apart, each painted ~3 s. Story 3: A
+      NEEDS_WORK box in_review +0.2 s. CODE CHANGE needing normal re-review: 9cc2fb6b
+      (pre-existing on master; like b290ebcb for sign_off) - a finished review loop
+      badge (⟳1⏸) masked the live QA spinner of a PR in qa; the live QA marker now
+      wins while QA panes are active or waiting, the badge returns when idle, and
+      a running loop still wins. Fixture-only: 9a7f9b13 + 1d51bcef fake-claude idle_once_after
+      (single idle_prompt per turn; the standalone bin/fake-claude argparse was missed
+      at first). The 2 s refresh made a waiting review loop relaunch 19x, while real
+      Claude emitted one idle per turn. Known limitation, NOT fixed here: Ctrl+C in
+      a review pane never ends a loop waiting on INPUT_REQUIRED (find_claude_pane
+      = surviving diff pane); filed as note-18c906b on pr-89296d3; z d stops it. impl.md
+      §5 item 24. Harness: env.sh scrubs env vars (whitelist OUT/ZZD_AFTER); the non-fzf
+      picker closes with C-c, not q, and shows the PR of the client active window.'
+    created_at: '2026-10-23T14:37:23Z'
+    last_edited: '2026-10-23T14:37:23Z'
+  - id: note-085f956
+    text: 'QA S29 follow-up to note-6a2a546. (1) Story 2 proves the held-line queue:
+      the two "(1/2 consecutive) — restarting QA" lines were logged 1.00 s apart and
+      painted one after the other, ~3 s each. (2) The story 3 replay on 9cc2fb6b covered
+      only the render change (the failed B-marker Then, verified live). The other
+      story 3 evidence is from attempt 1 on TUI code 1d51bcef; no Then was waived.
+      (3) Review question for 9cc2fb6b: the finished review-loop badge returns when
+      QA is idle (kept on purpose as historical summary). After QA PASS, "● qa ⟳1⏸"
+      can be read as a current input gate (the live gate is ⏸N plus a spinner), and
+      that ambiguity is pre-existing and not fixed here. Should the badge be dropped
+      past in_review, as b290ebcb did for sign_off? See impl.md §5 item 24(a).'
+    created_at: '2026-10-23T14:41:27Z'
+    last_edited: '2026-10-23T14:41:27Z'
+  - id: note-bdd4b23
+    text: 'Review 4f28 i1 (84662f7f, CODE CHANGE, needs normal re-review): reviewed
+      1098813c, 9a7f9b13, 1d51bcef and 9cc2fb6b, all sound in intent. 9cc2fb6b cleared
+      the whole loop marker at render time, so a merge INPUT_REQUIRED marker (⏸M)
+      also disappeared while QA panes were active or waiting. The precedence now lives
+      in _get_loop_marker(qa_live=), next to the sign_off rule, and drops only a finished
+      loop badge. Regression test_merge_input_marker_survives_live_qa (fails on 9cc2fb6b).
+      Spec 24(a) decided: keep the idle badge in qa (pr-97614ed treats it as expected),
+      recorded as a known limitation. Full suite 3491 passed before the test-only
+      addition; logs /pm-captures/review-4f28-i1.'
+    created_at: '2026-10-23T14:49:47Z'
+    last_edited: '2026-10-23T14:49:47Z'
+  - id: note-e84c098
+    text: 'S31 refiner (from reading the code, not run live): ⏸M can be reached only
+      on a vanilla/file:// project, through the auto-start merge. Steps: A target,
+      SIGNOFF_MERGE, main checkout diverged (unpushed commit), so ff-only fails and
+      the merge-<id> window opens with --transcript; the merge prompt is real Claude
+      on the main stub, which replies INPUT_REQUIRED. Manual g / `pr merge --resolve-window`
+      passes no --transcript, so the TUI never tracks that window. The sticky "⏸ Merge
+      INPUT_REQUIRED" line is logged again on every ~5 s merge poll while the PR is
+      in _pending_merge_prs (also while it is in qa). This keeps dropping unforced
+      lines (QA PASS … press i, MERGED detected, ✓ Merged) on the TUI log line; they
+      are still in L. This is pre-existing and outside RQ32: record it as an observation
+      or file it. To return M to in_review after the publish, use `pm pr edit --status
+      in_review` (the sign-off driver skips pending merges).'
+    created_at: '2026-10-23T15:03:05Z'
+    last_edited: '2026-10-23T15:03:05Z'
+  - id: note-04d574c
+    text: 'QA S31 (2026-10-23, RQ32 two PRs, host, real Claude refiners/workers +
+      merge window on stubs; captures /pm-captures/scenarios/31, REPORT.md). RQ32
+      triples 1-2 held: M read "● qa ⏸M"+spinner in every cast frame of its live QA
+      (595/595, replay 611/611), B showed only its own QA spinner then ⟳1⏸, M NEEDS_WORK
+      line painted 3.0 s with M in_review ⏸M. Triple 3 FAILED pre-fix: CODE CHANGE
+      needing normal re-review (pre-existing on master, 23df1ff1): A removing the
+      last target disables auto-start and _finalize_all_transcripts copied the live
+      merge window transcript, so MERGED was never detected (INPUT_REQUIRED every
+      5 s, ⏸M and window stayed). Fix keeps symlinks a reader still polls (live tracker
+      entries, running review loop iteration, impl/merge/review sessions in a live
+      pane); finished sessions incl. sign-off still archived. tests/test_autostart_transcript_finalize.py
+      (6 mutations caught); full suite 3497 passed. Post-fix MERGED detected ~1 s
+      after the reply, ✓ Merged, B unchanged. Future-only: frozen copies and merge
+      windows from an earlier TUI filed as pr-237d610. Harness: plain t on a PR with
+      a qa window only focuses it (use z t).'
+    created_at: '2026-10-23T16:03:35Z'
+    last_edited: '2026-10-23T16:03:35Z'
+  - id: note-2a62eb5
+    text: 'S30 refiner: for a running-loop-vs-QA check, do not end the loop with z
+      d. z d runs `pm pr review --fresh`, which moves a qa PR back to in_review. End
+      the loop with a fake review PASS after a delay instead; manual zz d PASS does
+      not start QA without auto-start. Two more facts: a QA pane keeps ⏸ after permission
+      approval until its next hook event (idle_prompt), and the S29 scratch HOME settings.json
+      allows Bash, so remove it to get a permission prompt.'
+    created_at: '2026-10-23T15:00:35Z'
+    last_edited: '2026-10-23T15:00:35Z'
+  - id: note-bfaed3d
+    text: 'QA S30 (2026-10-23, RQ32 one PR + A2, host, real Claude refiners/workers
+      on router stub; captures /pm-captures/scenarios/30, REPORT.md). All RQ32 Thens
+      held on 94f36a18: A ⟳1⏸ during planning then QA spinner when workers active;
+      Bash permission prompt -> "● qa ⏸" (SGR 1;91) in 7 s, stays 92 s after approval
+      until the pane idle_prompt; QA PASS -> idle badge ⟳1⏸ (known limitation 24(a));
+      i -> ◆ sign_off + spinner, no ⟳; A2 running loop ⟳1 wins over live QA in all
+      233 overlap frames, then plain QA spinner; A sign_off never ⟳; TUI restart drops
+      the badge, notes A unchanged / A2 +1. CODE CHANGE needing normal re-review:
+      94f36a18 (pre-existing on master) z t over a run with mid-turn scenario panes
+      left its qa:<pr>:sN tracker keys active forever, so after the new run PASS the
+      node kept spinning (hid the ⟳1⏸ badge); poll_qa_state now drops a PR qa: keys
+      not in the current run. 3 regressions (fail reverted), suite 3493 passed. Planning
+      run after supersede: picker qa [open] without badge (verified live on A2). Not
+      fixed: pre-fix/killed-TUI qa panes left in ~/.pm/runtime survive restarts and
+      merge into the next run entry (impl.md item 26). Harness: scratch settings need
+      permissions.defaultMode "default" (Claude starts in auto mode) and a writing
+      Bash command (echo is auto-allowed); stub re-holds atomically.'
+    created_at: '2026-10-23T16:13:00Z'
+    last_edited: '2026-10-23T16:13:00Z'
+  - id: note-4b48931
+    text: 'S30 follow-up to note-bfaed3d: the runtime-mirror limitation (qa scenario
+      panes left in ~/.pm/runtime/<pr>.json by a pre-94f36a18 or killed TUI survive
+      a restart, are merged into the next run qa entry, and the picker shows [working]
+      for a planning run with no live pane) is filed as pr-b2db183 (pending, not started)
+      with repro and evidence under /pm-captures/scenarios/30 (post-fix/reset-picker
+      runtime-A-*.json + picker-A-R2-planning.txt, post-fix/demo/runtime-A-after-pass.json).
+      impl.md item 26 and REPORT.md reference it. No change to the 94f36a18 fix.'
+    created_at: '2026-10-23T16:14:03Z'
+    last_edited: '2026-10-23T16:14:03Z'
+  - id: note-65db075
+    text: 'Review 03a7 i1 (c3d3f978, test-only): 94f36a18 (superseded-run tracker
+      keys) and c97aaf9c (keep live transcripts on auto-start disable) reviewed, both
+      sound. Full suite failed 1 test in suite order: test_pruned_planning_run_reads_like_a_first_run_in_the_picker
+      read a leftover idle hook event, because tests/test_hook_events.py reloads hook_events
+      under a tmp HOME and never restored _HOOKS_BASE. Fixed: fixture restores the
+      paths; picker test uses its own hooks dir. Full suite 3500 passed (env -u PM_HOST_HOME,
+      PATH=/usr/bin first).'
+    created_at: '2026-10-23T16:42:20Z'
+    last_edited: '2026-10-23T16:42:20Z'
+  - id: note-1c73dc7
+    text: 'QA S33 (2026-10-23, RQ34 host, ab14aafc, no code change; captures /pm-captures/scenarios/33,
+      REPORT.md). c97aaf9c held live: A removing the last target over a merge window
+      at INPUT_REQUIRED kept merge-<M>.jsonl a symlink ("still read live — not finalized"),
+      archived the sign-off, then MERGED was detected about 1 s after the reply (✓
+      merged), with Q routed QA held and unaffected. /autostart off kept review-i2,
+      impl-R and impl-S live and archived i1; the loop saw PASS (⟳2✓) and S went [working]→[idle].
+      Natural prune "all targets complete — auto-start OFF" archived signoff-T and
+      kept impl-V. After a TUI kill -9 + restart nothing was re-reported and all run
+      dirs were byte-identical (X untracked = pr-237d610). One Then FAILED as written:
+      after V was already idle, typing a message into its pane never showed a spinner/[working].
+      A control on a never-disabled session (W) shows the same, so it is pre-existing:
+      pm has no prompt-submit hook, so idle clears only on permission_prompt. Filed
+      pr-2a44020. Decision needed: narrow the RQ34 "idle/active state tracked" wording
+      to idle detection of a turn in flight, or require pr-2a44020 first.'
+    created_at: '2026-10-23T17:47:40Z'
+    last_edited: '2026-10-23T17:47:40Z'
+  - id: note-8ab9169
+    text: 'S33 follow-up: assessment of the idle→working fix for a manually typed
+      new turn (pr-2a44020). Not implemented, because the S33 verdict was already
+      final. CLI facts, checked live on claude 2.1.309 with a probe HOME (/tmp/s33/hookprobe/log):
+      "UserPromptSubmit" fires for the argv prompt and for every typed turn. Payload
+      keys: session_id, hook_event_name, prompt, prompt_id, cwd, permission_mode,
+      transcript_path. Order per turn is UserPromptSubmit → Stop, then Notification
+      idle_prompt about 60 s after Stop if nothing new is typed. While the workspace-trust
+      dialog is up, no hook fires (not even SessionStart), so the "no hook event yet"
+      trust watches still hold. Code fix: (1) hook_install._desired_hooks adds UserPromptSubmit
+      → receiver argv "user_prompt"; the receiver needs no change and must not store
+      the prompt. (2) PaneIdleTracker.poll: on "user_prompt" set idle=False, waiting_for_input=False,
+      idle_notified=False. (3) runtime_state._hook_state_for already treats any non-idle,
+      non-permission event as working, so the picker needs no change. The other read_event
+      readers (qa_loop ~3553, review_loop adoption ~252, loop_shared/qa_loop wait_for_event
+      idle_prompt newer_than) keep correct semantics. Regression test: tracker idle
+      → user_prompt → not idle → idle_prompt → became_idle again, which fails without
+      (2). Live replay: S33 scripts/control_w2.sh (W control, held turn). BLOCKER
+      needing a user choice: install policy. _detect_foreign_hooks refuses to install
+      any pm hooks (HookConflictError at pm session/TUI start, which disables verdict
+      detection) when a managed event already holds a foreign entry, and ensure_hooks_installed
+      replaces each managed event entry list. Adding UserPromptSubmit to _MANAGED_EVENTS
+      would therefore break pm for anyone with their own UserPromptSubmit hook (a
+      common customisation), and an upgrade rewrites every user settings.json, inside
+      containers too. A safe version needs a per-event "coexist" policy: append the
+      pm entry next to foreign ones, never refuse, never drop. That changes how pm
+      edits a user-owned file, which the current docstrings deliberately avoid. Decide:
+      coexist-append for UserPromptSubmit (my recommendation), or keep refuse-on-conflict
+      and accept that it breaks for those users. Side effect to accept: became_idle
+      re-arms after a typed turn, so an in_progress PR that goes idle again with auto-start
+      on gets an auto-review. Current host and scratch settings hold only pm hooks
+      (Notification x2, Stop). No auto-start target added and no QA unpaused.'
+    created_at: '2026-10-23T17:52:40Z'
+    last_edited: '2026-10-23T17:52:40Z'
+  - id: note-1952e9c
+    text: 'Finalize handoff (2026-10-23): S33 verdict stays INPUT_REQUIRED; nothing
+      is approved or implemented here. The scope choice for the NEXT native review
+      step is resolved: retain RQ34, and implement the bounded prompt-start status
+      fix (pr-2a44020; see note-8ab9169) using the coexist-append install policy.
+      The pm UserPromptSubmit hook is appended next to existing user hooks and never
+      refuses or drops them.'
+    created_at: '2026-10-23T17:55:19Z'
+    last_edited: '2026-10-23T17:55:19Z'
+  - id: note-3082972
+    text: 'Review d0d0 i1 (af19cfcf + spec 9ff9a728, CODE CHANGE, needs independent
+      re-review and native QA): implemented the pr-2a44020 fix per note-1952e9c. pm
+      installs a UserPromptSubmit hook (receiver "user_prompt"; stores no prompt,
+      prints nothing). It is appended next to user hooks and never refused. Notification/Stop
+      keep refuse-on-conflict. Merging is now hook-level for every pm event: all user
+      hooks are kept, including other Notification matchers that the old wholesale
+      replacement dropped. Only pm hooks are replaced, and up-to-date events are not
+      rewritten. PaneIdleTracker clears idle/waiting/idle_notified on user_prompt.
+      Live control (isolated HOME, real claude 2.1.309, S33 stub; /pm-captures/review-d0d0-i1/live-control/README.md):
+      after a typed turn the patched tracker reported WORKING (idle=false) about 1.2
+      s after Enter and idle again at the next idle_prompt. The pre-fix tracker stayed
+      idle throughout. Bounded limitation: for a prompt blocked by a user hook (no
+      ordering between hooks assumed), pm still records user_prompt, so the patched
+      tracker reports working until Claude re-fires idle_prompt about 60 s later (60.7
+      s observed), then idle. Trust dialog: waiting until the first user_prompt. Permission
+      approval is unchanged (pane keeps waiting until its next event). Side effect:
+      became_idle re-arms after a typed turn; only idempotent handlers run (auto-review
+      for in-scope in_progress PRs with auto-start on, merge re-check). After merge,
+      the next pm session/TUI start appends the UserPromptSubmit entry to the host
+      ~/.claude/settings.json. Full suite 3510 passed (env -u PM_HOST_HOME, /usr/bin
+      first), logs /pm-captures/review-d0d0-i1. impl.md item 27.'
+    created_at: '2026-10-23T18:15:37Z'
+    last_edited: '2026-10-23T18:15:37Z'
+  - id: note-2f2ded8
+    text: 'Review a183 i1 (aaf15356, CODE CHANGE, needs independent re-review + QA
+      RQ35): pm hook ownership is now an exact receiver invocation, not a substring.
+      af19cfcf deleted user hooks that mentioned or also ran the receiver. 3 mutation-checked
+      regressions; suite 3525 passed. Spec f4108fbf archived impl §5 items 1-26 and
+      qa passes 2-13 verbatim (impl-validation-history.md, qa-passes-2-13.md). Host
+      builders: sign-off 117479 B (~13.6 KB headroom), so keep verdict notes concise.
+      Evidence /pm-captures/review-a183-i1.'
+    created_at: '2026-10-23T18:33:50Z'
+    last_edited: '2026-10-23T18:33:50Z'
+  - id: note-5588b1e
+    text: 'Review a183 i2 (b8ebe2c3, CODE CHANGE, small, needs normal re-review):
+      aaf15356 exact-invocation ownership and the f4108fbf spec archive (verbatim,
+      checked line by line) are sound. One fix: a non-string hook "command" in user
+      settings.json made shlex.split raise AttributeError at hook install (pm session/TUI
+      start). It is now kept as a user hook. Regression test_installer_keeps_malformed_user_prompt_hooks
+      (mutation-checked). Full suite 3526 passed; logs /pm-captures/review-a183-i2
+      (an interrupted superseded first run is labelled there, its partial log was
+      lost).'
+    created_at: '2026-10-23T18:39:59Z'
+    last_edited: '2026-10-23T18:39:59Z'
+  - id: note-67113fc
+    text: 'Review a183 i2 follow-up: a plain-string hook entry on Notification/Stop
+      crashes pm session/TUI start (AttributeError in _detect_foreign_hooks). It is
+      pre-existing and identical on master 859657d8. Classified as input Claude Code
+      does not accept: 2.1.309 skips the entry with a warning. pm should still not
+      crash, so filed pr-0ac6f7a (pending, not started). Evidence /pm-captures/review-a183-i2/plain-string-hook-entry.'
+    created_at: '2026-10-23T18:41:30Z'
+    last_edited: '2026-10-23T18:41:30Z'
+  - id: note-0d6c70d
+    text: 'QA S34 (2026-10-23, RQ35, head c24f18b0, no code change; captures /pm-captures/scenarios/34,
+      manifest.md): every Then held live with real claude 2.1.309 on a stub. The S33-layout
+      upgrade appends only the pm UPS entry; the 2nd start leaves settings byte-identical
+      (receiver re-copied). Typed turn: user hooks ran, user_prompt +0.03 s, Stop
+      +2.1 s, idle_prompt +62 s; no prompt stored, no hook text in the request. Refusals
+      (a/b/c) use the exact wording, rc 1, nothing changed. 24 concurrent start rounds
+      with 2 live typing panes: 70/70 Enters got their own user_prompt within 0.06
+      s, no parse/hook errors. Coverage caveat: the non-atomic write_text/copyfile
+      race was not provoked (resets were upgraded about 60 ms later; both starts wrote
+      only once), so absence is not proof. h1/h4 scratch tmux servers + stub left
+      running (nested Claude).'
+    created_at: '2026-10-23T19:15:55Z'
+    last_edited: '2026-10-23T19:15:55Z'
+  - id: note-c751503
+    text: 'QA S35 (2026-10-23, RQ35/RQ34 host, captures /pm-captures/scenarios/35,
+      REPORT.md): CODE CHANGES needing normal re-review, pushed 41ff0d3c + ebf919e8
+      (tested as 43e38f0c/db01a42c, same tree; full suite 3532 passed). (1) tech_tree:
+      a live impl turn spinner/⏸ was masked by a finished review-loop badge (⟳2☠ after
+      z d); live impl now drops only that badge, as for live QA. (2) pane_idle: hook
+      file keeps only the latest event and impl panes poll every 5 s, so a turn answered
+      in ~0.1 s left Stop and the tracker stayed idle while the picker read [working];
+      a Stop newer than an observed idle_prompt now reads working until the next idle_prompt.
+      Story 2 held only on db01a42c (pre-fix and 43e38f0c attempts kept). Held: S1
+      typed turn after auto-start off, S3 pm sends (replays 3b/3c), S4 s0 untracked,
+      S5 user hook + BLOCKME 60.1 s working, S6 MERGED +4.8 s. Unobserved, hand to
+      next QA: S6 visible picker popup merge row [working] (pickmon read [working]
+      at 20:17:23.506, user_prompt 20:17:23.478; no popup in that 5 s window). Fixture:
+      fake qa_verification gives a second follow-up (fake exits on re-verify input,
+      pr-04dfffb); use a real verifier for follow-up counts.'
+    created_at: '2026-10-23T20:25:54Z'
+    last_edited: '2026-10-23T20:25:54Z'
+  - id: note-0e183ff
+    text: 'QA S36 (2026-10-23, container two-PR routed QA, RQ35 in containers): hook
+      Thens held live. The pm UserPromptSubmit entry was appended after the byte-identical
+      user hook at both installs. For all 36 routed sessions, user_prompt records
+      = stub turns. The user hook ran 0 times for container turns (non-blocking error
+      only). The proj2 reinstall during live turns gave no gap and no errors. Reminder,
+      flag follow-up and typed question each reached only their target pane. All runs
+      PASS/FINALIZE_DONE; 0 secrets. CODE CHANGE 93dca6ae needs normal re-review:
+      (1) the second PR started on a first QA run had no node spinner until the 300
+      s sync (workdir gate on cached data); (2) a queued launch narrows state.scenarios,
+      so the 94f36a18 prune dropped the run own live keys (spinner and picker qa entry
+      gone for the refiner turn); (3) another project TUI mount swept this project
+      live qa runtime entries. Regressions fail when reverted. Combined suite with
+      S35 41ff0d3c/ebf919e8: 3537 passed (88124d1b, code-identical to 27678558). Spec:
+      refiner panes are never tracked by node/picker, so a typed refiner turn cannot
+      read as working. Infra: the post-fix TUI died on fork EAGAIN at the 2048 PID
+      cap (PID-1 zombies, pr-2111fa0 note-76c738e) and recovered via TUI resume. Captures
+      /pm-captures/scenarios/36 (REPORT.md).'
+    created_at: '2026-10-23T20:34:19Z'
+    last_edited: '2026-10-23T20:34:19Z'
+  - id: note-528c0be
+    text: 'S36 follow-up, recipe docs only (needs normal independent review; S36 verdict
+      stays NEEDS_WORK). tmux-screen-recording.md and cli-recording.md now carry the
+      S36-validated VFR render_cast: agg from PATH, -vsync vfr -enc_time_base 1/100,
+      the last frame held at the GIF duration, write to .partial and rename on success,
+      and on failure no recording.mp4 is published. They also explain that video time
+      is compressed pause time and how to pick key frames with select, not -ss. Codec
+      and size rules are unchanged; casts are never modified. Validated both snippets
+      as written on 2 sparse S36 casts: output identical to the S36 renders (5.34
+      s/7 frames, 3.80 s/12), ffmpeg and agg failure paths, select vs -ss, source
+      sha unchanged (/pm-captures/scenarios/36/recipe-validation). Open from S36:
+      typed refiner turns are untracked by node/picker and were not observed as working;
+      S35 merge picker visibility still needs QA.'
+    created_at: '2026-10-23T20:51:51Z'
+    last_edited: '2026-10-23T20:51:51Z'
+  - id: note-15858db
+    text: 'Review 3992 i1 (156d7ae4 + spec 8dcda1fe; synced recipe f3385f12, which
+      is recipe-only and looks sound): S35 41ff0d3c/ebf919e8 and S36 93dca6ae reviewed
+      independently and all sound. Each of the 5 fixes was mutation-checked: its regression
+      fails when the fix is reverted. The mount-sweep reorder is safe because the
+      first _load_state writes no runtime state. The only code change is a render
+      refactor with no behaviour change: QA and impl now share one live_state and
+      one marker branch, and _get_loop_marker(qa_live=) is renamed pane_live. Re-mutated
+      after the refactor. Spec: RQ35 "QA pane" now means the scenario worker. Refiner,
+      s0, planner, verifier and finalizer panes are untracked by design (162442ec),
+      so the S36 typed-refiner Then is classified explicitly, not waived; filed pr-eee7483
+      to show refiner turns. Fifteenth pass: a visible picker popup frame with the
+      merge row [working] during a HELD turn is required. A MERGED reply closing the
+      row is terminal and is not a missing [idle]. Full suite 3537 passed (env -u
+      PM_HOST_HOME, /usr/bin first). Log in /pm-captures/review-3992-i1.'
+    created_at: '2026-10-23T20:57:05Z'
+    last_edited: '2026-10-23T20:57:05Z'
+  - id: note-826d2cd
+    text: 'Review 3992 i2 (c8030cb6, spec-only): i1 render refactor 156d7ae4 checked
+      line by line and behaves the same as before (live_state is only waiting/active/None;
+      the sign_off branch is reached as before). Spec 8dcda1fe and pr-eee7483 are
+      consistent. impl.md had not recorded the S35/S36 fixes 41ff0d3c/ebf919e8/93dca6ae
+      and still named qa_live=; added item 28 and fixed both. Full suite 3537 passed
+      on 91f77840; log /pm-captures/review-3992-i2.'
+    created_at: '2026-10-23T21:02:35Z'
+    last_edited: '2026-10-23T21:02:35Z'
+  - id: note-724fd74
+    text: 'QA S37 (2026-10-23, host, head ace966c7 code; captures /pm-captures/scenarios/37,
+      manifest.md): closed the S35 story-6 gap live, no product change. The rendered
+      picker popup from merge-<M> showed "● merge [open] [working]" during a turn
+      held 22 s at the main stub (after user_prompt, before release), [working] again
+      2 s after the fast reply Stop (ebf919e8), and [idle] after idle_prompt (60.0
+      s later). ⏸M + spinner held throughout; MERGED came +2.6 s after Stop and the
+      merge row left with no [idle] (terminal). Q routed QA stayed held and unchanged,
+      then PASS FINALIZE_DONE; 0 secrets. Doc-only commit 87279568 (user request):
+      the recording recipes now say a failed render_cast keeps an older completed
+      mp4 and that the call status should be checked; needs normal review.'
+    created_at: '2026-10-23T21:33:00Z'
+    last_edited: '2026-10-23T21:33:00Z'
+  - id: note-cafeed5
+    text: 'QA S39 (2026-10-23, two projects in one scratch HOME, host, real Claude
+      on router/main stubs; captures /pm-captures/scenarios/39, REPORT.md). 93dca6ae
+      held live: second PR first-run spinner within 1 s of its held worker, queued
+      s3 launch kept A/B spinning and runtime panes (181/181 samples), P2 TUI start
+      and restart left P1 runtime files byte-identical with no P1 sweep. RQ33 supersede
+      held. CODE CHANGE a711f411 needs normal re-review (pre-existing on master, plus
+      the superseded drop from 60574f28): ~/.pm/workdirs/qa is shared, and a TUI resume
+      scan deleted another project live qa_resume.json about 30 ms after that project
+      TUI died, treating the PR as "left QA". The killed TUI restart then never resumed
+      (C lost spinner and [working] mid-turn). The scan now skips PRs outside its
+      own project. Regression test_other_projects_snapshots_are_left_alone (1 failed
+      reverted / 37 passed); full suite 3538 passed on a711f411. Post-fix: P1 restart
+      while P2 ran resumed A and B, and P2 restart resumed C. Spec: impl.md item 29,
+      qa.md RQ36 + sixteenth pass (5f557465). Harness: plain t on a PR with a qa window
+      only focuses it (use z t).'
+    created_at: '2026-10-23T21:51:58Z'
+    last_edited: '2026-10-23T21:51:58Z'
+  - id: note-ec1616b
+    text: 'QA S38 (2026-10-23, host, two PRs, real Claude impl/s0/refiner/worker;
+      captures /pm-captures/scenarios/38, REPORT.md): no product change. Held live:
+      held R impl turn + 79 ms P fast turn each spin from their own events only (one
+      typed-turn request per PR); running loop ⟳1 wins over a typed turn for all 180
+      s, then ⟳1✓ and impl spinner on a later turn; QA worker held turn spinner, live
+      permission dialog -> [wait] + red ⏸ until idle_prompt, refiner/s0 typed turns
+      isolated and untracked (pr-eee7483), QA PASS ⟳1⏸ (24(a)), i -> sign_off no ⟳.
+      Literal story-2 Then ''⟳1✓ back within ≤5 s'' not shown: 4.9-5.4 s (0.5 s sampling);
+      16 transitions at 0.1 s sampling were 0.8-4.2 s. Spec clarification 87f9783c
+      (qa.md RQ35 Timing: a few seconds = next 5-tick impl poll + render, not a hard
+      deadline) needs normal independent review. Harness: scratch settings copied
+      from host allow Bash, so no permission dialog; S38 seed_home drops it (story3
+      attempt 1 kept as invalid fixture).'
+    created_at: '2026-10-23T22:01:06Z'
+    last_edited: '2026-10-23T22:01:06Z'
+  - id: note-e1f94df
+    text: 'Review 5e26 i1 (7968f576, CODE CHANGE, needs normal re-review): a711f411
+      and docs 87279568, 87f9783c, 5f557465 are sound. a711f411 reloaded project.yaml
+      on every 5 s resume scan while another project snapshot existed; foreign PR
+      ids are now cached, cleared whenever project.yaml changes (inode/mtime/size),
+      so a PR pulled/added after its snapshot was first seen resumes on the next scan
+      (supervisor concern). 3 mutations checked: never-invalidate, no-cache, no-filter.
+      Full suite 3540 passed (env -u PM_HOST_HOME, /usr/bin first); log /pm-captures/review-5e26-i1/full-suite.log
+      (it overwrote an earlier 3539-pass run on the pre-invalidation tree).'
+    created_at: '2026-10-23T22:12:31Z'
+    last_edited: '2026-10-23T22:12:31Z'
+  - id: note-21c2de4
+    text: 'Review 5e26 i2 (cbf9941c, test/docs only, no product change): 7968f576
+      foreign-id cache checked independently and sound (per-TUI app, reset on project.yaml
+      inode/mtime_ns/size). Gap: its tests only changed project.yaml via store.save
+      (rename = new inode), so an inode-only stamp passed them. Added test_in_place_project_edit_also_forgets_foreign_ids
+      (in-place rewrite, as an editor under pm edit may), which fails with an inode-only
+      stamp. Also my own never-invalidate mutation fails the pull test. Recipes: finished
+      the half-done rewrap (whitespace only). impl.md item 29: reordered and dated
+      the a711f411 counts. Focused: test_qa_resume + test_qa_self_driving + test_autostart_multi_target
+      184 passed (/pm-captures/review-5e26-i2/focused.log). Full suite not rerun:
+      no source change since the 3540-pass run on 7968f576.'
+    created_at: '2026-10-23T22:17:02Z'
+    last_edited: '2026-10-23T22:17:02Z'
+  - id: note-a2fbcd4
+    text: 'QA16 planner (2026-10-23): spec c236dec1 extends RQ36 and the sixteenth
+      pass for 7968f576 (foreign PR ids cached until project.yaml changes), which
+      landed after S39 and has not run live. S40 reruns the two-project kill/restart
+      in both directions on the current head, plus long downtime, both TUIs killed
+      together, and a result written while its TUI was down (driver killed after overall,
+      S12 method). S41 is new: two clones of one project (two sessions) where a PR
+      QAd in clone B, whose TUI dies, reaches clone A by git pull or an in-place pm
+      edit. From code reading, still open: resume_qa_sync uses the adopting TUI own
+      pm session (get_pm_session), not the snapshot session_tag, and resume_owned_elsewhere
+      is a read, not a claim, so two TUIs can both adopt a run in the same scan. S41
+      decides whether either fails.'
+    created_at: '2026-10-23T22:32:30Z'
+    last_edited: '2026-10-23T22:32:30Z'
+  - id: note-e05e36c
+    text: 'QA S40 (2026-10-23, head 8d938546 incl. 7968f576, no code change; captures
+      /pm-captures/scenarios/40, REPORT.md): RQ36 two-project kill/restart held live
+      in both directions with 95 s downtime (other project snapshot sha+mtime constant
+      in 5 s samples, 0 foreign log lines, Resuming QA ... 3 scenario(s), 1 queued
+      only by the owning TUI, panes/router sids unchanged), both TUIs killed in one
+      command (exactly one resume each, none for B or the other project, further restart
+      none), and a qa-run-bg result written while P2 was down (P1 never touched it;
+      P2 start Recovered completed QA → PASS once, one note, status qa; interrupted
+      finalizer not rerun = pr-0f85376). All A/B/C PASS FINALIZE_DONE, router only
+      work/ refiner+worker, 0 secrets. Harness: Claude re-sends a held stream request
+      every 360 s with the same session id (stub logs sid now); story3 attempt 1 fixture
+      fault kept in story3/attempt1-invalid.'
+    created_at: '2026-10-23T23:26:06Z'
+    last_edited: '2026-10-23T23:26:06Z'
+  - id: note-a6299fd
+    text: 'QA S41 (2026-10-23, two clones of one project, host; captures /pm-captures/scenarios/41,
+      REPORT.md). Four CODE CHANGES need normal independent re-review, pushed as f22e6f4c,
+      c8ab2f4c, ec227cf0 (code-identical to the tested aea367fc, 22890086, d809b358;
+      spec impl.md item 30 + qa.md RQ36 in 72205ab5). (1) An adopted run from the
+      other clone was driven in the adopting TUI session, so it ended PASS (finalize=None)
+      with no finalizer. It now uses the snapshot session; the finalizer runs in the
+      qa-<pr> window that holds the run. (2) After a pull, the adopted PR node appeared
+      only at the 300 s sync (4m25s live); the scan now reloads. (3) A conflicted
+      git pull plus any unknown snapshot killed the TUI (ProjectYamlParseError re-raised
+      by the poll tick); the scan now skips until the file parses, verified live.
+      (4) Check-then-adopt race: claim_resume_file re-checks owner and loop_id under
+      flock and writes the owner before adopting. Three live races had one winner
+      each (B, A, B), which is favorable timing, not proof. The guarantee rests on
+      a deterministic barrier regression and a two-process regression (4/4 fail without
+      the lock). Held: pull and in-place pm edit (same inode) resume once within 1-4
+      s, B panes kept, 0 retries, one note and one finalizer per PR. Full suite 3549
+      passed on d809b358. Fixture caveats: the post-fix P release files 1/2 were wrong
+      (P ran s3/s4); Claude dropped the held P requests itself at 360 s and retried
+      them, and the s3/s4 files released those retries (P PASS FINALIZE_DONE, one
+      note). Claude request timeout is about 360 s, so keep holds under it. Story
+      3 attempt 1 is kept as invalid (the A TUI died from the harness-committed conflict).'
+    created_at: '2026-10-23T23:44:16Z'
+    last_edited: '2026-10-23T23:44:16Z'
+  - id: note-a722e58
+    text: 'Review 2b8a i1 (db1eb982, CODE CHANGE, small, needs normal re-review):
+      S41 f22e6f4c (snapshot session), c8ab2f4c (parse-error deferral), ec227cf0 (flock
+      claim) reviewed and sound; _load_state from the scan cannot re-enter it (on_state_loaded
+      only schedules an async worker). Gap fixed: the scan guard caught only ProjectYamlParseError,
+      but store.load also raises PlanValidationError (a pulled plan parent that does
+      not validate) and FileNotFoundError (checkout unlinks then rewrites), which
+      escaped the poll tick the same way. Now skipped and retried. Regression test_unloadable_project_file_does_not_escape_the_scan[missing|bad_plan_parent],
+      both fail reverted. Full suite 3551 passed (env -u PM_HOST_HOME, scratch venv
+      PYTHONPATH=/workspace); tail in /pm-captures/review-2b8a-i1.'
+    created_at: '2026-10-23T23:53:22Z'
+    last_edited: '2026-10-23T23:53:22Z'
+  - id: note-d63d41c
+    text: 'Review 2b8a i2 (59d15fea, CODE CHANGE, small, needs normal re-review):
+      db1eb982 (scan survives PlanValidationError/OSError) is sound. Gap fixed: the
+      resume scan "left QA" cleanup deleted the snapshot of a run launched from another
+      clone when this clone project.yaml still had the PR at an older status, so that
+      clone restart had nothing to resume (S39 loss between clones). Cleanup now applies
+      only to runs launched from this TUI pm session (snapshot session_tag); provenance
+      decides, not liveness: a foreign run is kept (until project.yaml changes) even
+      when its session is gone, and after a pull to qa it is adopted and driven in
+      its session or, if gone, this TUI one (qa_loop.launched_elsewhere, _resume_session).
+      Cost: a foreign snapshot whose PR really left QA stays until its clone drops
+      it. Regressions test_stale_status_keeps_another_clones_snapshot[live|gone] (liveness-only
+      guard fails gone; no guard fails both) and test_stale_status_drops_this_sessions_own_snapshot.
+      Full suite 3554 passed; logs /pm-captures/review-2b8a-i2 (README lists the superseded
+      liveness-guard run and an -x run stopped by missing markdown).'
+    created_at: '2026-10-24T00:04:18Z'
+    last_edited: '2026-10-24T00:04:18Z'
+  - id: note-ac6e235
+    text: 'Review 5e15 i1 (59d15fea): PASS, no code change. The stale-status guard
+      (launched_elsewhere) is sound and the mutation is caught; related tests 395
+      passed. /pm-captures/review-5e15-i1. Prompt-size evidence went to pr-ace66e5
+      (note-62c9b82).'
+    created_at: '2026-10-24T00:14:52Z'
+    last_edited: '2026-10-24T00:14:52Z'
+  - id: note-033c97b
+    text: 'QA17 planner (2026-10-24): spec 2bcae5f6 adds a seventeenth pass (S42+),
+      delta-only, for db1eb982 (scan survives any project.yaml load failure) and 59d15fea
+      (another clone snapshot kept while this clone status is stale); neither has
+      run live. Two open points from code reading, which the scenarios decide: (a)
+      once B session is gone, A drives the adopted run in its own session, which has
+      no qa-<pr> window, so an all-PASS run may end finalize=None; the snapshot also
+      keeps B session_tag. (b) The superseded-snapshot drop still decides on liveness,
+      so a PR QAd in both clones can lose B older run once B TUI dies. Harness: S41
+      scripts, with recordings rendered by the current /workspace/pm/qa/artifacts
+      render_cast (VFR), not the S41 render_cast.sh or /scratch/qa-artifacts.'
+    created_at: '2026-10-24T00:23:14Z'
+    last_edited: '2026-10-24T00:23:14Z'
+  - id: note-81d5495
+    text: 'QA S42 (2026-10-24, two clones, host; captures /pm-captures/scenarios/42,
+      REPORT.md). CODE CHANGE bb39b92e needs normal re-review and reconciliation with
+      S43 a817f5c9 (both edit pm_core/tui/qa_loop_ui.py): the f22e6f4c tree reload
+      after adoption ran only for a PR with no node, so a PR pulled earlier at in_review
+      and later pulled in QA stayed in_review in the adopting TUI until the 300 s
+      sync (live: qa at +57 s, on the sync tick). The scan now reloads whenever the
+      shown status differs from project.yaml (_shown_status); regression test_resume_of_a_pr_shown_at_a_stale_status_reloads_the_tree
+      fails reverted; full suite 3555 passed. Replay on bb39b92e: qa at +2 s after
+      the pull. Held live: 59d15fea provenance (X snapshot kept 157 s of A scans with
+      dead B owner, only B restart resumed it, PASS FINALIZE_DONE, finalizer in B
+      qa-X, 1 note); pre-fix (59d15fea reverted) deleted it 2.2 s after the kill,
+      silently, and X stayed qa uncollected; pull adoption drives windows in B session
+      (one finalizer there, B restart does not resume); own stale snapshot dropped
+      0.9 s after A restart, B never touches it, second restart logs nothing. Session-gone
+      adoption (spec point a) not covered. Harness: active_pr is indented in project.yaml
+      (awk ^active_pr misses it); run pm from cwd outside /workspace or pm which reports
+      /workspace.'
+    created_at: '2026-10-24T01:18:07Z'
+    last_edited: '2026-10-24T01:18:07Z'
+  - id: note-bd2627d
+    text: 'QA S43 (2026-10-24, two clones, host; captures /pm-captures/scenarios/43,
+      REPORT.md). CODE CHANGES needing normal re-review, pushed af2278e5 + e0f74e2b
+      (tested as a817f5c9/b8c111eb, rebased onto S42 bb39b92e), impl.md item 31: (a)
+      an idle TUI ran the resume scan only on the 300 s sync, so a pulled orphan was
+      adopted 53 s late; a 5 s idle scan timer fixes it (live +4 s). (b) a run resumed
+      after its session died (own session killed+restarted, or another clone gone)
+      had no qa-<pr> window and ended PASS (finalize=None), pre-existing (single-clone
+      control same); the finalizer now opens the window. (c) runs of one PR from two
+      clones superseded/adopted each other (pre-fix Z1: A drove B run, 2 notes in
+      A, 0 in B); now per-session supersede, and no adoption while this clone QAd
+      the PR alongside it, from a retained qa_run.json record (survives TUI restart;
+      RAM-only version failed the fresh-app regression). (d) a relaunched pane reached
+      qa_resume.json only at the next tick (10 s+ with backoffs), so a TUI death then
+      could relaunch a duplicate; now written at once (bounded regression; live X4
+      covered only the steady state). Post-fix all X3P/C1P/X4/Z1P/Z2/Z3 Thens held
+      except the existing-PR tree box, stale 32.4 s after the pull: S42 bb39b92e,
+      not re-run live on the merged tree. Suite 3567 passed on 8061ea7e.'
+    created_at: '2026-10-24T01:52:17Z'
+    last_edited: '2026-10-24T01:52:17Z'
+  - id: note-0ef48df
+    text: 'QA S44 (2026-10-24, two clones, host, captures /pm-captures/scenarios/44
+      REPORT.md): CODE CHANGES needing normal re-review, pushed deb23fea, a4a45ffa,
+      67ea18e8 (tested as 6a4886d5/21900e9c/4b9eedca; full suite 3573 passed on combined
+      67ea18e8 over S43 4b702017). (1) A merge whose plans do not validate killed
+      the TUI at the 300 s background sync (_background_sync raised PlanValidationError,
+      TUI unmount; db1eb982 only covered the scan): sync + _load_state now skip it
+      like a parse error. (2) A sync (or reload) while a checkout had project.yaml
+      absent silently set app._root=None, so the resume scan stopped and an orphan
+      was adopted 4 min 55 s late: root/state kept while the pm dir exists. (3) A
+      fresh TUI never logged the absent-file scan skip (None stamp == default): sentinel.
+      Each regression fails reverted on the combined tree. Story 4 stale in_review
+      node after adoption = S42 bb39b92e (my duplicate dropped); combined replay qa
+      +<1 s. All four story Thens held post-fix; router only work/ refiner+worker;
+      0 secrets.'
+    created_at: '2026-10-24T02:26:45Z'
+    last_edited: '2026-10-24T02:26:45Z'
+  - id: note-6a7402d
+    text: 'Review c1d4 i1 (CODE CHANGE, small, needs normal re-review): S42 bb39b92e,
+      S43 af2278e5/e0f74e2b and S44 deb23fea/a4a45ffa/67ea18e8 reviewed, all sound.
+      Gap fixed: about 40 other TUI keep-state handlers caught only ProjectYamlParseError.
+      Reproduced: a QA NEEDS_WORK completion while plans did not validate raised PlanValidationError
+      out of the poll timer, which kills the TUI. PlanValidationError now subclasses
+      ProjectYamlParseError, and the S44 tuples are folded back. Regressions test_invalid_plans_are_an_unloadable_file
+      and test_needs_work_survives_plans_that_do_not_validate; 5 tests fail with the
+      subclass reverted. impl.md item 32 now records S44. Filed pr-43b14d2 (pre-existing:
+      _resumed_qa_pr_ids never cleared, so a later orphan of a PR this TUI already
+      handled is not recovered). Full suite 3575 passed; logs in /pm-captures/review-c1d4-i1.'
+    created_at: '2026-10-24T02:41:55Z'
+    last_edited: '2026-10-24T02:41:55Z'
+  - id: note-e0df1f4
+    text: 'Review c1d4 i2 (129cf5d2, CODE CHANGE, small, needs normal re-review):
+      i1 96555732 (PlanValidationError subclasses ProjectYamlParseError) is sound:
+      no handler orders both excepts, CLI main prints Error: for both. Gap fixed:
+      S44 a4a45ffa keeps the TUI root while project.yaml is missing, so keep-state
+      handlers catching only ProjectYamlParseError hit FileNotFoundError on store.load
+      and it escaped the poll timer (reproduced: QA NEEDS_WORK completion during the
+      absence). store.load now raises ProjectYamlMissingError (ProjectYamlParseError
+      + FileNotFoundError), so no-project callers are unchanged. 2 regressions fail
+      with it reverted. impl.md 32(e). Full suite 3577 passed; logs /pm-captures/review-c1d4-i2.'
+    created_at: '2026-10-24T02:51:13Z'
+    last_edited: '2026-10-24T02:51:13Z'
+  - id: note-233fd2b
+    text: 'QA18 planner (2026-10-24): spec 55431e7b adds RQ37 and an eighteenth pass
+      (S45+), delta-only, for review c1d4 i1/i2 (96555732, 129cf5d2). Those made all
+      ~40 keep-state handlers survive invalid plans and a missing project.yaml, and
+      have not run live. S42-S44 evidence stands. Two open points from code reading,
+      which S45/S46 decide with a pre-existing control: (a) a run in planning dies
+      "QA thread crashed" when its periodic merge guard (qa_loop.py ~4537) or the
+      spec-gate load (~4687) meets an unloadable file. (b) A completion processed
+      during the failure loses its NEEDS_WORK->in_review transition, its QA note and
+      the zz t restart or review loop. Only pm-log warnings are left, poll_qa_state
+      then clears the snapshot, and the TUI still prints "returning to review". The
+      RQ37 decision: a load failure ends no run and loses no result, which is applied
+      once the file loads. QA keys refuse with Error: and start nothing.'
+    created_at: '2026-10-24T03:05:40Z'
+    last_edited: '2026-10-24T03:05:40Z'
+  - id: note-5a9df10
+    text: 'S45 (2026-10-24) coordination: both RQ37 predictions reproduced live on
+      4d8f968a (captures /pm-captures/scenarios/45/pre-fix/combined; narrow 131 s
+      control window). (a) planning run A "QA thread crashed" 9 s after a conflicting
+      pull (mid-planning merge guard load) -> fixed in e11b952a (CODE CHANGE, needs
+      normal re-review): merge guards skip a round, start/spec-gate/resume loads wait
+      until project.yaml loads again; 17 regressions in tests/test_qa_load_failures.py.
+      (b) completions during conflict markers: C plain-t NEEDS_WORK logged "returning
+      to review" but transition + note lost (warnings only, snapshot cleared); F zz
+      t PASS 1/2 "restarting QA" then "Error: project.yaml is not valid YAML" and
+      the loop is gone; G zz t NEEDS_WORK review loop never started (_start_self_driving_review
+      warning) -> left to S46 per shepherd. Observation: zz t (start_or_stop_qa_loop)
+      leaves an in_review PR at in_review during its run (no in_review->qa like start_qa),
+      so a zz t NEEDS_WORK transition is a no-op.'
+    created_at: '2026-10-24T03:26:00Z'
+    last_edited: '2026-10-24T03:26:00Z'
+  - id: note-4681536
+    text: 'S46 (in progress) pushed a9b966ec (completion retention, RQ37): a finished
+      QA run is processed only once project.yaml loads (run, snapshot, transition,
+      note, zz t restart, [done] mirror wait; failed writes retried; one "waiting
+      for project.yaml" line per reason), and a TUI started/restarted on an unloadable
+      file shows an empty tree instead of dying in guide.detect_state at mount (reload
+      on file change via the 5 s idle timer). Pre-fix live on 4d8f968a: adopted X
+      + own P (conflict) and X3 (missing file) got 0 notes with snapshots cleared;
+      pm tui restart on conflict markers / invalid plans -> RuntimeError at mount
+      + TUI unmount. Regressions tests/test_qa_completion_unloadable.py (7, all fail
+      pre-fix). S45 may reuse it; post-fix S46 replay pending.'
+    created_at: '2026-10-24T03:50:56Z'
+    last_edited: '2026-10-24T03:50:56Z'
+  - id: note-c953c14
+    text: 'S46: pushed 54c88ad8 on top of a9b966ec (review of the a9b966ec race path).
+      A completion now writes its transition + QA note first (each once); until both
+      took, nothing else runs and the whole completion is retried. Follow-ups that
+      meet an unloadable file (review loop start, zz t start_qa, sign-off, tree reload)
+      report False and are retried individually with the snapshot kept; a retried
+      zz t restart that replaces the run only drops the old snapshot. Also clears
+      the sticky "project.yaml cannot be loaded" line once the file loads (it hid
+      "QA PASS ... press i" live). 5 caller-level race regressions in tests/test_qa_completion_unloadable.py
+      fail on a9b966ec. S45 can validate its completion matrix on 54c88ad8.'
+    created_at: '2026-10-24T04:00:56Z'
+    last_edited: '2026-10-24T04:00:56Z'
+  - id: note-0b329d4
+    text: 'QA S46 (2026-10-24, two clones, RQ37 completions + restarts; captures /pm-captures/scenarios/46,
+      REPORT.md): NEEDS_WORK. Pre-fix 4d8f968a reproduced the QA18 predictions live:
+      adopted X + own P (conflict markers) and X3 (file missing) each ended with 0
+      QA notes, snapshot cleared, no retry; pm tui restart on conflict markers / invalid
+      plans died at mount (guide.detect_state RuntimeError, TUI unmount). CODE CHANGES
+      needing normal re-review: a9b966ec (completion waits for the file), 54c88ad8
+      (writes first then follow-ups, each retried; race regressions), e52e8fac (empty
+      tree names the reason). Post-fix all three stories held: one note each, recorded
+      after the file loads, also across an in-conflict restart; finalizers in the
+      launching session window; restarted TUI alive, snapshots/owners untouched, Q
+      resumed once per round with identical panes; X2 only by B; pm session Error
+      rc 1. Full suite 3610 passed on e52e8fac. Not met as written: story 3 expects
+      a "QA resume scan skipped [Errno 2]" line, but the scan only loads the file
+      when an untracked snapshot exists; story 3 60 s cap < ~91 s release-to-complete,
+      so the absence was extended. Recipes: af12945d adds ffmpeg -nostdin to render_cast
+      (batch loop mangled paths); needs review. Filed pr-235f465.'
+    created_at: '2026-10-24T04:53:57Z'
+    last_edited: '2026-10-24T04:53:57Z'
+  - id: note-ff48815
+    text: 'QA S45 (2026-10-24, RQ37 host one clone, captures /pm-captures/scenarios/45
+      REPORT.md): both predictions reproduced live on 4d8f968a; (b) also on the bf21931b
+      base (pre-existing). CODE CHANGES needing normal re-review: e11b952a planning
+      guards (merge guards skip a round; start/spec-gate/resume loads wait), 8400faf7
+      stop during the spec-gate wait ends quietly, 0454edaf sync skip names the missing
+      file, be8f23d1+85463cfe+195889a5 review->QA hand-off kept pending (status write
+      or QA start) and retried once the file loads, dropped on zz t stop / auto-start
+      scope loss (live: a zz t review PASS during invalid plans left G at in_review
+      for good pre-fix; post-fix QA starts at the fix second), 8ff5e7a2 test mock.
+      S46 a9b966ec/54c88ad8 completion retention validated live for plain t NEEDS_WORK/PASS/INPUT_REQUIRED,
+      zz t PASS below count and NEEDS_WORK, and a kill -9 restart (no resume/recover/second
+      note). All Thens held on e52e8fac+; full suite 3622 passed. Observation: zz
+      t on an in_review PR does not move it to qa.'
+    created_at: '2026-10-24T05:39:53Z'
+    last_edited: '2026-10-24T05:39:53Z'
+  - id: note-1dfc281
+    text: 'Review 7026 i1 (ba5dd6e7, CODE CHANGE, small, needs normal re-review):
+      S45 e11b952a/8400faf7/0454edaf/be8f23d1/85463cfe/195889a5 and S46 a9b966ec/54c88ad8/e52e8fac
+      reviewed, all sound. Fixed: (1) a completion follow-up that fails after the
+      transition+note writes keeps the snapshot, so a TUI restart in that gap re-processed
+      it and wrote a second QA note (reproduced in a test); _record_qa_note now skips
+      a note this run already has (same verdict + this run workdir). (2) _load_state
+      cleared the sticky "cannot be loaded" line without its seq, which could wipe
+      a newer message. impl.md 33(d) + new item 34 (S45 fixes were unrecorded). Regressions
+      fail reverted; full suite 3624 passed; /pm-captures/review-7026-i1.'
+    created_at: '2026-10-24T05:53:35Z'
+    last_edited: '2026-10-24T05:53:35Z'
+  - id: note-f4b4eb0
+    text: 'Review 7026 i2 (a815e12e, spec-only): i1 ba5dd6e7 independently reviewed
+      and sound. Note dedupe (same verdict + run workdir) matches the real recovery
+      path (build_resume_state restores qa_workdir; each start gets a new loop_id/workdir,
+      _record_qa_note is the only QA-note writer). Load-error line cleared by seq
+      is correct. 3 mutations caught; focused 178, full suite 3624 passed; /pm-captures/review-7026-i2.
+      Fixed stale impl.md index (S1-S46, suite pointer 33(d)).'
+    created_at: '2026-10-24T06:02:10Z'
+    last_edited: '2026-10-24T06:02:10Z'
+  - id: note-f4e5cae
+    text: 'QA19 planner (2026-10-24): spec a8ab7d98 adds a nineteenth pass (S47+),
+      delta-only, for ba5dd6e7 (one QA note per run when a TUI restart re-processes
+      a completion whose follow-up was pending; load-error line cleared by its seq).
+      S45/S46 evidence stands. The gap (note written, follow-up pending, snapshot
+      kept) is reached reliably only through the auto-start sign-off hand-off, whose
+      locked_update waits on the project lock: a helper takes the lock the instant
+      the note lands and leaves the file unloadable. start_qa/review start/tree reload
+      only store.load (sub-ms race). Pre-fix control 5de77fe7. Two open points from
+      code reading, which the scenarios decide: (a) RQ38: with `pm edit` open (lock
+      held until quit), _transition_pr_status/_record_qa_note/start_signoff/the pending
+      hand-off retry StoreLockTimeout every poll tick on the TUI thread, 2 s each,
+      so the TUI may stay busy (master: one block, note lost). (b) Two clones: if
+      the adopting TUI dies in the gap and the launching clone restarts first, it
+      may recover the run into its own project.yaml, which lacks the adopter note
+      (one run, two notes).'
+    created_at: '2026-10-24T06:18:55Z'
+    last_edited: '2026-10-24T06:18:55Z'
+  - id: note-6060b10
+    text: 'QA S49 (2026-10-24, two clones, host; captures /pm-captures/scenarios/49,
+      REPORT.md). The QA19 point (b) prediction reproduced live on 3ebe4d7a. A adopted
+      B run X, wrote note-1905316 (06:35:48), and the auto-start sign-off hand-off
+      then failed on the held lock, so the snapshot was kept. A was killed -9. B,
+      started first, recovered X as its own (session_tag B, dead owner) and wrote
+      a second, separately created note-1905316 (06:35:52) in B project.yaml. CODE
+      CHANGE b740e188 needs normal re-review: _record_completion marks the snapshot
+      result_recorded_by=<session> under the claim lock; the resume scan and claim_resume_file
+      leave a run recorded elsewhere to that session; a run recorded here is processed
+      here (dedupe "already recorded"). 6 mutation-checked tests in tests/test_qa_resume.py;
+      full suite 3629 on b740e188. Post-fix and on combined 716d6ce1 (S47+S48): gap
+      reached on attempt 1 each time; B silent; A after the resolve logged Recovered
+      1 + already recorded 1; one note (A only before sync, the same id/created_at
+      replicated after); one finalizer in pm-b:qa-X; no sign-off. Story 2 (adopted
+      run resumed after an A restart) held twice. Test-only 5da5ea11: the planner-note
+      mock lacked locked_update timeout= after 716d6ce1; suite 3640. Observations:
+      pm session refuses (Error, rc 1) while project.yaml is unloadable, so a killed
+      TUI stays down until the file is fixed; the combined-head line "waiting for
+      project.yaml to load to record it" shows although only the follow-up waits.'
+    created_at: '2026-10-24T07:13:35Z'
+    last_edited: '2026-10-24T07:13:35Z'
+  - id: note-7e99ea1
+    text: 'S48 (RQ38) shared fix 716d6ce1 (on S49 b740e188 + S47 13eb925b), CODE CHANGE
+      needing normal re-review. Live pre-fix on 3ebe4d7a (pm edit open, F NEEDS_WORK
+      finished): _transition_pr_status retried each poll tick and waited the 2 s lock
+      timeout on the TUI loop each time (15 StoreLockTimeout warnings in 154 s, keys
+      0.056 s -> 1.99 s, spinner/cast gaps of 4 s). Result itself was not lost. Fix:
+      TUI writes retried per tick make one non-blocking attempt (store.NO_WAIT): completion
+      transition+note, start_signoff, review->QA hand-off status write, launch clear_return_awaiting
+      and the shared _enter_qa_status via start_qa(lock_timeout=). A held lock keeps
+      result/follow-up/hand-off pending with its snapshot, says so once ("waiting
+      for project.yaml to be unlocked ..."), lands on the first tick after release.
+      No separate probe (no check-then-act race). User keys/CLI keep the 2 s wait.
+      tests/test_project_lock_held.py (9, per-site mutations each caught). Live post-fix
+      replay in progress.'
+    created_at: '2026-10-24T06:53:33Z'
+    last_edited: '2026-10-24T06:53:33Z'
+  - id: note-9b681d8
+    text: 'QA S48 (RQ38 + ba5dd6e7, host, scratch TUI, routed workers on stub; /pm-captures/scenarios/48
+      REPORT.md). CODE CHANGES needing normal re-review: 716d6ce1 (TUI writes retried
+      per poll tick use one non-blocking lock attempt store.NO_WAIT: completion transition+note,
+      start_signoff, review->QA hand-off status write, launch clear_return_awaiting
+      + shared _enter_qa_status via start_qa(lock_timeout=), recovered completion;
+      user keys/CLI keep 2 s) and 006d7b4d (hand-off "waiting for project.yaml to
+      be unlocked/to load to start QA" line now sticky: live it was hidden by the
+      sticky "Review loop done ... PASS" line; expected NO_WAIT timeout no longer
+      logged at DEBUG each tick). Live pre-fix 3ebe4d7a: keys 1.99 s, spinner/cast
+      4 s gaps x15-17, 15 StoreLockTimeout warnings in 154 s (result kept). Control
+      bf21931b: one 4 s stall, "returning to review" shown, result lost (qa, 0 notes,
+      9 min). Post-fix: keys 0.055 s, 0 gaps >= 2 s, 0 lock warnings, one waiting
+      line per reason, all writes/hand-offs applied once after :wq, restart resumed
+      only the mid-run PR. ba5dd6e7 held (No PR selected kept across load; 5de77fe7
+      control blanks it). Fixture: J sign-off MERGE coerced to BLOCKED (J has no commits).
+      Full suite 3641 passed on 006d7b4d.'
+    created_at: '2026-10-24T07:36:37Z'
+    last_edited: '2026-10-24T07:36:37Z'
+  - id: note-dd3d9a2
+    text: 'QA S47 (2026-10-24, RQ37 one note per run, host, one clone; captures /pm-captures/scenarios/47,
+      REPORT.md). ba5dd6e7 held live: auto-start sign-off hand-off gap (lock helper
+      took the lock as the note landed and left conflict markers), kill -9 or in-place
+      restart, resolve -> Recovered once + "QA note ... already recorded", one note,
+      press i, [done PASS] (A,F on 3ebe4d7a; G,H on df093f0c/006d7b4d). Pre-fix 5de77fe7
+      control wrote a 2nd note with the same workdir. zz t restart race (B) and NEEDS_WORK
+      tree-reload race (C) reached and held on 716d6ce1; distinct runs (resumed, zz
+      t 1-3/3, z t rerun, qa-run-bg while TUI down) one note each. Two CODE CHANGES
+      need normal re-review, both pre-existing on master: 13eb925b the first zz t
+      pass never moved an in_review PR to qa, so the resume scan silently dropped
+      its snapshot at any TUI restart (finished pass: no Recovered/press i; mid-run:
+      run abandoned); 3a3dcc3e the resume snapshot got the final scenario verdicts
+      only after the blocking finalizer, so a run recovered after its driver died
+      mid-finalizer got a note reading "?" per scenario; now written before overall
+      is published (pr-0f85376 finalizer re-run unchanged). Full suite 3642 passed.
+      Spec notes: pm session refuses (rc 1) on an unloadable file, so after kill -9
+      the TUI only returns after the resolve; markers-present restart Thens checked
+      via pm tui restart. With 716d6ce1 the hand-off logs "Sign-off for X waits for
+      project.yaml to be unlocked" (no 2 s StoreLockTimeout).'
+    created_at: '2026-10-24T08:02:18Z'
+    last_edited: '2026-10-24T08:02:18Z'
+  - id: note-8104bd4
+    text: 'Review 679d i1 (64b41a91, CODE CHANGE, small, needs normal re-review):
+      S49 b740e188, S47 13eb925b/3a3dcc3e, S48 716d6ce1/006d7b4d and 5da5ea11 reviewed,
+      sound except: 716d6ce1 made start_signoff always NO_WAIT, so the one-shot skip_qa
+      review PASS hand-off (_maybe_auto_merge, never retried) was lost to any brief
+      lock holder while the TUI said it "waits". start_signoff now takes lock_timeout;
+      only the retried callers (_trigger_signoff follow-up, advance_all) pass NO_WAIT.
+      The one-shot path keeps the 2 s wait and reports Error: as on master. Residual,
+      pre-existing on master and not fixed here: a holder past 2 s or an unloadable
+      file still loses that hand-off (filed pr-7cf1fe4). Also: the wait line for a
+      recorded result whose follow-up waits now says "recorded — follow-up waiting"
+      (S49 observation), and an order-dependent caplog test was fixed. impl.md item
+      38. 4 mutations caught; full suite 3645 passed; /pm-captures/review-679d-i1.'
+    created_at: '2026-10-24T08:23:21Z'
+    last_edited: '2026-10-24T08:23:21Z'
+  - id: note-0e6b806
+    text: 'Review 679d i2 (spec-only): QA19 commits b740e188, 13eb925b, 716d6ce1,
+      5da5ea11, 006d7b4d, 3a3dcc3e and i1 64b41a91 reviewed independently, all sound.
+      6 mutations (claim ignores result_recorded_by, no mark, zz t without _enter_qa_status,
+      snapshot after overall, sign-off/note follow-ups with the 2 s wait) each fail
+      their regression. The only fix: the impl.md section 5 index said item 38 records
+      the latest full suite, but it did not; it now does. Full suite 3645 passed on
+      82f22b1f; /pm-captures/review-679d-i2.'
+    created_at: '2026-10-24T08:32:35Z'
+    last_edited: '2026-10-24T08:32:35Z'
+  - id: note-668269a
+    text: 'Review 679d i3 (3f339fe8, test/spec only, no product change): QA19 commits
+      b740e188, 13eb925b, 716d6ce1, 5da5ea11, 006d7b4d, 3a3dcc3e plus i1 64b41a91
+      and i2 84bb863a independently reviewed; all sound. 9 new mutations: 6 caught
+      by existing tests, M7 (mark_result_recorded ignores loop_id) now caught by the
+      new test_mark_result_recorded_touches_only_its_own_runs_snapshot, 2 defensive/equivalent.
+      impl.md item 35 fixed: a run recorded here is exempt from the same-PR overlap
+      gate (the old text said the gate applied). Full suite 3646 passed; /pm-captures/review-679d-i3.'
+    created_at: '2026-10-24T08:44:05Z'
+    last_edited: '2026-10-24T08:44:05Z'
+- id: pr-4edf491
+  plan: bugs
+  title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
+    as the spec'
+  branch: pm/pr-4edf491-bug-pm-pr-spec-saves-a-failed-claude-p-error-e-g-i
+  status: pending
+  depends_on: []
+  description: 'pm_core/spec_gen.py generate_spec: launch_claude_print output is written
+    to pm/specs/<pr>/<phase>.md without checking that claude succeeded. Repro (pr-592e4bd
+    QA s4, 2026-10-22): with an invalid ANTHROPIC_API_KEY in the env, `pm pr spec
+    <pr> qa` printed "Invalid API key · Fix external API key" and wrote exactly that
+    line as qa.md (39 bytes). A second `pm pr spec <pr> qa` just shows the bogus spec,
+    and the QA spec gate then passes with it, so planners/refiners get an error string
+    as the spec. Only --regenerate recovers. Expected: non-zero exit / error result
+    is not saved, the command reports the failure.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T20:39:47.848341+00:00'
+  updated_at: '2026-10-22T20:39:47.848341+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4296808
+  plan: bugs
+  title: 'Bug: after z t replaces a QA run, the TUI recovers the superseded run from
+    disk and logs INPUT_REQUIRED right after the new run PASS'
+  branch: pm/pr-4296808-bug-after-z-t-replaces-a-qa-run-the-tui-recovers-t
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/qa_loop_ui.py resume scan ("Recovered completed QA from
+    disk"). Repro (pr-592e4bd QA s4, 2026-10-22, local backend): start QA on a PR
+    (t), then z t mid-run. The old loop finishes as INPUT_REQUIRED ("window gone during
+    verification") and leaves its qa_resume.json + qa_status.json overall. When the
+    new run completes, the log shows "QA PASS for <pr> - press i to sign off" and
+    one second later "Recovered completed QA from disk: <pr> -> INPUT_REQUIRED" then
+    "QA INPUT_REQUIRED for <pr> - paused for human input". The runtime state stays
+    PASS, but the TUI message and notification are wrong. The superseded run snapshot
+    should be cleared when z t supersedes it, or the scan should skip loop_ids that
+    are not the current run. Related: pr-f8acf21.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T20:39:48.696543+00:00'
+  updated_at: '2026-10-24T06:09:31.624041+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-54d9506
+    text: 'Related: pr-f8acf21 covers the stop/supersede side effect that runs before
+      this one. The stopped or superseded loop still launches a finalizer pane (seen
+      live in pr-592e4bd QA S8, 2026-10-22, and in production at 18:56Z 2026-10-22
+      when native QA stop was sent for #236 #237 #243 #244 #239 #234; evidence /home/matt/.local/state/pm-pr-shepherd/qa-pause-20261022T185639Z).
+      Fixing them together keeps a stopped or superseded run from finalizing or reporting.'
+    created_at: '2026-10-22T22:50:54Z'
+    last_edited: '2026-10-22T22:50:54Z'
+  - id: note-6ed6d26
+    text: 'Likely fixed by pr-592e4bd once merged: ea78b9d1 makes z t drop the superseded
+      run qa_resume.json under _resume_lock, and a stopped loop never rewrites it,
+      so no later "Recovered completed QA from disk" for the old run (held live in
+      pr-592e4bd QA S12/S14/S22/S25). Re-check the repro after merge, then close.'
+    created_at: '2026-10-24T06:09:31Z'
+    last_edited: '2026-10-24T06:09:31Z'
+- id: pr-3c7ce04
+  plan: bugs
+  title: 'Bug: QA loop waits silently forever when a Claude pane is blocked on login
+    ("Login expired" / "Not logged in")'
+  branch: pm/pr-3c7ce04-bug-qa-loop-waits-silently-forever-when-a-claude-p
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/loop_shared.py poll_for_verdict + pm_core/qa_loop.py
+    _concretize_scenario / worker polling (and _RouteStallWatch.on_idle_without_verdict
+    for routed panes). pm has no detection of Claude auth-blocked panes (no match
+    for "Please run /login", "Login expired", "Not logged in", "Invalid API key" anywhere
+    in pm_core). Repro (pr-592e4bd QA s5, 2026-10-22; evidence /pm-captures/scenarios/5/attempt2-login-expired):
+    start QA (t) when the Claude login seen by the scenario panes cannot authenticate
+    (in s5: nested test HOME whose ~/.claude/.credentials.json had been wiped by a
+    failed OAuth refresh; any expired/absent main login reproduces it). Both refiner
+    panes print "Login expired · Please run /login" and sit at the idle prompt (idle_prompt
+    hook fires). The loop logged nothing for either refiner from 20:37:41 to 20:44:31,
+    the TUI showed no notice, and no verdict, timeout or fallback happened. For routed
+    panes the route stall watch only rechecks the router, which is healthy, so it
+    stays quiet too. Expected: when an idle pane without a verdict shows a Claude
+    auth error, surface it in the TUI/log (e.g. "QA [pr]: scenario k refiner blocked:
+    Claude login expired — run /login") and mark the scenario INPUT_REQUIRED or hold
+    it with a visible reason, instead of waiting forever. Applies to routed and unrouted
+    QA panes alike (routed containers still send the main-account OAuth from the mounted
+    ~/.claude to the router). Not caused by the token copy itself: the copy only produced
+    the expired login; the silent wait is pm behavior.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T21:03:52.814027+00:00'
+  updated_at: '2026-10-22T21:03:52.814027+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c175444
+  plan: bugs
+  title: 'Bug: pm model show table misaligns the qa_verification row'
+  branch: pm/pr-c175444-bug-pm-model-show-table-misaligns-the-qa-verificat
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/model.py:31-42 formats the session-type column as {st:14s}
+    but ''qa_verification'' is 15 chars, so its model/effort cells sit one column
+    right of every other row in ''Effective config per session type''. Pre-existing
+    on master (not in pr-592e4bd diff). Repro: pm model show in any project. Fix:
+    size the column from max(len(st)) (also the override/Routes sections). Seen in
+    pr-592e4bd QA s1 /pm-captures/scenarios/1/t3-model-routes.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T20:11:29.998628+00:00'
+  updated_at: '2026-10-22T20:11:29.998628+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-173e11e
+  plan: bugs
+  title: 'Bug: pm provider test --live leaves an empty pm-route-probe-* temp dir behind
+    on every host probe'
+  branch: pm/pr-173e11e-bug-pm-provider-test-live-leaves-an-empty-pm-route
+  status: pending
+  depends_on: []
+  description: 'pm_core/worker_route.py live_probe (host branch): run_cwd = cwd or
+    tempfile.mkdtemp(prefix="pm-route-probe-") is never removed. Repro (pr-592e4bd
+    QA S7): TMPDIR=/tmp/qa_s7/probe_tmp_ pm provider test claude-work --live -> /tmp/qa_s7/probe_tmp_/pm-route-probe-bfqa8zmk
+    (empty, 0700) remains after "Live: OK". Each probe adds one. Fix: rmtree the dir
+    after the transcript/hook lookup when pm created it (keep the Claude transcript
+    under ~/.claude/projects, which is what the probe reports).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T22:34:15.023090+00:00'
+  updated_at: '2026-10-22T22:34:15.023090+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-09f01da
+  plan: bugs
+  title: 'Bug: in-container pm shim imports the project''s own pm_core/ from cwd'
+  branch: pm/pr-09f01da-bug-in-container-pm-shim-imports-the-project-s-own
+  status: pending
+  depends_on: []
+  description: 'The base image installs /usr/local/bin/pm as "exec python3 -m pm_core.wrapper"
+    (Dockerfile:155). python -m puts the cwd first on sys.path, and container sessions
+    run with cwd /workspace = the project clone, so in any project with a top-level
+    pm_core/ package that is not pm (no pm_core/cli/), every in-container pm command
+    (pm which, pm pr note add, and the fake-claude shim that calls pm which) imports
+    the project package and fails. Repro (pr-592e4bd QA S10): project with pm_core/__init__.py
+    that raises ImportError; container QA with qa_scenario faked → fake-claude exits
+    127, worker windows die and retry; marker shows argv ["-m","which"]. Python 3.10
+    in the image has no -P; e.g. resolve the package from PYTHONPATH explicitly or
+    run from a neutral cwd while preserving the caller cwd for the wrapper. Same class
+    as the host push proxy fix dbb88ea8. Evidence /pm-captures/scenarios/10/story4-attempt-a.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T22:55:04.357673+00:00'
+  updated_at: '2026-10-22T22:55:04.357673+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-8f8ae78
+  plan: bugs
+  title: 'Bug: worker launch after a dead refiner pane logs "Launched" but creates
+    no pane, then burns a retry'
+  branch: pm/pr-8f8ae78-bug-worker-launch-after-a-dead-refiner-pane-logs-l
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py _concretize_and_launch (container ~2683-2701; host
+    path ~2424-2441 has the same shape): when the refiner pane/window is already gone
+    (user closed a stuck refiner, or the refiner process exited), tmux split_pane_at(concretize_pane)
+    raises -> "Failed to split scenario pane for scenario N", but scenario.window_name
+    was already set at refiner-window creation (~2612), so the "if scenario.window_name:"
+    branch logs "Launched scenario N ... (window qa-...-sN)" although no worker pane
+    exists. The poll loop then finds no pane and logs "Scenario N window died — retry
+    1/10 (backoff 5s)" (a blocking time.sleep inside the poll loop), spending a retry;
+    only the retry actually creates the worker window. Repro (pr-592e4bd QA S10 story
+    7, container mode, unrouted sonnet): z t, close the refiner windows at the API-key
+    prompt -> app log 23:31:10 Worker for scenario 18 / Failed to split / Launched
+    scenario 18; 23:31:15 window died — retry 1/10; 23:31:20 the only new_window_get_pane
+    for qa-...-s18 (@74) + Relaunched. Same in story 4 (22:56:09-25) and with a crashing
+    faked refiner (story4-attempt-a 22:52:29-34). Fix: when the split fails, create
+    the worker in a fresh window (as the relaunch path does) or leave window_name
+    unset so the launch is not logged as done; no retry should be spent. Evidence:
+    /pm-captures/scenarios/10/final/app-full.log, story4/, story7/.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T23:36:34.815807+00:00'
+  updated_at: '2026-10-23T07:38:52.266239+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-c73194b
+    text: 'pr-592e4bd a2ff954c and ded27fcd fix part of this bug in _split_worker_pane.
+      A failed worker split is no longer logged as "Launched". When the refiner pane
+      is still alive it is now closed, so the scenario cleanly takes the dead-worker
+      relaunch. Still open: the relaunch spends retry 1/10 and the poll loop sleeps
+      through the backoff. Creating the worker in a fresh window directly would avoid
+      both.'
+    created_at: '2026-10-23T07:38:52Z'
+    last_edited: '2026-10-23T07:38:52Z'
+- id: pr-0f85376
+  plan: bugs
+  title: 'Bug: TUI recovery of a completed QA run whose driver died mid-finalizer
+    records QA PASS without finalization'
+  branch: pm/pr-0f85376-bug-tui-recovery-of-a-completed-qa-run-whose-drive
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/qa_loop_ui.py _resume_incomplete_qa (overall
+    set → "Recovered completed QA from disk" → _on_qa_complete) and pm_core/qa_loop.py
+    run_qa_sync (qa_status.json overall is written BEFORE the blocking _run_qa_finalize_pane;
+    the snapshot is refreshed with finalize_verdict only after it). If the driving
+    process (TUI thread or a detached `pm pr qa-run-bg` / auto-sequence child) dies
+    while the finalizer runs, a later TUI start sees overall=PASS, records "QA PASS
+    for <pr> — press i to sign off" and a "QA PASS: … (workdir: …)" note with no [finalize:
+    …], clears the snapshot, and never relaunches or polls the finalizer. The orphaned
+    finalize pane keeps running unobserved. Finalization (verify scenario pushes reached
+    origin/<branch>, fast-forward the PR workdir, collect worker changes/notes) is
+    skipped silently, so the PR can go to sign-off with worker commits not reconciled.
+    Live repro (pr-592e4bd QA S12 story 3, captures /pm-captures/scenarios/12/story3):
+    container QA, kill -9 the TUI, run `pm pr qa-run-bg <pr>` in a tmux window with
+    a fake qa_finalize delay 600, kill -9 the driver as soon as qa_status.json has
+    overall PASS, reopen with `pm session` → app log "Recovered completed QA from
+    disk: <pr> → PASS", finalize pane %56 still alive, no finalize verdict anywhere.
+    Expected: recovery either re-runs/adopts the finalizer when the snapshot has no
+    finalize_verdict, or reports the run as finalize-interrupted rather than a clean
+    PASS.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T00:59:29.573038+00:00'
+  updated_at: '2026-10-23T00:59:29.573038+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-04dfffb
+  plan: bugs
+  title: 'Bug: QA verifier pane dying mid-check flags the worker (and can turn a PASS
+    into NEEDS_WORK)'
+  branch: pm/pr-04dfffb-bug-qa-verifier-pane-dying-mid-check-flags-the-wor
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py _verify_single_scenario: when the verifier pane
+    dies during the initial poll_for_verdict or the re-verification wait, content
+    is None -> passed=False, reason "verifier pane disappeared". _poll_tmux_verdicts
+    treats that as FLAGGED: the worker is told "Your verdict was reviewed and flagged:
+    verifier pane disappeared" and re-runs the scenario. After verify_max_retries
+    such deaths, a worker PASS is recorded as NEEDS_WORK "failed verification: verifier
+    pane disappeared". A verifier infrastructure failure should re-verify in a fresh
+    pane (or leave the scenario unverified so finalize blocks) instead of counting
+    against the worker. Found in pr-592e4bd review 590d i2, which fixed the related
+    send/wait races (fresh verifier on a failed re-verify send; wait_for_follow_up_verdict(pane_id=)
+    so a dead verifier no longer hangs the wait). Repro: patch poll_for_verdict to
+    return None with verification enabled; the scenario receives the flagged follow-up.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T04:05:12.347637+00:00'
+  updated_at: '2026-10-23T20:25:55.955272+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-1584caa
+    text: 'S35 (pr-592e4bd, 2026-10-23) reproduced this live: fake verifier exited
+      on the re-verify message, pm logged "FLAGGED scenario 3, attempt 2: verifier
+      pane disappeared" and sent the worker a second follow-up. Evidence /pm-captures/scenarios/35/story3
+      (pmlog-ts.log 19:38:51-19:38:57).'
+    created_at: '2026-10-23T20:25:55Z'
+    last_edited: '2026-10-23T20:25:55Z'
+- id: pr-d1d0139
+  plan: bugs
+  title: 'Bug: QA resume of a pre-32961096 snapshot with pane_id null sends the route
+    nudge to the refiner pane'
+  branch: pm/pr-d1d0139-bug-qa-resume-of-a-pre-32961096-snapshot-with-pane
+  status: pending
+  depends_on: []
+  description: 'Upgrade/resume compatibility (found in pr-592e4bd QA S15, 2026-10-23,
+    host mode). Producer: pm at 50200a21 (TUI pid 1412 started 04:32:31, code loaded
+    before fix 32961096). Its _poll_tmux_verdicts cleared scenario.pane_id when the
+    worker pane died, so qa_resume.json saved {"index": 4, "pane_id": null, "session_id":
+    "86b13070-..."} while the window qa-pr-2e1e412-s4 still held only the live refiner
+    pane %31 (pane 0). Saved snapshot: /pm-captures/scenarios/15/pre-fix/story6/resume-after-tui-restart/qa_resume.json
+    (README.md, pm-log-since-restart.txt, router-since-restart.jsonl, scrollback-31-refiner-after-resume.txt
+    in the same dir). Consumer: pm at 32961096 (TUI kill -9 + pm session respawn at
+    05:07:03). Observed: "Resuming incomplete QA from disk", then 05:07:36 the pending
+    loop resolved pane_id=None via _get_scenario_pane/find_claude_pane (first pane
+    = refiner %31), took the dead worker session API-error idle as that pane, and
+    typed the _RouteStallWatch NUDGE into the refiner (router stub seq 68 class=refiner,
+    refiner answered REFINED_STEPS) while TUI + log claimed "Scenario 4 worker: turn
+    ended on API Error: Connection refused ... and work route claude-work answers
+    again — resumed". No worker was relaunched. Recovery remedy used: z t fresh start
+    (superseded run stopped, QA complete INPUT_REQUIRED). 32961096 keeps a dead pane_id
+    so new snapshots do not hit this; snapshots from older pm still do. Review should
+    decide the compatibility requirement (e.g. on resume treat pane_id null for a
+    launched scenario as dead and relaunch, or never fall back to the window first
+    pane when a refiner/verifier pane shares the window). Related: pr-89296d3 (pane
+    index 0 assumptions), pr-3201ea8 (refiner vs worker identity on resume).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T05:11:52.756342+00:00'
+  updated_at: '2026-10-23T05:11:52.756342+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-237d610
+  plan: bugs
+  title: 'Bug: merge-window MERGED never detected when its tracked transcript is a
+    frozen copy or the window predates the current TUI'
+  branch: pm/pr-237d610-bug-merge-window-merged-never-detected-when-its-tr
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/review_loop_ui.py _poll_impl_idle second pass
+    (merge:<pr> registration from get_transcript_dir(app)/merge-<pr>.jsonl) and auto_start._finalize_all_transcripts.
+    Found in pr-592e4bd QA S31 (/pm-captures/scenarios/31/pre-fix/story3). pr-592e4bd
+    now keeps live sessions (live tmux pane running the --session-id, or live idle-tracker
+    entry) as symlinks when auto-start is disabled, but only going forward. Remaining:
+    (1) merge-<pr>.jsonl copies frozen by an earlier disable are never repaired, so
+    a window answered later keeps reporting INPUT_REQUIRED (repro: pre-fix S31 run,
+    A removes the last target while the merge window waits on INPUT_REQUIRED, then
+    answer MERGED: pm log repeats "merge_verdict: INPUT_REQUIRED detected" every 5
+    s, window and the merge marker stay). (2) After a TUI restart, get_transcript_dir
+    is a new run dir, so an open merge-<pr> window from the previous TUI is never
+    registered (ValueError, skipped) and its MERGED is never detected; _merge_input_required_prs
+    is lost too. Remedy today: pm pr merge --propagation-only <pr> by hand. Suggested
+    fix: fall back to claude_launcher.pane_transcript_path(pane) (session id from
+    the pane start command), as _watch_untracked_trust does, when the run-dir transcript
+    is missing or not a symlink. (3) Sessions whose pane stays open after finishing
+    (e.g. an idle sign-off pane) are left as symlinks at disable, so they are not
+    archived until their pane exits. There is no later finalizer for impl/merge/signoff
+    transcripts.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T15:53:17.974177+00:00'
+  updated_at: '2026-10-23T15:53:17.974177+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b2db183
+  plan: bugs
+  title: 'Bug: stale qa scenario panes in ~/.pm/runtime/<pr>.json survive a TUI restart
+    and are merged into the next QA run, so the actions picker shows [working] from
+    dead panes'
+  branch: pm/pr-b2db183-bug-stale-qa-scenario-panes-in-pm-runtime-pr-json-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/pane_idle.py _runtime_mirror_register (merges cur["panes"]
+    from the existing qa entry) and _runtime_mirror_clear (only pops subkeys the live
+    tracker unregisters); TUI-mount sweep keeps a done+verdict qa entry with its panes
+    dict. Pre-existing on master; not fixed by pr-592e4bd 94f36a18, which only prunes
+    keys the current TUI process tracks.
+
+
+    Repro (seen live in pr-592e4bd QA S30, /pm-captures/scenarios/30): (1) leave qa
+    scenario panes in the runtime file: either a pre-94f36a18 TUI with z t over a
+    run whose workers are mid-turn, or kill -9 the TUI while a QA run has scenario
+    panes registered and do not let it resume; (2) the run/next run completes, so
+    the qa entry becomes state=done verdict=X but keeps panes {s3,s4} pointing at
+    dead panes (%32/%33); (3) restart the TUI (kill -9 pid in ~/.pm/tui-<session>.pid,
+    pm session); the new process never tracked s3/s4, so nothing removes them; (4)
+    start QA again (z t). Registering the new scenarios merges into that dict: panes
+    {s3,s4,s11,s12}, state running. After the next z t, the new run is still planning
+    (no panes of its own), but the entry still has {s3,s4} with state running, and
+    the prefix+P actions picker shows "qa [open] [working]" for a run that has no
+    live pane. It stays that way until a completion overwrites it. The same PR without
+    leftovers shows "qa [open]" (no badge) during planning (post-fix/picker-planning-A2-win).
+
+
+    Evidence: post-fix/demo/runtime-A-after-pass.json (done PASS still listing s3/s4
+    after the TUI restart); post-fix/reset-picker/runtime-A-R1-running.json (s3,s4,s11,s12
+    merged), runtime-A-R2-planning.json (only s3/s4, state running), picker-A-R2-planning.txt
+    (qa [open] [working]); pre-fix/all-panes.txt (%32/%33 absent). Candidate fix:
+    on register, drop qa subkeys whose pane no longer exists, or start a fresh panes
+    dict when the existing entry is done; and/or have the TUI-mount sweep drop dead
+    qa panes from done entries. Keep the [done VERDICT] badge.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T16:13:51.145790+00:00'
+  updated_at: '2026-10-23T16:13:51.145790+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2a44020
+  plan: bugs
+  title: 'Bug: a Claude pane that already went idle never shows as working again when
+    the user types a new turn (no prompt-submit hook)'
+  branch: pm/pr-2a44020-bug-a-claude-pane-that-already-went-idle-never-sho
+  status: pending
+  depends_on: []
+  description: 'pm_core/hook_install.py installs only Notification[idle_prompt|permission_prompt]
+    and Stop hooks; pm_core/pane_idle.py PaneIdleTracker.poll only sets idle on idle_prompt
+    and never clears it on a new user turn (Stop is ignored), and the picker reads
+    the same latest hook event. So once an impl/merge/review pane has emitted idle_prompt,
+    typing a new message into it leaves the tech-tree node without its spinner and
+    the picker row [idle] for the whole turn. Repro (pr-592e4bd QA S33, captures /pm-captures/scenarios/33/control-w/part2
+    and story3): pm pr start a PR (auto-start off), wait for the first turn to end
+    (spinner stops, picker [idle]), type a message in the impl pane while the API
+    turn is held (main stub status=held 17:39:48-17:40:14): node never spins, picker
+    stays [idle]; hook file shows idle_prompt 17:37:52 then Stop 17:40:14, nothing
+    at submit. Same on master (hook_install/pane_idle/hook_events unchanged by pr-592e4bd).
+    Likely fix: a UserPromptSubmit hook (event user_prompt) that clears idle/waiting
+    in the tracker and reads as working in the picker; check every read_event consumer
+    that assumes the latest event is idle_prompt.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T17:41:04.955112+00:00'
+  updated_at: '2026-10-23T18:15:38.540576+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-366dbb5
+    text: 'Tracking record. Assessment and CLI facts are in note on pr-592e4bd (S33
+      follow-up, 2026-10-23): UserPromptSubmit (argv user_prompt) plus PaneIdleTracker
+      reset is a bounded code change. It is blocked on the install-policy choice:
+      the current _detect_foreign_hooks refuse-on-conflict would break pm for users
+      with their own UserPromptSubmit hook, so it needs coexist-append. Not addressed
+      in pr-592e4bd yet.'
+    created_at: '2026-10-23T17:52:41Z'
+    last_edited: '2026-10-23T17:52:41Z'
+  - id: note-2fd8b3f
+    text: 'Fixed on pr-592e4bd branch in af19cfcf (review d0d0 i1; impl.md item 27
+      there): UserPromptSubmit hook with coexist-append install + PaneIdleTracker
+      user_prompt handling. Not merged yet: keep this PR open (not started) until
+      pr-592e4bd merges, then close as done there. Known bounded limitation: a prompt
+      blocked by a user hook reads as working for about 60 s, until Claude re-fires
+      idle_prompt.'
+    created_at: '2026-10-23T18:15:38Z'
+    last_edited: '2026-10-23T18:15:38Z'
+- id: pr-0ac6f7a
+  plan: bugs
+  title: 'Bug: pm session/TUI start crashes with a raw traceback on a malformed Notification/Stop
+    hook entry that Claude Code skips'
+  branch: pm/pr-0ac6f7a-bug-pm-session-tui-start-crashes-with-a-raw-traceb
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/hook_install.py _detect_foreign_hooks, cmd = (hook
+    or {}).get("command", ""), called by ensure_hooks_installed from cli/session.py
+    and cli/tui.py, which only catch HookConflictError. Repro: in ~/.claude/settings.json,
+    put a plain string where a hook object belongs on a pm-managed event, e.g. {"hooks":{"Stop":[{"hooks":["notify-send
+    stop"]}]}}, or the same under Notification[idle_prompt], or "hooks": "<str>".
+    Then pm session / TUI start exits with AttributeError: str object has no attribute
+    get. Same on master 859657d8 and on pr-592e4bd 239a3ebf: /pm-captures/review-a183-i2/plain-string-hook-entry/repro.log.
+    Classification: this is not input Claude Code accepts. Claude Code 2.1.309 skips
+    that entry with "Hook entry must be an object; received a string; entry ignored"
+    and keeps the rest of the file (claude-validation.log next to repro.log). Expected:
+    pm should not crash. Either ignore the invalid entry like Claude Code (a string
+    in a managed slot is not pm hook, so it is still a conflict) or raise HookConflictError
+    naming the entry, so the user gets a readable message. Narrow scope: guard non-dict
+    hooks in _detect_foreign_hooks and add one regression test. Found during review
+    a183 i2 of pr-592e4bd. Not a pr-592e4bd regression.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T18:41:20.069591+00:00'
+  updated_at: '2026-10-23T18:41:20.069591+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-42425ab
+  plan: bugs
+  title: 'Bug: redact credential environment values from container command debug logs'
+  branch: pm/pr-42425ab-bug-redact-credential-environment-values-from-cont
+  status: pending
+  depends_on: []
+  description: 'During the #249 review-launch investigation on 2026-10-23, the existing
+    container runtime debug logger printed a podman run command including a nonempty
+    ANTHROPIC_API_KEY environment value. Evidence location: host ~/.pm/debug/project-manager-c5a1006b.log,
+    13:17:16 and 13:22:15 CDT container launch entries; do not copy the raw lines
+    or credential into this PR, notes, captures, or tests. This is pre-existing plain-Claude
+    container logging, separate from the work-route feature. Redact sensitive environment
+    values at the command-log boundary (including error paths), preserving useful
+    nonsecret command structure and names. Test with synthetic canary credentials:
+    captured debug/error output must contain no raw token, while the actual subprocess
+    still receives the original env value. Inspect shared shell-command logging for
+    the same exposure and handle relevant existing secret variables consistently.
+    Keep this pending; do not autostart or expand #249. Related broader safety plan:
+    pr-726757e.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T19:51:49.156170+00:00'
+  updated_at: '2026-10-23T19:51:49.156170+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-eee7483
+  plan: bugs
+  title: 'Improvement: show QA refiner (and planner) turns on the tech-tree node and
+    picker, not only scenario workers'
+  branch: pm/pr-eee7483-improvement-show-qa-refiner-and-planner-turns-on-t
+  status: pending
+  depends_on: []
+  description: Only QA scenario worker panes (qa:<pr>:s<N>) are registered in PaneIdleTracker
+    / the picker qa entry (since 162442ec). Refiner panes (and s0/planner/verifier/finalizer)
+    are untracked, so during refinement the node reads "● qa" with no spinner, and
+    a turn typed into a refiner never reads as working. Seen in pr-592e4bd S36 (/pm-captures/scenarios/36/REPORT.md
+    story 2; boxmon.log 19:01:24 refiner turns). Not a regression; pr-592e4bd qa.md
+    RQ35 now scopes "QA pane" to workers. Decide whether refiners should register
+    under e.g. qa:<pr>:r<N> and how the aggregate/picker present them.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-23T20:53:42.594737+00:00'
+  updated_at: '2026-10-23T20:53:42.594737+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-43b14d2
+  plan: bugs
+  title: 'Bug: TUI never recovers a later orphaned QA run of a PR it already resumed
+    or dropped once (_resumed_qa_pr_ids is never cleared)'
+  branch: pm/pr-43b14d2-bug-tui-never-recovers-a-later-orphaned-qa-run-of-
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/qa_loop_ui.py _resume_incomplete_qa adds a PR id to app._resumed_qa_pr_ids
+    when it resumes, recovers or drops a snapshot ("left QA" cleanup), and nothing
+    ever removes it. Every later scan skips that PR for the TUI lifetime. Repro (code
+    reading, found in pr-592e4bd review c1d4 i1): restart the TUI mid-QA of PR X so
+    it resumes the run and finishes it. Later in the same TUI lifetime, X goes through
+    QA again in a process other than this TUI: a pm pr qa-run-bg auto-sequence driver,
+    or another clone whose TUI then dies (S41 cross-clone adoption). Kill that driver
+    mid-run. Its qa_resume.json is left as an orphan, but this TUI never resumes it
+    until the TUI itself restarts. Pre-existing on master for the qa-run-bg case;
+    the S41 cross-clone adoption in pr-592e4bd makes it easier to reach. Possible
+    fix: key the guard on (pr_id, loop_id) or qa_workdir instead of pr_id, so only
+    the snapshot that was handled is skipped.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-24T02:38:29.173294+00:00'
+  updated_at: '2026-10-24T02:38:29.173294+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-235f465
+  plan: bugs
+  title: 'Bug: pm tui restart -s <session> prints a TmuxCommandError traceback when
+    that session is gone'
+  branch: pm/pr-235f465-bug-pm-tui-restart-s-session-prints-a-tmuxcommande
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/tui.py tui_restart: _find_tui_pane(session) returns the
+    pane recorded for a pm session whose tmux session no longer exists (seen in QA
+    S46 on pr-592e4bd: B session pm-b-* killed with tmux kill-session; ~/.pm/tui-<session>.pid
+    left behind), and tmux_mod.send_keys_literal(pane, "C-r") raises pm_core.tmux.TmuxCommandError
+    "tmux: can not find pane: %72" as a raw Python traceback, rc 1. Expected: "Error:
+    no TUI pane for session <s> (is the pm session running?)" and rc 1, like the "No
+    TUI pane found" branch. Repro: pm session in a project; tmux kill-session -t =<pm
+    session> and its ~1; pm tui restart -s <pm session>. Evidence /pm-captures/scenarios/46
+    (pre-fix/story3, B session killed; restart attempt at 03:51).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-24T04:01:32.540503+00:00'
+  updated_at: '2026-10-24T04:01:32.540503+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7cf1fe4
+  plan: bugs
+  title: 'Bug: skip_qa review PASS -> sign-off hand-off is lost (never retried) when
+    project.yaml stays locked >2 s or cannot be loaded'
+  branch: pm/pr-7cf1fe4-bug-skip-qa-review-pass-sign-off-hand-off-is-lost-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/review_loop_ui.py _maybe_start_qa skip_qa branch
+    -> _maybe_auto_merge -> signoff_ui.start_signoff (default 2 s lock wait). Pre-existing
+    on master. With skip_qa=true and auto-start on, a review PASS hands the PR to
+    sign-off exactly once. If the project lock is held for longer than the 2 s wait
+    (e.g. an open `pm edit`), or project.yaml cannot be loaded (conflict markers,
+    plans that do not validate, file missing), start_signoff logs "Error: ..." and
+    returns False, _maybe_start_qa returns None, so nothing is kept pending: the PR
+    stays in_review with a review PASS and no sign-off. signoff_ui.advance_all retries
+    only status==qa PRs with a recorded QA PASS, so it never picks this up. Repro:
+    skip_qa: true, auto-start target X in_review, hold project.yaml.lock (flock) for
+    5 s from another process when X review loop reports PASS; X stays in_review indefinitely.
+    The non-skip_qa review -> QA hand-off already keeps a pending entry (app._pending_auto_qa,
+    S45 be8f23d1/85463cfe) and retries it each poll tick with NO_WAIT (S48 716d6ce1);
+    the fix is a matching "signoff" stage (NO_WAIT, said once, dropped when auto-start
+    no longer covers the PR or it left in_review). Found in pr-592e4bd review 679d
+    i1 (which kept the 2 s wait on this one-shot path so a brief holder no longer
+    loses it). Related, not a duplicate: pr-dd4f07b (skip_qa routing through sign-off).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-24T08:22:51.208138+00:00'
+  updated_at: '2026-10-24T08:22:51.208138+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

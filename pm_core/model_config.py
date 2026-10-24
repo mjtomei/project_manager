@@ -49,7 +49,7 @@ _HAIKU_PATTERNS = ("haiku",)
 
 SESSION_TYPES = ("impl", "review", "qa", "qa_planning", "qa_scenario",
                  "qa_concretize", "qa_verification", "qa_finalize",
-                 "signoff", "watcher", "merge")
+                 "qa_interactive", "signoff", "watcher", "merge")
 
 DEFAULT_SESSION_MODELS: dict[str, str] = {
     # Empty — use Claude CLI defaults unless explicitly configured via
@@ -66,6 +66,10 @@ _FALLBACK_TYPES: dict[str, str] = {
     "qa_concretize": "qa",
     "qa_verification": "qa",
     "qa_finalize": "qa",
+    # Scenario 0, the persistent interactive QA session.  Separate from
+    # qa_scenario (autonomous workers) so routing workers to another
+    # account never moves the session the user remote-controls.
+    "qa_interactive": "qa",
     "signoff": "review",
 }
 

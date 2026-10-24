@@ -382,6 +382,47 @@ class TestRunQaSyncHandoff:
         assert launched["head"] == "c" * 40
         assert launched["changes"] == ["app.py"]
 
+    def test_initial_launch_status_keeps_queued_scenarios(
+            self, tmp_path, monkeypatch):
+        """With a concurrency cap, the initial batch's dashboard write
+        still lists the queued scenarios, as queued."""
+        launched = {}
+
+        def fake_launch(state, *a, **kw):
+            launched["batch"] = [s.index for s in state.scenarios]
+            launched["status"] = [s.index for s in kw["_status_scenarios"]]
+            launched["queued"] = set(kw["_status_queued"])
+            raise _Launched
+
+        class _Launched(Exception):
+            pass
+
+        with pytest.raises(_Launched):
+            _run_planning(
+                tmp_path, monkeypatch, pane_content="",
+                transcript_turns=[("user", TEMPLATE_PROMPT),
+                                  ("assistant", FULL_PLAN)],
+                extra_patches=(
+                    patch("pm_core.qa_loop._get_qa_spec",
+                          return_value="spec"),
+                    patch("pm_core.qa_loop._get_max_scenarios",
+                          return_value=1),
+                    patch("pm_core.qa_loop._rev_parse", return_value="a" * 40),
+                    patch("pm_core.qa_loop._publish_planner_head",
+                          return_value="c" * 40),
+                    patch("pm_core.qa_loop._planner_code_changes",
+                          return_value=[]),
+                    patch("pm_core.tmux.new_window_get_pane",
+                          return_value="%2"),
+                    patch("pm_core.tmux.split_pane_at", return_value="%3"),
+                    patch("pm_core.tmux.pane_window_id", return_value=None),
+                    patch("pm_core.qa_loop._launch_scenarios_in_tmux",
+                          side_effect=fake_launch),
+                ))
+        first, *rest = launched["status"]
+        assert launched["batch"] == [first] and rest
+        assert launched["queued"] == set(rest)
+
 
 class TestQAPlanProblem:
     def test_complete_plan_ok(self):
@@ -963,7 +1004,7 @@ class TestPlannerCodeChangesForceReview:
         data = {"prs": [{"id": "pr-001", "notes": []}]}
         app = MagicMock(_root=tmp_path)
         with patch.object(store, "locked_update",
-                          side_effect=lambda root, fn: fn(data)):
+                          side_effect=lambda root, fn, **kw: fn(data)):
             qa_loop_ui._record_qa_note(app, state)
         note = data["prs"][0]["notes"][0]["text"]
         assert note.startswith("QA NEEDS_WORK:")

@@ -155,3 +155,103 @@ def test_mark_active(tracker, transcript, monkeypatch):
     assert tracker.is_idle("k")
     tracker.mark_active("k")
     assert not tracker.is_idle("k")
+
+
+class TestUserPromptTurnStart:
+    """pr-2a44020: a typed turn after idle reads as working again."""
+
+    def _events(self, monkeypatch):
+        monkeypatch.setattr("pm_core.pane_idle.tmux_mod.pane_exists",
+                            lambda p: True)
+        cur = {}
+        monkeypatch.setattr("pm_core.hook_events.read_event",
+                            lambda sid: dict(cur, session_id=sid))
+
+        def emit(etype, ts):
+            cur.clear()
+            cur.update(event_type=etype, timestamp=ts)
+        return emit
+
+    def test_user_prompt_after_idle_reads_working_then_idle_again(
+            self, tracker, transcript, monkeypatch):
+        tracker.register("k", "%0", str(transcript))
+        emit = self._events(monkeypatch)
+        emit("idle_prompt", 1.0)
+        assert tracker.poll("k") is True
+        assert tracker.became_idle("k")
+        emit("user_prompt", 2.0)
+        assert tracker.poll("k") is False
+        assert not tracker.is_idle("k")
+        assert not tracker.is_waiting_for_input("k")
+        assert not tracker.became_idle("k")
+        emit("Stop", 3.0)
+        assert tracker.poll("k") is False
+        emit("idle_prompt", 4.0)
+        assert tracker.poll("k") is True
+        # The new turn's end is a fresh idle transition.
+        assert tracker.became_idle("k")
+
+    def test_fast_turn_whose_user_prompt_was_overwritten_reads_working(
+            self, tracker, transcript, monkeypatch):
+        # S35 story 2: a typed turn answered in ~0.1 s.  The hook file
+        # holds only the latest event, so the 5 s impl poll saw Stop (not
+        # user_prompt) and the node stayed idle while the picker said
+        # [working].  The Stop is newer than the idle_prompt already seen,
+        # so a new turn ran: working until the next idle_prompt.
+        tracker.register("k", "%0", str(transcript))
+        emit = self._events(monkeypatch)
+        emit("idle_prompt", 1.0)
+        assert tracker.poll("k") is True
+        assert tracker.became_idle("k")
+        emit("user_prompt", 2.0)
+        emit("Stop", 2.1)  # overwrites user_prompt before the next poll
+        assert tracker.poll("k") is False
+        assert not tracker.is_idle("k")
+        assert not tracker.became_idle("k")
+        assert tracker.poll("k") is False  # same Stop again: still working
+        emit("idle_prompt", 62.1)
+        assert tracker.poll("k") is True
+        assert tracker.became_idle("k")
+
+    def test_user_prompt_clears_waiting_for_input(
+            self, tracker, transcript, monkeypatch):
+        tracker.register("k", "%0", str(transcript))
+        emit = self._events(monkeypatch)
+        emit("permission_prompt", 1.0)
+        tracker.poll("k")
+        assert tracker.is_waiting_for_input("k")
+        emit("user_prompt", 2.0)
+        tracker.poll("k")
+        assert not tracker.is_waiting_for_input("k")
+        assert not tracker.is_idle("k")
+
+    def test_blocked_prompt_reidles_on_claudes_next_idle_prompt(
+            self, tracker, transcript, monkeypatch):
+        # A user UserPromptSubmit hook that blocks the prompt: pm's record
+        # still lands (no ordering between hooks), no Stop follows, and
+        # Claude fires idle_prompt again about a minute later.
+        tracker.register("k", "%0", str(transcript))
+        emit = self._events(monkeypatch)
+        emit("idle_prompt", 1.0)
+        tracker.poll("k")
+        tracker.became_idle("k")
+        emit("user_prompt", 2.0)
+        tracker.poll("k")
+        assert not tracker.is_idle("k")
+        emit("idle_prompt", 62.0)
+        assert tracker.poll("k") is True
+
+
+@pytest.mark.parametrize("key,action", [("pr-abc1234", "start"),
+                                        ("qa:pr-abc1234:s1", "qa")])
+def test_picker_status_reads_working_after_user_prompt(
+        tracker, transcript, monkeypatch, key, action):
+    """The picker (runtime_state, another process) sees the typed turn too."""
+    from pm_core import runtime_state
+    tracker.register(key, "%0", str(transcript))
+    cur = {"event_type": "idle_prompt", "timestamp": 1.0}
+    monkeypatch.setattr("pm_core.hook_events.read_event",
+                        lambda sid: dict(cur, session_id=sid))
+    assert runtime_state.derive_action_status("pr-abc1234", action)["state"] == "idle"
+    cur.update(event_type="user_prompt", timestamp=2.0)
+    assert runtime_state.derive_action_status("pr-abc1234", action)["state"] == "running"

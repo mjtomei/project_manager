@@ -489,8 +489,12 @@ class PRNode(Widget):
 
     # -- live marker state ---------------------------------------------------
 
-    def _get_loop_marker(self) -> tuple[str, str]:
-        """Return ``(marker_text, marker_style)`` for review-loop/merge state."""
+    def _get_loop_marker(self, pane_live: bool = False) -> tuple[str, str]:
+        """Return ``(marker_text, marker_style)`` for review-loop/merge state.
+
+        *pane_live*: the PR's QA or impl panes are active or waiting, so that
+        live marker must win over a finished review loop's verdict badge.
+        """
         try:
             loops = self.app._review_loops
             state = loops.get(self.pr_id)
@@ -503,8 +507,11 @@ class PRNode(Widget):
                         return (f"⏹{state.iteration}{spinner}", "bold red")
                     return (f"⟳{state.iteration}{spinner}", "bold cyan")
                 # A finished review loop's verdict must not mask the sign-off
-                # marker (▲ / re-run spinner) once the PR has moved on.
-                if state.latest_verdict and self._pr.get("status") != "sign_off":
+                # marker (▲ / re-run spinner) once the PR has moved on, nor
+                # the PR's live QA or impl pane (spinner / ⏸); it shows
+                # again once that pane is idle.
+                if (state.latest_verdict and not pane_live
+                        and self._pr.get("status") != "sign_off"):
                     v = state.latest_verdict
                     marker = VERDICT_MARKERS.get(v, v[:4])
                     style = VERDICT_STYLES.get(v, "")
@@ -569,35 +576,41 @@ class PRNode(Widget):
         title_line = f"{side} {title}{' ' * max(0, title_pad)} {side}"
 
         status_text = f"{icon} {status}"
-        loop_marker, loop_style = self._get_loop_marker()
+        # Live pane state ("waiting" / "active", else idle): the PR's QA panes
+        # in qa, its impl pane in in_progress / in_review.  A turn typed
+        # (or sent) into the impl pane after a review loop finished is
+        # live work too, so either one hides a finished loop's ⟳N badge
+        # (S35).
+        live_state = None
+        tracker = self.app._pane_idle_tracker
+        if status == "qa":
+            # No workdir gate: QA tracker keys exist only while a QA loop
+            # runs, and a PR's first QA run writes its workdir after
+            # start_qa reloaded the TUI's PR data, so a workdir gate hid
+            # that PR's spinner until the next background sync (S36).
+            live_state = qa_pane_state(tracker, pr_id)
+        elif (status in ("in_progress", "in_review") and pr.get("workdir")
+              and tracker.is_tracked(pr_id)):
+            if tracker.is_waiting_for_input(pr_id):
+                live_state = "waiting"
+            elif not tracker.is_idle(pr_id):
+                live_state = "active"
+        loop_marker, loop_style = self._get_loop_marker(
+            pane_live=live_state in ("waiting", "active"))
         marker_offset = -1
         if loop_marker:
             marker_offset = 2 + len(status_text) + 1
             status_text += f" {loop_marker}"
         else:
-            if status in ("in_progress", "in_review") and pr.get("workdir"):
-                tracker = self.app._pane_idle_tracker
-                if tracker.is_tracked(pr_id):
-                    if tracker.is_waiting_for_input(pr_id):
-                        marker_offset = 2 + len(status_text) + 1
-                        loop_style = "bold yellow"
-                        status_text += " ⏸"
-                    elif not tracker.is_idle(pr_id):
-                        spinner = SPINNER_FRAMES[self._tree._anim_frame % len(SPINNER_FRAMES)]
-                        marker_offset = 2 + len(status_text) + 1
-                        loop_style = "bold cyan"
-                        status_text += f" {spinner}"
-            elif status == "qa" and pr.get("workdir"):
-                qa_state = qa_pane_state(self.app._pane_idle_tracker, pr_id)
-                if qa_state == "waiting":
-                    marker_offset = 2 + len(status_text) + 1
-                    loop_style = "bold yellow"
-                    status_text += " ⏸"
-                elif qa_state == "active":
-                    spinner = SPINNER_FRAMES[self._tree._anim_frame % len(SPINNER_FRAMES)]
-                    marker_offset = 2 + len(status_text) + 1
-                    loop_style = "bold cyan"
-                    status_text += f" {spinner}"
+            if live_state == "waiting":
+                marker_offset = 2 + len(status_text) + 1
+                loop_style = "bold yellow"
+                status_text += " ⏸"
+            elif live_state == "active":
+                spinner = SPINNER_FRAMES[self._tree._anim_frame % len(SPINNER_FRAMES)]
+                marker_offset = 2 + len(status_text) + 1
+                loop_style = "bold cyan"
+                status_text += f" {spinner}"
             elif status == "sign_off":
                 # Sign-off is running until the router records a verdict: show
                 # the latest verdict icon if recorded, else animate the spinner.
@@ -790,8 +803,12 @@ class TechTree(Widget):
         if "hide_merged" in project:
             self._hide_merged = bool(project["hide_merged"])
 
-    def update_prs(self, prs: list[dict]) -> None:
+    def update_prs(self, prs: list[dict], unavailable: str | None = None) -> None:
+        """*unavailable*: why there is nothing to show (project.yaml cannot
+        be loaded and there is no earlier state); drawn instead of the
+        "No PRs defined" hint."""
         self._prs = prs
+        self._unavailable = unavailable
         self._recompute()
 
     def select_pr(self, pr_id: str) -> None:
@@ -990,6 +1007,8 @@ class TechTree(Widget):
     def _empty_message(self) -> str | None:
         """Return an empty-state message, or None if there is content to draw."""
         if not self._prs:
+            if getattr(self, "_unavailable", None):
+                return self._unavailable
             return "No PRs defined. Use 'pr add' to create PRs."
         # Hidden-plan labels still populate ``_ordered_ids`` (they are
         # navigable), so "is the grid empty?" must look only at *visible* PR
@@ -1202,6 +1221,8 @@ class TechTree(Widget):
         if pr.get("status") in ("in_progress", "in_review", "qa", "sign_off") and pr.get("workdir"):
             return True
         try:
+            if pr.get("status") == "qa" and pr_id in getattr(self.app, "_qa_loops", {}):
+                return True
             if self.app._review_loops.get(pr_id):
                 return True
             if pr_id in getattr(self.app, "_merge_input_required_prs", set()):

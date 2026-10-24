@@ -6,6 +6,10 @@ Supports multiple provider types:
     LM Studio 0.4.1+, llama.cpp).  Recommended for local models.
   - openai: OpenAI-compatible API endpoint (vLLM, etc.).
     Use only if your server doesn't speak the Anthropic Messages API.
+  - router: A host-local Anthropic-compatible router (e.g. the claude-mixed
+    router) that picks the upstream account from a model prefix such as
+    ``work/``.  Credentials stay with the router; pm only points Claude at
+    it.  See pm_core/worker_route.py.
 
 Configuration is stored in ~/.pm/providers.yaml:
 
@@ -20,6 +24,14 @@ Configuration is stored in ~/.pm/providers.yaml:
         type: openai
         api_base: http://localhost:8000/v1
         model: codellama
+
+      claude-work:
+        type: router
+        api_base: http://127.0.0.1:8790
+        model: work/claude-opus-5-5
+        launcher: ~/.local/bin/claude-mixed   # optional, host workers only
+        credentials_file: ~/.claude-work/.credentials.json  # expiry check
+        refresh_command: claude-work-ping              # optional
 
     default: claude
 
@@ -44,6 +56,22 @@ PROVIDERS_FILE = "providers.yaml"
 # Built-in provider that requires no configuration
 BUILTIN_CLAUDE = "claude"
 
+PROVIDER_TYPES = ("local", "openai", "claude", "router")
+
+# Claude Code env vars that pick the model for aliases, background calls and
+# subagents.  A router provider pins them all to its model by default.
+ROUTER_ALIAS_ENV_VARS = (
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+)
+
+
+class ProviderNotFoundError(LookupError):
+    """An explicitly named provider is not configured in providers.yaml."""
+
 
 @dataclass
 class ProviderConfig:
@@ -57,16 +85,46 @@ class ProviderConfig:
       - openai: OpenAI-compatible API endpoint (vLLM, older Ollama, etc.).
         Uses OPENAI_BASE_URL with --model openai:name prefix.  Use this
         only if your server doesn't speak the Anthropic Messages API.
+      - router: host-local account router (claude-mixed).  Uses
+        ANTHROPIC_BASE_URL only; the router holds the credentials.  The
+        router-only fields (launcher, credentials_file, refresh_command,
+        remedy, alias_models) are consumed by pm_core.worker_route and
+        claude_launcher.
     """
     name: str
-    type: str = "claude"  # "claude", "local", or "openai"
+    type: str = "claude"  # "claude", "local", "openai", or "router"
     api_base: str = ""
     api_key: str = ""
     model: str = ""
     capabilities: list[str] = field(default_factory=list)
+    # router-only
+    launcher: str = ""
+    credentials_file: str = ""
+    refresh_command: str = ""
+    remedy: str = ""
+    alias_models: dict[str, str] = field(default_factory=dict)
 
     def env_vars(self) -> dict[str, str]:
         """Return environment variables needed to use this provider."""
+        if self.type == "router":
+            # Never an API key or token: the router injects the account's
+            # credentials itself.  Pin Claude Code's alias/background
+            # models to the route so no request falls through to the
+            # caller's own account.
+            env = {}
+            if self.api_base:
+                env["ANTHROPIC_BASE_URL"] = self.api_base
+            # Routed ids (work/...) are not names Claude Code knows; without
+            # this it refuses them on context-window grounds (as claude-mixed
+            # does).
+            env["CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"] = "1"
+            if self.model:
+                for var in ROUTER_ALIAS_ENV_VARS:
+                    env[var] = self.model
+            for var, value in self.alias_models.items():
+                env[var] = value
+            return env
+
         if self.type in ("claude", "local"):
             env: dict[str, str] = {}
             if self.api_base:
@@ -90,6 +148,18 @@ class ProviderConfig:
             return env
 
         return {}
+
+    def unset_env_vars(self) -> tuple[str, ...]:
+        """Environment variables to remove for this provider's sessions.
+
+        A router authenticates upstream itself; a stray API key or auth
+        token in the caller's environment would only make Claude Code
+        prompt about it (blocking an unattended worker) -- the same
+        variables the claude-mixed launcher unsets.
+        """
+        if self.type == "router":
+            return ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+        return ()
 
     def model_flag(self) -> str | None:
         """Return the --model flag value for claude CLI, or None."""
@@ -124,6 +194,11 @@ def _config_to_provider(name: str, entry: dict) -> ProviderConfig:
         api_key=entry.get("api_key", ""),
         model=entry.get("model", ""),
         capabilities=entry.get("capabilities", []),
+        launcher=entry.get("launcher", ""),
+        credentials_file=entry.get("credentials_file", ""),
+        refresh_command=entry.get("refresh_command", ""),
+        remedy=entry.get("remedy", ""),
+        alias_models=dict(entry.get("alias_models") or {}),
     )
 
 
@@ -156,7 +231,8 @@ def save_providers(data: dict[str, Any]) -> None:
     _log.info("Saved provider config to %s", path)
 
 
-def get_provider(name: str | None = None) -> ProviderConfig:
+def get_provider(name: str | None = None, *,
+                 strict: bool = False) -> ProviderConfig:
     """Resolve and return a provider configuration.
 
     Resolution order:
@@ -165,6 +241,10 @@ def get_provider(name: str | None = None) -> ProviderConfig:
       3. Per-session provider setting
       4. Default from providers.yaml
       5. Built-in "claude" provider
+
+    With *strict*, an explicit *name* that is not configured raises
+    :class:`ProviderNotFoundError` instead of falling back to the built-in
+    claude provider (which would bill the caller's own account).
     """
     # 1. Explicit name
     resolved = name
@@ -198,6 +278,10 @@ def get_provider(name: str | None = None) -> ProviderConfig:
     # Look up the named provider in config
     providers = config.get("providers", {})
     if resolved not in providers:
+        if strict and name:
+            raise ProviderNotFoundError(
+                f"provider {name!r} is not configured in {_providers_path()} "
+                f"(add it with 'pm provider add {name} ...')")
         _log.warning("Provider %r not found in config, falling back to claude", resolved)
         return ProviderConfig(name=BUILTIN_CLAUDE)
 

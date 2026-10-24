@@ -221,6 +221,7 @@ def _fake_claude_args(config: dict, session_id: str | None = None,
         ("body_batch", "--body-batch"),
         ("body_delay", "--body-delay"),
         ("hold", "--hold"),
+        ("idle_once_after", "--idle-once-after"),
         ("display_bullet", "--display-bullet"),
     ):
         if cfg_key in effective:
@@ -284,10 +285,15 @@ def _resolve_provider(provider: str | None = None):
     launch_claude_print_background to avoid repeating the same pattern.
     """
     from pm_core.providers import get_provider
-    provider_cfg = get_provider(provider)
+    provider_cfg = get_provider(provider, strict=bool(provider))
     provider_env = provider_cfg.env_vars()
     model_flag = provider_cfg.model_flag()
     run_env = {**os.environ, **provider_env} if provider_env else None
+    if run_env is not None:
+        # As build_claude_shell_cmd's ``env -u``: a router authenticates
+        # upstream itself, so a stray key must not reach Claude.
+        for var in provider_cfg.unset_env_vars():
+            run_env.pop(var, None)
     return provider_env, model_flag, run_env
 
 SESSION_REGISTRY = ".pm-sessions.json"
@@ -755,9 +761,10 @@ def _claude_project_dir(cwd: str) -> Path:
     """Compute Claude's project directory for a given working directory.
 
     Claude Code stores transcripts in ~/.claude/projects/{mangled-path}/
-    where the path has '/' replaced with '-' and '.' replaced with '-'.
+    where every character of the path other than ASCII letters and digits
+    (``/``, ``.``, ``_``, spaces, ...) is replaced with '-'.
     """
-    mangled = cwd.replace("/", "-").replace(".", "-")
+    mangled = re.sub(r"[^a-zA-Z0-9]", "-", cwd)
     return Path.home() / ".claude" / "projects" / mangled
 
 
@@ -773,6 +780,7 @@ def build_claude_shell_cmd(
     effort: str | None = None,
     write_dir: str | None = None,
     session_type: str | None = None,
+    container: bool = False,
 ) -> str:
     """Build a claude shell command string with proper flags and logging.
 
@@ -806,6 +814,15 @@ def build_claude_shell_cmd(
             exist on the host, pass the corresponding host path here so
             the file can be written.  The command will still reference the
             file via ``cwd`` (the path claude sees at runtime).
+        container: The command runs inside a pm container.  Only matters
+            for ``router`` providers (pm_core.worker_route): the command
+            then starts the in-container bridge forwarder first and never
+            starts claude if it fails; on the host a router provider's
+            ``launcher`` replaces the ``claude`` executable.
+
+    An explicitly named *provider* that is not configured raises
+    :class:`~pm_core.providers.ProviderNotFoundError` instead of silently
+    launching on the built-in claude provider.
     """
     # When transcript is requested, generate a UUID and create a symlink
     if transcript and cwd:
@@ -823,13 +840,28 @@ def build_claude_shell_cmd(
         _log.info("transcript: symlink %s -> %s", transcript_path, target)
 
     # Resolve provider configuration
-    provider_env, model_flag, _ = _resolve_provider(provider)
+    from pm_core.providers import get_provider
+    provider_cfg = get_provider(provider, strict=bool(provider))
+    model_flag = provider_cfg.model_flag()
+
+    # Router providers (pm_core.worker_route): command-scoped, never global.
+    if provider_cfg.type == "router":
+        from pm_core import worker_route
+        route_prefix, provider_env, exe = worker_route.launch_parts(
+            provider_cfg, container=container)
+    else:
+        route_prefix, provider_env, exe = "", provider_cfg.env_vars(), "claude"
 
     # Build env prefix for non-claude providers
     env_prefix = ""
     if provider_env:
         parts = [f"{k}={shlex.quote(v)}" for k, v in provider_env.items()]
         env_prefix = " ".join(parts) + " "
+    if provider_cfg.unset_env_vars():
+        # Unset (not empty) so Claude authenticates the way the router
+        # expects rather than with a stray key from the environment.
+        env_prefix = "env " + "".join(
+            f"-u {v} " for v in provider_cfg.unset_env_vars()) + env_prefix
 
     from pm_core.paths import skip_permissions_enabled, fake_claude_config_for_type
     fc_config = fake_claude_config_for_type(session_type, session_tag)
@@ -861,7 +893,7 @@ def build_claude_shell_cmd(
             if os.path.isdir(cwd):
                 cd_prefix = f"cd {shlex.quote(cwd)} && "
         skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
-        cmd = f"{cd_prefix}{env_prefix}claude{skip}"
+        cmd = f"{cd_prefix}{route_prefix}{env_prefix}{exe}{skip}"
 
     # Explicit model param overrides provider's model_flag
     effective_model = model or model_flag

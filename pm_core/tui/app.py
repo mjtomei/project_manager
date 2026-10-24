@@ -21,6 +21,7 @@ from textual.containers import Container, Vertical
 from textual.timer import Timer
 
 from pm_core import store, guide
+from rich.markup import escape
 
 from pm_core import tmux as tmux_mod
 from pm_core.tui.tech_tree import TechTree, PRSelected
@@ -511,16 +512,6 @@ class ProjectManagerApp(App):
         # so CLI commands can ask us to reload state without depending on
         # tmux send-keys (which gets eaten by whichever widget has focus).
         self._install_reload_signal()
-        # Sweep stale runtime_state entries from the previous TUI
-        # process — a freshly-started TUI doesn't own any pane or loop
-        # recorded by an old one, so anything still flagged as
-        # running/idle/queued is no longer live.  Action mirrors will
-        # rewrite real entries as panes register and loops resume.
-        try:
-            from pm_core import runtime_state as _rs
-            _rs.sweep_stale_states("tui-mount")
-        except Exception:
-            _log.debug("runtime_state sweep on mount failed", exc_info=True)
         # Load any existing capture config
         frame_capture.load_capture_config(self)
         # Set up watchers on child widgets for frame capture
@@ -530,6 +521,20 @@ class ProjectManagerApp(App):
         # Defer heavier operations (heal_registry, tmux bindings, GitHub
         # sync) to after the first frame.
         self._load_state()
+        # Sweep stale runtime_state entries from the previous TUI
+        # process — a freshly-started TUI doesn't own any pane or loop
+        # recorded by an old one, so anything still flagged as
+        # running/idle/queued is no longer live.  Action mirrors will
+        # rewrite real entries as panes register and loops resume.
+        # Only this project's PRs: ~/.pm/runtime is shared by every
+        # project, and another project's live TUI owns its entries (S36).
+        try:
+            from pm_core import runtime_state as _rs
+            _rs.sweep_stale_states(
+                "tui-mount",
+                pr_ids={p.get("id") for p in (self._data or {}).get("prs") or []})
+        except Exception:
+            _log.debug("runtime_state sweep on mount failed", exc_info=True)
         self._update_orientation()
         # Start the coalescing write queue now that the project root is known.
         # TUI mutations enqueue here instead of writing to disk inline.
@@ -549,6 +554,10 @@ class ProjectManagerApp(App):
             self.run_worker(self._write_queue.run(), exclusive=False)
         # Background sync interval: 5 minutes for automatic PR sync
         self._sync_timer = self.set_interval(300, self._background_sync)
+        # The QA resume scan runs on the shared poll timer, which an idle
+        # TUI stops.  Another clone's orphaned run whose PR arrives by a
+        # pull would then wait for the 5 minute sync (S43); keep scanning.
+        self._qa_resume_timer = self.set_interval(5, self._idle_qa_resume_scan)
         # Run heavier startup tasks (heal_registry, tmux bindings) in a
         # background thread so they don't block input processing.
         self.run_worker(self._deferred_startup(), exclusive=False)
@@ -645,6 +654,7 @@ class ProjectManagerApp(App):
                         for p in (self._data or {}).get("prs") or []}
         old_deps = {p.get("id"): list(p.get("depends_on") or [])
                     for p in (self._data or {}).get("prs") or []}
+        load_error = None
         try:
             # Only search for root on first load; reuse existing root for refreshes
             if self._root is None:
@@ -660,12 +670,32 @@ class ProjectManagerApp(App):
             # newly-unblocked or newly-in-scope PRs.
             from pm_core.tui import auto_start as _auto_start
             _auto_start.on_state_loaded(self, old_statuses, old_deps)
-        except FileNotFoundError:
-            _log.warning("no project.yaml found")
-            self._root = None
-            self._data = {}
-        except store.ProjectYamlParseError as e:
+        except FileNotFoundError as e:
+            if self._root is not None and Path(self._root).is_dir():
+                # The project's pm dir is still there and only project.yaml
+                # is briefly missing (checkout/rebase): keep the previous
+                # state, as for a conflicted file.
+                _log.warning("project.yaml missing, keeping previous state: %s", e)
+                load_error = e
+            else:
+                _log.warning("no project.yaml found")
+                self._root = None
+                self._data = {}
+        except store.ProjectYamlParseError as e:  # incl. PlanValidationError
             _log.warning("corrupt project.yaml, keeping previous state: %s", e)
+            load_error = e
+        shown_seq = getattr(self, "_load_error_seq", None)
+        if load_error is None and shown_seq:
+            # The "cannot be loaded" line is sticky: drop it now, or it
+            # hides what the reload brings (resumed or recorded QA).  Only
+            # that line: a newer message keeps the log line.
+            self._load_error_seq = None
+            self._clear_log_message(shown_seq)
+            _log.info("project.yaml loads again")
+        self._load_error = load_error
+        if load_error is not None:
+            from pm_core.tui.qa_loop_ui import _project_file_stamp
+            self._load_error_stamp = _project_file_stamp(self._root)
 
         # Decide which view to show based on whether PRs exist
         prs = self._data.get("prs") or []
@@ -673,6 +703,19 @@ class ProjectManagerApp(App):
             self._show_plans_view()
         elif self._qa_visible:
             self._show_qa_view()
+        elif not prs and load_error is not None:
+            # No previous state to keep: a TUI started or restarted while
+            # project.yaml cannot be loaded.  The guide would load the file
+            # again and raise, which killed the TUI at mount, and every QA
+            # run it would resume with it.  Show the (empty) tree, say why,
+            # and reload once the file changes (_retry_failed_load).
+            reason = (str(load_error).splitlines() or [""])[0]
+            msg = (f"project.yaml cannot be loaded: {reason} — waiting "
+                   "for it to load")
+            self.query_one("#tech-tree", TechTree).update_prs(
+                [], unavailable=msg)
+            self._show_normal_view()
+            self._load_error_seq = self.log_message(escape(msg), sticky=30)
         elif not prs:
             state, _ = guide.detect_state(self._root)
             self._show_guide_view(state)
@@ -980,6 +1023,31 @@ class ProjectManagerApp(App):
             pass
 
     # --- Sync delegates (see tui/sync.py) ---
+
+    def _retry_failed_load(self) -> None:
+        """Reload once project.yaml changes after a load with no previous
+        state failed, so a TUI started on an unloadable file shows the
+        project when it loads, not at the next 5 minute sync."""
+        if (getattr(self, "_load_error", None) is None
+                or (self._data or {}).get("prs")):
+            return
+        from pm_core.tui.qa_loop_ui import _project_file_stamp
+        if _project_file_stamp(self._root) != self._load_error_stamp:
+            self._load_state()
+
+    def _idle_qa_resume_scan(self) -> None:
+        """QA resume scan while the shared poll timer (which scans) is off."""
+        try:
+            self._retry_failed_load()
+        except Exception:
+            _log.warning("reload after a failed load failed", exc_info=True)
+        if self._review_loop_timer:
+            return
+        try:
+            from pm_core.tui import qa_loop_ui
+            qa_loop_ui._resume_incomplete_qa(self)
+        except Exception:
+            _log.warning("idle QA resume scan failed", exc_info=True)
 
     async def _background_sync(self) -> None:
         try:

@@ -55,6 +55,19 @@ def model_show():
     else:
         click.echo("No project-level model_config in project.yaml (using defaults).")
 
+    # Router providers (worker routes): where those sessions actually go.
+    from pm_core import worker_route
+    shown = False
+    for st in SESSION_TYPES:
+        res = resolve_model_and_provider(st, project_data=data)
+        if not res.provider:
+            continue
+        if not shown:
+            click.echo()
+            click.echo("Routes:")
+            shown = True
+        click.echo(f"  {st:14s} {worker_route.describe(res)}")
+
     # Surface invalid model_config entries — unknown session types are
     # silently ignored at resolution time, so a typo would otherwise just
     # never take effect.

@@ -388,14 +388,66 @@ def _adopt_live_qa(app) -> None:
         _log.warning("auto_start: QA adoption scan failed", exc_info=True)
 
 
+# Transcripts the TUI's idle polling (_poll_impl_idle) keeps reading after
+# auto-start is disabled; it registers them lazily on a later poll.
+_LAZY_TRACKED_RE = re.compile(r"^(?:impl|merge|review)-(?!.*-i\d+\.jsonl$).+\.jsonl$")
+
+
+def _live_read_transcripts(app, tdir: Path) -> set[str]:
+    """Paths in *tdir* that a reader still polls after auto-start is off.
+
+    - live idle-tracker entries (impl / merge / non-loop review panes);
+    - a running review loop's current iteration transcript (the loop polls
+      it itself; ``_poll_impl_idle`` skips PRs with running loops);
+    - impl / merge / review windows not registered yet: a live pane of the
+      pm session runs that session (its ``--session-id`` / ``--resume``).
+    Sign-off transcripts are not among them: the sign-off driver only
+    steps auto-start-driven PRs.
+    """
+    from pm_core import tmux as tmux_mod
+    from pm_core.claude_launcher import _PANE_SESSION_RE, session_id_from_transcript
+    live: set[str] = set()
+    tracker = getattr(app, "_pane_idle_tracker", None)
+    if tracker is not None:
+        for key in tracker.tracked_keys():
+            path = tracker.get_transcript_path(key)
+            if path and not tracker.is_gone(key):
+                live.add(os.path.abspath(path))
+    for pr_id, state in (getattr(app, "_review_loops", None) or {}).items():
+        if state.running and getattr(state, "_transcript_dir", None):
+            live.add(os.path.abspath(os.path.join(
+                state._transcript_dir, f"review-{pr_id}-i{state.iteration}.jsonl")))
+    session = getattr(app, "_session_name", None)
+    if session:
+        ids: set[str] = set()
+        for cmd in tmux_mod.live_pane_start_commands(session):
+            ids.update(_PANE_SESSION_RE.findall(cmd))
+        for p in tdir.iterdir():
+            if (_LAZY_TRACKED_RE.match(p.name) and p.is_symlink()
+                    and session_id_from_transcript(p) in ids):
+                live.add(os.path.abspath(p))
+    return live
+
+
 def _finalize_all_transcripts(app) -> None:
-    """Finalize all transcript symlinks in the current run directory."""
+    """Finalize all transcript symlinks in the current run directory.
+
+    Skips transcripts a reader still polls: a copy freezes them, so e.g. a
+    repo-update (merge) window waiting on INPUT_REQUIRED would never have
+    its later MERGED detected, and a running review loop would never see
+    its verdict.  Those stay symlinks to Claude's own transcript (as in a
+    run that is never disabled).
+    """
     tdir = get_transcript_dir(app)
     if not tdir or not tdir.is_dir():
         return
     from pm_core.claude_launcher import finalize_transcript
+    live = _live_read_transcripts(app, tdir)
     for p in tdir.iterdir():
         if p.is_symlink() and p.suffix == ".jsonl":
+            if os.path.abspath(p) in live:
+                _log.info("transcript: %s is still read live — not finalized", p)
+                continue
             finalize_transcript(p)
 
 

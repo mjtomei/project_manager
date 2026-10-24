@@ -219,7 +219,8 @@ def clear_action(pr_id: str, action: str) -> None:
     set_action_state(pr_id, action, None)
 
 
-def sweep_stale_states(reason: str = "tui-restart") -> int:
+def sweep_stale_states(reason: str = "tui-restart",
+                       pr_ids: set[str] | None = None) -> int:
     """Reset any in-flight action states across all PRs.
 
     Called by the TUI on mount: a fresh TUI process can't own panes or
@@ -229,6 +230,9 @@ def sweep_stale_states(reason: str = "tui-restart") -> int:
     correspond to anything live.  We delete such entries entirely.
     Terminal states (``done`` / ``failed``) are left untouched so
     post-mortem info — e.g. last review-loop verdict — survives restart.
+
+    *pr_ids* limits the sweep to those PRs (the TUI's own project), since
+    the runtime dir is shared by every project under ``~/.pm``.
 
     Returns the number of action entries that were cleared.
     """
@@ -254,6 +258,8 @@ def sweep_stale_states(reason: str = "tui-restart") -> int:
         if not targets:
             continue
         pr_id = data.get("pr_id") or path.stem
+        if pr_ids is not None and pr_id not in pr_ids:
+            continue
         for action in targets:
             try:
                 clear_action(pr_id, action)

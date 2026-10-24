@@ -10,6 +10,7 @@ import pytest
 from pm_core.verdict_transcript import (
     extract_verdict_from_transcript,
     extract_verdict_reason_from_transcript,
+    latest_api_error,
 )
 
 
@@ -253,3 +254,30 @@ def test_reason_missing_returns_empty(tmp_path: Path) -> None:
 
 def test_reason_missing_file() -> None:
     assert extract_verdict_reason_from_transcript(None) == ""
+
+
+def _api_error_line(uid: str, text: str) -> str:
+    return json.dumps({
+        "type": "assistant", "uuid": uid, "isApiErrorMessage": True,
+        "message": {"role": "assistant", "model": "<synthetic>",
+                    "content": [{"type": "text", "text": text}]},
+    })
+
+
+def test_latest_api_error_when_turn_ended_on_it(tmp_path: Path) -> None:
+    p = _write(tmp_path, [
+        _user_line("go"), _assistant_line("working"),
+        _api_error_line("u1", "API Error: Connection dropped (ECONNRESET)"),
+        json.dumps({"type": "system", "subtype": "turn_duration"}),
+    ])
+    assert latest_api_error(p) == (
+        "u1", "API Error: Connection dropped (ECONNRESET)")
+
+
+def test_latest_api_error_none_for_normal_or_newer_turn(tmp_path: Path) -> None:
+    assert latest_api_error(_write(tmp_path, [
+        _api_error_line("u1", "API Error"), _user_line("go on"),
+        _assistant_line("done")])) is None
+    assert latest_api_error(_write(tmp_path, [
+        _api_error_line("u1", "API Error"), _user_line("go on")])) is None
+    assert latest_api_error(tmp_path / "missing.jsonl") is None

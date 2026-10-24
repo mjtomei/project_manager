@@ -68,8 +68,24 @@ class ProjectYamlParseError(Exception):
     """Raised when project.yaml cannot be parsed (e.g. mid-edit or merge conflict)."""
 
 
-class PlanValidationError(Exception):
-    """Raised when plan entries have invalid references (e.g. bad parent ID, cycles)."""
+class PlanValidationError(ProjectYamlParseError):
+    """Raised when plan entries have invalid references (e.g. bad parent ID, cycles).
+
+    A ProjectYamlParseError: a clean merge or pull can leave such a file just
+    as it can leave conflict markers, and every caller that keeps its previous
+    state on an unloadable file must survive both (S44: the TUI exited).
+    """
+
+
+class ProjectYamlMissingError(ProjectYamlParseError, FileNotFoundError):
+    """Raised by load() when project.yaml does not exist.
+
+    Still a FileNotFoundError for callers that treat a missing file as "no
+    project".  Also an unloadable file for callers that keep their previous
+    state: a checkout or rebase unlinks project.yaml before writing the new
+    one, and the TUI keeps its root meanwhile (S44), so a handler catching
+    only ProjectYamlParseError would raise out of a TUI timer.
+    """
 
 
 VALID_PLAN_STATUSES = {"draft", "active", "done"}
@@ -111,6 +127,8 @@ def load(root: Optional[Path] = None, validate: bool = True) -> dict:
     try:
         with open(path) as f:
             data = yaml.load(f, Loader=_yaml_loader())
+    except FileNotFoundError as e:
+        raise ProjectYamlMissingError(e.errno, e.strerror, e.filename) from e
     except yaml.YAMLError as e:
         raise ProjectYamlParseError(f"project.yaml is not valid YAML: {e}") from e
 
@@ -244,6 +262,16 @@ class StoreLockTimeout(Exception):
     """Raised when the project.yaml lock cannot be acquired within the timeout."""
 
 
+# Writers retried on the TUI's poll timer pass ``timeout=NO_WAIT``: a single
+# non-blocking lock attempt.  Waiting the default 2 s on every tick while the
+# user keeps ``pm edit`` open (lock held until the editor quits) blocked the
+# TUI for most of every tick (RQ38); such a caller keeps its write pending,
+# says once that it waits (``LOCK_BUSY_REASON``) and retries next tick.
+NO_WAIT = 0.0
+LOCK_BUSY_REASON = ("project.yaml is locked by another pm process "
+                    "(e.g. an open `pm edit`)")
+
+
 @contextmanager
 def _lock(root: Path, timeout: float = LOCK_TIMEOUT_SECONDS):
     """Acquire an exclusive advisory lock on project.yaml.lock.
@@ -364,7 +392,7 @@ def locked_update(
     ``locked_update`` and pass the results into ``fn`` via a closure.
 
     Raises ``StoreLockTimeout`` if the lock cannot be acquired within
-    *timeout* seconds (default 2).
+    *timeout* seconds (default 2); ``NO_WAIT`` tries exactly once.
     """
     with _lock(root, timeout):
         data = load(root, validate=validate)

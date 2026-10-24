@@ -126,6 +126,7 @@ class PushProxy:
         self._server_socket: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._ino: int | None = None
 
     def start(self) -> None:
         """Start the proxy in a background daemon thread."""
@@ -141,6 +142,7 @@ class PushProxy:
         self._server_socket.bind(self.socket_path)
         # Make socket world-writable so the container user can connect
         os.chmod(self.socket_path, 0o777)
+        self._ino = os.stat(self.socket_path).st_ino
         self._server_socket.listen(1)
         self._server_socket.settimeout(2.0)
 
@@ -162,18 +164,33 @@ class PushProxy:
                 pass
         if self._thread:
             self._thread.join(timeout=5)
-        try:
-            os.unlink(self.socket_path)
-        except FileNotFoundError:
-            pass
+        # A newer proxy may already serve this path (a stop then start of
+        # the PR's shared proxy): leave its socket alone.
+        if self.owns_socket():
+            try:
+                os.unlink(self.socket_path)
+            except FileNotFoundError:
+                pass
         _log.info("Push proxy stopped: %s", self.socket_path)
+
+    def owns_socket(self) -> bool:
+        """True while ``socket_path`` is still the socket this proxy bound.
+
+        False once it is removed or replaced by a newer proxy.  The open
+        listener pins its inode, so a replacement cannot reuse the number.
+        """
+        try:
+            return os.stat(self.socket_path).st_ino == self._ino
+        except OSError:
+            return False
 
     def _serve_loop(self) -> None:
         """Accept connections and handle push requests."""
         while not self._stop.is_set():
             # If the socket file was removed externally (e.g. container
-            # cleanup in tmux), exit the loop so the thread terminates.
-            if not os.path.exists(self.socket_path):
+            # cleanup in tmux) or replaced by a newer proxy, exit the loop
+            # so the thread terminates.
+            if not self.owns_socket():
                 _log.info("Push proxy socket removed, exiting: %s",
                           self.socket_path)
                 break
@@ -496,6 +513,11 @@ _proxy_lock = threading.Lock()
 
 # For shared proxies: which containers reference each proxy key
 _proxy_refs: dict[str, set[str]] = {}
+# Serialises the check-then-spawn of one shared proxy: QA launches a PR's
+# scenario containers in parallel threads, and without it each sees no live
+# socket, spawns its own proxy (the later one unlinks the earlier socket)
+# and resets the refs, so removing one container stops the others' proxy.
+_spawn_locks: dict[str, threading.Lock] = {}
 # Reverse lookup: container_name -> proxy key
 _container_to_proxy_key: dict[str, str] = {}
 
@@ -567,9 +589,18 @@ def _start_proxy_subprocess(sock_path: str, workdir: str,
     import sys
     import time
 
+    # ``-m`` puts the cwd first on sys.path, so a project with its own
+    # top-level pm_core/ (the caller's cwd is usually the project) would
+    # shadow pm and the proxy would die on import.  Run from / with this
+    # process's pm_core root first on PYTHONPATH.
+    pm_root = str(Path(__file__).resolve().parent.parent)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [pm_root] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
     proc = subprocess.Popen(
         [sys.executable, "-m", "pm_core.push_proxy",
          sock_path, workdir, allowed_branch],
+        cwd="/", env=env,
         start_new_session=True,  # detach from parent process group
         # Redirect stdin too: when spawned from a tmux popup (`display-popup
         # -E pm _popup-cmd ...`), an inherited pty FD keeps the popup
@@ -623,35 +654,38 @@ def start_push_proxy(container_name: str, workdir: str,
         sock_dir = _shared_sock_dir(session_tag, pr_id)
         sock_path = os.path.join(sock_dir, "push.sock")
 
-        # Reuse if an existing proxy is alive on this socket
-        if os.path.exists(sock_path) and proxy_is_alive(sock_path):
-            with _proxy_lock:
-                _proxy_refs.setdefault(key, set()).add(container_name)
-                _container_to_proxy_key[container_name] = key
-            _log.info("Reusing live shared push proxy for %s (container %s)",
-                      key, container_name)
-            return sock_path
-
-        # Socket missing or dead — spawn a new subprocess proxy
-        os.makedirs(sock_dir, exist_ok=True)
-        # Remove stale socket before spawning.  Docker creates a
-        # *directory* when bind-mounting a non-existent socket path, so
-        # handle both files and directories left over from old runs.
-        try:
-            os.unlink(sock_path)
-        except IsADirectoryError:
-            import shutil
-            shutil.rmtree(sock_path, ignore_errors=True)
-        except FileNotFoundError:
-            pass
-
-        _start_proxy_subprocess(sock_path, workdir, allowed_branch)
-
         with _proxy_lock:
-            _proxy_refs[key] = {container_name}
-            _container_to_proxy_key[container_name] = key
+            spawn_lock = _spawn_locks.setdefault(key, threading.Lock())
+        with spawn_lock:
+            # Reuse if an existing proxy is alive on this socket
+            if os.path.exists(sock_path) and proxy_is_alive(sock_path):
+                with _proxy_lock:
+                    _proxy_refs.setdefault(key, set()).add(container_name)
+                    _container_to_proxy_key[container_name] = key
+                _log.info("Reusing live shared push proxy for %s %s (container %s)",
+                          session_tag, pr_id, container_name)
+                return sock_path
 
-        return sock_path
+            # Socket missing or dead — spawn a new subprocess proxy
+            os.makedirs(sock_dir, exist_ok=True)
+            # Remove stale socket before spawning.  Docker creates a
+            # *directory* when bind-mounting a non-existent socket path, so
+            # handle both files and directories left over from old runs.
+            try:
+                os.unlink(sock_path)
+            except IsADirectoryError:
+                import shutil
+                shutil.rmtree(sock_path, ignore_errors=True)
+            except FileNotFoundError:
+                pass
+
+            _start_proxy_subprocess(sock_path, workdir, allowed_branch)
+
+            with _proxy_lock:
+                _proxy_refs[key] = {container_name}
+                _container_to_proxy_key[container_name] = key
+
+            return sock_path
 
     # Legacy per-container proxy
     import tempfile
@@ -708,6 +742,19 @@ def stop_push_proxy(container_name: str) -> None:
     For shared proxies the proxy is only stopped when the last container
     referencing it is removed.
     """
+    with _proxy_lock:
+        key = _container_to_proxy_key.get(container_name)
+        spawn_lock = _spawn_locks.get(key) if key else None
+    if spawn_lock is None:
+        _stop_push_proxy(container_name)
+        return
+    # Hold the start path's lock: a start between the last ref going and
+    # the socket removal would reuse the proxy this is about to kill.
+    with spawn_lock:
+        _stop_push_proxy(container_name)
+
+
+def _stop_push_proxy(container_name: str) -> None:
     with _proxy_lock:
         key = _container_to_proxy_key.pop(container_name, None)
         if key is None:
@@ -865,13 +912,13 @@ if __name__ == "__main__":
     proxy = PushProxy(_sock, _workdir, _branch)
     proxy.start()
 
-    # Block until the socket is removed or we get a signal
+    # Block until the socket is removed or replaced, or we get a signal
     import signal as _signal
     _stop = threading.Event()
     _signal.signal(_signal.SIGTERM, lambda *_: _stop.set())
     _signal.signal(_signal.SIGINT, lambda *_: _stop.set())
     while not _stop.is_set():
-        if not os.path.exists(_sock):
+        if not proxy.owns_socket():
             break
         _stop.wait(2.0)
     proxy.stop()

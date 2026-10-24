@@ -115,9 +115,15 @@ def poll_for_verdict(
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
     workdir: str | None = None,
+    on_idle_without_verdict: Callable[[], None] | None = None,
+    on_tick: Callable[[], None] | None = None,
 ) -> str | None:
     """Block until Claude signals idle, then extract a verdict from the
     JSONL transcript.
+
+    *on_idle_without_verdict* runs for each idle turn that ends without a
+    verdict and *on_tick* on every wait iteration (QA uses them to surface
+    and recover from a worker-route outage, see qa_loop._RouteStallWatch).
 
     Returns the assistant text from the latest turn when a verdict is
     found, or ``None`` when the pane disappears / ``stop_check`` fires.
@@ -170,6 +176,9 @@ def poll_for_verdict(
             _log.warning("%s: pane %s disappeared", log_prefix, pane_id)
             return None
 
+        if on_tick:
+            on_tick()
+
         if trust_watch is not None:
             blocked = trust_watch.check()
             if blocked:
@@ -202,6 +211,8 @@ def poll_for_verdict(
             _log.info("%s: hook-driven verdict %s (session_id=%s)",
                       log_prefix, verdict, session_id)
             return read_latest_assistant_text(transcript_path) or verdict
+        if on_idle_without_verdict:
+            on_idle_without_verdict()
 
 
 def wait_for_follow_up_verdict(
@@ -213,13 +224,17 @@ def wait_for_follow_up_verdict(
     wait_timeout: float = 15,
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
+    pane_id: str | None = None,
 ) -> str | None:
     """Block for the next hook-driven idle on an existing pane and return
     the assistant text of the follow-up turn (or ``None``).
 
-    Hook-driven only — requires *transcript_path*.
+    Hook-driven only — requires *transcript_path*.  The wait ends when
+    the window has no pane left, or, given *pane_id*, when that pane is
+    gone (for a session that shares its window with another one).
     """
     from pm_core import hook_events
+    from pm_core import tmux as tmux_mod
     from pm_core.claude_launcher import session_id_from_transcript
     from pm_core.verdict_transcript import (
         extract_verdict_from_transcript,
@@ -235,8 +250,8 @@ def wait_for_follow_up_verdict(
     hook_baseline = time.time()
 
     while not (stop_check and stop_check()):
-        pane_id = find_claude_pane(session, window_name)
-        if not pane_id:
+        if not (tmux_mod.pane_exists(pane_id) if pane_id
+                else find_claude_pane(session, window_name)):
             _log.warning("%s: pane gone during follow-up wait", log_prefix)
             return None
 
