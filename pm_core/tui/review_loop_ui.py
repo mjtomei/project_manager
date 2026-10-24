@@ -12,6 +12,8 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
 """
 
 from pm_core.paths import configure_logger
+from rich.markup import escape
+
 from pm_core import store
 from pm_core.autostart_state import held_by_text
 from pm_core.review_loop import (
@@ -459,7 +461,13 @@ def _poll_loop_state_inner(app) -> None:
 
         # Auto-start next step: review pass → QA (then QA pass → merge)
         if state.latest_verdict == VERDICT_PASS:
-            _maybe_start_qa(app, state.pr_id)
+            _start_qa_after_review(app, state.pr_id)
+
+    # Review → QA hand-offs that met an unloadable project.yaml: retried
+    # every tick until the file loads (RQ37), else a zz t loop or an
+    # auto-start chain stopped for good at in_review.
+    for pr_id in list(_pending_auto_qa(app)):
+        _start_qa_after_review(app, pr_id)
 
     # Stop the timer if no loops are running AND no active PRs need animation
     # AND watcher is not running
@@ -467,7 +475,7 @@ def _poll_loop_state_inner(app) -> None:
         pr.get("status") in ("in_progress", "in_review", "qa", "sign_off") and pr.get("workdir")
         for pr in (app._data.get("prs") or [])
     )
-    qa_running = _qa_needs_poll(app)
+    qa_running = _qa_needs_poll(app) or bool(_pending_auto_qa(app))
     watcher_running = app._watcher_manager.is_any_running()
     if not any_running and not has_active_prs and not watcher_running and not qa_running:
         if app._review_loop_timer:
@@ -494,8 +502,44 @@ def _refresh_tech_tree(app) -> None:
 # Auto-QA after passing review
 # ---------------------------------------------------------------------------
 
-def _maybe_start_qa(app, pr_id: str) -> None:
+def _pending_auto_qa(app) -> dict:
+    """PR id -> why its review → QA hand-off is waiting for project.yaml."""
+    pending = getattr(app, "_pending_auto_qa", None)
+    if not isinstance(pending, dict):
+        pending = {}
+        app._pending_auto_qa = pending
+    return pending
+
+
+def _start_qa_after_review(app, pr_id: str) -> None:
+    """Run the review → QA hand-off for *pr_id*, or keep it pending.
+
+    While project.yaml cannot be loaded (conflict markers, plans that do
+    not validate, the file missing) the in_review → qa write fails; the
+    hand-off is then kept in ``app._pending_auto_qa`` and retried by the
+    poll timer, saying once per reason that it waits.
+    """
+    pending = _pending_auto_qa(app)
+    problem = _maybe_start_qa(app, pr_id)
+    if problem is None:
+        if pending.pop(pr_id, None) is not None:
+            _log.info("auto_qa: project.yaml loads again — %s handed to QA",
+                      pr_id)
+        return
+    if pending.get(pr_id) != problem:
+        pending[pr_id] = problem
+        _log.warning("auto_qa: %s review passed; QA waits until "
+                     "project.yaml loads again: %s", pr_id, problem)
+        app.log_message(escape(
+            f"Review PASS for {pr_id} — waiting for project.yaml to load "
+            f"to start QA: {problem}"))
+
+
+def _maybe_start_qa(app, pr_id: str) -> str | None:
     """Transition a PR from in_review → qa and start QA.
+
+    Returns why the transition could not be written (project.yaml cannot
+    be loaded or locked) so the caller retries, else None.
 
     Called when review passes.  Works in two modes:
 
@@ -548,9 +592,8 @@ def _maybe_start_qa(app, pr_id: str) -> None:
         try:
             store.locked_update(app._root, apply_qa)
         except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
-            app.log_message(f"Error: {e}")
             _log.warning("auto_qa: %s for %s: %s", type(e).__name__, pr_id, e)
-            return
+            return str(e)
         app._load_state()
         if transitioned:
             _log.info("auto_qa: transitioned %s to qa status", pr_id)
