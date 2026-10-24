@@ -8,12 +8,16 @@ import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from pm_core.paths import configure_logger, log_shell_command
+from pm_core.prompt_bounds import (
+    PROMPT_ARG_LIMIT, PromptTooLargeError, prompt_bytes,
+)
 _log = configure_logger("pm.claude_launcher")
 
 # The fake-claude executable is invoked by bare name and resolved from PATH —
@@ -562,6 +566,81 @@ class WorkspacePromptWatch:
         return None
 
 
+def _prompt_is_oversized(prompt: str | None) -> bool:
+    """True when *prompt* exceeds the single-argv-entry budget."""
+    return bool(prompt) and prompt_bytes(prompt) > PROMPT_ARG_LIMIT
+
+
+def _bootstrap_prompt(path: str) -> str:
+    """A short argv prompt pointing claude at its full instructions on disk.
+
+    Used when the real prompt is too large for one argv entry: the complete
+    text is written to *path* and claude reads it on startup.  This preserves
+    every instruction (no truncation) while keeping argv small.
+    """
+    return (
+        f"Your complete instructions are in the file at {path}. "
+        f"Read that file now and follow it exactly — it is your full task "
+        f"prompt."
+    )
+
+
+def _materialize_oversized_prompt(
+    prompt: str, *, cwd: str | None = None, write_dir: str | None = None,
+    session_id: str | None = None,
+) -> tuple[str, str | None]:
+    """Return ``(argv_prompt, temp_path)`` for a possibly oversized *prompt*.
+
+    Under the limit the prompt is returned unchanged with no temp path.  Over
+    it, the full prompt is written to a file and a short bootstrap prompt is
+    returned; the caller must delete *temp_path* after the process exits.
+    Raises :class:`PromptTooLargeError` when no writable location exists.
+
+    The file lands on the host path (*write_dir*) while the bootstrap names
+    the path claude sees at runtime (*cwd*) — in a container those differ,
+    because the host workdir is mounted at the container path (the same split
+    ``build_claude_shell_cmd`` uses).  With only one of the two given, that
+    one is used for both.
+    """
+    if not _prompt_is_oversized(prompt):
+        return prompt, None
+    candidates: list[tuple[str, str]] = []
+    if write_dir:
+        candidates.append((write_dir, cwd or write_dir))
+    if cwd and cwd != write_dir:
+        candidates.append((cwd, cwd))
+    for write_base, ref_base in candidates:
+        try:
+            b = Path(write_base)
+            if not b.is_dir():
+                continue
+            d = b / "pm" / "prompts"
+            d.mkdir(parents=True, exist_ok=True)
+            fname = f"pm_prompt_{session_id or uuid.uuid4()}.txt"
+            f = d / fname
+            f.write_text(prompt)
+            ref = Path(ref_base) / "pm" / "prompts" / fname
+            _log.warning(
+                "prompt is %d bytes, over the %d-byte argv limit; using "
+                "file-backed bootstrap %s", prompt_bytes(prompt),
+                PROMPT_ARG_LIMIT, ref)
+            return _bootstrap_prompt(str(ref)), str(f)
+        except OSError:
+            continue
+    try:
+        fd, path = tempfile.mkstemp(prefix="pm_prompt_", suffix=".txt")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(prompt)
+        _log.warning(
+            "prompt is %d bytes, over the %d-byte argv limit; using "
+            "file-backed bootstrap %s", prompt_bytes(prompt),
+            PROMPT_ARG_LIMIT, path)
+        return _bootstrap_prompt(path), path
+    except OSError as e:
+        raise PromptTooLargeError(prompt_bytes(prompt), PROMPT_ARG_LIMIT,
+                                  "claude prompt") from e
+
+
 def launch_claude(prompt: str, session_key: str, pm_root: Path,
                   cwd: str | None = None, resume: bool = True,
                   provider: str | None = None,
@@ -608,6 +687,10 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
         save_session(pm_root, session_key, session_id)
         _log.info("Generated new session_id=%s for key=%s", session_id, session_key)
 
+    # Over-limit prompts are written to a file and delivered via a short
+    # bootstrap argv entry (see _materialize_oversized_prompt); the file is
+    # removed once the process exits.
+    cleanup_paths: list[str] = []
     if fc_config is not None:
         cmd = [_FAKE_CLAUDE_BIN]
         cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
@@ -625,7 +708,11 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
             # Don't pass prompt when resuming - Claude already has the conversation
         else:
             cmd.extend(["--session-id", session_id])
-            cmd.append(prompt)
+            argv_prompt, _tmp = _materialize_oversized_prompt(
+                prompt, cwd=cwd, session_id=session_id)
+            if _tmp:
+                cleanup_paths.append(_tmp)
+            cmd.append(argv_prompt)
 
     _log.info("launch_claude: cmd=%s (cwd=%s, session_key=%s, session_id=%s)",
               cmd[:6], cwd, session_key, session_id[:8] + "...")
@@ -633,31 +720,42 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     log_shell_command(cmd, prefix="claude")
     # Log the environment variables passed to the claude CLI (filtered for ANTHROPIC_/OPENAI_ prefixes)
     _log.debug("Claude env vars: %s", {k: v for k, v in (run_env or {}).items() if k.startswith('ANTHROPIC_') or k.startswith('OPENAI_')})
-    result = subprocess.run(cmd, cwd=cwd, env=run_env)
-    returncode = result.returncode
-    if returncode != 0:
-        log_shell_command(cmd, prefix="claude", returncode=returncode)
-
-    # If session failed (possibly invalid/corrupted), try with a fresh session.
-    # Skip the retry when using fake-claude — it always exits 0.
-    if returncode != 0 and resume and fc_config is None:
-        _log.warning("Session failed (rc=%d), retrying with fresh session", returncode)
-        session_id = str(uuid.uuid4())
-        save_session(pm_root, session_key, session_id)
-        cmd = [claude]
-        if _skip_permissions():
-            cmd.append("--dangerously-skip-permissions")
-        if model_flag:
-            cmd.extend(["--model", model_flag])
-        if effort:
-            cmd.extend(["--effort", effort])
-        cmd.extend(["--session-id", session_id])
-        cmd.append(prompt)
-        log_shell_command(cmd, prefix="claude")
+    try:
         result = subprocess.run(cmd, cwd=cwd, env=run_env)
         returncode = result.returncode
         if returncode != 0:
             log_shell_command(cmd, prefix="claude", returncode=returncode)
+
+        # If session failed (possibly invalid/corrupted), try with a fresh session.
+        # Skip the retry when using fake-claude — it always exits 0.
+        if returncode != 0 and resume and fc_config is None:
+            _log.warning("Session failed (rc=%d), retrying with fresh session", returncode)
+            session_id = str(uuid.uuid4())
+            save_session(pm_root, session_key, session_id)
+            cmd = [claude]
+            if _skip_permissions():
+                cmd.append("--dangerously-skip-permissions")
+            if model_flag:
+                cmd.extend(["--model", model_flag])
+            if effort:
+                cmd.extend(["--effort", effort])
+            cmd.extend(["--session-id", session_id])
+            argv_prompt, _tmp = _materialize_oversized_prompt(
+                prompt, cwd=cwd, session_id=session_id)
+            if _tmp:
+                cleanup_paths.append(_tmp)
+            cmd.append(argv_prompt)
+            log_shell_command(cmd, prefix="claude")
+            result = subprocess.run(cmd, cwd=cwd, env=run_env)
+            returncode = result.returncode
+            if returncode != 0:
+                log_shell_command(cmd, prefix="claude", returncode=returncode)
+    finally:
+        for _p in cleanup_paths:
+            try:
+                os.unlink(_p)
+            except OSError:
+                pass
 
     return returncode
 
@@ -695,6 +793,7 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
 
     # Resolve provider
     _, model_flag, run_env = _resolve_provider(provider)
+    cleanup_path: str | None = None
     if fc_config is not None:
         cmd = [_FAKE_CLAUDE_BIN]
         cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
@@ -711,7 +810,9 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
         if allowed_tools:
             for tool in allowed_tools:
                 cmd.extend(["--allowedTools", tool])
-        cmd.extend(["-p", prompt])
+        argv_prompt, cleanup_path = _materialize_oversized_prompt(
+            prompt, cwd=cwd)
+        cmd.extend(["-p", argv_prompt])
 
     done = threading.Event()
 
@@ -747,6 +848,11 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     finally:
         done.set()
         spinner_thread.join()
+        if cleanup_path:
+            try:
+                os.unlink(cleanup_path)
+            except OSError:
+                pass
 
     return result.stdout
 
@@ -895,13 +1001,32 @@ def build_claude_shell_cmd(
                     (_prompts_subdir / _fname).write_text(prompt)
                     _ref_base = Path(cwd) if cwd else _host_dir
                     _prompt_ref = _ref_base / "pm" / "prompts" / _fname
-                    # Delete the temp file after claude reads it via $(cat ...).
-                    # The semicolon ensures cleanup runs whether claude succeeds or fails.
-                    cmd += f' "$(cat {_prompt_ref})"; rm -f {shlex.quote(str(_prompt_ref))}'
+                    # Delete the temp file after claude reads it.  The
+                    # semicolon ensures cleanup runs whether claude succeeds
+                    # or fails.
+                    if _prompt_is_oversized(prompt):
+                        # "$(cat file)" still expands to one oversized argv
+                        # entry, so it does NOT avoid E2BIG.  Pass a short
+                        # bootstrap that points claude at the full prompt
+                        # file instead — every instruction is preserved.
+                        bootstrap = _bootstrap_prompt(str(_prompt_ref))
+                        cmd += (f' {shlex.quote(bootstrap)}; '
+                                f'rm -f {shlex.quote(str(_prompt_ref))}')
+                        _log.warning(
+                            "prompt is %d bytes, over the %d-byte argv limit; "
+                            "using file-backed bootstrap %s",
+                            prompt_bytes(prompt), PROMPT_ARG_LIMIT, _prompt_ref)
+                    else:
+                        cmd += f' "$(cat {_prompt_ref})"; rm -f {shlex.quote(str(_prompt_ref))}'
                     _prompt_written = True
             except Exception:
                 pass
         if not _prompt_written:
+            if _prompt_is_oversized(prompt):
+                # No writable location for file-backed delivery: fail with a
+                # clear error rather than letting execve raise a raw E2BIG.
+                raise PromptTooLargeError(prompt_bytes(prompt),
+                                          PROMPT_ARG_LIMIT, "claude prompt")
             escaped = prompt.replace("'", "'\\''")
             cmd += f" '{escaped}'"
 
@@ -1049,38 +1174,48 @@ def launch_claude_print_background(prompt: str, cwd: str | None = None,
     fc_config = _fake_claude_config_for_type(session_type)
 
     def _run():
-        if fc_config is not None:
-            cmd = [_FAKE_CLAUDE_BIN]
-            cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
-        else:
-            claude = find_claude()
-            if not claude:
-                if callback:
-                    callback("", "claude CLI not found", 1)
-                return
-            cmd = [claude]
-            if _skip_permissions():
-                cmd.append("--dangerously-skip-permissions")
-            if model_flag:
-                cmd.extend(["--model", model_flag])
-            cmd.extend(["-p", prompt])
-        log_shell_command(cmd, prefix="claude-print")
-        # Print mode is one-shot; close stdin so a no-verdict fake-claude
-        # (e.g. under "_all" mode) hits EOF in _hold_open instead of blocking
-        # forever on inherited stdin.  Real `claude -p` gets its prompt via
-        # argument, so it never needs stdin either.
-        result = subprocess.run(
-            cmd,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            env=run_env,
-            stdin=subprocess.DEVNULL,
-        )
-        if result.returncode != 0:
-            log_shell_command(cmd, prefix="claude-print", returncode=result.returncode)
-        if callback:
-            callback(result.stdout, result.stderr, result.returncode)
+        cleanup_path = None
+        try:
+            if fc_config is not None:
+                cmd = [_FAKE_CLAUDE_BIN]
+                cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
+            else:
+                claude = find_claude()
+                if not claude:
+                    if callback:
+                        callback("", "claude CLI not found", 1)
+                    return
+                cmd = [claude]
+                if _skip_permissions():
+                    cmd.append("--dangerously-skip-permissions")
+                if model_flag:
+                    cmd.extend(["--model", model_flag])
+                argv_prompt, cleanup_path = _materialize_oversized_prompt(
+                    prompt, cwd=cwd)
+                cmd.extend(["-p", argv_prompt])
+            log_shell_command(cmd, prefix="claude-print")
+            # Print mode is one-shot; close stdin so a no-verdict fake-claude
+            # (e.g. under "_all" mode) hits EOF in _hold_open instead of blocking
+            # forever on inherited stdin.  Real `claude -p` gets its prompt via
+            # argument, so it never needs stdin either.
+            result = subprocess.run(
+                cmd,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                env=run_env,
+                stdin=subprocess.DEVNULL,
+            )
+            if result.returncode != 0:
+                log_shell_command(cmd, prefix="claude-print", returncode=result.returncode)
+            if callback:
+                callback(result.stdout, result.stderr, result.returncode)
+        finally:
+            if cleanup_path:
+                try:
+                    os.unlink(cleanup_path)
+                except OSError:
+                    pass
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()

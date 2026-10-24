@@ -40,10 +40,14 @@ from pathlib import Path
 from pm_core import store
 from pm_core import tmux as tmux_mod
 from pm_core import prompt_gen
+from pm_core import integration
 from pm_core.cli.helpers import (
     _log,
     _pr_display_id,
     _record_status_timestamp,
+)
+from pm_core.prompt_bounds import (
+    INTEGRATION_LIST_BUDGET, INTEGRATION_MAX_PATHS, bounded_join,
 )
 
 # --- Routing verdicts ------------------------------------------------------
@@ -843,12 +847,29 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 f"`{(integ.get('base_sha') or '?')[:12]}` from "
                 f"`{integ.get('target_repo')}`")
         lines.append(f"Integration with {base}: **{integ.get('status')}**.")
+        # Resolved lazily: the pointer calls captures_dir(), which creates the
+        # PR's captures directory as a side effect.  Building a prompt must not
+        # touch the filesystem, and the pointer is only needed when a path list
+        # is actually abbreviated.
+        def _integ_note(n: int) -> str:
+            return (f" (+{n} more; "
+                    f"{integration.integration_pointer(pr.get('id', '???'))})")
+
+        # Byte-bounded as well as count-capped: the lines are filesystem
+        # paths, so 20 long ones blow the argv budget on their own (this
+        # block feeds the impl / review / QA-planner prompts).
         if integ.get("conflicts"):
-            lines.append("Conflicting paths: "
-                         + ", ".join(f"`{c}`" for c in integ["conflicts"]))
+            lines.append("Conflicting paths: " + bounded_join(
+                integ["conflicts"], lambda c: f"`{c}`",
+                max_items=INTEGRATION_MAX_PATHS,
+                max_bytes=INTEGRATION_LIST_BUDGET, separator=", ",
+                omitted_note=_integ_note))
         if integ.get("overlap"):
-            lines.append("Changed on both sides: "
-                         + ", ".join(f"`{c}`" for c in integ["overlap"]))
+            lines.append("Changed on both sides: " + bounded_join(
+                integ["overlap"], lambda c: f"`{c}`",
+                max_items=INTEGRATION_MAX_PATHS,
+                max_bytes=INTEGRATION_LIST_BUDGET, separator=", ",
+                omitted_note=_integ_note))
     applied = rec.get("applied") or {}
     if applied.get("merge_sha"):
         lines.append(

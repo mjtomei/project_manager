@@ -1,0 +1,783 @@
+# pr-ace66e5 — Audit prompt builders for unbounded enumeration
+
+## Context
+
+`claude` receives a session prompt as a single `argv` entry. Linux caps one
+argument at `MAX_ARG_STRLEN` (128 KiB / 131072 bytes, including the
+terminating NUL); exceeding it makes `execve` fail with `E2BIG`
+(`OSError [Errno 7] Argument list too long`). The plan-review builder was
+fixed in `pm_core/cli/plan.py` (commit 11fc933f) with a conditional fallback
+to a brief PR listing above `_PROMPT_ARG_LIMIT = 120_000`.
+
+Two things the existing fix does **not** cover:
+
+1. Every other builder that enumerates a collection into the prompt with no
+   bound on element count or total size.
+2. The `pm/prompts/<file>` + `"$(cat file)"` delivery trick. Command
+   substitution still expands to one oversized `argv` entry, so it does not
+   avoid `E2BIG` — it only avoids tmux's ~16 KB command-length limit.
+
+Live evidence in the PR notes: review 131175 B, sign-off 144144 B, QA planner
+134900 B; PR notes were ~83.5 KB of each prompt (101 notes) and the impl spec
+49 KB. Archiving the spec manually cannot bring sign-off or the planner under
+the limit because the notes alone exceed it.
+
+## 1. Requirements (grounded in code)
+
+### R1 — Shared size-aware prompt helpers (new module)
+
+Add `pm_core/prompt_bounds.py` as the single source of truth for prompt-size
+limits and bounding helpers:
+
+- `PROMPT_ARG_LIMIT = 120_000` (byte limit with headroom under
+  `MAX_ARG_STRLEN`).
+- `MAX_ARG_STRLEN = 131_072`.
+- Shared per-block budgets (single source of truth):
+  `PR_NOTES_BUDGET = 35_000`, `SPEC_BUDGET = 30_000`,
+  `SESSION_NOTES_BUDGET = 8_000`, `QA_CHILD_STEPS_BUDGET = 20_000`,
+  `CONCRETIZE_INSTRUCTION_BUDGET = 20_000`, `MOCKS_BUDGET = 12_000`,
+  `PLAN_CONTEXT_MAX_SIBLINGS = 25`, `LIBRARY_ITEMS_MAX = 20`,
+  `LIBRARY_LIST_BUDGET = 6_000`, `LIBRARY_TOTAL_BUDGET = 12_000`,
+  `PLAN_LIST_BUDGET = 20_000`, `QA_SCENARIOS_MAX = 40`,
+  `INTEGRATION_MAX_PATHS = 20`,
+  `ARTIFACT_PATHS_MAX = 20`, `WATCHER_MANAGED_MAX = 40`,
+  `MERGE_ERROR_MAX_LINES = 60`, `DEPS_MAX = 40`.
+  (Iterations 2-4 added `PLAN_LIST_BUDGET`, `LIBRARY_LIST_BUDGET` and
+  `LIBRARY_TOTAL_BUDGET` as the probes found count caps that did not bound
+  their listings; the plan-builder-local budgets —
+  `_PLAN_BRIEF_BUDGET`, `_PLAN_FILE_BUDGET`, `_PLAN_FILES_BUDGET`,
+  `_PLAN_DESC_CHARS` — stay in `pm_core/cli/plan.py` next to their only
+  users.)
+- `prompt_bytes(text) -> int` — `len(text.encode("utf-8"))`; measures bytes,
+  not characters (multi-byte text matters).
+- `bounded_join(items, formatter, *, max_items=None, max_bytes=None,
+  keep="oldest"|"newest", separator="\n", omitted_note=None) -> str` — format
+  and join items, stopping before `max_items`/`max_bytes` is exceeded; append
+  an explicit omission note when items were dropped. `keep="newest"` iterates
+  in reverse and restores order, so recent handoff notes survive.
+- `bounded_text(text, *, max_bytes, pointer, label) -> str` — return text
+  unchanged when it fits; otherwise head + explicit truncation marker + tail
+  (tail keeps verdicts/end-of-file content) + a pointer to the full source.
+- `bounded_lines(text, *, max_lines, head_ratio=0.25, marker=...) -> str` —
+  head/tail line truncation (mirrors the existing verification-prompt
+  behaviour) for transcripts and error output.
+- `PromptTooLargeError(RuntimeError)` — raised when a prompt cannot be made
+  argv-safe and no file-backed fallback is possible.
+- `prompt_fits(prompt, limit=PROMPT_ARG_LIMIT) -> bool`.
+
+`pm_core/cli/plan.py` keeps `_PROMPT_ARG_LIMIT` as an alias of
+`PROMPT_ARG_LIMIT` so existing call sites/tests keep importing it.
+
+### R2 — PR notes bounding (`prompt_gen._format_pr_notes`, line 96)
+
+Today the function merges main + workdir notes, sorts by `created_at`, and
+joins **every** note's full text. It feeds impl, review, sign-off, QA
+planner, QA interactive, and QA child prompts.
+
+Change: add a byte budget (`_PR_NOTES_BUDGET = PR_NOTES_BUDGET = 35_000`).
+When the full rendering fits, return it unchanged. When it does not, keep the
+newest notes in full within the budget and reduce older notes to a one-line
+summary; end with an explicit marker naming the count omitted and the command
+to read everything (`pm pr note list <pr-id>`). Never silently drop notes —
+the summary line stays for every note until the hard budget is reached, and
+the marker reports the remainder.
+
+### R3 — Spec bounding (`spec_gen.format_spec_for_prompt`, line 683)
+
+Today it inlines the whole spec file (49 KB observed). It feeds impl, review,
+sign-off, and QA planner prompts.
+
+Change: bound the spec text with `bounded_text` (`SPEC_BUDGET = 30_000`),
+head+tail truncation with a marker pointing at the full spec
+(`pm pr spec <pr-id> <phase>` and the spec file path). The "MISSING spec"
+and staleness guidance text stays intact. `_build_spec_prompt` (line 134)
+inlines the prior impl spec when generating a QA spec — bound it the same way.
+
+### R3b — Session notes (`notes.notes_for_prompt`, line 320; `notes.notes_section`, line 285)
+
+User-authored `notes.txt` sections are inlined whole by `notes_for_prompt`
+(impl/review/signoff/QA/merge/watcher prompts) and `notes_section` (plan and
+guide prompts). Bound each block with `bounded_text`
+(`SESSION_NOTES_BUDGET = 8_000`), pointing at the notes file / `pm notes`.
+
+### R4 — Sibling-PR plan context (`generate_review_prompt` line 258,
+`generate_signoff_prompt` line 465)
+
+Both build one line per sibling PR in the plan. Unbounded count and title
+length. Change: cap at 25 siblings (one-line each) and append
+`... (+N more; run \`pm pr list --plan <plan>\`)`.
+
+### R5 — QA scenarios block (`_signoff_qa_scenarios_block`, line 366)
+
+Enumerates every scenario's verdict + `verdict_reason` from the latest
+`qa_status.json`. Change: cap at 40 scenarios and truncate each reason to 200
+characters; append an omission marker pointing at the captures dir /
+`pm qa show`.
+
+### R6 — Integration block (`_signoff_integration_block`, line 403)
+
+Joins `overlap` and `conflicts` path lists. Change: cap each at 20 paths with
+`(+N more)`.
+
+### R7 — QA instruction library (`qa_instructions.instruction_summary_for_prompt`, line 276)
+
+One bullet per instruction/regression/artifact item. Change: cap at 20 items
+per category with `... (+N more; run \`pm qa list\`)`. Also bound
+`mocks_for_prompt` (line 311), which inlines full mock bodies: cap total
+bytes with `bounded_text`.
+
+### R8 — QA concretization prompt (`qa_loop._build_concretization_prompt`, line 1505)
+
+Inlines the full `instruction_content` file. Change: bound with `bounded_text`
+(`_CONCRETIZE_INSTRUCTION_BUDGET = 30_000`) pointing at the instruction path.
+
+### R9 — QA finalize prompt (`qa_finalize_prompt.build_qa_finalize_prompt`, line 20)
+
+One line per scenario worktree. Change: cap at 40 lines with `(+N more)`.
+
+### R10 — QA child prompt (`generate_qa_child_prompt`, line 2078)
+
+Inlines `scenario.steps` and one bullet per `artifact_paths` entry. Change:
+bound steps with `bounded_text` and cap artifact bullets at 20 with
+`(+N more)`.
+
+### R11 — Verification prompt (`qa_loop._build_verification_prompt`, line 3072)
+
+Already head/tail-truncates inlined pane output. Add a cap on
+`artifact_names` bullets (20) and use `bounded_lines` for consistency. The
+`pane_output_path` on-demand form stays preferred.
+
+### R12 — Plan prompts (`pm_core/cli/plan.py`)
+
+- `plan_review`: the existing fallback only shrinks the plan's own PR list.
+  `other_prs_context` (line 317) still joins **every** PR from other plans.
+  Bound it to 40 one-line entries with `(+N more; run \`pm pr list\`)`, and
+  make the over-limit check cover the total prompt including it. Re-point the
+  fallback's "run `pm pr show <id>`" text to commands that exist (see R16).
+- `plan_breakdown`: `existing_context` (line 193) joins every existing PR.
+  Bound to 40 one-line entries with an omission note.
+- `plan_deps`: `pr_list_str` (line 498) inlines every PR's description and
+  `plan_context` (line 502) reads every plan file's full text. Bound the PR
+  list to 40 entries and each plan file with `bounded_text`, pointing at the
+  plan path for full text.
+
+### R13 — Merge prompt error output (`generate_merge_prompt`, line 928)
+
+Inlines `error_output` verbatim. Change: bound with `bounded_lines`
+(head 40 / tail 20 lines) plus a marker telling the session to re-run the
+failed update or read the full output on disk.
+
+### R14 — Watcher auto-start scope (`generate_watcher_prompt`, line 1084)
+
+`managed_list` joins every managed PR id. Change: cap the displayed set at 40
+ids with `(+N more)`; the scope semantics (the actual set used for decisions)
+are unaffected.
+
+### R15 — Launcher guard (`pm_core/claude_launcher.py`)
+
+Defense in depth for builders we did not audit and for future ones. In
+`build_claude_shell_cmd`, `launch_claude`, `launch_claude_print`, and
+`launch_claude_print_background`:
+
+- Measure `prompt_bytes(prompt)` when a prompt is actually passed (not on
+  `--resume`, which sends none).
+- If over `PROMPT_ARG_LIMIT`:
+  - Write the **complete** prompt to a file (reuse the existing
+    `<host_dir>/pm/prompts/pm_prompt_<session_id>.txt` mechanism; for
+    direct/print launches without a host dir, use a temp file).
+  - Pass a short bootstrap as the argv prompt instead of `"$(cat file)"`:
+    e.g. `"Your complete instructions are in <path>. Read that file first and
+    follow it exactly; it is your full task prompt."`
+  - Log a warning naming the size and the file path.
+- If no writable location exists for the file, raise `PromptTooLargeError`
+  with the measured size, the limit, and remediation guidance — never let a
+  raw `E2BIG` escape and never silently truncate.
+- Under the limit, behaviour is unchanged (`"$(cat file)"` for shell commands,
+  quoted prompt for direct launches).
+- Fake-claude sessions pass no prompt in argv, so the guard is a no-op there.
+
+### R16 — Fix the broken on-demand pointer
+
+The plan-review fallback (and a watcher prompt) tell the session to run
+`pm pr show <id>`, but no such command exists (`pm_core/cli/pr.py` registers
+`list`, `graph`, `spec`, `note …`, but not `show`). Add a read-only
+`pm pr show <pr-id>` command that prints the PR's display id, title, status,
+branch, plan, dependencies, description, tests, files, and notes (using the
+same resolution/formatting helpers as `pr_list`/`pr_note_list`). Update the
+existing pointers to use it. This makes the "fetch detail on demand" fallback
+actually work.
+
+## 2. Implicit Requirements
+
+- **No silent loss.** Every degraded block must name what was omitted and a
+  working command/path to read it. The PR notes explicitly forbid silently
+  truncating required evidence or instructions.
+- **Preserve full instructions on the fallback path.** The launcher guard must
+  deliver the complete prompt via a readable file + bootstrap, matching the
+  prior recoveries' pattern.
+- **Budget coordination.** Per-block budgets must leave headroom for static
+  prompt text. Target allocations: PR notes ≤ 40 KB, spec ≤ 40 KB, static +
+  other collections ≤ 25 KB, leaving ≥ 15 KB under 120 KB. Builders whose
+  static text is large (sign-off ~12 KB) must still fit.
+- **Container mode.** Prompt-file writes must honour the existing `cwd` /
+  `write_dir` split: write on the host path (`write_dir`), reference the
+  container-visible path (`cwd`). The bootstrap must reference the same
+  path the `$(cat …)` form used.
+- **Resume launches.** No prompt is passed when resuming; the guard must not
+  fire or write files there.
+- **Fake-claude.** Prompt argv is absent for fake sessions; keep that path
+  untouched.
+- **Backward compatibility.** `_PROMPT_ARG_LIMIT` stays importable from
+  `pm_core.cli.plan`; existing tests keep passing; helper defaults are
+  deterministic (no randomness, no time-based budgets).
+- **Bounded outputs are stable.** The same input must yield the same prompt
+  (tests and prompt-file diffs depend on it).
+- **UTF-8 correctness.** All size checks use encoded bytes; truncation must
+  not split a multi-byte character (truncate on character boundaries after
+  measuring bytes, or accept a small overshoot and verify the final size).
+
+## 3. Ambiguities
+
+### A1 — Bound vs. preserve ("do not silently truncate")
+The task offers "cap count, summarize, or fetch detail on demand" while the
+PR notes forbid silent truncation. **Resolution:** do all three — cap counts,
+summarize older elements with an explicit omission marker, and point at a
+working command/path for the full detail; additionally keep the launcher's
+file-backed bootstrap so an over-limit prompt still delivers its complete
+instructions. No detail is lost without an explicit pointer.
+
+### A2 — How to keep PR notes within budget without dropping active requirements
+Notes are the cross-session handoff channel; older notes may still contain
+active requirements. **Resolution:** keep the newest notes in full first
+(they supersede older ones), reduce older notes to a first-line summary, and
+always name the omitted count + `pm pr note list <pr-id>`. Requirements near
+the top of each note survive in the summary.
+
+### A3 — Which delivery mechanism for over-limit prompts
+Command substitution (`$(cat file)`) still yields one oversized argv entry.
+**Resolution:** bootstrap delivery — write the full prompt to a file and pass
+a short "read this file and follow it" prompt as argv. Raise a clear error if
+no writable location exists.
+
+### A4 — `pm pr show` does not exist
+**Resolution:** add the read-only command (R16) rather than weaken the
+fallback text. It is small, read-only, and makes every "fetch detail on
+demand" pointer valid.
+
+### A5 — Should single large documents (spec, notes.txt sections, error output) be bounded?
+The task frames the bug as collections, but the observed E2BIGs were driven
+by single documents (spec 49 KB). **Resolution:** bound them too, with
+pointers, because they are the same failure class and the task says "any
+place a collection … or total size" is unbounded.
+
+### A6 — Truncation shape for specs
+Head-only truncation loses the end (edge cases, pass/fail criteria).
+**Resolution:** head + tail truncation with an explicit marker in the middle,
+pointing at the full file/command. The tail preserves the closing criteria.
+
+### A7 — Exact byte budgets
+**Resolution:** centralize defaults in `prompt_bounds.py`
+(`PR_NOTES_BUDGET`, `SPEC_BUDGET`, etc.) so they are tunable in one place and
+documented. Tests assert against `PROMPT_ARG_LIMIT`, not the individual
+budgets.
+
+*No [UNRESOLVED] ambiguities remain.*
+
+## 4. Edge Cases
+
+- **Already within budget:** full detail is preserved; no markers appear.
+- **Empty collection:** no marker, no trailing separator.
+- **Single element:** no "(+N more)" note.
+- **Multi-byte text:** a note/spec with emoji or CJK characters can exceed the
+  byte budget while looking short; size checks use encoded bytes. Truncation
+  must land on a valid character boundary.
+- **Exactly at the limit:** the guard treats `>` as over-limit (consistent with
+  the existing plan.py check); `== limit` is allowed.
+- **No writable host dir:** `build_claude_shell_cmd` previously fell back to a
+  quoted literal. For an over-limit prompt this must raise
+  `PromptTooLargeError`, not quote the literal (which would `E2BIG`).
+- **Container cwd vs host write_dir:** bootstrap path must be the path Claude
+  sees at runtime (`cwd`-based), while the file lands on the host
+  (`write_dir`).
+- **`cwd=None` direct launches:** write the fallback prompt to a temp file
+  (`tempfile.mkdtemp`/`NamedTemporaryFile`), pass its absolute path in the
+  bootstrap, and remove it after the process exits.
+- **Retry-on-failure path in `launch_claude`:** a failed resume retries with a
+  fresh session and the same prompt; apply the same guard to the retry.
+- **`launch_claude_print`/`_background`:** the prompt is appended as
+  `["-p", prompt]`; guard both. For fake sessions the prompt is not appended.
+- **Prompt-file cleanup:** the existing `; rm -f <file>` runs after Claude
+  exits; keep it for both `$(cat …)` and bootstrap forms. Temp files from
+  direct launches are removed in a `finally`.
+- **Concurrent launches:** keep the unique filename (`pm_prompt_<session_id>`)
+  so parallel panes never share a prompt file.
+- **Non-Linux hosts:** the guard is a byte threshold, not a platform-specific
+  check; 120 KB stays safely under macOS's 256 KB `MAX_ARG_STRLEN` analogue.
+- **`_format_pr_notes` merge/dedup:** bounding happens after merge/dedup, so a
+  workdir copy that wins dedup is what gets bounded.
+- **Sign-off return block:** appended after the notes block; its size is
+  bounded by the note count (one block per PR) and stays outside the notes
+  budget; total is still checked.
+- **Builders returning empty strings:** bounding helpers return `""` for empty
+  input without adding markers.
+- **Existing tests that assert exact prompt text:** summaries/markers only
+  appear over budget; small fixtures are unchanged.
+
+## 5. Files
+
+- `pm_core/prompt_bounds.py` (new)
+- `pm_core/prompt_gen.py`
+- `pm_core/spec_gen.py`
+- `pm_core/qa_instructions.py`
+- `pm_core/qa_loop.py`
+- `pm_core/qa_finalize_prompt.py`
+- `pm_core/claude_launcher.py`
+- `pm_core/cli/plan.py`
+- `pm_core/cli/pr.py`
+- `pm_core/notes.py` (if the notes block needs a size bound)
+- `pm_core/signoff.py` (if the integration/return joins need bounds)
+
+## 6. Tests
+
+New `tests/test_prompt_bounds.py` plus additions to existing prompt tests:
+
+- Helper unit tests: `prompt_bytes` counts UTF-8 bytes; `bounded_join`
+  honours `max_items`/`max_bytes`, appends the omission note, and `keep`
+  order; `bounded_text` head+tail; `bounded_lines`; `PromptTooLargeError`.
+- Builder tests with a many-element collection (e.g. 200 PR notes at ~2 KB,
+  200 sibling PRs, 100 QA scenarios, 100 instruction-library items, 100
+  artifact paths, 50 plan PRs, a 200 KB spec) asserting
+  `len(prompt.encode()) <= PROMPT_ARG_LIMIT` **and** that the prompt names
+  the omission + pointer.
+- Launcher guard tests: `build_claude_shell_cmd` with an over-limit prompt
+  produces a bootstrap referencing the written file (not `$(cat …)`); with no
+  writable dir raises `PromptTooLargeError`; under-limit behaviour unchanged;
+  resume path untouched.
+- `pm pr show` CLI test: prints the requested PR's description/notes and
+  errors on an unknown id.
+- Regression: existing prompt tests (`test_bug_fix_flow_prompts.py`,
+  `test_plan_review.py`, `test_claude_launcher.py`,
+  `test_regression_prompts.py`) stay green.
+
+## 7. Review-loop follow-ups (iteration 1)
+
+The implementation landed in 518b130d; review found five refinements, all
+within this spec's intent (no requirement changed):
+
+- **R9 pointer.** The finalize marker named `pm qa status`, which does not
+  exist (violating the "name a working command/path" requirement that R16
+  exists to enforce). It now resolves the QA run's `qa_status.json` via
+  `latest_qa_status_path` (whose directory also holds `qa_resume.json`, the
+  only place each scenario's worktree path is recorded), falling back to the
+  run-directory glob when no run exists yet.
+- **R7 pointer.** The mocks marker pointed at `pm qa list`, which lists
+  instructions / regression tests / artifact recipes but **not** mocks; it now
+  names `pm qa mocks list`.
+- **§5 signoff.py.** `format_signoff_return` still joined the integration
+  `conflicts` / `overlap` path lists unbounded — the same class of bug R6
+  fixes in `_signoff_integration_block`, and it feeds impl / review / QA
+  prompts via `_signoff_return_block`. Both are now bounded with
+  `INTEGRATION_MAX_PATHS`.
+- **R2 newline.** The under-budget PR-notes path dropped the trailing newline
+  the pre-PR builder emitted (the bounded path kept it). Both paths now
+  terminate the section.
+- **R2 marker.** `_render_pr_notes_bounded`'s upgrade path did not reserve the
+  marker's bytes, so newest-notes-in-full could fill the budget exactly and
+  force the "older notes are abbreviated" marker to be dropped — the
+  abbreviations would then be unexplained. The reserve is now applied before
+  upgrading.
+
+## 8. Review-loop follow-ups (iteration 2)
+
+Iteration 2 measured the builders against this repo's **real** `pm/project.yaml`
+(483 PRs, 619 notes, 22 plan files / ~500 KB, descriptions up to 11 KB) rather
+than synthetic fixtures, which surfaced two builders the audit still left
+unbounded. Both were fixed; the per-block budgets this spec prescribed were
+correct but insufficient on their own, because a per-item cap does not bound
+the **product** of cap × item size, and a per-file budget does not bound the
+number of files.
+
+- **`plan_deps` (R12) — measured 312,155 bytes** (2.6× the limit; the launcher
+  guard kept it from `E2BIG`, but the builder was still unbounded). Two
+  independent causes:
+  - `pr_list_str` inlined each PR's **full** description under a count cap of
+    40; real descriptions reach 11 KB, so the cap allowed ~440 KB.
+  - `plan_context` bounded each plan file to 20 KB but not the total: 22 plans
+    × 20 KB = 440 KB (277,519 bytes measured).
+  Fixed with `_PLAN_DESC_CHARS = 300` per-description truncation (with a
+  marker naming `pm pr show <id>`) and an aggregate `_PLAN_FILES_BUDGET =
+  30_000` shared across plan files, with `_PLAN_FILE_MIN_SLICE` so a plan is
+  listed as omitted rather than emitting a marker that does not fit its slice.
+  Re-measured on the real project: **47,015 bytes**.
+- **`_run_fix_command` (`pm plan fix`) — ~500 KB**, not covered by R12: it
+  concatenated **every** plan file's full text into `build_fix_prompt`. Now
+  bounded with `_PLAN_FILES_BUDGET` and a pointer at the plan files. Measured
+  on the real project: **31,159 bytes**.
+- **R6 / §5 integration markers named nothing.** `(+N more)` says what was
+  dropped but not where to read it, which the spec's own "no silent loss"
+  requirement forbids (the same defect iteration 1 fixed for R7 and R9). New
+  `integration.integration_pointer(pr_id)` names `$CAP/<pr-id>/integration.json`,
+  falling back to `pm pr show <pr-id>`; both `_signoff_integration_block` and
+  `format_signoff_return` use it. `pm pr show` now prints the integration
+  record (and the full-record path) so that fallback is not a dead end.
+- **R11 dead parameters.** `_build_verification_prompt` passed `pointer=` /
+  `label=` to `bounded_lines` without `max_bytes`; `bounded_lines` only applies
+  the byte bound when both are set, so both were silently ignored and a single
+  enormous line defeated the line count. Added
+  `_VERIFICATION_MAX_PANE_BYTES = 60_000` so the bound is real and the pointer
+  reaches the prompt.
+
+Verification: `tests/test_prompt_bounds.py` 53 cases (6 new, all
+failing-then-passing). Full suite 3410 passed, 1 pre-existing failure
+(`test_hook_events::test_installer_writes_standalone_receiver` — pr-4bde874,
+fails whenever `PM_HOST_HOME` is set).
+
+## 9. Review-loop follow-ups (iteration 3)
+
+Iteration 3 probed the builders with **pathological item sizes** rather than
+pathological counts, which is the same defect class iteration 2 found for
+descriptions — a count cap does not bound `cap × item size`, and iteration 2
+only fixed the *description* half of it. The count-capped one-line listings
+still inlined user-authored **titles** unbounded: 25 sibling PRs with long
+titles measured 180 KB in the review prompt (247 KB total) and 180 KB in the
+sign-off prompt (277 KB total) — both over `PROMPT_ARG_LIMIT`, so the launcher
+guard had to fire for builders this PR set out to bound.
+
+- **R4 / R12 listings now carry a byte budget.** New shared
+  `PLAN_LIST_BUDGET = 20_000` in `prompt_bounds.py` (used by
+  `bounded_join`'s `max_bytes`, which until now no production caller passed)
+  bounds the sibling-PR blocks (`generate_review_prompt`,
+  `generate_signoff_prompt`), the dependency block (`generate_prompt`), and the
+  plan builders' PR listings (`plan_review`'s other-PR context,
+  `plan_breakdown`'s existing-PR context, `plan_deps`'s PR list). Real listings
+  in this repo run 0.4-14.5 KB, so the budget only bites on pathological
+  titles — every real prompt measured byte-identical before and after
+  (`/pm-captures/review-4e41-i3/`).
+- **R12 plan-review fallback cascade was a no-op at ≤40 PRs.** The fallback
+  capped the brief listing at `_PLAN_LIST_MAX = 40`, but a plan with 40 or
+  fewer PRs and long titles produced the same oversized listing in both the
+  first and the "minimal" pass. The brief listing now goes through
+  `_brief_list()` with `_PLAN_BRIEF_BUDGET = 40_000` — deliberately generous
+  and *uncapped by count*, so the fallback still lists every PR one line each
+  exactly as before the audit (all 22 real plans produce byte-identical
+  `pm plan review` output) — and the second safety net re-runs it with a
+  quarter of the budget so the cascade actually shrinks.
+- **R15 container path split.** `_materialize_oversized_prompt` accepted
+  `write_dir` but returned a bootstrap naming *that* path, contradicting the
+  spec's container edge case ("write on the host path, reference the
+  container-visible path"): a container caller (`write_dir=<host>`,
+  `cwd=/workspace`) would have handed claude an unreadable path. It now writes
+  to `write_dir` and names `cwd`, falling back to `cwd` when `write_dir` is
+  unusable — the same split `build_claude_shell_cmd` uses.
+- **`bounded_lines` silently ignored `max_bytes` without `pointer`** (the trap
+  iteration 2 recorded): a future caller passing `max_bytes` alone got no byte
+  bound at all. The byte bound now always applies, with a generic pointer
+  fallback.
+
+Verification: `tests/test_prompt_bounds.py` 60 cases (7 new). Full suite 3417
+passed, 1 pre-existing failure (`test_hook_events::
+test_installer_writes_standalone_receiver` — pr-4bde874, fails whenever
+`PM_HOST_HOME` is set). Evidence: `/pm-captures/review-4e41-i3/`
+(`full-suite-i3.txt`, `prompt-bounds-tests-i3.txt`, `baseline-*.txt` /
+`after*-*.txt` real-data measurements).
+
+## 10. Review-loop follow-ups (iteration 4)
+
+Iteration 4 re-ran the i2/i3 probes (real project, then pathological counts,
+then pathological item sizes) and probed the one dimension none of them had
+covered — the *sum* of the blocks. Two gaps, both the same theme: a bound that
+is correct per item but not for the whole prompt.
+
+- **`instruction_summary_for_prompt` (R7) was count-capped but not
+  byte-bounded.** It caps each category at `LIBRARY_ITEMS_MAX = 20` but
+  inlines each item's user-authored frontmatter `description` verbatim, so 20
+  items with multi-KB descriptions measured **303,973 bytes** — over
+  `PROMPT_ARG_LIMIT` on their own — and the QA planner prompt built from them
+  measured **212,671 bytes**. The library is user-authored free text and
+  already at the 20-item cap in this repo (20 regression tests), so neither
+  the count cap nor the real-data size (3.1 KB today) bounds it.
+  Fixed with a new `LIBRARY_LIST_BUDGET = 6_000` per category plus an
+  aggregate `LIBRARY_TOTAL_BUDGET = 12_000` on the joined block (a per-category
+  budget alone would let three categories multiply it — the plan-file lesson
+  from iteration 2). Both markers name `pm qa list`, which lists every item.
+  Real library output is byte-identical (3,101 / 747 bytes); the pathological
+  case drops to 12,000 bytes and the planner prompt to 20,295 bytes.
+- **`build_regression_test_prompt` inlines its test body unbounded**
+  (considered, deliberately not bounded). The body *is* the prompt — the test
+  session executes it — so truncating it would silently corrupt the test
+  rather than abbreviate a listing. Real bodies run 7-12 KB, so a bound would
+  never bite in practice and truncation is the wrong degradation.
+  Correction (iteration 5): the guard does **not** deliver an over-limit body
+  intact on this path. `pm_core/tui/pane_ops.py` launches both the regression
+  and the non-regression QA-instruction panes through
+  `build_claude_shell_cmd(prompt=..., session_type="qa_author")` with no `cwd`
+  and no `write_dir`, so there is no host dir to write the prompt into and the
+  guard **raises** `PromptTooLargeError` (§4's "no writable host dir" case)
+  instead of falling back to a file. That is still the right degradation — an
+  explicit error beats a truncated test — but it is a hard pane-launch failure,
+  not the file-backed delivery claimed above, and it is the same no-`cwd`
+  situation that made `guide.build_assist_prompt` a hard failure until this
+  iteration bounded its plan listing.
+- **`get_spec_mocks_section`'s legacy fallback** extracts a `## Mocks` section
+  from the QA spec unbounded. It has no production caller (only
+  `tests/test_spec_gen.py`); the live path is `qa_instructions.mocks_for_prompt`,
+  which is bounded. Left as-is to keep this PR scoped to reachable builders.
+
+- **The per-block budgets did not compose (R1/R4/R15, §2 "Budget
+  coordination").** Every block was bounded *individually*, but nothing
+  checked their **sum** against the builder's static text. Probing every
+  collection at its own budget simultaneously (400 PR notes, a 200 KB spec,
+  200 QA scenarios, 200 long-title siblings, a 40 KB description, a 60 KB
+  notes.txt) measured **review 136,261 B, sign-off 158,350 B and the QA
+  planner 130,755 B — all over `PROMPT_ARG_LIMIT`**, so the launcher guard had
+  to fire for exactly the builders this PR exists to bound. The spec's §2
+  estimate that sign-off's static text is "~12 KB" was wrong: it is ~19 KB
+  (and ~47 KB once the always-inlined description and plan context are
+  counted), so no per-block constant can make the sum fit.
+  Fixed with a new shared `fit_prompt(render, blocks)` in `prompt_bounds.py`:
+  the builder keeps its own static text and block placement, and when the
+  render exceeds the limit the largest blocks are abbreviated (head+tail,
+  each with a marker naming a command that reads the full text) until it
+  fits. `generate_prompt`, `generate_review_prompt`,
+  `generate_signoff_prompt` and `generate_qa_planner_prompt` now assemble
+  through it, with the PR description, PR notes, spec, plan context, session
+  notes, QA library summary and QA scenario summary as the shrinkable blocks.
+  Blocks are never shrunk below 2 KB, and if the static text alone is over
+  the limit the render is returned unchanged for the launcher's file-backed
+  bootstrap to carry intact. Real prompts are unchanged: the sweep over all
+  483 real PRs still measures impl 75,143 / review 77,613 / sign-off 92,162 /
+  qa_planner 80,649, and a full-text diff for three real PRs x four builders
+  shows the only difference is the spec truncation marker wording below —
+  every real listing sits far under the budgets, so the fit path only runs
+  when a PR is large in several dimensions at once. After: 119,700 B for each
+  of review / sign-off / planner.
+- **`generate_qa_interactive_prompt` (Scenario 0) and
+  `generate_qa_child_prompt` are not wired through `fit_prompt`**: under the
+  same pathological inputs they measure 42,051 B and 65,464 B — well under
+  the limit, and they inline fewer blocks than the four builders above.
+- **Marker wording.** The spec truncation marker read "Implementation Spec
+  spec truncated" (`label=f"{label} spec"` where `label` was already
+  "Implementation Spec"); it now reads "Implementation Spec truncated". The
+  block size is unchanged (`bounded_text` keeps head+tail within the budget),
+  so only the marker's bytes shift between the slices.
+
+Verification: `tests/test_prompt_bounds.py` 72 cases (12 new: 4 `fit_prompt`
+unit tests, 5 budget-coordination tests — the 4 builder ones fail without the
+fix at 121-158 KB — and 3 for the library bound above). Full suite 3429 passed, 1 pre-existing failure
+(`test_hook_events::test_installer_writes_standalone_receiver` — pr-4bde874,
+fails whenever `PM_HOST_HOME` is set). Evidence: `/pm-captures/review-4e41-i4/`.
+
+## 11. Review-loop follow-ups (iteration 5)
+
+Iteration 5 swept every *reachable* prompt builder the audit never touched
+(not just the four wired through `fit_prompt`) under one pathological fixture,
+and re-checked the "name a working pointer" requirement in the environment the
+pointer is read in. Two gaps, both the same class as earlier iterations: a
+listing with no bound at all (R4/R12), and a marker naming a location that does
+not exist where the session runs (R6/§8).
+
+- **`guide.build_assist_prompt` inlined the plan list with no bound at all**
+  — no count cap, no byte budget, the one listing the audit missed entirely
+  (R4/R12 bound the sibling-PR, dependency, existing-PR and other-plan lists,
+  but `pm guide`'s "Current plans:" block kept joining every plan name
+  verbatim). 200 plans with long names measured **228,293 B** (1.9x
+  `PROMPT_ARG_LIMIT`), and the test fixture's 200 x 4 KB names measured
+  805,371 B — 6.7x `MAX_ARG_STRLEN`. The guide pane is launched with no `cwd`,
+  so `build_claude_shell_cmd` has no writable location and the launcher guard
+  **raises** `PromptTooLargeError` rather than degrading, i.e. this builder was
+  a hard launch failure, not just an oversized prompt. Now bounded with the
+  shared `PLAN_LIST_MAX` (new in `prompt_bounds.py`; `pm_core/cli/plan.py`'s
+  local `_PLAN_LIST_MAX` is now an alias of it) plus `PLAN_LIST_BUDGET`, with
+  the marker naming `pm plan list`. Re-measured: **29,693 B**.
+- **`integration.integration_pointer` named the host captures path.** It
+  built the path from `integration_json_path` (`captures_root()`, i.e.
+  `~/.pm/sessions/<tag>/captures/<pr>/integration.json`) and is what the
+  abbreviated overlap/conflict markers name. Those markers reach impl, review
+  and QA-planner prompts via `signoff.format_signoff_return`, and all three run
+  inside containers, where the captures dir is bind-mounted at `/pm-captures`
+  and the host path does not exist — a pointer the session cannot follow, the
+  exact defect iteration 1 fixed for the R7/R9 markers. Reachable: the
+  project.yaml record keeps up to `_YAML_LIST_LIMIT` (40) paths while
+  `INTEGRATION_MAX_PATHS` is 20, so a record with 21-40 paths fires the marker.
+  It now resolves through `captures_dir` (the resolver that knows about the
+  container mount), falling back to `pm pr show`; on the host the result is
+  unchanged. Evidence: `/pm-captures/review-4e41-i5/`.
+
+Checked and deliberately unchanged: `bounded_join`'s `keep="newest"` has no
+production caller (the PR-notes bound is implemented separately in
+`_render_pr_notes_bounded`), but R1 specifies it and it is covered by a unit
+test; `generate_merge_prompt` uses `bounded_lines`'s default 0.25 head ratio
+(15 head / 45 tail for 60 lines) rather than R13's "head 40 / tail 20" — the
+tail is where git prints the failure, so tail-heavy is the better degradation
+and it matches the verification prompt's ratio.
+
+
+## 12. Review-loop follow-ups (iteration 6)
+
+Iteration 6 continued iteration 5's method — check each omission marker in the
+environment the session actually reads it in — and re-swept the one remaining
+join over a collection that had no bound. Three of the four findings are the
+same host-path/placeholder class the earlier iterations kept hitting; none of
+the per-block budgets or the launcher guard changed.
+
+- **`_signoff_qa_scenarios_block`'s marker named a host-only path.** It named
+  `latest_qa_status_path(pr_id)` — the live `qa_status.json` under the *host*
+  `~/.pm/workdirs/qa/<pr>-*/`. Sign-off runs inside a container
+  (`signoff.py`: `_claude_cwd = _CONTAINER_WORKDIR`, host workdir as
+  `write_dir`), and the container mounts only the workdir, `~/.claude`,
+  `~/.pm/hooks`, the pm source and the captures dir — `~/.pm/workdirs` does not
+  exist there, so the marker was unreadable, the same defect iteration 5 fixed
+  for `integration_pointer`. Reachable whenever a QA run has more than
+  `QA_SCENARIOS_MAX` (40) scenarios. It now resolves through `captures_dir`
+  (the container-aware resolver) to the per-scenario verdicts
+  `qa_loop._persist_scenario_verdicts` writes at
+  `$CAP/scenarios/<n>/verdict.md` + `scenario.json` — the structured record
+  exists precisely so the sign-off agent does not need the ephemeral
+  `qa_status.json` — falling back to `pm qa captures-path <pr-id>`. On the
+  host the path is the same captures dir the prompt's own evidence step
+  already tells the reviewer to use (`CAP="$(pm qa captures-path <pr-id>)"`).
+- **`_render_pr_notes_bounded`'s markers used a literal `<pr-id>`.**
+  `run `pm pr note list <pr-id>`` is not directly runnable, and the same block
+  already carries the concrete id from `fit_prompt`'s pointer (`pm pr note
+  list <pr-id>`), so the two forms disagreed inside one prompt section. The
+  function now takes the PR id and interpolates it. Real prompts change only
+  by that: a full-text diff for 3 PRs x 4 builders shows the notes marker line
+  and +3 bytes on the builders that abbreviate notes, nothing else.
+- **`generate_watcher_prompt`'s `target_list` was the last unbounded join.**
+  It sat directly beside `managed_list`, which R14 bounds, and was built from
+  the same user-set collection: `", ".join(f"**{t}**" for t in targets)` with
+  no count cap and no byte budget. Now bounded by `WATCHER_MANAGED_MAX` with a
+  marker naming `pm autostart list` (the command that lists targets). Both
+  lists are display-only — the scope the watcher acts on still comes from
+  `managed_ids`.
+- **`mocks_for_prompt` passed an `omitted_note` to `bounded_join` with no
+  `max_items`/`max_bytes`,** so the note could never fire (dead code that read
+  as if a per-mock marker existed). Removed; the aggregate `bounded_text` owns
+  the degradation and its marker already names `pm qa mocks list`.
+
+Verification: `tests/test_prompt_bounds.py` 80 cases (4 new, all
+failing-then-passing: the container-mount and `captures-path`-fallback markers,
+the concrete PR id, and the bounded target list). Real-data sweep over all 483
+PRs x 4 builders: impl 75,146 / review 77,616 / sign-off 92,165 / planner
+80,652 B — all under `PROMPT_ARG_LIMIT`, the +3 B being the notes marker's
+concrete id. Full suite 3366 passed, 55 failed + 17 errors — a failure set
+byte-identical to `origin/master` in this sandbox (all environmental: the
+sandbox git shim forwards pull/push to a host workdir, so
+`test_signoff_integration` / `test_merge_publish` cannot reach a real remote).
+Evidence: `/pm-captures/review-4e41-i6/`.
+
+## 13. Review-loop follow-ups (iteration 7)
+
+Iteration 7 re-ran the i5/i6 method (check every omission marker where the
+session actually reads it) plus an independent sweep of **every reachable
+builder** — not just the four wired through `fit_prompt` — with pathological
+inputs on each dimension (count, item size, single-document size). Three
+findings; no per-block budget, shared helper or launcher path changed.
+
+- **`build_qa_finalize_prompt` was the last count-capped listing with no byte
+  budget.** It caps the per-scenario worktree listing at 40 entries but bounds
+  neither the line length nor the total: 40 worktree paths of ~4 KB (the
+  `PATH_MAX` ceiling, since the paths are user-visible filesystem paths) built
+  a **162,870-byte** prompt. Every other listing the audit touched got a byte
+  budget in i3/i4 for exactly this reason (a count cap does not bound
+  `cap × item size`), so this one was an inconsistency as well as a gap. Now
+  bounded with the shared `PLAN_LIST_BUDGET`, with the existing marker naming
+  the run's `qa_status.json` / `qa_resume.json`; that prompt drops to 17,423 B,
+  and real listings (short paths) are byte-identical. A single path longer
+  than the whole budget keeps no lines and emits only the marker, which names
+  where every scenario is recorded — the same degradation the other bounded
+  listings use.
+- **`_render_pr_notes_bounded`'s "older notes are abbreviated" marker was
+  wrong when *nothing* was abbreviated in full.** A single note larger than
+  the whole budget cannot be upgraded, so `remaining` runs out at the first
+  (newest) note and every line stays a summary — yet the marker told the
+  session only the *older* notes had been abbreviated, so the newest handoff
+  (the most important one) read as if it were the full text. The marker now
+  says "notes are abbreviated" when zero notes were upgraded and keeps the
+  "older notes" wording otherwise. Real prompts are unchanged (in this repo
+  the upgrade path always upgrades at least the newest note).
+- **`format_signoff_return` resolved its pointer eagerly.** It called
+  `integration.integration_pointer()` before checking whether either path list
+  was actually abbreviated, and that pointer goes through
+  `paths.captures_dir()`, which **creates** `~/.pm/sessions/<tag>/captures/
+  <pr-id>/` as a side effect — so merely *building* an impl / review / QA
+  prompt for a PR with an integration record touched the filesystem. The
+  pointer is now resolved inside the `omitted_note` callable, so it runs only
+  when something was really dropped (matching `_signoff_integration_block` and
+  `_signoff_qa_scenarios_block`, which were already lazy).
+
+Checked and deliberately unchanged:
+
+- **Single user-authored fields (PR / scenario titles, project name) are still
+  inlined unbounded.** They are not collections, and they are handled: when
+  the static text alone is over the limit `fit_prompt` returns the render
+  unchanged and the launcher writes the complete prompt to a file and passes a
+  short bootstrap, so nothing is lost. Bounding them would mean truncating the
+  one line that names what the session is working on.
+- **`generate_watcher_prompt`'s managed-PR list truncates at 40 while the
+  block's "only PRs in the managed set above" instruction refers to it.** The
+  list is a display of a set pm itself enforces (the watcher acts by running
+  `pm` commands), the marker signals the abbreviation with `(+N more; ...)`,
+  and no command prints the exact managed set (`pm autostart status` lists
+  targets and their *pending* dependencies only), so no marker change would be
+  more accurate.
+- **`PromptTooLargeError` is raised but never caught.** It only escapes when
+  there is no writable location at all (`build_claude_shell_cmd` with no
+  `cwd`/`write_dir`, e.g. a >120 KB QA instruction body launched from the QA
+  pane or `pm qa launch`); every other over-limit prompt is delivered via the
+  file-backed bootstrap. Surfacing it as a pane/CLI message rather than an
+  uncaught traceback is caller-side error handling outside this PR's scope.
+
+Verification: `tests/test_prompt_bounds.py` 86 cases (6 new, 3 of them
+failing-then-passing — the finalize byte bound, the marker accuracy and the
+lazy pointer; the other 3 guard the unchanged paths). Full suite re-run after
+the edits; failure set compared against an `origin/master` baseline in the
+same sandbox (see the PR note for the counts).
+
+## 14. Review-loop follow-ups (iteration 8)
+
+Iteration 8 re-ran the i7 sweep independently — every reachable builder, on
+each dimension (count, item size, single-document size) — and then split the
+remaining over-limit results by whether the *item* can actually be that long.
+Two listings were still count-capped with no byte budget; the rest are
+bounded by something other than the budget.
+
+- **The integration overlap/conflict listings (R6 / §5) were count-capped
+  only.** `INTEGRATION_MAX_PATHS = 20` bounds the count, but the items are
+  filesystem paths, whose length is bounded only by `PATH_MAX` — so 20 of
+  them measured **199,920 bytes** in the sign-off prompt and 200,114 with 40
+  (the YAML record's own `_YAML_LIST_LIMIT`). This is the cap-times-item-size
+  defect i3/i7 fixed for every other listing, and it is worse here than
+  elsewhere because `_signoff_integration_block` is part of the builder's
+  **static text**, not one of `fit_prompt`'s shrinkable blocks — so the
+  launcher guard had to fire for a builder this PR exists to bound. New
+  shared `INTEGRATION_LIST_BUDGET = 8_000` on all four sites: both lists in
+  `_signoff_integration_block` and both in `signoff.format_signoff_return`
+  (the block the impl / review / QA-planner prompts inline via
+  `_signoff_return_block`). The omission markers already name the full record
+  (`integration.integration_pointer`, R6/§12). Re-measured: **47,752 bytes**;
+  a 20 × 200 B record (the realistic shape) is byte-identical at 28,920.
+- **The QA child prompt's artifact listing was count-capped only.** It
+  inlines full paths (`{scratch}/qa-artifacts/<name>`), not basenames, so
+  `ARTIFACT_PATHS_MAX = 20` does not bound it: 20 paths of ~4 KB measured
+  **108,490 bytes** (the same reasoning i7 used for the finalize worktree
+  paths, which are the same shape). New `ARTIFACT_PATHS_BUDGET = 8_000`;
+  re-measured **31,934 bytes**.
+
+Checked and deliberately unchanged:
+
+- **`_build_verification_prompt`'s recipe bullets** are count-capped only
+  (`ARTIFACT_PATHS_MAX`) but carry `Path(p).name` — basenames, so the item is
+  bounded by the filesystem's `NAME_MAX` (255) and 20 of them cannot exceed
+  ~5 KB. A byte budget there could never fire, which is the dead-parameter
+  defect §12 removed from `mocks_for_prompt`; the count cap does bound it.
+- **`build_regression_test_prompt`** (the test body *is* the prompt) and the
+  watcher managed/target lists (PR ids and short target names, 40 items)
+  remain as recorded in §10 and §13.
+
+Verification: `tests/test_prompt_bounds.py` 89 cases (3 new, all
+failing-then-passing — the sign-off integration list, the sign-off-return
+block, and the QA child artifact list; each measured 108-200 KB before the
+fix). Real-data sweep unchanged. Evidence:
+`/pm-captures/review-4e41-i8/` (`sweep.py`, `sweep-after-i8.txt`,
+`integration-paths-before-after.txt`).

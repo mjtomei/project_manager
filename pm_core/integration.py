@@ -385,6 +385,29 @@ def integration_json_path(pr_id: str) -> Path | None:
     return croot / pr_id / "integration.json" if croot else None
 
 
+def integration_pointer(pr_id: str) -> str:
+    """Where a session can read the full integration record for *pr_id*.
+
+    Prompt builders abbreviate the overlap/conflict path lists (they grow with
+    the diff), and the marker naming what was dropped has to name a place the
+    session can actually read the rest — otherwise the abbreviation is silent
+    loss.  Falls back to ``pm pr show``, which prints the PR's integration
+    record when no captures directory can be resolved.
+
+    Resolved through :func:`pm_core.paths.captures_dir`, not
+    :func:`integration_json_path`: the latter is the *host* root, and these
+    markers reach impl / review / QA-planner prompts, which run inside
+    containers where the captures dir is bind-mounted at
+    ``/pm-captures`` and the host path does not exist.  ``captures_dir`` is
+    the resolver that knows about that mount.
+    """
+    from pm_core.paths import captures_dir
+    cap = captures_dir(pr_id)
+    if cap is not None:
+        return f"read {cap / 'integration.json'}"
+    return f"run `pm pr show {pr_id}`"
+
+
 def check_integration(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
     """Run the integration check for *pr_id* and record it.
 

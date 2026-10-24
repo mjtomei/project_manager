@@ -12,13 +12,39 @@ from pm_core import store, notes
 from pm_core.plans.parser import parse_plan_prs
 from pm_core.plans import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
+from pm_core.prompt_bounds import (
+    PLAN_LIST_BUDGET, PLAN_LIST_MAX, PROMPT_ARG_LIMIT, bounded_join,
+    bounded_text, prompt_bytes,
+)
 from pm_core.prompt_gen import tui_section
 
 # claude receives a session's prompt as a single argv entry.  Linux caps a
 # single argument at MAX_ARG_STRLEN (128 KiB / 131072 bytes, including the
 # terminating NUL); exceeding it makes execve fail with E2BIG.  Stay well
 # under that so prompts that inline per-PR detail degrade gracefully.
-_PROMPT_ARG_LIMIT = 120_000
+_PROMPT_ARG_LIMIT = PROMPT_ARG_LIMIT
+
+# Cap collection listings so cross-plan / existing-PR context cannot grow
+# without bound.  The markers point at commands that read the full detail.
+_PLAN_LIST_MAX = PLAN_LIST_MAX
+# A count cap alone does not bound a listing whose lines carry user-authored
+# titles; this bounds the product.  Real listings here run 0.4-14.5 KB.
+_PLAN_LIST_BUDGET = PLAN_LIST_BUDGET
+# The plan-review fallback lists every PR one line each (no count cap, as
+# before the audit); this byte budget only trims it when titles make the lines
+# huge.  Sized above the largest real listing so the fallback is unchanged.
+_PLAN_BRIEF_BUDGET = 40_000
+_PLAN_FILE_BUDGET = 20_000
+# Aggregate budget for plan-file text a builder inlines.  A per-file budget
+# alone is not enough: a project with many plans multiplies it (22 plans at
+# 20 KB each is 440 KB, well over MAX_ARG_STRLEN), so the total is bounded too.
+_PLAN_FILES_BUDGET = 30_000
+# Smallest per-file slice worth inlining; below this the plan is listed as
+# omitted instead of emitting a marker that would not fit the slice.
+_PLAN_FILE_MIN_SLICE = 500
+# One-line PR summaries inline the description; truncate it so 40 large
+# descriptions (11 KB each in this project) cannot blow the prompt budget.
+_PLAN_DESC_CHARS = 300
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -190,10 +216,16 @@ def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
     existing_prs = data.get("prs") or []
     existing_context = ""
     if existing_prs:
-        existing_context = "\nExisting PRs in this project:\n" + "\n".join(
-            f"  {pr['id']}: {pr.get('title', '???')} [{pr.get('status', '?')}]"
-            + (f" (depends on: {', '.join(pr.get('depends_on') or [])})" if pr.get("depends_on") else "")
-            for pr in existing_prs
+        def _existing_line(pr: dict) -> str:
+            deps = pr.get("depends_on") or []
+            dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+            return (f"  {pr['id']}: {pr.get('title', '???')} "
+                    f"[{pr.get('status', '?')}]{dep_str}")
+        existing_context = "\nExisting PRs in this project:\n" + bounded_join(
+            existing_prs, _existing_line, max_items=_PLAN_LIST_MAX,
+            max_bytes=_PLAN_LIST_BUDGET,
+            omitted_note=lambda n: (
+                f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
         )
 
     initial_context = ""
@@ -314,10 +346,18 @@ def plan_review(plan_id: str | None, fresh: bool):
 
     other_prs_context = ""
     if other_prs:
-        other_prs_context = "\nPRs from other plans (for cross-plan reference):\n" + "\n".join(
-            f"  {pr['id']}: {pr.get('title', '???')} [{pr.get('status', '?')}] (plan: {pr.get('plan', '?')})"
-            for pr in other_prs
-        ) + "\n"
+        def _other_plan_line(pr: dict) -> str:
+            return (f"  {pr['id']}: {pr.get('title', '???')} "
+                    f"[{pr.get('status', '?')}] (plan: {pr.get('plan', '?')})")
+        other_prs_context = (
+            "\nPRs from other plans (for cross-plan reference):\n"
+            + bounded_join(
+                other_prs, _other_plan_line, max_items=_PLAN_LIST_MAX,
+                max_bytes=_PLAN_LIST_BUDGET,
+                omitted_note=lambda n: (
+                    f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
+            )
+            + "\n")
 
     notes_block = notes.notes_section(root)
 
@@ -386,16 +426,32 @@ After fixing, summarize what was changed.
         # Inline full per-PR detail by default, but if doing so pushes the
         # prompt past the argv size limit (large plans), fall back to a brief
         # one-line listing and let the session pull detail with `pm pr show`.
+        # The brief form keeps listing every PR (it is already one line each);
+        # the byte budget only trims it when titles make the lines huge, which
+        # is why it is far more generous than _PLAN_LIST_BUDGET.
+        def _brief_list(prs: list[dict], budget: int = _PLAN_BRIEF_BUDGET) -> str:
+            return bounded_join(
+                prs, _format_pr_brief, max_bytes=budget,
+                omitted_note=lambda n: (
+                    f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
+            )
+
         prompt = _post_load_prompt(pr_list, "")
-        if len(prompt.encode()) > _PROMPT_ARG_LIMIT:
-            brief = "\n".join(_format_pr_brief(pr) for pr in plan_prs)
+        if prompt_bytes(prompt) > _PROMPT_ARG_LIMIT:
             note = (
                 "\n(This plan has too many PRs to inline each description here. "
                 "The list above is abbreviated — run `pm pr show <id>` to read "
                 "the full description, tests, and files of any PR before "
                 "reviewing it.)\n"
             )
-            prompt = _post_load_prompt(brief, note)
+            prompt = _post_load_prompt(_brief_list(plan_prs), note)
+            # Second safety net: even the brief form can exceed the limit when
+            # the static prompt text plus the bounded other-PR context is
+            # large.  Shrink the listing further and defer everything to the
+            # on-demand commands.
+            if prompt_bytes(prompt) > _PROMPT_ARG_LIMIT:
+                prompt = _post_load_prompt(
+                    _brief_list(plan_prs, _PLAN_BRIEF_BUDGET // 4), note)
     else:
         # Pre-load: no PRs in project.yaml yet — review the plan file's PR section
         prompt = f"""\
@@ -487,24 +543,61 @@ def plan_deps():
         click.echo("No PRs. Add PRs first with: pm pr add <title>", err=True)
         raise SystemExit(1)
 
-    pr_lines = []
-    for p in prs:
+    desc_truncated = False
+
+    def _dep_pr_line(p: dict) -> str:
+        nonlocal desc_truncated
         deps = p.get("depends_on") or []
         dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-        desc = p.get("description", "")
+        desc = " ".join((p.get("description") or "").split())
+        if len(desc) > _PLAN_DESC_CHARS:
+            desc = desc[:_PLAN_DESC_CHARS].rstrip() + "…"
+            desc_truncated = True
         desc_str = f" — {desc}" if desc else ""
-        pr_lines.append(f"  {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{desc_str}")
+        return (f"  {_pr_display_id(p)}: {p.get('title', '???')} "
+                f"[{p.get('status', '?')}]{dep_str}{desc_str}")
 
-    pr_list_str = "\n".join(pr_lines)
+    pr_list_str = bounded_join(
+        prs, _dep_pr_line, max_items=_PLAN_LIST_MAX,
+        max_bytes=_PLAN_LIST_BUDGET,
+        omitted_note=lambda n: (
+            f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
+    )
+    if desc_truncated:
+        pr_list_str += (
+            "\n  (Descriptions above are abbreviated to fit the prompt size "
+            "limit — run `pm pr show <id>` for a PR's full description.)")
 
-    # Include plan context if available
+    # Include plan context if available.  Each plan file is bounded so a
+    # long plan cannot blow the prompt's argv budget, and the files share an
+    # aggregate budget so a project with many plans cannot either; the
+    # markers point at the plan paths for the full text.
     plan_context = ""
     plans = data.get("plans") or []
+    omitted_plans: list[str] = []
+    remaining = _PLAN_FILES_BUDGET
     for plan_entry in plans:
         plan_path = root / plan_entry["file"]
-        if plan_path.exists():
-            plan_context += f"\nPlan: {plan_entry['name']} ({plan_entry['id']})\n"
-            plan_context += plan_path.read_text() + "\n"
+        if not plan_path.exists():
+            continue
+        header = f"\nPlan: {plan_entry['name']} ({plan_entry['id']})\n"
+        slice_budget = min(_PLAN_FILE_BUDGET, remaining - prompt_bytes(header))
+        if slice_budget < _PLAN_FILE_MIN_SLICE:
+            omitted_plans.append(str(plan_path))
+            continue
+        file_text = bounded_text(
+            plan_path.read_text(),
+            max_bytes=slice_budget,
+            pointer=f"the plan file at {plan_path}",
+            label=f"plan {plan_entry['name']}",
+        )
+        plan_context += header + file_text + "\n"
+        remaining -= prompt_bytes(header) + prompt_bytes(file_text) + 1
+    if omitted_plans:
+        plan_context += (
+            "\n(Plan files omitted to fit the prompt size limit — read each "
+            "in full at its path:\n"
+            + "\n".join(f"  - {p}" for p in omitted_plans) + "\n)\n")
 
     notes_block = notes.notes_section(root)
 
@@ -695,6 +788,15 @@ def _run_fix_command(step_name: str, review_path_str: str):
             context_parts.append(f"Plan {p['id']} ({p['name']}):\n{pp.read_text()}")
 
     original_context = "\n".join(context_parts) if context_parts else "No plan files found."
+    # Every plan file is inlined above, so the total grows with the project
+    # (22 plans / ~500 KB in this repo).  Bound the concatenation with a
+    # pointer at the plan files for the full text.
+    original_context = bounded_text(
+        original_context,
+        max_bytes=_PLAN_FILES_BUDGET,
+        pointer=f"the plan files under {root} (see `pm plan list`)",
+        label="plan context",
+    )
     prompt = review_mod.build_fix_prompt(step_name, original_context, parsed["findings"])
 
     notes_block = notes.notes_section(root)
