@@ -31628,7 +31628,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T08:02:18.900834+00:00'
+  updated_at: '2026-10-24T08:23:21.770485+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33133,6 +33133,21 @@ prs:
       project.yaml to be unlocked" (no 2 s StoreLockTimeout).'
     created_at: '2026-10-24T08:02:18Z'
     last_edited: '2026-10-24T08:02:18Z'
+  - id: note-8104bd4
+    text: 'Review 679d i1 (64b41a91, CODE CHANGE, small, needs normal re-review):
+      S49 b740e188, S47 13eb925b/3a3dcc3e, S48 716d6ce1/006d7b4d and 5da5ea11 reviewed,
+      sound except: 716d6ce1 made start_signoff always NO_WAIT, so the one-shot skip_qa
+      review PASS hand-off (_maybe_auto_merge, never retried) was lost to any brief
+      lock holder while the TUI said it "waits". start_signoff now takes lock_timeout;
+      only the retried callers (_trigger_signoff follow-up, advance_all) pass NO_WAIT.
+      The one-shot path keeps the 2 s wait and reports Error: as on master. Residual,
+      pre-existing on master and not fixed here: a holder past 2 s or an unloadable
+      file still loses that hand-off (filed pr-7cf1fe4). Also: the wait line for a
+      recorded result whose follow-up waits now says "recorded — follow-up waiting"
+      (S49 observation), and an order-dependent caplog test was fixed. impl.md item
+      38. 4 mutations caught; full suite 3645 passed; /pm-captures/review-679d-i1.'
+    created_at: '2026-10-24T08:23:21Z'
+    last_edited: '2026-10-24T08:23:21Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
