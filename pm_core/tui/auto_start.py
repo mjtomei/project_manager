@@ -608,6 +608,11 @@ def add_targets(app, ids: list[str], policy: str | None = None,
         _log.info("auto_start: target %s %s policy=%s source=%s", pr_id,
                   "added" if is_new else "re-armed", current, source)
     _sync_enabled(app)
+    # An explicit (re-)add asks for a start now: a start failure already
+    # shown for these PRs is said again, or a retry that fails the same
+    # way would leave only the targets line.
+    for pr in found:
+        _start_failures_shown(app).pop(pr["id"], None)
     released = sorted(held_before - set(merge_holds(app)))
     if released:
         _log.info("auto_start: released merge holds on %s", released)
@@ -705,6 +710,7 @@ def enable_all(app) -> dict:
     """Explicit whole-backlog mode (the legacy targetless auto-start)."""
     app._auto_start_all = True
     _sync_enabled(app)
+    _start_failures_shown(app).clear()
     app.log_message("Auto-start: ON (all ready PRs — explicit backlog mode)",
                     force=True, hold=CONFIRM_HOLD_SECONDS)
     _log.info("auto_start: all-mode enabled")

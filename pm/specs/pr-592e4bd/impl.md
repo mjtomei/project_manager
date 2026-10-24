@@ -1037,7 +1037,14 @@ recorded with item 41.
         pm pr start <pr> failed: …" (markup-escaped), forced and held like
         the other one-shot errors.  Later passes start the PR again (an
         in_progress PR whose spec awaits approval fails on each), so each
-        reason is said once per PR until a start goes through.
+        reason is said once per PR until a start goes through.  Review
+        loop e0e8 i9: an explicit re-arm (`autostart` target re-add, `A`,
+        `autostart all`) asks for a start now, so it forgets the reason
+        shown for those PRs; a retry that fails the same way (route still
+        down) is said again instead of leaving only the targets line
+        (`test_explicit_rearm_says_a_shown_start_failure_again`, both
+        cases fail with their clear removed;
+        `/pm-captures/review-e0e8-i9/mutation-checks.log`).
         `test_failed_start_shows_its_reason_on_the_log_line`; 7 mutations
         caught.  i7's `test_unavailable_route_propagates_and_opens_no_window`
         now also checks that no window opened and the per-PR launch lock

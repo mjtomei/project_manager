@@ -1379,6 +1379,42 @@ class TestCursorFollowsActivePr:
         start()  # ... so the same failure later is said again
         assert len(shown) == 3 and shown[2][0] == shown[1][0]
 
+    @pytest.mark.parametrize("rearm", ["add_targets", "enable_all"])
+    def test_explicit_rearm_says_a_shown_start_failure_again(self, rearm):
+        """Re-adding a target (or ``autostart all``) asks for a start now.
+        If that retry fails for the reason already shown (route still
+        down), the reason is said again, not just the targets line."""
+        app = FakeApp([_pr("u", status="in_progress")])
+        app._quiet_activations = {}
+        failures = []
+        app.log_message = lambda msg, **kw: (
+            failures.append(msg) if "failed" in msg else None)
+        reason = "work route 'claude-work' unavailable: x. Remedy: y"
+
+        class _P:
+            returncode = 1
+
+            async def communicate(self):
+                return b"", reason.encode()
+
+        async def fake_shell(*a, **k):
+            return _P()
+
+        def start():
+            with patch("pm_core.tui.auto_start._run_shell_async", fake_shell):
+                asyncio.run(auto_start._start_pr_quiet(app, "u"))
+
+        auto_start.add_targets(app, ["u"])
+        start()
+        start()
+        assert len(failures) == 1
+        if rearm == "add_targets":
+            auto_start.add_targets(app, ["u"])  # already a target: re-armed
+        else:
+            auto_start.enable_all(app)
+        start()
+        assert len(failures) == 2 and failures[1] == failures[0]
+
 
 def test_predates_open_return_accepts_z_suffix():
     """runtime_state / return timestamps may end in "Z" (Python 3.10's
