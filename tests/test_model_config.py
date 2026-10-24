@@ -196,6 +196,54 @@ class TestGetPrModelOverride:
         assert get_pr_model_override(pr, "qa_scenario") == "provider:glm-flash"
         assert get_pr_model_override(pr, "impl") == "opus"
 
+    def test_malformed_session_models_fall_back_to_the_pr_model(self):
+        """A non-mapping value (hand-edited YAML) is ignored, never
+        indexed: a string would otherwise match a role by substring."""
+        for bad in ("provider:qa-route", ["qa"], 3):
+            pr = {"model": "opus", "session_models": bad}
+            assert get_pr_model_override(pr, "qa") == "opus"
+
+    def test_qa_roles_resolve_their_pr_exception(self, monkeypatch):
+        """QA launches resolve through qa_loop._resolve_qa_model.  A worker
+        exception reaches only the worker: s0 (qa_interactive) and the
+        planner keep the PR-wide model, and the refiner inherits ``qa``."""
+        from pm_core import qa_loop
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        pr = {"model": "opus", "session_models": {
+            "qa_scenario": "provider:claude-work", "qa": "sonnet"}}
+        got = {st: qa_loop._resolve_qa_model(pr, {}, session_type=st)
+               for st in ("qa_scenario", "qa_concretize", "qa_planning")}
+        assert got["qa_scenario"].provider == "claude-work"
+        assert got["qa_concretize"].model == "sonnet"
+        assert got["qa_planning"].model == "sonnet"
+        s0 = qa_loop._resolve_interactive_model(pr, {})
+        assert (s0.model, s0.provider) == ("sonnet", None)
+
+    def test_merge_window_resolves_its_pr_exception(self, tmp_path,
+                                                    monkeypatch):
+        from types import SimpleNamespace
+        from pm_core.cli import pr as pr_mod
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        seen = []
+        monkeypatch.setattr(
+            "pm_core.model_config.resolve_model_and_provider",
+            lambda st, **k: seen.append((st, k["pr_model"])) or
+            SimpleNamespace(model=None, provider="claude-work", effort=None))
+        pr = {"id": "pr-001", "model": "provider:deepseek-flash",
+              "session_models": {"merge": "provider:claude-work"}}
+        with patch.object(pr_mod, "tmux_mod") as tm, \
+             patch.object(pr_mod, "prompt_gen"), \
+             patch.object(pr_mod, "build_claude_shell_cmd",
+                          return_value="claude") as build, \
+             patch.object(pr_mod, "_get_pm_session", return_value="pm-s"), \
+             patch("pm_core.paths.get_global_setting", return_value=False):
+            tm.find_window_by_name.return_value = None
+            pr_mod._launch_merge_window({"project": {}}, pr, "conflict",
+                                         cwd=str(tmp_path))
+        assert seen == [("merge", "provider:claude-work")]
+        assert build.call_args.kwargs["provider"] == "claude-work"
+
 
 class TestBuildClaudeShellCmd:
     def test_model_flag_included(self):
@@ -358,3 +406,47 @@ class TestValidateModelConfig:
         }}}
         errors = validate_model_config(data)
         assert any("extreme" in e for e in errors)
+
+    def test_pr_session_models_problems_flagged(self):
+        """A typo'd PR role would leave that role on the PR-wide model."""
+        from pm_core.model_config import validate_model_config
+        data = {"prs": [
+            {"id": "pr-a", "model": "opus",
+             "session_models": {"sign_off": "provider:claude-work"}},
+            {"id": "pr-b", "session_models": "provider:claude-work"},
+            {"id": "pr-c", "session_models": {"signoff": "sonnet"}},
+            {"id": "pr-d", "model": "opus"},
+        ]}
+        errors = validate_model_config(data)
+        assert len(errors) == 2
+        assert "prs[pr-a].session_models" in errors[0] and "sign_off" in errors[0]
+        assert errors[1] == "prs[pr-b].session_models must be a mapping"
+
+    def test_non_mapping_model_config_still_checks_prs(self):
+        from pm_core.model_config import validate_model_config
+        data = {"project": {"model_config": "opus"},
+                "prs": [{"id": "pr-a", "session_models": {"bogus": "x"}}]}
+        errors = validate_model_config(data)
+        assert errors[0] == "model_config must be a mapping"
+        assert any("prs[pr-a]" in e and "bogus" in e for e in errors)
+
+
+def test_model_show_lists_pr_overrides_and_their_problems(tmp_path,
+                                                          monkeypatch):
+    from click.testing import CliRunner
+    from pm_core import store
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master"},
+                "prs": [{"id": "pr-a", "model": "provider:deepseek-flash",
+                         "session_models": {"signoff": "provider:claude-work",
+                                            "sign_off": "opus"}},
+                        {"id": "pr-b", "title": "no override"}]}, tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    out = CliRunner().invoke(model_cli.model, ["show"]).output
+    assert "pr-a  model  -> provider:deepseek-flash" in out
+    assert "pr-a  signoff model  -> provider:claude-work" in out
+    assert "pr-b" not in out
+    assert "Problems in project.yaml model settings" in out
+    assert "prs[pr-a].session_models: unknown session type 'sign_off'" in out

@@ -1929,7 +1929,10 @@ def test_workflow_role_remedy_says_relaunch_not_qa_wait(pm_home_dir, monkeypatch
     if failure != "router_down":  # these also name the main-account way out
         assert "pm model set qa_scenario" in qa.remedy
         assert "'pm model set impl <model> --project'" in impl.remedy
-        assert "PR's 'model' override" in impl.remedy
+        # A PR override wins over the project setting, and since per-PR
+        # role exceptions either of its keys can be what selects the route.
+        for st in (qa, impl):
+            assert "PR's 'session_models' entry or 'model' override" in st.remedy
 
 
 def test_unrouted_provider_reuses_a_running_container_untouched(pm_home_dir, monkeypatch):
@@ -1967,9 +1970,13 @@ def test_impl_start_builds_and_wraps_for_the_selected_route(tmp_path, monkeypatc
     pm_dir.mkdir()
     workdir = tmp_path / "work"
     workdir.mkdir()
+    # The PR-wide model stays on main; only impl is routed, by a role
+    # exception (f1865615), which must reach the impl resolution.
     store.save({"project": {"name": "t", "repo": str(tmp_path), "base_branch": "master"},
                 "prs": [{"id": "pr-001", "title": "T", "branch": "pm/pr-001",
-                         "status": "in_progress", "workdir": str(workdir)}]}, pm_dir)
+                         "status": "in_progress", "workdir": str(workdir),
+                         "model": "opus",
+                         "session_models": {"impl": f"provider:{ROUTE}"}}]}, pm_dir)
     tmux = MagicMock()
     tmux.session_exists.return_value = True
     tmux.find_window_by_name.return_value = None
@@ -1991,10 +1998,12 @@ def test_impl_start_builds_and_wraps_for_the_selected_route(tmp_path, monkeypatc
     monkeypatch.setattr(pr_mod, "_get_pm_session", lambda: "pm-sess")
     monkeypatch.setattr(cm, "wrap_claude_cmd", wrap)
     monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: True)
+    resolved = []
     monkeypatch.setattr("pm_core.model_config.resolve_model_and_provider",
-                        lambda *a, **k: SimpleNamespace(
-                            model=None, provider=ROUTE, effort="high"))
+                        lambda st, **k: resolved.append((st, k["pr_model"])) or
+                        SimpleNamespace(model=None, provider=ROUTE, effort="high"))
     result = CliRunner().invoke(pr_mod.pr, ["start", "pr-001"])
+    assert resolved == [("impl", f"provider:{ROUTE}")]
     kw = build.call_args.kwargs
     assert (kw["session_type"], kw["container"], kw["provider"]) == ("impl", True, ROUTE)
     assert kw["cwd"] == cm._CONTAINER_WORKDIR and kw["write_dir"] == str(workdir)

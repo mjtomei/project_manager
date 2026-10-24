@@ -310,10 +310,16 @@ def test_review_container_uses_selected_route(fake_tmux, monkeypatch):
     remove = Mock()
     monkeypatch.setattr(cm, "remove_container", remove)
     monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: True)
+    resolved = []
     monkeypatch.setattr("pm_core.model_config.resolve_model_and_provider",
-                        lambda *a, **k: SimpleNamespace(model=None,
-                            provider="claude-work", effort="high"))
-    pr_mod._launch_review_window(_make_data(), _make_pr("T", fake_tmux["workdir"]))
+                        lambda st, **k: resolved.append((st, k["pr_model"])) or
+                        SimpleNamespace(model=None, provider="claude-work",
+                                        effort="high"))
+    # Only review is routed, by a PR role exception over a PR-wide model.
+    pr = {**_make_pr("T", fake_tmux["workdir"]), "model": "opus",
+          "session_models": {"review": "provider:claude-work"}}
+    pr_mod._launch_review_window(_make_data(), pr)
+    assert resolved == [("review", "provider:claude-work")]
     assert build.call_args.kwargs["container"] is True
     assert build.call_args.kwargs["provider"] == "claude-work"
     assert wrap.call_args.kwargs["provider"] == "claude-work"

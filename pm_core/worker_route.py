@@ -50,8 +50,13 @@ _log = configure_logger("pm.worker_route")
 
 # Session types whose QA launches are gated on their route (refiner, worker).
 ROUTED_SESSION_TYPES = ("qa_concretize", "qa_scenario")
+# A PR's own override wins over the project setting, so a remedy that
+# moves a session off the route names it first.
+_PR_OVERRIDE_REMEDY = ("remove the PR's 'session_models' entry or 'model' "
+                       "override if one selects this route")
 # How to move them back to the main account, quoted in remedies.
-_MAIN_ACCOUNT_REMEDY = ("run them on the main account: " + "; ".join(
+_MAIN_ACCOUNT_REMEDY = (f"run them on the main account: {_PR_OVERRIDE_REMEDY}, "
+                        "or " + "; ".join(
     f"'pm model set {st} <model> --project'" for st in ROUTED_SESSION_TYPES))
 
 _BRIDGE_DIRNAME = "route-bridge"
@@ -371,12 +376,12 @@ def _main_account_remedy(session_type: str | None) -> str:
 
     *session_type* None means the gated QA refiner/worker launches.  Other
     roles (implementation, review, sign-off containers) are selected by
-    their own type or by the PR's ``model`` override, which wins over it.
+    their own type or by the PR's ``session_models`` / ``model`` override,
+    which wins over it.
     """
     if session_type is None:
         return _MAIN_ACCOUNT_REMEDY
-    return ("run it on the main account: remove the PR's 'model' override "
-            "if it selects this route, or "
+    return (f"run it on the main account: {_PR_OVERRIDE_REMEDY}, or "
             f"'pm model set {session_type} <model> --project'")
 
 

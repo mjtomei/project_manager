@@ -237,13 +237,15 @@ def get_model_config_summary(project_data: dict | None = None) -> dict[str, str]
 
 
 def validate_model_config(project_data: dict | None) -> list[str]:
-    """Return a list of problems with project.yaml's ``model_config`` block.
+    """Return a list of problems with project.yaml's model settings: the
+    ``model_config`` block and each PR's ``session_models``.
 
     An empty list means valid. Checks that:
 
     - ``session_models`` / ``session_effort`` keys are known session types
       (``SESSION_TYPES``);
-    - ``session_effort`` values are valid effort levels (``EFFORT_LEVELS``).
+    - ``session_effort`` values are valid effort levels (``EFFORT_LEVELS``);
+    - each PR's ``session_models`` is a mapping keyed by known session types.
 
     Unknown keys are silently ignored by ``resolve_model_and_provider`` — a
     typo'd session type would otherwise just never take effect — so this is
@@ -252,10 +254,10 @@ def validate_model_config(project_data: dict | None) -> list[str]:
     if not project_data:
         return []
     mc = project_data.get("project", {}).get("model_config", {})
-    if not isinstance(mc, dict):
-        return ["model_config must be a mapping"]
-
     errors: list[str] = []
+    if not isinstance(mc, dict):
+        errors.append("model_config must be a mapping")
+        mc = {}
     known = sorted(SESSION_TYPES)
     for block in ("session_models", "session_effort"):
         entries = mc.get(block, {})
@@ -276,6 +278,20 @@ def validate_model_config(project_data: dict | None) -> list[str]:
                     f"model_config.session_effort[{st!r}]: invalid effort "
                     f"{level!r}. Valid levels: {list(EFFORT_LEVELS)}"
                 )
+    # A PR's role exceptions are ignored the same way, so a typo would
+    # leave that role on the PR-wide model.
+    for pr in project_data.get("prs") or []:
+        if not isinstance(pr, dict) or pr.get("session_models") is None:
+            continue
+        where = f"prs[{pr.get('id')}].session_models"
+        entries = pr["session_models"]
+        if not isinstance(entries, dict):
+            errors.append(f"{where} must be a mapping")
+            continue
+        for st in entries:
+            if st not in SESSION_TYPES:
+                errors.append(f"{where}: unknown session type {st!r}. "
+                              f"Valid types: {known}")
     return errors
 
 
@@ -288,8 +304,8 @@ def get_pr_model_override(pr_entry: dict,
     model for development while routing sign-off to Claude. Role inheritance
     matches project configuration (e.g. qa_scenario -> qa, signoff -> review).
     """
-    if session_type:
-        models = pr_entry.get("session_models") or {}
+    models = pr_entry.get("session_models")
+    if session_type and isinstance(models, dict):
         for role in (session_type, _FALLBACK_TYPES.get(session_type)):
             if role and role in models:
                 return models[role]

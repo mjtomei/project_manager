@@ -222,7 +222,7 @@ container; host + container `…190309Z/`). After 81cebf17 it passed on the
 host from an underscore cwd and in a container
 (`…195845Z/result.json`). Live QA S1–S50 is in
 `/pm-captures/scenarios/<N>/` (REPORT.md). The latest full suite is
-recorded with item 40.
+recorded with item 41.
 
 **Rules fixed during validation (index).** Commits in parentheses.
 - Live smokes 1–4. The bridge stream has no timeout after connect
@@ -903,7 +903,8 @@ recorded with item 40.
     "pm model set qa_concretize …"); `check_route(session_type=)` (passed
     through `wrap_claude_cmd(session_type=)`) now says to launch the
     session again, or to move it to the main account by removing the PR
-    `model` override or `pm model set <type> <model> --project`.  The QA
+    override that selects the route (`session_models` entry or `model`;
+    item 41) or `pm model set <type> <model> --project`.  The QA
     gates keep their wording.  The in-container ensure remedy also names
     relaunching a non-QA session.
     `test_workflow_role_remedy_says_relaunch_not_qa_wait[router_down|expired|unconfigured]`,
@@ -926,3 +927,42 @@ recorded with item 40.
     Full suite 3669 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
     PYTHONPATH=/workspace; markdown 3.10.3 installed first;
     `/pm-captures/review-e0e8-i1/full-suite.log`).
+
+41. (Per-PR role exceptions, user commits f1865615 and 32df2893; review
+    loop e0e8 i3.)  A PR's `session_models` mapping overrides its
+    `model` for one role: `get_pr_model_override(pr, <type>)` returns the
+    role's entry, then its parent role's (`_FALLBACK_TYPES`: `qa_*` ->
+    `qa`, `signoff` -> `review`), then the PR `model`.  `PM_MODEL` still
+    wins.  Implementation, review, merge, sign-off and every QA type
+    (`_resolve_qa_model`, which the route gates, mounts and `describe`
+    also use) pass their type.  s0 resolves `qa_interactive`, so a worker
+    exception never moves it.  32df2893 sets the DeepSeek/GLM trial PRs
+    (pr-ace66e5, pr-7f90572) to sign off on `provider:claude-work`; this
+    PR keeps `model: provider:claude-work` for every role.
+    Review loop e0e8 i3 fixes:
+    (a) The route remedies (item 40 and the QA gates) told the user to
+        remove the PR's `model` override, or only to `pm model set` the
+        QA types, while a `session_models` entry may be what selects the
+        route, and a PR override wins over `pm model set`.  Both now name
+        "the PR's 'session_models' entry or 'model' override".
+    (b) A non-mapping `session_models` (hand-edited YAML) is ignored: a
+        string matched roles by substring and then raised `TypeError`.
+    (c) `validate_model_config` reports a PR `session_models` that is
+        not a mapping or names an unknown type (e.g. `sign_off` would
+        leave sign-off on the PR-wide model), also when `model_config`
+        itself is malformed.  `pm model show` lists PR overrides and
+        prints those problems under "Problems in project.yaml model
+        settings".
+    Tests: `tests/test_model_config.py` (`test_qa_roles_resolve_their_pr_exception`,
+    `test_merge_window_resolves_its_pr_exception`,
+    `test_malformed_session_models_fall_back_to_the_pr_model`,
+    `test_pr_session_models_problems_flagged`,
+    `test_non_mapping_model_config_still_checks_prs`,
+    `test_model_show_lists_pr_overrides_and_their_problems`), and the
+    impl/review wiring tests now route by a role exception over a main
+    PR-wide model and check the resolved role.  12 mutations caught,
+    one per call site and fix
+    (`/pm-captures/review-e0e8-i3/mutation-checks.log`).  Full suite
+    3682 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
+    PYTHONPATH=/workspace; markdown 3.10.3 installed first;
+    `/pm-captures/review-e0e8-i3/full-suite.log`).

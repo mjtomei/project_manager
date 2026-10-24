@@ -55,6 +55,21 @@ def model_show():
     else:
         click.echo("No project-level model_config in project.yaml (using defaults).")
 
+    # PR overrides win over everything above except PM_MODEL.
+    pr_lines = []
+    for pr in data.get("prs") or []:
+        if pr.get("model"):
+            pr_lines.append(f"  {pr.get('id')}  model  -> {pr['model']}")
+        roles = pr.get("session_models")
+        if isinstance(roles, dict):
+            for st, val in roles.items():
+                pr_lines.append(f"  {pr.get('id')}  {st} model  -> {val}")
+    if pr_lines:
+        click.echo()
+        click.echo("PR overrides (project.yaml prs[]: model, session_models):")
+        for line in pr_lines:
+            click.echo(line)
+
     # Router providers (worker routes): where those sessions actually go.
     from pm_core import worker_route
     shown = False
@@ -75,7 +90,7 @@ def model_show():
     problems = validate_model_config(data)
     if problems:
         click.echo()
-        click.echo("⚠ Problems in project.yaml model_config:")
+        click.echo("⚠ Problems in project.yaml model settings:")
         for p in problems:
             click.echo(f"  • {p}")
 
