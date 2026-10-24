@@ -531,3 +531,26 @@ def test_prefix_timeout_clears_its_own_hint():
     app, shown = _prefix_app()
     ProjectManagerApp._cancel_w_mode(app)
     assert shown[-1] == ""
+
+
+# QA S50 (pr-592e4bd): a fast skip_qa sign-off's forced, held "✓ X signed
+# off" arrived after the "skipping QA" line's hold had expired but before
+# its flush timer ran; it was shown at once and dropped the queued
+# "Auto-start: X → sign-off", which was never painted.
+
+def test_message_after_expiry_waits_for_the_pending_flush():
+    app, shown = _stub_app()
+    _log(app, "Auto-start: pr-x review passed, skipping QA", force=True, hold=3)
+    _log(app, "Auto-start: pr-x → sign-off", force=True, hold=3)  # queued
+    app._log_hold_until = 0.0  # the hold expired; its timer has not run yet
+    _log(app, "✓ pr-x signed off — ready to merge", force=True, hold=3)
+    _log(app, "Selected: pr-y")  # plain chatter in the same gap
+    assert shown == [" Auto-start: pr-x review passed, skipping QA"]
+    app.timers.pop(0)()  # the first hold's flush
+    assert shown[-1] == " Auto-start: pr-x → sign-off"
+    app._log_hold_until = 0.0
+    app.timers.pop(0)()
+    assert shown[-1] == " ✓ pr-x signed off — ready to merge"
+    app._log_hold_until = 0.0
+    app.timers.pop(0)()
+    assert shown[-1] == " Selected: pr-y"

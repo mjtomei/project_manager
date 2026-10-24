@@ -918,7 +918,14 @@ class ProjectManagerApp(App):
         replay = _seq is not None
         if not replay:
             _seq = self._log_seq = getattr(self, "_log_seq", 0) + 1
-        held = hold <= 0 and now < self._log_hold_until and not force
+        # A hold lasts until its flush has run: a message arriving after the
+        # hold expired but before its timer fired must not jump (and so
+        # drop) the confirmations it queued (S50: a fast sign-off's "✓ …
+        # signed off" dropped the queued "→ sign-off").  Replays come from
+        # that flush.
+        holding = now < self._log_hold_until or (
+            not replay and bool(getattr(self, "_log_held_queue", None)))
+        held = hold <= 0 and holding and not force
         suppressed = held or (
             sticky <= 0 and now < self._log_sticky_until and not force)
         # The log line holds one message and is overwritten (often within
@@ -926,7 +933,7 @@ class ProjectManagerApp(App):
         # that ``L`` tails — otherwise status updates are lost unseen.
         if not replay:
             _record_log_message(self, msg, suppressed)
-        if hold > 0 and now < self._log_hold_until:
+        if hold > 0 and holding:
             queue = getattr(self, "_log_held_queue", None)
             if queue is None:
                 queue = self._log_held_queue = []
