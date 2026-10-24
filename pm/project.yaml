@@ -31649,7 +31649,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T22:09:20.953314+00:00'
+  updated_at: '2026-10-24T22:24:02.770302+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33374,6 +33374,23 @@ prs:
       reaches only the pm log (pre-existing for every start failure).'
     created_at: '2026-10-24T22:09:20Z'
     last_edited: '2026-10-24T22:09:20Z'
+  - id: note-57197a9
+    text: 'Review e0e8 i8 (CODE CHANGE, small, needs normal re-review): i7 57f04ee6
+      (sign-off route error on stderr, rc 1) and the e0e8 deltas (c1c08d83, 9c42bb6e,
+      3748691e, c08c7627, f1865615, 32df2893, 0c577dd2, 021f2810, 97a77383, 2d58dea4)
+      re-reviewed and sound. Gap fixed (pre-existing; i7 left it as an observation):
+      auto_start._start_pr_quiet only logged a failed `pm pr start` to the pm log.
+      A routed impl whose work route was down showed "Auto-start: starting <pr>" and
+      nothing else, and with no periodic scheduler pass the PR sat in_progress with
+      no window. The last stderr line (the remedy) is now shown as "Auto-start: pm
+      pr start <pr> failed: ...", markup-escaped, forced and held. Each reason is
+      shown once per PR until a start succeeds, because a spec awaiting approval makes
+      every pass fail. 7 mutations caught. The i7 test also checks now that no window
+      opened and the launch lock was released. Venv lacked markdown again (3.10.3
+      installed). Baseline 3692 passed; final full suite 3693 passed, rc 0; impl.md
+      41(h); /pm-captures/review-e0e8-i8.'
+    created_at: '2026-10-24T22:24:02Z'
+    last_edited: '2026-10-24T22:24:02Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
