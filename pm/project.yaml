@@ -28962,7 +28962,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T09:20:01.185973+00:00'
-  updated_at: '2026-10-24T23:20:33.165578+00:00'
+  updated_at: '2026-10-24T23:21:05.766334+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29142,6 +29142,19 @@ prs:
       child on this HEAD — the pane process tree changed.'
     created_at: '2026-10-24T23:20:33Z'
     last_edited: '2026-10-24T23:20:33Z'
+  - id: note-26d081c
+    text: 'impl follow-up (2026-10-25): end-to-end post-fix fish verification of the
+      sh -c wrapper captured at /pm-captures/impl/post-fix/fish-shwrap/ (README.md,
+      repro-postfix.py, fish-matrix.txt) — through real tmux with default-shell=static
+      fish 4.0.2, the pre-fix inner shape leaves the override stale (fish parse error,
+      Claude never starts) while the shipped _tmux_shell_cmd wrapper starts Claude
+      and kill-window clears the override; /bin/bash and /bin/dash controls both clean
+      with debug preserved. Full suite on 6f6fee32 with PATH sanitized (dropping /home/pm/.local/bin
+      shims): 3367 passed, 1 skipped (fish absent), 1 pre-existing env failure (test_installer_writes_standalone_receiver);
+      note the suite silently mis-fails (43 failed/17 errors) if run with ~/.local/bin
+      first on PATH.'
+    created_at: '2026-10-24T23:21:05Z'
+    last_edited: '2026-10-24T23:21:05Z'
 - id: pr-19990de
   plan: bugs
   title: 'Bug: vanilla/GitHub merge propagation still resolves in the project root
