@@ -131,7 +131,7 @@ render_cast() {
     [ -n "$n" ] && [ -n "$dur" ] \
         || { echo "render_cast: cannot probe $gif" >&2; return 1; }
     vf="tpad=stop=1:stop_mode=clone,setpts='if(eq(N\,$n)\,$dur/TB\,PTS)',$vf"
-    if ffmpeg -loglevel error -y -i "$gif" -vf "$vf" \
+    if ffmpeg -nostdin -loglevel error -y -i "$gif" -vf "$vf" \
            -vsync vfr -enc_time_base 1/100 -video_track_timescale 100 \
            -c:v libx264 -profile:v high -level:v 5.1 -pix_fmt yuv420p \
            -crf 18 -movflags +faststart "$part" && [ -s "$part" ]; then
@@ -164,6 +164,13 @@ Notes:
   `ffprobe -v error -show_entries format=duration -of csv=p=0 recording.mp4`
   and `ffprobe -v error -count_packets -select_streams v:0 -show_entries
   stream=nb_read_packets -of csv=p=0 recording.mp4`.
+- **Batches: ffmpeg never reads stdin.** Without `-nostdin`, ffmpeg reads
+  its interactive keys from stdin, so a `find ... | while read c; do
+  render_cast "$c"; done` loop loses characters of the next file names to
+  it (seen in QA S46: `/pm-captures/...` became `m-captures/...`, then agg
+  and rm were handed `-c`). Keep `-nostdin`, and give the loop its list
+  another way (`mapfile -t casts < <(find ...)`) or run each call with
+  `</dev/null`.
 - **Partial output is never published.** ffmpeg writes to
   `recording.mp4.partial.mp4`, which is renamed to `recording.mp4` only
   after a successful encode. The GIF is deleted only after that rename.
