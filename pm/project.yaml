@@ -31649,7 +31649,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T23:04:02.926844+00:00'
+  updated_at: '2026-10-24T23:20:54.876316+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33437,6 +33437,23 @@ prs:
       impl.md 41(j); /pm-captures/review-e0e8-i11.'
     created_at: '2026-10-24T23:04:02Z'
     last_edited: '2026-10-24T23:04:02Z'
+  - id: note-4f9b8c6
+    text: 'Review e0e8 i12 (7a437b79, CODE CHANGE, small, needs normal re-review):
+      i11 620327fa (a re-add forgets every shown auto-start failure) and the e0e8
+      deltas (c1c08d83, 9c42bb6e, 3748691e, c08c7627, f1865615, 32df2893, 0c577dd2,
+      021f2810, 97a77383, 2d58dea4, 57f04ee6, d76cc9d5, d361858c, 5fbbedad) re-reviewed
+      independently, sound. add_targets/enable_all are reached only from user verbs
+      (A, O, autostart add/all), so the clear never defeats the dedupe on event-driven
+      passes. Gap fixed: i3 made validate_model_config keep checking PRs on a non-mapping
+      model_config, but its only caller, pm model show, crashed first (AttributeError/TypeError
+      for a string or blank model_config or a string session_models/session_effort
+      block), so the problems were never shown. It now says the effective config is
+      not shown and still lists PR overrides and problems. Launches with such a file
+      still fail (pre-existing; no fallback). 4-case regression, 2 mutations caught.
+      Venv lacked markdown again (3.10.3 installed). Baseline 3699, final full suite
+      3703 passed, rc 0; impl.md 41(k); /pm-captures/review-e0e8-i12.'
+    created_at: '2026-10-24T23:20:54Z'
+    last_edited: '2026-10-24T23:20:54Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
