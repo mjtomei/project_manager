@@ -149,6 +149,23 @@ class TestMissingProjectFileKeepsRoot:
         assert app._data == {"prs": [{"id": "pr-001"}]}
         assert "Skipping sync" in mock_log.warning.call_args[0][0]
 
+    def test_background_sync_skip_names_the_missing_file(self, tmp_path):
+        """The cwd lookup's "cd into your repo" advice does not fit a TUI
+        whose project file is briefly gone: name the missing path (S45)."""
+        app = types.SimpleNamespace(
+            _root=tmp_path, _data={"prs": [{"id": "pr-001"}]},
+            _current_guide_step=None)
+        with patch.object(store, "find_project_root",
+                          side_effect=FileNotFoundError(
+                              "No project.yaml found. Either cd into your repo, "
+                              "use 'pm -C /path/to/pm-dir', or set PM_PROJECT")), \
+             patch("pm_core.tui.frame_capture.load_capture_config"), \
+             patch("pm_core.tui.sync._log") as mock_log:
+            asyncio.run(background_sync(app))
+        reason = str(mock_log.warning.call_args[0][1])
+        assert reason == ("[Errno 2] No such file or directory: "
+                          f"'{tmp_path / 'project.yaml'}'")
+
     def test_background_sync_without_a_root_still_resets(self, tmp_path):
         app = types.SimpleNamespace(
             _root=tmp_path / "gone", _data={"prs": [{"id": "pr-001"}]},
