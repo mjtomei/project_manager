@@ -23,6 +23,8 @@ from pathlib import Path
 
 import click
 
+from pm_core.prompt_bounds import SPEC_BUDGET, bounded_text
+
 from pm_core import store
 from pm_core.claude_launcher import launch_claude_print
 from pm_core.paths import configure_logger, get_global_setting_value
@@ -138,11 +140,19 @@ def _build_spec_prompt(data: dict, pr: dict, phase: str) -> str:
     base_branch = data.get("project", {}).get("base_branch", "master")
     workdir = pr.get("workdir", "")
 
-    # Gather prior specs for context
+    # Gather prior specs for context.  Bound the inlined spec so a large
+    # implementation spec cannot blow the prompt's argv budget; the marker
+    # points at the full spec file.
     prior_specs = ""
     if phase == "qa":
         impl_spec = get_spec(pr, "impl")
         if impl_spec:
+            impl_spec = bounded_text(
+                impl_spec,
+                max_bytes=SPEC_BUDGET,
+                pointer=f"`pm pr spec {pr.get('id', '???')} impl`",
+                label="implementation spec",
+            )
             prior_specs += f"""
 ## Implementation Spec (spec_impl)
 
@@ -744,6 +754,16 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
             "and ask for approval before continuing. "
             + staleness_note
         )
+
+    # Bound the spec so a large spec cannot blow the prompt's argv budget.
+    # Head + tail truncation keeps the requirements and the closing
+    # pass/fail criteria; the marker points at the full spec file.
+    spec = bounded_text(
+        spec,
+        max_bytes=SPEC_BUDGET,
+        pointer=f"`pm pr spec {pr_id} {phase}` (file: {file_path})",
+        label=f"{label} spec",
+    )
 
     return f"""
 ## {label}

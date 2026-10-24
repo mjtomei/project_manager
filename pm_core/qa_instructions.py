@@ -16,6 +16,12 @@ from pathlib import Path
 
 import yaml
 
+from pm_core.prompt_bounds import (
+    LIBRARY_ITEMS_MAX as _LIBRARY_ITEMS_MAX,
+    MOCKS_BUDGET as _MOCKS_BUDGET,
+    bounded_join, bounded_text,
+)
+
 
 # ---------------------------------------------------------------------------
 # Directory helpers
@@ -296,10 +302,17 @@ def instruction_summary_for_prompt(pm_root: Path,
         if not items:
             continue
         lines.append(f"### {label}")
-        for item in items:
+
+        def _item_line(item: dict) -> str:
             desc = f" — {item['description']}" if item["description"] else ""
             filename = Path(item['path']).name
-            lines.append(f"- **{item['title']}** (`{filename}`){desc}")
+            return f"- **{item['title']}** (`{filename}`){desc}"
+
+        lines.append(bounded_join(
+            items, _item_line, max_items=_LIBRARY_ITEMS_MAX,
+            omitted_note=lambda n: (
+                f"- ... (+{n} more; run `pm qa list` to see the library)"),
+        ))
         lines.append("")
 
     if not lines:
@@ -318,22 +331,32 @@ def mocks_for_prompt(pm_root: Path) -> str:
     if not mocks:
         return ""
 
-    lines: list[str] = [
+    header = "\n".join([
         "## Mocks",
         "",
         "The following mock contracts are defined for this project.  Use these "
         "when writing or running QA scenarios — do not devise your own mocking "
         "strategy for dependencies listed here.",
         "",
-    ]
-    for mock in mocks:
+    ]) + "\n"
+
+    def _mock_block(mock: dict) -> str:
         f = Path(mock["path"])
         content = f.read_text()
         _, body = _parse_frontmatter(content)
         desc = f" — {mock['description']}" if mock["description"] else ""
-        lines.append(f"### {mock['title']}{desc}")
-        lines.append("")
-        lines.append(body.strip())
-        lines.append("")
+        return f"### {mock['title']}{desc}\n\n{body.strip()}\n"
 
-    return "\n".join(lines) + "\n"
+    body = bounded_join(
+        mocks, _mock_block, separator="\n",
+        omitted_note=lambda n: (
+            f"... ({n} more mock definition(s) omitted to fit the prompt "
+            f"size limit — run `pm qa list` to read them.)"),
+    )
+    text = header + body + "\n"
+    return bounded_text(
+        text,
+        max_bytes=_MOCKS_BUDGET,
+        pointer="`pm qa list` (mock definitions under pm/qa/mocks/)",
+        label="mock definitions",
+    )

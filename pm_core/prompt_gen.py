@@ -3,6 +3,14 @@
 from pm_core import store, notes
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
+from pm_core.prompt_bounds import (
+    ARTIFACT_PATHS_MAX, DEPS_MAX, INTEGRATION_MAX_PATHS,
+    MERGE_ERROR_MAX_LINES, PLAN_CONTEXT_MAX_SIBLINGS,
+    PR_NOTE_SUMMARY_CHARS, PR_NOTES_BUDGET,
+    QA_CHILD_STEPS_BUDGET, QA_SCENARIO_REASON_CHARS, QA_SCENARIOS_MAX,
+    WATCHER_MANAGED_MAX, bounded_join, bounded_lines, bounded_text,
+    prompt_bytes,
+)
 from pm_core.spec_gen import (format_spec_for_prompt,
                                spec_generation_preamble)
 # Bug-fix prompt blocks live in their own module; re-exported here so
@@ -11,6 +19,20 @@ from pm_core.spec_gen import (format_spec_for_prompt,
 from pm_core.bug_fix_prompts import (
     _is_bug_pr, _bug_fix_flow_block, _bug_fix_review_block,
 )
+
+# Per-block byte budgets live in pm_core/prompt_bounds.py so every builder
+# shares one source of truth.  A prompt is one argv entry (MAX_ARG_STRLEN is
+# 128 KiB); these leave headroom for static text under PROMPT_ARG_LIMIT.
+_PR_NOTES_BUDGET = PR_NOTES_BUDGET
+_PR_NOTE_SUMMARY_CHARS = PR_NOTE_SUMMARY_CHARS
+_PLAN_CONTEXT_MAX_SIBLINGS = PLAN_CONTEXT_MAX_SIBLINGS
+_QA_SCENARIOS_MAX = QA_SCENARIOS_MAX
+_QA_SCENARIO_REASON_CHARS = QA_SCENARIO_REASON_CHARS
+_INTEGRATION_MAX_PATHS = INTEGRATION_MAX_PATHS
+_ARTIFACT_PATHS_MAX = ARTIFACT_PATHS_MAX
+_WATCHER_MANAGED_MAX = WATCHER_MANAGED_MAX
+_MERGE_ERROR_MAX_LINES = MERGE_ERROR_MAX_LINES
+_DEPS_MAX = DEPS_MAX
 
 _OUT_OF_SCOPE_BUGS_BLOCK = """
 ## Incidental Bugs
@@ -135,12 +157,77 @@ def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
     all_notes = sorted(merged.values(), key=lambda n: n.get("created_at", ""))
     if not all_notes:
         return ""
-    note_lines = []
-    for n in all_notes:
+    header = "\n## PR Notes\n"
+    full = _render_pr_notes(all_notes)
+    if prompt_bytes(header + full) <= _PR_NOTES_BUDGET:
+        return header + full
+    budget = _PR_NOTES_BUDGET - prompt_bytes(header)
+    return header + _render_pr_notes_bounded(all_notes, budget) + "\n"
+
+
+def _render_pr_notes(notes: list[dict]) -> str:
+    """Full rendering of every note, one bullet each."""
+    lines = []
+    for n in notes:
         ts = n.get("created_at", "")
         ts_str = f" ({ts})" if ts else ""
-        note_lines.append(f"- {n['text']}{ts_str}")
-    return f"\n## PR Notes\n" + "\n".join(note_lines) + "\n"
+        lines.append(f"- {n['text']}{ts_str}")
+    return "\n".join(lines)
+
+
+def _render_pr_notes_bounded(notes: list[dict], budget: int) -> str:
+    """Render notes within *budget*, newest in full and older as summaries.
+
+    Every note stays represented while the budget allows; a closing marker
+    names the count omitted (if any) and the command to read the full text.
+    Newer notes supersede older ones for handoff purposes, so they get the
+    full text first.
+    """
+    def full_line(n: dict) -> str:
+        ts = n.get("created_at", "")
+        ts_str = f" ({ts})" if ts else ""
+        return f"- {n['text']}{ts_str}"
+
+    def summary_line(n: dict) -> str:
+        text = " ".join((n.get("text") or "").split())
+        if len(text) > _PR_NOTE_SUMMARY_CHARS:
+            text = text[:_PR_NOTE_SUMMARY_CHARS].rstrip() + "…"
+        ts = n.get("created_at", "")
+        ts_str = f" ({ts})" if ts else ""
+        return f"- {text}{ts_str}"
+
+    sep = "\n"
+    marker_budget = 220
+    summaries = [summary_line(n) for n in notes]
+    total = prompt_bytes(sep.join(summaries))
+    if total > budget - marker_budget:
+        kept = list(summaries)
+        while kept and prompt_bytes(sep.join(kept)) > budget - marker_budget:
+            kept.pop(0)
+        omitted = len(notes) - len(kept)
+        marker = (
+            f"... ({omitted} older note(s) omitted to fit the prompt size "
+            f"limit — run `pm pr note list <pr-id>` to read all notes.)"
+        )
+        return sep.join(kept + [marker])
+
+    remaining = budget - total
+    rendered = list(summaries)
+    for i in range(len(notes) - 1, -1, -1):
+        full = full_line(notes[i])
+        delta = prompt_bytes(full) - prompt_bytes(rendered[i])
+        if delta > remaining:
+            break
+        rendered[i] = full
+        remaining -= delta
+    marker = (
+        "... (older notes are abbreviated to fit the prompt size limit — "
+        "run `pm pr note list <pr-id>` to read them in full.)"
+    )
+    if prompt_bytes(sep.join(rendered + [marker])) <= budget:
+        return sep.join(rendered + [marker])
+    # Defensive: drop the marker rather than overshoot the budget.
+    return sep.join(rendered)
 
 
 def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> str:
@@ -159,17 +246,24 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     plan_ref = pr.get("plan")
     plan = store.get_plan(data, plan_ref) if plan_ref else None
 
-    # Build dependency context
-    dep_lines = []
-    for dep_id in pr.get("depends_on") or []:
+    # Build dependency context.  Cap the list so a pathological dependency
+    # set cannot blow the prompt budget; the marker points at `pm pr graph`.
+    def _dep_line(dep_id: str) -> str:
         dep_pr = store.get_pr(data, dep_id)
-        if dep_pr:
-            status = dep_pr.get("status", "unknown").upper()
-            dep_lines.append(f"- {dep_id} ({dep_pr.get('title', '???')}) - {status}")
+        if not dep_pr:
+            return ""
+        status = dep_pr.get("status", "unknown").upper()
+        return f"- {dep_id} ({dep_pr.get('title', '???')}) - {status}"
 
+    dep_lines = [line for line in map(_dep_line, pr.get("depends_on") or [])
+                 if line]
     deps_section = ""
     if dep_lines:
-        deps_section = "It depends on:\n" + "\n".join(dep_lines)
+        deps_section = "It depends on:\n" + bounded_join(
+            dep_lines, str, max_items=_DEPS_MAX,
+            omitted_note=lambda n: (
+                f"... (+{n} more; run `pm pr graph` for the full tree)"),
+        )
 
     branch = pr.get("branch", f"pm/{pr_id}")
     title = pr.get("title", "")
@@ -265,14 +359,19 @@ def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = No
     if plan:
         sibling_prs = [p for p in all_prs if p.get("plan") == plan_ref and p["id"] != pr_id]
         if sibling_prs:
-            lines = []
-            for p in sibling_prs:
+            def _sibling_line(p: dict) -> str:
                 status = p.get("status", "pending")
-                lines.append(f"- {p['id']}: {p.get('title', '???')} [{status}]")
+                return f"- {p['id']}: {p.get('title', '???')} [{status}]"
+            lines = bounded_join(
+                sibling_prs, _sibling_line,
+                max_items=_PLAN_CONTEXT_MAX_SIBLINGS,
+                omitted_note=lambda n: (
+                    f"... (+{n} more; run `pm pr list --plan {plan['id']}`)"),
+            )
             plan_context = f"""
 ## Plan Context
 This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
-{chr(10).join(lines)}
+{lines}
 """
 
     tui_block = tui_section(session_name) if session_name else ""
@@ -380,23 +479,36 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
         return "\n_qa_status.json unreadable — read the captures dir directly._\n"
     lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
     if data.get("error"):
-        lines.append(f"QA error: {data['error']}")
+        err = " ".join(str(data["error"]).split())
+        if len(err) > 500:
+            err = err[:500].rstrip() + "…"
+        lines.append(f"QA error: {err}")
     scenarios = data.get("scenarios") or []
     if isinstance(scenarios, dict):
         scenarios = list(scenarios.values())
-    if scenarios:
+    valid = [s for s in scenarios if isinstance(s, dict)]
+    if valid:
         lines.append("")
-        for s in scenarios:
-            if not isinstance(s, dict):
-                continue
+
+        def _scenario_line(s: dict) -> str:
             idx = s.get("index", "?")
-            title = s.get("title", "")
+            title = " ".join(str(s.get("title", "")).split())
+            if len(title) > 120:
+                title = title[:120].rstrip() + "…"
             verdict = s.get("verdict", "?")
-            reason = (s.get("verdict_reason") or "").strip()
+            reason = " ".join((s.get("verdict_reason") or "").split())
+            if len(reason) > _QA_SCENARIO_REASON_CHARS:
+                reason = reason[:_QA_SCENARIO_REASON_CHARS].rstrip() + "…"
             line = f"- Scenario {idx} — {title}: **{verdict}**"
             if reason:
                 line += f" — {reason}"
-            lines.append(line)
+            return line
+
+        lines.append(bounded_join(
+            valid, _scenario_line, max_items=_QA_SCENARIOS_MAX,
+            omitted_note=lambda n: (
+                f"... (+{n} more scenarios; read `{latest}` for all verdicts)"),
+        ))
     return "\n" + "\n".join(lines) + "\n"
 
 
@@ -423,11 +535,13 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
             f"{rec['merge_base'][:12]} {base_sha[:12]}` "
             f"({rec.get('base_files_count', 0)} file(s))")
     if rec.get("overlap"):
-        lines.append("- Files changed on both sides: "
-                     + ", ".join(f"`{f}`" for f in rec["overlap"]))
+        lines.append("- Files changed on both sides: " + bounded_join(
+            rec["overlap"], lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
+            separator=", ", omitted_note=lambda n: f" (+{n} more)"))
     if rec.get("conflicts"):
-        lines.append("- Conflicting paths: "
-                     + ", ".join(f"`{f}`" for f in rec["conflicts"]))
+        lines.append("- Conflicting paths: " + bounded_join(
+            rec["conflicts"], lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
+            separator=", ", omitted_note=lambda n: f" (+{n} more)"))
     if rec.get("status") == integ.CONFLICT:
         lines.append(f"- A conflicted integration can only route "
                      f"**{SIGNOFF_IMPL}** (pm enforces this).")
@@ -473,12 +587,19 @@ def generate_signoff_prompt(data: dict, pr_id: str,
         sibling_prs = [p for p in all_prs
                        if p.get("plan") == plan_ref and p["id"] != pr_id]
         if sibling_prs:
-            lines = [f"- {p['id']}: {p.get('title', '???')} "
-                     f"[{p.get('status', 'pending')}]" for p in sibling_prs]
+            def _sibling_line(p: dict) -> str:
+                return (f"- {p['id']}: {p.get('title', '???')} "
+                        f"[{p.get('status', 'pending')}]")
+            lines = bounded_join(
+                sibling_prs, _sibling_line,
+                max_items=_PLAN_CONTEXT_MAX_SIBLINGS,
+                omitted_note=lambda n: (
+                    f"... (+{n} more; run `pm pr list --plan {plan['id']}`)"),
+            )
             plan_context = (
                 f"\n## Plan Context\nThis PR is part of plan "
                 f"\"{plan['name']}\" ({plan['id']}). Other PRs:\n"
-                + "\n".join(lines) + "\n")
+                + lines + "\n")
 
     tui_block = tui_section(session_name) if session_name else ""
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
@@ -962,13 +1083,21 @@ def generate_merge_prompt(data: dict, pr_id: str, error_output: str,
     except FileNotFoundError:
         pass
 
+    bounded_error = bounded_lines(
+        error_output or "",
+        max_lines=_MERGE_ERROR_MAX_LINES,
+        pointer="re-run the failed update in the repo directory",
+        label="merge error output",
+        max_bytes=20_000,
+    )
+
     prompt = f"""You're updating the local repo after a successful merge of PR {pr_id}: "{title}"
 
 The PR branch `{branch}` has already been merged and published to origin,
 but updating the local repo directory failed:
 
 ```
-{error_output}
+{bounded_error}
 ```
 
 ## Context
@@ -1055,7 +1184,11 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
         targets.append(auto_start_target)
     if targets:
         from pm_core.autostart_state import managed_ids as _managed_ids
-        managed_list = ", ".join(sorted(_managed_ids(all_prs, targets)))
+        managed_list = bounded_join(
+            sorted(_managed_ids(all_prs, targets)), str,
+            max_items=_WATCHER_MANAGED_MAX, separator=", ",
+            omitted_note=lambda n: f" (+{n} more; run `pm pr list`)",
+        )
         target_list = ", ".join(f"**{t}**" for t in targets)
 
         auto_start_scope_block = f"""
@@ -2125,8 +2258,15 @@ If a setup step fails or a required tool is unavailable, report
     artifact_paths = getattr(scenario, "artifact_paths", None) or []
     if artifact_paths:
         # Each path is what the agent will see (set by
-        # _install_artifact_files during launch).
-        bullets = "\n".join(f"- `{p}`" for p in artifact_paths)
+        # _install_artifact_files during launch).  Cap the listing so a
+        # pathological plan cannot blow the prompt budget; the marker points
+        # at the QA library for the rest.
+        bullets = bounded_join(
+            artifact_paths, lambda p: f"- `{p}`",
+            max_items=_ARTIFACT_PATHS_MAX,
+            omitted_note=lambda n: (
+                f"- ... (+{n} more recipes; run `pm qa list` to see the library)"),
+        )
         heading = "Capture Recipe" if len(artifact_paths) == 1 else "Capture Recipes"
         artifact_block = f"""
 ## Artifact {heading} (drive the WHEN, capture the THEN)
@@ -2235,6 +2375,13 @@ contains a reproduction test, running that test is a fast way to confirm
 the fix.
 """
 
+    steps_text = bounded_text(
+        scenario.steps or "",
+        max_bytes=QA_CHILD_STEPS_BUDGET,
+        pointer="the QA plan in the QA planner transcript",
+        label="scenario steps",
+    )
+
     prompt = f"""You are running QA scenario {scenario.index}: "{scenario.title}"
 
 ## Context
@@ -2268,7 +2415,7 @@ final verdict.
 **Focus**: {scenario.focus}
 
 **Steps**:
-{scenario.steps}
+{steps_text}
 
 The steps are framed as one or more Given / When / Then user
 stories. A scenario may bundle several triples that share a focus;

@@ -17,6 +17,8 @@ Local section (gitignored, in notes-local.txt):
 from pathlib import Path
 import re
 
+from pm_core.prompt_bounds import SESSION_NOTES_BUDGET, bounded_text
+
 NOTES_FILENAME = "notes.txt"
 LOCAL_NOTES_FILENAME = "notes-local.txt"
 
@@ -304,7 +306,14 @@ def notes_section(root: Path, prompt_type: str | None = None) -> str:
         return ""
 
     combined = "\n\n".join(parts)
-    return f"\n## Session Notes\n{combined}\n"
+    block = f"\n## Session Notes\n{combined}\n"
+    # Bound the block so a long notes file cannot blow the prompt's argv
+    # budget; the marker points at the notes file for the full text.
+    return bounded_text(
+        block, max_bytes=SESSION_NOTES_BUDGET,
+        pointer=f"`pm notes` (file: {root / NOTES_FILENAME})",
+        label="session notes",
+    )
 
 
 # Mapping from prompt_type to the specific section name.
@@ -353,4 +362,14 @@ def notes_for_prompt(root: Path, prompt_type: str) -> tuple[str, str]:
                 f"for {label} sessions:\n\n{content}\n"
             )
 
+    # Bound the user-authored notes so a long notes file cannot blow the
+    # prompt's argv budget; the marker points at the notes file for the full
+    # text.  Empty blocks pass through unchanged.
+    notes_path = root / NOTES_FILENAME
+    pointer = f"`pm notes` (file: {notes_path})"
+    general_block = bounded_text(general_block, max_bytes=SESSION_NOTES_BUDGET,
+                                 pointer=pointer, label="session notes")
+    specific_block = bounded_text(specific_block, max_bytes=SESSION_NOTES_BUDGET,
+                                  pointer=pointer,
+                                  label=f"{section_name or prompt_type} notes")
     return general_block, specific_block

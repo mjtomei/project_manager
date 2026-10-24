@@ -29,6 +29,11 @@ from typing import Callable
 
 from pm_core import qa_instructions
 from pm_core.paths import configure_logger
+from pm_core.prompt_bounds import (
+    ARTIFACT_PATHS_MAX as _ARTIFACT_PATHS_MAX,
+    CONCRETIZE_INSTRUCTION_BUDGET, QA_CHILD_STEPS_BUDGET,
+    bounded_join, bounded_lines, bounded_text,
+)
 from pm_core.spec_gen import get_spec as _get_qa_spec
 from pm_core.loop_shared import (
     find_claude_pane,
@@ -1510,6 +1515,12 @@ def _build_concretization_prompt(scenario: QAScenario, pr_branch: str,
     this_pr = pr_id or "<pr-id>"
     instruction_section = ""
     if instruction_content:
+        bounded_instruction = bounded_text(
+            instruction_content,
+            max_bytes=CONCRETIZE_INSTRUCTION_BUDGET,
+            pointer="the instruction file under pm/qa/instructions/",
+            label="instruction file",
+        )
         instruction_section = f"""
 ## Instruction File
 
@@ -1517,8 +1528,14 @@ The scenario references an instruction file whose full contents are below.
 Incorporate its setup steps into your refined step list so the test agent
 does not need to read the file separately.
 
-{instruction_content}
+{bounded_instruction}
 """
+    steps_text = bounded_text(
+        scenario.steps or "",
+        max_bytes=QA_CHILD_STEPS_BUDGET,
+        pointer="the QA plan in the QA planner transcript",
+        label="scenario steps",
+    )
     return f"""You are refining the test steps for QA scenario {scenario.index}: "{scenario.title}"
 
 ## Scenario
@@ -1526,7 +1543,7 @@ does not need to read the file separately.
 **Focus**: {scenario.focus}
 
 **Planned steps**:
-{scenario.steps}
+{steps_text}
 {instruction_section}
 ## Your Task
 
@@ -3103,18 +3120,14 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
             f"Read that file to review the scenario output.{format_hint}"
         )
     else:
-        text = pane_output or ""
-        lines = text.splitlines()
-        if len(lines) > _VERIFICATION_MAX_PANE_LINES:
-            # Keep both head and tail so the verifier sees setup AND verdict
-            head_lines = _VERIFICATION_MAX_PANE_LINES // 4
-            tail_lines = _VERIFICATION_MAX_PANE_LINES - head_lines
-            omitted = len(lines) - head_lines - tail_lines
-            text = (
-                "\n".join(lines[:head_lines])
-                + f"\n\n[... {omitted} lines omitted ...]\n\n"
-                + "\n".join(lines[-tail_lines:])
-            )
+        # Head/tail truncation so the verifier sees setup AND verdict; the
+        # marker points at the transcript for the full output.
+        text = bounded_lines(
+            pane_output or "",
+            max_lines=_VERIFICATION_MAX_PANE_LINES,
+            pointer="the full scenario transcript on disk",
+            label="scenario output",
+        )
         output_section = (
             f"The scenario produced the verdict: **{verdict}**\n\n"
             f"Here is the full output from the scenario session:\n\n"
@@ -3131,7 +3144,12 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
     artifact_check_block = ""
     artifact_judgment_bullet = ""
     if artifact_names:
-        recipe_bullets = "\n".join(f"- {n}" for n in artifact_names)
+        recipe_bullets = bounded_join(
+            artifact_names, lambda n: f"- {n}",
+            max_items=_ARTIFACT_PATHS_MAX,
+            omitted_note=lambda n: (
+                f"- ... (+{n} more recipes; run `pm qa list` to see the library)"),
+        )
         where = captures_scenario_dir or (
             "the per-scenario captures directory the scenario worker was given")
         artifact_check_block = f"""
@@ -3170,6 +3188,13 @@ the artifact with no explanation are **not** valid reasons.
     # the judgment step shifts to Step 4.
     judgment_step_no = 4 if artifact_names else 3
 
+    steps_text = bounded_text(
+        scenario.steps or "",
+        max_bytes=QA_CHILD_STEPS_BUDGET,
+        pointer="the QA plan in the QA planner transcript",
+        label="scenario steps",
+    )
+
     return f"""You are verifying the output of QA scenario {scenario.index}: "{scenario.title}"
 
 ## Scenario Definition
@@ -3177,7 +3202,7 @@ the artifact with no explanation are **not** valid reasons.
 **Focus**: {scenario.focus}
 
 **Steps**:
-{scenario.steps}
+{steps_text}
 
 ## Scenario Output
 

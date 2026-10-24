@@ -543,6 +543,51 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
     emit_paged(out)
 
 
+@pr.command("show")
+@click.argument("pr_id")
+def pr_show(pr_id: str):
+    """Show a PR's full detail: description, tests, files, deps, notes.
+
+    The on-demand companion to the abbreviated listings prompt builders
+    emit when a collection is too large to inline: sessions told to "run
+    `pm pr show <id>`" read the full record here.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+
+    click.echo(format_pr_line(pr_entry))
+    for label, key in (
+        ("Title", "title"),
+        ("Status", "status"),
+        ("Plan", "plan"),
+        ("Branch", "branch"),
+        ("Workdir", "workdir"),
+        ("GitHub", "gh_pr"),
+    ):
+        val = pr_entry.get(key)
+        if val:
+            click.echo(f"{label}: {val}")
+    deps = pr_entry.get("depends_on") or []
+    if deps:
+        click.echo(f"Depends on: {', '.join(deps)}")
+    for label, key in (
+        ("Description", "description"),
+        ("Tests", "tests"),
+        ("Files", "files"),
+    ):
+        val = (pr_entry.get(key) or "").strip()
+        if val:
+            click.echo(f"\n## {label}\n{val}")
+    notes = pr_entry.get("notes") or []
+    if notes:
+        click.echo("\n## Notes")
+        for n in notes:
+            ts = n.get("created_at", "")
+            ts_str = f" ({ts})" if ts else ""
+            click.echo(f"  {n['id']}{ts_str}: {n['text']}")
+
+
 @pr.command("graph")
 def pr_graph():
     """Show static dependency graph."""

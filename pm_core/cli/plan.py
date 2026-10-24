@@ -12,13 +12,21 @@ from pm_core import store, notes
 from pm_core.plans.parser import parse_plan_prs
 from pm_core.plans import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
+from pm_core.prompt_bounds import (
+    PROMPT_ARG_LIMIT, bounded_join, bounded_text, prompt_bytes,
+)
 from pm_core.prompt_gen import tui_section
 
 # claude receives a session's prompt as a single argv entry.  Linux caps a
 # single argument at MAX_ARG_STRLEN (128 KiB / 131072 bytes, including the
 # terminating NUL); exceeding it makes execve fail with E2BIG.  Stay well
 # under that so prompts that inline per-PR detail degrade gracefully.
-_PROMPT_ARG_LIMIT = 120_000
+_PROMPT_ARG_LIMIT = PROMPT_ARG_LIMIT
+
+# Cap collection listings so cross-plan / existing-PR context cannot grow
+# without bound.  The markers point at commands that read the full detail.
+_PLAN_LIST_MAX = 40
+_PLAN_FILE_BUDGET = 20_000
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -190,10 +198,15 @@ def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
     existing_prs = data.get("prs") or []
     existing_context = ""
     if existing_prs:
-        existing_context = "\nExisting PRs in this project:\n" + "\n".join(
-            f"  {pr['id']}: {pr.get('title', '???')} [{pr.get('status', '?')}]"
-            + (f" (depends on: {', '.join(pr.get('depends_on') or [])})" if pr.get("depends_on") else "")
-            for pr in existing_prs
+        def _existing_line(pr: dict) -> str:
+            deps = pr.get("depends_on") or []
+            dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+            return (f"  {pr['id']}: {pr.get('title', '???')} "
+                    f"[{pr.get('status', '?')}]{dep_str}")
+        existing_context = "\nExisting PRs in this project:\n" + bounded_join(
+            existing_prs, _existing_line, max_items=_PLAN_LIST_MAX,
+            omitted_note=lambda n: (
+                f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
         )
 
     initial_context = ""
@@ -314,10 +327,17 @@ def plan_review(plan_id: str | None, fresh: bool):
 
     other_prs_context = ""
     if other_prs:
-        other_prs_context = "\nPRs from other plans (for cross-plan reference):\n" + "\n".join(
-            f"  {pr['id']}: {pr.get('title', '???')} [{pr.get('status', '?')}] (plan: {pr.get('plan', '?')})"
-            for pr in other_prs
-        ) + "\n"
+        def _other_plan_line(pr: dict) -> str:
+            return (f"  {pr['id']}: {pr.get('title', '???')} "
+                    f"[{pr.get('status', '?')}] (plan: {pr.get('plan', '?')})")
+        other_prs_context = (
+            "\nPRs from other plans (for cross-plan reference):\n"
+            + bounded_join(
+                other_prs, _other_plan_line, max_items=_PLAN_LIST_MAX,
+                omitted_note=lambda n: (
+                    f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
+            )
+            + "\n")
 
     notes_block = notes.notes_section(root)
 
@@ -387,7 +407,7 @@ After fixing, summarize what was changed.
         # prompt past the argv size limit (large plans), fall back to a brief
         # one-line listing and let the session pull detail with `pm pr show`.
         prompt = _post_load_prompt(pr_list, "")
-        if len(prompt.encode()) > _PROMPT_ARG_LIMIT:
+        if prompt_bytes(prompt) > _PROMPT_ARG_LIMIT:
             brief = "\n".join(_format_pr_brief(pr) for pr in plan_prs)
             note = (
                 "\n(This plan has too many PRs to inline each description here. "
@@ -396,6 +416,17 @@ After fixing, summarize what was changed.
                 "reviewing it.)\n"
             )
             prompt = _post_load_prompt(brief, note)
+            # Second safety net: even the brief form can exceed the limit when
+            # the static prompt text plus the bounded other-PR context is
+            # large.  Fall back to a minimal listing and defer everything to
+            # the on-demand commands.
+            if prompt_bytes(prompt) > _PROMPT_ARG_LIMIT:
+                minimal = "\n".join(
+                    _format_pr_brief(pr) for pr in plan_prs[:_PLAN_LIST_MAX])
+                more = len(plan_prs) - _PLAN_LIST_MAX
+                if more > 0:
+                    minimal += f"\n  ... (+{more} more; run `pm pr list`)"
+                prompt = _post_load_prompt(minimal, note)
     else:
         # Pre-load: no PRs in project.yaml yet — review the plan file's PR section
         prompt = f"""\
@@ -487,24 +518,36 @@ def plan_deps():
         click.echo("No PRs. Add PRs first with: pm pr add <title>", err=True)
         raise SystemExit(1)
 
-    pr_lines = []
-    for p in prs:
+    def _dep_pr_line(p: dict) -> str:
         deps = p.get("depends_on") or []
         dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
         desc = p.get("description", "")
         desc_str = f" — {desc}" if desc else ""
-        pr_lines.append(f"  {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{desc_str}")
+        return (f"  {_pr_display_id(p)}: {p.get('title', '???')} "
+                f"[{p.get('status', '?')}]{dep_str}{desc_str}")
 
-    pr_list_str = "\n".join(pr_lines)
+    pr_list_str = bounded_join(
+        prs, _dep_pr_line, max_items=_PLAN_LIST_MAX,
+        omitted_note=lambda n: (
+            f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
+    )
 
-    # Include plan context if available
+    # Include plan context if available.  Each plan file is bounded so a
+    # long plan cannot blow the prompt's argv budget; the marker points at
+    # the plan file for the full text.
     plan_context = ""
     plans = data.get("plans") or []
     for plan_entry in plans:
         plan_path = root / plan_entry["file"]
         if plan_path.exists():
+            file_text = bounded_text(
+                plan_path.read_text(),
+                max_bytes=_PLAN_FILE_BUDGET,
+                pointer=f"the plan file at {plan_path}",
+                label=f"plan {plan_entry['name']}",
+            )
             plan_context += f"\nPlan: {plan_entry['name']} ({plan_entry['id']})\n"
-            plan_context += plan_path.read_text() + "\n"
+            plan_context += file_text + "\n"
 
     notes_block = notes.notes_section(root)
 

@@ -12,6 +12,12 @@ window. It runs a short Claude session whose job is:
 Outputs a short structured report so the user sees what happened.
 """
 
+from pm_core.prompt_bounds import bounded_join
+
+# Cap the per-scenario worktree listing so a large QA run cannot blow the
+# finalize prompt's argv budget.
+_SCENARIO_LINES_MAX = 40
+
 
 def build_qa_finalize_prompt(
     *,
@@ -29,9 +35,13 @@ def build_qa_finalize_prompt(
     can be ``None``.
     """
     if scenario_worktrees:
-        scenario_lines = "\n".join(
-            f"- Scenario {idx}: verdict={verdict or '?'}, worktree={path or '(none)'}"
-            for idx, verdict, path in scenario_worktrees
+        scenario_lines = bounded_join(
+            scenario_worktrees,
+            lambda t: (f"- Scenario {t[0]}: verdict={t[1] or '?'}, "
+                       f"worktree={t[2] or '(none)'}"),
+            max_items=_SCENARIO_LINES_MAX,
+            omitted_note=lambda n: (
+                f"- ... (+{n} more scenarios; run `pm qa status`)"),
         )
     else:
         scenario_lines = "- (no scenarios ran)"

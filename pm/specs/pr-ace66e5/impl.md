@@ -1,0 +1,352 @@
+# pr-ace66e5 — Audit prompt builders for unbounded enumeration
+
+## Context
+
+`claude` receives a session prompt as a single `argv` entry. Linux caps one
+argument at `MAX_ARG_STRLEN` (128 KiB / 131072 bytes, including the
+terminating NUL); exceeding it makes `execve` fail with `E2BIG`
+(`OSError [Errno 7] Argument list too long`). The plan-review builder was
+fixed in `pm_core/cli/plan.py` (commit 11fc933f) with a conditional fallback
+to a brief PR listing above `_PROMPT_ARG_LIMIT = 120_000`.
+
+Two things the existing fix does **not** cover:
+
+1. Every other builder that enumerates a collection into the prompt with no
+   bound on element count or total size.
+2. The `pm/prompts/<file>` + `"$(cat file)"` delivery trick. Command
+   substitution still expands to one oversized `argv` entry, so it does not
+   avoid `E2BIG` — it only avoids tmux's ~16 KB command-length limit.
+
+Live evidence in the PR notes: review 131175 B, sign-off 144144 B, QA planner
+134900 B; PR notes were ~83.5 KB of each prompt (101 notes) and the impl spec
+49 KB. Archiving the spec manually cannot bring sign-off or the planner under
+the limit because the notes alone exceed it.
+
+## 1. Requirements (grounded in code)
+
+### R1 — Shared size-aware prompt helpers (new module)
+
+Add `pm_core/prompt_bounds.py` as the single source of truth for prompt-size
+limits and bounding helpers:
+
+- `PROMPT_ARG_LIMIT = 120_000` (byte limit with headroom under
+  `MAX_ARG_STRLEN`).
+- `MAX_ARG_STRLEN = 131_072`.
+- Shared per-block budgets (single source of truth):
+  `PR_NOTES_BUDGET = 35_000`, `SPEC_BUDGET = 30_000`,
+  `SESSION_NOTES_BUDGET = 8_000`, `QA_CHILD_STEPS_BUDGET = 20_000`,
+  `CONCRETIZE_INSTRUCTION_BUDGET = 20_000`, `MOCKS_BUDGET = 12_000`,
+  `PLAN_CONTEXT_MAX_SIBLINGS = 25`, `LIBRARY_ITEMS_MAX = 20`,
+  `QA_SCENARIOS_MAX = 40`, `INTEGRATION_MAX_PATHS = 20`,
+  `ARTIFACT_PATHS_MAX = 20`, `WATCHER_MANAGED_MAX = 40`,
+  `MERGE_ERROR_MAX_LINES = 60`, `DEPS_MAX = 40`.
+- `prompt_bytes(text) -> int` — `len(text.encode("utf-8"))`; measures bytes,
+  not characters (multi-byte text matters).
+- `bounded_join(items, formatter, *, max_items=None, max_bytes=None,
+  keep="oldest"|"newest", separator="\n", omitted_note=None) -> str` — format
+  and join items, stopping before `max_items`/`max_bytes` is exceeded; append
+  an explicit omission note when items were dropped. `keep="newest"` iterates
+  in reverse and restores order, so recent handoff notes survive.
+- `bounded_text(text, *, max_bytes, pointer, label) -> str` — return text
+  unchanged when it fits; otherwise head + explicit truncation marker + tail
+  (tail keeps verdicts/end-of-file content) + a pointer to the full source.
+- `bounded_lines(text, *, max_lines, head_ratio=0.25, marker=...) -> str` —
+  head/tail line truncation (mirrors the existing verification-prompt
+  behaviour) for transcripts and error output.
+- `PromptTooLargeError(RuntimeError)` — raised when a prompt cannot be made
+  argv-safe and no file-backed fallback is possible.
+- `prompt_fits(prompt, limit=PROMPT_ARG_LIMIT) -> bool`.
+
+`pm_core/cli/plan.py` keeps `_PROMPT_ARG_LIMIT` as an alias of
+`PROMPT_ARG_LIMIT` so existing call sites/tests keep importing it.
+
+### R2 — PR notes bounding (`prompt_gen._format_pr_notes`, line 96)
+
+Today the function merges main + workdir notes, sorts by `created_at`, and
+joins **every** note's full text. It feeds impl, review, sign-off, QA
+planner, QA interactive, and QA child prompts.
+
+Change: add a byte budget (`_PR_NOTES_BUDGET = PR_NOTES_BUDGET = 35_000`).
+When the full rendering fits, return it unchanged. When it does not, keep the
+newest notes in full within the budget and reduce older notes to a one-line
+summary; end with an explicit marker naming the count omitted and the command
+to read everything (`pm pr note list <pr-id>`). Never silently drop notes —
+the summary line stays for every note until the hard budget is reached, and
+the marker reports the remainder.
+
+### R3 — Spec bounding (`spec_gen.format_spec_for_prompt`, line 683)
+
+Today it inlines the whole spec file (49 KB observed). It feeds impl, review,
+sign-off, and QA planner prompts.
+
+Change: bound the spec text with `bounded_text` (`SPEC_BUDGET = 30_000`),
+head+tail truncation with a marker pointing at the full spec
+(`pm pr spec <pr-id> <phase>` and the spec file path). The "MISSING spec"
+and staleness guidance text stays intact. `_build_spec_prompt` (line 134)
+inlines the prior impl spec when generating a QA spec — bound it the same way.
+
+### R3b — Session notes (`notes.notes_for_prompt`, line 320; `notes.notes_section`, line 285)
+
+User-authored `notes.txt` sections are inlined whole by `notes_for_prompt`
+(impl/review/signoff/QA/merge/watcher prompts) and `notes_section` (plan and
+guide prompts). Bound each block with `bounded_text`
+(`SESSION_NOTES_BUDGET = 8_000`), pointing at the notes file / `pm notes`.
+
+### R4 — Sibling-PR plan context (`generate_review_prompt` line 258,
+`generate_signoff_prompt` line 465)
+
+Both build one line per sibling PR in the plan. Unbounded count and title
+length. Change: cap at 25 siblings (one-line each) and append
+`... (+N more; run \`pm pr list --plan <plan>\`)`.
+
+### R5 — QA scenarios block (`_signoff_qa_scenarios_block`, line 366)
+
+Enumerates every scenario's verdict + `verdict_reason` from the latest
+`qa_status.json`. Change: cap at 40 scenarios and truncate each reason to 200
+characters; append an omission marker pointing at the captures dir /
+`pm qa show`.
+
+### R6 — Integration block (`_signoff_integration_block`, line 403)
+
+Joins `overlap` and `conflicts` path lists. Change: cap each at 20 paths with
+`(+N more)`.
+
+### R7 — QA instruction library (`qa_instructions.instruction_summary_for_prompt`, line 276)
+
+One bullet per instruction/regression/artifact item. Change: cap at 20 items
+per category with `... (+N more; run \`pm qa list\`)`. Also bound
+`mocks_for_prompt` (line 311), which inlines full mock bodies: cap total
+bytes with `bounded_text`.
+
+### R8 — QA concretization prompt (`qa_loop._build_concretization_prompt`, line 1505)
+
+Inlines the full `instruction_content` file. Change: bound with `bounded_text`
+(`_CONCRETIZE_INSTRUCTION_BUDGET = 30_000`) pointing at the instruction path.
+
+### R9 — QA finalize prompt (`qa_finalize_prompt.build_qa_finalize_prompt`, line 20)
+
+One line per scenario worktree. Change: cap at 40 lines with `(+N more)`.
+
+### R10 — QA child prompt (`generate_qa_child_prompt`, line 2078)
+
+Inlines `scenario.steps` and one bullet per `artifact_paths` entry. Change:
+bound steps with `bounded_text` and cap artifact bullets at 20 with
+`(+N more)`.
+
+### R11 — Verification prompt (`qa_loop._build_verification_prompt`, line 3072)
+
+Already head/tail-truncates inlined pane output. Add a cap on
+`artifact_names` bullets (20) and use `bounded_lines` for consistency. The
+`pane_output_path` on-demand form stays preferred.
+
+### R12 — Plan prompts (`pm_core/cli/plan.py`)
+
+- `plan_review`: the existing fallback only shrinks the plan's own PR list.
+  `other_prs_context` (line 317) still joins **every** PR from other plans.
+  Bound it to 40 one-line entries with `(+N more; run \`pm pr list\`)`, and
+  make the over-limit check cover the total prompt including it. Re-point the
+  fallback's "run `pm pr show <id>`" text to commands that exist (see R16).
+- `plan_breakdown`: `existing_context` (line 193) joins every existing PR.
+  Bound to 40 one-line entries with an omission note.
+- `plan_deps`: `pr_list_str` (line 498) inlines every PR's description and
+  `plan_context` (line 502) reads every plan file's full text. Bound the PR
+  list to 40 entries and each plan file with `bounded_text`, pointing at the
+  plan path for full text.
+
+### R13 — Merge prompt error output (`generate_merge_prompt`, line 928)
+
+Inlines `error_output` verbatim. Change: bound with `bounded_lines`
+(head 40 / tail 20 lines) plus a marker telling the session to re-run the
+failed update or read the full output on disk.
+
+### R14 — Watcher auto-start scope (`generate_watcher_prompt`, line 1084)
+
+`managed_list` joins every managed PR id. Change: cap the displayed set at 40
+ids with `(+N more)`; the scope semantics (the actual set used for decisions)
+are unaffected.
+
+### R15 — Launcher guard (`pm_core/claude_launcher.py`)
+
+Defense in depth for builders we did not audit and for future ones. In
+`build_claude_shell_cmd`, `launch_claude`, `launch_claude_print`, and
+`launch_claude_print_background`:
+
+- Measure `prompt_bytes(prompt)` when a prompt is actually passed (not on
+  `--resume`, which sends none).
+- If over `PROMPT_ARG_LIMIT`:
+  - Write the **complete** prompt to a file (reuse the existing
+    `<host_dir>/pm/prompts/pm_prompt_<session_id>.txt` mechanism; for
+    direct/print launches without a host dir, use a temp file).
+  - Pass a short bootstrap as the argv prompt instead of `"$(cat file)"`:
+    e.g. `"Your complete instructions are in <path>. Read that file first and
+    follow it exactly; it is your full task prompt."`
+  - Log a warning naming the size and the file path.
+- If no writable location exists for the file, raise `PromptTooLargeError`
+  with the measured size, the limit, and remediation guidance — never let a
+  raw `E2BIG` escape and never silently truncate.
+- Under the limit, behaviour is unchanged (`"$(cat file)"` for shell commands,
+  quoted prompt for direct launches).
+- Fake-claude sessions pass no prompt in argv, so the guard is a no-op there.
+
+### R16 — Fix the broken on-demand pointer
+
+The plan-review fallback (and a watcher prompt) tell the session to run
+`pm pr show <id>`, but no such command exists (`pm_core/cli/pr.py` registers
+`list`, `graph`, `spec`, `note …`, but not `show`). Add a read-only
+`pm pr show <pr-id>` command that prints the PR's display id, title, status,
+branch, plan, dependencies, description, tests, files, and notes (using the
+same resolution/formatting helpers as `pr_list`/`pr_note_list`). Update the
+existing pointers to use it. This makes the "fetch detail on demand" fallback
+actually work.
+
+## 2. Implicit Requirements
+
+- **No silent loss.** Every degraded block must name what was omitted and a
+  working command/path to read it. The PR notes explicitly forbid silently
+  truncating required evidence or instructions.
+- **Preserve full instructions on the fallback path.** The launcher guard must
+  deliver the complete prompt via a readable file + bootstrap, matching the
+  prior recoveries' pattern.
+- **Budget coordination.** Per-block budgets must leave headroom for static
+  prompt text. Target allocations: PR notes ≤ 40 KB, spec ≤ 40 KB, static +
+  other collections ≤ 25 KB, leaving ≥ 15 KB under 120 KB. Builders whose
+  static text is large (sign-off ~12 KB) must still fit.
+- **Container mode.** Prompt-file writes must honour the existing `cwd` /
+  `write_dir` split: write on the host path (`write_dir`), reference the
+  container-visible path (`cwd`). The bootstrap must reference the same
+  path the `$(cat …)` form used.
+- **Resume launches.** No prompt is passed when resuming; the guard must not
+  fire or write files there.
+- **Fake-claude.** Prompt argv is absent for fake sessions; keep that path
+  untouched.
+- **Backward compatibility.** `_PROMPT_ARG_LIMIT` stays importable from
+  `pm_core.cli.plan`; existing tests keep passing; helper defaults are
+  deterministic (no randomness, no time-based budgets).
+- **Bounded outputs are stable.** The same input must yield the same prompt
+  (tests and prompt-file diffs depend on it).
+- **UTF-8 correctness.** All size checks use encoded bytes; truncation must
+  not split a multi-byte character (truncate on character boundaries after
+  measuring bytes, or accept a small overshoot and verify the final size).
+
+## 3. Ambiguities
+
+### A1 — Bound vs. preserve ("do not silently truncate")
+The task offers "cap count, summarize, or fetch detail on demand" while the
+PR notes forbid silent truncation. **Resolution:** do all three — cap counts,
+summarize older elements with an explicit omission marker, and point at a
+working command/path for the full detail; additionally keep the launcher's
+file-backed bootstrap so an over-limit prompt still delivers its complete
+instructions. No detail is lost without an explicit pointer.
+
+### A2 — How to keep PR notes within budget without dropping active requirements
+Notes are the cross-session handoff channel; older notes may still contain
+active requirements. **Resolution:** keep the newest notes in full first
+(they supersede older ones), reduce older notes to a first-line summary, and
+always name the omitted count + `pm pr note list <pr-id>`. Requirements near
+the top of each note survive in the summary.
+
+### A3 — Which delivery mechanism for over-limit prompts
+Command substitution (`$(cat file)`) still yields one oversized argv entry.
+**Resolution:** bootstrap delivery — write the full prompt to a file and pass
+a short "read this file and follow it" prompt as argv. Raise a clear error if
+no writable location exists.
+
+### A4 — `pm pr show` does not exist
+**Resolution:** add the read-only command (R16) rather than weaken the
+fallback text. It is small, read-only, and makes every "fetch detail on
+demand" pointer valid.
+
+### A5 — Should single large documents (spec, notes.txt sections, error output) be bounded?
+The task frames the bug as collections, but the observed E2BIGs were driven
+by single documents (spec 49 KB). **Resolution:** bound them too, with
+pointers, because they are the same failure class and the task says "any
+place a collection … or total size" is unbounded.
+
+### A6 — Truncation shape for specs
+Head-only truncation loses the end (edge cases, pass/fail criteria).
+**Resolution:** head + tail truncation with an explicit marker in the middle,
+pointing at the full file/command. The tail preserves the closing criteria.
+
+### A7 — Exact byte budgets
+**Resolution:** centralize defaults in `prompt_bounds.py`
+(`PR_NOTES_BUDGET`, `SPEC_BUDGET`, etc.) so they are tunable in one place and
+documented. Tests assert against `PROMPT_ARG_LIMIT`, not the individual
+budgets.
+
+*No [UNRESOLVED] ambiguities remain.*
+
+## 4. Edge Cases
+
+- **Already within budget:** full detail is preserved; no markers appear.
+- **Empty collection:** no marker, no trailing separator.
+- **Single element:** no "(+N more)" note.
+- **Multi-byte text:** a note/spec with emoji or CJK characters can exceed the
+  byte budget while looking short; size checks use encoded bytes. Truncation
+  must land on a valid character boundary.
+- **Exactly at the limit:** the guard treats `>` as over-limit (consistent with
+  the existing plan.py check); `== limit` is allowed.
+- **No writable host dir:** `build_claude_shell_cmd` previously fell back to a
+  quoted literal. For an over-limit prompt this must raise
+  `PromptTooLargeError`, not quote the literal (which would `E2BIG`).
+- **Container cwd vs host write_dir:** bootstrap path must be the path Claude
+  sees at runtime (`cwd`-based), while the file lands on the host
+  (`write_dir`).
+- **`cwd=None` direct launches:** write the fallback prompt to a temp file
+  (`tempfile.mkdtemp`/`NamedTemporaryFile`), pass its absolute path in the
+  bootstrap, and remove it after the process exits.
+- **Retry-on-failure path in `launch_claude`:** a failed resume retries with a
+  fresh session and the same prompt; apply the same guard to the retry.
+- **`launch_claude_print`/`_background`:** the prompt is appended as
+  `["-p", prompt]`; guard both. For fake sessions the prompt is not appended.
+- **Prompt-file cleanup:** the existing `; rm -f <file>` runs after Claude
+  exits; keep it for both `$(cat …)` and bootstrap forms. Temp files from
+  direct launches are removed in a `finally`.
+- **Concurrent launches:** keep the unique filename (`pm_prompt_<session_id>`)
+  so parallel panes never share a prompt file.
+- **Non-Linux hosts:** the guard is a byte threshold, not a platform-specific
+  check; 120 KB stays safely under macOS's 256 KB `MAX_ARG_STRLEN` analogue.
+- **`_format_pr_notes` merge/dedup:** bounding happens after merge/dedup, so a
+  workdir copy that wins dedup is what gets bounded.
+- **Sign-off return block:** appended after the notes block; its size is
+  bounded by the note count (one block per PR) and stays outside the notes
+  budget; total is still checked.
+- **Builders returning empty strings:** bounding helpers return `""` for empty
+  input without adding markers.
+- **Existing tests that assert exact prompt text:** summaries/markers only
+  appear over budget; small fixtures are unchanged.
+
+## 5. Files
+
+- `pm_core/prompt_bounds.py` (new)
+- `pm_core/prompt_gen.py`
+- `pm_core/spec_gen.py`
+- `pm_core/qa_instructions.py`
+- `pm_core/qa_loop.py`
+- `pm_core/qa_finalize_prompt.py`
+- `pm_core/claude_launcher.py`
+- `pm_core/cli/plan.py`
+- `pm_core/cli/pr.py`
+- `pm_core/notes.py` (if the notes block needs a size bound)
+- `pm_core/signoff.py` (if the integration/return joins need bounds)
+
+## 6. Tests
+
+New `tests/test_prompt_bounds.py` plus additions to existing prompt tests:
+
+- Helper unit tests: `prompt_bytes` counts UTF-8 bytes; `bounded_join`
+  honours `max_items`/`max_bytes`, appends the omission note, and `keep`
+  order; `bounded_text` head+tail; `bounded_lines`; `PromptTooLargeError`.
+- Builder tests with a many-element collection (e.g. 200 PR notes at ~2 KB,
+  200 sibling PRs, 100 QA scenarios, 100 instruction-library items, 100
+  artifact paths, 50 plan PRs, a 200 KB spec) asserting
+  `len(prompt.encode()) <= PROMPT_ARG_LIMIT` **and** that the prompt names
+  the omission + pointer.
+- Launcher guard tests: `build_claude_shell_cmd` with an over-limit prompt
+  produces a bootstrap referencing the written file (not `$(cat …)`); with no
+  writable dir raises `PromptTooLargeError`; under-limit behaviour unchanged;
+  resume path untouched.
+- `pm pr show` CLI test: prints the requested PR's description/notes and
+  errors on an unknown id.
+- Regression: existing prompt tests (`test_bug_fix_flow_prompts.py`,
+  `test_plan_review.py`, `test_claude_launcher.py`,
+  `test_regression_prompts.py`) stay green.
