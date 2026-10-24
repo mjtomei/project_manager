@@ -31628,7 +31628,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T08:32:35.282547+00:00'
+  updated_at: '2026-10-24T08:44:05.860497+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33158,6 +33158,16 @@ prs:
       82f22b1f; /pm-captures/review-679d-i2.'
     created_at: '2026-10-24T08:32:35Z'
     last_edited: '2026-10-24T08:32:35Z'
+  - id: note-668269a
+    text: 'Review 679d i3 (3f339fe8, test/spec only, no product change): QA19 commits
+      b740e188, 13eb925b, 716d6ce1, 5da5ea11, 006d7b4d, 3a3dcc3e plus i1 64b41a91
+      and i2 84bb863a independently reviewed; all sound. 9 new mutations: 6 caught
+      by existing tests, M7 (mark_result_recorded ignores loop_id) now caught by the
+      new test_mark_result_recorded_touches_only_its_own_runs_snapshot, 2 defensive/equivalent.
+      impl.md item 35 fixed: a run recorded here is exempt from the same-PR overlap
+      gate (the old text said the gate applied). Full suite 3646 passed; /pm-captures/review-679d-i3.'
+    created_at: '2026-10-24T08:44:05Z'
+    last_edited: '2026-10-24T08:44:05Z'
 - id: pr-4edf491
   plan: bugs
   title: 'Bug: pm pr spec saves a failed claude -p error (e.g. "Invalid API key")
