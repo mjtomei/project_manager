@@ -710,7 +710,7 @@ class TestWindowLaunchWorkdir:
                     return_value="CLAUDE_CMD"))
             self.wrap = p(patch("pm_core.container.wrap_claude_cmd",
                     return_value=("WRAPPED", "signoff-test")))
-            p(patch("pm_core.container.remove_container"))
+            self.remove = p(patch("pm_core.container.remove_container"))
             p(patch("pm_core.container.is_container_mode_enabled",
                     return_value=routed))
             p(patch("pm_core.tmux.new_window_get_pane", new_window))
@@ -741,6 +741,18 @@ class TestWindowLaunchWorkdir:
         assert self.build.call_args.kwargs["provider"] == "claude-work"
         assert self.build.call_args.kwargs["session_tag"] == "x"
         assert self.wrap.call_args.kwargs["provider"] == "claude-work"
+        assert self.wrap.call_args.kwargs["session_type"] == "signoff"
+
+    def test_signoff_removes_the_session_tagged_container_it_recreates(
+            self, tmp_path):
+        """The old container is removed under the name wrap_claude_cmd
+        creates (with the session tag); the untagged name was never used,
+        so a still-running container was reused instead (and, routed,
+        refused when it lacked the route mount)."""
+        self._launch(tmp_path, routed=True)
+        self.remove.assert_called_once()
+        name = self.remove.call_args.args[0]
+        assert name == "pm-x-signoff-" + self.wrap.call_args.kwargs["pr_id"]
 
     def test_window_creation_uses_workdir_cwd(self, tmp_path):
         new_window, workdir = self._launch(tmp_path)

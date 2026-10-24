@@ -1889,17 +1889,47 @@ def test_workflow_container_route_mount_and_fail_closed(pm_home_dir, monkeypatch
         match = ("router offline" if state == "down"
                  else "review-test is running without the route socket mount")
         with pytest.raises(cm.ContainerError, match=match):
-            cm.wrap_claude_cmd("ROUTED", "/w", provider=ROUTE, extra_rw_mounts=existing)
+            cm.wrap_claude_cmd("ROUTED", "/w", provider=ROUTE, extra_rw_mounts=existing,
+                               session_type="review")
         create.assert_not_called()
         assert mounts.called == (state != "down")
     else:
         cmd, name = cm.wrap_claude_cmd("ROUTED", "/w", provider=ROUTE,
-                                       extra_rw_mounts=existing)
+                                       extra_rw_mounts=existing,
+                                       session_type="review")
         assert (cmd, name) == ("ROUTED", "review-test")
         assert create.call_args.kwargs["extra_rw_mounts"] == {**existing, **bridge}
         assert existing == {Path("/evidence"): "/evidence"}
     assert check.call_args.args[0].provider == ROUTE
-    assert check.call_args.kwargs == {"container": True}
+    assert check.call_args.kwargs == {"container": True,
+                                      "session_type": "review"}
+
+
+@pytest.mark.parametrize("failure", ["router_down", "expired", "unconfigured"])
+def test_workflow_role_remedy_says_relaunch_not_qa_wait(pm_home_dir, monkeypatch,
+                                                         failure):
+    """impl/review/sign-off are refused once (ContainerError), not waited
+    for, so their remedy must not promise QA's automatic launch or point at
+    the QA session types; the QA gate keeps its wording."""
+    from pm_core.model_config import ModelResolution
+    creds = pm_home_dir / "creds.json"
+    _creds(creds, -60)
+    _write_providers(pm_home_dir, **({"credentials_file": str(creds)}
+                                     if failure == "expired" else {}))
+    monkeypatch.setattr(route_bridge, "tcp_connectable",
+                        lambda *a, **k: failure != "router_down")
+    res = ModelResolution(provider="nope" if failure == "unconfigured" else ROUTE)
+    qa = worker_route.check_route(res, container=True)
+    impl = worker_route.check_route(res, container=True, session_type="impl")
+    assert not qa.ok and not impl.ok and qa.problem == impl.problem
+    assert "QA" not in impl.remedy and "qa_" not in impl.remedy
+    if failure != "unconfigured":
+        assert "QA launches the session automatically" in qa.remedy
+        assert "then launch the impl session again" in impl.remedy
+    if failure != "router_down":  # these also name the main-account way out
+        assert "pm model set qa_scenario" in qa.remedy
+        assert "'pm model set impl <model> --project'" in impl.remedy
+        assert "PR's 'model' override" in impl.remedy
 
 
 def test_unrouted_provider_reuses_a_running_container_untouched(pm_home_dir, monkeypatch):
@@ -1969,6 +1999,7 @@ def test_impl_start_builds_and_wraps_for_the_selected_route(tmp_path, monkeypatc
     assert (kw["session_type"], kw["container"], kw["provider"]) == ("impl", True, ROUTE)
     assert kw["cwd"] == cm._CONTAINER_WORKDIR and kw["write_dir"] == str(workdir)
     assert wrap.call_args.kwargs["provider"] == ROUTE
+    assert wrap.call_args.kwargs["session_type"] == "impl"  # names the remedy
     if route_ok:
         assert result.exit_code == 0, result.output
         launched = tmux.new_window.call_args or tmux.new_window_get_pane.call_args

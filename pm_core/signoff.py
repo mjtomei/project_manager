@@ -523,14 +523,16 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
 
         branch = pr_entry.get("branch", "")
         if is_container_mode_enabled():
-            remove_container(_make_container_name(f"signoff-{pr_id}"))
+            remove_container(_make_container_name(f"signoff-{pr_id}",
+                                                  session_tag=_stag))
             try:
                 claude_cmd, _cname = wrap_claude_cmd(
                     claude_cmd, workdir, label=f"signoff-{pr_id}",
                     allowed_push_branch=branch,
                     session_tag=_stag,
                     pr_id=pr_id,
-                    provider=_resolution.provider)
+                    provider=_resolution.provider,
+                    session_type="signoff")
             except ContainerError as e:
                 print(str(e))
                 return

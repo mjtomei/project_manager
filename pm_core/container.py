@@ -1081,6 +1081,7 @@ def wrap_claude_cmd(
     session_tag: str | None = None,
     pr_id: str | None = None,
     provider: str | None = None,
+    session_type: str | None = None,
 ) -> tuple[str, str]:
     """Create a container and return a wrapped command for tmux.
 
@@ -1103,6 +1104,8 @@ def wrap_claude_cmd(
             provider (pm_core.worker_route) is checked before the
             container is created and its bridge socket dir is mounted;
             an unavailable route raises ContainerError.
+        session_type: The role being launched (``impl``, ``review``,
+            ``signoff``), named in that error's remedy.
 
     Returns:
         (wrapped_cmd, container_name).  container_name is "" if not containerised.
@@ -1119,7 +1122,8 @@ def wrap_claude_cmd(
         from pm_core import worker_route
         from pm_core.model_config import ModelResolution
         resolution = ModelResolution(provider=provider)
-        ready = worker_route.check_route(resolution, container=True)
+        ready = worker_route.check_route(resolution, container=True,
+                                         session_type=session_type)
         if not ready.ok:
             raise ContainerError(ready.message())
         route_mounts = worker_route.container_mounts(resolution)

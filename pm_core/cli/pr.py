@@ -1032,7 +1032,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
                                               allowed_push_branch=branch,
                                               session_tag=_stag, pr_id=pr_id,
-                                              provider=resolved_provider)
+                                              provider=resolved_provider,
+                                              session_type="impl")
             except ContainerError as e:
                 click.echo(str(e), err=True)
                 raise SystemExit(1)
@@ -1218,7 +1219,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     branch = pr_entry.get("branch", "")
     from pm_core.container import wrap_claude_cmd, ContainerError, remove_container, is_container_mode_enabled, _make_container_name
     if is_container_mode_enabled():
-        remove_container(_make_container_name(f"review-{pr_id}"))
+        remove_container(_make_container_name(f"review-{pr_id}",
+                                              session_tag=_review_stag))
     # session_tag drives the captures bind-mount so the review
     # container's /pm-captures points at the same per-PR captures dir
     # the impl and QA containers use (lets a reviewer read pre/post-fix
@@ -1228,7 +1230,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                               allowed_push_branch=branch,
                                               session_tag=_review_stag,
                                               pr_id=pr_id,
-                                              provider=_resolution.provider)
+                                              provider=_resolution.provider,
+                                              session_type="review")
     except ContainerError as e:
         click.echo(str(e), err=True)
         raise SystemExit(1)

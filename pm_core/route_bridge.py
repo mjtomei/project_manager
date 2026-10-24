@@ -185,7 +185,8 @@ def ensure_container_forwarder(sock_path: str, port: int,
     remedy = ("Remedy: on the host run 'pm provider test "
               f"{route or '<route>'} --container' and fix what it reports; "
               "if the socket is not mounted in this container, restart QA "
-              "so the container is recreated with it.")
+              "(or remove the container and launch the session again) so "
+              "the container is recreated with it.")
     if not os.path.exists(sock_path):
         return _fail(f"route{label} socket {sock_path} is not mounted in "
                      f"this container. {remedy}")

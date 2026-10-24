@@ -366,14 +366,37 @@ def _run_refresh(cfg: ProviderConfig) -> None:
         _log.warning("route %s: refresh_command failed: %s", cfg.name, exc)
 
 
-def _signin_remedy(cfg: ProviderConfig) -> str:
+def _main_account_remedy(session_type: str | None) -> str:
+    """How to move the checked session back to the main account.
+
+    *session_type* None means the gated QA refiner/worker launches.  Other
+    roles (implementation, review, sign-off containers) are selected by
+    their own type or by the PR's ``model`` override, which wins over it.
+    """
+    if session_type is None:
+        return _MAIN_ACCOUNT_REMEDY
+    return ("run it on the main account: remove the PR's 'model' override "
+            "if it selects this route, or "
+            f"'pm model set {session_type} <model> --project'")
+
+
+def _relaunch_hint(session_type: str | None, when: str) -> str:
+    """QA's route gates wait and launch by themselves; other roles are
+    refused once and must be launched again."""
+    if session_type is None:
+        return f"QA launches the session automatically once {when}"
+    return f"then launch the {session_type} session again"
+
+
+def _signin_remedy(cfg: ProviderConfig,
+                   session_type: str | None = None) -> str:
     if cfg.remedy:
         return cfg.remedy
     hint = (f"run '{cfg.refresh_command}' or sign in again"
             if cfg.refresh_command else "sign in to that account again")
-    return (f"{hint} so {cfg.credentials_file} holds a valid session; QA "
-            f"launches the session automatically once it is valid "
-            f"(or {_MAIN_ACCOUNT_REMEDY})")
+    return (f"{hint} so {cfg.credentials_file} holds a valid session; "
+            f"{_relaunch_hint(session_type, 'it is valid')} "
+            f"(or {_main_account_remedy(session_type)})")
 
 
 # ---------------------------------------------------------------------------
@@ -382,14 +405,16 @@ def _signin_remedy(cfg: ProviderConfig) -> str:
 
 def check_route(resolution, *, container: bool = False,
                 container_name: str | None = None,
-                try_refresh: bool = True) -> RouteStatus:
+                try_refresh: bool = True,
+                session_type: str | None = None) -> RouteStatus:
     """Validate that a session can be launched on *resolution*'s route.
 
     Always ok for unrouted resolutions.  For a router provider checks the
     config, the router's TCP port, credential expiry, the launcher (host
     workers) and, for containers, the host bridge, the container's socket
     mount and the in-container forwarder.  *container_name* implies
-    *container*.
+    *container*.  *session_type* names a role launched once (no QA wait),
+    so the remedies say how to relaunch it or move it off the route.
     """
     container = container or bool(container_name)
     try:
@@ -397,7 +422,8 @@ def check_route(resolution, *, container: bool = False,
     except ProviderNotFoundError as exc:
         return RouteStatus(
             False, getattr(resolution, "provider", None), problem=str(exc),
-            remedy=f"configure the provider on this host, or {_MAIN_ACCOUNT_REMEDY}")
+            remedy=("configure the provider on this host, or "
+                    f"{_main_account_remedy(session_type)}"))
     if cfg is None:
         return RouteStatus(True)
 
@@ -422,15 +448,15 @@ def check_route(resolution, *, container: bool = False,
     if not route_bridge.tcp_connectable(host, port):
         return fail(f"router not reachable at {host}:{port}",
                     "start the router (e.g. the claude-mixed router "
-                    f"listening on {host}:{port}); QA launches the session "
-                    "automatically once it answers")
+                    f"listening on {host}:{port}); "
+                    f"{_relaunch_hint(session_type, 'it answers')}")
 
     if cfg.credentials_file:
         try:
             exp = credentials_expiry(cfg.credentials_file)
         except FileNotFoundError:
             return fail(f"credentials file {cfg.credentials_file} not found",
-                        _signin_remedy(cfg))
+                        _signin_remedy(cfg, session_type))
         if exp is not None and exp <= time.time() + _EXPIRY_MARGIN_S:
             if try_refresh and cfg.refresh_command:
                 _run_refresh(cfg)
@@ -440,7 +466,7 @@ def check_route(resolution, *, container: bool = False,
                     exp = 0.0
             if exp is not None and exp <= time.time() + _EXPIRY_MARGIN_S:
                 return fail(f"account sign-in expired at {_fmt_time(exp)}",
-                            _signin_remedy(cfg))
+                            _signin_remedy(cfg, session_type))
 
     if container:
         try:

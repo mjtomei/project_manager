@@ -307,6 +307,8 @@ def test_review_container_uses_selected_route(fake_tmux, monkeypatch):
     wrap = Mock(return_value=("WRAPPED", "review-test"))
     monkeypatch.setattr(pr_mod, "build_claude_shell_cmd", build)
     monkeypatch.setattr(cm, "wrap_claude_cmd", wrap)
+    remove = Mock()
+    monkeypatch.setattr(cm, "remove_container", remove)
     monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: True)
     monkeypatch.setattr("pm_core.model_config.resolve_model_and_provider",
                         lambda *a, **k: SimpleNamespace(model=None,
@@ -315,3 +317,8 @@ def test_review_container_uses_selected_route(fake_tmux, monkeypatch):
     assert build.call_args.kwargs["container"] is True
     assert build.call_args.kwargs["provider"] == "claude-work"
     assert wrap.call_args.kwargs["provider"] == "claude-work"
+    assert wrap.call_args.kwargs["session_type"] == "review"
+    # The old container goes under the session-tagged name the wrapper
+    # creates; the untagged name left a running one to be reused.
+    remove.assert_called_once_with(
+        cm._make_container_name("review-pr-001", session_tag="test"))

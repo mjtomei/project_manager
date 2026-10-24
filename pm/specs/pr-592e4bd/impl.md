@@ -885,6 +885,25 @@ recorded with item 40.
     front ("running without the route socket mount", remedy: end the
     session using it, remove the container, launch again).  Review and
     sign-off remove their container first, so this matters for impl.
+    Review loop e0e8 i2: that removal used the untagged name
+    (`pm-review-<pr>`), while `wrap_claude_cmd` creates
+    `pm-<session tag>-review-<pr>`, so it removed nothing and a still
+    running container was reused (pre-existing on master for review and
+    sign-off; the race the removal comment describes was never closed).
+    Both now remove the session-tagged name.  The route remedies were
+    QA-worded for these roles ("QA launches the session automatically",
+    "pm model set qa_concretize …"); `check_route(session_type=)` (passed
+    through `wrap_claude_cmd(session_type=)`) now says to launch the
+    session again, or to move it to the main account by removing the PR
+    `model` override or `pm model set <type> <model> --project`.  The QA
+    gates keep their wording.  The in-container ensure remedy also names
+    relaunching a non-QA session.
+    `test_workflow_role_remedy_says_relaunch_not_qa_wait[router_down|expired|unconfigured]`,
+    `test_signoff_removes_the_session_tagged_container_it_recreates`, and
+    assertions in the review/sign-off/impl wiring tests; 9 mutations
+    caught (`/pm-captures/review-e0e8-i2/mutation-checks.log`).  Full
+    suite 3673 passed, rc 0 (markdown 3.10.3 installed first;
+    `/pm-captures/review-e0e8-i2/full-suite.log`).
     Regressions in `tests/test_worker_route.py`
     (`test_workflow_container_route_mount_and_fail_closed[down|fresh|reused_mounted|reused_unmounted]`,
     `test_unrouted_provider_reuses_a_running_container_untouched`,
