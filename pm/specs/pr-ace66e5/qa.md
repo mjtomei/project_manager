@@ -273,3 +273,20 @@ for small projects.
 - When a command prints the prompt because no `claude` is on PATH
   (`pm plan review|deps|breakdown|fix`, `pm prompt`), that printed text *is*
   the prompt under test; keep the stand-in off PATH for those checks.
+
+## 7. Coverage status (planner pass 2, 2026-10-24)
+
+Re-checked against HEAD (`5cee545e`): `tests/test_prompt_bounds.py` holds 93
+cases as stated, and the markers, `notes.notes_pointer()`,
+`integration.integration_pointer()` and `pm pr show` match R1–R20 as written.
+No requirement contradicts the implementation and no [UNRESOLVED] ambiguity
+remains, so §§0–6 are unchanged.
+
+Run state at this pass (QA loop `cbc3808772a8a908`, session tag
+`project_manager-5b29c418`): scenarios 1–3 and 5 were planned and captured;
+scenario 4 ("The QA planner prompt — the one that failed in the field") and
+scenario 6 ("Several sessions launched at once share the prompt-file directory
+safely") were planned but produced no evidence. The fresh scenarios below
+(7–11) re-cover those two surfaces — 7 for the planner, 9 for concurrent
+launches — and add the QA child/verification prompts (R13), the bounding
+edges, and the side-effect/resume properties the review loop fixed.
