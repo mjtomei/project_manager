@@ -13168,60 +13168,29 @@ prs:
   - pr-51586d2
   - pr-1d8b2b7
   - pr-ff9b728
-  description: 'The integration checkpoint for the autonomous loop: re-validate the
-    merged Phase 1-5 features under BOTH the Phase 10 QA model (regressions-as-scenarios)
-    AND the Phase 11 architecture (the generalized plan auto-start watcher + the sign-off
-    step), using deterministic fakes, before declaring the loop unsupervised-ready.
+  description: 'Validate the Phase 10 regressions-as-scenarios model together with
+    Phase 11 agent-controlled execution and sign-off. The generalized watcher replaces
+    the programmatic autostart phase engine; participating agents explicitly hand
+    off work through shared PM tools, and watchers recover gaps by inspecting tmux
+    and durable records. Autostart must work with hooks and automatic state detectors
+    disabled.
 
 
-    Phase 11 retains the programmatic scheduler and adds the plan watcher (pr-ff9b728)
-    above it. Validate watcher decisions through shared PM operations, scheduler-owned
-    phase transitions, and sign-off recommendations. Existing CLI/TUI auto-start must
-    also work with the watcher off. Cover duplicate requests, watcher restart, shared
-    dependencies, explicit and inherited manual merge holds, and fresh approval without
-    bypasses or duplicate workers.
-
-
-    Targets:
-
-    1. Plan auto-start watcher tests (tests/test_plan_watcher.py) via FakeClaudeSession
-    (pr-abcf70f) + FakeGitHubBackend (pr-9603d04): per-plan config (gated vs autonomous,
-    mandated taste check), max-in-flight concurrency, arms targets through PM; the
-    scheduler checks readiness and advances the per-PR flow, while sign-off recommends
-    the next step. Scenarios bind to regression tests (pr-06a96fa) or author new ones
-    (pr-2680fbf), NOT INSTRUCTION+ARTIFACT.
-
-    2. Discovery supervisor (pr-271cb3a, unchanged) launch + reconcile cycle.
-
-    3. Sign-off step (pr-2d5f712) integration: qa-finalize -> sign_off -> merge (autonomous)
-    / hold (gated); verdict-router next-hops; re-loop on code change.
-
-    4. Auto-sequence chain integration backstop (the three paths from pr-e58459b''s
-    review) now including the sign_off stage.
-
-    5. launch_qa_item target_window (pr-97ddabf) + regression-filing addendum (pr-47940bc)
-    under the new flow.
-
-    6. Behavior interface / review session (pr-e84b43c) reads plan notes (recast from
-    work logs by pr-ff9b728), PR descriptions, PR notes.
-
-
-    Uses the VerdictRegistry (pr-1d8b2b7) so the fakes don''t drift from production
-    verdicts (incl. the new sign_off verdicts).
-
-
-    Depends on: pr-06a96fa, pr-2680fbf, pr-51586d2 (Phase 10 chain), pr-1d8b2b7 (verdict
-    registry), pr-ff9b728 (the plan watcher integrated with the retained scheduler
-    and sign-off flow).
-
-
-    Out of scope: coverage gates (Phase 7); adding regression tests beyond validating
-    the loop.'
+    Use the existing fake session/backend and shared verdict fixtures to cover plan
+    policy, concurrency, dependency readiness, duplicate/stale requests, worker-initiated
+    next steps, missing handoff recovery, review/QA rework, sign-off freshness, and
+    explicit/inherited human holds. Exercise both CLI/TUI entry points and restart/adoption
+    without requiring autonomous operation while all supervising agents are stopped.
+    Carry forward existing behavior cases, replacing phase-machine-specific assertions.
+    Complete bounded real-session integration and keep isolated regression evidence.
+    Retain the existing Phase 10 and watcher dependencies; the earlier recipe-based
+    runner/corpus migration can qualify plan-delivery''s initial loop before this
+    full bridge.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-02T20:49:18.500977+00:00'
-  updated_at: '2026-10-21T00:48:08.726694+00:00'
+  updated_at: '2026-10-24T20:40:46.945740+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -21737,43 +21706,24 @@ prs:
   depends_on:
   - pr-ff9b728
   - pr-c77561b
-  description: 'Claude-driven regression-test markdowns covering the watcher / observation
-    surfaces, REFRAMED for Phase 11: the surfaces are the plan watcher (pr-ff9b728),
-    retained programmatic scheduler and sign-off step (pr-2d5f712).
+  description: 'Add artifact-backed regression coverage for discovery, agent-controlled
+    plan execution, sign-off and the human review surface after Phase 11 replaces
+    the programmatic phase engine. Use instruction/artifact recipes from pr-c77561b.
 
 
-    Files in pm/qa/regression/:
-
-    1. discovery-supervisor-tick.md — discovery supervisor (pr-271cb3a, unchanged):
-    reads its log, launches a regression test in the watcher window (pr-97ddabf),
-    reconciles a filed bug via dedup, emits READY/INPUT_REQUIRED. Variants: cold start,
-    rolling context, in-flight continuation.
-
-    2. plan-watcher-pick-and-advance.md — the generalized plan watcher against a plan:
-    arms targets and requests recovery through PM; the scheduler enforces readiness,
-    concurrency, single phase ownership and fresh-signoff merge policy. Variants:
-    at concurrency cap (no-op); authorized auto-merge; explicit and dependency-inherited
-    human holds; shared dependencies; stalled work; duplicate ticks; watcher restart;
-    and ordinary CLI/TUI auto-start with the watcher off.
-
-    3. sign-off-step.md — qa-finalize -> sign_off: comprehensive review, verdict-router
-    next-hops (merge / re-qa / back-to-impl / escalate), audit notes.
-
-    4. watcher-review-session.md — the behavior interface / review session reads PLAN
-    NOTES (recast from work logs by pr-ff9b728), PR descriptions, PR notes; remediation
-    via a plan/Watcher note confirmed before applying; next tick picks it up.
-
-
-    Opportunistic audit folded in (flag other uncovered surfaces -> improvement PRs
-    via pr-47940bc), complementing pr-f4dc8a2.
-
-
-    Depends on: pr-ff9b728 (the generalized watcher + sign-off the scenarios exercise).'
+    Cover discovery cold starts, ongoing runs, deduplication and persistent regression
+    reuse; direct worker handoffs and watcher recovery of absent outcomes; concurrency
+    and shared dependencies; fresh-revision sign-off and rework; explicit/inherited
+    manual holds; and plan/PR notes plus tmux-based human steering. Disable hooks
+    and automatic state detection. Include watcher/TUI restart, duplicate requests
+    and GitHub sync observing a ready PR during active implementation. Agents file
+    discovered defects or improvements through the existing plans. Preserve evidence
+    from isolated test targets.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T14:49:12.969486+00:00'
-  updated_at: '2026-10-21T00:48:09.387819+00:00'
+  updated_at: '2026-10-24T20:40:46.945768+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -21786,42 +21736,25 @@ prs:
   depends_on:
   - pr-ff9b728
   - pr-c77561b
-  description: 'Claude-driven regression-test markdown covering the auto-sequence
-    chain (pr-e58459b) — now start -> review -> QA -> SIGN_OFF -> merge after Phase
-    11. Exercises every pause/transition through existing TUI/CLI entry points, with
-    the watcher enabled and disabled. Retain the programmatic scheduler and its checks.
+  description: 'Add pm/qa/regression/auto-sequence-halt-conditions.md for the preserved
+    CLI/TUI controls after migration to agent-controlled execution. Plans and session
+    prompts drive the flow; PM launches agents and supplies durable records/tools,
+    without a programmatic phase engine or hook/state-detection requirement.
 
 
-    pm/qa/regression/auto-sequence-halt-conditions.md, conditions:
-
-    1. impl idle-no-spec.
-
-    2. review INPUT_REQUIRED.
-
-    3. QA INPUT_REQUIRED (or refiner rejection; reason per pr-b59f0c7).
-
-    4. sign_off stage (NEW): qa-finalize enters sign_off; verify the chain advances
-    to sign_off, the verdict router runs, and on a bounce it routes back through review+qa.
-
-    5. manual merge holds: fresh sign-off is required before a PR shows merge-ready;
-    explicit stop-before-merge and dependency-wide --wait-for-merge holds remain binding
-    across shared dependencies, watcher recovery and restart. Manual merges unblock
-    dependents automatically. The watcher cannot bypass a human hold.
-
-    6. review NEEDS_WORK loop; 7. QA NEEDS_WORK loop; 8. max-iterations / no-progress
-    stop (pr-ed10ac4).
-
-
-    For each: entry point, condition fired, emitted state, correct resume.
-
-
-    Depends on: pr-ff9b728 (watcher integration with the existing scheduler and sign-off
-    flow).'
+    Exercise incomplete specs, blocked review/QA, explicit handoff to sign-off, return
+    to implementation/review/affected QA, spec-review gates, explicit and dependency-inherited
+    merge holds, stale sign-off, and bounded no-progress recovery. Verify both worker-initiated
+    handoff and watcher recovery of a missing report via tmux, including restarts
+    and duplicate/stale requests. A manual merge must become visible for further agent
+    action without a scheduler callback. Fresh sign-off and current configured authority
+    remain required for merge. Use the artifact-backed regression corpus and preserve
+    isolated evidence.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-14T14:49:39.950664+00:00'
-  updated_at: '2026-10-21T00:48:10.056984+00:00'
+  updated_at: '2026-10-24T20:40:46.945770+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26180,69 +26113,56 @@ prs:
   signed_off_at: '2026-09-18T14:00:47.727000+00:00'
 - id: pr-ff9b728
   plan: plan-regression
-  title: Plan watcher using the existing auto-start scheduler
+  title: 'Plan auto-start watcher: replace phase automation with agent control'
   branch: pm/pr-ff9b728-auto-run-wiring-re-loop-on-code-change-loop-guard-
   status: pending
   depends_on:
   - pr-2d5f712
-  description: 'Add a plan supervisor above the existing programmatic auto-start scheduler.
-    The watcher chooses work, maintains the plan and handles exceptions; the scheduler
-    continues to execute ordinary PR lifecycles. Retain pm_core/tui/auto_start.py,
-    multi-target CLI/TUI controls, status visibility, restart handling and the per-PR
-    auto-sequence/sign-off flow. Ordinary auto-start must remain usable with the watcher
-    disabled.
+  description: 'Replace the programmatic autostart phase engine and consolidate plan-specific
+    and monitoring watchers. See plan-delivery D3/D4 and plan-regression Phase 11
+    (2026-10-24 correction). PM launches configured agents in their workspaces; observability
+    and human interaction remain through tmux. Hooks, idle detection and automatic
+    transcript/state interpretation must not be required for autostart. Codex integration
+    completes this migration for both Claude and Codex; OMP can use the same boundary
+    later.
 
 
-    Plan decisions: generalize the bug-fix and improvement-fix watchers into one supervisor
-    parameterized by plan policy, required checks, priorities and resource limits.
-    Choose targets and concurrency within configured bounds; diagnose stalled work
-    and request recovery through shared PM commands/lifecycle operations. The scheduler
-    owns dependency readiness, routine phase transitions and idempotent launches.
-    Do not introduce a competing phase loop or edit lifecycle state directly. Watcher
-    retries, CLI/TUI requests and restart must not launch duplicate workers or merges.
+    Distributed control: implementation, review, QA and other sessions may record
+    revision/attempt-bound outcomes and request the next appropriate activity. Not
+    every session needs a formal terminal verdict. Watchers inspect tmux and durable
+    context, recover missing handoffs or failed requests, choose priorities and maintain
+    the plan. Preserve multi-target CLI/TUI controls and status visibility as agent/tool
+    entry points; remove competing phase decisions from code.
 
 
-    Merge authority: sign-off recommends; the execution path enforces fresh approval
-    and configured policy. The watcher may arm authorized auto-merge work or request
-    a merge through the same checks. Explicit stop-before-merge and dependency-wide
-    --wait-for-merge holds remain binding, including shared dependencies. A watcher
-    cannot release a human hold or bypass it by invoking the manual merge command
-    without authorization. A successful manual merge wakes the scheduler without another
-    watcher decision.
+    Shared operations must reject stale writes and duplicate launches, preserve concurrent
+    edits and recover paired plan/registry changes. Respect dependencies, resource
+    bounds and explicit/inherited spec/merge holds. Agents cannot release human holds
+    without authority. GitHub repository state must not overwrite active workflow
+    ownership. Sign-off checks integration and recommends rework or acceptance; merge
+    only publishes a conflict-free candidate with fresh approval for both PR and base
+    revisions. Keep the dependency-merge preamble in implementation (pr-b77702b).
 
 
-    Plan feedback: discovery and any workflow session can file bug/improvement work.
-    The watcher adds justified prerequisite PRs, updates depends_on and plan sections
-    through validated additive mutations, rejects cycles, records reasons in plan
-    notes, and publishes plan/registry changes together. Gated plan edits remain subject
-    to their configured authority. The scheduler recomputes readiness from the resulting
-    graph. pr-b77702b retains its implementation-session dependency-merge preamble;
-    this PR does not own that work.
+    Preserve decisions/evidence and adopt active attempts after restart. Record justified
+    findings and prerequisite changes through validated mutations; reject dependency
+    cycles. Bound retries and no-progress loops. Revalidate affected evidence after
+    substantive changes, not note-only work. The existing runner/corpus migration
+    is required for delivery-plan bug-fix handoff.
 
 
-    Continuity and recovery: retain decisions, evidence links and recovery history
-    in plan notes. Apply the existing review/QA/sign-off return path after substantive
-    code changes, including merge-resolution changes; note-only handoffs do not restart
-    acceptance. Use the planned ten-bounce ceiling and pr-ed10ac4''s earlier no-progress
-    checks, resetting only on real progress. Bound recovery attempts and preserve
-    evidence when parking blocked work.
-
-
-    Acceptance: exercise existing CLI/TUI auto-start with the watcher off, then watcher-driven
-    prioritization and recovery through those same operations. Cover shared dependencies,
-    inherited and explicit merge holds, duplicate ticks, watcher/TUI restarts, adoption
-    of running sessions, stale sign-off and substantive integration changes. Keep
-    the existing scheduler regression tests. Consolidate duplicate watchers, prompts
-    or decision paths only after equivalent behavior is demonstrated; deleting the
-    scheduler is not a requirement.
-
-
-    Depends on: pr-2d5f712 (sign-off step).'
+    Acceptance: with hooks/state detectors disabled, demonstrate worker-initiated
+    review and watcher recovery of a missing handoff, shared dependencies, manual
+    gates, duplicate requests, watcher/TUI/worker restart, stale approval, and the
+    #250/#251 GitHub-sync overwrite case. Run discovery through fix, independent verification,
+    authorized merge and scheduled regression reuse. Preserve behavior coverage while
+    removing tests tied only to the obsolete phase engine. This updates planned work;
+    do not change live sessions during registration.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
-  updated_at: '2026-10-21T00:48:08.079039+00:00'
+  updated_at: '2026-10-24T20:40:46.945776+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29395,7 +29315,7 @@ prs:
   title: 'Bug: closing the pm meta window (kill-window) leaves the session override
     active, so pm silently keeps using the meta clone'
   branch: pm/pr-7f90572-bug-closing-the-pm-meta-window-kill-window-leaves-
-  status: pending
+  status: merged
   depends_on: []
   description: 'Found in QA pr-b53bfe2 scenario 2 (2026-10-13, captures pr-b53bfe2/scenarios/2/tui/attempts/t16-attempt1-killwindow-override-left).
     cli/meta.py launches the window as "<claude cmd> ; rm -rf ~/.pm/sessions/<tag>",
@@ -29406,15 +29326,357 @@ prs:
     it is removed by hand. Fix: run the cleanup from a trap on EXIT/HUP in the pane
     command, or have pm _pane-closed / the wrapper drop an override whose meta window
     is gone.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/251
+  gh_pr_number: 251
   created_at: '2026-10-13T09:20:01.185973+00:00'
-  updated_at: '2026-10-13T09:20:01.185973+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
+  updated_at: '2026-10-25T00:07:29.209534+00:00'
+  started_at: '2026-10-24T12:08:03.878803+00:00'
+  reviewed_at: '2026-10-24T23:16:12.525853+00:00'
+  merged_at: '2026-10-25T00:07:29.209534+00:00'
+  notes:
+  - id: note-f9e58cb
+    text: 'Scenario 4 (interactive-fallback interrupt) concretizer notes: (1) run
+      `pm meta` from a pane in a tmux session whose name does NOT start with pm- (e.g.
+      tmux new-session -d -s meta-int-driver), with no pm session for the test cwd
+      running — if the driver session is itself named pm-*, _get_pm_session() resolves
+      to it and pm meta opens a tmux meta window instead of the interactive fallback.
+      (2) Set a fake-claude config {"_all": {}} for the test dir tag first (pm fake-claude
+      config set from the test cwd) — meta is a valid fake session type, and with
+      no verdicts the fake stays open like real claude, giving something to interrupt;
+      also creates ~/.pm/sessions/<tag>/ and reveals the tag. (3) The meta workdir
+      is cloned from the public GitHub repo, whose master is c98fa96e (pre-fix) —
+      that is expected: the trap under test is built by the launching pm (PYTHONPATH=/workspace
+      clone), not by the workdir copy. (4) pm meta exits 1 with "Claude CLI not found"
+      without setting the override if claude is not on PATH in the pane.'
+    created_at: '2026-10-24T20:59:23Z'
+    last_edited: '2026-10-24T20:59:23Z'
+  - id: note-5025c33
+    text: 'QA scenario 4 (interactive-fallback interrupt): trap cleanup itself passed
+      on the first run against 79205aa9/40f27fa9 (override removed, session dir preserved,
+      no hang), but the interrupt was not reflected in the exit status: click 8.5
+      turns the KeyboardInterrupt in the meta.py:207 subprocess.run fallback into
+      Abort — "Aborted!", exit 1, scenario Then expects 130. Fixed in commit 0b3f34b9
+      (qa: catch KeyboardInterrupt, exit 128+2); re-ran the full scenario against
+      the fix and every Then held (pm-meta-exit:130, override removed, debug+fake-claude
+      config preserved, pm which back to /workspace/pm_core). Evidence /pm-captures/scenarios/4/{pre-fix,post-fix}/.'
+    created_at: '2026-10-24T21:05:05Z'
+    last_edited: '2026-10-24T21:05:05Z'
+  - id: note-be26c89
+    text: 'Sign-off (2026-10-24, HEAD 2889b14c) -> SIGNOFF_IMPL. Tmux pane trap path
+      (kill-window/normal exit/foreign guard) is solid and stays verified by S1-S3,S5-S7.
+      Gap in the interactive fallback (meta.py ~207, the try/except added by unreviewed
+      QA commit 0b3f34b9): on SIGINT, subprocess.run waits only 0.25 s for the child,
+      then SIGKILLs the sh that carries the trap, so if the foreground child takes
+      longer than ~0.25 s to exit after SIGINT the override is left stale (the exact
+      bug this PR fixes). Repro: /pm-captures/signoff/orch.py (child sleeps 0/0.1/0.5/2
+      s in its INT handler -> override GONE/GONE/EXISTS/EXISTS). Suggested fix: use
+      Popen and keep waiting on KeyboardInterrupt (do NOT set SIG_IGN before spawn:
+      sh cannot trap a signal ignored on entry), then exit with the shell child returncode;
+      add a unit test with a slow-exiting INT-handling child. Then review must cover
+      the fallback change and QA must re-run S4 (fallback interrupt) incl. a slow-exit
+      child.'
+    created_at: '2026-10-24T22:32:12Z'
+    last_edited: '2026-10-24T22:32:12Z'
+  - id: note-2bc73f1
+    text: 'Additional requirement (QA pr-592e4bd S50, 2026-10-24): the NORMAL-exit
+      path is overbroad too. cli/meta.py:190-191 runs "<claude cmd> ; rm -rf ~/.pm/sessions/<session_tag>"
+      with the pm session own tag, so when a meta Claude exits normally it deletes
+      the whole shared session dir: fake-claude config + scripted cursor, the debug
+      marker, captures/<pr>/ (QA evidence), fake-github state, and any other per-session
+      settings, not just the meta override. Seen live in S50 (scratch HOMEs, both
+      7887d772+ and ca8fa055): a meta session ended at 10:07:26/27 and ~/.pm/sessions/p2-*/
+      was emptied (dir mtime), so the next QA planner ran as real Claude and stopped
+      at the workspace-trust prompt (INPUT_REQUIRED). Evidence /pm-captures/scenarios/50/{post,control}/story4-attempt3-planner-real-claude/NOTE.md.
+      Cleanup (both normal exit and the trap fix above) should remove only the override
+      file meta owns (and only if it still points at this meta workdir), preserving
+      all other session state.'
+    created_at: '2026-10-24T22:32:13Z'
+    last_edited: '2026-10-24T22:32:13Z'
+  - id: note-abc3864
+    text: 'SIGNOFF_IMPL addressed in 2e6f8831 (merged base into branch in 63d5773e,
+      data-level 3-way yaml merge after textual resolution kept corrupting project.yaml).
+      The interactive fallback no longer uses subprocess.run: new _run_interactive()
+      (pm_core/cli/meta.py) waits on the Popen and keeps waiting across repeated KeyboardInterrupts
+      — never SIGKILLs the trap-carrying shell — then exits with the shell child returncode
+      (130 when interrupted); no SIG_IGN set before spawn. New test test_fallback_interrupt_waits_out_slow_int_handler
+      (driver process, process-group SIGINT, 1 s slow-exiting INT-handling child):
+      red on pre-fix code, green post-fix. Post-fix sweep of the sign-off repro (child
+      INT-handler delays 0/0.1/0.5/2 s): override GONE at every delay, debug kept,
+      pm_rc=130 — captures /pm-captures/impl/{pre-fix,post-fix}/ (pre-fix = sign-off
+      orch.py baseline). Spec updated: R4 added to pm/specs/pr-7f90572/impl.md. Full
+      suite 3691 passed + 1 pre-existing env failure (test_installer_writes_standalone_receiver,
+      fails identically with the change stashed). Review must cover the fallback change
+      per sign-off; QA must re-run S4 (fallback interrupt) incl. slow-exit child.'
+    created_at: '2026-10-24T22:32:14Z'
+    last_edited: '2026-10-24T22:32:14Z'
+  - id: note-3638416
+    text: 'Sign-off (2026-10-24, HEAD 7a7e018b, base master@6d70b5fe) -> SIGNOFF_IMPL,
+      for branch scope only; the code is fine. Merge commit 63d5773e merged origin/pm/pr-592e4bd-...
+      (an unrelated in_review PR, NOT the base; base_branch is master) into this branch.
+      As a result git diff origin/master...HEAD is 69 files/+16.6k lines, and merging
+      this PR would publish all of pr-592e4bd to master without its own sign-off.
+      pr-7f90572 has no depends_on on it. Fix: rebuild the branch so it carries only
+      this PR. Reset it to 2e6f8831 (its parent chain is c98fa96e + this PR only),
+      re-apply only the pm/specs/pr-7f90572/{impl,qa}.md content from 7a7e018b and
+      re-add the pr-7f90572 notes, then merge origin/master (6d70b5fe) and force-push
+      (gh_pr is unset). Do NOT git revert -m 1 63d5773e: a reverted merge would make
+      a later pr-592e4bd merge into master silently drop those commits. Acceptance:
+      git diff origin/master...HEAD --name-only lists only pm_core/cli/meta.py, tests/test_meta_override_cleanup.py,
+      pm/specs/pr-7f90572/*, pm/project.yaml, and project.yaml changes only the pr-7f90572
+      entry. Sign-off checked this in a scratch worktree: 2e6f8831 + origin/master
+      merges cleanly (5 files), the 7 tests in test_meta_override_cleanup.py pass,
+      and meta.py and the test file are byte-identical to HEAD. Review 3e95 and QA
+      S8/S9 (and S1-S7 for the tmux path) therefore carry over as long as those two
+      files stay byte-identical. Report: /pm-captures/report.html.'
+    created_at: '2026-10-24T22:32:15Z'
+    last_edited: '2026-10-24T22:32:15Z'
+  - id: note-a2bb684
+    text: 'SIGNOFF_IMPL branch rebuild done (2026-10-24, new tip d967ccfa). Branch
+      reset to 2e6f8831, merged origin/master (6d70b5fe) cleanly (ort, 5 files + project.yaml),
+      re-added the four post-2e6f8831 notes (same ids) and the qa spec from 7a7e018b.
+      Acceptance verified: git diff origin/master...HEAD --name-only = pm_core/cli/meta.py,
+      tests/test_meta_override_cleanup.py, pm/specs/pr-7f90572/{impl,qa}.md, pm/project.yaml;
+      project.yaml diff vs master touches only the pr-7f90572 entry; origin/pm/pr-592e4bd-...
+      is NOT an ancestor; meta.py and the test file byte-identical to 7a7e018b, so
+      review 3e95 and QA S8/S9 (+S1-S7 tmux path) carry over. Force-pushed (7a7e018b
+      -> d967ccfa). Full suite on the rebuilt tree: 3364 passed + 1 pre-existing env
+      failure (test_installer_writes_standalone_receiver, fails identically with the
+      change stashed); the 7 meta-override tests pass. No code changes this session.'
+    created_at: '2026-10-24T22:35:42Z'
+    last_edited: '2026-10-24T22:35:42Z'
+  - id: note-ff2f2f5
+    text: 'QA S10 (rebuilt-branch meta lifecycle gate) PASS on rebuilt HEAD 604ed25d
+      (workdir /workspace): full meta lifecycle driven in a fresh /tmp project session
+      via fake-claude. Launch: override set to ~/.pm/workdirs/meta-<tag>, pm which
+      resolves <workdir>/pm_core. kill-window: override removed (original bug does
+      not reproduce), pm which back to /workspace/pm_core, debug/fake-claude config/captures
+      evidence and the meta workdir all preserved. Relaunch: reuses the workdir and
+      resumes the SAME branch meta/session-20261024-224819 (no re-clone), override
+      re-set to the same path. Normal exit (meta fake hold=60): override removed by
+      the EXIT trap within seconds of the fake exiting, meta window self-closed, only
+      the override removed — S50 overbroad-cleanup fix holds (debug, fake-claude config
+      incl. the new hold entry, and captures evidence all survive), no traceback in
+      the meta pane or driver pane. Note: a pane whose cwd is a different pm project
+      (e.g. /workspace) is unaffected by the override — pm which resolves per-project,
+      which is correct. Evidence: /pm-captures/scenarios/10/{1-launch,2-kill-window,3-relaunch,4-normal-exit}/
+      (cast+mp4+transcripts+manifests).'
+    created_at: '2026-10-24T22:52:14Z'
+    last_edited: '2026-10-24T22:52:14Z'
+  - id: note-28f0874
+    text: 'Sign-off (2026-10-24, HEAD 4a02d59a, base master@6d70b5fe) -> SIGNOFF_IMPL.
+      Branch scope is now correct (5 files; pr-592e4bd not an ancestor; meta.py and
+      the test are byte-identical to 2e6f8831; 7/7 tests pass). New gap: the tmux
+      pane command is not portable. tmux runs new-window commands as `<default-shell>
+      -c <cmd>`, and default-shell defaults to $SHELL, not sh, so the spec premise
+      "tmux runs the pane command ... as sh -c" is wrong. _build_meta_pane_cmd defines
+      a POSIX function `pm_meta_clear_override() { ...; }`, which fish rejects at
+      parse time ("command substitutions not allowed in command position", rc 127).
+      For a fish user, pm meta writes the override and opens a window that dies at
+      once without starting Claude, and the override stays stale: the exact bug this
+      PR fixes, and a regression, since the pre-PR `cmd ; rm -rf ...` runs under fish
+      3.4+. Repro and matrix: /pm-captures/signoff/fish-default-shell/ (README.md,
+      repro.py, matrix.txt). Shipped cmd under fish: Claude never started, override
+      stays. The same string wrapped in `sh -c <shlex.quote(cmd)>`: started, and kill-window
+      removes the override under fish, bash and dash. Fix: in the tmux branch of meta_cmd,
+      pass `sh -c {shlex.quote(cmd)}` to new_window. This matches pm_core/cli/session.py
+      and container.py, which pin trap-carrying pane commands to an explicit `bash
+      -c`. Leave the interactive fallback as is: Popen(shell=True) is already /bin/sh,
+      and an extra outer shell there could die on SIGINT before the inner trap finishes
+      and break the 130 return. Add a unit test that the tmux command is the `sh -c`
+      wrapper, plus a behavior test that the wrapped command still clears the override
+      on HUP and on a normal exit; optionally a skip-if-no-fish test. Update spec
+      R1 and its implicit requirements (premise correction). Harness caveat for repros:
+      on kill-window the kernel SIGHUPs only the pty session leader. A trapped shell
+      survives it, so the child must be tty-reading (claude, fake-claude, or cat)
+      for the deferred trap to fire. A sleep stand-in falsely shows a stale override.
+      Afterwards, review must re-pass meta.py, and QA must re-run the tmux lifecycle
+      (kill-window, normal exit, relaunch, foreign guard) on the new HEAD, because
+      the pane process tree changes.'
+    created_at: '2026-10-24T23:04:54Z'
+    last_edited: '2026-10-24T23:04:54Z'
+  - id: note-eab6c19
+    text: 'review-loop f5ea i1 (2026-10-25, commit 6f6fee32): fixed the fish default-shell
+      SIGNOFF_IMPL gap — meta_cmd tmux branch now passes sh -c {shlex.quote(cmd)}
+      to new_window (interactive fallback deliberately unwrapped, Popen(shell=True)
+      is already /bin/sh and an extra outer shell could break the 130 exit status).
+      New tests: wrapper unit test, wrapped-command normal-exit + process-group-HUP
+      behavior tests under the default shell (fish when available, dash otherwise),
+      skip-if-no-fish test proving fish rejects the unwrapped cmd (rc != 0, override
+      left) but accepts the wrapper. Spec R1 premise corrected. Suite on new HEAD:
+      3367 passed + 1 skipped (fish absent here) + 1 pre-existing env failure (test_installer_writes_standalone_receiver,
+      fails identically stashed). QA per sign-off: re-run the tmux lifecycle (kill-window,
+      normal exit, relaunch, foreign guard) and S4 fallback interrupt incl. slow-exit
+      child on this HEAD — the pane process tree changed.'
+    created_at: '2026-10-24T23:20:33Z'
+    last_edited: '2026-10-24T23:20:33Z'
+  - id: note-26d081c
+    text: 'impl follow-up (2026-10-25): end-to-end post-fix fish verification of the
+      sh -c wrapper captured at /pm-captures/impl/post-fix/fish-shwrap/ (README.md,
+      repro-postfix.py, fish-matrix.txt) — through real tmux with default-shell=static
+      fish 4.0.2, the pre-fix inner shape leaves the override stale (fish parse error,
+      Claude never starts) while the shipped _tmux_shell_cmd wrapper starts Claude
+      and kill-window clears the override; /bin/bash and /bin/dash controls both clean
+      with debug preserved. Full suite on 6f6fee32 with PATH sanitized (dropping /home/pm/.local/bin
+      shims): 3367 passed, 1 skipped (fish absent), 1 pre-existing env failure (test_installer_writes_standalone_receiver);
+      note the suite silently mis-fails (43 failed/17 errors) if run with ~/.local/bin
+      first on PATH.'
+    created_at: '2026-10-24T23:21:05Z'
+    last_edited: '2026-10-24T23:21:05Z'
+  - id: note-4ba3870
+    text: 'QA S13 (2026-10-25): post-sh -c-wrapper lifecycle re-run PASS at HEAD db87bba2
+      — all four stories green through the real tmux surface with fake-claude. Launch:
+      meta window runs fake output, override = meta workdir path, pm which resolves
+      <meta workdir>/pm_core, fresh GitHub clone on meta/session-20261024-232809.
+      Kill-window: override gone in <3 s (HUP trap through the wrapper), pm which
+      back to /workspace/pm_core, debug/fake-claude config/captures evidence md5-identical,
+      workdir preserved. Relaunch: Using existing workdir + Resuming in-progress branch,
+      no re-clone; second invocation Switched to existing window, one meta window,
+      override unchanged, fake undisturbed (pane PID stable). Normal exit (hold=15):
+      override removed ~1-3 s after fake exit (EXIT trap), only the override removed
+      — S50 overbroad cleanup did not recur, fake-claude config incl. hold entry survived,
+      window self-closed, no tracebacks. Direct process-tree evidence: pane PID cmd
+      is sh -c pm_meta_clear_override(){...}; trap ... EXIT HUP INT TERM; fake-claude.
+      Unit tests on the tree: test_meta_override_cleanup.py 10 passed + 1 skipped
+      (fish absent). Evidence /pm-captures/scenarios/13/{1-launch,2-kill-window,3-relaunch,4-normal-exit}/.'
+    created_at: '2026-10-24T23:31:03Z'
+    last_edited: '2026-10-24T23:31:03Z'
+  - id: note-c8c7b75
+    text: 'QA scenario 16 (meta fallback interrupt) concretizer finding: the bundled
+      fake-claude swallows Ctrl-C — KeyboardInterrupt is caught in _hold_open stdin.read
+      (pm_core/fake_claude.py:414) and the fake exits 0, so `pm meta` exits 0, not
+      130. The 130/override-cleared THEN requires a PATH shim that installs a SIGINT
+      handler (sleep ~1 s, exit 130) before runpy-ing the real fake; the refined steps
+      include that shim. Also: pm meta clones the pm repo from GitHub on first run
+      (network reachable in the QA container) and the fallback triggers only when
+      no tmux session named pm-<cwd-tag> exists — a plain non-pm- session works.'
+    created_at: '2026-10-24T23:29:56Z'
+    last_edited: '2026-10-24T23:29:56Z'
+  - id: note-2722cb6
+    text: 'QA S15 (foreign ownership guard + concurrent actors on the shared override,
+      now with the sh -c pane wrapper) PASS at db87bba2: (1) foreign rewrite of ~/.pm/sessions/<tag>/override
+      survives kill-window byte-for-byte and pm which resolves through it; (2) kill-window
+      + zero-delay pm meta relaunch settles to exactly one meta window, override =
+      meta workdir, workdir reused and same meta/session branch resumed; (3) a background
+      actor alternating the override every 0.4 s through kill-window leaves exactly
+      one complete path, zero pane errors; (4) plain/HUP/INT/TERM exit modes with
+      the session dir rm -rf-ed are silent no-ops that never recreate the override,
+      and a supplemental hup-with-override-present run shows the deferred HUP trap
+      removing the owned override. tests/test_meta_override_cleanup.py 10 passed,
+      1 skipped (fish absent here). Evidence /pm-captures/scenarios/15/. Harness notes
+      for future runs: tmux commands from a scaffold pane on its own -L socket must
+      use -S /tmp/tmux-1000/default to reach the default server; strip ps pgid whitespace
+      before kill -TERM -<pgid>.'
+    created_at: '2026-10-24T23:40:06Z'
+    last_edited: '2026-10-24T23:40:06Z'
+  - id: note-6e1db0
+    text: 'User authorized an all-role GLM 5.3 Flash trial on 2026-10-24. Use provider:glm-flash
+      for implementation, review, QA, and sign-off; preserve manual merge gating.
+      Include both abnormal-exit stale override and the previously filed normal-exit
+      overbroad cleanup: rm -rf ~/.pm/sessions/<tag> deletes captures and session
+      config. Cleanup should remove only the owned override and preserve unrelated
+      session state; see existing note-2bc73f1 and #249 scenario50 evidence. Track
+      completion, defects, retries, cost and required interventions for the model
+      trial.'
+    created_at: '2026-10-24T12:07:39.999422+00:00'
+  - id: note-c598406
+    text: 'QA NEEDS_WORK: Closing the meta window clears the session override (original
+      bug repro): PASS; A normal meta exit removes only the override and preserves
+      all other session state (S50 overbroad-cleanup repro): PASS; Cleanup respects
+      foreign ownership of the shared override file: PASS; Interactive fallback cleans
+      up on interrupt (no tmux session): NEEDS_WORK; Concurrent actors on the shared
+      override — relaunch race and clone override written mid-flight: PASS (workdir:
+      /home/matt/.pm/workdirs/qa/pr-7f90572-dcd03571964e6918)'
+    created_at: '2026-10-24T21:10:59Z'
+    last_edited: '2026-10-24T21:10:59Z'
+  - id: note-4b610f5
+    text: 'QA PASS: Meta window relaunch lifecycle — close, relaunch, and re-select:
+      PASS; Abnormal teardown edges — kill-session, launch without claude, and cleanup
+      with nothing to clean: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-7f90572-fe42c244dca39bb4)'
+    created_at: '2026-10-24T21:35:38Z'
+    last_edited: '2026-10-24T21:35:38Z'
+  - id: note-c6feb31
+    text: 'QA PASS: Interactive fallback interrupt — slow-exiting foreground child,
+      double Ctrl-C, and exit status: PASS; Post-merge meta lifecycle sweep — launch,
+      override active, kill-window, relaunch, normal exit, second invocation: PASS
+      (workdir: /home/matt/.pm/workdirs/qa/pr-7f90572-8fccf0804e7851da)'
+    created_at: '2026-10-24T22:26:26Z'
+    last_edited: '2026-10-24T22:26:26Z'
+  - id: note-96f9cff
+    text: 'QA PASS: Rebuilt-branch meta lifecycle gate — kill-window, relaunch with
+      workdir reuse, normal exit: PASS; Teardown idempotency — stacked signals and
+      nothing-to-clean under any exit signal: PASS; Concurrent actors on the shared
+      override — mid-flight rewrite and relaunch race: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-7f90572-df970ed647f63de2)'
+    created_at: '2026-10-24T22:57:22Z'
+    last_edited: '2026-10-24T22:57:22Z'
+  - id: note-6d09c60
+    text: 'QA PASS: tmux meta lifecycle gate on the sh -c pane wrapper — launch, kill-window,
+      relaunch, re-select, normal exit: PASS; non-POSIX tmux default-shell (fish)
+      — the sh -c wrapper must start Claude and still clean up, with a POSIX control:
+      PASS; foreign ownership guard and concurrent actors on the shared override at
+      final HEAD: PASS; interactive fallback sanity at final HEAD — interrupt clears
+      the override and exits 130: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-7f90572-bb01b209c327ab14)'
+    created_at: '2026-10-24T23:45:19Z'
+    last_edited: '2026-10-24T23:45:19Z'
+  model: provider:glm-flash
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7f90572-bug-closing-the-pm-meta-window-kill--bf21931b
+  session_models:
+    signoff: provider:claude-work
+  signed_off_at: '2026-10-24T23:45:20.290060+00:00'
+  integration:
+    checked_at: '2026-10-24T23:45:21.589810+00:00'
+    target_repo: https://github.com/mjtomei/project_manager.git
+    base_branch: master
+    head: 8dfbc18871c4ef626d6a6820a6a7a1b4b637b4e9
+    base_sha: 8807689be39a0aade476b702a2018c24c50b7f04
+    conflicts: []
+    overlap: []
+    candidate_tree: 91750cee9ac285114f92938ec79cf9b22cba671c
+    merge_base: 8807689be39a0aade476b702a2018c24c50b7f04
+    status: up_to_date
+    base_files_count: 0
+  signoff_return:
+    verdict: SIGNOFF_IMPL
+    hop: impl
+    reason: 'Unchanged since the last sign-off: the tmux meta pane command defines
+      a POSIX shell function that a non-POSIX tmux default-shell (fish, the default
+      when $SHELL is fish) rejects at parse time, so pm meta writes the override,
+      Claude never starts and the override stays stale (the bug this PR fixes, and
+      a regression vs the pre-PR command). Re-reproduced on ebfbe438 (/pm-captures/signoff/fish-default-shell/recheck-ebfbe438/).
+      Fix: in the tmux branch pass `sh -c {shlex.quote(cmd)}` to new_window (leave
+      the interactive fallback as is), add a wrapper unit test plus HUP/normal-exit
+      behaviour tests of the wrapped command, update spec R1 premise; then review
+      meta.py and re-run the tmux lifecycle QA.'
+    reviewed_head: ebfbe438e0854039c3ff00455ed4d6962cc55caa
+    integration:
+      target_repo: https://github.com/mjtomei/project_manager.git
+      base_branch: master
+      base_sha: 8807689be39a0aade476b702a2018c24c50b7f04
+      merge_base: 6d70b5feee65e9d89c904002526f349e9a88075a
+      status: clean
+      conflicts: []
+      overlap:
+      - pm/project.yaml
+      error: null
+    applied:
+      from_head: ebfbe438e0854039c3ff00455ed4d6962cc55caa
+      merge_sha: d50211f741e41844d8860659f2918b698e75db52
+      base_sha: 8807689be39a0aade476b702a2018c24c50b7f04
+    awaiting: null
+    ts: '2026-10-24T23:09:09.847642+00:00'
+    resolved_at: '2026-10-24T23:50:34.914919+00:00'
+  signoff:
+    verdict: SIGNOFF_MERGE
+    sha: 8dfbc18871c4ef626d6a6820a6a7a1b4b637b4e9
+    ts: '2026-10-24T23:50:34.914919+00:00'
+    origin: auto-sequence
+    integration:
+      target_repo: https://github.com/mjtomei/project_manager.git
+      base_branch: master
+      base_sha: 8807689be39a0aade476b702a2018c24c50b7f04
+      candidate_tree: 91750cee9ac285114f92938ec79cf9b22cba671c
+      status: up_to_date
+      head: 8dfbc18871c4ef626d6a6820a6a7a1b4b637b4e9
 - id: pr-19990de
   plan: bugs
   title: 'Bug: vanilla/GitHub merge propagation still resolves in the project root
@@ -30662,20 +30924,28 @@ prs:
   status: pending
   depends_on:
   - pr-8df6472
+  - pr-7d68898
   description: 'Add the optimization loop described in pm/plans/plan-doc-eval.md and
-    run it against the production planning-prompt baseline on both case types. Design
-    and version the optimizer prompt that reads scores and judge rationales, separates
-    general guidance from case-specific fixes, names probable harms in the current
-    prompt and returns an edited prompt with reasoning. Maintain the two candidate
+    run it against the production planning-prompt baseline on both case types. Engineer
+    prompt changes as distinct types and measure success per type: ad hoc optimizer
+    edits; verbatim insertion of writing-guidance excerpts and of small or large exemplary
+    passages from pr-7d68898''s library; and further types such as removing instructions
+    or paraphrasing guidance instead of quoting it. Record each candidate''s change
+    type, size and source in its lineage, evaluate a child with its parent on shared
+    cases, give each type enough applications to compare, and report gain, survival,
+    share of winning ancestry and prompt-length cost per type and size with uncertainty.
+    Design and version the optimizer prompt that reads scores and judge rationales,
+    separates general guidance from case-specific fixes, names probable harms in the
+    current prompt and returns an edited prompt with reasoning. Maintain the two candidate
     populations with the genetic scheme in the plan: one evaluated only on whole-document
     cases, one evaluated on continuation cases as well, with cross-breeding allowed
     and re-scoring on entry to the whole-document population; sparse cumulative evaluation
     with stored scores reused, a few new case evaluations per candidate each generation
     and fitness as the mean of all accumulated evaluations; selection with diversity,
-    mutation through optimizer edits, crossover between strong candidates, recorded
-    lineage. Report the best of each population on whole-document validation cases
-    as the measured benefit of continuations. Select using validation, and reserve
-    final cases and an independent evaluator for the chosen candidate. Include checkpoint/resume,
+    typed mutation, crossover between strong candidates, recorded lineage. Report
+    the best of each population on whole-document validation cases as the measured
+    benefit of continuations. Select using validation, and reserve final cases and
+    an independent evaluator for the chosen candidate. Include checkpoint/resume,
     resource accounting and panel continuation or stop decisions. Estimate the share
     of weekly subscription limits taken by campaigns of different population sizes
     and generation counts, and pick the campaign shape from that estimate before running,
@@ -30719,7 +30989,10 @@ prs:
     panel membership/aggregation, and that fitness never pools incompatible scoring
     configurations. Retain real open-model baseline/candidate comparisons and the
     panel-feedback comparison. Check that no weak-brief case enters whole-document
-    fitness, validation or final evaluation.
+    fitness, validation or final evaluation. Check that every candidate records its
+    change type, size and source, that per-type results come from parent-child comparisons
+    on shared cases, that each type receives its configured share of applications,
+    and that withheld exemplar documents never appear as evaluation cases.
 
 
     Files: experiments/plan-writing/, reusable evaluation/optimization modules under
@@ -30728,7 +31001,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677755+00:00'
-  updated_at: '2026-10-23T22:00:43.801990+00:00'
+  updated_at: '2026-10-24T22:07:20.813644+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32009,26 +32282,26 @@ prs:
     on reader expectations, audience, working memory in reading and the curse of knowledge,
     starting from Gopen and Swan''s reader-expectation approach, Flower''s writer-based
     versus reader-based prose and Kintsch''s construction-integration model, together
-    with work on LLM-simulated readers. Turn each reference into a seed prompt for
-    a genetic search over the interleaved-generation prompt, using pr-09c4e8e''s populations,
-    sparse cumulative evaluation, optimizer and lineage with the evaluator fixed;
-    add the production baseline and the pr-09c4e8e winner, each with an annotation
-    instruction, as further seeds. Compare the best interleaved prompt with plain
-    one-shot generation from the production baseline and from the pr-09c4e8e winner,
-    sharing cases and writers, on strong-brief whole-document cases and on continuation
-    cases as separate tracks. Report progression, clarity, concision and requirement
-    coverage in particular, by track, document family and PM task kind, with length
-    changes beside score changes and usage including annotation tokens. Retain the
-    interleaved streams with lineage. If the fixed rubric cannot register reader strain,
-    report that instead of adding a measure. Estimate the share of weekly subscription
-    limits for the planned case counts, population sizes and generation counts first
-    and keep every run under the twenty percent per-subscription single-run ceiling.
-    Environment dependency for review and QA: real runs need the claude-mixed router
-    and the routes behind each role (the ChatGPT and Grok bridges, OpenRouter, the
-    work account); when a required route is down, return INPUT_REQUIRED asking the
-    human to restore it, and record a coverage gap only for a route still unavailable
-    after that. Locally served models are out of scope here and wait for the later
-    local-model PR.
+    with work on LLM-simulated readers. Turn each reference into a seed prompt, quoting
+    the variation library''s verbatim excerpts where available, for a genetic search
+    over the interleaved-generation prompt, using pr-09c4e8e''s populations, sparse
+    cumulative evaluation, optimizer and lineage with the evaluator fixed; add the
+    production baseline and the pr-09c4e8e winner, each with an annotation instruction,
+    as further seeds. Compare the best interleaved prompt with plain one-shot generation
+    from the production baseline and from the pr-09c4e8e winner, sharing cases and
+    writers, on strong-brief whole-document cases and on continuation cases as separate
+    tracks. Report progression, clarity, concision and requirement coverage in particular,
+    by track, document family and PM task kind, with length changes beside score changes
+    and usage including annotation tokens. Retain the interleaved streams with lineage.
+    If the fixed rubric cannot register reader strain, report that instead of adding
+    a measure. Estimate the share of weekly subscription limits for the planned case
+    counts, population sizes and generation counts first and keep every run under
+    the twenty percent per-subscription single-run ceiling. Environment dependency
+    for review and QA: real runs need the claude-mixed router and the routes behind
+    each role (the ChatGPT and Grok bridges, OpenRouter, the work account); when a
+    required route is down, return INPUT_REQUIRED asking the human to restore it,
+    and record a coverage gap only for a route still unavailable after that. Locally
+    served models are out of scope here and wait for the later local-model PR.
 
 
     Tests: Verify that extraction is deterministic, that malformed interleaving is
@@ -32049,7 +32322,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-23T21:44:50.718137+00:00'
-  updated_at: '2026-10-23T21:59:19.921855+00:00'
+  updated_at: '2026-10-24T22:07:22.466709+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32328,21 +32601,22 @@ prs:
     the writer, critic and reviser prompts, with round count and critic configuration
     drawn from those pr-eadd1b7 found useful; seed the population with pr-eadd1b7''s
     best configuration and pr-09c4e8e''s winning prompts. Reuse pr-09c4e8e''s populations,
-    sparse cumulative evaluation, optimizer, lineage and checkpoint/resume, with its
-    two-population whole-document/continuation scheme and strong-brief case selection;
-    the optimizer may read in-loop critiques and final scores on development cases
-    only. Compare the winner with the one-shot campaign winner, the best fixed iterative
-    configuration and the production baseline on validation and reserved final cases,
-    at comparable budgets as well as equal call counts, separately for plans, both
-    spec types and sign-off reports and for each writer model; report gains, usage
-    and latency. Estimate the share of weekly subscription limits for the planned
-    case counts, population sizes and generation counts first and keep every run under
-    the twenty percent per-subscription single-run ceiling. Environment dependency
-    for review and QA: real runs need the claude-mixed router and the routes behind
-    each role (the ChatGPT and Grok bridges, OpenRouter, the work account); when a
-    required route is down, return INPUT_REQUIRED asking the human to restore it,
-    and record a coverage gap only for a route still unavailable after that. Locally
-    served models are out of scope here and wait for the later local-model PR.
+    sparse cumulative evaluation, optimizer, typed changes with per-type reporting,
+    lineage and checkpoint/resume, with its two-population whole-document/continuation
+    scheme and strong-brief case selection; the optimizer may read in-loop critiques
+    and final scores on development cases only. Compare the winner with the one-shot
+    campaign winner, the best fixed iterative configuration and the production baseline
+    on validation and reserved final cases, at comparable budgets as well as equal
+    call counts, separately for plans, both spec types and sign-off reports and for
+    each writer model; report gains, usage and latency. Estimate the share of weekly
+    subscription limits for the planned case counts, population sizes and generation
+    counts first and keep every run under the twenty percent per-subscription single-run
+    ceiling. Environment dependency for review and QA: real runs need the claude-mixed
+    router and the routes behind each role (the ChatGPT and Grok bridges, OpenRouter,
+    the work account); when a required route is down, return INPUT_REQUIRED asking
+    the human to restore it, and record a coverage gap only for a route still unavailable
+    after that. Locally served models are out of scope here and wait for the later
+    local-model PR.
 
 
     Tests: Verify that fitness comes only from the fixed evaluator''s score of each
@@ -32361,7 +32635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-23T22:00:22.651612+00:00'
-  updated_at: '2026-10-23T22:00:22.651612+00:00'
+  updated_at: '2026-10-24T22:07:21.702566+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32625,6 +32899,50 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-7d68898
+  plan: plan-doc-eval
+  title: 'Prompt-variation library: writing-guidance excerpts and exemplary technical
+    writing'
+  branch: pm/pr-7d68898-prompt-variation-library-writing-guidance-excerpts
+  status: pending
+  depends_on:
+  - pr-44f807f
+  - pr-9f111ef
+  description: 'Build the material for typed prompt changes in pm/plans/plan-doc-eval.md.
+    Collect excerpts from the writing-guidance sources behind the rubric (pr-44f807f''s
+    references.json: requirement standards, plain-language and style guides, process
+    templates, reader-expectation guidance) and passages of lauded technical writing,
+    chosen by a recorded criterion for their standing, such as being cited as exemplary
+    by a style guide or by a community''s own process documents, rather than by preference.
+    Size each item small (a sentence or paragraph), medium (a section) or large (a
+    whole document), tag it with the rubric dimensions it illustrates, and record
+    source, location, licence and the evidence for its standing. Leave out exemplars
+    whose documents are evaluation cases, or mark those documents and their split
+    groups so every evaluation split withholds them. Keep verbatim text in gitignored
+    data/ unless its licence allows committing it, and commit the index. Define the
+    operator interface pr-09c4e8e uses to insert an item into a prompt, attributed
+    and labelled as guidance or as an example. Environment dependency: needs web access
+    to fetch sources.
+
+
+    Tests: Verify that every item records source, location, licence, standing evidence,
+    size and dimension tags, that no item''s document remains in an evaluation split
+    unless withheld, that verbatim text of non-redistributable sources is not committed,
+    and that the insertion operator renders guidance and example items with attribution
+    at each size.
+
+
+    Files: library index and builder under experiments/plan-writing/, gitignored excerpt
+    store, insertion operator, relevant tests'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-24T22:07:19.975334+00:00'
+  updated_at: '2026-10-24T22:07:19.975334+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-a42a4f8
   plan: bugs
   title: 'Bug: a >120 KB QA instruction prompt raises an uncaught PromptTooLargeError
@@ -32664,6 +32982,75 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-a591cbf
+  plan: bugs
+  title: 'Bug: meta cleanup can delete a concurrently replaced override'
+  branch: pm/pr-a591cbf-bug-meta-cleanup-can-delete-a-concurrently-replace
+  status: pending
+  depends_on:
+  - pr-7f90572
+  description: "Follow-up to #251 / pr-7f90572, accepted by the user as a separate\
+    \ bug when authorizing #251 merge on 2026-10-24. Independently reproduced twice\
+    \ on signed-off HEAD 8dfbc18871c4ef626d6a6820a6a7a1b4b637b4e9.\n\npm_core/cli/meta.py::_build_meta_pane_cmd\
+    \ checks the override with cat and then removes the pathname in a separate command.\
+    \ If another actor writes its own override after the read but before unlink, the\
+    \ trap compares the old value and deletes the new actor's override. The ownership\
+    \ check is not atomic. Expected: the foreign override survives; actual: it is\
+    \ deleted. Other session state survives.\n\nThe existing concurrent-actor QA checks\
+    \ final state while a writer continues afterward, which can mask this interleaving.\
+    \ Add deterministic coverage that pauses the actual handler after reading the\
+    \ owned value, replaces the override with a foreign path, then resumes cleanup.\
+    \ Address the ownership lifecycle and relevant writers together; do not prescribe\
+    \ a particular locking mechanism before implementation. Retain normal/abnormal-exit\
+    \ cleanup, shell compatibility, and preservation of unrelated session state. Consider\
+    \ relaunch ownership as well as foreign-path replacement.\n\nReproduction below\
+    \ uses the real PR251 handler, a temporary home and a synchronized cat shim; it\
+    \ never touches real session overrides. Run from a checkout containing #251 with\
+    \ PM dependencies installed. Observed JSON: foreign_override_survived=false, debug_survived=true,\
+    \ exit=0. Original evidence: /home/matt/.local/state/pm-pr-shepherd/251-independent-report-review-20261025T000152Z/{repro.py,result.json}.\
+    \ A durable copy will be stored under pm/bug-repros/ alongside this registry entry.\n\
+    \n```python\n\"\"\"Reproduce the override check/unlink race using the real PR251\
+    \ handler.\n\nRun from the PR251 checkout with its dependencies available. Only\
+    \ temporary\nfiles are modified. The cat shim pauses after reading the old value,\
+    \ making\na possible reader/writer scheduling order deterministic.\n\"\"\"\nimport\
+    \ json\nimport os\nfrom pathlib import Path\nimport shlex\nimport subprocess\n\
+    import sys\nimport tempfile\nimport time\nfrom unittest.mock import patch\n\n\
+    sys.path.insert(0, str(Path.cwd()))\nfrom pm_core.cli.meta import _build_meta_pane_cmd\n\
+    \nwith tempfile.TemporaryDirectory(prefix=\"pm251-guard-race-\") as temporary:\n\
+    \    root = Path(temporary)\n    session_dir = root / \".pm/sessions/isolated-test\"\
+    \n    session_dir.mkdir(parents=True)\n    override = session_dir / \"override\"\
+    \n    old_owner = root / \"meta-root\"\n    new_owner = root / \"foreign-root\"\
+    \n    override.write_text(str(old_owner) + \"\\n\")\n    (session_dir / \"debug\"\
+    ).write_text(\"keep\\n\")\n    with patch(\"pathlib.Path.home\", return_value=root):\n\
+    \        command = _build_meta_pane_cmd(\"true\", \"isolated-test\", old_owner)\n\
+    \n    binaries = root / \"bin\"\n    binaries.mkdir()\n    ready = root / \"cat-read\"\
+    \n    release = root / \"writer-done\"\n    cat = binaries / \"cat\"\n    cat.write_text(\n\
+    \        '#!/bin/sh\\n/bin/cat \"$@\"\\n'\n        + \"/usr/bin/touch \" + shlex.quote(str(ready))\
+    \ + \"\\n\"\n        + \"while [ ! -f \" + shlex.quote(str(release))\n       \
+    \ + \" ]; do /bin/sleep 0.01; done\\n\"\n    )\n    cat.chmod(0o755)\n    environment\
+    \ = dict(os.environ)\n    environment[\"PATH\"] = str(binaries) + \":/usr/bin:/bin\"\
+    \n    process = subprocess.Popen(\n        [\"/bin/sh\", \"-c\", command], env=environment,\n\
+    \        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,\n    )\n \
+    \   try:\n        deadline = time.monotonic() + 8\n        while not ready.exists()\
+    \ and time.monotonic() < deadline:\n            if process.poll() is not None:\n\
+    \                break\n            time.sleep(0.01)\n        if not ready.exists():\n\
+    \            raise RuntimeError(\"Reader synchronization failed\")\n        override.write_text(str(new_owner)\
+    \ + \"\\n\")\n        release.touch()\n        stdout, stderr = process.communicate(timeout=5)\n\
+    \        print(json.dumps({\n            \"foreign_override_survived\": override.exists(),\n\
+    \            \"debug_survived\": (session_dir / \"debug\").exists(),\n       \
+    \     \"exit\": process.returncode,\n            \"stdout\": stdout,\n       \
+    \     \"stderr\": stderr,\n        }, indent=2))\n    finally:\n        release.touch()\n\
+    \        if process.poll() is None:\n            process.kill()\n            process.wait()\n\
+    \n```\n"
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-25T00:07:20.058339+00:00'
+  updated_at: '2026-10-25T00:07:20.058339+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-e7ee94d
   plan: bugs
   title: 'Bug: pm pr note add creates duplicate note IDs for identical text, making
@@ -32689,6 +33076,10 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-25T00:26:43.182859+00:00'
   updated_at: '2026-10-25T00:26:43.182859+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
   started_at: null
   reviewed_at: null
   merged_at: null

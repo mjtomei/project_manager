@@ -45,3 +45,7 @@ These supplement the existing execution benchmark. Source and test connections h
 ## Connection to PM evaluation
 
 This extends the document-only experiment within [plan-self-improve](../plans/plan-self-improve.md) to execution outcomes, before the recursive tournament or full PM capstone is required. Reuse the resulting task inputs, prompt versions, execution artifacts and outcome accounting for [plan-delivery](../plans/plan-delivery.md)'s D9 comparisons as the runtime becomes available. The delivery plan's auto-fix, cosmic_ac, Omerta and living-document demonstrations remain separate required evidence of PM's usefulness.
+
+## Beyond planning and code execution
+
+This is one stage of an improvement flow covering all PM use cases. Add project import/discovery and automatic plan/recipe generation as early adoption cases from [plan-delivery](../plans/plan-delivery.md): begin with existing repositories and user goals, discover relevant artifacts, generate and exercise missing recipes, and measure useful work plus setup/correction/coordination effort. Extend to recovery, research verification, living-document maintenance and Radar as those capabilities become runnable. Document quality remains the first bootstrap; later promotion requires the appropriate downstream evidence, not merely a better writing score.
