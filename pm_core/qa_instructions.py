@@ -16,14 +16,6 @@ from pathlib import Path
 
 import yaml
 
-from pm_core.prompt_bounds import (
-    LIBRARY_ITEMS_MAX as _LIBRARY_ITEMS_MAX,
-    LIBRARY_LIST_BUDGET as _LIBRARY_LIST_BUDGET,
-    LIBRARY_TOTAL_BUDGET as _LIBRARY_TOTAL_BUDGET,
-    MOCKS_BUDGET as _MOCKS_BUDGET,
-    bounded_join, bounded_text,
-)
-
 
 # ---------------------------------------------------------------------------
 # Directory helpers
@@ -310,26 +302,16 @@ def instruction_summary_for_prompt(pm_root: Path,
             filename = Path(item['path']).name
             return f"- **{item['title']}** (`{filename}`){desc}"
 
-        lines.append(bounded_join(
-            items, _item_line, max_items=_LIBRARY_ITEMS_MAX,
-            max_bytes=_LIBRARY_LIST_BUDGET,
-            omitted_note=lambda n: (
-                f"- ... (+{n} more; run `pm qa list` to see the library)"),
-        ))
+        lines.append("\n".join(_item_line(i) for i in items))
         lines.append("")
 
     if not lines:
         return "No QA instructions found."
 
-    # Aggregate bound: the per-category budgets bound each listing, but three
-    # categories still multiply them, and the descriptions are user-authored
-    # free text.  The marker names `pm qa list`, which lists every item.
-    return bounded_text(
-        "\n".join(lines),
-        max_bytes=_LIBRARY_TOTAL_BUDGET,
-        pointer="`pm qa list`",
-        label="QA library summary",
-    )
+    # The library entries are instructions, so they are inlined whole and never
+    # truncated or count-capped; an over-limit prompt is delivered by the
+    # launcher's file-backed bootstrap instead (see pm_core.prompt_bounds).
+    return "\n".join(lines)
 
 
 def mocks_for_prompt(pm_root: Path) -> str:
@@ -358,21 +340,8 @@ def mocks_for_prompt(pm_root: Path) -> str:
         desc = f" — {mock['description']}" if mock["description"] else ""
         return f"### {mock['title']}{desc}\n\n{body.strip()}\n"
 
-    # No per-mock bound here: bounded_join only omits when given max_items /
-    # max_bytes, and the aggregate bound below owns the degradation (it drops
-    # the middle of the listing).  An omitted_note passed without a bound
-    # would never fire.
-    body = bounded_join(mocks, _mock_block, separator="\n")
-    text = header + body + "\n"
-    return bounded_text(
-        text,
-        max_bytes=_MOCKS_BUDGET,
-        # The marker's sentence is "Read the full text: <pointer>", so the
-        # pointer must return the *bodies* this bound cut.  `pm qa mocks list`
-        # prints ids/titles/descriptions only, so it cannot be that pointer —
-        # `pm qa mocks show` prints a mock's body, and the directory holds all
-        # of them.
-        pointer=("`pm qa mocks show <mock-id>` (all definitions: "
-                 "`pm/qa/mocks/`)"),
-        label="mock definitions",
-    )
+    # Mock bodies are guidance the scenarios are written against, so they are
+    # inlined whole and never truncated; an over-limit prompt is delivered by
+    # the launcher's file-backed bootstrap instead.
+    body = "\n".join(_mock_block(m) for m in mocks)
+    return header + body + "\n"

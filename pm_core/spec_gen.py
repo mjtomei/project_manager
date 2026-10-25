@@ -23,8 +23,6 @@ from pathlib import Path
 
 import click
 
-from pm_core.prompt_bounds import SPEC_BUDGET, bounded_text
-
 from pm_core import store
 from pm_core.claude_launcher import launch_claude_print
 from pm_core.paths import configure_logger, get_global_setting_value
@@ -33,7 +31,6 @@ _log = configure_logger("pm.spec_gen")
 
 # Phase names that have specs
 PHASES = ("impl", "qa")
-
 
 
 def get_spec_mode() -> str:
@@ -140,19 +137,14 @@ def _build_spec_prompt(data: dict, pr: dict, phase: str) -> str:
     base_branch = data.get("project", {}).get("base_branch", "master")
     workdir = pr.get("workdir", "")
 
-    # Gather prior specs for context.  Bound the inlined spec so a large
-    # implementation spec cannot blow the prompt's argv budget; the marker
-    # points at the full spec file.
+    # Gather prior specs for context.  Specs are instructions, so they are
+    # inlined whole and never truncated: a spec that would push the prompt
+    # over PROMPT_ARG_LIMIT is delivered by the launcher's file-backed
+    # bootstrap instead (see pm_core.prompt_bounds for the policy).
     prior_specs = ""
     if phase == "qa":
         impl_spec = get_spec(pr, "impl")
         if impl_spec:
-            impl_spec = bounded_text(
-                impl_spec,
-                max_bytes=SPEC_BUDGET,
-                pointer=f"`pm pr spec {pr.get('id', '???')} impl`",
-                label="implementation spec",
-            )
             prior_specs += f"""
 ## Implementation Spec (spec_impl)
 
@@ -755,16 +747,9 @@ def format_spec_for_prompt(pr: dict, phase: str) -> str:
             + staleness_note
         )
 
-    # Bound the spec so a large spec cannot blow the prompt's argv budget.
-    # Head + tail truncation keeps the requirements and the closing
-    # pass/fail criteria; the marker points at the full spec file.
-    spec = bounded_text(
-        spec,
-        max_bytes=SPEC_BUDGET,
-        pointer=f"`pm pr spec {pr_id} {phase}` (file: {file_path})",
-        label=label,
-    )
-
+    # The spec is instruction text, so it is inlined whole and never
+    # truncated; an over-limit prompt is delivered by the launcher's
+    # file-backed bootstrap rather than by cutting the spec.
     return f"""
 ## {label}
 

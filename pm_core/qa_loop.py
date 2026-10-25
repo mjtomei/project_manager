@@ -31,8 +31,7 @@ from pm_core import qa_instructions
 from pm_core.paths import configure_logger
 from pm_core.prompt_bounds import (
     ARTIFACT_PATHS_MAX as _ARTIFACT_PATHS_MAX,
-    CONCRETIZE_INSTRUCTION_BUDGET, QA_CHILD_STEPS_BUDGET,
-    bounded_join, bounded_lines, bounded_text,
+    bounded_join, bounded_lines,
 )
 from pm_core.spec_gen import get_spec as _get_qa_spec
 from pm_core.loop_shared import (
@@ -1514,37 +1513,16 @@ def _build_concretization_prompt(scenario: QAScenario, pr_branch: str,
                                   instruction_ref: str | None = None) -> str:
     """Build a prompt that verifies and refines scenario steps against code.
 
-    *instruction_ref* is the instruction's path relative to ``pm/qa/`` (for
-    example ``instructions/tui-manual-test.md`` or
-    ``regression/command-dedup.md``), as stored on the scenario before it is
-    installed into the scenario scratch dir.  The truncation marker names that
-    exact file, so the session can read the text the bound cut.  Without it the
-    marker names the library directory generically — it must not claim
-    ``pm/qa/instructions/``: ``qa_instructions.resolve_instruction_ref``
-    resolves INSTRUCTION references against ``instructions/``, ``regression/``
-    and ``artifacts/``, so a >20 KB regression test lives under
-    ``pm/qa/regression/`` and the old marker pointed at a directory that does
-    not contain it.
+    The instruction file is inlined whole: it is instruction text, so it is
+    never truncated.  A prompt too large for one argv entry is delivered by
+    the launcher's file-backed bootstrap instead.
     """
     this_pr = pr_id or "<pr-id>"
     instruction_section = ""
     if instruction_content:
-        # Only a library-relative ref is a usable path; a resumed snapshot may
-        # carry the absolute scratch copy (``_install_instruction_file``
-        # rewrites it before clearing), which would not resolve from the
-        # scenario workdir.
-        relative_ref = bool(instruction_ref) and not Path(
-            instruction_ref).is_absolute()
-        pointer = (
-            f"`pm/qa/{instruction_ref}`" if relative_ref
-            else "the QA library file under `pm/qa/` "
-                 "(run `pm qa list` for every item)")
-        bounded_instruction = bounded_text(
-            instruction_content,
-            max_bytes=CONCRETIZE_INSTRUCTION_BUDGET,
-            pointer=pointer,
-            label="instruction file",
-        )
+        # The instruction file is inlined whole and never truncated; an
+        # over-limit prompt is delivered by the launcher's file-backed
+        # bootstrap instead.
         instruction_section = f"""
 ## Instruction File
 
@@ -1552,14 +1530,12 @@ The scenario references an instruction file whose full contents are below.
 Incorporate its setup steps into your refined step list so the test agent
 does not need to read the file separately.
 
-{bounded_instruction}
+{instruction_content}
 """
-    steps_text = bounded_text(
-        scenario.steps or "",
-        max_bytes=QA_CHILD_STEPS_BUDGET,
-        pointer="the QA plan in the QA planner transcript",
-        label="scenario steps",
-    )
+    # Scenario steps are the guidelines the session works from, so they are
+    # inlined whole and never truncated; an over-limit prompt is delivered by
+    # the launcher's file-backed bootstrap instead.
+    steps_text = scenario.steps or ""
     return f"""You are refining the test steps for QA scenario {scenario.index}: "{scenario.title}"
 
 ## Scenario
@@ -3230,12 +3206,10 @@ the artifact with no explanation are **not** valid reasons.
     # the judgment step shifts to Step 4.
     judgment_step_no = 4 if artifact_names else 3
 
-    steps_text = bounded_text(
-        scenario.steps or "",
-        max_bytes=QA_CHILD_STEPS_BUDGET,
-        pointer="the QA plan in the QA planner transcript",
-        label="scenario steps",
-    )
+    # Scenario steps are the guidelines the session works from, so they are
+    # inlined whole and never truncated; an over-limit prompt is delivered by
+    # the launcher's file-backed bootstrap instead.
+    steps_text = scenario.steps or ""
 
     return f"""You are verifying the output of QA scenario {scenario.index}: "{scenario.title}"
 

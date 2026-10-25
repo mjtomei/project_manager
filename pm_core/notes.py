@@ -17,7 +17,6 @@ Local section (gitignored, in notes-local.txt):
 from pathlib import Path
 import re
 
-from pm_core.prompt_bounds import SESSION_NOTES_BUDGET, bounded_text
 
 NOTES_FILENAME = "notes.txt"
 LOCAL_NOTES_FILENAME = "notes-local.txt"
@@ -33,28 +32,6 @@ PROMPT_SECTIONS: dict[str, tuple[str, ...]] = {
     "merge": ("General", "Merge", "Local"),
     "watcher": ("General", "Watcher", "Local"),
 }
-
-
-def notes_pointer() -> str:
-    """Where a session reads the session notes in full.
-
-    The notes blocks are byte-bounded (see ``notes_section`` /
-    ``notes_for_prompt``), and the omission marker has to name a way to read
-    the text that was cut.  It names the notes *files*, not ``pm notes``: that
-    command opens an interactive editor (with a splash that waits for a
-    keypress), so a session following the marker gets no text at all.  The
-    paths are relative to the project root so they resolve both on the host
-    and inside a container, where the workdir is mounted at ``/workspace`` and
-    an absolute host path does not exist.
-
-    ``notes.txt`` is git-tracked, so it is present in the container workdir
-    clone.  ``notes-local.txt`` is gitignored (``ensure_notes_file``), so it
-    exists only on the machine that runs pm — the marker says that instead of
-    promising a path a container session cannot read (the local text is still
-    inlined from the host up to the budget).
-    """
-    return (f"`pm/{NOTES_FILENAME}` in the project root "
-            f"(`pm/{LOCAL_NOTES_FILENAME}` is local to the machine running pm)")
 
 
 # Descriptions shown in the edit template header lines.
@@ -329,14 +306,10 @@ def notes_section(root: Path, prompt_type: str | None = None) -> str:
         return ""
 
     combined = "\n\n".join(parts)
-    block = f"\n## Session Notes\n{combined}\n"
-    # Bound the block so a long notes file cannot blow the prompt's argv
-    # budget; the marker points at the notes files for the full text.
-    return bounded_text(
-        block, max_bytes=SESSION_NOTES_BUDGET,
-        pointer=notes_pointer(),
-        label="session notes",
-    )
+    # Session notes are user-authored instructions, so they are inlined whole
+    # and never truncated; an over-limit prompt is delivered by the launcher's
+    # file-backed bootstrap instead (see pm_core.prompt_bounds).
+    return f"\n## Session Notes\n{combined}\n"
 
 
 # Mapping from prompt_type to the specific section name.
@@ -385,13 +358,7 @@ def notes_for_prompt(root: Path, prompt_type: str) -> tuple[str, str]:
                 f"for {label} sessions:\n\n{content}\n"
             )
 
-    # Bound the user-authored notes so a long notes file cannot blow the
-    # prompt's argv budget; the marker points at the notes files for the full
-    # text.  Empty blocks pass through unchanged.
-    pointer = notes_pointer()
-    general_block = bounded_text(general_block, max_bytes=SESSION_NOTES_BUDGET,
-                                 pointer=pointer, label="session notes")
-    specific_block = bounded_text(specific_block, max_bytes=SESSION_NOTES_BUDGET,
-                                  pointer=pointer,
-                                  label=f"{section_name or prompt_type} notes")
+    # Session notes are user-authored instructions, so both blocks are inlined
+    # whole and never truncated; an over-limit prompt is delivered by the
+    # launcher's file-backed bootstrap instead.
     return general_block, specific_block

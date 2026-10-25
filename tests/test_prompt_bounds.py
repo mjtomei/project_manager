@@ -2,9 +2,22 @@
 
 Prompts are delivered to claude as one argv entry.  Linux caps a single
 argument at MAX_ARG_STRLEN (128 KiB); exceeding it fails ``execve`` with
-E2BIG.  Builders that inline collections must keep their output within
-``PROMPT_ARG_LIMIT`` and, when they trim, name what was omitted plus a way to
-read the full detail.
+E2BIG.  Only two kinds of content are ever shortened (see
+``pm_core.prompt_bounds``): PR notes, and pure enumerations — sibling/plan
+and dependency listings, filesystem/worktree/artifact path lists, QA scenario
+verdicts, watcher lists, merge-error and verification-pane output.  When one
+of those trims, it names what was omitted plus a way to read the full detail.
+
+Everything instruction-shaped — specs, PR descriptions, session notes, QA
+instruction-library entries, mock bodies, QA scenario steps and concretization
+instructions, plan files — is inlined **whole and never truncated**.  Such a
+prompt may therefore exceed ``PROMPT_ARG_LIMIT``; that is correct.  The
+launcher then writes the complete prompt to a file and passes a short
+bootstrap argv, so every instruction still reaches the session intact
+(``_materialize_oversized_prompt`` / ``build_claude_shell_cmd``).  The
+assertions below reflect that split: ``_assert_bounded`` for prompts that
+still fit, ``_assert_preserved_over_limit`` for prompts that are expected to
+overflow and be delivered by the file-backed bootstrap.
 """
 
 import json
@@ -78,6 +91,34 @@ def _assert_bounded(prompt, *needles):
     assert size <= PROMPT_ARG_LIMIT, f"prompt is {size} bytes"
     for needle in needles:
         assert needle in prompt, f"missing pointer: {needle!r}"
+
+
+def _assert_preserved_over_limit(prompt, tmp_path, *needles):
+    """A prompt whose instruction blocks are inlined whole may exceed
+    ``PROMPT_ARG_LIMIT`` — that is correct, not a failure.  Assert the
+    still-bounded enumerations kept their omission markers, then that the
+    launcher carries the complete prompt to claude by file, byte for byte.
+
+    *needles* name the markers of blocks that are still bounded (PR notes,
+    sibling/plan listings, integration paths, …); an implementation that
+    dropped one fails here just as ``_assert_bounded`` would.
+    """
+    size = prompt_bytes(prompt)
+    assert size > PROMPT_ARG_LIMIT, f"prompt is only {size} bytes"
+    for needle in needles:
+        assert needle in prompt, f"missing pointer: {needle!r}"
+    with patch("pm_core.claude_launcher.log_shell_command"), \
+            patch("pm_core.paths.skip_permissions_enabled", return_value=False):
+        cmd = build_claude_shell_cmd(prompt=prompt, cwd=str(tmp_path),
+                                     session_id="s")
+    # argv stays small and points at the file; the prompt itself is not argv.
+    assert prompt_bytes(cmd) < PROMPT_ARG_LIMIT, prompt_bytes(cmd)
+    assert "Read that file" in cmd
+    files = list((tmp_path / "pm" / "prompts").glob("pm_prompt_*.txt"))
+    assert files, "no prompt file was written"
+    assert files[0].read_text() == prompt, "the prompt file is not the prompt"
+    for f in files:
+        f.unlink()
 
 
 # ---------------------------------------------------------------------------
@@ -685,22 +726,22 @@ class TestSignoffPromptBounding:
         assert "$CAP/scenarios/<n>/verdict.md" in p
         assert 'CAP="$(pm qa captures-path pr-x)"' in p
 
-    def test_fit_prompt_qa_marker_names_the_verdict_reader(
+    def test_signoff_qa_verdict_block_still_bounds_and_names_the_reader(
             self, _isolated_pm_root, tmp_path, monkeypatch):
-        """fit_prompt's marker says "Read the full text: <pointer>", so a cut
-        QA-scenario block must point at the verdicts — `pm qa captures-path`
-        only prints a directory, not the text it cut.
+        """QA scenario verdicts are a pure enumeration, so the block still
+        count-caps; the dropped verdicts are reported with a reader that
+        returns them.
 
-        Reachable: the per-line caps are in *characters* (120-char title,
-        200-char reason), so 40 scenarios of multi-byte text make the block
-        ~40 KB, and a PR large in several dimensions at once pushes the prompt
-        over PROMPT_ARG_LIMIT.  (This is the block-level marker; the block's
-        own count marker already names the same reader.)
+        60 scenarios exceed the 40-scenario cap, so 20 are dropped and the
+        block's own marker names `$CAP/scenarios/<n>/verdict.md` — the block
+        is no longer cut by fit_prompt (its marker said "QA scenario summary
+        truncated"), because the instruction blocks around it are inlined
+        whole and the over-limit prompt goes out by file.
         """
         self._qa_status(tmp_path, monkeypatch, [
             {"index": i, "title": "情" * 120, "verdict": "PASS",
              "verdict_reason": "由" * 200}
-            for i in range(1, 41)
+            for i in range(1, 61)
         ])
         spec_dir = _isolated_pm_root / "specs" / "pr-x"
         spec_dir.mkdir(parents=True)
@@ -715,14 +756,18 @@ class TestSignoffPromptBounding:
         siblings = [_pr(f"pr-s{i:03d}", plan="pl-1", title="L" * 255)
                     for i in range(400)]
         p = prompt_gen.generate_signoff_prompt(_data(pr, siblings), "pr-x")
-        _assert_bounded(p)
-        markers = [line for line in p.splitlines()
-                   if "QA scenario summary truncated" in line]
-        assert markers, "the QA block was not abbreviated"
-        assert "$CAP/scenarios/<n>/verdict.md" in markers[0]
-        assert "pm qa captures-path" not in markers[0]
+        # The instruction blocks are whole; the verdict block is the one that
+        # is bounded, and fit_prompt no longer cuts it.
+        assert "S" * 200_000 in p
+        assert "D" * 40_000 in p
+        assert not [line for line in p.splitlines()
+                    if "QA scenario summary truncated" in line]
+        assert p.count("- Scenario ") == 40  # 60 offered, 40 kept
+        assert "(+20 more scenarios" in p
+        assert "$CAP/scenarios/<n>/verdict.md" in p
         # The reader is only live because this prompt defines CAP.
         assert 'CAP="$(pm qa captures-path pr-x)"' in p
+        _assert_preserved_over_limit(p, tmp_path)
 
     def test_pr_notes_markers_name_the_concrete_pr_id(self):
         """The omission marker is the only recovery path for the abbreviated
@@ -893,12 +938,14 @@ class TestFitPrompt:
 # ---------------------------------------------------------------------------
 
 class TestBudgetCoordination:
-    """Every block at its own budget at once must still fit one argv entry.
+    """A PR large in several dimensions at once.
 
-    The per-block budgets bound each block individually, but a PR that is
-    large in several dimensions at once (many notes, a big spec, many
-    scenarios, a long description, a big notes.txt) can sum past
-    PROMPT_ARG_LIMIT — the sign-off prompt's static text alone is ~19 KB.
+    The per-block bounds cap the enumerations and the PR notes, but the
+    instruction blocks (spec, description, notes.txt, sign-off return) are
+    inlined whole, so a PR that is large in several dimensions at once makes
+    the assembled prompt exceed PROMPT_ARG_LIMIT.  That is correct: the
+    launcher then writes the complete prompt to a file and passes a short
+    bootstrap argv, so every instruction still arrives intact.
     """
 
     def _pathological(self, _isolated_pm_root, monkeypatch,
@@ -932,33 +979,56 @@ class TestBudgetCoordination:
                         title="LONGTITLE " * 600) for i in range(200)]
         return pr, _data(pr, siblings)
 
-    def test_signoff_fits_when_every_block_is_large(self, _isolated_pm_root,
-                                                    monkeypatch):
+    def test_signoff_preserves_instructions_when_every_block_is_large(
+            self, _isolated_pm_root, tmp_path, monkeypatch):
         pr, data = self._pathological(_isolated_pm_root, monkeypatch)
         p = prompt_gen.generate_signoff_prompt(data, "pr-x")
-        _assert_bounded(p, "pm pr note list pr-x")
-        # The sign-off routing contract must survive the shrink.
+        # The instruction blocks are inlined whole, with no truncation marker;
+        # the prompt overflows and goes out by file.  (The sign-off prompt
+        # carries no session notes, so notes.txt is not part of it.)
+        assert "s" * 200000 in p
+        assert "D" * 40_000 in p
+        assert "truncated to fit" not in p
+        # The sign-off routing contract must survive intact.
         assert "pm-signoff-verdict" in p
+        # Still bounded: PR notes, the sibling listing, and the integration
+        # paths each keep their own marker.
+        _assert_preserved_over_limit(
+            p, tmp_path, "pm pr note list pr-x", "pm pr list --plan pl-1",
+            "(+480 more")
 
-    def test_review_fits_when_every_block_is_large(self, _isolated_pm_root,
-                                                   monkeypatch):
+    def test_review_preserves_instructions_when_every_block_is_large(
+            self, _isolated_pm_root, tmp_path, monkeypatch):
         pr, data = self._pathological(_isolated_pm_root, monkeypatch)
         p = prompt_gen.generate_review_prompt(data, "pr-x")
-        _assert_bounded(p)
+        assert "s" * 200000 in p
+        assert "D" * 40_000 in p
+        assert "g" * 60000 in p
+        assert "truncated to fit" not in p
+        _assert_preserved_over_limit(p, tmp_path, "pm pr note list pr-x",
+                                     "pm pr list --plan pl-1")
 
-    def test_impl_fits_when_every_block_is_large(self, _isolated_pm_root,
-                                                 monkeypatch):
+    def test_impl_preserves_instructions_when_every_block_is_large(
+            self, _isolated_pm_root, tmp_path, monkeypatch):
         # A long PR description alone can push the impl prompt over.
         pr, data = self._pathological(_isolated_pm_root, monkeypatch,
                                       desc_bytes=80_000)
         p = prompt_gen.generate_prompt(data, "pr-x")
-        _assert_bounded(p, "pm pr show pr-x")
+        assert "s" * 200000 in p
+        assert "D" * 80_000 in p
+        assert "g" * 60000 in p
+        assert "truncated to fit" not in p
+        _assert_preserved_over_limit(p, tmp_path, "pm pr note list pr-x")
 
-    def test_planner_fits_when_every_block_is_large(self, _isolated_pm_root,
-                                                    monkeypatch):
+    def test_planner_preserves_instructions_when_every_block_is_large(
+            self, _isolated_pm_root, tmp_path, monkeypatch):
         pr, data = self._pathological(_isolated_pm_root, monkeypatch)
         p = prompt_gen.generate_qa_planner_prompt(data, "pr-x")
-        _assert_bounded(p, "pm pr show pr-x")
+        assert "s" * 200000 in p
+        assert "D" * 40_000 in p
+        assert "g" * 60000 in p
+        assert "truncated to fit" not in p
+        _assert_preserved_over_limit(p, tmp_path, "pm pr note list pr-x")
 
     def test_small_prompts_are_byte_identical(self, _isolated_pm_root,
                                               monkeypatch):
@@ -977,28 +1047,26 @@ class TestBudgetCoordination:
         prompt_gen.generate_signoff_prompt,
         prompt_gen.generate_qa_planner_prompt,
     ])
-    def test_signoff_return_is_its_own_bounded_block(
-            self, _isolated_pm_root, monkeypatch, builder):
-        """A cut sign-off return must name a reader that contains it.
+    def test_signoff_return_reason_is_inlined_whole(
+            self, _isolated_pm_root, tmp_path, monkeypatch, builder):
+        """The sign-off return reason is instruction text: every builder that
+        carries it inlines it whole, with no truncation marker.
 
-        The return block used to be appended to the PR-notes block, so
-        fit_prompt's marker for a cut return reason said `pm pr note list`
-        — which does not contain the reason.  It is a separate block now,
-        whose marker names `pm pr show`, which prints the record.
+        The return block used to be a fit_prompt block, so an oversized prompt
+        cut the reason and named `pm pr show` as its reader.  It is inlined
+        whole now, so the only reader left in play is the notes block's own
+        `pm pr note list` — the notes marker must still name that for its own
+        text.
         """
         pr, data = self._pathological(
             _isolated_pm_root, monkeypatch,
             return_reason="REASONTOKEN " + "R" * 90_000)
         p = builder(data, "pr-x")
-        _assert_bounded(p, "`pm pr show pr-x`")
-        markers = [line for line in p.splitlines()
-                   if "sign-off return truncated" in line]
-        assert markers, "the return block was not bounded separately"
-        assert "`pm pr show pr-x`" in markers[0]
-        # The head of the reason survives, and the notes block still names
-        # the notes reader for its own text.
         assert "REASONTOKEN" in p
+        assert "R" * 90_000 in p
+        assert "sign-off return truncated" not in p
         assert "pm pr note list pr-x" in p
+        _assert_preserved_over_limit(p, tmp_path, "pm pr note list pr-x")
 
 
 class TestQaPromptsBounding:
@@ -1013,7 +1081,10 @@ class TestQaPromptsBounding:
             _data(pr), "pr-x", "/tmp/w")
         _assert_bounded(p, "pm pr note list")
 
-    def test_child_many_artifacts_and_huge_steps(self):
+    def test_child_many_artifacts_and_huge_steps(self, tmp_path):
+        """Scenario steps are inlined whole, so a huge step list pushes the
+        child prompt over the limit; the artifact recipe bullets stay bounded
+        and the launcher delivers the whole prompt intact."""
         pr = _pr()
         scenario = QAScenario(
             index=1, title="S", focus="F",
@@ -1023,7 +1094,10 @@ class TestQaPromptsBounding:
         p = prompt_gen.generate_qa_child_prompt(
             _data(pr), "pr-x", scenario, workdir="/tmp/w",
             captures_root="/tmp/cap")
-        _assert_bounded(p, "pm qa list")
+        assert p.count("GIVEN x") == 20000
+        _assert_preserved_over_limit(
+            p, tmp_path,
+            "(+80 more recipes; run `pm qa list` to see the library)")
 
     def test_child_artifact_paths_are_byte_bounded_too(self):
         """The listing inlines full paths (not basenames), so the 20-item cap
@@ -1122,22 +1196,26 @@ class TestMergeAndWatcherBounding:
 # ---------------------------------------------------------------------------
 
 class TestSpecBounding:
-    def test_huge_spec_bounded_with_pointer(self, monkeypatch):
+    def test_huge_spec_is_inlined_whole(self, monkeypatch):
+        """A spec is instruction text: it is inlined whole and never cut,
+        even when that makes the block far larger than the old 31 KB budget.
+        The launcher delivers an over-limit prompt by file."""
         monkeypatch.setattr(spec_gen, "get_spec", lambda pr, phase: "s" * 200000)
         pr = _pr()
         block = spec_gen.format_spec_for_prompt(pr, "impl")
-        # SPEC_BUDGET bounds the spec text; the template adds a few hundred
-        # bytes of framing.
-        assert prompt_bytes(block) <= 31_000
-        assert "pm pr spec" in block
-        assert "truncated" in block
+        assert "s" * 200000 in block
+        assert "truncated" not in block
+        # The old SPEC_BUDGET is gone; the full spec is what the block holds.
+        assert prompt_bytes(block) > 31_000
 
-    def test_prior_spec_in_spec_prompt_bounded(self, monkeypatch):
+    def test_prior_spec_in_spec_prompt_is_inlined_whole(self, monkeypatch):
         monkeypatch.setattr(spec_gen, "get_spec", lambda pr, phase: "s" * 200000)
         pr = _pr()
         prompt = spec_gen._build_spec_prompt(
             {"project": {"base_branch": "master"}}, pr, "qa")
-        assert prompt_bytes(prompt) <= 40_000
+        assert "s" * 200000 in prompt
+        assert "truncated" not in prompt
+        assert prompt_bytes(prompt) > 40_000
 
 
 class TestQaInstructionsBounding:
@@ -1148,34 +1226,39 @@ class TestQaInstructionsBounding:
             (directory / f"item-{i:03d}.md").write_text(
                 f"---\ntitle: Item {i}\ndescription: {description}\n---\n{body}\n")
 
-    def test_instruction_summary_caps_each_category(self, _isolated_pm_root):
+    def test_instruction_summary_lists_every_item(self, _isolated_pm_root):
+        """The library entries are instructions: every item's title and
+        description is listed, with no count cap and no "more" marker."""
         from pm_core import qa_instructions
         self._write_items(_isolated_pm_root / "qa" / "instructions", 60)
         self._write_items(_isolated_pm_root / "qa" / "artifacts", 60)
         out = qa_instructions.instruction_summary_for_prompt(_isolated_pm_root)
-        assert out.count("- **Item ") <= 40  # 20 per category
-        assert "more; run `pm qa list`" in out
+        assert out.count("- **Item ") == 120  # 60 per category
+        assert "more; run `pm qa list`" not in out
+        for i in (0, 59):
+            assert f"- **Item {i}** (`item-{i:03d}.md`) — desc {i}" in out
 
-    def test_instruction_summary_bounds_long_descriptions(self,
-                                                          _isolated_pm_root):
-        """A count cap alone does not bound the listing.
+    def test_instruction_summary_inlines_long_descriptions(
+            self, _isolated_pm_root):
+        """Descriptions are user-authored free text and are instructions, so
+        they are inlined whole.
 
-        Descriptions are user-authored free text: 20 items per category with
-        multi-KB descriptions measured ~300 KB (over PROMPT_ARG_LIMIT) before
-        the byte budgets were added.  This is the block the QA planner prompt
-        (the one that hit E2BIG in the field) inlines.
+        50 items per category with multi-KB descriptions produce a summary far
+        over PROMPT_ARG_LIMIT; the launcher delivers that by file rather than
+        the summary cutting any description.
         """
         from pm_core import qa_instructions
-        from pm_core.prompt_bounds import LIBRARY_TOTAL_BUDGET
         for category in ("instructions", "regression", "artifacts"):
             self._write_items(_isolated_pm_root / "qa" / category, 50,
                               desc=lambda i: "d" * 5000)
         out = qa_instructions.instruction_summary_for_prompt(
             _isolated_pm_root, include_regression=True)
-        # Bounded by the aggregate budget (plus the truncation marker).
-        assert prompt_bytes(out) <= LIBRARY_TOTAL_BUDGET + 400
-        assert "pm qa list" in out
-        assert prompt_bytes(out) < PROMPT_ARG_LIMIT
+        # Every one of the 150 descriptions is intact; nothing was cut.
+        assert out.count("d" * 5000) == 150
+        assert out.count("- **Item ") == 150
+        assert "truncated" not in out
+        assert "more; run `pm qa list`" not in out
+        assert prompt_bytes(out) > PROMPT_ARG_LIMIT
 
     def test_instruction_summary_small_library_unchanged(self,
                                                          _isolated_pm_root):
@@ -1189,32 +1272,33 @@ class TestQaInstructionsBounding:
         assert "truncated" not in out
         assert "more; run" not in out
 
-    def test_planner_prompt_bounded_with_pathological_library(
-            self, _isolated_pm_root):
-        """The assembled planner prompt stays argv-safe too."""
+    def test_planner_prompt_preserves_pathological_library(
+            self, _isolated_pm_root, tmp_path):
+        """The library is inlined whole, so a pathological library pushes the
+        assembled planner prompt over PROMPT_ARG_LIMIT; the launcher then
+        delivers it intact by file instead of the builder cutting the
+        library."""
         self._write_items(_isolated_pm_root / "qa" / "instructions", 50,
                           desc=lambda i: "d" * 5000)
         self._write_items(_isolated_pm_root / "qa" / "artifacts", 50,
                           desc=lambda i: "d" * 5000)
         pr = _pr(notes=[_note(i) for i in range(60)])
         prompt = prompt_gen.generate_qa_planner_prompt(_data(pr), "pr-x")
-        _assert_bounded(prompt, "pm qa list")
+        assert prompt.count("d" * 5000) == 100
+        _assert_preserved_over_limit(prompt, tmp_path, "pm pr note list pr-x")
 
-    def test_mocks_for_prompt_bounded(self, _isolated_pm_root):
+    def test_mocks_for_prompt_inlines_full_bodies(self, _isolated_pm_root):
+        """Mock bodies are guidance the scenarios are written against, so they
+        are inlined whole.  40 mocks of 3 KB produce a block over the old
+        12 KB budget with every body intact and no marker."""
         from pm_core import qa_instructions
         self._write_items(_isolated_pm_root / "qa" / "mocks", 40,
                           body="m" * 3000)
         out = qa_instructions.mocks_for_prompt(_isolated_pm_root)
-        assert prompt_bytes(out) <= 12_000 + 400
-        # The aggregate bound owns the degradation (a per-mock omission note
-        # could never fire, since the listing passes no max_items/max_bytes),
-        # and its marker's "Read the full text:" sentence must name a reader
-        # that returns the *bodies* it cut.  `pm qa mocks list` prints
-        # ids/titles/descriptions only, so it is not that reader; `pm qa mocks
-        # show` prints the body, and the directory holds every definition.
-        assert "pm qa mocks show" in out
-        assert "pm/qa/mocks/" in out
-        assert "Read the full text: `pm qa mocks list`" not in out
+        assert out.count("m" * 3000) == 40
+        assert "truncated" not in out
+        assert "pm qa mocks show" not in out
+        assert prompt_bytes(out) > 12_000
 
 
 class TestQaFinalizeBounding:
@@ -1247,23 +1331,30 @@ class TestQaFinalizeBounding:
 
 
 class TestQaLoopPromptsBounding:
-    def test_concretization_huge_instruction_and_steps(self):
+    def test_concretization_inlines_steps_and_instruction(self, tmp_path):
+        """Scenario steps and the concretization instruction file are
+        instruction text, so both are inlined whole; the resulting prompt
+        overflows and the launcher delivers it intact by file."""
         scenario = QAScenario(index=1, title="S", focus="F",
                               steps="GIVEN x\n" * 20000)
         p = _build_concretization_prompt(
             scenario, "b", "master",
             instruction_content="i" * 200000, pr_id="pr-x")
-        _assert_bounded(p, "instruction file")
+        assert "## Instruction File" in p
+        assert p.count("GIVEN x") == 20000
+        assert "i" * 200000 in p
+        assert "truncated" not in p
+        _assert_preserved_over_limit(p, tmp_path)
 
-    def test_concretization_marker_names_the_actual_instruction_file(self):
-        """The marker must name the file it cut.
+    def test_concretization_inlines_the_instruction_file_whole(self, tmp_path):
+        """With the instruction file inlined whole there is no truncation
+        marker — and so no category-specific path to get wrong.
 
-        ``qa_instructions.resolve_instruction_ref`` resolves a scenario's
-        INSTRUCTION reference against ``instructions/``, ``regression/`` and
-        ``artifacts/``, so a >20 KB regression test lives under
-        ``pm/qa/regression/``.  The old marker claimed
-        ``pm/qa/instructions/`` — a directory that does not contain it, so the
-        omitted text was unrecoverable (the silent loss R2/A1 forbids).
+        The old marker claimed ``pm/qa/instructions/`` even when the file
+        lived under ``regression/`` (where
+        ``qa_instructions.resolve_instruction_ref`` resolves it); the fix was
+        to name the real path.  Now nothing is cut, so the prompt must inject
+        no such path at all.
         """
         scenario = QAScenario(index=1, title="S", focus="F",
                               steps="GIVEN x\n" * 20000)
@@ -1271,60 +1362,66 @@ class TestQaLoopPromptsBounding:
             scenario, "b", "master",
             instruction_content="i" * 200000, pr_id="pr-x",
             instruction_ref="regression/big-regression.md")
-        marker = [ln for ln in p.splitlines()
-                  if "instruction file truncated" in ln]
-        assert marker, "the instruction was not abbreviated"
-        assert "`pm/qa/regression/big-regression.md`" in marker[0]
+        assert "i" * 200000 in p
+        assert "instruction file truncated" not in p
         assert "pm/qa/instructions/" not in p
+        _assert_preserved_over_limit(p, tmp_path)
 
-    def test_concretization_fallback_pointer_is_category_neutral(self):
-        """Older callers pass no relative path; the fallback must not claim
-        ``pm/qa/instructions/`` specifically — the file may be under
-        ``regression/`` or ``artifacts/``."""
+    def test_concretization_without_a_ref_injects_no_category_path(
+            self, tmp_path):
+        """Older callers pass no relative path; the file is inlined whole, so
+        the prompt must not claim ``pm/qa/instructions/`` specifically (the
+        file may be under ``regression/`` or ``artifacts/``)."""
         scenario = QAScenario(index=1, title="S", focus="F",
                               steps="GIVEN x\n" * 20000)
         p = _build_concretization_prompt(
             scenario, "b", "master",
             instruction_content="i" * 200000, pr_id="pr-x")
-        marker = [ln for ln in p.splitlines()
-                  if "instruction file truncated" in ln]
-        assert marker, "the instruction was not abbreviated"
-        assert "`pm/qa/`" in marker[0]
-        assert "pm qa list" in marker[0]
+        assert "i" * 200000 in p
+        assert "instruction file truncated" not in p
         assert "pm/qa/instructions/" not in p
+        _assert_preserved_over_limit(p, tmp_path)
 
-    def test_concretization_absolute_ref_falls_back_to_the_library(self):
-        """A resumed snapshot can carry the absolute scratch copy; the marker
-        must not build a `pm/qa/<absolute>` path that resolves nowhere."""
+    def test_concretization_absolute_ref_is_not_baked_in(self, tmp_path):
+        """A resumed snapshot can carry the absolute scratch copy; with the
+        file inlined whole that path must not appear in the prompt at all."""
         scenario = QAScenario(index=1, title="S", focus="F",
                               steps="GIVEN x\n" * 20000)
         p = _build_concretization_prompt(
             scenario, "b", "master",
             instruction_content="i" * 200000, pr_id="pr-x",
             instruction_ref="/scratch/qa-instructions/big.md")
-        marker = [ln for ln in p.splitlines()
-                  if "instruction file truncated" in ln]
-        assert marker, "the instruction was not abbreviated"
-        assert "pm/qa/" in marker[0]
+        assert "i" * 200000 in p
         assert "/scratch/qa-instructions" not in p
+        _assert_preserved_over_limit(p, tmp_path)
 
-    def test_verification_many_artifacts_and_huge_output(self):
+    def test_verification_steps_whole_but_artifacts_and_output_bounded(
+            self, tmp_path):
+        """The verification prompt's steps are inlined whole, but its artifact
+        recipe bullets and pane output stay bounded — they are enumerations
+        and evidence, not instructions."""
         scenario = QAScenario(
             index=1, title="S", focus="F", steps="GIVEN x\n" * 20000,
             artifact_paths=[f"/tmp/recipe-{i}.md" for i in range(100)])
         p = _build_verification_prompt(
             scenario, "PASS", pane_output="line\n" * 100000)
-        _assert_bounded(p, "pm qa list")
+        assert p.count("GIVEN x") == 20000
+        assert "(+80 more recipes; run `pm qa list` to see the library)" in p
+        assert "the full scenario transcript" in p
+        _assert_preserved_over_limit(p, tmp_path)
 
-    def test_verification_long_lines_bounded(self):
+    def test_verification_long_lines_still_bounded(self, tmp_path):
         """The line bound alone does not bound the prompt: a single enormous
         line is one line.  The byte cap must catch it and name the transcript
-        so the verifier can still read the rest."""
+        so the verifier can still read the rest — the steps being inlined
+        whole does not lift the bound on the pane output."""
         scenario = QAScenario(index=1, title="S", focus="F",
                               steps="GIVEN x\n" * 20000)
         p = _build_verification_prompt(
             scenario, "PASS", pane_output="y" * 400_000)
-        _assert_bounded(p, "the full scenario transcript")
+        assert p.count("GIVEN x") == 20000
+        assert "y" * 400_000 not in p
+        _assert_preserved_over_limit(p, tmp_path, "the full scenario transcript")
 
 
 # ---------------------------------------------------------------------------
@@ -1332,46 +1429,48 @@ class TestQaLoopPromptsBounding:
 # ---------------------------------------------------------------------------
 
 class TestNotesBounding:
-    def test_notes_for_prompt_bounded(self, _isolated_pm_root):
+    def test_notes_for_prompt_inlines_the_full_body(self, _isolated_pm_root):
+        """Session notes are instruction text: both blocks carry the whole
+        100 KB body with no truncation marker."""
         from pm_core import notes as notes_mod
         (_isolated_pm_root / "notes.txt").write_text(
             "## General\n" + "g" * 100000 + "\n\n"
             "## Implementation\n" + "i" * 100000 + "\n")
         general, specific = notes_mod.notes_for_prompt(
             _isolated_pm_root, "impl")
-        assert prompt_bytes(general) <= 8_000 + 400
-        assert prompt_bytes(specific) <= 8_000 + 400
-        assert "pm/notes.txt" in general
+        assert "g" * 100000 in general
+        assert "i" * 100000 in specific
+        assert "truncated" not in general
+        assert "truncated" not in specific
 
-    def test_notes_section_bounded(self, _isolated_pm_root):
+    def test_notes_section_inlines_the_full_body(self, _isolated_pm_root):
         from pm_core import notes as notes_mod
         (_isolated_pm_root / "notes.txt").write_text(
-            "## General\n" + "g" * 100000 + "\n")
+            "## General\n" + "g" * 100000 + "\n\n"
+            "## Implementation\n" + "i" * 100000 + "\n")
         block = notes_mod.notes_section(_isolated_pm_root)
-        assert prompt_bytes(block) <= 8_000 + 400
-        assert "pm/notes.txt" in block
+        assert "g" * 100000 in block
+        assert "i" * 100000 in block
+        assert "truncated" not in block
 
-    def test_notes_marker_names_a_readable_file_not_the_editor(
-            self, _isolated_pm_root):
-        """The truncation marker must name something a session can read.
+    def test_notes_block_injects_no_dead_end_pointer(self, _isolated_pm_root):
+        """The whole body is inlined, so there is no truncation marker and no
+        reader a session could follow into nothing.
 
-        ``pm notes`` opens an interactive editor (with a splash that waits for
-        a keypress), so a session that follows it gets no text at all — the
-        marker names the notes files instead.  The path is relative to the
-        project root, because the sessions these blocks feed (impl / review /
-        QA planner) run inside a container where the host path does not exist.
+        The old bounded block named ``pm/notes.txt``; that pointer is gone
+        with the bound.  What must not come back is a *dead-end* pointer: the
+        ``pm notes`` editor opens an interactive splash (a session that
+        follows it gets no text), and a host path does not exist inside the
+        container the sessions these blocks feed run in.
         """
         from pm_core import notes as notes_mod
         (_isolated_pm_root / "notes.txt").write_text(
             "## General\n" + "g" * 100000 + "\n")
         block = notes_mod.notes_section(_isolated_pm_root)
-        assert "pm/notes.txt" in block
+        assert "g" * 100000 in block
+        assert "truncated" not in block
         assert "`pm notes`" not in block
         assert str(_isolated_pm_root) not in block
-        # notes-local.txt is gitignored, so it is not in a container workdir
-        # clone: the marker must not claim it is in the project root there.
-        assert "pm/notes-local.txt` in the project root" not in block
-        assert "local to the machine running pm" in block
         for prompt in (
             prompt_gen.generate_prompt(_data(_pr()), "pr-x"),
             prompt_gen.generate_review_prompt(_data(_pr()), "pr-x"),
@@ -1844,45 +1943,43 @@ def _make_big_plan_state(tmp_path, n_prs, n_plans, desc_size, plan_size,
 
 class TestPlanDepsAndFixBounding:
     """`pm plan deps` inlines every PR description and every plan file, and
-    `pm plan fix` inlines every plan file.  Both were still unbounded after
-    the first pass: 312 KB and ~500 KB on this repo's real data, because the
-    count cap and the per-file budget do not bound their product."""
+    `pm plan fix` inlines every plan file.  Plan files are planning documents
+    the session works from, so they are inlined whole and never truncated: an
+    over-limit prompt is delivered by the launcher's file-backed bootstrap.
+    Only the PR listing's one-line descriptions stay abbreviated (the
+    `_PLAN_DESC_CHARS` cut and its `pm pr show <id>` note)."""
 
-    def test_plan_deps_bounds_descriptions_and_plan_files(self, tmp_path):
+    def test_plan_deps_inlines_plan_files_whole(self, tmp_path):
         root = _make_big_plan_state(tmp_path, n_prs=60, n_plans=22,
                                     desc_size=11_000, plan_size=40_000)
         with patch("pm_core.cli.plan.find_claude", return_value=None):
             result = CliRunner().invoke(cli, ["-C", str(root), "plan", "deps"])
         assert result.exit_code == 0, result.output
-        # Bounded, and both abbreviations name where the full text lives.
-        _assert_bounded(result.output, "pm pr show", "omitted to fit the prompt")
+        # All 22 plan files (40 KB each) are inlined whole, so the prompt is
+        # far over the limit and no plan-file listing is emitted.
+        assert result.output.count("# Plan\n\n" + "p" * 40_000) == 22
+        assert "Plan files omitted to fit" not in result.output
+        # The description abbreviation and its reader stay: the PR listing is
+        # still a bounded enumeration.
+        _assert_preserved_over_limit(
+            result.output, tmp_path,
+            "Descriptions above are abbreviated", "pm pr show")
 
-    def test_plan_deps_bounds_the_omitted_plan_file_list(self, tmp_path):
-        """The list of *omitted* plan files is itself a listing: it grows with
-        the project, its items are paths (so a count cap alone would not bound
-        it), and the aggregate plan-file budget does not cover it."""
+    def test_plan_deps_inlines_every_plan_file_whole(self, tmp_path):
+        """The plan files were once a count- and byte-bounded listing (the
+        omitted ones were listed by path); now every plan file is inlined
+        whole, so 400 of them produce an over-limit prompt and none is
+        dropped."""
         root = _make_big_plan_state(tmp_path, n_prs=1, n_plans=400,
                                     desc_size=0, plan_size=1_000, file_pad=200)
         with patch("pm_core.cli.plan.find_claude", return_value=None):
             result = CliRunner().invoke(cli, ["-C", str(root), "plan", "deps"])
         assert result.exit_code == 0, result.output
-        assert prompt_bytes(result.output) <= PROMPT_ARG_LIMIT + 300
-        # Both halves are bounded, and the omitted-file marker names a reader
-        # that actually yields the omitted *paths*: `pm plan list` prints ids
-        # and names only, and plan files have no single path convention
-        # (`pm/bugs.md`, `pm/plans/watchers.md`, ...), so the marker also names
-        # project.yaml, which records each plan's `file:`.
-        _assert_bounded(result.output, "Plan files omitted to fit",
-                        "run `pm plan list`", "project.yaml")
-        project_yaml = root / "project.yaml"
-        assert str(project_yaml) in result.output
-        assert project_yaml.is_file()
-        # The plans the prompt dropped are exactly the ones whose `file:`
-        # project.yaml records, so the named reader contains their paths.
-        import yaml
-        plans = yaml.safe_load(project_yaml.read_text())["plans"]
-        assert len(plans) == 400
-        assert all((root / p["file"]).is_file() for p in plans)
+        # Every omitted-file marker is gone because nothing is omitted.
+        assert result.output.count("p" * 1_000) == 400
+        assert "Plan files omitted to fit" not in result.output
+        assert "run `pm plan list`" not in result.output
+        _assert_preserved_over_limit(result.output, tmp_path)
 
     def test_plan_deps_description_note_describes_the_kept_lines(self, tmp_path):
         """The "Descriptions above are abbreviated" note must describe the
@@ -1924,7 +2021,7 @@ class TestPlanDepsAndFixBounding:
         assert "pr-001" in result.output
         assert "Descriptions above are abbreviated" in result.output
 
-    def test_plan_fix_bounds_plan_context(self, tmp_path):
+    def test_plan_fix_inlines_plan_files_whole(self, tmp_path):
         root = _make_big_plan_state(tmp_path, n_prs=0, n_plans=22,
                                     desc_size=0, plan_size=40_000)
         review = tmp_path / "review.txt"
@@ -1935,7 +2032,10 @@ class TestPlanDepsAndFixBounding:
             result = CliRunner().invoke(
                 cli, ["-C", str(root), "plan", "fix", "--review", str(review)])
         assert result.exit_code == 0, result.output
-        _assert_bounded(result.output, "plan files under", "truncated")
+        # Every plan file is inlined whole; nothing is cut from the context.
+        assert result.output.count("# Plan\n\n" + "p" * 40_000) == 22
+        assert "truncated" not in result.output
+        _assert_preserved_over_limit(result.output, tmp_path)
 
 
 class TestPrShowCommand:

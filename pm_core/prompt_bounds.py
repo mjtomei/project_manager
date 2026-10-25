@@ -7,11 +7,29 @@ terminating NUL); exceeding it makes ``execve`` fail with ``E2BIG``
 well under that cap so prompt builders can degrade gracefully before the
 launcher has to fall back to file-backed delivery.
 
-Builders inline collections (PR notes, specs, sibling PRs, QA scenarios,
-instruction libraries, ...) whose size grows with project age.  The helpers
-here keep those blocks bounded.  When a helper trims, it appends an explicit
-omission marker naming what was dropped and how to read the full detail —
-never silently dropping evidence or instructions.
+**What is bounded, and what is not.**  Only two kinds of content are ever
+shortened:
+
+* **PR notes** — an append-only handoff log whose newest entries supersede the
+  older ones, so summarizing the tail is information-preserving.
+* **Pure enumerations** — lists of PR ids, sibling PRs, dependency names,
+  filesystem paths, worktree paths, QA scenario *verdicts*.  These are
+  pointers by nature: an omission marker names a command or path that returns
+  the full list.
+
+Everything instruction-shaped is inlined **whole and never truncated**:
+implementation and QA specs, PR descriptions, session notes, QA instruction
+library entries, mock bodies, QA scenario steps and concretization
+instructions, and plan files.  Cutting those would silently change what the
+session is told to do, which is worse than a large prompt.  When such a
+prompt exceeds ``PROMPT_ARG_LIMIT`` the launcher writes it to a file and
+passes a short bootstrap instead (see ``claude_launcher``), so every
+instruction still arrives intact; if no writable location exists the launch
+fails loudly with :class:`PromptTooLargeError` rather than degrading quietly.
+
+When a helper here trims, it appends an explicit omission marker naming what
+was dropped and how to read the full detail — never silently dropping
+evidence.
 """
 
 from __future__ import annotations
@@ -25,15 +43,12 @@ T = TypeVar("T")
 PROMPT_ARG_LIMIT = 120_000
 MAX_ARG_STRLEN = 131_072
 
-# Per-block defaults.  Static prompt text runs 4-19 KB; these leave room for
-# it while keeping the assembled prompt under PROMPT_ARG_LIMIT.  Callers may
-# pass tighter budgets; these are the shared fallbacks.
+# Budgets for the two bounded kinds.  Static prompt text runs 4-19 KB; these
+# leave room for it plus the unbounded instruction blocks, which the launcher
+# carries by file when the total goes over.  Callers may pass tighter budgets;
+# these are the shared fallbacks.
 PR_NOTES_BUDGET = 35_000
 PR_NOTE_SUMMARY_CHARS = 200
-SPEC_BUDGET = 30_000
-SESSION_NOTES_BUDGET = 8_000
-QA_CHILD_STEPS_BUDGET = 20_000
-CONCRETIZE_INSTRUCTION_BUDGET = 20_000
 PLAN_CONTEXT_MAX_SIBLINGS = 25
 # One-line listings (sibling PRs, a PR's dependencies, the plan/other-PR
 # lists the plan builders inline) are count-capped, but a count cap alone does
@@ -44,16 +59,6 @@ PLAN_CONTEXT_MAX_SIBLINGS = 25
 PLAN_LIST_BUDGET = 20_000
 # Count cap for the same listings; the byte budget above bounds the product.
 PLAN_LIST_MAX = 40
-LIBRARY_ITEMS_MAX = 20
-# The QA library summary is count-capped per category, but the items carry
-# user-authored descriptions, so a count cap does not bound the listing — the
-# same cap-times-item-size defect the plan listings had (20 items with long
-# descriptions measured 300 KB, and the QA planner prompt that E2BIG'd in the
-# field inlines this block).  Each category gets a byte budget, and the joined
-# block gets an aggregate one so three categories cannot multiply it.
-LIBRARY_LIST_BUDGET = 6_000
-LIBRARY_TOTAL_BUDGET = 12_000
-MOCKS_BUDGET = 12_000
 QA_SCENARIOS_MAX = 40
 QA_SCENARIO_REASON_CHARS = 200
 INTEGRATION_MAX_PATHS = 20

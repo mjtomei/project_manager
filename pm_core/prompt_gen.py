@@ -8,8 +8,8 @@ from pm_core.prompt_bounds import (
     INTEGRATION_LIST_BUDGET, INTEGRATION_MAX_PATHS,
     MERGE_ERROR_MAX_LINES, PLAN_CONTEXT_MAX_SIBLINGS, PLAN_LIST_BUDGET,
     PR_NOTE_SUMMARY_CHARS, PR_NOTES_BUDGET,
-    QA_CHILD_STEPS_BUDGET, QA_SCENARIO_REASON_CHARS, QA_SCENARIOS_MAX,
-    WATCHER_MANAGED_MAX, bounded_join, bounded_lines, bounded_text,
+    QA_SCENARIO_REASON_CHARS, QA_SCENARIOS_MAX,
+    WATCHER_MANAGED_MAX, bounded_join, bounded_lines,
     fit_prompt, prompt_bytes,
 )
 from pm_core.spec_gen import (format_spec_for_prompt,
@@ -389,12 +389,11 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
     def _assemble(parts: dict[str, str]) -> str:
-        description = parts["description"]
+        # Only the enumerations and the PR notes are size-bounded, so only
+        # those come from *parts*; the description, spec, sign-off return and
+        # session notes are instructions and are inlined whole.
         deps_section = parts["deps"]
         pr_notes_block = parts["notes"]
-        signoff_return_block = parts["signoff_return"]
-        impl_spec_block = parts["spec"]
-        general_notes_block = parts["session_notes"]
         prompt = f"""You're working on PR {pr_id}: "{title}"
 
 This session is managed by `pm`. Run `pm help` to see available commands.
@@ -418,22 +417,17 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 {tui_block}{general_notes_block}{impl_specific_block}{beginner_block}{cleanup_block}"""
         return prompt.strip()
 
-    # Per-block budgets bound each block; fit_prompt abbreviates the largest
-    # when their sum plus this builder's static text would exceed the argv
-    # limit (a PR description can be large on its own).
+    # Only the PR notes and the pure enumerations are bounded; everything
+    # instruction-shaped (description, spec, sign-off return, session notes)
+    # is inlined whole.  fit_prompt still abbreviates the enumerations when
+    # their sum plus this builder's static text would exceed the argv limit,
+    # and returns the render unchanged — for the launcher's file-backed
+    # bootstrap to deliver intact — when it cannot fit at all.
     return fit_prompt(
         _assemble,
         {
-            "description": (description, f"`pm pr show {pr_id}`",
-                            "PR description"),
             "deps": (deps_section, "`pm pr graph`", "dependency list"),
             "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
-            "signoff_return": (signoff_return_block,
-                               f"`pm pr show {pr_id}`", "sign-off return"),
-            "spec": (impl_spec_block, f"`pm pr spec {pr_id} impl`",
-                     "implementation spec"),
-            "session_notes": (general_notes_block, notes.notes_pointer(),
-                              "session notes"),
         },
     )
 
@@ -558,12 +552,11 @@ with spec generation enabled.
                                       review_loop_id)
 
     def _assemble(parts: dict[str, str]) -> str:
-        description = parts["description"]
+        # Only the enumerations and the PR notes are size-bounded; the
+        # description, spec, sign-off return and session notes are
+        # instructions and are inlined whole.
         pr_notes_block = parts["notes"]
-        signoff_return_block = parts["signoff_return"]
-        impl_spec_block = parts["spec"]
         plan_context = parts["plan"]
-        general_notes_block = parts["session_notes"]
         prompt = f"""You are reviewing PR {pr_id}: "{title}"
 
 ## Task
@@ -593,26 +586,18 @@ Review the code changes in this PR for quality, correctness, and architectural f
         base = prompt.strip()
         return base + tail
 
-    # The per-block budgets above bound each block on its own, but their sum
-    # plus this builder's static text can still exceed the argv limit when a
-    # PR is large in several dimensions at once.  fit_prompt abbreviates the
-    # largest blocks — each marker names where to read the full text — until
-    # the whole prompt fits.
+    # Only the PR notes and the two enumerations (sibling-PR plan context,
+    # dependency list) are bounded; the description, spec, sign-off return and
+    # session notes are instructions and are inlined whole.  fit_prompt
+    # abbreviates the enumerations until the prompt fits, and returns the
+    # render unchanged when it cannot.
     return fit_prompt(
         _assemble,
         {
-            "description": (description, f"`pm pr show {pr_id}`",
-                            "PR description"),
             "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
-            "spec": (impl_spec_block, f"`pm pr spec {pr_id} impl`",
-                     "implementation spec"),
-            "signoff_return": (signoff_return_block,
-                               f"`pm pr show {pr_id}`", "sign-off return"),
             "plan": (plan_context,
                      f"`pm pr list --plan {plan_ref}`" if plan_ref
                      else "`pm pr list`", "plan context"),
-            "session_notes": (general_notes_block,
-                              notes.notes_pointer(), "session notes"),
         },
     )
 
@@ -866,10 +851,10 @@ def generate_signoff_prompt(data: dict, pr_id: str,
     tail = "\n" + _pr_notes_handoff_block(pr_id) + _beginner_addendum()
 
     def _assemble(parts: dict[str, str]) -> str:
-        description = parts["description"]
+        # Only the enumerations and the PR notes are size-bounded; the
+        # description, spec and sign-off return are instructions and are
+        # inlined whole.
         pr_notes_block = parts["notes"]
-        signoff_return_block = parts["signoff_return"]
-        impl_spec_block = parts["spec"]
         plan_context = parts["plan"]
         qa_block = parts["qa"]
         prompt = f"""You are performing the **sign-off review** for PR {pr_id}: "{title}"
@@ -1196,16 +1181,13 @@ IMPORTANT: end your response with exactly one of {SIGNOFF_MERGE}, {SIGNOFF_REQA}
 {SIGNOFF_REVIEW}, {SIGNOFF_IMPL}, or {SIGNOFF_BLOCKED} on its own line."""
         return prompt.strip() + tail
 
+    # Only the PR notes and the enumerations (sibling-PR plan context, QA
+    # scenario verdicts) are bounded; the description, spec and sign-off
+    # return are instructions and are inlined whole.
     return fit_prompt(
         _assemble,
         {
-            "description": (description, f"`pm pr show {pr_id}`",
-                            "PR description"),
             "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
-            "spec": (impl_spec_block, f"`pm pr spec {pr_id} impl`",
-                     "implementation spec"),
-            "signoff_return": (signoff_return_block,
-                               f"`pm pr show {pr_id}`", "sign-off return"),
             "plan": (plan_context, plan_pointer, "plan context"),
             # fit_prompt's marker says "Read the full text: <pointer>", so the
             # pointer must return the verdicts this block cut.  `pm qa
@@ -2233,13 +2215,10 @@ worker's prompt names the exact path)."""
     )
 
     def _assemble(parts: dict[str, str]) -> str:
-        description = parts["description"]
-        library_summary = parts["library"]
+        # Only the PR notes are size-bounded; the description, QA library,
+        # spec, sign-off return and session notes are instructions and are
+        # inlined whole.
         pr_notes_block = parts["notes"]
-        signoff_return_block = parts["signoff_return"]
-        qa_spec_block = parts["spec"]
-        general_notes_block = parts["session_notes"]
-        qa_specific_block = parts["qa_notes"]
         prompt = f"""You are a QA planner analyzing PR {pr_id}: "{title}"
 
 ## Task
@@ -2385,23 +2364,15 @@ not accomplishing this goal.
 """
         return prompt.strip()
 
-    # Per-block budgets bound each block; fit_prompt abbreviates the largest
-    # when their sum plus this builder's static text would exceed the argv
-    # limit — the planner prompt is the one that hit E2BIG in the field.
+    # Only the PR notes are bounded here; the description, QA library, spec,
+    # sign-off return and session notes are all instruction text and are
+    # inlined whole.  The planner prompt is the one that hit E2BIG in the
+    # field, so a prompt that cannot fit goes out via the launcher's
+    # file-backed bootstrap instead of being cut.
     return fit_prompt(
         _assemble,
         {
-            "description": (description, f"`pm pr show {pr_id}`",
-                            "PR description"),
-            "library": (library_summary, "`pm qa list`", "QA library summary"),
             "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
-            "signoff_return": (signoff_return_block,
-                               f"`pm pr show {pr_id}`", "sign-off return"),
-            "spec": (qa_spec_block, f"`pm pr spec {pr_id} qa`", "QA spec"),
-            "session_notes": (general_notes_block, notes.notes_pointer(),
-                              "session notes"),
-            "qa_notes": (qa_specific_block, notes.notes_pointer(),
-                         "QA session notes"),
         },
     )
 
@@ -2676,12 +2647,10 @@ contains a reproduction test, running that test is a fast way to confirm
 the fix.
 """
 
-    steps_text = bounded_text(
-        scenario.steps or "",
-        max_bytes=QA_CHILD_STEPS_BUDGET,
-        pointer="the QA plan in the QA planner transcript",
-        label="scenario steps",
-    )
+    # Scenario steps are the guidelines the session works from, so they are
+    # inlined whole and never truncated; an over-limit prompt is delivered by
+    # the launcher's file-backed bootstrap instead.
+    steps_text = scenario.steps or ""
 
     prompt = f"""You are running QA scenario {scenario.index}: "{scenario.title}"
 

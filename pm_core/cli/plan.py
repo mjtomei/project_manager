@@ -14,7 +14,7 @@ from pm_core.plans import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
 from pm_core.prompt_bounds import (
     PLAN_LIST_BUDGET, PLAN_LIST_MAX, PROMPT_ARG_LIMIT, bounded_join,
-    bounded_text, prompt_bytes,
+    prompt_bytes,
 )
 from pm_core.prompt_gen import tui_section
 
@@ -34,14 +34,6 @@ _PLAN_LIST_BUDGET = PLAN_LIST_BUDGET
 # before the audit); this byte budget only trims it when titles make the lines
 # huge.  Sized above the largest real listing so the fallback is unchanged.
 _PLAN_BRIEF_BUDGET = 40_000
-_PLAN_FILE_BUDGET = 20_000
-# Aggregate budget for plan-file text a builder inlines.  A per-file budget
-# alone is not enough: a project with many plans multiplies it (22 plans at
-# 20 KB each is 440 KB, well over MAX_ARG_STRLEN), so the total is bounded too.
-_PLAN_FILES_BUDGET = 30_000
-# Smallest per-file slice worth inlining; below this the plan is listed as
-# omitted instead of emitting a marker that would not fit the slice.
-_PLAN_FILE_MIN_SLICE = 500
 # One-line PR summaries inline the description; truncate it so 40 large
 # descriptions (11 KB each in this project) cannot blow the prompt budget.
 _PLAN_DESC_CHARS = 300
@@ -578,53 +570,19 @@ def plan_deps():
             "\n  (Descriptions above are abbreviated to fit the prompt size "
             "limit — run `pm pr show <id>` for a PR's full description.)")
 
-    # Include plan context if available.  Each plan file is bounded so a
-    # long plan cannot blow the prompt's argv budget, and the files share an
-    # aggregate budget so a project with many plans cannot either; the
-    # markers point at the plan paths for the full text.
+    # Include plan context if available.  Plan files are planning documents
+    # the session works from, so they are inlined whole and never truncated;
+    # a prompt too large for one argv entry is delivered by the launcher's
+    # file-backed bootstrap instead (see pm_core.prompt_bounds).
     plan_context = ""
-    plans = data.get("plans") or []
-    omitted_plans: list[str] = []
-    remaining = _PLAN_FILES_BUDGET
-    for plan_entry in plans:
+    for plan_entry in (data.get("plans") or []):
         plan_path = root / plan_entry["file"]
         if not plan_path.exists():
             continue
-        header = f"\nPlan: {plan_entry['name']} ({plan_entry['id']})\n"
-        slice_budget = min(_PLAN_FILE_BUDGET, remaining - prompt_bytes(header))
-        if slice_budget < _PLAN_FILE_MIN_SLICE:
-            omitted_plans.append(str(plan_path))
-            continue
-        file_text = bounded_text(
-            plan_path.read_text(),
-            max_bytes=slice_budget,
-            pointer=f"the plan file at {plan_path}",
-            label=f"plan {plan_entry['name']}",
-        )
-        plan_context += header + file_text + "\n"
-        remaining -= prompt_bytes(header) + prompt_bytes(file_text) + 1
-    if omitted_plans:
-        # The list of omitted files is itself a listing, so it needs its own
-        # bound: a project with hundreds of plans grows it with the project,
-        # and its items are paths (a count cap alone would not bound it).  The
-        # aggregate plan-file budget above does not cover this text.
         plan_context += (
-            "\n(Plan files omitted to fit the prompt size limit — read each "
-            "in full at its path:\n"
-            + bounded_join(
-                omitted_plans, lambda p: f"  - {p}",
-                max_items=_PLAN_LIST_MAX, max_bytes=_PLAN_LIST_BUDGET,
-                # `pm plan list` prints ids/names/status but *not* file paths,
-                # and plan files do not follow one convention (`pm/bugs.md`,
-                # `pm/plans/watchers.md`, `pm/plans/plan-<id>.md`, ...), so the
-                # project.yaml — which records each plan's `file:` — is the
-                # reader that actually yields the omitted paths.  This builder
-                # runs on the host, so the absolute path is readable.
-                omitted_note=lambda n: (
-                    f"  ... (+{n} more plan files; run `pm plan list` for "
-                    f"their ids and read each plan's `file:` in "
-                    f"`{root / 'project.yaml'}`)"))
-            + "\n)\n")
+            f"\nPlan: {plan_entry['name']} ({plan_entry['id']})\n"
+            + plan_path.read_text() + "\n"
+        )
 
     notes_block = notes.notes_section(root)
 
@@ -814,16 +772,10 @@ def _run_fix_command(step_name: str, review_path_str: str):
         if pp.exists():
             context_parts.append(f"Plan {p['id']} ({p['name']}):\n{pp.read_text()}")
 
+    # Every plan file is inlined whole: plan files are the documents this
+    # session works from, so they are never truncated.  A prompt too large for
+    # one argv entry is delivered by the launcher's file-backed bootstrap.
     original_context = "\n".join(context_parts) if context_parts else "No plan files found."
-    # Every plan file is inlined above, so the total grows with the project
-    # (22 plans / ~500 KB in this repo).  Bound the concatenation with a
-    # pointer at the plan files for the full text.
-    original_context = bounded_text(
-        original_context,
-        max_bytes=_PLAN_FILES_BUDGET,
-        pointer=f"the plan files under {root} (see `pm plan list`)",
-        label="plan context",
-    )
     prompt = review_mod.build_fix_prompt(step_name, original_context, parsed["findings"])
 
     notes_block = notes.notes_section(root)
