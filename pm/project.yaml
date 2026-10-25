@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T14:28:49.054081+00:00'
+  updated_at: '2026-10-25T14:50:00.087724+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22833,6 +22833,73 @@ prs:
       note in full. Evidence: /pm-captures/review-2ac8-i4/.'
     created_at: '2026-10-25T14:28:48Z'
     last_edited: '2026-10-25T14:28:48Z'
+  - id: note-e671220
+    text: 'Review-loop 2ac8 i5 (499ed0ce): one marker-accuracy defect fixed, plus
+      a small dedup; no budget, helper or launcher path changed.
+
+
+      (1) FIXED — `_render_pr_notes_bounded`''s overflow marker counted verbatim notes
+      as "abbreviated". The marker reads "N older note(s) omitted and M abbreviated"
+      (i2''s wording, so a session reading previews knows they are previews), but
+      M was `len(kept) - (1 if upgraded else 0)` — "every kept line but the upgraded
+      newest". A note short enough to survive `summary_line` unchanged (`_PR_NOTE_SUMMARY_CHARS`
+      = 200) renders identically as a summary and in full, so those kept lines are
+      the note''s complete text. Repro: 400 notes of 100 chars render "... (143 older
+      note(s) omitted and 256 abbreviated to fit the prompt size limit ...)" while
+      all 257 kept lines are verbatim; a mixed block (newest 100 short, older 300
+      long) claimed 233 against 134 really cut. Reachable exactly when the merged
+      one-line summaries overflow the budget — the ~150-note (~56 CJK) branch i2/§19
+      measured for this path, since the notes that trigger it are the short ones with
+      small summaries. M is now the number of kept lines that really differ from their
+      note''s full text, and the clause is dropped when that is 0. The fits path''s
+      fixed wording is entailed whenever it fires (entering it requires the full render
+      to exceed the budget while the summaries fit, so at least one kept line is a
+      real preview); a property sweep of both paths (2 scripts x 10 counts x 11 sizes
+      x 3 short/long mixes, ASCII + CJK) now finds no marker that misdescribes the
+      block, no claimed count that differs from the real one, no over-budget block,
+      no non-determinism. Real prompts unchanged: all 488 PRs'' four builders hash
+      identically before/after (every real block is in the fits path; the marker never
+      fires on this repo''s data).
+
+
+      (2) `pm pr show` and `pm pr note list` printed a note with the same three lines
+      of formatting; now shared as `cli/pr.py::_note_line` (output unchanged, both
+      re-run against a throwaway project). Both are on-demand readers for the PR-notes
+      block, so a divergence would make the marker lie.
+
+
+      (3) `fit_prompt`''s docstring named only "the static text alone is over it";
+      the loop also returns the untouched render when the blocks cannot give up enough
+      while staying at min_bytes (§16/i10). Docstring only.
+
+
+      Independent re-verification this iteration (not a re-read of §19-§21): real-data
+      sweep over all 488 PRs x 4 builders — none over PROMPT_ARG_LIMIT (max impl 45,883
+      / review 47,305 / sign-off 61,576 / planner 50,315 B; lower than §19''s host
+      numbers because this sandbox has no ~/.pm/workdirs clones to merge notes from,
+      so the meaningful check is branch vs origin/master in the same sandbox: 205
+      PRs byte-identical across all four builders, and the only PRs where the branch
+      is larger are pr-ace66e5 and pr-0368986 — this PR''s own notes; a capped PR,
+      pr-8e693f6, diffs against master only in the PR-notes and 25-sibling plan-context
+      blocks and their markers); a pathological fixture that maxes every collection
+      at once leaves every reachable builder under the limit (four fit_prompt builders
+      117,189 / 119,700 / 119,700 / 119,700, verification 91,506, QA child 75,773,
+      concretization 49,465, QA interactive 44,748, merge 29,574, finalize 21,653,
+      guide 18,820, watcher 17,305, mocks 12,000, notes 8,000, library 6,239, watcher-review
+      3,691); the §21 bridge path re-exercised end to end (324-byte launcher command
+      delivered a 150,016-byte prompt intact to the bridge''s first turn, file removed);
+      every omission marker re-checked against a registered command that prints the
+      omitted text; mutation checks (bridge ignoring --prompt-file fails 3 tests;
+      unguarded launch_bridge_in_tmux fails its over-limit test); full-suite failure
+      set identical to an origin/master worktree baseline in this sandbox (1 failure:
+      the documented environmental test_hook_events::test_installer_writes_standalone_receiver,
+      pr-4bde874; the `markdown` dep pyproject declares was installed into a scratch
+      PYTHONPATH for both runs). Tests: test_prompt_bounds 109 (2 new, failing-then-passing:
+      `assert "abbreviated" not in block` with "256 abbreviated" in the text, and
+      `assert 233 == 134`), test_claude_launcher 37, related suites 371. Evidence
+      /pm-captures/review-2ac8-i5/.'
+    created_at: '2026-10-25T14:50:00Z'
+    last_edited: '2026-10-25T14:50:00Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
