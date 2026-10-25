@@ -40,7 +40,10 @@ theirs_text)`:
   independently on both sides with different content is an ambiguous record
   and a conflict; duplicate ids within one side are ambiguous and a conflict.
   Ordering changes are preserved when only one side reordered; conflicting
-  reorders are a conflict.
+  reorders are a conflict. A list absent from the merge base (a PR record
+  that never had a `notes` key) merges like an empty one — independent
+  additions survive and a same-id/different-content entry is still
+  ambiguous.
 - Non-id lists (`depends_on`, etc.) and scalars are atomic: both changed
   differently is a conflict.
 - After merging, validate that **neither side lost a change**: for every leaf
@@ -73,8 +76,12 @@ returns, for a successful resolution:
 goes to `$CAP/<pr>/integration.json`; the human-readable delta goes to
 `$CAP/<pr>/integration-resolution.diff`.
 
+`added_ours`/`added_theirs`/`merged_fields`/`removed` name nested-list ids
+with their list path (`prs[pr-200].notes:note-1`), so a resolution that only
+merged notes inside an existing record is visible instead of looking empty.
 `summary()` renders resolved candidates ("conflicts with master@… resolved by
-record (N added from PR, M from base)") and failed resolutions.
+record (N added from PR, M from base)", counting nested records) and failed
+resolutions.
 
 ### R3. Do not exempt metadata; surface new-base interactions
 `compute_candidate` computes `base_behavior_changes` for every check with a
@@ -103,7 +110,11 @@ published. So the sign-off launch
    `project.yaml` files (recomputing it from index stages), commits the merge,
    and verifies the resulting tree **equals** `candidate_tree` before
    committing; on any mismatch or remaining conflict it aborts the merge and
-   restores the original HEAD.
+   restores the original HEAD. HEAD is re-verified immediately before the
+   merge, and a branch that already carries the base (a concurrent apply won
+   the race) is reported as the applied revision instead of being committed
+   over or reset — `merge --abort` is used, never `reset --hard <checked
+   head>`, so a concurrent commit is never discarded.
 3. Re-runs the check against the **same** base revision (no second fetch, so
    a base that moves during the apply cannot make the record describe a
    different merge) and records it with the resolution provenance carried
@@ -143,13 +154,18 @@ integrated result, not only the PR's own diff.
   report's `pm-signoff-head` matches the reviewed head):
   `pm-signoff-evidence` (`stage@sha,…`), `pm-signoff-evidence-reason`,
   `pm-signoff-checks`, `pm-signoff-candidate`.
+The block is rewritten into `project.yaml` on every record, so its lists
+(`reused`, `planner_code_changes`) are bounded at 20 entries with a
+`*_total` count when truncated.
 `pr_signoff_record` and the auto-sequence driver refuse/coerce a `MERGE` when
 the integration carries a `resolution` or `base_behavior_changes` but the
 report does not state (a) the candidate tree (`pm-signoff-candidate`) for
 resolved candidates and (b) which evidence is reused / which targeted checks
 were run, with a reason. A resolved MERGE additionally requires
-`resolution.applied_merge_sha`. This makes reuse an explicit, recorded act
-instead of an invented approval.
+`resolution.applied_merge_sha`. `pm-signoff-candidate` must be at least 7
+characters (like the head tag) — a short value could match almost any tree
+as a prefix without identifying the approved one. This makes reuse an
+explicit, recorded act instead of an invented approval.
 
 The sign-off prompt (`_signoff_integration_block` + step 0 + report contract)
 renders the resolution (paths, ids added/changed/removed, unresolved), the
@@ -179,7 +195,8 @@ invalidates and returns to sign-off.
 - prints the resolution summary, unresolved conflicts, applied merge and the
   delta file path; exits 1 on unresolved conflict/error;
 - `--apply` applies a `CLEAN` or `RESOLVED` candidate (the existing clean
-  behavior is preserved).
+  behavior is preserved), including a `RESOLVED` check whose re-check in
+  `prepare` comes back `CLEAN` because the base moved between the two checks.
 `--record` still records the check the verdict binds to.
 
 ### R9. Regression coverage
@@ -205,6 +222,12 @@ tests):
    candidate.
 9. Prompt/CLI surfaces: sign-off prompt names the resolution, candidate,
    evidence instructions; `integrate` prints the resolution.
+10. Notes appended to the same PR record on both sides (the merge base has no
+    `notes` key) resolve, both notes survive, and the nested ids are named in
+    the summary/prompt; the same id with different content is still ambiguous.
+11. Approval guards: a too-short `pm-signoff-candidate` is not accepted, an
+    unapplied resolution cannot be justified, and a concurrent apply that
+    already integrated the base is not committed over or reset away.
 
 ## Implicit requirements
 

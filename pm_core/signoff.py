@@ -305,6 +305,11 @@ def invalidate_signoff(root: Path, pr_id: str, reason: str) -> None:
 # the merge gate refuses a resolved/behaviourally-changed approval that has
 # none.
 
+# The evidence block lands in project.yaml (rewritten on every sign-off
+# record), so its lists are bounded; a total records what was left out.
+_EVIDENCE_LIST_LIMIT = 20
+
+
 def qa_evidence(pr_id: str) -> dict | None:
     """Latest QA evidence and the revision it exercised, when recorded."""
     import json
@@ -346,14 +351,18 @@ def _report_evidence(pr_id: str, reviewed_head: str | None) -> dict:
         meta = {}
         meta_head = ""
     reused = (meta.get("evidence") or "").strip()
-    return {
+    tokens = [x.strip() for x in re.split(r"[,\s]+", reused) if x.strip()]
+    out = {
         "report_head": meta_head or None,
         "report_base": meta.get("base") or None,
         "report_candidate": meta.get("candidate") or None,
-        "reused": [x.strip() for x in re.split(r"[,\s]+", reused) if x.strip()],
+        "reused": tokens[:_EVIDENCE_LIST_LIMIT],
         "reason": meta.get("evidence-reason") or None,
         "checks": meta.get("checks") or None,
     }
+    if len(tokens) > _EVIDENCE_LIST_LIMIT:
+        out["reused_total"] = len(tokens)
+    return out
 
 
 _VERDICT_STAGE = {
@@ -374,6 +383,12 @@ def _evidence_block(pr: dict, reviewed_head: str | None,
         prior_block["integration"] = prior.get("integration")
     full = pr.get("integration") or {}
     qa = qa_evidence(pr["id"])
+    if qa:
+        changes = list(qa.get("planner_code_changes") or [])
+        if len(changes) > _EVIDENCE_LIST_LIMIT:
+            qa = dict(qa,
+                      planner_code_changes=changes[:_EVIDENCE_LIST_LIMIT],
+                      planner_code_changes_total=len(changes))
     review_sha, review_note = None, (
         "pm does not record the revision the review ran on")
     if qa and qa.get("planner_head") and not qa.get("planner_code_changes"):
@@ -429,7 +444,13 @@ def approval_justification_problem(pr_id: str, integration: dict | None,
     if resolution:
         candidate = rec.get("candidate_tree") or ""
         named = (meta.get("candidate") or "").strip()
-        if not named or not candidate.startswith(named):
+        if len(named) < 7:
+            # Same minimum as the head tag: a short value can match almost
+            # any tree as a prefix without identifying the approved one.
+            return ("report.html has no usable pm-signoff-candidate tag; it "
+                    "must name the approved candidate tree "
+                    f"({candidate[:12] or '?'})")
+        if not candidate.startswith(named):
             return ("report.html does not name the approved candidate tree "
                     f"(pm-signoff-candidate {candidate[:12] or '?'})")
         if not resolution.get("applied_merge_sha"):

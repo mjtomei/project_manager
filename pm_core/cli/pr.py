@@ -1672,7 +1672,9 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
                                             resolve=resolve)
         if rec.get("status") == integration.RESOLVED:
             rec = integration.prepare(root, pr_id, data=data)
-        elif rec.get("status") == integration.CLEAN:
+        if rec.get("status") == integration.CLEAN:
+            # Also covers a resolved check whose base moved to a clean merge
+            # between the two checks: `--apply` must still apply the merge.
             applied_clean, err = integration.apply_integration(root, pr_id, rec)
             if err:
                 click.echo(f"Not applied: {err}", err=True)

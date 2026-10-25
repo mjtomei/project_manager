@@ -244,6 +244,23 @@ def test_one_sided_reorder_is_preserved():
     assert merged.index("id: pr-2") < merged.index("id: pr-1")
 
 
+def test_id_list_absent_from_the_base_merges_like_an_empty_one():
+    """A nested list the merge base never had still merges by record id."""
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+    ours = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+            "  notes:\n  - id: note-a\n    text: branch\n")
+    theirs = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+              "  notes:\n  - id: note-b\n    text: base\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is not None, details
+    assert "note-a" in merged and "note-b" in merged
+    # The same id added on both sides with different content stays ambiguous.
+    other = ours.replace("branch", "other")
+    merged, details = integration.resolve_project_yaml(base, ours, other)
+    assert merged is None
+    assert any("added on both sides" in c for c in details["conflicts"])
+
+
 def test_resolved_text_uses_pm_writer_and_reparses():
     merged, _ = resolve("\n- id: pr-300\n  title: Feat\n  status: pending\n")
     assert merged.startswith(store._YAML_HEADER)
@@ -336,6 +353,48 @@ def test_250_metadata_conflict_resolves_and_all_records_survive(w):
         "pr-100", PR, "pr-250", "pr-251", "pr-300", "pr-301"]
     # The PR workdir was not rewritten by the merge step.
     assert git(w.wd, "rev-parse", "HEAD") == rec["head"]
+
+
+def test_notes_appended_to_the_same_record_on_both_sides_survive(w):
+    """#250 also appends notes inside an existing PR record, not just PRs."""
+    def add_note(pm_dir: Path, note_id: str, text: str) -> None:
+        data = store.load(pm_dir)
+        store.get_pr(data, PR)["notes"] = [{
+            "id": note_id, "text": text,
+            "created_at": "2026-01-01T00:00:00Z"}]
+        store.save(data, pm_dir)
+
+    add_note(w.wd / "pm", "note-branch", "from the branch")
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "branch note")
+    original_head = git(w.wd, "rev-parse", "HEAD")
+    add_note(w.base_pm, "note-base", "from the base")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base note")
+
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.UP_TO_DATE, rec
+    entry = rec["resolution"]["paths"][0]
+    # The nested ids are named with their list path: a notes-only resolution
+    # must not look like "nothing happened".
+    assert entry["added_ours"] == [f"prs[{PR}].notes:note-branch"]
+    assert entry["added_theirs"] == [f"prs[{PR}].notes:note-base"]
+    # The resolved summary counts the nested records, not just top-level PRs.
+    assert "1 added from PR, 1 from base" in integration.summary(
+        dict(rec, status=integration.RESOLVED))
+
+    notes = [n["id"]
+             for n in store.get_pr(store.load(w.wd / "pm"), PR)["notes"]]
+    assert notes == ["note-branch", "note-base"]
+    assert git(w.wd, "rev-parse", "HEAD^{tree}") == rec["candidate_tree"]
+    assert rec["resolution"]["resolved_from"]["head"] == original_head
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert f"prs[{PR}].notes:note-branch" in text
+    assert f"prs[{PR}].notes:note-base" in text
 
 
 def test_same_field_conflict_routes_to_impl_and_changes_nothing(w):
@@ -484,6 +543,9 @@ def test_resolution_digest_survives_a_benign_recheck(w):
         rec["resolution"]["applied_merge_sha"]
     assert signoff.merge_gate_refusal(
         pr_entry(w), again["head"], "master") is None
+    # The artifact keeps the human-readable delta through a re-check.
+    artifact = json.loads((w.croot / PR / "integration.json").read_text())
+    assert "resolved" in artifact["resolution"]["diff"]
 
 
 def test_approval_rejects_a_head_tag_too_short_to_identify_the_head(w):
@@ -501,6 +563,21 @@ def test_approval_rejects_a_head_tag_too_short_to_identify_the_head(w):
     assert problem and "pm-signoff-head" in problem
     # A tag that cannot identify the revision is not attributed as evidence.
     assert signoff._report_evidence(PR, rec["head"])["reused"] == []
+
+
+def test_approval_rejects_a_candidate_tag_too_short_to_identify_the_tree(w):
+    rec = _metadata_conflict(w)
+    (w.croot / PR).mkdir(parents=True, exist_ok=True)
+    (w.croot / PR / "report.html").write_text(
+        f'<html><head><meta name="pm-signoff-head" content="{rec["head"]}">'
+        f'<meta name="pm-signoff-candidate" '
+        f'content="{rec["candidate_tree"][:3]}">'
+        '<meta name="pm-signoff-evidence" content="review@deadbee,qa@cafef00">'
+        '<meta name="pm-signoff-evidence-reason" content="records only">'
+        '</head><body/></html>')
+    problem = signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"])
+    assert problem and "pm-signoff-candidate" in problem and "usable" in problem
 
 
 def test_resolved_approval_is_stale_when_head_moves_after_the_apply(w):
@@ -535,6 +612,32 @@ def test_compact_resolution_bounds_records_and_is_idempotent():
         integration._resolution_digest(compact)
 
 
+def test_recorded_evidence_lists_are_bounded(w):
+    """The evidence block is rewritten into project.yaml: bound its lists."""
+    rec = _metadata_conflict(w)
+    (w.croot / PR).mkdir(parents=True, exist_ok=True)
+    tokens = ",".join(f"review@{i:040x}" for i in range(50))
+    (w.croot / PR / "report.html").write_text(
+        f'<html><head><meta name="pm-signoff-head" content="{rec["head"]}">'
+        f'<meta name="pm-signoff-evidence" content="{tokens}">'
+        '<meta name="pm-signoff-evidence-reason" content="records only">'
+        '</head><body/></html>')
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps({"overall": "PASS"}))
+    (qa_dir / "qa_resume.json").write_text(json.dumps({
+        "planner_head": rec["head"],
+        "planner_code_changes": [f"f{i}.py" for i in range(50)]}))
+    block = signoff._evidence_block(
+        pr_entry(w), rec["head"], integration.binding(rec),
+        verdict=SIGNOFF_MERGE)
+    limit = signoff._EVIDENCE_LIST_LIMIT
+    assert len(block["reused"]) == limit
+    assert block["reused_total"] == 50
+    assert len(block["qa"]["planner_code_changes"]) == limit
+    assert block["qa"]["planner_code_changes_total"] == 50
+
+
 def test_resolution_preserves_workdir_files_and_evidence(w):
     evidence_file = w.croot / PR / "scenarios" / "1" / "note.txt"
     evidence_file.parent.mkdir(parents=True)
@@ -567,6 +670,27 @@ def test_dirty_workdir_keeps_the_isolated_resolution_unapplied(w):
     verdict, why = signoff.effective_verdict(
         SIGNOFF_MERGE, pr_entry(w)["integration"], head)
     assert verdict == SIGNOFF_BLOCKED and "could not be applied" in why
+    # Even a report that names everything cannot approve an unapplied merge.
+    write_report(w, rec)
+    problem = signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], head)
+    assert problem and "not applied" in problem
+
+
+def test_an_already_integrated_branch_is_not_committed_over(w):
+    """A concurrent apply that already merged the base is not reset away."""
+    base_sha = git(w.repo, "rev-parse", "master")
+    head = git(w.wd, "rev-parse", "HEAD")
+    tree = git(w.wd, "rev-parse", "HEAD^{tree}")
+    record = {"status": integration.RESOLVED, "head": head,
+              "base_sha": base_sha, "candidate_tree": tree,
+              "resolution": {"paths": [{"path": "pm/project.yaml"}]}}
+    merged, err = integration._apply_resolution(
+        record, str(w.wd), head, base_sha, "Integrate master")
+    assert err is None, err
+    assert merged == head
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "rev-parse", "HEAD^{tree}") == tree
 
 
 def test_bounce_to_review_applies_the_resolved_candidate(w):
@@ -678,6 +802,32 @@ def test_integrate_cli_prints_the_resolution(w):
             pr_mod.pr, ["signoff", "integrate", PR, "--no-resolve"])
     assert r.exit_code != 0
     assert "CONFLICTS" in r.output
+
+
+def test_integrate_cli_apply_applies_a_clean_recheck_of_a_resolved_check(w):
+    """`--apply` still applies when the base moved to a clean merge."""
+    head, base, tree = "b" * 40, "a" * 40, "c" * 40
+    resolved = {"status": integration.RESOLVED, "head": head, "base_sha": base,
+                "base_branch": "master", "target_repo": "repo",
+                "candidate_tree": tree, "conflicts": ["pm/project.yaml"],
+                "resolution": {"paths": [{"path": "pm/project.yaml"}]}}
+    clean = dict(resolved, status=integration.CLEAN, resolution=None)
+    applied = {}
+
+    def fake_apply(root, pr_id, rec=None, **kw):
+        applied["status"] = rec["status"]
+        return "d" * 40, None
+
+    with patch.object(integration, "check_integration",
+                      return_value=dict(resolved)), \
+         patch.object(integration, "prepare", return_value=dict(clean)), \
+         patch.object(integration, "apply_integration", side_effect=fake_apply), \
+         patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(
+            pr_mod.pr, ["signoff", "integrate", PR, "--apply"])
+    assert r.exit_code == 0, r.output
+    assert applied == {"status": integration.CLEAN}
 
 
 def test_integrate_cli_apply_exits_nonzero_when_it_cannot_apply(w):

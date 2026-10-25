@@ -371,10 +371,12 @@ def _merge_value(base, ours, theirs, path: str, actions: dict):
         return _merge_dict(base, ours, theirs, path, actions)
     if _is_id_list(ours) and _is_id_list(theirs) \
             and (base is _MISSING or _is_id_list(base)):
-        if base is _MISSING:
-            return None, [f"{path or '<root>'}: records added on both sides "
-                          "with different content"]
-        return _merge_id_list(base, ours, theirs, path, actions)
+        # A list absent in the merge base (e.g. a PR record that had no
+        # ``notes`` key) merges like an empty one: independent additions
+        # survive and a same-id/different-content entry is still ambiguous.
+        # The preservation check below proves neither side lost an entry.
+        return _merge_id_list([] if base is _MISSING else base, ours, theirs,
+                              path, actions)
     return None, [f"{path or '<root>'}: changed differently on both sides"]
 
 
@@ -965,15 +967,22 @@ def _resolve_worktree_conflicts(wt: Path, workdir: str, head: str,
 
 
 def _action_ids(actions: dict, kind: str, side: str | None = None) -> list[str]:
-    """Flatten top-level record-list actions into the ids they touched."""
+    """Flatten record actions into the ids they touched.
+
+    A nested list's ids are qualified with their path
+    (``prs[pr-200].notes:note-1``) so a resolution that only merged notes
+    inside an existing record is still visible in the summary instead of
+    looking like nothing happened.
+    """
     out: list[str] = []
     for path, entry in actions.items():
-        if "[" in path or "." in path:
-            continue                       # a field/record-level detail
         if kind == "added":
-            out.extend((entry.get("added") or {}).get(side) or [])
+            values = (entry.get("added") or {}).get(side) or []
         else:
-            out.extend(entry.get(kind) or [])
+            values = entry.get(kind) or []
+        if "[" in path or "." in path:
+            values = [f"{path}:{v}" for v in values]
+        out.extend(values)
     return sorted({str(i) for i in out})
 
 
@@ -1243,6 +1252,13 @@ def _record_check(root: Path, pr_id: str, record: dict) -> dict:
                      or is_ancestor(workdir, applied, new_head)):
             carried = dict(old["resolution"])
             carried.pop("diff", None)      # compact state never holds it
+            diff_path = carried.get("diff_path")
+            if diff_path:
+                # Keep the full record's delta in integration.json: the
+                # artifact is rewritten below, and the compact state only
+                # carries the pointer.
+                with contextlib.suppress(OSError):
+                    carried["diff"] = Path(diff_path).read_text()
             record["resolution"] = carried
             record["resolution_digest"] = _resolution_digest(carried)
             record["resolved_from"] = carried.get("resolved_from")
@@ -1355,6 +1371,20 @@ def valid_for(record: dict | None, head: str | None) -> bool:
     return True
 
 
+def _added_count(entry: dict, key: str) -> int:
+    """Added-record count for one resolved path, nested lists included.
+
+    ``records`` holds the per-path counts (notes, plan sub-lists, ...); the
+    flat id lists only name top-level records, so a notes-only resolution
+    would otherwise read "0 added".
+    """
+    records = entry.get("records") or {}
+    if records:
+        return sum(int(c.get(key) or 0) for c in records.values()
+                   if isinstance(c, dict))
+    return len(entry.get(key) or [])
+
+
 def summary(record: dict) -> str:
     """One-line human summary of an integration record."""
     status = record.get("status")
@@ -1368,8 +1398,8 @@ def summary(record: dict) -> str:
     if status == RESOLVED:
         entries = (record.get("resolution") or {}).get("paths") or []
         paths = [p.get("path") for p in entries if p.get("path")]
-        ours = sum(len(p.get("added_ours") or []) for p in entries)
-        theirs = sum(len(p.get("added_theirs") or []) for p in entries)
+        ours = sum(_added_count(p, "added_ours") for p in entries)
+        theirs = sum(_added_count(p, "added_theirs") for p in entries)
         return (f"conflicts with {base} resolved by record "
                 f"({', '.join(paths) or 'project.yaml'}; "
                 f"{ours} added from PR, {theirs} from base)")
@@ -1451,6 +1481,10 @@ def _apply_resolution(record: dict, workdir: str, head: str, base_sha: str,
     expected = record.get("candidate_tree")
     resolution = record.get("resolution") or {}
     recorded = {p.get("path"): p for p in resolution.get("paths") or []}
+    if _out(_git("rev-parse", "HEAD", cwd=workdir)) != head:
+        # Re-check right before touching the worktree: the caller verified
+        # HEAD, but another process may have moved it since.
+        return None, "PR HEAD moved while applying the resolution"
     m = _git(*no_hooks, "-c", "rerere.enabled=false", "merge", "--no-commit",
              "--no-ff", base_sha, cwd=workdir)
     if m.returncode == 0:
@@ -1458,14 +1492,26 @@ def _apply_resolution(record: dict, workdir: str, head: str, base_sha: str,
         # recorded check, or the branch already carries the change): the
         # candidate must still match exactly.
         tree = _out(_git("write-tree", cwd=workdir))
+        merging = _git("rev-parse", "-q", "--verify", "MERGE_HEAD",
+                       cwd=workdir).returncode == 0
         if not expected or tree != expected:
-            _git("reset", "--hard", head, cwd=workdir)
+            # Undo only this merge.  ``merge --abort`` restores the state
+            # before it, while ``reset --hard head`` could discard a commit
+            # another process made between the HEAD check and this merge.
+            if merging:
+                _git("merge", "--abort", cwd=workdir)
             return None, ("the resolved merge produced a different tree "
                           f"({(tree or '?')[:12]} != {(expected or '?')[:12]})")
+        if not merging:
+            # The branch already carries the base (a concurrent apply won
+            # the race): there is nothing to commit, and resetting would
+            # discard that merge.  Report the current head; the caller
+            # re-checks and binds that revision.
+            return _out(_git("rev-parse", "HEAD", cwd=workdir)) or None, None
         commit = _git(*no_hooks, "-c", "user.name=pm", "-c", "user.email=pm@localhost",
                       "commit", "--no-edit", cwd=workdir)
         if commit.returncode != 0:
-            _git("reset", "--hard", head, cwd=workdir)
+            _git("merge", "--abort", cwd=workdir)
             return None, f"merge commit failed: {_detail(commit)}"
         return _out(_git("rev-parse", "HEAD", cwd=workdir)) or None, None
 
