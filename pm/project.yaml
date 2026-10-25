@@ -22665,6 +22665,59 @@ prs:
       QA scenario prompts" — true of the design, not of current production wiring.'
     created_at: '2026-10-25T00:27:46Z'
     last_edited: '2026-10-25T00:27:46Z'
+  - id: note-4fa726d
+    text: 'concretize s11 (prompt no-side-effect / resume / pr show): verified against
+      HEAD 70436638, refined steps emitted.
+
+
+      Verified surfaces and fixtures:
+
+      - pm prompt <pr-id> twice = byte-identical, and creates no captures/<pr-id>/
+      dir, no pm/prompts/ dir, no pm_prompt_*.txt (small project, one PR).
+
+      - Review pane (pm pr review <pr-id> from a pane in the pm session) generates
+      the review prompt and creates no captures dir; PR must be in_progress/in_review
+      first (pm pr edit --status in_progress), workdir is cloned on demand.
+
+      - Resume: pm pr start <pr-id> twice from a PLAIN shell (no pm tmux session for
+      the project). 1st argv = --session-id <uuid> + prompt; 2nd argv = --resume <same
+      uuid> with NO prompt argument.
+
+
+      Two traps future runs must know:
+
+      1. pm pr start only resumes on the non-tmux fallback. With a pm tmux session
+      running for the project, it opens a window whose command always carries the
+      prompt (build_claude_shell_cmd gets no session_id/resume) and the second run
+      just switches to that window. So the resume story needs the pm tmux session
+      killed (pm session kill).
+
+      2. tmux panes do not inherit a custom PATH: the pane shell''s rc puts /home/pm/.local/bin
+      first, so a recording claude stand-in on PATH is invisible to panes and the
+      real CLI would run. Pane flows must use the bundled fake instead: pm fake-claude
+      config set --tag <tag> ''{"_all": {}}'' (absolute _FAKE_CLAUDE_BIN, no PATH
+      needed). The PATH stand-in is only usable from the plain shell (env PATH=/tmp/standbin:$PATH
+      ...). Clear the fake config (pm fake-claude config clear) before the resume
+      story or the fake swallows the launch and nothing is recorded.
+
+
+      Deliberately NOT used: the sign-off pane cannot test the no-side-effect property.
+      launch_signoff_window calls integration.check_integration before generate_signoff_prompt,
+      and that check writes captures/<pr-id>/integration.json, so the captures dir
+      exists before the prompt is built (observed: dir appears even when the integration
+      fetch fails). The lazy-pointer fix (signoff.py _integ_note, prompt_gen._qa_scenarios_pointer)
+      is therefore not observable there.
+
+
+      Fixture note: a PR session prompt is always bounded - description/notes/spec/session-notes/deps
+      are all fit_prompt blocks (verified: a 118 KB description is truncated to 119
+      701 B, no bootstrap). The only user-reachable over-limit PR prompt is unbounded
+      static text, i.e. a title big enough that fit_prompt returns the original render
+      (used ~130 KB title -> prompt 134 991 B -> file-backed bootstrap). Also: pm
+      pr start requires project.yaml committed on the base branch (pm push, then merge
+      the pm/sync-* branch), else it exits with "not committed on master yet".'
+    created_at: '2026-10-25T00:19:38Z'
+    last_edited: '2026-10-25T00:19:38Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
@@ -32587,6 +32640,35 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-24T22:28:40.901263+00:00'
   updated_at: '2026-10-24T22:28:40.901263+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e7ee94d
+  plan: bugs
+  title: 'Bug: pm pr note add creates duplicate note IDs for identical text, making
+    notes unaddressable'
+  branch: pm/pr-e7ee94d-bug-pm-pr-note-add-creates-duplicate-note-ids-for-
+  status: pending
+  depends_on: []
+  description: "Location: pm_core/cli/pr.py pr_note_add (~line 3171) calls store.generate_note_id(pr_id,\
+    \ text) WITHOUT the existing_ids argument, so the collision-avoidance in store.generate_note_id\
+    \ (store.py:594-611) never runs. Every other caller passes the existing ids (cli/pr.py:210,\
+    \ cli/pr.py:2432, tui/qa_loop_ui.py:669).\n\nRepro:\n  pm pr add \"Add login feature\"\
+    \                      # pr-x\n  pm pr note add pr-x \"confirmed the bug\"   \
+    \         # note-fca0f36\n  pm pr note add pr-x \"confirmed the bug\"        \
+    \    # note-fca0f36 AGAIN (same id)\n  pm pr show pr-x                       \
+    \             # ## Notes lists both, same id\n  pm pr note delete pr-x note-fca0f36\
+    \                # deletes BOTH (pr_note_delete filters n[\"id\"] != note_id)\n\
+    \nImpact: two notes share an id, so pm pr note delete/edit/list cannot address\
+    \ them individually; delete silently removes both. Expected: the second add gets\
+    \ an extended-hash id (e.g. note-fca0f36a), as tests/test_pr_notes.py:42-43 already\
+    \ asserts for the helper."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-25T00:26:43.182859+00:00'
+  updated_at: '2026-10-25T00:26:43.182859+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
