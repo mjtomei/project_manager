@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T00:30:26.888255+00:00'
+  updated_at: '2026-10-25T00:56:55.420524+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22671,6 +22671,25 @@ prs:
       removes both).'
     created_at: '2026-10-25T00:30:26Z'
     last_edited: '2026-10-25T00:30:26Z'
+  - id: note-337c8fb
+    text: 'Sign-off return SIGNOFF_IMPL resolved (merge 56bc503b, spec 867fe6f5).
+      Not a code defect: integration vs master@c0ba037b3bb6 conflicted only in pm/project.yaml,
+      where both sides appended PR entries. Merged c0ba037b and kept all four new
+      entries in the file''s created_at order — pr-7d68898 (master), pr-a42a4f8 (branch),
+      pr-a591cbf (master), pr-e7ee94d (branch) — each byte-identical to its source
+      side; every other project.yaml edit from both sides is preserved. Code merged
+      cleanly (pm/project.yaml was the only path changed on both sides).
+
+
+      Verification on the integrated branch: pm/project.yaml parses (487 PRs, each
+      of the four once); tests/test_prompt_bounds.py 93 passed; test_bug_fix_flow_prompts
+      + test_plan_review + test_claude_launcher + test_regression_prompts 86 passed;
+      full suite failure set byte-identical to an origin/master worktree baseline
+      in this sandbox (59 failures/errors, all test_signoff_integration / test_merge_publish
+      / test_hook_events — environmental, none prompt-related). No prompt builder
+      was touched by the merge. Ready for a fresh review + QA on the integrated branch.'
+    created_at: '2026-10-25T00:56:55Z'
+    last_edited: '2026-10-25T00:56:55Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
@@ -33076,10 +33095,6 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-25T00:26:43.182859+00:00'
   updated_at: '2026-10-25T00:26:43.182859+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
   started_at: null
   reviewed_at: null
   merged_at: null
