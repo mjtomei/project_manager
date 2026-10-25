@@ -3966,10 +3966,11 @@ prs:
       pr-271cb3a was reviewed in its workdir clone (setting started_at/reviewed_at/workdir)
       while the main repo concurrently added a note via pm pr note. The merge-propagation
       path (git stash + pop, used by pr-83b98d5 to merge notes across clones) bypassed
-      the file lock from pr-f38005f and left literal <<<<<<< Updated upstream /       / >>>>>>> Stashed changes markers in project.yaml, breaking yaml parsing for
-      all pm commands until manually resolved. Resolution: keep timestamps + workdir
-      from the workdir side, keep the new note from the main side. Likely shares root
-      cause with this bug.'
+      the file lock from pr-f38005f and left literal <<<<<<< Updated upstream /       /
+      >>>>>>> Stashed changes markers in project.yaml, breaking yaml parsing for all
+      pm commands until manually resolved. Resolution: keep timestamps + workdir from
+      the workdir side, keep the new note from the main side. Likely shares root cause
+      with this bug.'
     created_at: '2026-05-01T21:41:09Z'
     last_edited: '2026-05-01T21:41:09Z'
 - id: pr-ad7bd98
@@ -11857,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-25T16:49:32.077215+00:00'
+  updated_at: '2026-10-25T17:00:08.798077+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -12058,6 +12059,47 @@ prs:
       will be committed with qa prefix; separate tracking bug pr-ed9fc64.'
     created_at: '2026-10-25T16:49:32Z'
     last_edited: '2026-10-25T16:49:32Z'
+  - id: note-b40a732
+    text: 'Scenario 4 refinement (2026-10-25): public-flow coverage is feasible using
+      real nested Podman plus an explicitly documented, narrowly scoped PATH forwarding
+      shim named podman that gates real run/inspect/rm operations and preserves output/status;
+      qa.md setup item 5 permits runtime-boundary fault harnesses. PM has no built-in
+      race barriers, so fake delays alone do not establish inventory-before-retain
+      or old-EXIT-after-replacement ordering. Keep pm set container-runtime podman
+      (arbitrary executable paths are rejected). Use file:// absolute URL to the disposable
+      bare origin: raw local-path origins are rejected by the push proxy. Shell pm
+      pr qa does not launch QA; use TUI or pm qa run <instruction-id> --pr <canonical-id>
+      inside an actual test-session shell pane; qa debug has no shared PR proxy. Explicit
+      held fake roles need verdicts:{} and hold, with _all:{} covering concretization.
+      Same-PR impl/review use one workdir, so serialize unique commits/pushes rather
+      than invent independent branch tips. Old failed-release records and >1h lock
+      pruning should be separate fixtures/stories, not hand-edited runtime state in
+      the concurrency scenario. No runtime QA PASS claimed during refinement.'
+    created_at: '2026-10-25T16:00:38Z'
+    last_edited: '2026-10-25T16:00:38Z'
+  - id: note-5036526
+    text: 'S4 Astra handoff 2026-10-25: executed under chatgpt/gpt-6.1-sol-high, switched
+      to chatgpt/gpt-6-astra-high for requested safe handoff; no terminal QA verdict/PASS.
+      Story1 real impl/review/actual QA plus P2/long-tag controls: review close concurrent
+      allowed push succeeded with origin SHA equality, forbidden push rejected/ref
+      absent, QA/P2/long-tag pushes succeeded, old review ID gone, source/sentinel
+      hashes unchanged; native transcript coverage incomplete. Stories2-9 incomplete/unproven:
+      pre-fix Podman3.4 tabwriter discarded inventory, unavailable gates, story5 cleanup
+      timeout/watchdog expiry, driver/PTY/stale-gate defects; no accepted race coverage
+      there. S3 already pushed parsing fix be658949 (pr-ed9fc64); fetched/fast-forwarded,
+      preserved all local/upstream notes after conflict, no duplicate source change
+      and no post-fix rerun. Standard build Chromium smoke failed; documented recovery
+      omitted only smoke RUN and real image exec/workers worked. Stopped owned background
+      driver chains; no top-level drivers left; SIGSTOP only 19 fixture TUI/QA controls,
+      preserving 37 S4-only runtime containers, panes, source/evidence. Later fixtures
+      shared S4-only runtime storage (per-story isolation deviation); fresh Astra
+      run must isolate each story and fix unique gate IDs, PATH/actor inheritance
+      and <10s inspect watchdog. All partial attempts retained. Detailed tested/remaining
+      coverage, process inventory and recovery paths: /pm-captures/scenarios/4/astra-handoff.md;
+      exact scripts/gates durable in handoff-drivers. All stories require fresh native
+      Astra validation; do not duplicate S3 fix or treat old gate expiry as PASS.'
+    created_at: '2026-10-25T17:00:08Z'
+    last_edited: '2026-10-25T17:00:08Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
