@@ -81,6 +81,27 @@ ROUTER_ALIAS_ENV_VARS = (
 SUBAGENT_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
 SUBAGENT_FORCE_ENV = "CLAUDE_CODE_SUBAGENT_MODEL_FORCE"
 
+# Auto permission mode's classifier picks its own model: it refuses an
+# Opus-class or Sonnet 5.5 ANTHROPIC_DEFAULT_SONNET_MODEL (and the same in
+# CLAUDE_CODE_AUTO_MODE_MODEL) and falls back to its Sonnet 5 default, sent
+# without a route prefix -- on the router, to the main account.  A router
+# session therefore sends that default through its route.
+AUTO_MODE_MODEL_ENV = "CLAUDE_CODE_AUTO_MODE_MODEL"
+CLASSIFIER_DEFAULT_MODEL = "claude-sonnet-5"
+
+
+def route_classifier_model(model: str | None) -> str | None:
+    """The auto-mode classifier model for a router session on *model*.
+
+    Claude Code's own classifier default under the route's prefix
+    (``work/claude-opus-5-5[1m]`` -> ``work/claude-sonnet-5``).  None for a
+    model without a prefix: the router sends it, and so the default
+    classifier, to the same backend.
+    """
+    if not model or "/" not in model:
+        return None
+    return f"{model.split('/', 1)[0]}/{CLASSIFIER_DEFAULT_MODEL}"
+
 
 def subagent_pin_env(model: str | None,
                      provider: "ProviderConfig | None" = None) -> dict[str, str]:
@@ -168,6 +189,9 @@ class ProviderConfig:
             if self.model:
                 for var in ROUTER_ALIAS_ENV_VARS:
                     env[var] = self.model
+            classifier = route_classifier_model(self.model)
+            if classifier:
+                env[AUTO_MODE_MODEL_ENV] = classifier
             for var, value in self.alias_models.items():
                 env[var] = value
             if self.model:
@@ -204,10 +228,15 @@ class ProviderConfig:
         A router authenticates upstream itself; a stray API key or auth
         token in the caller's environment would only make Claude Code
         prompt about it (blocking an unattended worker) -- the same
-        variables the claude-mixed launcher unsets.
+        variables the claude-mixed launcher unsets.  A main-account
+        (``claude``) session drops a classifier pin inherited from a routed
+        caller, so its auto-mode classifier stays on Claude's default on
+        that account (a router session sets its own, env_vars).
         """
         if self.type == "router":
             return ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+        if self.type == "claude":
+            return (AUTO_MODE_MODEL_ENV,)
         return ()
 
     def model_flag(self) -> str | None:

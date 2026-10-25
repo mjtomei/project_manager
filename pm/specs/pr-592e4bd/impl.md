@@ -190,13 +190,29 @@ account.
   `ANTHROPIC_DEFAULT_FABLE_MODEL` (QA S61, 79b6ddd7; these four are every
   `ANTHROPIC_DEFAULT_*_MODEL` alias Claude Code 2.1.310 reads). A full id
   typed into `/model` is outside the launch boundary.
-  Known gap, not fixed here (pr-1071c5a, QA S59/S61): in auto permission
-  mode Claude's permission classifier refuses an Opus-class
-  `ANTHROPIC_DEFAULT_SONNET_MODEL` and requests unprefixed
-  `claude-sonnet-5[1m]`, which the router sends to the main account.
-  `CLAUDE_CODE_AUTO_MODE_MODEL=<route>/claude-sonnet-5` (settable today
-  through `alias_models`) kept it on the work route in S59. Sessions
-  launched with `--dangerously-skip-permissions` never classify.
+- *Auto-mode permission classifier* (pr-1071c5a, QA S59/S61; user
+  decision 2026-10-25: a session on the work account classifies on the
+  work account, every other session on the main account). In auto
+  permission mode Claude Code 2.1.310 picks the classifier model itself:
+  a server-configured model first, then `CLAUDE_CODE_AUTO_MODE_MODEL`
+  (refused if Opus/Sonnet 5.5-class), then
+  `ANTHROPIC_DEFAULT_SONNET_MODEL` (same restriction), then its Sonnet 5
+  default `claude-sonnet-5`, sent with no route prefix. The route's
+  Opus pins are therefore refused and the default reached the main
+  account. A router provider now sets
+  `CLAUDE_CODE_AUTO_MODE_MODEL=<route prefix>/claude-sonnet-5`
+  (`providers.route_classifier_model`: Claude's own default, through the
+  route; nothing for an unprefixed route model, whose default already goes
+  to the same backend; an `alias_models` entry wins). A main-account
+  (`claude`-type) session removes an inherited value (`env -u`; dropped
+  from the `claude -p` run env), so its classifier keeps Claude's default
+  on that account. `local`/`openai` providers are the user's own endpoints
+  and keep whatever the environment gives them. `pm provider list` names
+  the route's classifier model. Sessions launched with
+  `--dangerously-skip-permissions` never classify. Residual outside pm's
+  control: a server-configured classifier model takes priority over the
+  env var (none was configured for these accounts in S59 or the c189 live
+  check).
 - The router does not rewrite the response model, so transcripts record the
   physical name (`claude-opus-5-5`); requested-model checks use claude's
   `modelUsage` (`work/claude-opus-5-5`). A `[1m]` suffix on the route model
@@ -1396,6 +1412,13 @@ from that run, each with mutation-checked regressions:
 - S61, 79b6ddd7: `ANTHROPIC_DEFAULT_FABLE_MODEL` pinned for routers
   (`TestRouterProvider::test_fable_alias_is_pinned`).
 - S60: no product change; qa.md clarifications 0e13c5f8.
-Open (§2): the auto-mode classifier probe (pr-1071c5a). Review loop
-c189 i1 re-checked these three fixes (7 mutations caught,
-`/pm-captures/review-c189-i1/mutation-checks.log`).
+Review loop c189 i1 re-checked these three fixes (7 mutations caught,
+`/pm-captures/review-c189-i1/mutation-checks.log`) and, on the user's
+decision, routed the auto-mode classifier (§2; pr-1071c5a):
+`tests/test_worker_route.py::TestClassifierRoute` (7 mutations caught,
+`mutation-checks-classifier.log`). Live through the real work route behind
+the S59 work/-only relay (`/pm-captures/review-c189-i1/live-classifier/`),
+with pm's own built command in auto mode: without the new pin the
+classifier requested `claude-sonnet-5` (refused at the relay); with it both
+classifier calls requested `work/claude-sonnet-5` and the work account
+answered 200 (same org hash as the session), with no unprefixed request.

@@ -765,13 +765,28 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     `ANTHROPIC_DEFAULT_FABLE_MODEL` is pinned with the other router
     aliases, so skill/command `model: fable` and the `/model` Fable entry
     stay on `work/`. A full model id typed into `/model` is outside the
-    launch boundary and is not a failure. Still open, tracked on
-    pr-1071c5a and not an RQ42 child request: in auto permission mode the
-    permission classifier requests unprefixed `claude-sonnet-5[1m]`
-    (S59 Finding B, S61).
+    launch boundary and is not a failure. The auto-mode permission
+    classifier's unprefixed `claude-sonnet-5[1m]` (S59 Finding B, S61,
+    pr-1071c5a) is RQ43.
   - (c) Held in S59 with a `claude-mixed` stand-in launcher.
   - S59 also found and fixed ff65f489: `pm provider test --live` passes
     on a healthy `[1m]` route.
+- **RQ43** (user decision 2026-10-25, review loop c189 i1) Given a
+  session in auto permission mode (not `--dangerously-skip-permissions`),
+  When Claude classifies a tool call, Then the classifier request runs on
+  the session's account: a session on a router provider whose model has a
+  route prefix requests `<prefix>/claude-sonnet-5` (its launch env carries
+  `CLAUDE_CODE_AUTO_MODE_MODEL=work/claude-sonnet-5`, or the provider's
+  `alias_models` value), which the work account answers; no classifier
+  request names an unprefixed model. A main-account (plain or no-model)
+  session sets no classifier model and drops an inherited one (`env -u`),
+  so it classifies on Claude's default on the main account, also when pm
+  runs inside a routed session. `pm provider list` shows the route's
+  classifier model. Check requested models in a work/-only relay's log
+  (S59 method; classifier calls are triggered reliably by a relay-scripted
+  Agent call). Review evidence: `/pm-captures/review-c189-i1/live-classifier/`
+  (host `claude -p`; QA covers interactive host/container panes and the
+  TUI launch paths).
 
 ## 2. Setup
 

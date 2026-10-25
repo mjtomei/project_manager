@@ -217,8 +217,10 @@ class TestBuildShellCmd:
 
     def test_plain_model_stays_on_claude(self, pm_home_dir):
         cmd = self._build(model="claude-opus-5-5", effort="high")
-        # No route, no key handling; only the subagent pin (TestSubagentPin).
-        assert cmd == ("CLAUDE_CODE_SUBAGENT_MODEL=claude-opus-5-5 "
+        # No route, no key handling; only the subagent pin (TestSubagentPin)
+        # and no inherited classifier pin (TestClassifierRoute).
+        assert cmd == ("env -u CLAUDE_CODE_AUTO_MODE_MODEL "
+                       "CLAUDE_CODE_SUBAGENT_MODEL=claude-opus-5-5 "
                        "CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1 "
                        "claude --model claude-opus-5-5 --effort high")
 
@@ -240,6 +242,101 @@ def _cmd_env(cmd: str) -> dict[str, str]:
     import shlex
     return dict(w.split("=", 1) for w in shlex.split(cmd)
                 if re.match(r"[A-Z_][A-Z0-9_]*=", w))
+
+
+class TestClassifierRoute:
+    """Auto permission mode's classifier stays on the session's account.
+
+    QA S59/S61 (pr-1071c5a): the classifier refuses an Opus-class
+    ANTHROPIC_DEFAULT_SONNET_MODEL (and an Opus-class
+    CLAUDE_CODE_AUTO_MODE_MODEL) and falls back to its Sonnet 5 default,
+    requested without ``work/``, which the router sends to the main
+    account.  ``work/claude-sonnet-5`` kept it on the real work route.
+    """
+
+    CLASSIFIER = "work/claude-sonnet-5"
+    _build = staticmethod(TestBuildShellCmd()._build)
+
+    @staticmethod
+    def _shell_env(cmd, var="CLAUDE_CODE_AUTO_MODE_MODEL"):
+        """What *var* is in claude's environment when *cmd* runs."""
+        import re
+        exe = re.search(r" claude(?= |$)", cmd)  # the executable word
+        probe = cmd[:exe.start()] + f" sh -c 'echo \"${{{var}-unset}}\"'"
+        return subprocess.run(["sh", "-c", probe], capture_output=True,
+                              text=True, check=True).stdout.strip()
+
+    @pytest.mark.parametrize("model", [MODEL, f"{MODEL}[1m]"])
+    def test_router_sends_the_classifier_default_through_its_route(self, model):
+        p = ProviderConfig(name=ROUTE, type="router", api_base="http://x:1",
+                           model=model)
+        assert p.env_vars()["CLAUDE_CODE_AUTO_MODE_MODEL"] == self.CLASSIFIER
+
+    @pytest.mark.parametrize("container", [False, True])
+    def test_routed_launch_carries_it_over_an_inherited_value(
+            self, pm_home_dir, monkeypatch, container):
+        monkeypatch.setenv("CLAUDE_CODE_AUTO_MODE_MODEL", "claude-sonnet-5")
+        _write_providers(pm_home_dir, model=f"{MODEL}[1m]")
+        cmd = self._build(provider=ROUTE, container=container)
+        assert _cmd_env(cmd)["CLAUDE_CODE_AUTO_MODE_MODEL"] == self.CLASSIFIER
+        if not container:
+            assert self._shell_env(cmd) == self.CLASSIFIER
+
+    def test_live_probe_cmd_carries_it(self, pm_home_dir):
+        _write_providers(pm_home_dir)
+        cfg = get_provider(ROUTE, strict=True)
+        cmd = worker_route._probe_shell_cmd(cfg, "sid", container=False)
+        assert _cmd_env(cmd)["CLAUDE_CODE_AUTO_MODE_MODEL"] == self.CLASSIFIER
+
+    def test_alias_models_entry_wins(self):
+        p = ProviderConfig(name=ROUTE, type="router", api_base="http://x:1",
+                           model=MODEL, alias_models={
+                               "CLAUDE_CODE_AUTO_MODE_MODEL": "work/other"})
+        assert p.env_vars()["CLAUDE_CODE_AUTO_MODE_MODEL"] == "work/other"
+
+    def test_unprefixed_route_model_leaves_the_classifier_default(self):
+        # The router sends an unprefixed model, and so Claude's default
+        # classifier, to the same backend.
+        p = ProviderConfig(name=ROUTE, type="router", api_base="http://x:1",
+                           model="claude-opus-5-5")
+        assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in p.env_vars()
+
+    @pytest.mark.parametrize("model", [None, "claude-opus-5-5"])
+    def test_main_account_session_drops_an_inherited_value(
+            self, pm_home_dir, monkeypatch, model):
+        # A routed caller's pin would put a main session's classifier on
+        # the work route (or on a model main cannot serve).
+        monkeypatch.setenv("CLAUDE_CODE_AUTO_MODE_MODEL", self.CLASSIFIER)
+        cmd = self._build(model=model)
+        assert "CLAUDE_CODE_AUTO_MODE_MODEL=" not in cmd
+        assert self._shell_env(cmd) == "unset"
+
+    def test_print_launchers_drop_it_for_main_and_set_it_for_routes(
+            self, pm_home_dir, monkeypatch):
+        from pm_core.claude_launcher import _resolve_provider
+        for var in ("PM_MODEL", "PM_PROVIDER", "CLAUDE_CODE_SUBAGENT_MODEL",
+                    "CLAUDE_CODE_SUBAGENT_MODEL_FORCE"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("CLAUDE_CODE_AUTO_MODE_MODEL", self.CLASSIFIER)
+        _, _, run_env = _resolve_provider(model="claude-opus-5-5")
+        assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in run_env
+        _write_providers(pm_home_dir)
+        monkeypatch.setenv("CLAUDE_CODE_AUTO_MODE_MODEL", "claude-sonnet-5")
+        _, _, run_env = _resolve_provider(provider=ROUTE)
+        assert run_env["CLAUDE_CODE_AUTO_MODE_MODEL"] == self.CLASSIFIER
+
+    def test_local_provider_keeps_the_callers_value(self):
+        # A user's own endpoint: pm neither sets nor removes it.
+        p = ProviderConfig(name="ollama", type="local",
+                           api_base="http://localhost:11434", model="qwen")
+        assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in p.unset_env_vars()
+        assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in p.env_vars()
+
+    def test_provider_list_names_the_classifier_route(self, pm_home_dir):
+        from pm_core.cli.provider import _router_detail_lines
+        _write_providers(pm_home_dir)
+        lines = _router_detail_lines(get_provider(ROUTE, strict=True))
+        assert f"auto-mode classifier: {self.CLASSIFIER}" in lines
 
 
 class TestSubagentPin:
@@ -298,7 +395,8 @@ class TestSubagentPin:
     def test_no_model_selected_sets_nothing(self, pm_home_dir):
         # The CLI default model: pm has no selection to enforce, and only
         # removes a pin the caller's environment may carry.
-        assert self._build() == ("env -u CLAUDE_CODE_SUBAGENT_MODEL "
+        assert self._build() == ("env -u CLAUDE_CODE_AUTO_MODE_MODEL "
+                                 "-u CLAUDE_CODE_SUBAGENT_MODEL "
                                  "-u CLAUDE_CODE_SUBAGENT_MODEL_FORCE claude")
 
     def test_no_model_drops_an_inherited_pin(self, pm_home_dir, monkeypatch):

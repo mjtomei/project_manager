@@ -253,7 +253,8 @@ class TestLaunchBoundary:
         pane happens to start in (review pane regression)."""
         wd = _pm_workdir(home)
         cmd = build_claude_shell_cmd(prompt="p", cwd=str(wd), session_type="review")
-        assert cmd.startswith(f"cd {wd} && env -u CLAUDE_CODE_SUBAGENT_MODEL "
+        assert cmd.startswith(f"cd {wd} && env -u CLAUDE_CODE_AUTO_MODE_MODEL "
+                              "-u CLAUDE_CODE_SUBAGENT_MODEL "
                               "-u CLAUDE_CODE_SUBAGENT_MODEL_FORCE claude")
         container = build_claude_shell_cmd(prompt="p", cwd="/workspace",
                                            write_dir=str(wd), session_type="review")

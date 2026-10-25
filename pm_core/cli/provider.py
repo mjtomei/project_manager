@@ -53,6 +53,11 @@ def _router_detail_lines(p) -> list[str]:
         lines.append(f"credentials file: {p.credentials_file} ({state})")
     if p.refresh_command:
         lines.append(f"refresh command: {p.refresh_command}")
+    from pm_core.providers import AUTO_MODE_MODEL_ENV
+    classifier = p.env_vars().get(AUTO_MODE_MODEL_ENV)
+    lines.append("auto-mode classifier: "
+                 + (classifier or "Claude's default (unprefixed: the router's "
+                    "default backend)"))
     return lines
 
 

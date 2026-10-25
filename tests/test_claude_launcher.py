@@ -89,7 +89,8 @@ class TestBuildClaudeShellCmd:
     def test_basic_prompt(self, mock_sp, mock_log):
         result = build_claude_shell_cmd(prompt="hello world")
         # No model selected: an inherited subagent pin is dropped.
-        assert result == ("env -u CLAUDE_CODE_SUBAGENT_MODEL "
+        assert result == ("env -u CLAUDE_CODE_AUTO_MODE_MODEL "
+                          "-u CLAUDE_CODE_SUBAGENT_MODEL "
                           "-u CLAUDE_CODE_SUBAGENT_MODEL_FORCE claude 'hello world'")
 
     @patch("pm_core.claude_launcher.log_shell_command")
@@ -122,7 +123,8 @@ class TestBuildClaudeShellCmd:
     @patch("pm_core.paths.skip_permissions_enabled", return_value=False)
     def test_no_prompt_no_session(self, mock_sp, mock_log):
         result = build_claude_shell_cmd()
-        assert result == ("env -u CLAUDE_CODE_SUBAGENT_MODEL "
+        assert result == ("env -u CLAUDE_CODE_AUTO_MODE_MODEL "
+                          "-u CLAUDE_CODE_SUBAGENT_MODEL "
                           "-u CLAUDE_CODE_SUBAGENT_MODEL_FORCE claude")
 
     @patch("pm_core.claude_launcher.log_shell_command")
