@@ -1359,10 +1359,12 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
     """
     from pm_core import container_reaper
     if not container_is_running(name):
-        if container_reaper.is_retained(name):
+        # A retained allocation may have been renamed, so a name-only filter
+        # cannot rule it out. Resolve the ID whenever retention records exist.
+        if container_reaper.retained_names():
             cid = current_container_id(name)
             if cid is None or cid and container_reaper.is_retained(name, cid):
-                raise launch_error(name, "incomplete", "container is explicitly retained; release it before recreation",
+                raise launch_error(name, "incomplete", "container is explicitly retained or its identity is unknown; release it before recreation",
                                    stage="be reused")
         return None
     container_id = current_container_id(name)
@@ -2012,10 +2014,25 @@ def _relieve_keyring_pressure() -> None:
         _log.warning("pre-launch reap failed", exc_info=True)
 
 
-def activity_owner(name: str) -> bool:
-    """Whether an interactive (non-tmux) exec holds this allocation alive."""
+def _activity_identity_key(cid: str) -> str:
+    from pm_core.container_reaper import _runtime_domain
+    domain = _runtime_domain()
+    if domain is None:
+        raise ContainerError("Cannot determine runtime domain for interactive ownership")
+    identity = json.dumps([domain, cid], sort_keys=True)
+    return "active-id-" + hashlib.sha256(identity.encode()).hexdigest()
+
+
+def activity_owner(name: str, container_id: str = "") -> bool:
+    """Whether an interactive exec owns this name or its rename-stable identity."""
+    if container_id and _activity_lock_held(_activity_identity_key(container_id)):
+        return True
+    return _activity_lock_held(f"active-{name}")
+
+
+def _activity_lock_held(key: str) -> bool:
     try:
-        path = _lock_path(f"active-{name}")
+        path = _lock_path(key)
         # Only interactive attachment creates this file. An absent file is
         # unowned; the final removal recheck is serialized with attachment by
         # the launch lock. Never unlink existing activity files: a waiter may
@@ -2032,7 +2049,7 @@ def activity_owner(name: str) -> bool:
             fcntl.flock(lock, fcntl.LOCK_UN)
         return False
     except OSError as exc:
-        raise ContainerError(f"Cannot check interactive owner of '{name}': {exc}") from exc
+        raise ContainerError(f"Cannot check interactive owner '{key}': {exc}") from exc
 
 
 @_runtime_domain_operation
@@ -2050,20 +2067,23 @@ def run_interactive_exec(name: str, cid: str, generation: str,
     # Serialize attachment with cleanup; an old shell must not attach to a
     # replacement. The child inherits the lock so killing this helper alone
     # cannot make a still-running exec appear abandoned.
-    activity_context = contextlib.nullcontext(None)
-    if hold_activity != "0":
-        path = _lock_path(f"active-{name}")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        activity_context = path.open("a")
-    with activity_context as activity:
+    with contextlib.ExitStack() as stack:
+        activities = []
         with launch_lock(name) as locked:
             if not locked or not cid or current_container_id(name) != cid:
                 raise ContainerError(f"Container '{name}' changed before interactive attachment")
             if cleanup_generation(name) != generation:
                 raise ContainerError(f"Container '{name}' was recovered before interactive attachment")
-            if activity is not None:
-                fcntl.flock(activity, fcntl.LOCK_SH)
-        inherited = (activity.fileno(),) if activity is not None else ()
+            if hold_activity != "0":
+                # Keep the legacy name lock for older readers, and an ID/domain
+                # lock so a runtime rename cannot hide an active foreground exec.
+                for key in (f"active-{name}", _activity_identity_key(cid)):
+                    path = _lock_path(key)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    activity = stack.enter_context(path.open("a"))
+                    fcntl.flock(activity, fcntl.LOCK_SH)
+                    activities.append(activity)
+        inherited = tuple(activity.fileno() for activity in activities)
         return subprocess.call(["bash", "-c", command], pass_fds=inherited)
 
 

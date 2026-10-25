@@ -65,8 +65,9 @@ removed by automatic or scoped cleanup) when any of:
    socket, the default server, and the shared-session socket for its tag —
    has a `#{pane_start_command}` that contains the exact container name
    (token-boundary match, so `…-s1` ≠ `…-s10`) or its full id;
-   foreground QA debug instead holds a host activity lock for the lifetime
-   of its interactive exec, including when it runs outside tmux;
+   foreground QA debug instead holds host activity locks for the lifetime
+   of its interactive exec, including when it runs outside tmux. An additional
+   runtime-domain/container-ID lock preserves ownership after a runtime rename;
 2. it is explicitly retained (`pm container retain <name>`; marker file in
    `~/.pm/containers/retain/`);
 3. a launch holds its per-name launch lock (fcntl lock in
@@ -176,6 +177,8 @@ retryable cleanup rather than permission to delete by name.
   restore the full scenario list even when launch/status persistence raises.
   PR resource orchestration must not stop a removed container's proxy a second
   time after cleanup returns: a concurrent launch may already own its replacement.
+  Session shutdown's remaining-proxy sweep likewise uses exact session/runtime
+  records and locked runtime-user checks, preserving failed removals and replacements.
   Workdirs, captures, transcripts, QA workdirs are never touched.
 
 ### R4 — Reconcile on startup and periodically
@@ -261,6 +264,9 @@ reconcile passes prune retention and pending release records only when their
 recorded runtime domain matches the successfully inventoried domain; unknown
 or legacy domains are preserved. Known foreign-domain release records cannot
 authorize removal even when a cloned runtime store has identical container IDs.
+New releases recorded with an unknown domain remain non-authoritative, not legacy
+unscoped authorization. Release filenames include the domain so an unknown or
+foreign-domain write cannot overwrite an existing scoped request.
 Failure state and cleanup generations are runtime-domain scoped too. Launching
 an identically named container in another runtime store must not invalidate an
 existing allocation's attachment or EXIT release. Legacy generations remain
@@ -321,7 +327,8 @@ container cleared it and kept its files.  Running state is not health.
 - `pm container restart NAME [--force]` takes the launch lock, then checks
   ownership and refuses while a live pane uses the container unless `--force`.
   Checking after lock acquisition protects a session that attached while the
-  command waited for a concurrent launch. Prints PIDs before → after.
+  command waited for a concurrent launch. Ordinary restart also respects the
+  pending attachment lease; only `--force` can override it. Prints PIDs before → after.
   Runtime ID/short-ID/slash-name aliases resolve to the canonical name before
   taking the launch lock. Before restart, advance a host-side per-name cleanup
   generation; pane EXIT traps capture that generation before exec and skip container/proxy removal if

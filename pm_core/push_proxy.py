@@ -972,24 +972,25 @@ def stop_all_proxies() -> None:
 
 
 def stop_session_proxies(session_tag: str) -> int:
-    """Stop all push proxies belonging to a session.
+    """Release unused shared proxies for this exact session/runtime.
 
-    Returns the number of proxies stopped.
+    Session container removal can fail or race a new launch. Never unlink its
+    sockets unconditionally afterwards; the locked runtime inventory is the
+    authority, not the caller's earlier cleanup result or local references.
+    Per-container proxies are released by their container's removal.
     """
-    import glob as _glob
-    prefix = f"{session_tag}\0"
-    with _proxy_lock:
-        keys_to_remove = [k for k in _active_proxies if k.startswith(prefix)]
-        for k in keys_to_remove:
-            _active_proxies.pop(k, None)
-            for cname in _proxy_refs.pop(k, set()):
-                _container_to_proxy_key.pop(cname, None)
-
-    # Kill sockets matching the session tag
+    from pm_core.container_reaper import _runtime_domain, runtime_domain_scope
     count = 0
-    for sock in _glob.glob(f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-*/push.sock"):
-        _kill_proxy_socket(sock)
-        count += 1
+    with runtime_domain_scope():
+        domain = _runtime_domain()
+        if domain is None:
+            return 0
+        for proxy in list_shared_proxies():
+            if (proxy["session_tag"] != session_tag
+                    or proxy.get("runtime_domain") != domain):
+                continue
+            if release_proxy_if_unused(session_tag, proxy["pr_id"]):
+                count += 1
 
     if count:
         _log.info("Stopped %d session proxy(ies) for %s", count, session_tag)

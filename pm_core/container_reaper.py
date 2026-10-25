@@ -266,7 +266,9 @@ def _record_release(name: str, cid: str, generation: str, reason: str) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     # Runtime names/IDs are normally safe; hash unusual input instead of
     # letting an alias or malformed state escape the release directory.
-    key = f"{name}@{cid}"
+    domain = _runtime_domain()
+    domain_key = hashlib.sha256(json.dumps(domain, sort_keys=True).encode()).hexdigest()[:16]
+    key = f"{name}@{cid}-{domain_key}"
     if generation:
         key += "-" + hashlib.sha256(generation.encode()).hexdigest()[:16]
     if len(key) > 220 or not re.fullmatch(r"[A-Za-z0-9_.@-]+", key):
@@ -276,7 +278,7 @@ def _record_release(name: str, cid: str, generation: str, reason: str) -> None:
         with os.fdopen(fd, "w") as stream:
             json.dump({"name": name, "id": cid, "generation": generation,
                        "at": time.time(), "reason": reason,
-                       "runtime_domain": _runtime_domain()}, stream)
+                       "runtime_domain": domain, "domain_required": True}, stream)
         os.replace(temp, directory / f"{key}.json")
     finally:
         Path(temp).unlink(missing_ok=True)
@@ -300,12 +302,14 @@ def _release_records() -> list[tuple[Path, dict]]:
 def _current_release_records() -> list[tuple[Path, dict]]:
     """Only this runtime's releases may override live ownership.
 
-    Preserve legacy unscoped records, but an unknown current domain must
-    never authorize a release explicitly attributed to another runtime.
+    Preserve legacy unscoped records, but new unknown-domain requests are
+    diagnostic only. They cannot grant cleanup authority in any runtime.
     """
     domain = _runtime_domain()
     return [(path, rec) for path, rec in _release_records()
-            if rec.get("runtime_domain") in (None, domain)]
+            if (rec.get("runtime_domain") is not None
+                and rec["runtime_domain"] == domain)
+            or (rec.get("runtime_domain") is None and not rec.get("domain_required"))]
 
 
 def pending_releases() -> dict[str, dict]:
@@ -565,7 +569,7 @@ def _owner_panes(info: ContainerInfo, cache: _PaneCache,
     owners: list[str] = []
     indeterminate = False
     try:
-        if container_mod.activity_owner(info.name):
+        if container_mod.activity_owner(info.name, info.id):
             owners.append("interactive client")
     except (container_mod.ContainerError, OSError):
         indeterminate = True
@@ -1145,6 +1149,8 @@ def release_containers(names: list[str], *, reason: str = "release",
                 continue
             try:
                 _record_release(name, cid, generation, reason)
+                if _runtime_domain() is None:
+                    refused[name] = "runtime domain unknown; owner release needs an identity-verified retry"
             except OSError as exc:
                 refused[name] = f"could not persist owner release: {exc}"
         if refused:
@@ -1228,4 +1234,8 @@ def pending_failures() -> dict[str, dict]:
     for name, rec in pending_releases().items():
         failures.setdefault(name, {**rec, "owner_release": True,
                                    "error": "owner release pending; retry with pm container reap"})
+    for _, rec in _release_records():
+        if rec.get("domain_required") and rec.get("runtime_domain") is None:
+            failures.setdefault(rec["name"], {**rec, "owner_release": False,
+                "error": "release runtime domain unknown; inspect ownership before retrying cleanup"})
     return failures

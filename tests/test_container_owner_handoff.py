@@ -388,8 +388,8 @@ def test_dead_foreign_proxy_is_not_reassigned(monkeypatch, tmp_path):
     ({"runtime": "docker", "daemon_id": "a"}, {"runtime": "docker", "daemon_id": "a"}, True),
     ({"runtime": "docker", "daemon_id": "b"}, {"runtime": "docker", "daemon_id": "a"}, False),
     (None, {"runtime": "docker", "daemon_id": "a"}, False),
-    ({"runtime": "docker", "daemon_id": "a"}, None, True),
-    (None, None, True),
+    ({"runtime": "docker", "daemon_id": "a"}, None, False),
+    (None, None, False),
 ])
 def test_plan_release_records_respect_runtime_domain(monkeypatch, current, recorded, release_allowed):
     monkeypatch.setattr(reaper, "_runtime_domain", lambda: recorded)

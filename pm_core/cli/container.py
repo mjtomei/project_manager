@@ -455,7 +455,11 @@ def container_restart(name: str, force: bool):
         # A launch may have attached its pane while we waited for the lock.
         try:
             owners = [] if force else container_reaper.live_owner_panes(name)
-        except container_mod.ContainerError as e:
+            if not force and container_mod.recent_launch(name, container_reaper.LAUNCH_GRACE):
+                click.echo(f"{name} is awaiting attachment; retry after its launch lease "
+                           "expires, or use --force only when it is safe to end the session.", err=True)
+                raise SystemExit(1)
+        except (container_mod.ContainerError, OSError) as e:
             click.echo(f"{e}. Retry once ownership can be checked, or use --force "
                        "only when it is safe to end the session.", err=True)
             raise SystemExit(1)

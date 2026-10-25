@@ -397,8 +397,12 @@ class TestSharedProxy:
             assert sock == str(tmp_path / "pm-push-proxy-repo-abc-pr-1" / "push.sock")
             stop_push_proxy("c1")
 
-    def test_stop_session_proxies(self):
-        """stop_session_proxies cleans up all proxies for a session."""
+    def test_stop_session_proxies(self, monkeypatch, tmp_path):
+        """stop_session_proxies cleans up unused proxies for a session."""
+        import glob
+        original_glob = glob.glob
+        monkeypatch.setattr(glob, "glob", lambda pattern:
+                            original_glob(str(tmp_path / "pm-push-proxy-*")))
         with self._mock_start():
             start_push_proxy("c1", "/w", "b1",
                              session_tag="repo-abc", pr_id="pr-1")
