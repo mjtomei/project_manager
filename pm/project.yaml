@@ -33712,6 +33712,22 @@ prs:
       unverified.'
     created_at: '2026-10-25T18:40:54Z'
     last_edited: '2026-10-25T18:40:54Z'
+  - id: note-ed63e27
+    text: 'Subagent enforcement (note-6153fe1) done in ba4e830d: every launch with
+      a pm-selected model sets CLAUDE_CODE_SUBAGENT_MODEL=<effective --model, prefix/[1m]
+      kept> + CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1 (providers.subagent_pin_env), all
+      roles, host/container/resume, fake-claude and claude -p helpers. Regressions:
+      tests/test_worker_route.py::TestSubagentPin (3 mutations caught). Real Claude
+      Code 2.1.310 child requests via a controlled router stand-in, pre-fix (ccf0959b)
+      vs post-fix, host + slirp4netns container through the pm bridge + --resume:
+      pre-fix the agent-frontmatter model: fable and Agent(model=fable) children requested
+      claude-fable-5-1 (router -> main account); post-fix every child (default, Explore,
+      Plan, frontmatter, explicit Fable, [1m], resume) requested work/claude-opus-5-5
+      and the Agent tool no longer offers model. Evidence /pm-captures/subagent-pin-249/README.md.
+      impl.md R8, qa.md RQ42. Suite 3752 passed; failures only missing markdown dep
+      (rerun passes) and pre-existing test_hook_events installer test.'
+    created_at: '2026-10-25T19:21:10Z'
+    last_edited: '2026-10-25T19:21:10Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
