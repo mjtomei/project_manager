@@ -33557,6 +33557,20 @@ prs:
       so relaunch sign-off before review.'
     created_at: '2026-10-25T00:30:42Z'
     last_edited: '2026-10-25T00:30:42Z'
+  - id: note-72694d2
+    text: 'Review 0f64 i2 (ac202207, CODE CHANGE, small, needs normal re-review):
+      S53 66404830 (auto-start starting line queued during a hold; pr_view run_command
+      output escaped; Review loop done held; PR-override Routes) and i1 14d72926 (Routes
+      only for the types a PR override decides; review-loop ERROR escaped) reviewed
+      independently and sound. One gap fixed: PR Routes lines also counted the watcher,
+      a project session that pm watcher resolves with no PR, so a PR routed for every
+      role but one listed "watcher". Now model_config.PR_SESSION_TYPES. validate_model_config
+      also flags a PR session_models watcher entry, which used to be accepted silently
+      and did nothing. 2 mutations caught. Venv lacked markdown (3.10.3 installed).
+      Baseline 3724, final full suite 3726 passed, rc 0; impl.md 42(f); /pm-captures/review-0f64-i2.
+      S52 (RQ39) still has to run in the next QA.'
+    created_at: '2026-10-25T14:39:14Z'
+    last_edited: '2026-10-25T14:39:14Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
