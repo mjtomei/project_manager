@@ -30457,7 +30457,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677739+00:00'
-  updated_at: '2026-10-23T22:52:11.302759+00:00'
+  updated_at: '2026-10-25T00:18:01.608530+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30699,6 +30699,18 @@ prs:
       time.'
     created_at: '2026-10-23T22:52:11Z'
     last_edited: '2026-10-23T22:52:11Z'
+  - id: note-d22b767
+    text: 'Impl 2026-10-25 (02b8037b): reader review request implemented: 10 family
+      rubrics (508 criteria, verbatim quotes, 61 same-source examples) beside the
+      aggregate, plus general-writing families; templates per reader preferences (no
+      label explanation/warnings, no evidence/rationale, end-with-JSON, no penalty
+      for omitting what the document does not need, examples held out). Restricted
+      level tables are local only (rubric/restricted/levels.json, gitignored), awaiting
+      a user decision on publishing. The reader host library edits (~/.pageborne/library/PR
+      235 - Writing Quality Prompts.md) were not reachable from this container and
+      are not merged. tests/test_doc_rubric.py: 426 passed.'
+    created_at: '2026-10-25T00:18:01Z'
+    last_edited: '2026-10-25T00:18:01Z'
 - id: pr-8df6472
   plan: plan-doc-eval
   title: Document evaluation runner and evaluator calibration
@@ -30770,7 +30782,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-21T00:15:38.677748+00:00'
-  updated_at: '2026-10-23T22:20:59.991827+00:00'
+  updated_at: '2026-10-25T00:18:00.717447+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30806,6 +30818,22 @@ prs:
       served models are deferred to pr-ff9fea2.'
     created_at: '2026-10-23T22:06:36Z'
     last_edited: '2026-10-23T22:06:36Z'
+  - id: note-0c61934
+    text: 'Rubric interface update from pr-44f807f (02b8037b), supersedes note-4106e20
+      where they differ: rubric sets via rubric.list_rubrics() ("aggregate" + one
+      per survey family); render_judge/render_single(..., rubric_id=, criteria=, sources=)
+      (sources picks a family criteria by reference, e.g. sources=["pep1","pep12"]
+      in process_templates). Judge replies may contain notes and must END with JSON:
+      use extract_judgment(text), then validate_judgment(obj, rubric.criteria_for(case_type,
+      rubric_id, ...), single=) - rows are {"criterion", score_a/score_b/preference}
+      or {"criterion","score"}, each on its criterion own scale; no evidence/rationale.
+      Key results by (rubric_id, criterion_id) and record each criterion levels_source
+      (published | restricted_local | generic): licensed level tables (AAC&U, 6+1,
+      GRE, IELTS, ACT) live only in gitignored rubric/restricted/levels.json. Examples
+      render in prompts and are held out when they share an 8-word run with the case;
+      also exclude examples from the same source document as a corpus case if needed.'
+    created_at: '2026-10-25T00:18:00Z'
+    last_edited: '2026-10-25T00:18:00Z'
 - id: pr-09c4e8e
   plan: plan-doc-eval
   title: Automated planning prompt improvement campaign
