@@ -922,3 +922,35 @@ over the four builders with pathological inputs now finds no absolute host path
 in any marker. Real prompts are byte-identical (this repo's `notes.txt` is
 211 B, far under the 8 KB budget, so the marker never fires here). Full suite
 failure set unchanged from the i10 baseline.
+
+## 18. Sign-off return: integration merge (SIGNOFF_IMPL)
+
+Sign-off routed the PR back to impl with `SIGNOFF_IMPL` — not for a code
+defect, but because the integration check against `master` @ `c0ba037b3bb6`
+conflicted in `pm/project.yaml`. Both sides had appended new PR entries to the
+registry (the file's only changed path on both sides; every code path merged
+cleanly), so pm only permits an implementation return.
+
+Resolved by merging `c0ba037b` into this branch and keeping **all four** new
+entries, in the `created_at` order the file already uses:
+
+| entry | side | created_at |
+| --- | --- | --- |
+| `pr-7d68898` | master | 2026-10-24T22:07:19 |
+| `pr-a42a4f8` | this branch | 2026-10-24T22:28:40 |
+| `pr-a591cbf` | master | 2026-10-25T00:07:20 |
+| `pr-e7ee94d` | this branch | 2026-10-25T00:26:43 |
+
+Each entry is byte-identical to its source side, and each side's *other*
+`project.yaml` edits are preserved (this branch's notes on `pr-ace66e5` /
+`pr-0368986`, master's status updates). No requirement in this spec changed and
+no prompt builder was touched by the merge.
+
+Verification: `pm/project.yaml` parses (487 PRs, each of the four present
+exactly once); `tests/test_prompt_bounds.py` 93 passed; the four prompt suites
+named in §6 (`test_bug_fix_flow_prompts`, `test_plan_review`,
+`test_claude_launcher`, `test_regression_prompts`) 86 passed; the full suite
+failure set is byte-identical to an `origin/master` worktree baseline in this
+sandbox (59 failures/errors — all `test_signoff_integration` /
+`test_merge_publish` / `test_hook_events`, all environmental, none
+prompt-related).
