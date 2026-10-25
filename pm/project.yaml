@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T21:38:58.593032+00:00'
+  updated_at: '2026-10-25T22:00:21.825686+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33834,6 +33834,21 @@ prs:
       probe (pr-1071c5a).'
     created_at: '2026-10-25T21:38:58Z'
     last_edited: '2026-10-25T21:38:58Z'
+  - id: note-48cbfe9
+    text: 'Review c189 i1 follow-up (f0031965, CODE CHANGE, needs normal re-review
+      + QA RQ43): user decision 2026-10-25: the auto-mode permission classifier runs
+      on the session account. Router sessions set CLAUDE_CODE_AUTO_MODE_MODEL=<route
+      prefix>/claude-sonnet-5 (Claude own classifier default through the route; alias_models
+      wins; none for an unprefixed route model); main (claude-type) sessions env -u
+      an inherited value; local/openai untouched; pm provider list names it. Live
+      via the real work route behind the S59 work/-only relay, pm-built command, claude
+      -p auto mode: control requested unprefixed claude-sonnet-5 (refused), pinned
+      run sent both classifier calls to work/claude-sonnet-5, 200, same org hash.
+      Residual: a server-configured classifier model would beat the env var (none
+      seen). TestClassifierRoute, 7 mutations caught; full suite 3783 passed; /pm-captures/review-c189-i1
+      (live-classifier/README.md). Spec impl.md §2, qa.md RQ43.'
+    created_at: '2026-10-25T22:00:21Z'
+    last_edited: '2026-10-25T22:00:21Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -34562,7 +34577,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:58:32.257836+00:00'
-  updated_at: '2026-10-25T21:17:50.289736+00:00'
+  updated_at: '2026-10-25T22:00:22.767142+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34583,3 +34598,11 @@ prs:
       over the env var.'
     created_at: '2026-10-25T21:17:50Z'
     last_edited: '2026-10-25T21:17:50Z'
+  - id: note-7d21e93
+    text: 'Fixed in pr-592e4bd f0031965 (user decision 2026-10-25, review c189 i1):
+      router sessions pin CLAUDE_CODE_AUTO_MODE_MODEL=<route prefix>/claude-sonnet-5,
+      main sessions drop an inherited value. Verified live on the real work route
+      (/pm-captures/review-c189-i1/live-classifier). Pending QA RQ43 on pr-592e4bd;
+      this PR can be closed once that lands.'
+    created_at: '2026-10-25T22:00:22Z'
+    last_edited: '2026-10-25T22:00:22Z'
