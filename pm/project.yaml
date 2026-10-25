@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-22T17:23:20.401201+00:00'
+  updated_at: '2026-10-25T16:10:01.555371+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -11934,6 +11934,22 @@ prs:
       No implementation fix claimed.'
     created_at: '2026-10-25T16:06:59Z'
     last_edited: '2026-10-25T16:06:59Z'
+  - id: note-c12d254
+    text: 'QA scenario 8 (2026-10-25; actual agent model chatgpt/gpt-6.1-sol-high)
+      blocked before load runs on HEAD 38ec06b7. Installed editable checkout in /scratch/s8-venv;
+      pm which=/workspace/pm_core; isolated HOME/state/tmux/rootless Podman store;
+      projects A/B initialized with local origins, committed QA specs, eight-worker
+      fake config and auto-start off. Real pm container build-base failed at Dockerfile
+      Chromium smoke (step 17/25): inotify_init() failed: Too many open files (24),
+      GPU process is not usable. Independent inotify_init1 probe also returned errno
+      24 despite ulimit -n=500000; no working pm-dev:latest image (image exists rc=1),
+      zero test containers. Did not bypass smoke, change host quotas, reuse controller
+      storage, or substitute unit tests. All concurrency/queue/cleanup/retry/replacement/trial
+      stories remain unexecuted; rerun with a working isolated image and available
+      inotify resources. Evidence /pm-captures/scenarios/8/prerequisites/{build.log,build.cast,build.mp4,final-probe.log},
+      load-A and load-B TUI captures. No application fix claimed.'
+    created_at: '2026-10-25T16:10:01Z'
+    last_edited: '2026-10-25T16:10:01Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
