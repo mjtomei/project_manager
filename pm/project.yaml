@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T19:38:08.729475+00:00'
+  updated_at: '2026-10-25T21:28:58.946330+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -23258,6 +23258,53 @@ prs:
       PYTHONPATH for both). Evidence /pm-captures/review-240e-i6/. (2026-10-25T19:40:00Z)'
     created_at: '2026-10-25T19:38:08Z'
     last_edited: '2026-10-25T19:38:08Z'
+  - id: note-307d7d6
+    text: 'Policy change (74d0916e, spec §31 cf410957), per your direction: bounds
+      now cut accumulation only, never instructions.
+
+
+      Bounded (unchanged in kind): PR notes (newest full, older summarized, ~35 KB)
+      and pure enumerations — sibling/dependency listings, QA scenario verdicts, integration
+      + artifact path lists, worktree listings, watcher managed/target lists, merge
+      error output, verification pane output. Every marker names a command/path that
+      returns the full text.
+
+
+      Never truncated now, inlined whole: impl/QA specs, PR descriptions, session
+      notes, QA instruction-library entries, mock bodies, QA scenario steps (child
+      + concretization), concretization instruction files, plan files (plan deps /
+      plan fix / plan context), sign-off return reason. Removed SPEC_BUDGET, SESSION_NOTES_BUDGET,
+      QA_CHILD_STEPS_BUDGET, CONCRETIZE_INSTRUCTION_BUDGET, MOCKS_BUDGET, LIBRARY_ITEMS_MAX/LIST/TOTAL
+      budgets and the plan-file budgets; the four fit_prompt builders keep only their
+      notes + enumeration blocks; notes_pointer() removed with its last caller. Net
+      -155 lines in pm_core/.
+
+
+      Consequence, measured on this repo (489 PRs): impl/review/sign-off for pr-ace66e5
+      now exceed PROMPT_ARG_LIMIT (164,723 / 167,156 / 181,708 B) because pm/specs/pr-ace66e5/impl.md
+      is itself >120 KB with §31 inlined — the prompts grow by whatever the spec gains.
+      That is the policy working: the launcher delivers the complete prompt file-backed.
+      Verified end to end — 161 KB impl prompt -> 284-char command, file byte-identical
+      to the prompt. Where no writable dir exists it raises PromptTooLargeError instead
+      of cutting (still pr-a42a4f8 for the caller-side reporting). QA planner max
+      113,196 B; PR-notes bound still holds (400 notes -> 34,697 B).
+
+
+      Tests: tests/test_prompt_bounds.py rewritten to assert whole-text preservation
+      plus the launcher round trip — 137 pass. Five mutations each fail the suite:
+      spec cut, library capped to 1, PR notes unbounded, plan files cut, session notes
+      cut. Full suite 3,447 passed / 43 failed / 17 errors, failure set identical
+      to an origin/master worktree baseline in this sandbox (signoff_integration,
+      merge_publish, hook_events, and the test_git_ops::test_keeps_unpushed_merge
+      flake, which fails on master too).
+
+
+      Not done yet, next step if you want it: the `-p` print paths (launch_claude_print/_background)
+      can take the prompt on stdin instead of the bootstrap, which delivers it as
+      the actual turn with no model file-read. Held back so this change stays reviewable
+      on its own.'
+    created_at: '2026-10-25T21:28:58Z'
+    last_edited: '2026-10-25T21:28:58Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
