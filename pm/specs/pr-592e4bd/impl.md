@@ -222,9 +222,11 @@ config unchanged, passed on the final implementation 75f0dde6
 (`/pm-captures/host-work-route-smoke-20261022T190834Z/`: slirp4netns
 container; host + container `…190309Z/`). After 81cebf17 it passed on the
 host from an underscore cwd and in a container
-(`…195845Z/result.json`). Live QA S1–S50 is in
-`/pm-captures/scenarios/<N>/` (REPORT.md). The latest full suite is
-recorded with item 41.
+(`…195845Z/result.json`). Live QA S1–S54 is in
+`/pm-captures/scenarios/<N>/` (REPORT.md), except S52 (RQ39), whose
+worker never executed (`verdict.md`: no recovery after 10 relaunches):
+its coverage is still owed to the next QA run. The latest full suite is
+recorded with item 42.
 
 **Rules fixed during validation (index).** Commits in parentheses.
 - Live smokes 1–4. The bridge stream has no timeout after connect
@@ -1203,5 +1205,13 @@ recorded with item 41.
         the project settings apply"; a non-empty one (`5`, a list) still
         fails its launches.  `test_pr_empty_model_flagged_as_ignored[5
         cases]` (all fail with the old wording;
-        `/pm-captures/review-0f64-i4/mutation-checks.log`).  Full suite:
-        `/pm-captures/review-0f64-i4/full-suite.log`.
+        `/pm-captures/review-0f64-i4/mutation-checks.log`).  Full suite
+        3735 passed, rc 0 (`/pm-captures/review-0f64-i4/full-suite.log`).
+    (i) Review loop 0f64 i5: (b) escaped `run_command`'s output lines but
+        not its "> <cmd>" echo of a typed command (pre-existing on
+        master), so `pr note add … 'creds[work]'` from the command bar
+        showed "creds", and a `[/…]` in it refused the line.  Escaped now.
+        `test_typed_command_echo_keeps_brackets` (checked with Textual's
+        own markup parser; fails with the fix reverted,
+        `/pm-captures/review-0f64-i5/mutation-checks.log`).  Full suite
+        3736 passed, rc 0 (`/pm-captures/review-0f64-i5/full-suite.log`).

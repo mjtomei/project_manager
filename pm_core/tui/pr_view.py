@@ -819,7 +819,9 @@ def run_command(app, cmd: str, working_message: str | None = None,
         app.run_worker(_run_command_async(app, cmd, parts, working_message, action_key))
     else:
         # Run sync for quick commands
-        app.log_message(f"> {cmd}")
+        # The typed command is text too: "pr note add … 'creds[work]'" lost
+        # "[work]", and a "[/…]" in it refused the whole line.
+        app.log_message(f"> {escape(cmd)}")
         _run_command_sync(app, parts)
         if action_key:
             app._inflight_pr_action = None

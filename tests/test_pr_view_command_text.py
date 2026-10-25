@@ -62,6 +62,20 @@ def test_async_command_error_keeps_brackets(tmp_path):
     assert out == ["Work directory: /tmp/w[work]", f"Error: {REASON}"]
 
 
+def test_typed_command_echo_keeps_brackets(tmp_path):
+    """The "> <cmd>" echo of a typed command is text as well: a note naming
+    ``creds[work]`` lost ``[work]``, and a ``[/x]`` refused the line."""
+    from textual.content import Content
+
+    app, logs = _app(tmp_path)
+    cmd = "pr note add pr-x 'see creds[work] and [/x]'"
+    result = SimpleNamespace(returncode=0, stdout="", stderr="")
+    with patch.object(pr_view, "_run_shell", return_value=result):
+        pr_view.run_command(app, cmd)
+    # The log line is a Textual widget: check with Textual's own parser.
+    assert Content.from_markup(logs[0]).plain == f"> {cmd}"
+
+
 def test_command_exception_keeps_brackets(tmp_path):
     app, logs = _app(tmp_path)
 
