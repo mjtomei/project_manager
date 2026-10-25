@@ -22350,7 +22350,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-24T23:40:24.054867+00:00'
+  updated_at: '2026-10-25T00:27:46.098879+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22629,6 +22629,42 @@ prs:
       which also fails standalone). Evidence /pm-captures/review-4e41-i11/.'
     created_at: '2026-10-24T23:40:24Z'
     last_edited: '2026-10-24T23:40:24Z'
+  - id: note-12e1b06
+    text: 'QA scenario 7 PASS (2026-10-25, branch 70436638, evidence /pm-captures/scenarios/7/).
+      Runtime evidence, not code reading: throwaway local project with 20+20+20 QA-library
+      items (~3 KB descriptions each), 5 mocks (~393 KB of bodies), a 79 339-byte
+      QA spec and 100 PR notes (~90 KB). Pressing t in the pm TUI launched the planner;
+      the recording stand-in captured the planner argv: --session-id + one 81 953-byte
+      last argument beginning `You are a QA planner analyzing PR pr-7fb7dbc:`, NOT
+      the launcher bootstrap sentence — so the builder itself bounded the prompt.
+      `## Task`, `QA_PLAN_START`, `QA_PLAN_END` and `Number scenarios starting from
+      1.` all survive; the library, PR-notes and QA-spec blocks are all abbreviated
+      and each marker names a command that returns the omitted text (verified from
+      the project dir AND from the QA session workdir /home/pm/.pm/workdirs/<tag>/pm-pr-7fb7dbc-.../
+      where pm/project.yaml lives). No `Argument list too long` / `Errno 7` in the
+      pane, its scrollback, or ~/.pm/debug/<tag>.log. Pre-fix/post-fix on the same
+      project via an origin/master worktree: master builds a 318 710-byte planner
+      prompt (execve -> Errno 7, the #229 symptom), the branch builds 81 694 bytes
+      (execs fine). tests/test_prompt_bounds.py 93 passed.'
+    created_at: '2026-10-25T00:27:42Z'
+    last_edited: '2026-10-25T00:27:42Z'
+  - id: note-7962477
+    text: 'QA scenario 7, two observations left unfixed deliberately (no defect found
+      against the scenario, which prescribes this exact marker): (1) the mocks omission
+      marker reads "Read the full text: `pm qa mocks list` (mock definitions under
+      pm/qa/mocks/)", but `pm qa mocks list` prints titles only — the bodies are only
+      reachable through the directory the marker also names, or `pm qa mocks show
+      <mock-id>`. The other three markers (`pm qa list`, `pm pr note list <id>`, `pm
+      pr spec <id> qa`) do print the full text their builder omitted. The head+tail
+      cut also leaves only one `### Mock` heading in the 12 000-byte block. Worth
+      a follow-up if the marker should name `pm qa mocks show`. (2) `get_spec_mocks_section`
+      (spec_gen.py:632) has no production caller — commit 3eb89e65 "qa: remove mock
+      prompting (planner, scenario, spec-gen)" left the machinery, so today the mocks
+      block is reachable only via `pm qa mocks prompt`; it is not injected into scenario
+      prompts. Scenario 7 states the premise "these are the contracts injected into
+      QA scenario prompts" — true of the design, not of current production wiring.'
+    created_at: '2026-10-25T00:27:46Z'
+    last_edited: '2026-10-25T00:27:46Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
