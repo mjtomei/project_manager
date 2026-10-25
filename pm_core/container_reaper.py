@@ -353,16 +353,23 @@ def live_owner_panes(name: str, container_id: str = "") -> list[str]:
 
     The container's own labels are consulted so the tmux server it was
     launched from (``pm.tmux_socket``) is searched even when that isn't
-    this process's server.
+    this process's server. Raises ContainerError when ownership cannot be
+    established; destructive recovery must not interpret unknown as unowned.
     """
-    found = _inspect([name], timeout=10) or []
-    info = found[0] if found else ContainerInfo(name=name)
+    found = _inspect([name], timeout=10)
+    if not found:
+        raise container_mod.ContainerError(
+            f"Container '{name}' ownership unknown: could not inspect ownership metadata")
+    info = found[0]
     info.id = container_id or info.id
     if info.session_tag is None:
         parsed = container_mod.parse_container_name(name)
         if parsed:
             info.session_tag = parsed.session_tag
-    owners, _ = _owner_panes(info, _PaneCache(), fresh=True)
+    owners, indeterminate = _owner_panes(info, _PaneCache(), fresh=True)
+    if not owners and indeterminate:
+        raise container_mod.ContainerError(
+            f"Container '{name}' ownership unknown: tmux server unreachable")
     return owners
 
 
@@ -589,9 +596,11 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
             if current and current != info.id:
                 return False, "skipped: replaced by a newer launch"
         if not d.released:
-            owners, _ = _owner_panes(info, _PaneCache(), fresh=True)
+            owners, indeterminate = _owner_panes(info, _PaneCache(), fresh=True)
             if owners:
                 return False, f"skipped: pane {', '.join(owners)} attached concurrently"
+            if indeterminate:
+                return False, "skipped: tmux server unreachable — ownership unknown"
         try:
             container_mod.remove_container(info.name)
         except Exception as e:

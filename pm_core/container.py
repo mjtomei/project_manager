@@ -1164,7 +1164,7 @@ def pids_usage() -> dict[str, tuple[int, int]] | None:
         return None
     current: dict[str, int] = {}
     for line in (st.stdout or "").splitlines():
-        parts = line.strip().split("\t")
+        parts = line.split()
         if len(parts) == 2 and parts[0].startswith(CONTAINER_PREFIX):
             try:
                 current[parts[0]] = int(parts[1])
@@ -1180,7 +1180,7 @@ def pids_usage() -> dict[str, tuple[int, int]] | None:
         insp = None
     limits: dict[str, int] = {}
     for line in ((insp.stdout if insp else "") or "").splitlines():
-        parts = line.strip().split("\t")
+        parts = line.split()
         if len(parts) == 2:
             try:
                 limits[parts[0].lstrip("/")] = max(0, int(parts[1]))
@@ -1217,7 +1217,11 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
         # clears that and keeps its files, but ends every session inside —
         # so only when nothing owns it.
         from pm_core import container_reaper
-        owners = container_reaper.live_owner_panes(name, container_id)
+        try:
+            owners = container_reaper.live_owner_panes(name, container_id)
+        except ContainerError as exc:
+            raise launch_error(name, wedged, f"{probe_err}\n{exc}",
+                               stage="be reused") from exc
         if owners:
             raise launch_error(
                 name, wedged,

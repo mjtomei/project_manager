@@ -12136,6 +12136,25 @@ prs:
       Astra validation; do not duplicate S3 fix or treat old gate expiry as PASS.'
     created_at: '2026-10-25T17:00:08Z'
     last_edited: '2026-10-25T17:00:08Z'
+  - id: note-5cc63b0
+    text: 'Review-loop 6427 i2 final: actual model chatgpt/gpt-6-astra-high. Fixed
+      five safety/diagnostic issues: restart checked owners before waiting for launch
+      lock; ownership lookup treated failed inspect/unreachable tmux as unowned; final
+      removal recheck ignored unknown ownership; shared-proxy release fell back to
+      local references on unavailable runtime inventory; PID stats/limit parsers rejected
+      Podman spaces. Unknown ownership now preserves containers; restart checks under
+      lock with explicit --force override; PID recovery keeps real cause; unknown
+      inventory preserves shared proxy. Eight pre-fix failing cases reproduced; all
+      14 added regression/control cases pass. Focused suite 269 passed. Final sanitized
+      full suite 3464 passed, 3 existing unawaited AsyncMock warnings. First full
+      suite had 12 missing-markdown failures (3452 passed); installed declared markdown>=3.5,
+      kept failed log, reran successfully without code changes. Spec clarified; no
+      architectural redesign. Evidence /pm-captures/review-6427-i2/README.md and full-suite-with-dependency.log.
+      Existing model/handoff edits preserved outside commit. No real-container QA
+      claim or waiver; next review, outstanding runtime scenarios and independent
+      sign-off remain.'
+    created_at: '2026-10-25T17:42:16Z'
+    last_edited: '2026-10-25T17:46:18Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

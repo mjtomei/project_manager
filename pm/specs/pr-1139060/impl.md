@@ -75,7 +75,9 @@ Otherwise it is a candidate with a reason: `PR <id> is merged|closed`,
 `tmux session <s> gone`, `superseded QA run`, or `no owning pane`.
 **Recheck before delete:** for each candidate the reaper takes the per-name
 launch lock non-blockingly (skip if held), re-queries panes/retain, then
-removes while holding the lock.  `create_container` holds the same lock for
+removes while holding the lock. An unreachable tmux server at this final
+recheck preserves the container, just as during initial candidate selection.
+`create_container` holds the same lock for
 create/verify/reuse, so a concurrent launch/relaunch and a reap of the same
 name are serialized.
 
@@ -105,6 +107,8 @@ name are serialized.
   that tag+PR, checked under a per-proxy fcntl lock; `create_container` holds
   that lock from proxy start until `run` returns so a concurrent release
   cannot stop a proxy a new container is about to mount.
+  If runtime inventory is unavailable, preserve the shared proxy for a later
+  reconcile; process-local references cannot prove other processes have no users.
   A per-container (unshared: qa-debug, untagged) proxy is stopped whenever
   its container is removed, by whichever process removes it.
   If the QA run-end release is skipped because another reconcile holds the
@@ -197,14 +201,19 @@ container cleared it and kept its files.  Running state is not health.
   restarted in place (`restart_container`, files/id/mounts kept, setup
   re-verified; recreate on failure); with a live owner it raises the real
   error and is not touched.  Keyring failures raise (host-wide; recreating
-  won't help).
+  won't help). Failed ownership inspection or unreachable tmux servers are
+  unknown ownership, not absence: refuse destructive reuse recovery and ordinary
+  restart. Explicit `restart --force` remains the user's override.
 - `pids_usage()` reads cgroup stats (`stats --no-stream`, works when exec
-  can't) + `HostConfig.PidsLimit`.  Non-targeted reconcile passes report
+  can't) + `HostConfig.PidsLimit`, accepting both tabs and Podman's expanded
+  whitespace separators. Non-targeted reconcile passes report
   kept containers ≥ 90 % of their limit (`Outcome.pid_pressure`; TUI log
   line, `pm container reap` WARNING rows); `pm container status` lists
   ≥ 80 %.  Unowned ones are simply reaped like any leftover.
-- `pm container restart NAME [--force]` refuses while a live pane uses the
-  container unless `--force`, takes the launch lock, prints PIDs before → after.
+- `pm container restart NAME [--force]` takes the launch lock, then checks
+  ownership and refuses while a live pane uses the container unless `--force`.
+  Checking after lock acquisition protects a session that attached while the
+  command waited for a concurrent launch. Prints PIDs before → after.
 - Retry scheduling of dead QA workers stays with pr-1ab9075.
 
 ## 2. Implicit requirements

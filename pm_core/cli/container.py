@@ -445,16 +445,22 @@ def container_restart(name: str, force: bool):
     """
     from pm_core import container as container_mod
     from pm_core import container_reaper
-    owners = container_reaper.live_owner_panes(name)
-    if owners and not force:
-        click.echo(f"{name} is in use by live pane(s) {', '.join(owners)}; "
-                   f"restarting would end that session. Re-run with --force "
-                   f"once it is safe.", err=True)
-        raise SystemExit(1)
     before = (container_mod.pids_usage() or {}).get(name)
     with container_mod.launch_lock(name, timeout=60) as locked:
         if not locked:
             click.echo(f"{name} is being launched right now; try again.", err=True)
+            raise SystemExit(1)
+        # A launch may have attached its pane while we waited for the lock.
+        try:
+            owners = [] if force else container_reaper.live_owner_panes(name)
+        except container_mod.ContainerError as e:
+            click.echo(f"{e}. Retry once ownership can be checked, or use --force "
+                       "only when it is safe to end the session.", err=True)
+            raise SystemExit(1)
+        if owners:
+            click.echo(f"{name} is in use by live pane(s) {', '.join(owners)}; "
+                       f"restarting would end that session. Re-run with --force "
+                       f"once it is safe.", err=True)
             raise SystemExit(1)
         try:
             container_mod.restart_container(name)

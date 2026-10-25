@@ -814,7 +814,7 @@ def stop_push_proxy(container_name: str) -> None:
 
     For shared proxies the proxy is only stopped when no container — in this
     process or any other — still uses it (see :func:`release_proxy_if_unused`).
-    When the runtime can't be queried, falls back to this process's refcount.
+    When the runtime can't be queried, keep the proxy for a later reconcile.
     """
     with _proxy_lock:
         key = _container_to_proxy_key.pop(container_name, None)
@@ -846,30 +846,19 @@ def stop_push_proxy(container_name: str) -> None:
         if local_refs_left:
             return  # this process still has a container on the proxy
         stag, pid = key.split("\0", 1)
-        released = release_proxy_if_unused(stag, pid, exclude={container_name})
-        if released is not None:
-            return
-        # Runtime unknown and no local users left: legacy refcount behaviour.
-        with _proxy_lock:
-            _proxy_refs.pop(key, None)
-            _active_proxies.pop(key, None)
-    else:
-        with _proxy_lock:
-            _active_proxies.pop(key, None)
+        # Local references cannot prove that another process has no users.
+        # Unknown runtime inventory leaves the shared proxy for a later pass.
+        release_proxy_if_unused(stag, pid, exclude={container_name})
+        return
 
-    # Derive the socket path from the key and remove it to stop the
-    # subprocess proxy (the __main__ loop exits when socket disappears).
-    if "\0" in key:
-        # Shared proxy key: "session_tag\0pr_id"
-        stag, pid = key.split("\0", 1)
-        sock_dir = _shared_sock_dir_path(stag, pid)
-        sock_path = os.path.join(sock_dir, "push.sock")
-    else:
-        # Legacy key = container_name
-        import tempfile
-        sock_path = os.path.join(tempfile.gettempdir(),
-                                 f"{_SOCKET_DIR_PREFIX}{key}",
-                                 "push.sock")
+    with _proxy_lock:
+        _active_proxies.pop(key, None)
+
+    # Legacy key = container_name: this proxy serves only this container.
+    import tempfile
+    sock_path = os.path.join(tempfile.gettempdir(),
+                             f"{_SOCKET_DIR_PREFIX}{key}",
+                             "push.sock")
     _kill_proxy_socket(sock_path)
 
 

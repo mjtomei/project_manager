@@ -84,6 +84,21 @@ class TestKeyring:
             assert cm.keyring_pressure() is None
 
 
+class TestPidsUsage:
+    @pytest.mark.parametrize("stats_sep,inspect_sep", [
+        ("\t", "\t"), ("  ", "\t"), ("\t", "  "), ("  ", "  "),
+    ])
+    def test_runtime_whitespace(self, monkeypatch, stats_sep, inspect_sep):
+        name = "pm-repo-ab12-review-pr-aaaa"
+        def runtime(command, *args, **kwargs):
+            if command == "stats":
+                return _cp(out=f"{name}{stats_sep}2041\n")
+            return _cp(out=f"/{name}{inspect_sep}2048\n")
+        monkeypatch.setattr(cm, "_run_runtime", runtime)
+        assert cm.pids_usage() == {name: (2041, 2048)}
+        assert cm.pids_pressure() == [(name, 2041, 2048)]
+
+
 class TestLaunchError:
     def test_keyring_message_keeps_cause_and_recovery(self):
         err_text = "unable to create session key: disk quota exceeded"
@@ -379,6 +394,23 @@ class TestReaperOwnership:
         assert out.removed == []
         assert "attached concurrently" in out.decisions[0].reason
 
+    def test_recheck_keeps_unknown_owner(self, fake_env, monkeypatch):
+        info = _info("pm-repo-ab12-review-pr-aaaa")
+        monkeypatch.setattr(reaper, "_owner_panes", lambda *a, **kw: ([], True))
+        decision = reaper.Decision(info, "remove", "no owning pane")
+        removed, reason = reaper._remove_checked(decision, Scope())
+        assert not removed and "unknown" in reason
+        assert fake_env["removed"] == []
+
+    @pytest.mark.parametrize("failure", ["inspect", "tmux"])
+    def test_live_owner_lookup_refuses_unknown(self, monkeypatch, failure):
+        name = "pm-repo-ab12-review-pr-aaaa"
+        monkeypatch.setattr(reaper, "_inspect",
+                            lambda *a, **kw: None if failure == "inspect" else [_info(name)])
+        monkeypatch.setattr(reaper, "_owner_panes", lambda *a, **kw: ([], True))
+        with pytest.raises(cm.ContainerError, match="ownership unknown"):
+            reaper.live_owner_panes(name)
+
     def test_recheck_under_lock_skips_replaced_container(self, fake_env, monkeypatch):
         """A relaunch between plan and removal swapped in a new container of
         the same name (no pane attached yet): removal by name must not hit it."""
@@ -623,6 +655,22 @@ class TestEnsureReusable:
         assert "Cannot fork" in str(ei.value) and "%5" in str(ei.value)
         assert not rt.ran("restart") and removed == []
 
+    @pytest.mark.parametrize("kind,stderr", [("pids", "sh: Cannot fork"),
+                                             ("incomplete", "")])
+    def test_unknown_owner_blocks_recovery(self, monkeypatch, no_claude_json, kind, stderr):
+        rt = _Runtime(exec=lambda *a: _cp(126 if stderr else 1, err=stderr))
+        removed = self._setup(monkeypatch, rt)
+
+        def unknown(*args):
+            raise cm.ContainerError("ownership unknown: tmux server unreachable")
+
+        monkeypatch.setattr(reaper, "live_owner_panes", unknown)
+        with pytest.raises(cm.ContainerError, match="ownership unknown") as exc:
+            cm._ensure_reusable("c", Path("/w"), None, session_tag=None, pr_id=None)
+        if kind == "pids":
+            assert exc.value.kind == "pids" and stderr in str(exc.value)
+        assert not rt.ran("restart") and removed == []
+
     def test_restart_timeout_does_not_claim_removal(self, monkeypatch):
         monkeypatch.setattr(cm, "_run_runtime", _Runtime())
 
@@ -761,6 +809,19 @@ class TestProxyRelease:
         monkeypatch.setattr(push_proxy, "_kill_proxy_socket", killed.append)
         assert push_proxy.release_proxy_if_unused("t", "pr-1") is None
         assert killed == []
+
+    def test_local_shared_proxy_kept_when_runtime_unknown(self, monkeypatch):
+        from pm_core import push_proxy as pp
+        name, key = "pm-repo-ab12-review-pr-aaaa", "repo-ab12\0pr-aaaa"
+        monkeypatch.setattr(pp, "_container_to_proxy_key", {name: key})
+        monkeypatch.setattr(pp, "_proxy_refs", {key: {name}})
+        monkeypatch.setattr(pp, "_active_proxies", {key: "/unused/push.sock"})
+        monkeypatch.setattr(cm, "containers_for_pr", lambda *a: None)
+        kill = MagicMock()
+        monkeypatch.setattr(pp, "_kill_proxy_socket", kill)
+        pp.stop_push_proxy(name)
+        kill.assert_not_called()
+        assert key in pp._active_proxies
 
     def test_foreign_per_container_proxy_stopped_on_remove(self, monkeypatch, tmp_path):
         """A qa-debug/untagged container removed by another process (the
@@ -982,10 +1043,57 @@ class TestReapCLI:
         from click.testing import CliRunner
         from pm_core.cli import cli
         monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: ["%4"])
+        monkeypatch.setattr(cm, "pids_usage", lambda: {})
         restarted = []
         monkeypatch.setattr(cm, "restart_container", restarted.append)
         r = CliRunner().invoke(cli, ["container", "restart", "pm-x-review-pr-1"])
         assert r.exit_code == 1 and "%4" in r.output and restarted == []
+
+    @pytest.mark.parametrize("force", [False, True])
+    def test_restart_checks_owner_after_acquiring_launch_lock(self, monkeypatch, force):
+        from contextlib import contextmanager
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        owners = []
+
+        @contextmanager
+        def lock(name, **kwargs):
+            # A concurrent launch attaches its pane before we acquire its lock.
+            owners.append("%7")
+            yield True
+
+        monkeypatch.setattr(cm, "launch_lock", lock)
+        monkeypatch.setattr(cm, "pids_usage", lambda: {})
+        monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: list(owners))
+        restarted = []
+        monkeypatch.setattr(cm, "restart_container", restarted.append)
+        name = "pm-x-review-pr-1"
+        args = ["container", "restart", name] + (["--force"] if force else [])
+        r = CliRunner().invoke(cli, args)
+        assert r.exit_code == (0 if force else 1), r.output
+        assert restarted == ([name] if force else [])
+        if not force:
+            assert "%7" in r.output
+
+    @pytest.mark.parametrize("force", [False, True])
+    def test_restart_unknown_owner_requires_force(self, monkeypatch, force):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        def unknown(*args):
+            raise cm.ContainerError("ownership unknown: runtime unavailable")
+
+        monkeypatch.setattr(reaper, "live_owner_panes", unknown)
+        monkeypatch.setattr(cm, "pids_usage", lambda: {})
+        restarted = []
+        monkeypatch.setattr(cm, "restart_container", restarted.append)
+        name = "pm-x-review-pr-1"
+        r = CliRunner().invoke(cli, ["container", "restart", name]
+                               + (["--force"] if force else []))
+        assert r.exit_code == (0 if force else 1), r.output
+        assert restarted == ([name] if force else [])
+        if not force:
+            assert "ownership unknown" in r.output and "--force" in r.output
 
     def test_restart_unowned_reports_pids(self, monkeypatch):
         from click.testing import CliRunner
