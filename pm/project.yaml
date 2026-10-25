@@ -34546,8 +34546,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:58:32.257836+00:00'
-  updated_at: '2026-10-25T20:58:32.257836+00:00'
+  updated_at: '2026-10-25T21:17:50.289736+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-babcb48
+    text: 'S59 evidence (2026-10-25, real work route behind a work/-only relay; /pm-captures/scenarios/59/post-fix/classifier-probe
+      + story4/story5): reproduced on every pm launch path, including a TUI-launched
+      session (claude-mixed stand-in), plain-terminal pm pr start, its --resume, and
+      pre-fix ccf0959b. It is one probe per claude process (max_tokens 64, claude-sonnet-5[1m]
+      + 1M beta), then on http_400 "Sonnet 5 probe demotion" falls back to the route
+      model. Claude debug: "ANTHROPIC_DEFAULT_SONNET_MODEL=work/claude-opus-5-5[1m]
+      cannot serve as the classifier; using the Sonnet 5 default". CLAUDE_CODE_AUTO_MODE_MODEL=work/claude-opus-5-5[1m]
+      is ignored ("the API safeguards refuse the classifier escalated check on it").
+      CLAUDE_CODE_AUTO_MODE_MODEL=work/claude-sonnet-5 kept every classifier call
+      on the work route (real route 200, model claude-sonnet-5, same org hash, no
+      unprefixed probe); router providers can set it today via providers.yaml alias_models.
+      A server-configured classifier model (GrowthBook) would still take priority
+      over the env var.'
+    created_at: '2026-10-25T21:17:50Z'
+    last_edited: '2026-10-25T21:17:50Z'
