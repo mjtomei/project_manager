@@ -33425,8 +33425,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T01:15:37.606229+00:00'
-  updated_at: '2026-10-25T01:15:37.606229+00:00'
+  updated_at: '2026-10-25T15:10:40.378475+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f7db862
+    text: 'Cross-PR note from review-loop 2ac8 i6 on pr-ace66e5: the reproduction
+      in this bug''s description no longer occurs for the prompt-building path. It
+      went through integration.integration_pointer / prompt_gen._qa_scenarios_pointer
+      resolving paths.captures_dir() when an omission marker fired; both now name
+      runtime-resolved readers (`$(pm qa captures-path <pr-id>)/integration.json`,
+      `$CAP/scenarios/<n>/verdict.md`) and call no resolver at all, so building impl
+      / review / sign-off prompts no longer creates the captures dir even when the
+      markers fire (verified: generate_prompt / generate_review_prompt / generate_signoff_prompt
+      for a PR whose signoff_return.integration carries 30 paths create no captures
+      dir). Remaining filesystem touch on that path: _signoff_qa_scenarios_block calls
+      latest_qa_status_path() eagerly, and workdirs_base() creates ~/.pm/workdirs/
+      (not a per-PR dir) — decide whether this bug should be narrowed to that or closed.'
+    created_at: '2026-10-25T15:10:40Z'
+    last_edited: '2026-10-25T15:10:40Z'
