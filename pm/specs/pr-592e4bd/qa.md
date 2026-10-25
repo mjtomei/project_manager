@@ -712,6 +712,30 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
   which the router sends to the main account
   (`/pm-captures/subagent-pin-249/`, impl.md R8). When pm selects no model,
   no pin is set.
+  *QA24 planner clarifications (2026-10-25):*
+  - The impl evidence used a controlled endpoint standing in for the
+    router (`fake_anthropic.py`). That proves which model each child
+    *requests*. It does not prove that the requests reach the real work
+    account. QA must check the real route too: a child request that pm's
+    real `claude-work` route sends to the work backend and the work
+    backend answers. Use a recording relay in front of the real route. It
+    refuses every model without the `work/` prefix and never forwards
+    one, so a regression is visible and never bills the main account.
+    No real credential is copied or logged.
+  - S57/S58 ran before ba4e830d and do not test RQ42.
+  - A router's explicit `alias_models` entry for
+    `CLAUDE_CODE_SUBAGENT_MODEL` replaces the pinned value and is forced
+    too (impl.md R8).
+  - Open from code reading; the scenarios decide:
+    - (a) pm sets nothing when it selects no model. A pin already in the
+      environment then passes through: for example, pm driven from inside
+      a routed Claude session, whose env carries FORCE and a `work/` model.
+      A main-account session would then pin its children to `work/`.
+    - (b) FORCE covers subagents only. A skill or slash command whose
+      frontmatter says `model:`, or a `/model` switch, changes the
+      *main-loop* model, which may leave the route.
+    - (c) The real host launcher `claude-mixed` adds `--settings` and
+      exports its own `ANTHROPIC_BASE_URL`. The pin must survive it.
 
 ## 2. Setup
 
@@ -1134,6 +1158,49 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     Same scratch-only limits as the fourteenth pass. Render with this
     branch's `/workspace/pm/qa/artifacts` `render_cast`, never
     `/scratch/qa-artifacts`. Never copy real credentials.
+    Done: S57 PASS (host), S58 NEEDS_WORK (fix 0db93125, via= by path).
+  - Twenty-fourth pass (S59+), QA24 planner 2026-10-25, recovered native
+    planner after an E2BIG launch failure. The product delta is ba4e830d,
+    the subagent FORCE pin (impl.md R8, RQ42). Review loop 3741 i1 passed
+    on 3d4ebe31: 6 mutations caught, and the full suite on a `git archive`
+    snapshot had 3764 passed and 1 failure (an artifact: the snapshot is
+    not a git repo). In the checkout, test_dedup + test_hook_events
+    passed 59, so the reported test_hook_events failure did not
+    reproduce. 0db93125 also has not run live in container mode. None of
+    this has run in live QA.
+    - S59: host-mode pm inside the scenario container. A scratch PR is
+      routed for every role through a recording relay in front of the
+      real in-container `claude-work` route (the worker's own forwarder
+      to the host bridge and router).
+      - Real-Claude impl, review, sign-off, QA refiner/worker and the
+        live probe start the default agent, Explore, Plan,
+        `claude-code-guide`, a project `model: fable` agent, a user
+        `model: haiku` agent and an explicit-Fable request, also several
+        at once and after `--resume`.
+      - A scripted-parent relay mode makes the explicit `model: "fable"`
+        Agent call deterministic, while the child goes to the real work
+        account.
+      - A pre-fix control on ccf0959b must show the escape. It is
+        refused at the relay and never forwarded.
+      - Also: a launcher stand-in that behaves like `claude-mixed`, the
+        worker's own launch env and Agent schema, and the S57
+        follow-up/idle_prompt open point.
+    - S60: container mode inside the scenario container (S55/S58 harness,
+      nested slirp4netns). Two PRs at once: A routed for every role
+      through the relay to the real route, C on a plain model on a main
+      stub.
+      - Children of impl/review/sign-off/QA containers are checked
+        through a bridge kill and a review `--fresh` relaunch.
+      - `pm model show` via= is checked live (0db93125), and a C review
+        container must have no mount (S58 gap).
+    - S61: plain-model, no-model and inherited-pin sessions, the
+      `alias_models` override, and main-loop model switches outside FORCE
+      (RQ42 open points a–c), on a main stub plus the relay.
+    S59/S60 send real requests to the work account, so keep prompts
+    trivial. Requests without the `work/` prefix are refused at the relay,
+    never forwarded. Never read, copy or log a credential or header value.
+    Record only booleans and a short hash of a response's organization
+    header. Earlier evidence stands. S57/S58 do not cover RQ42.
 
 ## 3. Edge cases
 
