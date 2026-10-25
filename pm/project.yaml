@@ -34103,3 +34103,30 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-6082c0d
+  plan: bugs
+  title: 'Bug: pm pr start on a malformed model_config prints a raw AttributeError
+    traceback after moving the PR to in_progress'
+  branch: pm/pr-6082c0d-bug-pm-pr-start-on-a-malformed-model-config-prints
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py pr_start (~982) calls resolve_model_and_provider
+    -> model_config.config_block (~354) mc.get(block) after the status transition
+    and workdir clone. Repro (QA S54 story 4, pr-592e4bd head 27258d15): hand-edit
+    project.yaml via pm edit to `model_config: claude-sonnet-5-5` (a string), then
+    `pm pr start <pending PR>`: rc 1 with a Python traceback ending AttributeError:
+    str object has no attribute get, while the PR is already in_progress with its
+    workdir cloned and no window opened. pm model show already reports "model_config
+    must be a mapping". Expected: one Error: line naming the problem (as for an unconfigured
+    provider, review e0e8 i6) and ideally validation before the status change. No
+    silent fallback is wanted. Evidence /pm-captures/scenarios/54/story4 (cli-screens/after-start.txt,
+    REPORT.md).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-25T02:16:05.181654+00:00'
+  updated_at: '2026-10-25T02:16:05.181654+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
