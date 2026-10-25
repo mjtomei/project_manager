@@ -12192,6 +12192,24 @@ prs:
       edits and manual merge gate preserved.'
     created_at: '2026-10-25T18:56:49Z'
     last_edited: '2026-10-25T18:56:49Z'
+  - id: note-b752c5a
+    text: 'Review-loop 6427 i5 (main and inherited helper chatgpt/gpt-6-astra-high):
+      fixed retention/remove locking, successful reuse generation plus attachment
+      grace, destructive recovery on unknown exec/setup/restart failures, unsafe impl/review/signoff
+      failed-attachment discard, foreground debug ownership outside tmux, QA viewed-window
+      failure handling, and orphan-proxy runtime/storage-domain isolation. QA discard
+      carries captured ID/generation; known cross-domain proxy reuse/release refused,
+      legacy owner records excluded from global sweep. Spec updated; no architectural
+      redesign. Same-assertion pre-fix regressions: core 10 failures/1 control pass
+      and launcher/viewing 8 failures/1 control pass; final focused core 358 passed,
+      corrected owner-handoff fixtures 23 passed, full sanitized suite 3576 passed
+      with 3 existing AsyncMock warnings. Installed declared markdown dependency.
+      Failed/intermediate logs retained; summary /pm-captures/review-6427-i5-summary.md,
+      full suite /pm-captures/review-6427-i5-full-suite-final.log. Existing model/handoff/manual-gate
+      edits preserved outside commit. No real-container QA claim or waiver; next review,
+      outstanding runtime scenarios and independent sign-off remain.'
+    created_at: '2026-10-25T19:26:23Z'
+    last_edited: '2026-10-25T19:26:23Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

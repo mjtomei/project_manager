@@ -1028,7 +1028,7 @@ class TestProxyRelease:
             link.unlink(missing_ok=True)
             shutil.rmtree(real, ignore_errors=True)
 
-    def test_reused_proxy_without_owner_file_gets_one(self, monkeypatch, tmp_path):
+    def test_reused_proxy_without_owner_file_is_not_attributed(self, monkeypatch, tmp_path):
         import json
         from pm_core import push_proxy
         sock_dir = tmp_path / "proxy"
@@ -1038,8 +1038,7 @@ class TestProxyRelease:
         monkeypatch.setattr(push_proxy, "proxy_is_alive", lambda s: True)
         push_proxy.start_push_proxy("pm-t-impl-pr-1", "/w", "b",
                                     session_tag="t", pr_id="pr-1")
-        owner = json.loads((sock_dir / push_proxy._OWNER_FILE).read_text())
-        assert (owner["session_tag"], owner["pr_id"]) == ("t", "pr-1")
+        assert not (sock_dir / push_proxy._OWNER_FILE).exists()
         push_proxy._proxy_refs.pop(push_proxy._shared_proxy_key("t", "pr-1"), None)
         push_proxy._container_to_proxy_key.pop("pm-t-impl-pr-1", None)
 

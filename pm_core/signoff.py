@@ -499,7 +499,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         # mounted host path via write_dir.
         from pm_core.container import (
             is_container_mode_enabled, _CONTAINER_WORKDIR,
-            wrap_claude_cmd, ContainerError, discard_container, _make_container_name,
+            wrap_claude_cmd, ContainerError, discard_unowned_container, _make_container_name,
         )
         if is_container_mode_enabled():
             _claude_cwd = _CONTAINER_WORKDIR
@@ -522,10 +522,9 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         _cname = ""
         if is_container_mode_enabled():
             _stag = pm_session.removeprefix("pm-") if pm_session else None
-            # Never reuse the previous sign-off's container: its window's
-            # EXIT trap may still be removing it.  The tagged name is the
-            # one wrap_claude_cmd creates.
-            discard_container(_make_container_name(f"signoff-{pr_id}", _stag))
+            # Discard the previous allocation only when it has no live or
+            # retained owner. Use the same tagged name as wrap_claude_cmd.
+            discard_unowned_container(_make_container_name(f"signoff-{pr_id}", _stag))
             try:
                 claude_cmd, _cname = wrap_claude_cmd(
                     claude_cmd, workdir, label=f"signoff-{pr_id}",
@@ -549,7 +548,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                 pm_session, window_name, claude_cmd, workdir, switch=switch)
             if not claude_pane:
                 print(f"Sign-off window: failed to create tmux window '{window_name}'.")
-                discard_container(_cname)
+                discard_unowned_container(_cname)
                 return
 
             wid_result = subprocess.run(
@@ -582,7 +581,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             _log.warning("Failed to launch sign-off window: %s", e)
             print(f"Sign-off window error: {e}")
             if not claude_pane:
-                discard_container(_cname)
+                discard_unowned_container(_cname)
     finally:
         _launch_lock_f.close()
 

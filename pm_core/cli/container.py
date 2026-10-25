@@ -420,15 +420,10 @@ def container_retain(name: str, release: bool, note: str):
         return
     from pm_core import container as container_mod
     try:
-        cid = container_mod.current_container_id(name)
-    except (OSError, subprocess.TimeoutExpired):
-        cid = None  # runtime unknown: retain by name
-    if cid == "":
-        click.echo(f"No container named {name}.", err=True)
+        name = container_reaper.retain_current(name, note)
+    except (container_mod.ContainerError, OSError, subprocess.TimeoutExpired) as exc:
+        click.echo(str(exc), err=True)
         raise SystemExit(1)
-    # Bound to this container's id: a later replacement under the same
-    # name is not retained by this marker.
-    container_reaper.retain(name, note, container_id=cid or "")
     click.echo(f"Retained {name}. Release with 'pm container retain --release {name}'.")
 
 

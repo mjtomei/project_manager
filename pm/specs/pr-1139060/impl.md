@@ -65,11 +65,16 @@ removed by automatic or scoped cleanup) when any of:
    socket, the default server, and the shared-session socket for its tag —
    has a `#{pane_start_command}` that contains the exact container name
    (token-boundary match, so `…-s1` ≠ `…-s10`) or its full id;
+   foreground QA debug instead holds a host activity lock for the lifetime
+   of its interactive exec, including when it runs outside tmux;
 2. it is explicitly retained (`pm container retain <name>`; marker file in
    `~/.pm/containers/retain/`);
 3. a launch holds its per-name launch lock (fcntl lock in
    `~/.pm/containers/locks/container-<name>.lock`) or it was created < 120 s ago and
-   no pane has attached yet (launch grace).
+   no pane has attached yet (launch grace). Successful reuse renews the
+   cleanup generation and the same 120 s attachment grace under the launch
+   lock, so old release requests and the create-to-pane gap cannot destroy
+   a new attachment. Retention inspection and marker writes use this lock too.
 
 Otherwise it is a candidate with a reason: `PR <id> is merged|closed`,
 `tmux session <s> gone`, `superseded QA run`, or `no owning pane`.
@@ -90,12 +95,15 @@ retryable cleanup rather than permission to delete by name.
   review/sign-off pre-launch removal uses the session-tagged name
   (`_make_container_name(label, session_tag)`), fixing the stale-reuse bug;
   if tmux window creation fails after the container was created, the
-  launcher releases it.
+  launcher releases it only after checking live/unknown ownership under the
+  launch lock. Pane discovery failure is not proof that attachment failed;
+  implementation launch must not fall back to a duplicate host worker then.
 - **QA**: at the end of `_execute_and_finalize` (completed *or* stopped),
   scenario containers of **this loop** are released in bounded parallel,
   except scenarios whose verdict is `INPUT_REQUIRED` (awaiting a human), that
   are explicitly retained, or whose window is currently being viewed by an
-  attached client.  Those stay until their pane goes away, the PR is
+  attached client. Failed client/window inspection defers owner release;
+  it must not be interpreted as nobody viewing. Those stay until their pane goes away, the PR is
   merged/closed, or a later run supersedes them; then the reconciler takes
   them.  A scenario whose container/window fails to launch releases its
   partial container immediately. QA worker-split and relaunch failures (including
@@ -156,9 +164,12 @@ Single-flight across processes via an fcntl lock (a concurrent caller skips).
 - Reuse requires: running **and** `/tmp/.pm-setup-complete` **and**
   `/home/pm/.claude.json` present (when the host has one) **and**, when a push
   branch is set, the proxy socket alive.  If incomplete: if `/tmp/.pm-ready`
-  exists, finish post-setup in place (idempotent) and re-verify; otherwise (or
-  if finishing fails) remove and recreate — but if the incomplete container
-  has a live owning pane and cannot be finished, raise instead of killing it.
+  exists, finish post-setup in place (idempotent) and re-verify; otherwise
+  remove and recreate only when missing readiness is confirmed by a successful
+  exec of `test` returning 1 without runtime errors. Failed exec/post-setup
+  preserves the existing filesystem and reports its cause for retry. If the
+  incomplete container has a live owning pane and cannot be finished, raise
+  instead of killing it.
 - Failed/unknown running-state inspection refuses recreation; it is not proof
   of absence. Required setup commands fail before readiness is written. Fresh
   creation verifies push-proxy connectivity as well as reuse.
@@ -219,7 +230,9 @@ container cleared it and kept its files.  Running state is not health.
 - Reuse probe distinguishes "can't exec" (pids/memory/keyring) from
   "unfinished setup": an exhausted container with **no** live owner pane is
   restarted in place (`restart_container`, files/id/mounts kept, setup
-  re-verified; recreate on failure); with a live owner it raises the real
+  re-verified; preserve and report on failed restart/verification, since a
+  runtime failure does not establish that the filesystem is disposable);
+  with a live owner it raises the real
   error and is not touched.  Keyring failures raise (host-wide; recreating
   won't help). Failed ownership inspection or unreachable tmux servers are
   unknown ownership, not absence: refuse destructive reuse recovery and ordinary
@@ -253,7 +266,11 @@ container cleared it and kept its files.  Running state is not health.
 - IR4 The reaper must work with no project context (CLI outside a project)
   and with docker (labels and `ps --filter label=` are common to both).
 - IR5 The proxy socket dir gets an `owner.json` (`session_tag`, `pr_id`,
-  `workdir`) so the reconciler can map hashed dirs back to tag+PR.
+  `workdir`, `runtime_domain`) so the reconciler can map hashed dirs back to
+  tag+PR and the runtime storage it can inventory. Global orphan-proxy sweeps
+  require a matching Docker daemon identity or Podman host/storage identity;
+  unknown/legacy domains are preserved. Known cross-domain socket reuse is
+  refused rather than sharing a proxy whose other users cannot be inventoried.
 - IR6 Tests that mock `_run_runtime` sequences in `tests/test_container.py`
   must keep passing or be updated for the extra exec/label calls.
 - IR7 Removing a container removes only the container; bind-mounted host dirs

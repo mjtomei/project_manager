@@ -1086,9 +1086,10 @@ def create_container(
         reused = _ensure_reusable(name, workdir, allowed_push_branch,
                                   session_tag=session_tag, pr_id=pr_id)
         if reused:
+            _renew_launch(name)
             return reused
         with _create_slot():
-            return _create_fresh(
+            container_id = _create_fresh(
                 name, config, workdir,
                 extra_ro_mounts=extra_ro_mounts,
                 extra_rw_mounts=extra_rw_mounts,
@@ -1098,6 +1099,12 @@ def create_container(
                                         pr_id=pr_id, kind=kind,
                                         loop_id=loop_id, scenario=scenario),
             )
+            try:
+                _renew_launch(name)
+            except ContainerError:
+                discard_container(name)
+                raise
+            return container_id
 
 
 # Container PID 1 after setup: wait forever, reaping adopted children; exit
@@ -1129,7 +1136,12 @@ def _probe_setup(name: str) -> tuple[bool, str, str]:
         return True, "", ""
     stderr = (r.stderr or "").strip()
     kind = classify_runtime_error(stderr)
-    return False, kind if kind in ("pids", "memory", "keyring") else "", stderr
+    if kind in ("pids", "memory", "keyring"):
+        return False, kind, stderr
+    if r.returncode != 1 or stderr:
+        raise launch_error(name, kind, stderr or f"setup probe exited {r.returncode}",
+                           stage="verify existing setup")
+    return False, "", ""
 
 
 def _restart_generation_path(name: str) -> Path:
@@ -1157,6 +1169,30 @@ def cleanup_generation(name: str) -> str:
         return _restart_generation_path(name).read_text().strip()
     except FileNotFoundError:
         return ""
+
+
+def _renew_launch(name: str) -> None:
+    """Give an attaching owner a new generation and a bounded attachment lease.
+
+    Called under the launch lock after successful create/reuse. Previous EXIT
+    releases must not authorize deletion of this new ownership epoch.
+    """
+    marker = _restart_generation_path(name)
+    try:
+        if not marker.parent.exists():
+            marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(uuid.uuid4().hex)
+    except OSError as exc:
+        raise launch_error(name, "runtime", str(exc),
+                           stage="record launch ownership") from exc
+
+
+def recent_launch(name: str, grace: float) -> bool:
+    """Protect the gap between releasing the create lock and attaching a pane."""
+    try:
+        return time.time() - _restart_generation_path(name).stat().st_mtime < grace
+    except FileNotFoundError:
+        return False
 
 
 def restart_container(name: str) -> None:
@@ -1282,9 +1318,8 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
             restart_container(name)
             complete = True
         except ContainerError:
-            _log.warning("Restart of %s failed — recreating", name, exc_info=True)
-            remove_container(name)
-            return None
+            _log.warning("Restart of %s failed — preserving its filesystem", name, exc_info=True)
+            raise
     elif wedged == "keyring":
         # Host-wide quota, not this container's fault: recreating won't help.
         raise launch_error(name, "keyring", probe_err, stage="be reused")
@@ -1295,11 +1330,12 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
         base = _run_runtime("exec", name, "test", "-f", _READY_SENTINEL,
                             check=False, timeout=10)
         if base.returncode == 0:
-            try:
-                _post_setup(name, workdir, "podman" in _get_runtime())
-                finished = _setup_complete(name)
-            except ContainerError:
-                _log.warning("Finishing setup of %s failed", name, exc_info=True)
+            _post_setup(name, workdir, "podman" in _get_runtime())
+            finished = _setup_complete(name)
+        elif base.returncode != 1 or (base.stderr or "").strip():
+            raise launch_error(name, "runtime", (base.stderr or "").strip()
+                               or f"readiness probe exited {base.returncode}",
+                               stage="verify existing setup")
         if not finished:
             from pm_core import container_reaper
             if container_reaper.live_owner_panes(name, container_id):
@@ -1802,7 +1838,8 @@ def discard_container(name: str) -> None:
         _log.warning("Could not remove container %s", name, exc_info=True)
 
 
-def discard_unowned_container(name: str, *, container_id: str | None = None) -> bool:
+def discard_unowned_container(name: str, *, container_id: str | None = None,
+                               generation: str | None = None) -> bool:
     """Best-effort cleanup after a pane failed to attach (never raises).
 
     Unlike ``discard_container`` (used inside a locked create), this acquires
@@ -1825,6 +1862,8 @@ def discard_unowned_container(name: str, *, container_id: str | None = None) -> 
             if not current:
                 return True  # already gone
             if container_id and current != container_id:
+                return False
+            if generation is not None and cleanup_generation(name) != generation:
                 return False
             if container_reaper.is_retained(name, current):
                 return False
@@ -1860,9 +1899,47 @@ def _relieve_keyring_pressure() -> None:
         _log.warning("pre-launch reap failed", exc_info=True)
 
 
+def activity_owner(name: str) -> bool:
+    """Whether an interactive (non-tmux) exec holds this allocation alive."""
+    try:
+        path = _lock_path(f"active-{name}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(lock, fcntl.LOCK_UN)
+        return False
+    except OSError as exc:
+        raise ContainerError(f"Cannot check interactive owner of '{name}': {exc}") from exc
+
+
+def run_interactive_exec(name: str, cid: str, generation: str,
+                         state_dir: str, command: str, runtime: str) -> int:
+    """Hold an activity lock for a terminal exec not represented by a tmux pane."""
+    os.environ["PM_CONTAINER_STATE_DIR"] = state_dir
+    global _get_runtime
+    _get_runtime = lambda: runtime
+    # Serialize attachment with cleanup; an old shell must not attach to a
+    # replacement. The child inherits the lock so killing this helper alone
+    # cannot make a still-running exec appear abandoned.
+    path = _lock_path(f"active-{name}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as activity:
+        with launch_lock(name) as locked:
+            if not locked or not cid or current_container_id(name) != cid:
+                raise ContainerError(f"Container '{name}' changed before interactive attachment")
+            if cleanup_generation(name) != generation:
+                raise ContainerError(f"Container '{name}' was recovered before interactive attachment")
+            fcntl.flock(activity, fcntl.LOCK_SH)
+        return subprocess.call(["bash", "-c", command], pass_fds=(activity.fileno(),))
+
+
 def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
                    proxy_socket_path: str | None = None,
-                   container_id: str | None = None) -> str:
+                   container_id: str | None = None,
+                   interactive_owner: bool = False) -> str:
     """Build a ``<runtime> exec -it`` command string for use in a tmux window.
 
     When the exec'd process exits, its allocation is released unless
@@ -1888,6 +1965,15 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
         exec_part = f"{runtime} exec -it {shlex.quote(name)} bash -c {escaped}"
     else:
         exec_part = f"{runtime} exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
+    if interactive_owner:
+        import sys
+        script = (
+            f"import sys; sys.path.insert(0, {str(Path(__file__).resolve().parent.parent)!r}); "
+            "from pm_core.container import run_interactive_exec; "
+            "sys.exit(run_interactive_exec(*sys.argv[1:]))")
+        exec_part = shlex.join([
+            sys.executable, "-c", script, name, container_id or "",
+            cleanup_generation(name), str(container_state_dir()), exec_part, runtime])
     if cleanup:
         import sys
         # Pin this checkout/interpreter, not whichever pm happens to be on the

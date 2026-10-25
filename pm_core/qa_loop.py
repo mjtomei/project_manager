@@ -2342,7 +2342,9 @@ def _launch_scenarios_in_containers(
                          scenario.index, exc_info=True)
             # Discovery may fail after a pane attached. Preserve live/unknown
             # ownership, and keep the name for the run-end cleanup retry.
-            container_mod.discard_unowned_container(cname)
+            container_mod.discard_unowned_container(
+                cname, container_id=scenario.container_id,
+                generation=scenario.container_generation)
             _record_launch_failure(state, scenario, exc)
             return
 
@@ -2653,7 +2655,9 @@ def _relaunch_scenario_window(
             from pm_core import container as container_mod
             # Pane discovery can fail after tmux actually attached a worker.
             # Preserve live/unknown owners rather than blindly removing it.
-            container_mod.discard_unowned_container(scenario.container_name)
+            container_mod.discard_unowned_container(
+                scenario.container_name, container_id=scenario.container_id,
+                generation=scenario.container_generation)
         return False
 
 
@@ -4321,18 +4325,27 @@ def _execute_and_finalize(
     return state
 
 
-def _viewed_window_ids(session: str) -> set[str]:
+def _viewed_window_ids(session: str) -> set[str] | None:
     """Window ids an attached client is currently looking at (any grouped session)."""
     from pm_core import tmux as tmux_mod
-    viewed: set[str] = set()
     try:
-        for sess in [session] + list(tmux_mod.list_grouped_sessions(session)):
-            wid = tmux_mod.attached_active_window(sess)
-            if wid:
-                viewed.add(wid)
+        result = subprocess.run(
+            tmux_mod._tmux_cmd("list-clients", "-F", "#{session_name}\t#{window_id}"),
+            capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return None
+        viewed: set[str] = set()
+        base = session.split("~", 1)[0]
+        for line in result.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) != 2 or not parts[1].startswith("@"):
+                return None
+            if parts[0] == base or parts[0].startswith(base + "~"):
+                viewed.add(parts[1])
+        return viewed
     except Exception:
         _log.debug("could not list viewed windows for %s", session, exc_info=True)
-    return viewed
+        return None
 
 
 def _release_scenario_containers(state: QALoopState, session: str, *,
@@ -4352,6 +4365,9 @@ def _release_scenario_containers(state: QALoopState, session: str, *,
     from pm_core import container_reaper
     from pm_core import tmux as tmux_mod
     viewed = _viewed_window_ids(session) if session else set()
+    if viewed is None:
+        state.latest_output += " [container cleanup deferred: viewed windows unavailable]"
+        return True
     names: list[str] = []
     for sc in state.scenarios if scenarios is None else scenarios:
         if not sc.container_name:
@@ -4360,16 +4376,19 @@ def _release_scenario_containers(state: QALoopState, session: str, *,
             # A failed pane lookup may hide a live worker. Do not turn the
             # conservative launch-failure cleanup into an owner release here.
             from pm_core import container as container_mod
-            container_mod.discard_unowned_container(sc.container_name)
+            container_mod.discard_unowned_container(
+                sc.container_name, container_id=sc.container_id,
+                generation=sc.container_generation)
             continue
         if state.scenario_verdicts.get(sc.index) == VERDICT_INPUT_REQUIRED:
             continue
         if viewed and sc.pane_id:
             try:
-                if tmux_mod.pane_window_id(sc.pane_id) in viewed:
+                window_id = tmux_mod.pane_window_id(sc.pane_id)
+                if not window_id or window_id in viewed:
                     continue
             except Exception:
-                pass
+                continue
         names.append(sc.container_name)
     if not names:
         return False

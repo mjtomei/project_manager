@@ -1,7 +1,7 @@
 """Tests for the sign-off step module (pm_core/signoff.py)."""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from pm_core import signoff
 from pm_core.signoff import (
@@ -673,7 +673,7 @@ class TestWindowLaunchWorkdir:
     """
 
     def _launch(self, tmp_path, *, transcript=None, existing=None,
-                head="abc"):
+                head="abc", container=False, missing_pane=False):
         from types import SimpleNamespace
         from contextlib import ExitStack
         from unittest.mock import MagicMock
@@ -688,7 +688,7 @@ class TestWindowLaunchWorkdir:
         pr_entry = {"id": "pr-001", "title": "T", "status": "sign_off",
                     "branch": "pm/pr-001", "workdir": str(workdir)}
 
-        new_window = MagicMock(return_value="cl_pane")
+        new_window = MagicMock(return_value=None if missing_pane else "cl_pane")
         with ExitStack() as es:
             p = es.enter_context
             p(patch("pm_core.tmux.has_tmux", return_value=True))
@@ -709,7 +709,11 @@ class TestWindowLaunchWorkdir:
             p(patch("pm_core.claude_launcher.build_claude_shell_cmd",
                     return_value="CLAUDE_CMD"))
             p(patch("pm_core.container.is_container_mode_enabled",
-                    return_value=False))
+                    return_value=container))
+            p(patch("pm_core.container.wrap_claude_cmd",
+                    return_value=("EXEC", "pm-x-signoff-pr-001")))
+            self.safe_discard = p(patch("pm_core.container.discard_unowned_container"))
+            self.unsafe_discard = p(patch("pm_core.container.discard_container"))
             p(patch("pm_core.tmux.new_window_get_pane", new_window))
             p(patch("pm_core.tmux.set_shared_window_size"))
             p(patch("pm_core.tmux.switch_sessions_to_window"))
@@ -731,6 +735,12 @@ class TestWindowLaunchWorkdir:
                 data, pr_entry, background=True,
                 transcript=str(transcript) if transcript else None)
         return new_window, workdir
+
+    def test_failed_pane_discovery_uses_ownership_checked_cleanup(self, tmp_path):
+        self._launch(tmp_path, container=True, missing_pane=True)
+        self.unsafe_discard.assert_not_called()
+        assert self.safe_discard.call_args_list == [
+            call("pm-x-signoff-pr-001"), call("pm-x-signoff-pr-001")]
 
     def test_window_creation_uses_workdir_cwd(self, tmp_path):
         new_window, workdir = self._launch(tmp_path)

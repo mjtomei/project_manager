@@ -1027,7 +1027,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                                          session_type="impl")
             # Optionally wrap in a container for isolation
             from pm_core.container import (
-                wrap_claude_cmd, ContainerError, discard_container,
+                wrap_claude_cmd, ContainerError, discard_unowned_container,
             )
             try:
                 cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
@@ -1076,8 +1076,13 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     clear_return_awaiting(root, pr_id, "impl")
                     return
                 click.echo(f"Failed to create tmux window: {e}", err=True)
-                # No pane will ever exec into the container — release it.
-                discard_container(_cname)
+                # Pane discovery can fail after tmux attached the worker.
+                # Do not remove it or launch a duplicate host worker when
+                # ownership is live/unknown or cleanup could not finish.
+                if _cname and not discard_unowned_container(_cname):
+                    click.echo("Container preserved; check the existing session before retrying.",
+                               err=True)
+                    raise SystemExit(1)
                 click.echo("Launching Claude in current terminal...")
 
     # Fall through: launch interactively in current terminal
@@ -1226,16 +1231,12 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                          session_tag=_review_stag,
                                          session_type="review")
     # Optionally wrap in a container for isolation.
-    # Always remove any existing container for this review before creating a
-    # new one.  The previous session's bash EXIT trap runs "docker rm -f"
-    # asynchronously after its pane is killed; if wrap_claude_cmd runs while
-    # that rm is still in flight it will "reuse" the dying container, then
-    # the old trap's rm completes and kills the new session mid-init.
-    # Removing it here (synchronously) closes that race regardless of whether
-    # an existing tmux window was found above.
+    # Prefer a fresh allocation after the old window closed, but preserve
+    # retained/live owners if pane discovery failed. Verified reuse renews
+    # the cleanup generation so a delayed old EXIT cannot kill this launch.
     branch = pr_entry.get("branch", "")
     from pm_core.container import (
-        wrap_claude_cmd, ContainerError, discard_container,
+        wrap_claude_cmd, ContainerError, discard_unowned_container,
         is_container_mode_enabled, _make_container_name,
     )
     # session_tag drives the captures bind-mount so the review
@@ -1244,7 +1245,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     # captures and scenario captures from inside their pane).
     if is_container_mode_enabled():
         # The tagged name is the one wrap_claude_cmd will create/reuse.
-        discard_container(_make_container_name(f"review-{pr_id}", _review_stag))
+        discard_unowned_container(_make_container_name(f"review-{pr_id}", _review_stag))
     try:
         claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
                                               allowed_push_branch=branch,
@@ -1325,7 +1326,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                 window_name, pm_session,
             )
             click.echo(f"Review window: failed to create tmux window '{window_name}'.")
-            discard_container(_cname)
+            discard_unowned_container(_cname)
             return
 
         # Explicit cwd: without -c tmux starts the split in the calling
@@ -1381,7 +1382,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         _log.warning("Failed to launch review window: %s", e)
         click.echo(f"Review window error: {e}")
         if not claude_pane:
-            discard_container(_cname)
+            discard_unowned_container(_cname)
 
 
 @pr.command("review")

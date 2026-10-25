@@ -78,11 +78,32 @@ def is_retained(name: str, container_id: str = "") -> bool:
     return not rec_id or not container_id or rec_id == container_id
 
 
-def retain(name: str, note: str = "", container_id: str = "") -> None:
+def _write_retention(name: str, note: str, container_id: str) -> None:
     d = _retain_dir()
     d.mkdir(parents=True, exist_ok=True)
     (d / name).write_text(json.dumps(
         {"note": note, "at": int(time.time()), "id": container_id}))
+
+
+def retain(name: str, note: str = "", container_id: str = "") -> None:
+    with container_mod.launch_lock(name) as locked:
+        if not locked:
+            raise container_mod.ContainerError(f"Cannot retain '{name}': lifecycle lock unavailable")
+        _write_retention(name, note, container_id)
+
+
+def retain_current(name: str, note: str = "") -> str:
+    """Inspect and retain atomically with respect to launch/removal."""
+    name = container_mod.canonical_container_name(name)
+    with container_mod.launch_lock(name) as locked:
+        if not locked:
+            raise container_mod.ContainerError(f"Cannot retain '{name}': lifecycle lock unavailable")
+        cid = container_mod.current_container_id(name)
+        if not cid:
+            raise container_mod.ContainerError(
+                f"No container named {name}, or its identity is unknown; cannot retain.")
+        _write_retention(name, note, cid)
+    return name
 
 
 def unretain(name: str) -> bool:
@@ -423,6 +444,11 @@ def _owner_panes(info: ContainerInfo, cache: _PaneCache,
         pats.append(_token_re(info.id))
     owners: list[str] = []
     indeterminate = False
+    try:
+        if container_mod.activity_owner(info.name):
+            owners.append("interactive client")
+    except (container_mod.ContainerError, OSError):
+        indeterminate = True
     for server in _servers_for(info):
         snap = cache.get(server, fresh=fresh)
         if snap.panes is None:
@@ -442,6 +468,8 @@ def live_owner_panes(name: str, container_id: str = "") -> list[str]:
     this process's server. Raises ContainerError when ownership cannot be
     established; destructive recovery must not interpret unknown as unowned.
     """
+    if container_mod.activity_owner(name):
+        return ["interactive client"]
     found = _inspect([name], timeout=10)
     if not found:
         raise container_mod.ContainerError(
@@ -651,7 +679,11 @@ def _decide(info: ContainerInfo, scope: Scope, cache: _PaneCache,
     owners, indeterminate = _owner_panes(info, cache)
     if owners:
         return Decision(info, "keep", f"owned by live pane {', '.join(owners)}")
-    if info.created is not None and now - info.created < LAUNCH_GRACE:
+    try:
+        attaching = container_mod.recent_launch(info.name, LAUNCH_GRACE)
+    except OSError:
+        return Decision(info, "keep", "launch lease unreadable — ownership unknown")
+    if attaching or info.created is not None and now - info.created < LAUNCH_GRACE:
         return Decision(info, "keep", "launching (no pane yet)")
     if indeterminate:
         # Unknown beats merged: a pane we can't see may still be in use.
@@ -709,6 +741,11 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
             if generation != d.release_generation:
                 return False, "skipped: container restarted since owner release"
         if not d.released:
+            try:
+                if container_mod.recent_launch(info.name, LAUNCH_GRACE):
+                    return False, "skipped: new owner attaching"
+            except OSError:
+                return False, "skipped: launch lease unreadable — ownership unknown"
             owners, indeterminate = _owner_panes(info, _PaneCache(), fresh=True)
             if owners:
                 return False, f"skipped: pane {', '.join(owners)} attached concurrently"
@@ -776,7 +813,12 @@ def spawn_detached_reap(pr_id: str | None = None,
 def _release_unused_proxies(scope: Scope) -> list[str]:
     from pm_core import push_proxy
     released: list[str] = []
+    domain = push_proxy.runtime_domain()
+    if domain is None:
+        return released
     for prox in push_proxy.list_shared_proxies():
+        if prox.get("runtime_domain") != domain:
+            continue
         if scope.session_tag and prox["session_tag"] != scope.session_tag:
             continue
         if scope.pr_id and prox["pr_id"] != scope.pr_id:

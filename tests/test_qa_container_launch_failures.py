@@ -46,7 +46,8 @@ def test_relaunch_window_failure_is_not_success(scenario_state, monkeypatch, fai
     assert qa_loop._is_launch_failure(state, 1)
     assert not state.scenario_verdicts
     assert scenario.pane_id is None
-    discard.assert_called_once_with(scenario.container_name)
+    discard.assert_called_once_with(scenario.container_name, container_id="cid",
+                                    generation=scenario.container_generation)
     if failure:
         assert "can't find session: test" in state.scenario_verdict_reasons[1]
     release = MagicMock()

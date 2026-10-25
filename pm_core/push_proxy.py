@@ -625,10 +625,12 @@ def start_push_proxy(container_name: str, workdir: str,
 
         # Reuse if an existing proxy is alive on this socket
         if os.path.exists(sock_path) and proxy_is_alive(sock_path):
-            if not os.path.exists(os.path.join(sock_dir, _OWNER_FILE)):
-                # Started by an older pm: record the owner so the reaper's
-                # unused-proxy sweep can find it.
-                _write_owner_file(sock_dir, session_tag, pr_id, workdir)
+            if not _owner_domain_matches(sock_dir):
+                from pm_core.container import ContainerError
+                raise ContainerError("Existing shared push proxy belongs to a different or "
+                                     "unverifiable runtime; refusing cross-runtime reuse")
+            # Do not attribute an existing socket to this runtime: it may
+            # have been started by a different daemon or rootless store.
             with _proxy_lock:
                 _proxy_refs.setdefault(key, set()).add(container_name)
                 _container_to_proxy_key[container_name] = key
@@ -710,6 +712,50 @@ def _kill_proxy_socket(sock_path: str) -> None:
 _OWNER_FILE = "owner.json"
 
 
+def runtime_domain() -> dict | None:
+    """Identify the runtime storage this process can actually inventory.
+
+    An empty inventory is meaningful only for proxies created in this domain.
+    Legacy owners or unavailable runtime info must never authorize a sweep.
+    """
+    from pm_core import container as cm
+    try:
+        result = cm._run_runtime("info", "--format", "{{json .}}",
+                                 check=False, timeout=10)
+        if result.returncode != 0:
+            return None
+        info = json.loads(result.stdout)
+        runtime = cm._get_runtime()
+        if "podman" in runtime:
+            store = info.get("store") or info.get("Store") or {}
+            host = info.get("host") or info.get("Host") or {}
+            graph = store.get("graphRoot") or store.get("GraphRoot")
+            run = store.get("runRoot") or store.get("RunRoot")
+            hostname = host.get("hostname") or host.get("Hostname")
+            if not (graph and run and hostname):
+                return None
+            return {"runtime": "podman", "graph_root": graph, "run_root": run,
+                    "hostname": hostname,
+                    "endpoint": os.environ.get("CONTAINER_HOST", ""),
+                    "connection": os.environ.get("CONTAINER_CONNECTION", "")}
+        daemon = info.get("ID") or info.get("Id")
+        return {"runtime": "docker", "daemon_id": daemon} if daemon else None
+    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError, TypeError):
+        return None
+
+
+def _owner_domain_matches(sock_dir: str) -> bool:
+    """Known foreign domains cannot share or release one another's sockets."""
+    try:
+        owner = json.loads(Path(sock_dir, _OWNER_FILE).read_text())
+    except (OSError, ValueError):
+        return True  # legacy direct lifecycle behavior
+    domain = owner.get("runtime_domain") if isinstance(owner, dict) else None
+    if domain is None:
+        return True
+    return domain == runtime_domain()
+
+
 def _write_owner_file(sock_dir: str, session_tag: str, pr_id: str,
                       workdir: str) -> None:
     """Record which (session, PR) a shared proxy dir serves.
@@ -719,7 +765,8 @@ def _write_owner_file(sock_dir: str, session_tag: str, pr_id: str,
     """
     try:
         Path(sock_dir, _OWNER_FILE).write_text(json.dumps(
-            {"session_tag": session_tag, "pr_id": pr_id, "workdir": workdir}))
+            {"session_tag": session_tag, "pr_id": pr_id, "workdir": workdir,
+             "runtime_domain": runtime_domain()}))
     except OSError:
         _log.debug("could not write proxy owner file in %s", sock_dir,
                    exc_info=True)
@@ -754,12 +801,13 @@ def list_shared_proxies() -> list[dict]:
                              base)
                 if m:
                     owner = {"session_tag": m.group(1), "pr_id": m.group(2)}
-        if not owner or not owner.get("session_tag") or not owner.get("pr_id"):
+        if not isinstance(owner, dict) or not owner.get("session_tag") or not owner.get("pr_id"):
             continue
         seen.add(real)
         out.append({"session_tag": owner["session_tag"],
                     "pr_id": owner["pr_id"],
-                    "sock_path": os.path.join(real, "push.sock")})
+                    "sock_path": os.path.join(real, "push.sock"),
+                    "runtime_domain": owner.get("runtime_domain")})
     return out
 
 
@@ -778,6 +826,8 @@ def release_proxy_if_unused(session_tag: str, pr_id: str,
     from pm_core import container as container_mod
     with container_mod.proxy_lock(session_tag, pr_id, timeout=30) as locked:
         if not locked:
+            return False
+        if not _owner_domain_matches(_shared_sock_dir_path(session_tag, pr_id)):
             return False
         users = container_mod.containers_for_pr(session_tag, pr_id)
         if users is None:
