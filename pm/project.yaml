@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T23:09:29.280607+00:00'
+  updated_at: '2026-10-25T23:24:54.687425+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33906,6 +33906,29 @@ prs:
       /pm-captures/review-c189-i5. Master merge-tree: project.yaml conflicts only.'
     created_at: '2026-10-25T23:09:29Z'
     last_edited: '2026-10-25T23:09:29Z'
+  - id: note-7e11292
+    text: 'Review c189 i6 (INPUT_REQUIRED, no code change): ff65f489, 3ee69236, 79b6ddd7,
+      f0031965, 5f5a1453, S60 spec 0e13c5f8 and i5 tests 9aa3f316 re-checked and sound;
+      full suite 3793 passed, rc 0. DECISION NEEDED: a pm process started from a routed
+      session inherits that session env: the route ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU,FABLE}_MODEL,
+      ANTHROPIC_SMALL_FAST_MODEL and ANTHROPIC_BASE_URL (this review container has
+      all of them). pm passes these unchanged to every non-router session it launches.
+      3ee69236 and c189 i1 only remove or override the subagent pin and the classifier
+      pin. Live, real claude 2.1.310 on a local stub: a no-model session with the
+      inherited opus alias sent its whole main loop as work/claude-opus-5-5 (1M beta)
+      and exited rc 1 at a main endpoint. Behind the router that request would run
+      on the work account. Without the alias it sent claude-opus-5-5. A plain-model
+      main session keeps its --model, but fable/haiku/small-fast calls follow the
+      route. Unrouted containers also get the host BASE_URL and SMALL_FAST by name
+      (pre-existing _CLAUDE_ENV_VARS). S61 story 2 exported only the pin, so this
+      case never ran. Options: (A, recommended) claude-type sessions drop inherited
+      alias vars whose value carries a configured router model prefix, plus a BASE_URL
+      equal to a router api_base, and keep a user own unprefixed values; (B) drop
+      every inherited alias var for claude-type sessions; (C) accept it and document
+      that pm/TUI must not be started from a routed session. Evidence /pm-captures/review-c189-i6
+      (README, alias-probe/).'
+    created_at: '2026-10-25T23:24:54Z'
+    last_edited: '2026-10-25T23:24:54Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
