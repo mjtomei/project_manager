@@ -305,7 +305,7 @@ def invalidate_signoff(root: Path, pr_id: str, reason: str) -> None:
 # the merge gate refuses a resolved/behaviourally-changed approval that has
 # none.
 
-def _qa_evidence(pr_id: str) -> dict | None:
+def qa_evidence(pr_id: str) -> dict | None:
     """Latest QA evidence and the revision it exercised, when recorded."""
     import json
     from pm_core.paths import latest_qa_status_path
@@ -367,7 +367,7 @@ def _evidence_block(pr: dict, reviewed_head: str | None,
                                                   "origin", "invalidated")}
         prior_block["integration"] = prior.get("integration")
     full = pr.get("integration") or {}
-    qa = _qa_evidence(pr["id"])
+    qa = qa_evidence(pr["id"])
     review_sha, review_note = None, (
         "pm does not record the revision the review ran on")
     if qa and qa.get("planner_head") and not qa.get("planner_code_changes"):
@@ -412,9 +412,11 @@ def approval_justification_problem(pr_id: str, integration: dict | None,
         return None
     meta = report_meta(pr_id)
     meta_head = (meta.get("head") or "").strip()
-    if not meta_head:
-        return ("report.html has no pm-signoff-head tag; it cannot be tied to "
-                "the reviewed HEAD")
+    if len(meta_head) < 7:
+        # Same minimum as the manual record path: a short tag cannot
+        # identify a HEAD (and would match almost any sha as a prefix).
+        return ("report.html has no usable pm-signoff-head tag; it cannot be "
+                "tied to the reviewed HEAD")
     if not head or not head.startswith(meta_head):
         return (f"report.html reviewed HEAD {meta_head[:12]}, but sign-off "
                 f"reviewed {(head or '?')[:12]}")

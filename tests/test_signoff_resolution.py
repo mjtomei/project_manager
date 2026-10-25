@@ -215,6 +215,16 @@ def test_duplicate_ids_are_ambiguous():
     assert any("duplicate record id" in c for c in details["conflicts"])
 
 
+def test_non_string_record_id_is_a_conflict_not_a_crash():
+    """A malformed id must fail the resolution, not raise out of it."""
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+    ours = base + "- id: [1]\n  status: pending\n"
+    theirs = base + "- id: pr-2\n  status: pending\n"
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert details.get("conflicts") or details.get("error")
+
+
 def test_non_id_list_changed_on_both_sides_is_a_conflict():
     base = "project:\n  name: p\nprs:\n- id: pr-1\n  depends_on: []\n"
     ours = base.replace("depends_on: []", "depends_on: [pr-a]")
@@ -458,6 +468,40 @@ def test_resolved_approval_is_refused_when_the_recorded_candidate_changed(w):
     assert refusal and "candidate changed" in refusal
 
 
+def test_resolution_digest_survives_a_benign_recheck(w):
+    """A re-check after the apply must not look like a changed resolution.
+
+    The applied merge makes the branch up to date, so the re-check carries
+    the *compact* resolution forward (``_record_check``).  The digest is
+    computed over that same compact projection, so an approval recorded
+    before the re-check stays valid.
+    """
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    assert again["resolution_digest"] == rec["resolution_digest"]
+    assert again["resolution"]["applied_merge_sha"] == \
+        rec["resolution"]["applied_merge_sha"]
+    assert signoff.merge_gate_refusal(
+        pr_entry(w), again["head"], "master") is None
+
+
+def test_approval_rejects_a_head_tag_too_short_to_identify_the_head(w):
+    rec = _metadata_conflict(w)
+    (w.croot / PR).mkdir(parents=True, exist_ok=True)
+    (w.croot / PR / "report.html").write_text(
+        '<html><head><meta name="pm-signoff-head" content="abc">'
+        f'<meta name="pm-signoff-candidate" '
+        f'content="{rec["candidate_tree"]}">'
+        '<meta name="pm-signoff-checks" content="ran the resolver tests">'
+        '</head><body/></html>')
+    problem = signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"])
+    assert problem and "pm-signoff-head" in problem
+
+
 def test_resolution_preserves_workdir_files_and_evidence(w):
     evidence_file = w.croot / PR / "scenarios" / "1" / "note.txt"
     evidence_file.parent.mkdir(parents=True)
@@ -555,6 +599,14 @@ def test_driver_blocks_a_resolved_merge_without_the_evidence_statement(w):
 
 def test_signoff_prompt_shows_the_resolution_and_evidence_contract(w):
     rec = _metadata_conflict(w)
+    original_head = rec["resolution"]["resolved_from"]["head"]
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps(
+        {"pr_id": PR, "overall": "PASS", "scenarios": []}))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": original_head, "planner_code_changes": []}))
+
     data = store.load(w.pm_dir)
     with patch("pm_core.prompt_gen.store.find_project_root",
                side_effect=FileNotFoundError):
@@ -566,6 +618,9 @@ def test_signoff_prompt_shows_the_resolution_and_evidence_contract(w):
     assert "pm-signoff-candidate" in text
     assert "pm-signoff-evidence" in text
     assert "metadata is not an automatic exemption" in text
+    # The evidence revisions the reuse statement must name are surfaced.
+    assert f"qa@{original_head[:12]}" in text
+    assert f"review@{original_head[:12]}" in text
 
 
 def test_integrate_cli_prints_the_resolution(w):
@@ -590,3 +645,24 @@ def test_integrate_cli_prints_the_resolution(w):
             pr_mod.pr, ["signoff", "integrate", PR, "--no-resolve"])
     assert r.exit_code != 0
     assert "CONFLICTS" in r.output
+
+
+def test_integrate_cli_apply_exits_nonzero_when_it_cannot_apply(w):
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    # A dirty workdir is never touched, so the resolution stays unapplied;
+    # `--apply` asked for the merge and must not report success.
+    (w.wd / "keep.txt").write_text("uncommitted\n")
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(
+            pr_mod.pr, ["signoff", "integrate", PR, "--apply"])
+    assert r.exit_code != 0
+    assert "not applied" in r.output
+    assert not (pr_entry(w)["integration"].get("resolution") or {}).get(
+        "applied_merge_sha")

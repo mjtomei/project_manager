@@ -482,11 +482,42 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
             lines.append(f"- {change}")
         if rec.get("base_behavior_count", len(behavior)) > 20:
             lines.append(f"- … {rec['base_behavior_count'] - 20} more")
+    evidence = _evidence_revision_lines(pr_id)
+    if evidence:
+        lines.append("")
+        lines.extend(evidence)
     if rec.get("status") == integ.CONFLICT:
         lines.append(f"- A conflicted integration that pm could not resolve "
                      f"safely can only route **{SIGNOFF_IMPL}** (pm enforces "
                      "this).")
     return "\n" + "\n".join(lines) + "\n"
+
+
+def _evidence_revision_lines(pr_id: str) -> list[str]:
+    """The revisions the existing review/QA evidence was produced against.
+
+    The reuse statement in the report names stages and revisions; pm records
+    the QA revision from its resume snapshot and infers the review revision
+    only when QA committed no code (see ``signoff.qa_evidence``).
+    """
+    from pm_core.signoff import qa_evidence
+    qa = qa_evidence(pr_id) or {}
+    if not qa:
+        return []
+    lines = ["**Existing evidence revisions** (name these when reusing it):"]
+    head = qa.get("planner_head")
+    if not head:
+        lines.append("- QA: no recorded revision (qa_resume.json missing)")
+        return lines
+    lines.append(f"- QA: `qa@{head[:12]}` "
+                 f"(overall {qa.get('overall') or '?'})")
+    if qa.get("planner_code_changes"):
+        lines.append("- Review: pm does not record the revision the review ran "
+                     "on (QA committed changes after it).")
+    else:
+        lines.append(f"- Review: `review@{head[:12]}` (inferred: QA recorded "
+                     "no code changes after the review).")
+    return lines
 
 
 def generate_signoff_prompt(data: dict, pr_id: str,

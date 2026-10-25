@@ -1639,8 +1639,8 @@ def pr_signoff_record(pr_id: str):
               help="Record the result on the PR (what a sign-off verdict "
                    "binds to). Run from the base pm directory.")
 @click.option("--apply", "apply_", is_flag=True, default=False,
-              help="Apply a clean/resolved result to the PR branch (never "
-                   "the base) and re-record the applied candidate.")
+              help="Apply a clean result, or apply and re-record a resolved "
+                   "candidate, to the PR branch (never the base).")
 @click.option("--resolve/--no-resolve", "resolve", default=True,
               help="Resolve metadata-only project.yaml conflicts by record "
                    "id in the isolated candidate (default: yes).")
@@ -1713,6 +1713,11 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
                    f"{resolution['applied_merge_sha'][:12]}")
     if rec.get("apply_error"):
         click.echo(f"  not applied: {rec['apply_error']}", err=True)
+        if apply_:
+            # `--apply` asked for the merge; a resolved candidate that could
+            # not be applied has not done what was asked, even though the
+            # (unapplied) record is still a mergeable-looking RESOLVED one.
+            raise SystemExit(1)
     if resolution.get("diff_path"):
         click.echo(f"  resolution delta: {resolution['diff_path']}")
     for change in (rec.get("base_behavior_changes") or [])[:10]:

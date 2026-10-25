@@ -286,12 +286,21 @@ def resolve_project_yaml(base_text: str | None, ours_text: str | None,
         return None, {"error": f"cannot serialize project.yaml: {e}"}
 
 
+def _yaml_load(text: str):
+    """Parse YAML with the store's loader (C-accelerated when available).
+
+    project.yaml is large enough that the pure-Python loader dominates a
+    sign-off's resolution time; this is the same loader ``store`` uses.
+    """
+    return yaml.load(text, Loader=store._yaml_loader())
+
+
 def _parse_yaml(text: str | None):
     if text is None:
         return _MISSING
     if not text.strip():
         return {}
-    return yaml.safe_load(text)
+    return _yaml_load(text)
 
 
 def _dump_project_yaml(data: dict) -> str:
@@ -304,8 +313,12 @@ def _dump_project_yaml(data: dict) -> str:
 
 
 def _is_id_list(value) -> bool:
+    # The id must be a string: ids are used as dict keys (a mapping/list id
+    # is unhashable) and pm's own records always use string ids.  A list
+    # with any other id type is treated as an atomic value, so a malformed
+    # record becomes a conflict instead of an exception.
     return isinstance(value, list) and all(
-        isinstance(e, dict) and "id" in e for e in value)
+        isinstance(e, dict) and isinstance(e.get("id"), str) for e in value)
 
 
 def _duplicate_id_problems(data, label: str) -> list[str]:
@@ -602,12 +615,19 @@ def _shape_problems(data) -> list[str]:
 
 
 def _resolution_digest(resolution: dict | None) -> str | None:
-    """Canonical digest of a resolution's identity-bearing fields."""
+    """Canonical digest of a resolution's identity-bearing fields.
+
+    The digest is computed over the *compact* projection (the form stored in
+    ``project.yaml``), not the raw record: a re-check after pm applied the
+    resolution carries the compact form forward (``_record_check``), and the
+    two must hash identically or a benign re-check would look like a changed
+    resolution and invalidate the approval.  The artifact path is excluded
+    because it is host-specific, not part of the resolution's identity.
+    """
     if not resolution:
         return None
-    payload = {k: resolution.get(k) for k in (
-        "resolver", "paths", "unresolved", "base_tree", "head_tree",
-        "candidate_tree", "applied_merge_sha", "resolved_from")}
+    payload = _compact_resolution(resolution)
+    payload.pop("diff_path", None)
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
@@ -659,7 +679,7 @@ def _show_yaml(workdir: str, rev: str, path: str):
     if r.returncode != 0:
         return None
     try:
-        return yaml.safe_load(r.stdout or "") or {}
+        return _yaml_load(r.stdout or "") or {}
     except yaml.YAMLError:
         return None
 
@@ -827,7 +847,11 @@ def _all_resolvable(conflicts: list[str]) -> bool:
 
 
 def _write_resolved(target: Path, text: str) -> None:
-    """Write a resolved document, lifting pm's read-only state-file mode."""
+    """Write a resolved document, lifting then restoring pm's read-only mode.
+
+    ``store.save`` leaves project.yaml read-only (0444) so casual manual
+    edits are blocked; a resolved file must not silently end up writable.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         try:
@@ -835,6 +859,10 @@ def _write_resolved(target: Path, text: str) -> None:
         except OSError:
             pass
     target.write_text(text, encoding="utf-8")
+    try:
+        target.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+    except OSError:
+        pass
 
 
 def _stage_text(cwd, path: str, stage: int) -> str | None:
@@ -862,7 +890,11 @@ def _resolve_worktree_conflicts(wt: Path, workdir: str, head: str,
         ours_text = _stage_text(wt, path, 2)
         theirs_text = _stage_text(wt, path, 3)
         base_text = _stage_text(wt, path, 1)
-        merged, detail = resolve_project_yaml(base_text, ours_text, theirs_text)
+        try:
+            merged, detail = resolve_project_yaml(
+                base_text, ours_text, theirs_text)
+        except Exception as e:  # a resolver bug must read as "unresolved"
+            merged, detail = None, {"error": f"resolver raised: {e}"}
         detail = dict(detail or {})
         detail["path"] = path
         if merged is None:
@@ -887,6 +919,7 @@ def _resolve_worktree_conflicts(wt: Path, workdir: str, head: str,
                                "conflicts": [f"git add failed: {_detail(add)}"]})
             paths.append(detail)
             continue
+        detail["resolver"] = "project-yaml-records/v1"
         detail["blob"] = _out(_git("rev-parse", f":{path}", cwd=wt)) or None
         actions = detail.get("actions") or {}
         detail["records"] = _record_counts(actions)
@@ -1306,11 +1339,13 @@ def summary(record: dict) -> str:
         return (f"merges cleanly with {base}"
                 + (f" ({n} file(s) changed on both sides)" if n else ""))
     if status == RESOLVED:
-        paths = [p.get("path") for p in
-                 (record.get("resolution") or {}).get("paths") or []
-                 if p.get("path")]
+        entries = (record.get("resolution") or {}).get("paths") or []
+        paths = [p.get("path") for p in entries if p.get("path")]
+        ours = sum(len(p.get("added_ours") or []) for p in entries)
+        theirs = sum(len(p.get("added_theirs") or []) for p in entries)
         return (f"conflicts with {base} resolved by record "
-                f"({', '.join(paths) or 'project.yaml'})")
+                f"({', '.join(paths) or 'project.yaml'}; "
+                f"{ours} added from PR, {theirs} from base)")
     if status == CONFLICT:
         files = record.get("conflicts") or []
         text = (f"CONFLICTS with {base}: {', '.join(files[:5])}"
@@ -1368,8 +1403,7 @@ def apply_integration(root: Path, pr_id: str, record: dict | None = None,
     msg = (f"Integrate {record.get('base_branch')}@{base_sha[:8]} into "
            f"{branch or 'PR branch'}")
     if status == RESOLVED:
-        return _apply_resolution(root, pr_id, record, workdir, head, base_sha,
-                                 msg)
+        return _apply_resolution(record, workdir, head, base_sha, msg)
 
     m = _git("merge", "--no-ff", "-m", msg, base_sha, cwd=workdir)
     if m.returncode != 0:
@@ -1383,8 +1417,8 @@ def apply_integration(root: Path, pr_id: str, record: dict | None = None,
     return merged or None, None
 
 
-def _apply_resolution(root: Path, pr_id: str, record: dict, workdir: str,
-                      head: str, base_sha: str, msg: str):
+def _apply_resolution(record: dict, workdir: str, head: str, base_sha: str,
+                      msg: str):
     """Merge *base_sha* and re-apply the recorded project.yaml resolution."""
     no_hooks = ("-c", "core.hooksPath=/dev/null")
     expected = record.get("candidate_tree")
@@ -1419,16 +1453,24 @@ def _apply_resolution(root: Path, pr_id: str, record: dict, workdir: str,
             _git("merge", "--abort", cwd=workdir)
             return None, (f"unexpected conflict in {path} (not part of the "
                           "recorded resolution)")
-        merged, detail = resolve_project_yaml(
-            _stage_text(workdir, path, 1),
-            _stage_text(workdir, path, 2),
-            _stage_text(workdir, path, 3))
+        try:
+            merged, detail = resolve_project_yaml(
+                _stage_text(workdir, path, 1),
+                _stage_text(workdir, path, 2),
+                _stage_text(workdir, path, 3))
+        except Exception as e:  # never leave the workdir mid-merge
+            _git("merge", "--abort", cwd=workdir)
+            return None, f"resolution of {path} raised: {e}"
         if merged is None:
             _git("merge", "--abort", cwd=workdir)
             why = (detail or {}).get("conflicts") or [(detail or {}).get("error")]
             return None, f"resolution of {path} failed: {why}"
         target = Path(workdir, path)
-        _write_resolved(target, merged)
+        try:
+            _write_resolved(target, merged)
+        except OSError as e:  # never leave the workdir mid-merge
+            _git("merge", "--abort", cwd=workdir)
+            return None, f"cannot write the resolution of {path}: {e}"
         add = _git("add", "--", path, cwd=workdir)
         if add.returncode != 0:
             _git("merge", "--abort", cwd=workdir)
