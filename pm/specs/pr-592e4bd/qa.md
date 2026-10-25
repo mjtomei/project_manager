@@ -7,6 +7,13 @@ router type, `pm_core/claude_launcher.py` launcher boundary,
 `pm_core/cli/provider.py`, `pm_core/cli/model.py`, `pm_core/container.py`
 env-by-name).
 
+Scope update (2026-10-24, impl.md header, R1/R5, items 40–41): the
+refiner/worker-only split stays the project default, and a PR may now
+put *every* role on the route (`model: provider:<route>`) or single
+roles (`session_models: {<type>: …}`). Implementation, review and
+sign-off containers use the same router bridge and fail closed. RQ2/RQ6
+describe the project default; RQ39–RQ41 cover the PR-level routing.
+
 ## 1. Requirements (Given / When / Then)
 
 ### Route definition and visibility
@@ -576,6 +583,88 @@ env-by-name).
   follow-up waiting for project.yaml to load: …", not "… to load to
   record it" (S49 observation, 64b41a91).
 
+### All-role and per-role routing (2026-10-24 scope update)
+- **RQ39** Given a router provider and container mode, When a PR's
+  `model: provider:<route>` selects the route for every role, Then its
+  implementation, review, sign-off and every QA session (planner, s0,
+  refiner, worker, verifier, finalizer) reach only the router with the
+  `work/` model, and none reaches the main endpoint. Each impl, review and
+  sign-off container is created with the route-bridge mount at
+  `/run/pm-route`, with no published ports and no network change. Its
+  command runs the in-container ensure step, then plain `claude` with the
+  in-container router URL and `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`
+  unset. Hooks and transcripts work as for QA workers (c1c08d83). When a
+  PR instead sets `session_models` exceptions (`model: <main or other
+  provider>` plus `session_models: {signoff: provider:<route>}`, or the
+  reverse), Then only the named role and its children
+  (`qa_*` → `qa`, `signoff` → `review`) follow the exception. Every
+  other role keeps the PR model or the project default. `PM_MODEL` still
+  wins over both. s0 never follows a worker exception (f1865615, 0c577dd2,
+  021f2810). In a second PR of the same TUI with no override, impl, review
+  and sign-off containers get no bridge mount and stay on main. Review and
+  sign-off relaunches remove their old session-tagged container
+  (`pm-<tag>-review-<pr>`, `pm-<tag>-signoff-<pr>`) and create a fresh one.
+  An impl relaunch that finds its container running *without* the mount
+  (created before the route was selected) is refused with "running
+  without the route socket mount. Remedy: end the session using it,
+  remove it (… rm -f …) and launch again" (3748691e, c08c7627). The
+  route bridge is shared by these containers and the QA containers of
+  every PR. Each PR keeps one push proxy (RQ26). Host mode: impl/review/
+  sign-off and host QA planner/s0/verifier/finalizer are not gated (impl.md
+  §3). They start with the router env, so a down router shows an API error
+  in the pane, never a main-account fallback.
+- **RQ40** Given a role routed per RQ39 whose route is unavailable
+  (router down, sign-in expired, provider missing from this host's
+  providers.yaml), When the role is launched from the TUI, the CLI,
+  auto-start or the review loop, Then nothing is launched on the main
+  account and the user sees the reason and remedy:
+  - `pm pr start`, `pm pr review` and `pm pr signoff` print it on stderr
+    and exit 1. No window opens, the per-PR launch lock is released, and no
+    container is left (57f04ee6).
+  - The remedies for these roles say to launch the session again, or to
+    move it off the route by removing "the PR's 'session_models' entry or
+    'model' override" or with `pm model set <type> <model> --project`
+    (c08c7627, 0c577dd2). They are not QA-worded ("QA launches the
+    session automatically" appears only on QA gates).
+  - The TUI sign-off driver shows "Sign-off launch failed for <pr>: work
+    route … Remedy: …" as plain text. Brackets in the reason are kept, and
+    a `[/…]` does not blank the line (5fbbedad).
+  - An auto-start `pm pr start` failure shows "Auto-start: pm pr start
+    <pr> failed: <last stderr line>", forced and held. It is shown once
+    per reason per PR. An explicit re-arm (`A`, a target re-add,
+    `autostart all`) says it again even when the failing PR is a
+    dependency of the target. Once the route is back and a start goes
+    through, the PR runs routed (d76cc9d5, d361858c, 620327fa).
+  - A provider that is not configured gives one line from every CLI
+    launch: `Error: … ; or change the model setting that selects it ('pm
+    model show' lists them, PR overrides included)`, rc 1, no traceback.
+    A QA run whose planner, s0, verifier or finalizer meets it shows
+    "QA stopped: … then start QA again", not "QA thread crashed"
+    (2d58dea4).
+  - The review loop's error (`stderr[:500]`) contains the remedy.
+- **RQ41** Given a hand-edited project.yaml model setting, When the user
+  runs `pm model show`, `pm model set … --project` or `pm model unset …
+  --project`, or launches any role, Then:
+  - A blank block (`model_config:`, `session_models:` or
+    `session_effort:` with every entry commented out) reads as empty.
+    Launches use the defaults, `show` resolves every type, and `set` and
+    `unset` fill or edit the block (05bfd6c5).
+  - A blank or non-string entry, at project level
+    (`model_config.session_models.signoff:` with no value) or PR level
+    (`session_models: {signoff: }`), counts as absent. The parent type,
+    then the PR model or global setting, applies. A blank effort level
+    counts as absent too. `pm model show` reports each one under
+    "Problems in project.yaml model settings" (97a77383, 52ec17f3).
+  - A non-mapping `model_config` or block is reported by `pm model show`:
+    "Effective config not shown: model_config is malformed", with PR
+    overrides and problems still listed. A non-mapping PR
+    `session_models` is ignored and flagged. An unknown type such as
+    `sign_off` is flagged (0c577dd2, 7a437b79).
+  - Launches with a malformed (non-mapping) block still fail with an
+    error. They never silently fall back.
+  - `pm model show` lists PR overrides (`model`, `session_models`) and a
+    Routes section for every type that resolves to a route.
+
 ## 2. Setup
 
 - Install pm from this PR's clone (`./install.sh --local` or venv per
@@ -889,6 +978,52 @@ env-by-name).
     unloadable file), pr-0f85376 (an interrupted finalizer is not
     re-run), pr-235f465, pr-43b14d2, pr-1139060. Same scratch-only
     limits as the fourteenth pass.
+    Done: S50 (fixes 4fb42e06, e60c9927, f19831c2) and S51 (PASS on
+    7887d772, no code change) ran live, with REPORT.md in
+    `/pm-captures/scenarios/50` and `51`.
+  - Twenty-first pass (S52+), delta-only, for the 2026-10-24 all-role
+    scope update (RQ39–RQ41). None of these product commits has run in
+    live QA:
+    - c1c08d83: impl/review/sign-off containers on the route.
+    - 9c42bb6e: tests only.
+    - Review loop 350f i1–i3: c3c39382 flush re-arm and the one-shot
+      parse `Error:` held; fbcb08b3 "Auto-start: starting" waits for a
+      queued flush; 25015d25 test only.
+    - Review loop e0e8 i1–i14: 3748691e, c08c7627, 0c577dd2, 021f2810,
+      97a77383, 2d58dea4, 57f04ee6, d76cc9d5, d361858c, 5fbbedad,
+      620327fa, 7a437b79, 52ec17f3, 05bfd6c5.
+    - User commits f1865615 and 32df2893.
+    Review e0e8 i15 passed on 104bf8fe with no code change: full suite
+    3715 passed, plus focused tests and 4 mutations
+    (`/pm-captures/review-e0e8-i15`). The only live evidence so far is
+    review e0e8 i1, which ran in a routed review container
+    (`/pm-captures/review-e0e8-i1/live-review-container-route.txt`).
+    Earlier QA evidence stands and S1–S51 are not rerun.
+    - S52: container mode, two PRs, real Claude for routed roles. One PR
+      is routed for all roles, one has a sign-off exception, and an
+      unrouted PR runs alongside both. The impl, review, QA and sign-off
+      lifecycles share one bridge, with a bridge kill in the middle.
+      Includes the review and sign-off relaunch and the unmounted impl
+      container refusal.
+    - S53: route failures for workflow roles in container mode (TUI keys,
+      CLI, auto-start, review loop, sign-off driver), plus host-mode
+      ungated roles and an unconfigured provider.
+    - S54: model-setting robustness and per-role resolution, checked
+      through the CLI and through which endpoint each launched role
+      actually reaches, including s0 with a legacy plain `qa_scenario`.
+    The stub router needs canned answers for review prompts (a `PASS`
+    verdict line), sign-off prompts (a SIGNOFF verdict) and impl prompts
+    (`ok`). The QA route gate skips fake sessions, but `wrap_claude_cmd`
+    checks the route even for a fake impl/review/sign-off command, so a
+    fake can drive the failure stories while real Claude proves the
+    router traffic. Harness: copy `/pm-captures/scenarios/23/scripts` or
+    `/36/scripts` (container, two PRs) or `/50/scripts` (host, scratch
+    TUI) and change S, the ports and the paths. Render with this branch's
+    `/workspace/pm/qa/artifacts` `render_cast`, and never use
+    `/scratch/qa-artifacts`. Never copy real credentials. Known items stay
+    observations: pr-7cf1fe4, pr-748e708 (an impl container and QA
+    containers in separate pm processes share one push proxy key),
+    pr-1139060. Same scratch-only limits as the fourteenth pass.
 
 ## 3. Edge cases
 
@@ -937,6 +1072,10 @@ models and only from refiner/worker sessions; s0/planner/verifier/finalizer
 never hit the stub; route failures never produce a verdict or a launch on
 the main endpoint, and recover automatically; no secret values in any
 artifact.
+
+With a PR-level override (RQ39) "routed" means the role's resolved
+setting selects the route. For that PR the router may then see every
+role, while another PR's unrouted roles must still reach only main.
 
 Fail: any routed request reaching the main endpoint or a non-`work/`
 model, any unrouted role hitting the router, a verdict recorded because of
