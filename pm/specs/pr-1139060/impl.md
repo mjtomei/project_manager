@@ -256,8 +256,14 @@ container cleared it and kept its files.  Running state is not health.
   runtime for any remaining tag+PR container under the proxy lock.
 - E5 TUI restart mid-QA: panes survive → owned; if the session died, resume
   recreates containers (IR2).
-- E6 Runtime unavailable / `ps` fails: reconcile returns an "unavailable"
-  outcome, removes nothing.
+- E6 Runtime unavailable / `ps` fails / `inspect` fails or returns an
+  incomplete or malformed inventory: reconcile returns an "unavailable"
+  outcome, removes nothing, and preserves retention markers and pending
+  failures. A container disappearing between `ps` and `inspect` can fail the
+  batch; retry with a fresh inventory on the next pass rather than treating
+  omitted rows as confirmed absence. Inventory parsing accepts both tabs
+  and Podman tabwriter spaces without splitting whitespace inside labels JSON
+  (QA S3, `be658949`).
 - E7 Retained container of a merged PR: kept by automatic reconcile, listed in
   preview as retained; `--include-retained` or `pm pr cleanup --resources`
   removes it.

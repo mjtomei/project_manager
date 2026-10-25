@@ -12058,6 +12058,43 @@ prs:
       will be committed with qa prefix; separate tracking bug pr-ed9fc64.'
     created_at: '2026-10-25T16:49:32Z'
     last_edited: '2026-10-25T16:49:32Z'
+  - id: note-88f4580
+    text: 'Review-loop 6427 i1 (chatgpt/gpt-6-astra-high): reviewed be658949 after
+      prior 86a70256 PASS. Found adjacent inventory safety bug: failed/partial inspect
+      was accepted as complete, so full reconciliation could prune retention markers
+      and pending failures for still-existing containers. Changed inspect to fail
+      closed on nonzero exit, missing/malformed rows or invalid labels; preserve tab/space
+      parsing and legacy null labels. Six regression cases fail against HEAD and pass
+      with fix; focused lifecycle/container/proxy/cleanup suite 252 passed. Full suite
+      pending. Evidence /pm-captures/review-6427-i1; earlier pre-fix full-suite attempt
+      interrupted and explicitly labeled. Spec E6 updated; no QA acceptance waived,
+      no new real-container coverage claimed.'
+    created_at: '2026-10-25T17:07:27Z'
+    last_edited: '2026-10-25T17:07:27Z'
+  - id: note-a34194a
+    text: 'Review-loop 6427 i1 final validation: sanitized full suite passed 3447
+      tests (3 unawaited AsyncMock RuntimeWarnings); focused suite 252 passed. Six
+      failure/retry regression cases fail against original HEAD inspect implementation.
+      Evidence /pm-captures/review-6427-i1/full-suite-after-fix.log and README.md.
+      No new runtime QA coverage claimed; existing blocked scenarios and independent
+      sign-off remain required. Review fix and spec clarification will be committed
+      with review-loop 6427 i1 prefix; existing uncommitted model/handoff edits are
+      preserved outside the commit.'
+    created_at: '2026-10-25T17:09:32Z'
+    last_edited: '2026-10-25T17:09:32Z'
+  - id: note-9546b26
+    text: 'Review-loop 6427 i1 final patch supersedes the earlier 3447-test checkpoint:
+      3450 tests passed (3 unawaited AsyncMock warnings), focused 255 passed. Patch
+      review also preserved ID/short-ID/slash-name ownership lookup metadata while
+      rejecting incomplete inventories; three alias regressions added. Direct before/after
+      reproduction confirms original failed inspect erased retention and pending failure
+      records, fixed code preserves both. Final evidence /pm-captures/review-6427-i1/full-suite-final.log,
+      focused-final.log, retention-before-after.log and README.md. No runtime QA claims
+      or waivers. Remaining work is next review plus previously blocked real-container
+      QA and independent sign-off.'
+    created_at: '2026-10-25T17:14:38Z'
+    last_edited: '2026-10-25T17:14:38Z'
+
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

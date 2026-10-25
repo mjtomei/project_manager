@@ -196,34 +196,45 @@ _INSPECT_FMT = ("{{.Name}}\t{{.Id}}\t{{.State.Running}}\t{{.State.Status}}\t"
 
 
 def _inspect(names: list[str], timeout: int) -> list[ContainerInfo] | None:
-    """ContainerInfo for each existing pm container in *names*; None if the
-    runtime couldn't be run."""
+    """ContainerInfo for *names*, or None if the inventory is incomplete.
+
+    Missing rows are not proof of absence: full reconciles use this inventory
+    to prune retention and failure records, so a failed inspect must fail closed.
+    """
     try:
         insp = container_mod._run_runtime("inspect", "--format", _INSPECT_FMT,
                                           *names, check=False, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired):
         return None
+    if insp.returncode != 0:
+        # A vanished container can fail the batch too; retry on the next pass
+        # rather than guess whether missing rows mean removal or runtime failure.
+        return None
     out: list[ContainerInfo] = []
     seen: set[str] = set()
-    # A container that vanished between ps and inspect makes inspect exit
-    # non-zero but still print the others — parse whatever came back.
     for line in (insp.stdout or "").splitlines():
         # Podman 3.x renders template tabs through a tabwriter as spaces.
         # Only the labels JSON may contain whitespace within a field.
         parts = line.split(None, 4)
         if len(parts) < 5:
-            continue
+            return None
         name = parts[0].lstrip("/").strip()
         try:
-            labels = json.loads(parts[4]) or {}
+            labels = json.loads(parts[4])
         except ValueError:
-            labels = {}
+            return None
+        if labels is None:
+            labels = {}  # unlabeled legacy container
+        if not isinstance(labels, dict):
+            return None
         info = _info_from(name, parts[1].strip(), parts[2].strip() == "true",
                           parts[3].strip(), {str(k): str(v) for k, v in labels.items()})
         if info is not None and name not in seen:
-            seen.add(name)
             out.append(info)
-    return out
+        seen.add(name)
+    # Ownership lookups may pass a container ID or /name; inspect returns its
+    # canonical name. Require every requested row without rejecting aliases.
+    return out if len(seen) == len(set(names)) else None
 
 
 # ---------------------------------------------------------------------------

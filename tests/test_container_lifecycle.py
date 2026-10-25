@@ -125,6 +125,78 @@ class TestReaperInventory:
         assert infos[0].pr_id == "pr-1a2b3c"
         assert infos[0].project_root == "/path with spaces"
 
+    @pytest.mark.parametrize("identifier", ["a" * 64, "aaaaaaaaaaaa",
+                                             "/pm-review-pr-aaaa"])
+    def test_owner_lookup_resolves_runtime_identifier(self, monkeypatch, identifier):
+        name = "pm-review-pr-aaaa"
+        row = (f"/{name}\t{'a' * 64}\ttrue\trunning\t"
+               '{"pm.tmux_socket":"/custom/owner.sock"}\n')
+        monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw: _cp(out=row))
+        owner = MagicMock(return_value=(["%1"], False))
+        monkeypatch.setattr(reaper, "_owner_panes", owner)
+        assert reaper.live_owner_panes(identifier) == ["%1"]
+        info = owner.call_args.args[0]
+        assert info.name == name
+        assert info.id == "a" * 64
+        assert info.tmux_socket == "/custom/owner.sock"
+
+    @pytest.mark.parametrize("labels", ["null", "{}"])
+    def test_inspect_accepts_unlabeled_legacy_container(self, monkeypatch, labels):
+        name = "pm-review-pr-aaaa"
+        row = f"/{name}\tid\ttrue\trunning\t{labels}\n"
+        monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw: _cp(out=row))
+        infos = reaper._inspect([name], timeout=60)
+        assert len(infos) == 1
+        assert infos[0].pr_id == "pr-aaaa"
+
+    @pytest.mark.parametrize("rc,output", [
+        (1, ""),
+        (1, "partial"),
+        (0, "partial"),
+        (0, "malformed"),
+        (0, "bad-json"),
+        (0, "non-object-labels"),
+    ])
+    def test_incomplete_inventory_preserves_records_until_retry(
+            self, fake_env, monkeypatch, rc, output):
+        kept = "pm-repo-ab12-review-pr-aaaa"
+        orphan = "pm-repo-ab12-impl-pr-bbbb"
+        fake_env["containers"] = [_info(kept), _info(orphan)]
+        reaper.retain(kept, container_id="id-" + kept)
+        TestReaperOwnership._backdate_marker(kept)
+        reaper._record(reaper.Outcome(failures={kept: "previous timeout"}),
+                       Scope(), "manual")
+        before = reaper.last_state()
+        rows = [f"{name}\tid-{name}\ttrue\trunning\t{{}}\n"
+                for name in (kept, orphan)]
+        outputs = {
+            "": "",
+            "partial": rows[1],
+            "malformed": rows[0] + orphan + "\n",
+            "bad-json": rows[0] + rows[1].replace("{}", "{broken"),
+            "non-object-labels": rows[0] + rows[1].replace("{}", "[]"),
+        }
+        response = _cp(rc, outputs[output], "inspect failed" if rc else "")
+        monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw: response)
+        monkeypatch.setattr(reaper, "list_containers",
+                            lambda: reaper._inspect([kept, orphan], timeout=60))
+        proxies = MagicMock(return_value=[])
+        monkeypatch.setattr(reaper, "_release_unused_proxies", proxies)
+
+        out = reaper.reconcile(reason="manual")
+        assert out.error
+        assert not fake_env["removed"]
+        assert reaper.is_retained(kept, "id-" + kept)
+        assert reaper.last_state() == before
+        proxies.assert_not_called()
+
+        response = _cp(out="".join(rows))
+        out = reaper.reconcile(reason="manual")
+        assert not out.error
+        assert out.removed == [orphan]
+        assert reaper.is_retained(kept, "id-" + kept)
+        assert not reaper.pending_failures()
+
 
 def _info(name, **kw):
     p = cm.parse_container_name(name)
