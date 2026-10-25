@@ -1449,3 +1449,76 @@ the `origin/master` worktree baseline in this sandbox (1 failure, the
 documented environmental
 `test_hook_events::test_installer_writes_standalone_receiver`, pr-4bde874;
 3486 vs 3367 passed, the delta being this PR's new tests).
+
+## 25. Review-loop follow-ups (review loop 240e, iteration 2)
+
+Iteration 2 ran natively in the review container (the controller's
+`pr-592e4bd` runtime still launches the review prompt as one argv entry, so
+its first launch failed with E2BIG; the recovery read the complete native
+prompt from a file). It re-ran the §19-§24 method — sweep every reachable
+builder, then check each omission marker against what the session can actually
+do with it — and found three defects, all in code this PR added.
+
+- **`pm plan deps`' description note described lines the listing dropped.**
+  `bounded_join` formats the first item past the byte budget before breaking,
+  so the `desc_truncated` side-effect flag fired for a PR the listing omitted:
+  with the budget spent by a long-titled first PR (short description) and the
+  only long description on the dropped second PR, the prompt said
+  "Descriptions above are abbreviated ..." while every kept description was
+  complete. (Repro: two PRs, the first with a 19,800-character title and a
+  short description, the second with a 400-character description; the shared
+  20,000-byte listing budget.) The note is now emitted only when a *kept*
+  line's description was cut — checked by the PR's unique display-id line
+  prefix — and the formatter no longer has a side effect. `bounded_join`'s
+  docstring now states the invariant (a formatter call is not evidence the
+  item was kept).
+- **The file-backed prompt fallback depended on the process locale.** The new
+  `_materialize_oversized_prompt` and `build_claude_shell_cmd` wrote the
+  prompt with `Path.write_text()`, and `pm_core.bridge` read the handoff with
+  `Path.read_text()`, none with an encoding. Prompts are user-authored and
+  `prompt_bytes` measures UTF-8, but under an ASCII locale (`LC_ALL=C` with
+  `PYTHONCOERCECLOCALE=0` / `PYTHONUTF8=0`) a CJK prompt made the write raise
+  `UnicodeEncodeError` — crashing the fallback that exists to deliver an
+  over-limit prompt — and the bridge's read raised `UnicodeDecodeError`, which
+  its `OSError` handler does not catch. All four sites now use
+  `encoding="utf-8"`.
+- **`pm pr show` under-reported the integration record and named a host
+  path.** The command is the fallback reader for the integration omission
+  marker, but it printed `len(vals)` from the project.yaml copy
+  (`integration.compact` caps each list at `_YAML_LIST_LIMIT` = 40 and records
+  the real total in `overlap_total` / `conflicts_total`), so a 500-path record
+  read as "Overlap (40)" with no indication more existed; and its
+  "Full record:" line was `integration_json_path()` — a *host* path that does
+  not exist in the container where the marker is followed (resolving it also
+  creates the captures dir as a side effect, §19/pr-155f3e3). It now reports
+  the real total and how many paths are not shown (falling back to the yaml
+  copy for a missing/malformed total), and names the runtime-resolved
+  `` `$(pm qa captures-path <id>)/integration.json` ``.
+
+Verification: `tests/test_prompt_bounds.py` 120 cases (3 new tests / 4 cases:
+the plan-deps marker accuracy, the UTF-8 fallback under a C locale via a
+subprocess, and the `pm pr show` totals + runtime-resolved record; all four
+failing-then-passing — verified by reverting the source edits) and
+`tests/test_claude_launcher.py` 37. Related suites (`test_prompt_bounds`,
+`test_claude_launcher`, `test_bug_fix_flow_prompts`, `test_plan_review`,
+`test_regression_prompts`, `test_spec_gen`, `test_signoff`,
+`test_qa_instructions`) 382 passed. Real-data sweep over all 488 PRs x 4
+builders is byte-identical to §24 (impl 75,146 / review 77,616 / sign-off
+92,165 / planner 80,652 B, max `pr-0b87a97`; 1,952 prompts, 0 errors), and the
+launcher/bridge paths were re-exercised end to end with a stub `claude`
+(150,010-byte prompt delivered intact, file removed). The three plan builders
+measured against this repo's real state: `plan deps` 46,989 B,
+`plan review bugs` 24,767 B (the brief-listing fallback, with its
+`pm pr list` / `pm pr show` markers), `plan breakdown bugs` 5,693 B — all
+under `PROMPT_ARG_LIMIT`. Full-suite failure set identical to the
+`origin/master` worktree baseline in this sandbox (42 failed / 17 errors: 22
+`test_signoff_integration`, 19+17 `test_merge_publish`, 1 `test_hook_events`;
+branch 3431 passed vs master 3309, the delta being this PR's new tests; the
+`markdown` dependency pyproject declares was installed into a scratch
+`PYTHONPATH` for both runs). Note: `test_git_ops::test_keeps_unpushed_merge`
+fails while the worktree has uncommitted edits — the sandbox git wrapper
+forwards `git pull` to this host workdir — and passes on the clean committed
+tree on both branch and master. Evidence: `/pm-captures/review-240e-i2/`
+(sweep TSVs, probes, suite logs). `/pm-captures/review-240e-i1/` was absent in
+this container (as i1 recorded for `review-240e-i0`); §24 plus
+`/pm-captures/review-2ac8-i6/` were used for the prior iteration's evidence.
