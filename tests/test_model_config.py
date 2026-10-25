@@ -521,6 +521,19 @@ class TestValidateModelConfig:
         assert "prs[pr-a].session_models" in errors[0] and "sign_off" in errors[0]
         assert errors[1] == "prs[pr-b].session_models must be a mapping"
 
+    def test_pr_watcher_entry_flagged_as_not_a_pr_session(self):
+        """Review 0f64 i2: the watcher is project-wide (``pm watcher``
+        resolves it with no PR), so a PR's ``watcher`` entry does nothing;
+        it was accepted silently."""
+        from pm_core.model_config import validate_model_config
+        data = {"prs": [{"id": "pr-a", "session_models": {
+            "watcher": "provider:claude-work", "impl": "sonnet"}}]}
+        errors = validate_model_config(data)
+        assert len(errors) == 1, errors
+        assert errors[0].startswith(
+            "prs[pr-a].session_models: 'watcher' is not a PR session")
+        assert "pm model set watcher <model> --project" in errors[0]
+
     def test_pr_session_models_bad_values_flagged(self):
         """Blank or non-string role entries are ignored, so say so."""
         from pm_core.model_config import validate_model_config
@@ -729,3 +742,31 @@ def test_model_show_routes_name_only_the_types_a_pr_override_decides(
     assert not any("pr-r" in r for r in routes), routes
     assert [r for r in routes if "pr-q" in r] == [
         "  pr-q (qa_scenario) route=claude-work"], routes
+
+
+def test_model_show_pr_routes_never_count_the_project_watcher(tmp_path,
+                                                             monkeypatch):
+    """Review 0f64 i2: a PR's Routes line counted the watcher, which a PR
+    override never reaches (``pm watcher`` resolves it with no PR), so a PR
+    whose override routes every PR session but one listed "watcher" among
+    its types."""
+    from click.testing import CliRunner
+    from pm_core import store, worker_route
+    from pm_core.cli import model as model_cli
+    from pm_core.model_config import PR_SESSION_TYPES
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    monkeypatch.setattr(worker_route, "describe",
+                        lambda res, **kw: f"route={res.provider}")
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master"},
+                "prs": [{"id": "pr-a", "model": "provider:claude-work"},
+                        {"id": "pr-i", "model": "provider:claude-work",
+                         "session_models": {"impl": "opus"}}]}, tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    out = CliRunner().invoke(model_cli.model, ["show"]).output
+    routes = out.split("Routes:\n", 1)[1].splitlines()
+    assert "  pr-a (all types) route=claude-work" in routes, routes
+    i = [r for r in routes if r.startswith("  pr-i ")]
+    others = ", ".join(st for st in PR_SESSION_TYPES if st != "impl")
+    assert i == [f"  pr-i ({others}) route=claude-work"], routes
+    assert not any("watcher" in r for r in routes), routes

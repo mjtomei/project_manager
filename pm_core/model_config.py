@@ -51,6 +51,11 @@ SESSION_TYPES = ("impl", "review", "qa", "qa_planning", "qa_scenario",
                  "qa_concretize", "qa_verification", "qa_finalize",
                  "qa_interactive", "signoff", "watcher", "merge")
 
+# The types a PR's ``model`` / ``session_models`` can decide.  The watcher
+# is a project session (``pm watcher`` resolves it with no PR), so a PR
+# override never reaches it.
+PR_SESSION_TYPES = tuple(st for st in SESSION_TYPES if st != "watcher")
+
 DEFAULT_SESSION_MODELS: dict[str, str] = {
     # Empty — use Claude CLI defaults unless explicitly configured via
     # project.yaml, global settings, or PM_MODEL env var.
@@ -248,8 +253,9 @@ def validate_model_config(project_data: dict | None) -> list[str]:
       (``SESSION_TYPES``);
     - ``session_models`` values are model names (other values are ignored);
     - ``session_effort`` values are valid effort levels (``EFFORT_LEVELS``);
-    - each PR's ``session_models`` is a mapping keyed by known session types,
-      with model-name values (other values are ignored).
+    - each PR's ``session_models`` is a mapping keyed by the types a PR
+      decides (``PR_SESSION_TYPES``), with model-name values (other values
+      are ignored).
 
     Unknown keys are silently ignored by ``resolve_model_and_provider`` — a
     typo'd session type would otherwise just never take effect — so this is
@@ -297,9 +303,15 @@ def validate_model_config(project_data: dict | None) -> list[str]:
             errors.append(f"{where} must be a mapping")
             continue
         for st, val in entries.items():
-            if st not in SESSION_TYPES:
-                errors.append(f"{where}: unknown session type {st!r}. "
-                              f"Valid types: {known}")
+            if st not in PR_SESSION_TYPES:
+                if st in SESSION_TYPES:
+                    errors.append(
+                        f"{where}: {st!r} is not a PR session; a PR "
+                        "override never reaches it (ignored). Set it with "
+                        f"'pm model set {st} <model> --project'")
+                else:
+                    errors.append(f"{where}: unknown session type {st!r}. "
+                                  f"Valid types: {sorted(PR_SESSION_TYPES)}")
             elif not _is_model_value(val):
                 errors.append(f"{where}[{st!r}]: {val!r} is not a model "
                               "name or 'provider:<name>' (ignored)")

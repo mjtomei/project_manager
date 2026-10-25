@@ -1168,3 +1168,17 @@ recorded with item 41.
         `test_error_line_shows_the_remedy_as_text_not_markup`; 2 mutations
         caught (`/pm-captures/review-0f64-i1/mutation-checks.log`).  Full
         suite: `/pm-captures/review-0f64-i1/full-suite.log`.
+    (f) Review loop 0f64 i2: a PR's Routes line also counted the
+        watcher, which is a project session (`pm watcher` resolves it with
+        no PR), so `model: provider:<route>` plus one plain-model role
+        exception listed "watcher" among that PR's routed types.  PR lines
+        now use `model_config.PR_SESSION_TYPES` (every type but the
+        watcher); "all types" means all of those.  `validate_model_config`
+        reports a PR `session_models` entry for `watcher` ("is not a PR
+        session … Set it with 'pm model set watcher <model> --project'"),
+        which was accepted and silently did nothing, and the unknown-type
+        hint lists only the PR types.
+        `test_model_show_pr_routes_never_count_the_project_watcher`,
+        `test_pr_watcher_entry_flagged_as_not_a_pr_session`; 2 mutations
+        caught (`/pm-captures/review-0f64-i2/mutation-checks.log`).  Full
+        suite: `/pm-captures/review-0f64-i2/full-suite.log`.

@@ -83,7 +83,7 @@ def model_show():
 
     # Router providers (worker routes): where those sessions actually go.
     from pm_core import worker_route
-    from pm_core.model_config import get_pr_model_override
+    from pm_core.model_config import PR_SESSION_TYPES, get_pr_model_override
     route_lines = []
     for st in SESSION_TYPES if resolvable else ():
         res = resolve_model_and_provider(st, project_data=data)
@@ -92,12 +92,13 @@ def model_show():
     # A PR override that selects a route sends that PR's sessions there
     # too; resolved per type as its launches do (one line per distinct
     # route, naming the types it covers).  Only the types the override
-    # decides: the others follow the project lines above.
+    # decides: the others (and the project-wide watcher) follow the
+    # project lines above.
     for pr in (data.get("prs") or []) if resolvable else ():
         if not (pr.get("model") or isinstance(pr.get("session_models"), dict)):
             continue
         routes: dict[str, list[str]] = {}
-        for st in SESSION_TYPES:
+        for st in PR_SESSION_TYPES:
             pr_model = get_pr_model_override(pr, st)
             if not pr_model:
                 continue
@@ -106,7 +107,7 @@ def model_show():
             if res.provider:
                 routes.setdefault(worker_route.describe(res), []).append(st)
         for desc, types in routes.items():
-            label = ("all types" if len(types) == len(SESSION_TYPES)
+            label = ("all types" if len(types) == len(PR_SESSION_TYPES)
                      else ", ".join(types))
             route_lines.append(f"  {pr.get('id')} ({label}) {desc}")
     if route_lines:
