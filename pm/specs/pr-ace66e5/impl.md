@@ -1376,7 +1376,8 @@ highest) and its markers now read
 and `` (+20 more scenarios; read `$CAP/scenarios/<n>/verdict.md` for all verdicts) ``.
 Full-suite failure set identical to the `origin/master` worktree baseline in
 this sandbox (1 failure, the documented environmental
-`test_hook_events::test_installer_writes_standalone_receiver`, pr-4bde874).
+`test_hook_events::test_installer_writes_standalone_receiver`, pr-4bde874;
+3481 vs 3367 passed, the delta being this PR's new tests).
 Evidence: `/pm-captures/review-2ac8-i6/` (`i6_sweep.py` + `pathological*.txt`,
 `i6_markers.py` + `markers-pathological*.txt`, `i6_container_marker.py`,
 `sweep-head.txt` / `sweep-branch-fixed.txt` + `hashes-*.txt`,
