@@ -22562,42 +22562,6 @@ prs:
       which also fails standalone). Evidence /pm-captures/review-4e41-i11/.'
     created_at: '2026-10-24T23:40:24Z'
     last_edited: '2026-10-24T23:40:24Z'
-  - id: note-12e1b06
-    text: 'QA scenario 7 PASS (2026-10-25, branch 70436638, evidence /pm-captures/scenarios/7/).
-      Runtime evidence, not code reading: throwaway local project with 20+20+20 QA-library
-      items (~3 KB descriptions each), 5 mocks (~393 KB of bodies), a 79 339-byte
-      QA spec and 100 PR notes (~90 KB). Pressing t in the pm TUI launched the planner;
-      the recording stand-in captured the planner argv: --session-id + one 81 953-byte
-      last argument beginning `You are a QA planner analyzing PR pr-7fb7dbc:`, NOT
-      the launcher bootstrap sentence — so the builder itself bounded the prompt.
-      `## Task`, `QA_PLAN_START`, `QA_PLAN_END` and `Number scenarios starting from
-      1.` all survive; the library, PR-notes and QA-spec blocks are all abbreviated
-      and each marker names a command that returns the omitted text (verified from
-      the project dir AND from the QA session workdir /home/pm/.pm/workdirs/<tag>/pm-pr-7fb7dbc-.../
-      where pm/project.yaml lives). No `Argument list too long` / `Errno 7` in the
-      pane, its scrollback, or ~/.pm/debug/<tag>.log. Pre-fix/post-fix on the same
-      project via an origin/master worktree: master builds a 318 710-byte planner
-      prompt (execve -> Errno 7, the #229 symptom), the branch builds 81 694 bytes
-      (execs fine). tests/test_prompt_bounds.py 93 passed.'
-    created_at: '2026-10-25T00:27:42Z'
-    last_edited: '2026-10-25T00:27:42Z'
-  - id: note-7962477
-    text: 'QA scenario 7, two observations left unfixed deliberately (no defect found
-      against the scenario, which prescribes this exact marker): (1) the mocks omission
-      marker reads "Read the full text: `pm qa mocks list` (mock definitions under
-      pm/qa/mocks/)", but `pm qa mocks list` prints titles only — the bodies are only
-      reachable through the directory the marker also names, or `pm qa mocks show
-      <mock-id>`. The other three markers (`pm qa list`, `pm pr note list <id>`, `pm
-      pr spec <id> qa`) do print the full text their builder omitted. The head+tail
-      cut also leaves only one `### Mock` heading in the 12 000-byte block. Worth
-      a follow-up if the marker should name `pm qa mocks show`. (2) `get_spec_mocks_section`
-      (spec_gen.py:632) has no production caller — commit 3eb89e65 "qa: remove mock
-      prompting (planner, scenario, spec-gen)" left the machinery, so today the mocks
-      block is reachable only via `pm qa mocks prompt`; it is not injected into scenario
-      prompts. Scenario 7 states the premise "these are the contracts injected into
-      QA scenario prompts" — true of the design, not of current production wiring.'
-    created_at: '2026-10-25T00:27:46Z'
-    last_edited: '2026-10-25T00:27:46Z'
   - id: note-4fa726d
     text: 'concretize s11 (prompt no-side-effect / resume / pr show): verified against
       HEAD 70436638, refined steps emitted.
@@ -22651,6 +22615,42 @@ prs:
       the pm/sync-* branch), else it exits with "not committed on master yet".'
     created_at: '2026-10-25T00:19:38Z'
     last_edited: '2026-10-25T00:19:38Z'
+  - id: note-12e1b06
+    text: 'QA scenario 7 PASS (2026-10-25, branch 70436638, evidence /pm-captures/scenarios/7/).
+      Runtime evidence, not code reading: throwaway local project with 20+20+20 QA-library
+      items (~3 KB descriptions each), 5 mocks (~393 KB of bodies), a 79 339-byte
+      QA spec and 100 PR notes (~90 KB). Pressing t in the pm TUI launched the planner;
+      the recording stand-in captured the planner argv: --session-id + one 81 953-byte
+      last argument beginning `You are a QA planner analyzing PR pr-7fb7dbc:`, NOT
+      the launcher bootstrap sentence — so the builder itself bounded the prompt.
+      `## Task`, `QA_PLAN_START`, `QA_PLAN_END` and `Number scenarios starting from
+      1.` all survive; the library, PR-notes and QA-spec blocks are all abbreviated
+      and each marker names a command that returns the omitted text (verified from
+      the project dir AND from the QA session workdir /home/pm/.pm/workdirs/<tag>/pm-pr-7fb7dbc-.../
+      where pm/project.yaml lives). No `Argument list too long` / `Errno 7` in the
+      pane, its scrollback, or ~/.pm/debug/<tag>.log. Pre-fix/post-fix on the same
+      project via an origin/master worktree: master builds a 318 710-byte planner
+      prompt (execve -> Errno 7, the #229 symptom), the branch builds 81 694 bytes
+      (execs fine). tests/test_prompt_bounds.py 93 passed.'
+    created_at: '2026-10-25T00:27:42Z'
+    last_edited: '2026-10-25T00:27:42Z'
+  - id: note-7962477
+    text: 'QA scenario 7, two observations left unfixed deliberately (no defect found
+      against the scenario, which prescribes this exact marker): (1) the mocks omission
+      marker reads "Read the full text: `pm qa mocks list` (mock definitions under
+      pm/qa/mocks/)", but `pm qa mocks list` prints titles only — the bodies are only
+      reachable through the directory the marker also names, or `pm qa mocks show
+      <mock-id>`. The other three markers (`pm qa list`, `pm pr note list <id>`, `pm
+      pr spec <id> qa`) do print the full text their builder omitted. The head+tail
+      cut also leaves only one `### Mock` heading in the 12 000-byte block. Worth
+      a follow-up if the marker should name `pm qa mocks show`. (2) `get_spec_mocks_section`
+      (spec_gen.py:632) has no production caller — commit 3eb89e65 "qa: remove mock
+      prompting (planner, scenario, spec-gen)" left the machinery, so today the mocks
+      block is reachable only via `pm qa mocks prompt`; it is not injected into scenario
+      prompts. Scenario 7 states the premise "these are the contracts injected into
+      QA scenario prompts" — true of the design, not of current production wiring.'
+    created_at: '2026-10-25T00:27:46Z'
+    last_edited: '2026-10-25T00:27:46Z'
   - id: note-9da1246
     text: 'QA scenario 11 PASS (3 stories: prompt no-side-effect, resume, pm pr show),
       evidence /pm-captures/scenarios/11/. One extra observation for the next iteration,
@@ -23258,6 +23258,23 @@ prs:
       PYTHONPATH for both). Evidence /pm-captures/review-240e-i6/. (2026-10-25T19:40:00Z)'
     created_at: '2026-10-25T19:38:08Z'
     last_edited: '2026-10-25T19:38:08Z'
+  - id: note-341e718
+    text: User stopped the current review and autostart on 2026-10-25. Preserve current
+      branch and all QA/review evidence. Do not restart the review or merge automatically.
+      A new PR pr-5cee3d5 implements sign-off conflict resolution with selective evidence
+      reuse. The prior sign-off report returned for integration conflict and predates
+      subsequent fixes; no new approval has been asserted.
+    created_at: '2026-10-25T20:35:43Z'
+    last_edited: '2026-10-25T20:35:43Z'
+  - id: note-7ab3268
+    text: 'User explicitly resumed #250 on 2026-10-25 after giving implementation
+      feedback and requested a fresh path through sign-off. This supersedes the earlier
+      stop note. Adopt the existing implementation session and wait for its final
+      pushed changes/tests before fresh review; keep manual merge gating. Feedback
+      policy: preserve instruction text via file-backed transport, bound only eligible
+      context/PR notes. Do not reuse prior sign-off as approval of these changes.'
+    created_at: '2026-10-25T21:26:33Z'
+    last_edited: '2026-10-25T21:26:33Z'
   - id: note-307d7d6
     text: 'Policy change (74d0916e, spec §31 cf410957), per your direction: bounds
       now cut accumulation only, never instructions.
@@ -33793,6 +33810,145 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-25T18:51:17.319060+00:00'
   updated_at: '2026-10-25T18:51:17.319060+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5cee3d5
+  plan: null
+  title: Resolve integration conflicts at sign-off and reuse unaffected review and
+    QA evidence
+  branch: pm/pr-5cee3d5-resolve-integration-conflicts-at-sign-off-and-reus
+  status: pending
+  depends_on: []
+  description: 'A metadata-only integration conflict currently sends a passed PR through
+    implementation, full review and QA again. PR #250 is the concrete example: both
+    master and the feature branch independently appended records to pm/project.yaml;
+    keeping all four records was sufficient, but sign-off could only return SIGNOFF_IMPL.
+
+
+    Make integration resolution part of the sign-off workflow. Resolve conflicts in
+    an isolated candidate workspace, inspect the resolution delta and relevant interactions
+    with the new base, and let the sign-off agent choose whether implementation, review,
+    QA, or only refreshed sign-off is warranted. When no change would benefit from
+    another review or QA pass, explicitly reuse existing evidence rather than restarting
+    those phases solely because the commit changed. Keep the human merge gate and
+    a fresh sign-off report tied to the exact resolved candidate.
+
+
+    Requirements:
+
+    - Safely combine independent project.yaml additions by stable record ID and validate
+    that neither side lost changes. Do not silently select a side for real field conflicts,
+    deletion/edit conflicts, or ambiguous records. Existing store.merge_3way resolves
+    true conflicts in favor of theirs; that policy is not a sufficient integration
+    resolver.
+
+    - Do not grant every metadata change an exemption: model settings, dependencies,
+    statuses and other behavioral configuration can change what runs. Consider new-base
+    interactions even when Git reports a clean merge.
+
+    - Record the original evidence revisions, base/head/candidate tree, resolution
+    changes, evidence being reused and why, and any targeted checks or required return
+    stage. Expose this in the sign-off report so a person can assess the decision.
+    Ambiguity must remain visible and must not become an invented approval.
+
+    - Merge only a conflict-free approved candidate; revalidate head/base/candidate
+    identity before publication and invalidate/reassess stale approvals. Preserve
+    unrelated dirty files and existing evidence. The merge step must not make new
+    substantive conflict resolutions after sign-off.
+
+    - Keep the agent responsible for the judgment about necessary follow-up; PM supplies
+    reliable candidate/provenance tools and enforces the approved result. Choose the
+    smallest coherent change to the existing integration/sign-off flow, without a
+    general orchestration rewrite.
+
+
+    Regression coverage: reproduce #250 with distinct PR entries appended on both
+    branches and verify all entries survive, review/QA evidence can be reused, and
+    fresh sign-off is still required. Cover conflicting edits to the same record/field,
+    deletion vs edit, meaningful code/config resolution and new-base interaction requiring
+    follow-up, stale candidate identity, and preservation of work/evidence. Exercise
+    the user-visible flow as well as the decision and merge guards.
+
+
+    Related existing work: sign-off integration routing (pr-ac10f03), registry merge
+    preservation (pr-80b04db), and post-merge base-race checking (pr-b530f8b). Coordinate
+    with their current implementation; do not reopen or duplicate whole plans. No
+    dependency is required merely to reproduce #250''s trigger.
+
+
+    Run with provider:deepseek-flash (DeepSeek V4.1 Flash 1017, high), with provider:claude-work
+    sign-off as in the current DeepSeek trial. Autostart must wait for manual merge;
+    spec-review gating is off.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-25T20:35:32.509320+00:00'
+  updated_at: '2026-10-25T20:35:32.509320+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  model: provider:deepseek-flash
+  session_models:
+    signoff: provider:claude-work
+- id: pr-22ea6a2
+  plan: null
+  title: Resume autostart after user feedback in an existing implementation session
+  branch: pm/pr-22ea6a2-resume-autostart-after-user-feedback-in-an-existin
+  status: pending
+  depends_on: []
+  description: 'After a PR has reached review, a user may stop the review loop, give
+    feedback in the existing implementation session, then ask autostart to take the
+    changed PR through sign-off again. This should be a supported handoff that preserves
+    the live session and waits for the current work before advancing.
+
+
+    Concrete reproduction: #250 had a stopped review-loop240e i8. The user resumed
+    implementation in its existing pane and requested another sign-off. The registry
+    still said in_review. autostart add only re-adds the target; it neither selects
+    the implementation rework stage nor retires the completed/stopped review state.
+    _auto_start_review_loops and _auto_review_idle_prs both skip a PR if any old review-loop
+    object exists, so even manually restoring in_progress can leave the new implementation
+    completion unable to start fresh review. A simple re-add can also use the wrong
+    stage or stale completion evidence.
+
+
+    Provide an explicit CLI and matching TUI action to resume from implementation
+    after feedback (choose the minimal coherent interface). Adopt the existing active
+    implementation session/attempt and preserve its source, transcript, context and
+    unsent drafts; do not kill it or launch a duplicate. Wait for its new completed
+    handoff, then run fresh review, necessary QA and sign-off using the existing model
+    assignments and merge policy. Clearly show that it is waiting for the current
+    implementation turn, and why, in CLI/TUI status.
+
+
+    Retire or supersede obsolete loop/QA/sign-off state without deleting historical
+    evidence. Old Stop events, prior PASS results, stale aliases or late callbacks
+    must not advance the new attempt. Handle re-adding while implementation is busy,
+    already completed before autostart was enabled, a restarted TUI, and repeated
+    requests idempotently. If later-stage work is still active, make the requested
+    stage transition explicit and safe rather than allowing overlapping edits. Keep
+    manual merge and optional spec-review gates unchanged. Do not infer that arbitrary
+    extra chat means restart work; this is an explicit user/agent-controlled operation
+    and should remain usable during the planned move away from harness hooks.
+
+
+    Acceptance: reproduce #250''s stopped-review plus resumed-implementation case;
+    the existing session finishes and a new review starts exactly once, then the flow
+    reaches sign-off and waits for manual merge. Test stale stopped/PASS loops, busy
+    and already-completed feedback turns, old completion events, restart recovery
+    and repeated resume calls. Preserve unrelated target scheduling and never waive
+    review/QA evidence merely to unblock the flow.
+
+
+    This PR is filed for follow-up, not authorized for autostart by this request.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-25T21:27:23.093198+00:00'
+  updated_at: '2026-10-25T21:27:23.093198+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
