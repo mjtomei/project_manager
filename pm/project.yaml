@@ -33612,6 +33612,18 @@ prs:
       has to run in the next QA.'
     created_at: '2026-10-25T15:10:00Z'
     last_edited: '2026-10-25T15:10:00Z'
+  - id: note-240c68a
+    text: 'Review 0f64 i6 (3a0c32e6, CODE CHANGE, small, needs normal re-review):
+      S53 66404830 and 0f64 i1-i5 (14d72926, ac202207, 1dc3e618, 6bd59adf, 690a9fe1)
+      reviewed independently and sound. Gap fixed in 66404830 (d): the PR Routes lines
+      in pm model show ignored PM_MODEL, which beats every PR override, so with PM_MODEL=provider:<route>
+      a PR whose override is a plain model read ''(all types) route=<route>''. With
+      PM_MODEL set no PR line is listed (the per-type lines show its route). Regression
+      test_model_show_pr_routes_defer_to_pm_model, mutation caught. Venv lacked markdown
+      (3.10.3 installed). Full suite 3737 passed, rc 0; impl.md 42(j); /pm-captures/review-0f64-i6.
+      S52 (RQ39) still has to run in the next QA.'
+    created_at: '2026-10-25T15:18:56Z'
+    last_edited: '2026-10-25T15:18:56Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
