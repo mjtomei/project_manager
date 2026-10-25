@@ -623,12 +623,14 @@ def start_push_proxy(container_name: str, workdir: str,
         sock_dir = _shared_sock_dir(session_tag, pr_id)
         sock_path = os.path.join(sock_dir, "push.sock")
 
+        # A dead socket may still be mounted by another runtime's containers.
+        # Do not overwrite its ownership record while repairing our own proxy.
+        if not _owner_domain_matches(sock_dir):
+            from pm_core.container import ContainerError
+            raise ContainerError("Existing shared push proxy belongs to a different or "
+                                 "unverifiable runtime; refusing cross-runtime reuse")
         # Reuse if an existing proxy is alive on this socket
         if os.path.exists(sock_path) and proxy_is_alive(sock_path):
-            if not _owner_domain_matches(sock_dir):
-                from pm_core.container import ContainerError
-                raise ContainerError("Existing shared push proxy belongs to a different or "
-                                     "unverifiable runtime; refusing cross-runtime reuse")
             # Do not attribute an existing socket to this runtime: it may
             # have been started by a different daemon or rootless store.
             with _proxy_lock:

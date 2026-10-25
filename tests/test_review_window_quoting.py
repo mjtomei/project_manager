@@ -107,24 +107,31 @@ def fake_tmux(tmp_path, monkeypatch):
     return {"workdir": str(workdir), "captured": captured}
 
 
-@pytest.mark.parametrize("failure", ["missing-diff", "split-error"])
+@pytest.mark.parametrize("failure", ["missing-diff", "split-error", "missing-worker"])
 def test_launch_failure_preserves_live_or_unknown_container(fake_tmux, monkeypatch, failure):
     from pm_core import container
     monkeypatch.setattr(container, "is_container_mode_enabled", lambda: True)
-    monkeypatch.setattr(container, "wrap_claude_cmd",
-                        lambda *a, **k: ("EXEC", "pm-test-review-pr-001"))
+    def wrap(*args, allocation_identity, **kwargs):
+        allocation_identity.update(id="original-id", generation="original-generation")
+        return "EXEC", "pm-test-review-pr-001"
+    monkeypatch.setattr(container, "wrap_claude_cmd", wrap)
     safe = mock.Mock(return_value=False)
     unsafe = mock.Mock()
     monkeypatch.setattr(container, "discard_unowned_container", safe)
     monkeypatch.setattr(container, "discard_container", unsafe)
     if failure == "missing-diff":
         monkeypatch.setattr(pr_mod.tmux_mod, "new_window_get_pane", lambda *a, **k: None)
+    elif failure == "missing-worker":
+        monkeypatch.setattr(pr_mod.tmux_mod, "split_pane_at", lambda *a, **k: "")
     else:
         monkeypatch.setattr(pr_mod.tmux_mod, "split_pane_at",
                             mock.Mock(side_effect=RuntimeError("pane lookup unavailable")))
     pr_mod._launch_review_window(_make_data(), _make_pr("Review", fake_tmux["workdir"]))
     unsafe.assert_not_called()
-    assert safe.call_args_list == [mock.call("pm-test-review-pr-001")] * 2
+    assert safe.call_args_list == [
+        mock.call("pm-test-review-pr-001"),
+        mock.call("pm-test-review-pr-001", container_id="original-id",
+                  generation="original-generation")]
 
 
 @pytest.mark.parametrize("title", HOSTILE_TITLES)

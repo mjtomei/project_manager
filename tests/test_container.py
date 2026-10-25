@@ -806,7 +806,7 @@ class TestCreateQAContainer:
             allowed_push_branch=None,
             session_tag=None,
             pr_id=None,
-            kind="qa", loop_id=None, scenario=None,
+            kind="qa", loop_id=None, scenario=None, allocation_identity=None,
         )
 
     @patch("pm_core.container.create_container")
@@ -828,7 +828,7 @@ class TestCreateQAContainer:
             allowed_push_branch="pm/pr-123-feature",
             session_tag=None,
             pr_id=None,
-            kind="qa", loop_id=None, scenario=None,
+            kind="qa", loop_id=None, scenario=None, allocation_identity=None,
         )
 
     @patch("pm_core.container.create_container")
@@ -843,7 +843,7 @@ class TestCreateQAContainer:
             allowed_push_branch="pm/pr-123-feature",
             session_tag="repo-abc",
             pr_id="pr-123",
-            kind="qa", loop_id=None, scenario=None,
+            kind="qa", loop_id=None, scenario=None, allocation_identity=None,
         )
         mock_create.assert_called_once_with(
             name="pm-repo-abc-qa-test-s1",
@@ -853,7 +853,7 @@ class TestCreateQAContainer:
             allowed_push_branch="pm/pr-123-feature",
             session_tag="repo-abc",
             pr_id="pr-123",
-            kind="qa", loop_id=None, scenario=None,
+            kind="qa", loop_id=None, scenario=None, allocation_identity=None,
         )
 
 

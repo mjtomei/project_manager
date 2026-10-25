@@ -546,6 +546,7 @@ End with a summary of which steps work and which don't, then one of:
         session_tag = session.removeprefix("pm-") if session else None
         cname = f"{container_mod.CONTAINER_PREFIX}qa-debug-{instruction_id}-{debug_id}"
 
+        allocation_identity: dict[str, str] = {}
         try:
             container_id = container_mod.create_qa_container(
                 name=cname,
@@ -555,6 +556,7 @@ End with a summary of which steps work and which don't, then one of:
                 allowed_push_branch=base_branch,
                 session_tag=session_tag,
                 kind="qa-debug",
+                allocation_identity=allocation_identity,
             )
         except container_mod.ContainerError as e:
             click.echo(str(e), err=True)
@@ -571,6 +573,7 @@ End with a summary of which steps work and which don't, then one of:
         from pm_core.push_proxy import get_proxy_socket_path
         shell_cmd = container_mod.build_exec_cmd(
             cname, claude_cmd, cleanup=True, container_id=container_id,
+            generation=allocation_identity.get("generation"),
             proxy_socket_path=get_proxy_socket_path(cname),
             interactive_owner=foreground)
         run_cwd = str(qa_workdir)
@@ -601,7 +604,9 @@ End with a summary of which steps work and which don't, then one of:
             pane = None
         if not pane:
             if use_containers:
-                container_mod.discard_unowned_container(cname, container_id=container_id)
+                container_mod.discard_unowned_container(
+                    cname, container_id=container_id,
+                    generation=allocation_identity.get("generation"))
             click.echo(f"Failed to create debug window '{window_name}': {launch_error}", err=True)
             raise SystemExit(1)
         click.echo(f"Launched debug session")

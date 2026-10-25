@@ -171,3 +171,118 @@ def test_proxy_owner_records_domain_on_creation(monkeypatch, tmp_path):
     monkeypatch.setattr(pp, "runtime_domain", lambda: domain)
     pp._write_owner_file(str(tmp_path), "tag", "pr-aaaa", "/w")
     assert json.loads((tmp_path / pp._OWNER_FILE).read_text())["runtime_domain"] == domain
+
+
+def test_allocation_identity_captured_before_concurrent_reuse(monkeypatch):
+    monkeypatch.setattr(cm, "_ensure_reusable", lambda *a, **kw: "cid")
+    first, second = {}, {}
+    cm.create_container(NAME, cm.ContainerConfig(), Path("/w"), allocation_identity=first)
+    cm.create_container(NAME, cm.ContainerConfig(), Path("/w"), allocation_identity=second)
+    assert first["id"] == second["id"] == "cid"
+    assert first["generation"] != second["generation"]
+    command = cm.build_exec_cmd(NAME, "true", container_id=first["id"],
+                                generation=first["generation"])
+    assert first["generation"] in command and second["generation"] not in command
+
+
+@pytest.mark.parametrize("state", ["stopped", "incomplete", "pids", "memory"])
+def test_retention_blocks_destructive_reuse(monkeypatch, state):
+    reaper.retain(NAME, container_id="cid")
+    monkeypatch.setattr(cm, "container_is_running", lambda n: state != "stopped")
+    monkeypatch.setattr(cm, "current_container_id", lambda n: "cid")
+    monkeypatch.setattr(cm, "_probe_setup", lambda n: (False, state if state in ("pids", "memory") else "", "exhausted"))
+    monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw: subprocess.CompletedProcess(a, 1, "", ""))
+    monkeypatch.setattr(reaper, "live_owner_panes", lambda *a, **kw: [])
+    removed, restarted = MagicMock(), MagicMock()
+    monkeypatch.setattr(cm, "remove_container", removed)
+    monkeypatch.setattr(cm, "restart_container", restarted)
+    monkeypatch.setattr(cm, "_create_fresh", MagicMock(return_value="replacement"))
+    with pytest.raises(cm.ContainerError, match="retained"):
+        cm.create_container(NAME, cm.ContainerConfig(), Path("/w"))
+    removed.assert_not_called()
+    restarted.assert_not_called()
+
+
+def test_proxy_repair_and_validation_hold_shared_lock(monkeypatch):
+    held = []
+    @contextlib.contextmanager
+    def lock(*args, **kwargs):
+        held.append(True)
+        yield True
+        held.pop()
+    monkeypatch.setattr(cm, "proxy_lock", lock)
+    monkeypatch.setattr(cm, "container_is_running", lambda n: True)
+    monkeypatch.setattr(cm, "current_container_id", lambda n: "cid")
+    monkeypatch.setattr(cm, "_probe_setup", lambda n: (True, "", ""))
+    def start(*args, **kwargs):
+        assert held
+        return "/sock"
+    monkeypatch.setattr(pp, "start_push_proxy", start)
+    monkeypatch.setattr(pp, "proxy_is_alive", lambda p: True)
+    assert cm._ensure_reusable(NAME, Path("/w"), "branch", session_tag="tag", pr_id="pr-aaaa") == "cid"
+
+
+def test_foreign_inventory_does_not_prune_retention_or_release(monkeypatch):
+    a, b = {"runtime": "docker", "daemon_id": "a"}, {"runtime": "docker", "daemon_id": "b"}
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: a)
+    reaper.retain(NAME, container_id="a-id")
+    reaper._record_release(NAME, "a-id", "", "owner-exit")
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: b)
+    reaper.retain(NAME, container_id="b-id")
+    reaper._prune_retain_markers({}, time.time() + 2)
+    reaper._prune_releases(reaper.Outcome(), reaper.Scope(), time.time() + 2)
+    assert reaper.is_retained(NAME, "a-id")
+    assert not reaper.is_retained(NAME, "b-id")
+    assert any(rec["id"] == "a-id" for _, rec in reaper._release_records())
+
+
+def test_unknown_domain_cannot_prune_legacy_records(monkeypatch):
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: None)
+    reaper.retain(NAME, container_id="cid")
+    reaper._record_release(NAME, "cid", "", "owner-exit")
+    reaper._prune_retain_markers({}, time.time() + 2)
+    reaper._prune_releases(reaper.Outcome(), reaper.Scope(), time.time() + 2)
+    assert reaper.is_retained(NAME, "cid")
+    assert reaper._release_records()
+
+
+def test_failures_separate_runtime_domains(monkeypatch):
+    domain = {"runtime": "docker", "daemon_id": "a"}
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: domain)
+    reaper._record(reaper.Outcome(failures={NAME: "timeout"}), reaper.Scope(), "manual")
+    domain = {"runtime": "docker", "daemon_id": "b"}
+    reaper._record(reaper.Outcome(), reaper.Scope(), "manual", inventory=set())
+    domain = {"runtime": "docker", "daemon_id": "a"}
+    assert NAME in reaper.pending_failures()
+
+
+def test_strict_owner_lookup_preserves_unknown_with_known_concretizer(monkeypatch):
+    monkeypatch.setattr(reaper, "_inspect", lambda *a, **kw: [reaper.ContainerInfo(NAME, id="cid")])
+    monkeypatch.setattr(reaper, "_owner_panes", lambda *a, **kw: (["%1"], True))
+    with pytest.raises(cm.ContainerError, match="unknown"):
+        reaper.live_owner_panes(NAME, "cid", strict=True)
+
+
+@pytest.mark.parametrize("owners,removed", [(["%1"], True), (["%1", "%2"], False)])
+def test_discard_allows_only_confirmed_concretizer(monkeypatch, owners, removed):
+    monkeypatch.setattr(cm, "current_container_id", lambda n: "cid")
+    def live(*a, strict=False):
+        assert strict
+        return owners
+    monkeypatch.setattr(reaper, "live_owner_panes", live)
+    remove = MagicMock()
+    monkeypatch.setattr(cm, "remove_container", remove)
+    monkeypatch.setattr(pp, "stop_push_proxy", MagicMock())
+    assert cm.discard_unowned_container(NAME, container_id="cid", generation="", allowed_owner_panes={"%1"}) is removed
+    assert remove.called is removed
+
+
+def test_dead_foreign_proxy_is_not_reassigned(monkeypatch, tmp_path):
+    (tmp_path / pp._OWNER_FILE).write_text(json.dumps({"runtime_domain": {"runtime": "docker", "daemon_id": "a"}}))
+    monkeypatch.setattr(pp, "runtime_domain", lambda: {"runtime": "docker", "daemon_id": "b"})
+    monkeypatch.setattr(pp, "_shared_sock_dir", lambda *a: str(tmp_path))
+    start = MagicMock()
+    monkeypatch.setattr(pp, "_start_proxy_subprocess", start)
+    with pytest.raises(cm.ContainerError, match="runtime"):
+        pp.start_push_proxy(NAME, "/w", "branch", session_tag="tag", pr_id="pr-aaaa")
+    start.assert_not_called()

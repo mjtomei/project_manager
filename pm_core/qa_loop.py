@@ -2301,6 +2301,7 @@ def _launch_scenarios_in_containers(
             state.pr_id, state.loop_id, scenario.index,
             session_tag=_session_tag,
         )
+        allocation_identity: dict[str, str] = {}
         try:
             scenario.container_id = container_mod.create_qa_container(
                 name=cname,
@@ -2312,9 +2313,10 @@ def _launch_scenarios_in_containers(
                 pr_id=state.pr_id,
                 loop_id=state.loop_id,
                 scenario=scenario.index,
+                allocation_identity=allocation_identity,
             )
             scenario.container_name = cname
-            scenario.container_generation = container_mod.cleanup_generation(cname)
+            scenario.container_generation = allocation_identity.get("generation")
         except Exception as exc:
             _log.error("Failed to create container for scenario %d — aborting scenario",
                        scenario.index, exc_info=True)
@@ -2430,11 +2432,22 @@ def _launch_scenarios_in_containers(
             _log.warning("Failed to split scenario pane for scenario %d",
                          scenario.index, exc_info=True)
             _record_launch_failure(state, scenario, exc)
-            # Only the concretizer exists, not a worker awaiting input.
-            # End this allocation unless explicitly retained or being viewed.
-            scenario.pane_id = concretize_pane
+            # A split can attach its worker before pane discovery fails.
+            # Only discard when a fresh, locked ownership check proves that
+            # the concretizer is the sole remaining owner (and is not viewed).
+            scenario.pane_id = None
             scenario.window_name = None
-            _release_scenario_containers(state, session, scenarios=[scenario])
+            viewed = _viewed_window_ids(session)
+            try:
+                window_id = tmux_mod.pane_window_id(concretize_pane) if viewed else None
+                if viewed is not None and (not viewed or (window_id and window_id not in viewed)):
+                    container_mod.discard_unowned_container(
+                        cname, container_id=scenario.container_id,
+                        generation=scenario.container_generation,
+                        allowed_owner_panes={concretize_pane})
+            except Exception:
+                _log.warning("Could not inspect failed worker allocation %s", cname,
+                             exc_info=True)
             return
 
         if scenario.window_name:
@@ -2559,6 +2572,7 @@ def _ensure_scenario_container(scenario: QAScenario, state: QALoopState,
     if not scenario.worktree_path:
         return False
     clone_path = Path(scenario.worktree_path)
+    allocation_identity: dict[str, str] = {}
     try:
         scenario.container_id = container_mod.create_qa_container(
             name=scenario.container_name,
@@ -2570,14 +2584,14 @@ def _ensure_scenario_container(scenario: QAScenario, state: QALoopState,
             pr_id=state.pr_id,
             loop_id=state.loop_id,
             scenario=scenario.index,
+            allocation_identity=allocation_identity,
         )
     except Exception as exc:
         _log.warning("Scenario %d container could not be re-ensured: %s",
                      scenario.index, exc)
         _record_launch_failure(state, scenario, str(exc))
         return False
-    from pm_core import container_reaper
-    scenario.container_generation = container_reaper.restart_generation(scenario.container_name)
+    scenario.container_generation = allocation_identity.get("generation")
     if _is_launch_failure(state, scenario.index):
         state.scenario_verdict_reasons.pop(scenario.index, None)  # recovered
     return True
@@ -2703,7 +2717,13 @@ def _poll_tmux_verdicts(
     _launch_queue: list[QAScenario] = list(queued_scenarios or [])
     _queued_indices: set[int] = {s.index for s in _launch_queue}
 
-    pending = {s.index for s in state.scenarios if s.window_name}
+    # Completed allocations may already have been released before a queued
+    # batch or TUI restart. Do not recreate them just because their panes died.
+    pending = {s.index for s in state.scenarios if s.window_name
+               and (s.index not in state.scenario_verdicts
+                    or (state.scenario_verdicts[s.index] == VERDICT_PASS
+                        and verify_enabled
+                        and s.index not in state.verified_scenarios))}
     retry_counts: dict[int, int] = {}  # scenario_index -> retries used
     # Track how many verification failures each scenario has had
     verification_failures: dict[int, int] = {}
@@ -2786,8 +2806,19 @@ def _poll_tmux_verdicts(
             # and ``pending`` is also empty the loop exits before it
             # sees the result (race condition).
 
+    released_indices: set[int] = set()
+
     def _launch_next_queued():
-        """Launch the next queued scenario if concurrency allows."""
+        """Release settled allocations before giving their slots to queued work."""
+        if use_containers:
+            settled = [s for s in state.scenarios
+                       if s.index not in pending and s.index not in verifying
+                       and s.index not in released_indices
+                       and s.index in state.scenario_verdicts]
+            if settled:
+                if _release_scenario_containers(state, session, scenarios=settled):
+                    _notify()
+                released_indices.update(s.index for s in settled)
         if not _launch_queue:
             return
         # Count currently active (pending + verifying)
@@ -3151,8 +3182,9 @@ def _poll_tmux_verdicts(
                     # Scenario fully done — launch next queued if available
                     _launch_next_queued()
 
-        # Launch queued scenarios after verified completions too
-        if completed_verifications:
+        # Fill every free slot, including when a dequeued launch failed.
+        # A failed launch has no pending worker to trigger the next dequeue.
+        for _ in range(max(1, len(_launch_queue))):
             _launch_next_queued()
 
         if verdicts_changed or completed_verifications:

@@ -12210,6 +12210,26 @@ prs:
       outstanding runtime scenarios and independent sign-off remain.'
     created_at: '2026-10-25T19:26:23Z'
     last_edited: '2026-10-25T19:26:23Z'
+  - id: note-7341872
+    text: 'Review-loop 6427 i6 (main and inherited helper chatgpt/gpt-6-astra-high):
+      fixed atomic allocation ID/generation capture through all launchers; retained
+      stopped/incomplete/exhausted reuse safety; serialized proxy repair and foreign-domain
+      validation; identity-keyed retention plus domain-safe record pruning/failure
+      state; ambiguous QA worker-split ownership; queued QA allocation growth, failed-dequeue
+      starvation and settled-worker resume. Spec updated, same existing lifecycle
+      architecture. Focused core 371 passed plus final domain/release subset 68 passed;
+      QA/launcher focused 235 passed. Pre-fix: 9 core behavioral failures (4 separate
+      new-API TypeErrors not counted), 10 QA failures/3 controls passed. Full sanitized
+      suite completed successfully; exact count and warnings in /pm-captures/review-6427-i6/full-suite-final.log.
+      Initial helper baseline insufficiently mocked fresh creation and attempted two
+      image builds, both failed Chromium smoke before named test-container run; corrected
+      fixture bounded, original evidence retained. No broad runtime cleanup performed;
+      possible build cache remains. Evidence /pm-captures/review-6427-i6/README.md.
+      No real-container QA claim or waiver; outstanding scenarios and independent
+      sign-off remain. Existing model/handoff/manual-gate edits preserved outside
+      review commit.'
+    created_at: '2026-10-25T19:48:41Z'
+    last_edited: '2026-10-25T19:50:01Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

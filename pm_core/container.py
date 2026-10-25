@@ -1041,6 +1041,7 @@ def create_container(
     kind: str | None = None,
     loop_id: str | None = None,
     scenario: int | None = None,
+    allocation_identity: dict[str, str] | None = None,
 ) -> str:
     """Create a detached container with the workdir and claude mounted.
 
@@ -1087,6 +1088,8 @@ def create_container(
                                   session_tag=session_tag, pr_id=pr_id)
         if reused:
             _renew_launch(name)
+            if allocation_identity is not None:
+                allocation_identity.update(id=reused, generation=cleanup_generation(name))
             return reused
         with _create_slot():
             container_id = _create_fresh(
@@ -1101,6 +1104,8 @@ def create_container(
             )
             try:
                 _renew_launch(name)
+                if allocation_identity is not None:
+                    allocation_identity.update(id=container_id, generation=cleanup_generation(name))
             except ContainerError:
                 discard_container(name)
                 raise
@@ -1289,7 +1294,13 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
     A container that cannot be finished but has a live owning pane is not
     killed — that raises instead.
     """
+    from pm_core import container_reaper
     if not container_is_running(name):
+        if container_reaper.is_retained(name):
+            cid = current_container_id(name)
+            if cid is None or cid and container_reaper.is_retained(name, cid):
+                raise launch_error(name, "incomplete", "container is explicitly retained; release it before recreation",
+                                   stage="be reused")
         return None
     container_id = current_container_id(name)
     if not container_id:
@@ -1297,6 +1308,10 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
                            stage="be reused")
 
     complete, wedged, probe_err = _probe_setup(name)
+    retained = container_reaper.is_retained(name, container_id)
+    if retained and wedged in ("pids", "memory"):
+        raise launch_error(name, wedged, f"{probe_err}\nContainer is explicitly retained; restart it explicitly.",
+                           stage="be reused")
     if wedged in ("pids", "memory"):
         # Can't exec: the container's own processes exhausted it.  Restart
         # clears that and keeps its files, but ends every session inside —
@@ -1337,7 +1352,9 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
                                or f"readiness probe exited {base.returncode}",
                                stage="verify existing setup")
         if not finished:
-            from pm_core import container_reaper
+            if retained:
+                raise launch_error(name, "incomplete", "container is explicitly retained; release it before recreation",
+                                   stage="be reused")
             if container_reaper.live_owner_panes(name, container_id):
                 raise launch_error(
                     name, "incomplete",
@@ -1354,15 +1371,21 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
         from pm_core.push_proxy import (
             start_push_proxy, get_proxy_socket_path, proxy_is_alive,
         )
-        sock = get_proxy_socket_path(name, session_tag=session_tag,
-                                     pr_id=pr_id)
-        if not sock or not proxy_is_alive(sock):
-            _log.warning("Push proxy dead/missing for container %s — "
-                         "restarting proxy", name)
-            sock = start_push_proxy(
-                name, str(workdir), allowed_push_branch,
-                session_tag=session_tag, pr_id=pr_id,
-            )
+        guard = (proxy_lock(session_tag, pr_id) if session_tag and pr_id
+                 else contextlib.nullcontext(True))
+        with guard as locked:
+            if not locked:
+                raise launch_error(name, "proxy", "shared proxy lock unavailable", stage="be reused")
+            # Always pass through start_push_proxy's domain validation, even
+            # when a healthy socket already exists. Serialize dead-socket repair.
+            if session_tag and pr_id:
+                sock = start_push_proxy(name, str(workdir), allowed_push_branch,
+                                        session_tag=session_tag, pr_id=pr_id)
+            else:
+                sock = get_proxy_socket_path(name, session_tag=session_tag, pr_id=pr_id)
+                if not sock or not proxy_is_alive(sock):
+                    sock = start_push_proxy(name, str(workdir), allowed_push_branch,
+                                            session_tag=session_tag, pr_id=pr_id)
             if not proxy_is_alive(sock):
                 raise launch_error(name, "proxy",
                                    f"push proxy at {sock} is not accepting connections",
@@ -1839,7 +1862,8 @@ def discard_container(name: str) -> None:
 
 
 def discard_unowned_container(name: str, *, container_id: str | None = None,
-                               generation: str | None = None) -> bool:
+                               generation: str | None = None,
+                               allowed_owner_panes: set[str] | None = None) -> bool:
     """Best-effort cleanup after a pane failed to attach (never raises).
 
     Unlike ``discard_container`` (used inside a locked create), this acquires
@@ -1867,7 +1891,11 @@ def discard_unowned_container(name: str, *, container_id: str | None = None,
                 return False
             if container_reaper.is_retained(name, current):
                 return False
-            if container_reaper.live_owner_panes(name, current):
+            if allowed_owner_panes is None:
+                owners = container_reaper.live_owner_panes(name, current)
+            else:
+                owners = container_reaper.live_owner_panes(name, current, strict=True)
+            if set(owners) - (allowed_owner_panes or set()):
                 return False
             remove_container(current)
             # Removal by id cannot derive the original name's proxy key.
@@ -1939,7 +1967,8 @@ def run_interactive_exec(name: str, cid: str, generation: str,
 def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
                    proxy_socket_path: str | None = None,
                    container_id: str | None = None,
-                   interactive_owner: bool = False) -> str:
+                   interactive_owner: bool = False,
+                   generation: str | None = None) -> str:
     """Build a ``<runtime> exec -it`` command string for use in a tmux window.
 
     When the exec'd process exits, its allocation is released unless
@@ -1956,6 +1985,8 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     never unconditional socket deletion.
     """
     runtime = _get_runtime()
+    if generation is None:
+        generation = cleanup_generation(name)
     escaped = shlex.quote(shell_cmd)
     # Under Podman with --userns=keep-id, the default user is already the
     # host user (correct UID).  The "pm" username doesn't exist in
@@ -1973,7 +2004,7 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
             "sys.exit(run_interactive_exec(*sys.argv[1:]))")
         exec_part = shlex.join([
             sys.executable, "-c", script, name, container_id or "",
-            cleanup_generation(name), str(container_state_dir()), exec_part, runtime])
+            generation, str(container_state_dir()), exec_part, runtime])
     if cleanup:
         import sys
         # Pin this checkout/interpreter, not whichever pm happens to be on the
@@ -1983,7 +2014,6 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
             f"import sys; sys.path.insert(0, {str(Path(__file__).resolve().parent.parent)!r}); "
             "from pm_core.container import release_on_exit; "
             "release_on_exit(*sys.argv[1:])")
-        generation = cleanup_generation(name)
         cleanup_cmd = shlex.join([
             sys.executable, "-c", script, name, container_id or "", generation,
             runtime, str(container_state_dir()), proxy_socket_path or ""])
@@ -2077,6 +2107,7 @@ def wrap_claude_cmd(
     session_tag: str | None = None,
     pr_id: str | None = None,
     kind: str | None = None,
+    allocation_identity: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     """Create a container and return a wrapped command for tmux.
 
@@ -2109,6 +2140,7 @@ def wrap_claude_cmd(
         label, workdir, cname, session_tag, pr_id,
     )
 
+    identity = allocation_identity if allocation_identity is not None else {}
     try:
         container_id = create_container(
             name=cname,
@@ -2120,6 +2152,7 @@ def wrap_claude_cmd(
             session_tag=session_tag,
             pr_id=pr_id,
             kind=kind,
+            allocation_identity=identity,
         )
     except ContainerError:
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
@@ -2161,6 +2194,7 @@ def wrap_claude_cmd(
         cname, claude_cmd,
         proxy_socket_path=None if shared_proxy else proxy_sock,
         container_id=container_id if isinstance(container_id, str) and container_id else None,
+        generation=identity.get("generation", ""),
     )
     _log.info("Wrapped claude command in container %s", cname)
     return exec_cmd, cname
@@ -2181,6 +2215,7 @@ def create_qa_container(
     loop_id: str | None = None,
     scenario: int | None = None,
     kind: str = "qa",
+    allocation_identity: dict[str, str] | None = None,
 ) -> str:
     """Create a detached container for a QA scenario.
 
@@ -2204,6 +2239,7 @@ def create_qa_container(
         kind=kind,
         loop_id=loop_id,
         scenario=scenario,
+        allocation_identity=allocation_identity,
     )
 
 

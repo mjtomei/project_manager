@@ -91,7 +91,9 @@ retryable cleanup rather than permission to delete by name.
 ### R3 — Release on finish / supersede / cancel / launch failure
 - **impl / review / sign-off**: the pane EXIT trap releases the captured container
   **id and recovery generation**, rechecked under the name's launch lock, so a
-  late trap cannot kill a replacement or restarted container;
+  late trap cannot kill a replacement or restarted container. Creation returns
+  the ID/generation together under the launch lock; callers use that captured
+  pair for EXIT and failed-attachment cleanup, never a later generation lookup;
   review/sign-off pre-launch removal uses the session-tagged name
   (`_make_container_name(label, session_tag)`), fixing the stale-reuse bug;
   if tmux window creation fails after the container was created, the
@@ -110,7 +112,9 @@ retryable cleanup rather than permission to delete by name.
   missing pane IDs) keep the actual tmux error, create no agent verdict, and
   release the allocation; failed pane discovery preserves live or unknown
   owners. A failed worker split releases its concretizer-only allocation unless
-  retained or viewed, and is not polled as a worker.
+  retained or viewed, and is not polled as a worker. A missing split pane ID is
+  not proof that the worker never attached: locked cleanup must confirm the
+  concretizer is the only owner, preserving additional or unknown owners.
 - **Supersede**: a new QA run no longer removes the previous run's containers
   synchronously; it kicks a background, PR-scoped reconcile (old windows are
   already killed by `_cleanup_stale_scenario_windows`, so they are unowned).
@@ -121,7 +125,9 @@ retryable cleanup rather than permission to delete by name.
   when the runtime reports **no container** (any state) labeled/named for
   that tag+PR, checked under a per-proxy fcntl lock; `create_container` holds
   that lock from proxy start until `run` returns so a concurrent release
-  cannot stop a proxy a new container is about to mount.
+  cannot stop a proxy a new container is about to mount. Reuse holds the same
+  proxy lock while validating its runtime domain or repairing a dead socket;
+  a dead foreign-domain proxy directory is not reassigned.
   If runtime inventory is unavailable, preserve the shared proxy for a later
   reconcile; process-local references cannot prove other processes have no users.
   A failed removal does not release its proxy or exclude the surviving container
@@ -169,7 +175,9 @@ Single-flight across processes via an fcntl lock (a concurrent caller skips).
   exec of `test` returning 1 without runtime errors. Failed exec/post-setup
   preserves the existing filesystem and reports its cause for retry. If the
   incomplete container has a live owning pane and cannot be finished, raise
-  instead of killing it.
+  instead of killing it. Explicit retention also blocks recreation of stopped
+  or incomplete containers and automatic pressure-recovery restart; safe
+  idempotent setup completion is still allowed.
 - Failed/unknown running-state inspection refuses recreation; it is not proof
   of absence. Required setup commands fail before readiness is written. Fresh
   creation verifies push-proxy connectivity as well as reuse.
@@ -201,7 +209,11 @@ running-container and keyring counts before → after).  `pm session cleanup
 [--dry-run]` = `reap --session <current tag>` (the command older messages
 referenced).  `pm container retain NAME [--release]` manages retention; a marker is bound
 to the retained container's id (a replacement under the same name is not
-retained) and full reconcile passes prune markers whose container is gone.
+retained). Markers are keyed by container identity so same-name allocations
+in different runtime stores do not overwrite each other's retention. Full
+reconcile passes prune retention and pending release records only when their
+recorded runtime domain matches the successfully inventoried domain; unknown
+or legacy domains are preserved. Failure state is runtime-domain scoped too.
 `pm container status` shows running pm containers, keyring usage, and last
 reaper failures.  Existing `pm container cleanup` (remove all / by PR) is kept.
 
@@ -212,7 +224,11 @@ reaper failures.  Existing `pm container cleanup` (remove all / by PR) is kept.
 - `container-max-running` (default 0 = unlimited; supersedes the
   `qa-max-containers` name from 7b6dc7b9): QA clamps its launch batch to the
   remaining headroom (≥1), the rest queue through the existing
-  queued-scenario mechanism.
+  queued-scenario mechanism. Settled scenarios release their allocations before
+  handing slots to queued work (after PASS verification, with the same human,
+  retention and viewed-window exceptions). Resume must not recreate already
+  settled workers. Failed queued launches leave no worker/verdict and must not
+  strand the remaining queue.
 - Before a create, if keyring usage ≥ 90 % a scoped synchronous reconcile
   (bounded) runs first; the launch then proceeds and, if it still fails,
   surfaces R6's explicit error.

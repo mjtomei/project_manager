@@ -57,9 +57,21 @@ def _retain_dir() -> Path:
     return container_mod.container_state_dir() / "retain"
 
 
-def _retain_record(name: str) -> dict | None:
+def _retention_path(name: str, container_id: str = "") -> Path:
+    if container_id:
+        key = hashlib.sha256(f"{name}\0{container_id}".encode()).hexdigest()
+        return _retain_dir() / f"{key}.json"
+    return _retain_dir() / name
+
+
+def _runtime_domain() -> dict | None:
+    from pm_core.push_proxy import runtime_domain
+    return runtime_domain()
+
+
+def _retain_record(name: str, container_id: str = "") -> dict | None:
     try:
-        rec = json.loads((_retain_dir() / name).read_text())
+        rec = json.loads(_retention_path(name, container_id).read_text())
     except FileNotFoundError:
         return None
     except (OSError, ValueError):
@@ -71,7 +83,11 @@ def is_retained(name: str, container_id: str = "") -> bool:
     """True when *name* is retained — and, when both ids are known, only for
     the very container that was retained: a replacement launched later
     under the same name is not."""
-    rec = _retain_record(name)
+    rec = _retain_record(name, container_id) if container_id else None
+    if rec is None:
+        rec = _retain_record(name)  # pre-identity-key marker
+    if rec is None and not container_id:
+        return name in retained_names()
     if rec is None:
         return False
     rec_id = str(rec.get("id") or "")
@@ -81,8 +97,9 @@ def is_retained(name: str, container_id: str = "") -> bool:
 def _write_retention(name: str, note: str, container_id: str) -> None:
     d = _retain_dir()
     d.mkdir(parents=True, exist_ok=True)
-    (d / name).write_text(json.dumps(
-        {"note": note, "at": int(time.time()), "id": container_id}))
+    _retention_path(name, container_id).write_text(json.dumps(
+        {"name": name, "note": note, "at": int(time.time()), "id": container_id,
+         "runtime_domain": _runtime_domain()}))
 
 
 def retain(name: str, note: str = "", container_id: str = "") -> None:
@@ -106,19 +123,38 @@ def retain_current(name: str, note: str = "") -> str:
     return name
 
 
-def unretain(name: str) -> bool:
+def _retention_records() -> list[tuple[Path, dict]]:
+    records = []
     try:
-        (_retain_dir() / name).unlink()
-        return True
+        paths = list(_retain_dir().glob("*"))
     except FileNotFoundError:
-        return False
+        return records
+    for path in paths:
+        try:
+            rec = json.loads(path.read_text())
+            if isinstance(rec, dict):
+                records.append((path, {"name": path.name, **rec}))
+        except (OSError, ValueError):
+            records.append((path, {"name": path.name}))
+    return records
+
+
+def unretain(name: str) -> bool:
+    domain = _runtime_domain()
+    removed = False
+    for path, rec in _retention_records():
+        if rec.get("name") != name:
+            continue
+        recorded = rec.get("runtime_domain")
+        if recorded is not None and recorded != domain:
+            continue
+        path.unlink(missing_ok=True)
+        removed = True
+    return removed
 
 
 def retained_names() -> list[str]:
-    try:
-        return sorted(p.name for p in _retain_dir().iterdir())
-    except OSError:
-        return []
+    return sorted({rec["name"] for _, rec in _retention_records()})
 
 
 def _prune_retain_markers(inventory: dict[str, str], since: float) -> None:
@@ -129,10 +165,15 @@ def _prune_retain_markers(inventory: dict[str, str], since: float) -> None:
     Markers written at or after *since* (the pass's listing time) are kept:
     they may name a container launched after the listing.
     """
-    for name in retained_names():
-        if name in inventory and is_retained(name, inventory[name]):
+    domain = _runtime_domain()
+    if domain is None:
+        return
+    for path, rec in _retention_records():
+        if rec.get("runtime_domain") != domain:
+            continue  # another runtime's absence proves nothing about this marker
+        name = rec["name"]
+        if name in inventory and (not rec.get("id") or rec["id"] == inventory[name]):
             continue
-        rec = _retain_record(name) or {}
         try:
             # "at" has whole-second resolution, so compare against the
             # truncated listing time (errs on keeping the marker).
@@ -140,7 +181,7 @@ def _prune_retain_markers(inventory: dict[str, str], since: float) -> None:
                 continue
         except (TypeError, ValueError):
             pass
-        unretain(name)
+        path.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +222,8 @@ def _record_release(name: str, cid: str, generation: str, reason: str) -> None:
     try:
         with os.fdopen(fd, "w") as stream:
             json.dump({"name": name, "id": cid, "generation": generation,
-                       "at": time.time(), "reason": reason}, stream)
+                       "at": time.time(), "reason": reason,
+                       "runtime_domain": _runtime_domain()}, stream)
         os.replace(temp, directory / f"{key}.json")
     finally:
         Path(temp).unlink(missing_ok=True)
@@ -203,13 +245,18 @@ def _release_records() -> list[tuple[Path, dict]]:
 
 
 def pending_releases() -> dict[str, dict]:
+    domain = _runtime_domain()
     return {rec["name"]: rec for _, rec in sorted(
-        _release_records(), key=lambda item: item[1].get("at", 0))}
+        _release_records(), key=lambda item: item[1].get("at", 0))
+        if rec.get("runtime_domain") in (None, domain)}
 
 
 def _prune_releases(out: "Outcome", scope: "Scope", since: float) -> None:
     inventory = {d.info.name: d.info for d in out.decisions}
+    domain = _runtime_domain()
     for path, rec in _release_records():
+        if domain is None or rec.get("runtime_domain") != domain:
+            continue
         if rec.get("at", 0) >= since:
             continue
         info = inventory.get(rec["name"])
@@ -460,7 +507,7 @@ def _owner_panes(info: ContainerInfo, cache: _PaneCache,
     return owners, indeterminate
 
 
-def live_owner_panes(name: str, container_id: str = "") -> list[str]:
+def live_owner_panes(name: str, container_id: str = "", *, strict: bool = False) -> list[str]:
     """Live tmux panes started for container *name* (fresh query).
 
     The container's own labels are consulted so the tmux server it was
@@ -468,7 +515,7 @@ def live_owner_panes(name: str, container_id: str = "") -> list[str]:
     this process's server. Raises ContainerError when ownership cannot be
     established; destructive recovery must not interpret unknown as unowned.
     """
-    if container_mod.activity_owner(name):
+    if not strict and container_mod.activity_owner(name):
         return ["interactive client"]
     found = _inspect([name], timeout=10)
     if not found:
@@ -481,7 +528,7 @@ def live_owner_panes(name: str, container_id: str = "") -> list[str]:
         if parsed:
             info.session_tag = parsed.session_tag
     owners, indeterminate = _owner_panes(info, _PaneCache(), fresh=True)
-    if not owners and indeterminate:
+    if indeterminate and (strict or not owners):
         raise container_mod.ContainerError(
             f"Container '{name}' ownership unknown: tmux server unreachable")
     return owners
@@ -1036,7 +1083,11 @@ def release_containers(names: list[str], *, reason: str = "release",
 # ---------------------------------------------------------------------------
 
 def _state_file() -> Path:
-    return container_mod.container_state_dir() / "reaper.json"
+    domain = _runtime_domain()
+    if domain is None:
+        return container_mod.container_state_dir() / "reaper.json"
+    key = hashlib.sha256(json.dumps(domain, sort_keys=True).encode()).hexdigest()[:16]
+    return container_mod.container_state_dir() / f"reaper-{key}.json"
 
 
 def last_state() -> dict:
@@ -1052,9 +1103,12 @@ def _record(out: Outcome, scope: Scope, reason: str,
     for containers that no longer exist."""
     prev = last_state()
     failures = dict(prev.get("failures") or {})
-    if inventory is not None:
+    domain = _runtime_domain()
+    if inventory is not None and domain is not None:
         failures = {k: v for k, v in failures.items() if k in inventory}
     for d in out.decisions:
+        if domain is None:
+            continue  # unknown inventory domain cannot retire legacy failures
         previous = failures.get(d.info.name, {})
         if (d.info.name in out.removed or
                 previous.get("id") and previous["id"] != d.info.id or

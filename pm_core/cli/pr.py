@@ -1029,11 +1029,13 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             from pm_core.container import (
                 wrap_claude_cmd, ContainerError, discard_unowned_container,
             )
+            allocation_identity: dict[str, str] = {}
             try:
                 cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
                                               allowed_push_branch=branch,
                                               session_tag=_stag, pr_id=pr_id,
-                                              kind="impl")
+                                              kind="impl",
+                                              allocation_identity=allocation_identity)
             except ContainerError as e:
                 click.echo(str(e), err=True)
                 raise SystemExit(1)
@@ -1079,7 +1081,9 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 # Pane discovery can fail after tmux attached the worker.
                 # Do not remove it or launch a duplicate host worker when
                 # ownership is live/unknown or cleanup could not finish.
-                if _cname and not discard_unowned_container(_cname):
+                if _cname and not discard_unowned_container(
+                        _cname, container_id=allocation_identity.get("id"),
+                        generation=allocation_identity.get("generation")):
                     click.echo("Container preserved; check the existing session before retrying.",
                                err=True)
                     raise SystemExit(1)
@@ -1246,11 +1250,13 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     if is_container_mode_enabled():
         # The tagged name is the one wrap_claude_cmd will create/reuse.
         discard_unowned_container(_make_container_name(f"review-{pr_id}", _review_stag))
+    allocation_identity: dict[str, str] = {}
     try:
         claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
                                               allowed_push_branch=branch,
                                               session_tag=_review_stag,
-                                              pr_id=pr_id, kind="review")
+                                              pr_id=pr_id, kind="review",
+                                              allocation_identity=allocation_identity)
     except ContainerError as e:
         click.echo(str(e), err=True)
         raise SystemExit(1)
@@ -1326,13 +1332,17 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                 window_name, pm_session,
             )
             click.echo(f"Review window: failed to create tmux window '{window_name}'.")
-            discard_unowned_container(_cname)
+            discard_unowned_container(
+                _cname, container_id=allocation_identity.get("id"),
+                generation=allocation_identity.get("generation"))
             return
 
         # Explicit cwd: without -c tmux starts the split in the calling
         # process's cwd (the TUI's pm dir), not the PR workdir.
         claude_pane = tmux_mod.split_pane_at(diff_pane, "h", claude_cmd,
                                              background=True, cwd=workdir)
+        if not claude_pane:
+            raise RuntimeError(f"no worker pane returned for '{window_name}'")
 
         # Register review panes under the review window (multi-window safe).
         # Derive window ID from the pane we just created rather than
@@ -1382,7 +1392,9 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         _log.warning("Failed to launch review window: %s", e)
         click.echo(f"Review window error: {e}")
         if not claude_pane:
-            discard_unowned_container(_cname)
+            discard_unowned_container(
+                _cname, container_id=allocation_identity.get("id"),
+                generation=allocation_identity.get("generation"))
 
 
 @pr.command("review")

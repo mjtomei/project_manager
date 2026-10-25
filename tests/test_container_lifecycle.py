@@ -305,7 +305,7 @@ class TestReaperOwnership:
     @staticmethod
     def _backdate_marker(name, seconds=60):
         import json
-        f = reaper._retain_dir() / name
+        f = next(path for path, rec in reaper._retention_records() if rec["name"] == name)
         rec = json.loads(f.read_text())
         rec["at"] -= seconds
         f.write_text(json.dumps(rec))

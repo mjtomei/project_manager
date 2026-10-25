@@ -710,8 +710,10 @@ class TestWindowLaunchWorkdir:
                     return_value="CLAUDE_CMD"))
             p(patch("pm_core.container.is_container_mode_enabled",
                     return_value=container))
-            p(patch("pm_core.container.wrap_claude_cmd",
-                    return_value=("EXEC", "pm-x-signoff-pr-001")))
+            def wrap(*args, allocation_identity, **kwargs):
+                allocation_identity.update(id="original-id", generation="original-generation")
+                return "EXEC", "pm-x-signoff-pr-001"
+            p(patch("pm_core.container.wrap_claude_cmd", side_effect=wrap))
             self.safe_discard = p(patch("pm_core.container.discard_unowned_container"))
             self.unsafe_discard = p(patch("pm_core.container.discard_container"))
             p(patch("pm_core.tmux.new_window_get_pane", new_window))
@@ -740,7 +742,9 @@ class TestWindowLaunchWorkdir:
         self._launch(tmp_path, container=True, missing_pane=True)
         self.unsafe_discard.assert_not_called()
         assert self.safe_discard.call_args_list == [
-            call("pm-x-signoff-pr-001"), call("pm-x-signoff-pr-001")]
+            call("pm-x-signoff-pr-001"),
+            call("pm-x-signoff-pr-001", container_id="original-id",
+                 generation="original-generation")]
 
     def test_window_creation_uses_workdir_cwd(self, tmp_path):
         new_window, workdir = self._launch(tmp_path)

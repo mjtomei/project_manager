@@ -39,6 +39,9 @@ def _isolated_container_state(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("PM_CONTAINER_STATE_DIR",
                        str(tmp_path_factory.mktemp("container-state")))
     monkeypatch.setattr(container, "_create_semaphore", None)
+    from pm_core import container_reaper
+    monkeypatch.setattr(container_reaper, "_runtime_domain",
+                        lambda: {"runtime": "test", "id": "isolated"}, raising=False)
     # The host's real keyring may be near quota; that must not trigger a
     # pre-launch reap inside unit tests.
     monkeypatch.setattr(container, "_KEY_USERS_FILE",

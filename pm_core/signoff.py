@@ -520,6 +520,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
 
         branch = pr_entry.get("branch", "")
         _cname = ""
+        allocation_identity: dict[str, str] = {}
         if is_container_mode_enabled():
             _stag = pm_session.removeprefix("pm-") if pm_session else None
             # Discard the previous allocation only when it has no live or
@@ -530,7 +531,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                     claude_cmd, workdir, label=f"signoff-{pr_id}",
                     allowed_push_branch=branch,
                     session_tag=_stag,
-                    pr_id=pr_id, kind="signoff")
+                    pr_id=pr_id, kind="signoff",
+                    allocation_identity=allocation_identity)
             except ContainerError as e:
                 print(str(e))
                 return
@@ -548,7 +550,9 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                 pm_session, window_name, claude_cmd, workdir, switch=switch)
             if not claude_pane:
                 print(f"Sign-off window: failed to create tmux window '{window_name}'.")
-                discard_unowned_container(_cname)
+                discard_unowned_container(
+                    _cname, container_id=allocation_identity.get("id"),
+                    generation=allocation_identity.get("generation"))
                 return
 
             wid_result = subprocess.run(
@@ -581,7 +585,9 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             _log.warning("Failed to launch sign-off window: %s", e)
             print(f"Sign-off window error: {e}")
             if not claude_pane:
-                discard_unowned_container(_cname)
+                discard_unowned_container(
+                    _cname, container_id=allocation_identity.get("id"),
+                    generation=allocation_identity.get("generation"))
     finally:
         _launch_lock_f.close()
 

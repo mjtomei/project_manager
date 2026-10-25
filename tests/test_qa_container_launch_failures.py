@@ -23,7 +23,11 @@ def scenario_state(tmp_path, monkeypatch):
     monkeypatch.setattr(container, "is_container_mode_enabled", lambda: True)
     monkeypatch.setattr(container, "_runtime_available", lambda: True)
     monkeypatch.setattr(container, "load_container_config", MagicMock())
-    monkeypatch.setattr(container, "create_qa_container", MagicMock(return_value="cid"))
+    def create(**kwargs):
+        if kwargs.get("allocation_identity") is not None:
+            kwargs["allocation_identity"].update(id="cid", generation="captured-generation")
+        return "cid"
+    monkeypatch.setattr(container, "create_qa_container", create)
     monkeypatch.setattr(qa_loop, "_resolve_qa_model", MagicMock())
     monkeypatch.setattr(qa_loop, "_build_scenario_run_cmd",
                         lambda *a, **k: ("worker", str(clone)))
@@ -75,7 +79,8 @@ def test_successful_retry_clears_launch_failure(scenario_state, monkeypatch):
 
 
 @pytest.mark.parametrize("failure", [None, "exception", "build"])
-def test_worker_split_failure_keeps_real_launch_error(scenario_state, monkeypatch, failure):
+@pytest.mark.parametrize("viewed", [set(), {"@5"}, None])
+def test_worker_split_failure_keeps_real_launch_error(scenario_state, monkeypatch, failure, viewed):
     state, scenario = scenario_state
     scenario.window_name = None
     clone = Path(scenario.worktree_path)
@@ -95,6 +100,10 @@ def test_worker_split_failure_keeps_real_launch_error(scenario_state, monkeypatc
     monkeypatch.setattr(tmux, "split_pane_at", split)
     release = MagicMock(return_value=False)
     monkeypatch.setattr(qa_loop, "_release_scenario_containers", release)
+    discard = MagicMock()
+    monkeypatch.setattr(container, "discard_unowned_container", discard)
+    monkeypatch.setattr(qa_loop, "_viewed_window_ids", lambda *a: viewed)
+    monkeypatch.setattr(tmux, "pane_window_id", lambda *a: "@5")
 
     qa_loop._launch_scenarios_in_containers(
         state, {}, {"id": state.pr_id}, "pm-t", None, str(clone))
@@ -103,7 +112,14 @@ def test_worker_split_failure_keeps_real_launch_error(scenario_state, monkeypatc
     assert not state.scenario_verdicts
     assert scenario.session_id is None
     assert scenario.window_name is None
-    release.assert_called_once_with(state, "pm-t", scenarios=[scenario])
+    release.assert_not_called()
+    if viewed == set():
+        discard.assert_called_once_with(
+            scenario.container_name, container_id="cid", generation="captured-generation",
+            allowed_owner_panes={"%5"})
+    else:
+        discard.assert_not_called()
+    assert scenario.pane_id is None
     if failure == "exception":
         assert "can't find pane: %5" in state.scenario_verdict_reasons[1]
     elif failure == "build":
