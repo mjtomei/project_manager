@@ -370,10 +370,10 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
 
     tui_block = tui_section(session_name) if session_name else ""
 
-    # Include PR notes (addendums added after work began) and the sign-off
-    # return block as *separate* fit_prompt blocks: they are different
-    # documents, so a cut return reason must not be explained by the notes
-    # reader (`pm pr note list` does not contain it).
+    # Include PR notes (addendums added after work began).  The sign-off
+    # return block is instruction text (the operative handoff), so it is
+    # inlined whole below rather than passed to fit_prompt; only the notes
+    # enumeration is bounded.
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
     signoff_return_block = _signoff_return_block(pr)
 
@@ -499,8 +499,9 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     except FileNotFoundError:
         pass
 
-    # Include PR notes (addendums) and the sign-off return block as separate
-    # fit_prompt blocks — see generate_prompt.
+    # Include PR notes (addendums) and the sign-off return block.  Only the
+    # notes block is bounded; the return is instruction text and is inlined
+    # whole (see generate_prompt).
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
     signoff_return_block = _signoff_return_block(pr)
 
@@ -637,78 +638,100 @@ def _qa_scenarios_pointer() -> str:
     return f"read {_QA_SCENARIOS_READER}"
 
 
-def _signoff_qa_scenarios_block(pr_id: str) -> str:
-    """Render every QA scenario's verdict + reason from the latest qa_status.json.
+def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
+    """Split the QA status block into ``(head, listing)``.
 
-    Best-effort: returns a "no QA status" note when nothing is found so the
-    sign-off reviewer is told to fall back to the captures dir.
+    *head* is the overall verdict and the QA error.  Both are pm-generated
+    evidence, not enumerations, so they are inlined whole and never truncated:
+    the error's full text exists only in the QA run's host
+    ``~/.pm/workdirs/qa/<pr>-*/qa_status.json``, which a containerised
+    sign-off session cannot read (the reason the old 500-character cut was
+    removed).  Keeping them out of the shrinkable block is what stops
+    ``fit_prompt`` from cutting the error with a marker that names the
+    per-scenario verdict files — which do not contain it.
+
+    *listing* is the per-scenario verdict enumeration — the only part the
+    sign-off builder hands to ``fit_prompt``.  It is count- and line-bounded,
+    and every marker it carries names the per-scenario verdict files under
+    ``$CAP``, which really do contain the full verdicts.
     """
     import json
     from pm_core.paths import latest_qa_status_path
     latest = latest_qa_status_path(pr_id)
     if latest is None:
-        return "\n_No qa_status.json found — read the captures dir directly._\n"
+        return ("\n_No qa_status.json found — read the captures dir directly._\n",
+                "")
     try:
         data = json.loads(latest.read_text())
     except (OSError, ValueError):
-        return "\n_qa_status.json unreadable — read the captures dir directly._\n"
-    lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
+        return ("\n_qa_status.json unreadable — read the captures dir directly._\n",
+                "")
+    head_lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
     if data.get("error"):
         # Normalise whitespace but keep every character.  The error is
         # pm-generated (planner/trust/handoff messages), not a collection, and
-        # the block is one of the sign-off builder's ``fit_prompt`` blocks, so
-        # an over-limit prompt is abbreviated there (head+tail, with a marker)
-        # or delivered intact by the launcher's file-backed bootstrap.  A bare
-        # ``…`` cut here would be loss with no reader: the full text lives only
-        # in the QA run's host ``~/.pm/workdirs/qa/<pr>-*/qa_status.json``,
-        # which a containerised sign-off session cannot read.
+        # a bare ``…`` cut here would be loss with no reader: the full text
+        # lives only in the QA run's host
+        # ``~/.pm/workdirs/qa/<pr>-*/qa_status.json``, which a containerised
+        # sign-off session cannot read.
         err = " ".join(str(data["error"]).split())
-        lines.append(f"QA error: {err}")
+        head_lines.append(f"QA error: {err}")
+    head = "\n" + "\n".join(head_lines) + "\n"
     scenarios = data.get("scenarios") or []
     if isinstance(scenarios, dict):
         scenarios = list(scenarios.values())
     valid = [s for s in scenarios if isinstance(s, dict)]
-    if valid:
-        lines.append("")
-        truncated = False
+    if not valid:
+        return (head, "")
+    truncated = False
 
-        def _scenario_line(s: dict) -> str:
-            nonlocal truncated
-            idx = s.get("index", "?")
-            title = " ".join(str(s.get("title", "")).split())
-            if len(title) > 120:
-                title = title[:120].rstrip() + "…"
-                truncated = True
-            verdict = s.get("verdict", "?")
-            reason = " ".join((s.get("verdict_reason") or "").split())
-            if len(reason) > _QA_SCENARIO_REASON_CHARS:
-                reason = reason[:_QA_SCENARIO_REASON_CHARS].rstrip() + "…"
-                truncated = True
-            line = f"- Scenario {idx} — {title}: **{verdict}**"
-            if reason:
-                line += f" — {reason}"
-            return line
+    def _scenario_line(s: dict) -> str:
+        nonlocal truncated
+        idx = s.get("index", "?")
+        title = " ".join(str(s.get("title", "")).split())
+        if len(title) > 120:
+            title = title[:120].rstrip() + "…"
+            truncated = True
+        verdict = s.get("verdict", "?")
+        reason = " ".join((s.get("verdict_reason") or "").split())
+        if len(reason) > _QA_SCENARIO_REASON_CHARS:
+            reason = reason[:_QA_SCENARIO_REASON_CHARS].rstrip() + "…"
+            truncated = True
+        line = f"- Scenario {idx} — {title}: **{verdict}**"
+        if reason:
+            line += f" — {reason}"
+        return line
 
-        lines.append(bounded_join(
-            valid, _scenario_line, max_items=_QA_SCENARIOS_MAX,
-            omitted_note=lambda n: (
-                f"... (+{n} more scenarios; {_qa_scenarios_pointer()})"),
-        ))
-        if truncated:
-            # A title/reason cut per line is not a dropped item, so the
-            # listing's own omission marker does not cover it — without this
-            # note the session reads abbreviated previews as if they were the
-            # full verdicts (the same "the marker must describe what the
-            # session is reading" rule the PR-notes and plan-deps markers
-            # follow).  `$CAP` is defined in this prompt's own evidence
-            # checklist, so the note needs no path resolution.
-            lines.append("")
-            lines.append(
-                "_(Scenario titles and reasons above are abbreviated to fit "
-                f"the prompt size limit; read {_QA_SCENARIOS_PATH} "
-                "for the full verdicts.)_"
-            )
-    return "\n" + "\n".join(lines) + "\n"
+    listing_lines = [bounded_join(
+        valid, _scenario_line, max_items=_QA_SCENARIOS_MAX,
+        omitted_note=lambda n: (
+            f"... (+{n} more scenarios; {_qa_scenarios_pointer()})"),
+    )]
+    if truncated:
+        # A title/reason cut per line is not a dropped item, so the
+        # listing's own omission marker does not cover it — without this
+        # note the session reads abbreviated previews as if they were the
+        # full verdicts (the same "the marker must describe what the session
+        # is reading" rule the PR-notes and plan-deps markers follow).
+        # `$CAP` is defined in this prompt's own evidence checklist, so the
+        # note needs no path resolution.
+        listing_lines += [
+            "",
+            "_(Scenario titles and reasons above are abbreviated to fit "
+            f"the prompt size limit; read {_QA_SCENARIOS_PATH} "
+            "for the full verdicts.)_",
+        ]
+    return (head + "\n", "\n".join(listing_lines) + "\n")
+
+
+def _signoff_qa_scenarios_block(pr_id: str) -> str:
+    """The complete QA status block (head + listing).
+
+    See :func:`_signoff_qa_scenarios_parts` for the split; the sign-off
+    builder passes only the listing to ``fit_prompt``.
+    """
+    head, listing = _signoff_qa_scenarios_parts(pr_id)
+    return head + listing
 
 
 def _signoff_integration_block(pr: dict, pr_id: str) -> str:
@@ -822,7 +845,10 @@ def generate_signoff_prompt(data: dict, pr_id: str,
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
     signoff_return_block = _signoff_return_block(pr, for_signoff=True)
     impl_spec_block = format_spec_for_prompt(pr, "impl") or ""
-    qa_block = _signoff_qa_scenarios_block(pr_id)
+    # The QA block is split: the overall verdict and the QA error are
+    # pm-generated evidence, inlined whole; only the per-scenario verdict
+    # listing is handed to fit_prompt as a shrinkable enumeration.
+    qa_head, qa_listing = _signoff_qa_scenarios_parts(pr_id)
     integration_block = _signoff_integration_block(pr, pr_id)
 
     if _is_bug_pr(pr):
@@ -856,7 +882,7 @@ def generate_signoff_prompt(data: dict, pr_id: str,
         # inlined whole.
         pr_notes_block = parts["notes"]
         plan_context = parts["plan"]
-        qa_block = parts["qa"]
+        qa_listing = parts["qa"]
         prompt = f"""You are performing the **sign-off review** for PR {pr_id}: "{title}"
 
 Sign-off is the dedicated lifecycle step between QA and merge. Your job is a
@@ -866,7 +892,7 @@ PR-level *comprehensive* review and a routing decision.
 {description}
 {pr_notes_block}{signoff_return_block}{impl_spec_block}{plan_context}{tui_block}
 ## QA scenarios (from the QA run)
-{qa_block}
+{qa_head}{qa_listing}
 ## Integration with the latest base
 pm fetched the latest `{base_branch}` and merged this PR's HEAD with it in an
 isolated candidate (your worktree and the base branch were not touched):
@@ -1194,8 +1220,9 @@ IMPORTANT: end your response with exactly one of {SIGNOFF_MERGE}, {SIGNOFF_REQA}
             # captures-path` only prints the captures directory; the per-
             # scenario verdict files are the actual reader (the same one the
             # block's own count marker names, and CAP is defined by this
-            # prompt's evidence checklist).
-            "qa": (qa_block, _QA_SCENARIOS_READER, "QA scenario summary"),
+            # prompt's evidence checklist).  Only the listing is a block: the
+            # overall verdict and the QA error above it are not enumerations.
+            "qa": (qa_listing, _QA_SCENARIOS_READER, "QA scenario summary"),
         },
     )
 

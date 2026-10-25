@@ -728,15 +728,17 @@ class TestSignoffPromptBounding:
 
     def test_signoff_qa_verdict_block_still_bounds_and_names_the_reader(
             self, _isolated_pm_root, tmp_path, monkeypatch):
-        """QA scenario verdicts are a pure enumeration, so the block still
+        """QA scenario verdicts are a pure enumeration, so the listing still
         count-caps; the dropped verdicts are reported with a reader that
         returns them.
 
         60 scenarios exceed the 40-scenario cap, so 20 are dropped and the
-        block's own marker names `$CAP/scenarios/<n>/verdict.md` — the block
-        is no longer cut by fit_prompt (its marker said "QA scenario summary
-        truncated"), because the instruction blocks around it are inlined
-        whole and the over-limit prompt goes out by file.
+        block's own marker names `$CAP/scenarios/<n>/verdict.md`.  The 200 KB
+        spec makes this prompt impossible to fit, so `fit_prompt` returns the
+        original render for the launcher's file-backed bootstrap and the
+        listing is not cut a second time.  (When a prompt *can* be made to
+        fit, only the listing is cut — never the QA error above it; see
+        `test_fit_prompt_cuts_only_the_verdict_listing_not_the_qa_error`.)
         """
         self._qa_status(tmp_path, monkeypatch, [
             {"index": i, "title": "情" * 120, "verdict": "PASS",
@@ -756,8 +758,9 @@ class TestSignoffPromptBounding:
         siblings = [_pr(f"pr-s{i:03d}", plan="pl-1", title="L" * 255)
                     for i in range(400)]
         p = prompt_gen.generate_signoff_prompt(_data(pr, siblings), "pr-x")
-        # The instruction blocks are whole; the verdict block is the one that
-        # is bounded, and fit_prompt no longer cuts it.
+        # The instruction blocks are whole; the verdict listing is the
+        # bounded enumeration, and here only its count cap fires (the prompt
+        # cannot be made to fit, so fit_prompt leaves it alone).
         assert "S" * 200_000 in p
         assert "D" * 40_000 in p
         assert not [line for line in p.splitlines()
@@ -840,16 +843,15 @@ class TestSignoffPromptBounding:
                                                      monkeypatch):
         """The QA error is a single pm-generated message, not a collection.
 
-        The block is one of the sign-off builder's ``fit_prompt`` blocks, so
-        an oversized prompt is abbreviated there (head+tail, with a marker
-        naming a reader) or delivered intact by the launcher's file-backed
-        bootstrap.  A bare ``…`` cut here is loss with no reader: the full
-        text exists only in the QA run's host
-        ``~/.pm/workdirs/qa/<pr>-*/qa_status.json``, which a containerised
-        sign-off session cannot read.  Reachable: a planner error that lists
-        many scenario indices (``parsed scenarios [...] differ from the plan
-        block's headers [...]``) or a trust-blocked message with a long
-        workdir path exceeds the old 500-character cut.
+        It is not part of the shrinkable scenario listing: the block is split
+        into an always-whole head (overall verdict + error) and the verdict
+        listing, and only the listing is a ``fit_prompt`` block.  A bare
+        ``…`` cut here is loss with no reader: the full text exists only in
+        the QA run's host ``~/.pm/workdirs/qa/<pr>-*/qa_status.json``, which
+        a containerised sign-off session cannot read.  Reachable: a planner
+        error that lists many scenario indices (``parsed scenarios [...]
+        differ from the plan block's headers [...]``) or a trust-blocked
+        message with a long workdir path exceeds the old 500-character cut.
         """
         status = tmp_path / "qa_status.json"
         long_err = ("planner problem: " + "X" * 1200 + ": end-of-error")
@@ -1067,6 +1069,46 @@ class TestBudgetCoordination:
         assert "sign-off return truncated" not in p
         assert "pm pr note list pr-x" in p
         _assert_preserved_over_limit(p, tmp_path, "pm pr note list pr-x")
+
+    def test_fit_prompt_cuts_only_the_verdict_listing_not_the_qa_error(
+            self, _isolated_pm_root, monkeypatch):
+        """The sign-off QA block mixes two kinds of content: the scenario
+        verdicts (a pure enumeration, shrinkable) and the QA error (a single
+        pm-generated message, *not* an enumeration, whose full text exists
+        only in the host qa_status.json — unreadable from the sign-off
+        container).
+
+        A prompt that can be brought under the limit by shrinking must
+        therefore cut only the listing.  Cutting the whole block takes the
+        error with it while the marker names the per-scenario verdict files,
+        which do not contain it — the silent loss §30 removed by deleting the
+        old 500-character cut.
+        """
+        status = _isolated_pm_root / "qa_status.json"
+        status.write_text(json.dumps({
+            "overall": "INPUT_REQUIRED",
+            "error": "ERRHEAD " + "E" * 3000 + " ERRTAIL",
+            "scenarios": [{"index": i, "title": "標" * 120,
+                           "verdict": "PASS", "verdict_reason": "由" * 200}
+                          for i in range(40)],
+        }))
+        monkeypatch.setattr("pm_core.paths.latest_qa_status_path",
+                            lambda _pr_id: status)
+        monkeypatch.setattr(spec_gen, "get_spec",
+                            lambda pr, phase: "s" * 40_000)
+        pr = _pr(description="D" * 30_000,
+                 notes=[_note(i) for i in range(400)], plan="pl-1")
+        siblings = [_pr(f"pr-s{i:03d}", plan="pl-1",
+                        title="LONGTITLE " * 600) for i in range(200)]
+        p = prompt_gen.generate_signoff_prompt(_data(pr, siblings), "pr-x")
+        # This fixture *can* be made to fit, so the delivered prompt is the
+        # shrunk one (not the launcher's file-backed original).
+        assert prompt_bytes(p) <= PROMPT_ARG_LIMIT
+        # The QA error survives whole...
+        assert "ERRHEAD" in p and "ERRTAIL" in p
+        # ...while the verdict listing really was the block that gave.
+        assert "QA scenario summary truncated" in p
+        assert "$CAP/scenarios/<n>/verdict.md" in p
 
 
 class TestQaPromptsBounding:
@@ -1354,24 +1396,8 @@ class TestQaLoopPromptsBounding:
         lived under ``regression/`` (where
         ``qa_instructions.resolve_instruction_ref`` resolves it); the fix was
         to name the real path.  Now nothing is cut, so the prompt must inject
-        no such path at all.
+        no such path at all, and the builder takes no path argument.
         """
-        scenario = QAScenario(index=1, title="S", focus="F",
-                              steps="GIVEN x\n" * 20000)
-        p = _build_concretization_prompt(
-            scenario, "b", "master",
-            instruction_content="i" * 200000, pr_id="pr-x",
-            instruction_ref="regression/big-regression.md")
-        assert "i" * 200000 in p
-        assert "instruction file truncated" not in p
-        assert "pm/qa/instructions/" not in p
-        _assert_preserved_over_limit(p, tmp_path)
-
-    def test_concretization_without_a_ref_injects_no_category_path(
-            self, tmp_path):
-        """Older callers pass no relative path; the file is inlined whole, so
-        the prompt must not claim ``pm/qa/instructions/`` specifically (the
-        file may be under ``regression/`` or ``artifacts/``)."""
         scenario = QAScenario(index=1, title="S", focus="F",
                               steps="GIVEN x\n" * 20000)
         p = _build_concretization_prompt(
@@ -1382,17 +1408,19 @@ class TestQaLoopPromptsBounding:
         assert "pm/qa/instructions/" not in p
         _assert_preserved_over_limit(p, tmp_path)
 
-    def test_concretization_absolute_ref_is_not_baked_in(self, tmp_path):
-        """A resumed snapshot can carry the absolute scratch copy; with the
-        file inlined whole that path must not appear in the prompt at all."""
+    def test_concretization_without_a_ref_injects_no_category_path(
+            self, tmp_path):
+        """The file is inlined whole, so the prompt must not claim
+        ``pm/qa/instructions/`` specifically (the file may be under
+        ``regression/`` or ``artifacts/``)."""
         scenario = QAScenario(index=1, title="S", focus="F",
                               steps="GIVEN x\n" * 20000)
         p = _build_concretization_prompt(
             scenario, "b", "master",
-            instruction_content="i" * 200000, pr_id="pr-x",
-            instruction_ref="/scratch/qa-instructions/big.md")
+            instruction_content="i" * 200000, pr_id="pr-x")
         assert "i" * 200000 in p
-        assert "/scratch/qa-instructions" not in p
+        assert "instruction file truncated" not in p
+        assert "pm/qa/instructions/" not in p
         _assert_preserved_over_limit(p, tmp_path)
 
     def test_verification_steps_whole_but_artifacts_and_output_bounded(

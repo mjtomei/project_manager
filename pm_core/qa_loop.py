@@ -1509,8 +1509,7 @@ _CONCRETIZE_GRACE = 15
 def _build_concretization_prompt(scenario: QAScenario, pr_branch: str,
                                   base_branch: str,
                                   instruction_content: str | None = None,
-                                  pr_id: str | None = None,
-                                  instruction_ref: str | None = None) -> str:
+                                  pr_id: str | None = None) -> str:
     """Build a prompt that verifies and refines scenario steps against code.
 
     The instruction file is inlined whole: it is instruction text, so it is
@@ -1638,7 +1637,6 @@ def _build_concretize_cmd(
     cwd: str,
     container_name: str | None = None,
     instruction_content: str | None = None,
-    instruction_ref: str | None = None,
     write_dir: str | None = None,
     session_id: str | None = None,
     session_tag: str | None = None,
@@ -1654,7 +1652,7 @@ def _build_concretize_cmd(
     prompt = _build_concretization_prompt(
         scenario, pr_branch, base_branch,
         instruction_content=instruction_content,
-        pr_id=pr_data.get("id"), instruction_ref=instruction_ref)
+        pr_id=pr_data.get("id"))
     claude_cmd = build_claude_shell_cmd(
         prompt=prompt,
         model=resolution.model, provider=resolution.provider,
@@ -2041,13 +2039,11 @@ def _launch_scenarios_in_tmux(
             _setup_clone_override(clone_path)
 
         # Read instruction content before installing (sets absolute path on
-        # scenario).  Keep the library-relative path for the concretizer's
-        # truncation marker — installing rewrites/clears instruction_path.
+        # scenario).  The concretizer inlines the file whole, so this is the
+        # only copy it needs.
         instruction_content: str | None = None
-        instruction_ref: str | None = None
         if pm_root and scenario.instruction_path:
-            instruction_ref = scenario.instruction_path
-            src = pm_root / "qa" / instruction_ref
+            src = pm_root / "qa" / scenario.instruction_path
             if src.is_file():
                 try:
                     instruction_content = src.read_text()
@@ -2073,7 +2069,6 @@ def _launch_scenarios_in_tmux(
         concretize_cmd = _build_concretize_cmd(
             scenario, pr_data, data, cwd=scenario_cwd,
             instruction_content=instruction_content,
-            instruction_ref=instruction_ref,
             session_id=scenario.concretize_session_id,
             session_tag=state.session_tag)
         try:
@@ -2268,14 +2263,12 @@ def _launch_scenarios_in_containers(
             return
         scenario.worktree_path = str(clone_path)
 
-        # Read instruction content from source before installing.  Keep the
-        # library-relative path for the concretizer's truncation marker —
-        # installing rewrites/clears instruction_path.
+        # Read instruction content from source before installing.  The
+        # concretizer inlines the file whole, so this is the only copy it
+        # needs.
         instruction_content: str | None = None
-        instruction_ref: str | None = None
         if pm_root and scenario.instruction_path:
-            instruction_ref = scenario.instruction_path
-            src = pm_root / "qa" / instruction_ref
+            src = pm_root / "qa" / scenario.instruction_path
             if src.is_file():
                 try:
                     instruction_content = src.read_text()
@@ -2321,7 +2314,6 @@ def _launch_scenarios_in_containers(
         concretize_cmd = _build_concretize_cmd(
             scenario, pr_data, data, cwd=container_workdir,
             container_name=cname, instruction_content=instruction_content,
-            instruction_ref=instruction_ref,
             write_dir=str(clone_path),
             session_id=scenario.concretize_session_id,
             session_tag=state.session_tag)

@@ -2008,3 +2008,74 @@ summarized, marker present).
 This is the trade the user chose: a prompt that is too large to pass as one
 argument is a delivery problem, and delivery already has a correct answer;
 a truncated instruction is a correctness problem with no correct answer.
+
+## 32. Review-loop follow-ups (review loop 4029, iteration 1)
+
+Iteration 1 ran natively in the review container (the controller's
+`pr-592e4bd` runtime still launches the review prompt as one argv entry, so
+the first launch failed with E2BIG; the recovery read the complete native
+prompt from a file). It re-ran the §19-§31 method — sweep every reachable
+builder, then check every omission marker in the environment the session
+reads it in — and found one block that mixed a shrinkable enumeration with
+non-enumeration evidence, plus dead code left by §31.
+
+- **The sign-off QA block was shrunk as a whole, so `fit_prompt` could cut
+  the QA error.** §31 keeps only PR notes and pure enumerations shrinkable;
+  the QA error is neither. `_signoff_qa_scenarios_block` rendered the
+  overall verdict, the QA error and the scenario verdict listing as one
+  string, and `generate_signoff_prompt` handed that whole string to
+  `fit_prompt` as the `qa` block. When a prompt is over the limit but *can*
+  be brought under it by shrinking (a large-but-under-120 KB spec plus many
+  notes, siblings and scenarios), `fit_prompt` head/tail-cuts the block and
+  its marker names `$CAP/scenarios/<n>/verdict.md` — which contains the
+  verdicts but **not** the error, whose only full copy is the host
+  `~/.pm/workdirs/qa/<pr>-*/qa_status.json` (unreadable from the sign-off
+  container). That is the silent loss §30 removed the old 500-character cut
+  for, one layer up. Repro: a 40 KB impl spec, a 30 KB description, 400
+  notes, 200 long-titled siblings, 40 CJK scenarios at the per-line caps and
+  a 3 KB error build a 119,700-byte sign-off prompt in which the error's
+  tail is gone and the only marker names the verdict files.
+
+  Fixed by splitting the block: `_signoff_qa_scenarios_parts(pr_id)` returns
+  `(head, listing)`, where *head* is the overall verdict + QA error (inlined
+  whole as static text) and *listing* is the scenario verdict enumeration —
+  the only part handed to `fit_prompt`. `_signoff_qa_scenarios_block`
+  remains `head + listing` for the tests. The split is byte-identical for
+  every real prompt (all 491 PRs' sign-off prompts hash identically before
+  and after) and for the no-status, empty, error-only, truncated, dropped
+  and mixed fixtures; when the listing is cut, the error above it is intact
+  and the marker still names the verdict reader.
+
+- **Dead `instruction_ref` threading.** §31 removed the concretization
+  instruction-file truncation, so the library-relative path threaded through
+  `_build_concretization_prompt` / `_build_concretize_cmd` and both scenario
+  launch flows had no reader; two comments still claimed it was "for the
+  concretizer's truncation marker". Removed the parameter (and the two
+  launch-flow locals), corrected the comments, and replaced the two tests
+  that existed only to feed it with one that asserts the instruction file is
+  inlined whole and no category path is injected.
+
+- **Stale comments.** `generate_prompt` and `generate_review_prompt` still
+  described the sign-off return block as a separate `fit_prompt` block; §31
+  inlines it whole. Comments corrected (no behaviour change).
+
+Verification: `tests/test_prompt_bounds.py` 137 cases (one new,
+failing-then-passing against the pre-fix source — `ERRTAIL` was absent with
+the listing cut; one obsolete `instruction_ref` test removed). Related
+suites 625 passed. Real-data sweep over all 491 PRs x 4 builders: no builder
+raises, all instruction text is whole (spec and description head/tail
+present), every truncation marker names a reader, and the maxima are
+unchanged (impl 166,248 / review 168,681 / sign-off 183,233 / planner
+113,196 B; only pr-ace66e5 is over the limit and goes out by the launcher's
+file-backed bootstrap). The pathological fixture (every collection maxed)
+keeps every instruction block whole and every enumeration bounded. The
+launcher was exercised end to end with a stub `claude`: a >120 KB CJK prompt
+becomes a 277-byte command whose named file is byte-identical and is removed
+after the run; under-limit prompts still use `$(cat)`; `launch_claude`
+bootstraps and removes its file. Full-suite failure set on the clean
+committed tree is byte-identical to the `origin/master` worktree baseline in
+this sandbox (42 failed / 17 errors / 3448 passed vs 42 / 17 / 3309; all
+`test_signoff_integration`, `test_merge_publish` and `test_hook_events`,
+environmental). The dirty-tree run adds only the documented
+`test_git_ops::TestPullRebase::test_keeps_unpushed_merge` proxy flake, which
+passes with the tree clean. Evidence: `/pm-captures/review-4029-i1/`.
