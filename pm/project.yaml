@@ -33598,6 +33598,20 @@ prs:
       has to run in the next QA.'
     created_at: '2026-10-25T14:58:22Z'
     last_edited: '2026-10-25T14:58:22Z'
+  - id: note-bd81b90
+    text: 'Review 0f64 i5 (690a9fe1, CODE CHANGE, small, needs normal re-review):
+      S53 66404830 and 0f64 i1-i4 (14d72926, ac202207, 1dc3e618, 6bd59adf) reviewed
+      independently and sound; S53 (a) auto-start starting line and (c) held Review-loop-done
+      line re-mutated, both caught. Gap fixed (pre-existing on master): run_command
+      echoed the typed command ("> <cmd>") as markup, so a command-bar note naming
+      creds[work] lost "[work]" and a "[/x]" refused the line; 66404830 escaped only
+      the output lines. Regression test_typed_command_echo_keeps_brackets (Textual
+      parser, mutation caught). Spec section 5 indexes S1-S54 (S52 still owed) and
+      points at item 42. Venv lacked markdown (3.10.3 installed). Baseline 3735, final
+      full suite 3736 passed, rc 0; /pm-captures/review-0f64-i5. S52 (RQ39) still
+      has to run in the next QA.'
+    created_at: '2026-10-25T15:10:00Z'
+    last_edited: '2026-10-25T15:10:00Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
