@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T00:56:55.420524+00:00'
+  updated_at: '2026-10-25T01:04:13.476482+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22690,6 +22690,41 @@ prs:
       was touched by the merge. Ready for a fresh review + QA on the integrated branch.'
     created_at: '2026-10-25T00:56:55Z'
     last_edited: '2026-10-25T00:56:55Z'
+  - id: note-bd5c48f
+    text: 'Review-loop 2ac8 i1 (6ae0ae44): independent re-sweep of every reachable
+      builder — real project data (487 PRs, 22 plans) plus pathological count / item
+      size / single document — found no unbounded enumeration left and no builder
+      over PROMPT_ARG_LIMIT. Max real prompt is still sign-off at 92,165 B (pr-0b87a97),
+      matching the recorded numbers; a fuzz of bounded_text / bounded_join / bounded_lines
+      / fit_prompt in the production byte range found no byte-bound, order, determinism
+      or empty-output violation. Two coverage gaps fixed, no production behaviour
+      changed:
+
+
+      (1) Spec §6/R15 require the launcher guard to be tested as *wired into* launch_claude
+      / launch_claude_print / launch_claude_print_background, including "resume path
+      untouched" (§4). Only build_claude_shell_cmd and _materialize_oversized_prompt
+      had direct tests, so the bootstrap argv, the file lifetime (present and complete
+      while claude runs, removed after it exits) and the resume path writing nothing
+      were unverified. Five tests added and mutation-checked (passing the prompt on
+      resume, and dropping launch_claude_print''s unlink, each make them fail).
+
+
+      (2) bounded_text can return more than max_bytes when the marker alone does not
+      fit (it returns the marker rather than an empty block). Deliberate and already
+      pinned by test_marker_survives_tiny_budget, but only an inline comment said
+      so while bounded_join documents the same overshoot — postcondition now documented.
+
+
+      tests/test_prompt_bounds.py 93 -> 98 cases; related suites 344 passed. Deliberately
+      unchanged after probing: bounded_lines(max_lines=1) keeps a head and a tail
+      line (2 lines for max_lines=1) — the max(1, ...) guards exist so a single-line
+      budget still shows both ends and the marker reports the count actually omitted,
+      and no caller passes max_lines<60; single user-authored fields (PR/scenario
+      titles, the spec builder''s PR description) stay inlined and are delivered intact
+      by the launcher bootstrap, per the i7 decision.'
+    created_at: '2026-10-25T01:04:13Z'
+    last_edited: '2026-10-25T01:04:13Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
