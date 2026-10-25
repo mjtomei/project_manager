@@ -371,6 +371,32 @@ class TestLaunchBridgeInTmux:
         cmd = mock_split.call_args[0][2]
         assert "--prompt" not in cmd
 
+    @patch("pm_core.tmux.split_pane_background")
+    def test_oversized_prompt_is_passed_by_file(self, mock_split, tmp_path):
+        """An over-limit prompt cannot be a shell argument (E2BIG), so the
+        complete text goes to a file the bridge reads with --prompt-file."""
+        import shlex
+        from pm_core.prompt_bounds import PROMPT_ARG_LIMIT, prompt_bytes
+
+        huge = "x" * (PROMPT_ARG_LIMIT + 1)
+        launch_bridge_in_tmux(huge, str(tmp_path), "sess")
+        cmd = mock_split.call_args[0][2]
+        assert "--prompt-file" in cmd
+        assert "--prompt " not in cmd
+        assert huge not in cmd
+        # The command itself stays small enough to exec.
+        assert prompt_bytes(cmd) < PROMPT_ARG_LIMIT
+        argv = shlex.split(cmd)
+        prompt_file = argv[argv.index("--prompt-file") + 1]
+        assert Path(prompt_file).read_text() == huge
+
+    @patch("pm_core.tmux.split_pane_background")
+    def test_small_prompt_is_still_a_shell_argument(self, mock_split, tmp_path):
+        launch_bridge_in_tmux("small prompt", str(tmp_path), "sess")
+        cmd = mock_split.call_args[0][2]
+        assert "--prompt-file" not in cmd
+        assert "small prompt" in cmd
+
 
 # ---------------------------------------------------------------------------
 # launch_claude_print_background — additional coverage

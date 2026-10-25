@@ -1078,3 +1078,77 @@ sweep over all 488 real PRs x 4 builders is byte-identical to §19's numbers
 (impl 75,146 / review 77,616 / sign-off 92,165 / planner 80,652 B, max
 `pr-0b87a97`): neither marker fires on this repo's data, and both only fire
 when content was really abbreviated. Evidence: `/pm-captures/review-2ac8-i3/`.
+
+## 21. Review-loop follow-ups (review loop 2ac8, iteration 4)
+
+Iteration 4 re-ran the i7-i11 method (sweep every reachable builder, check
+every omission marker in the environment the session reads it in) and then
+audited the *delivery* paths rather than the builders. One gap, in the last
+argv-entry prompt path this module owns.
+
+- **`launch_bridge_in_tmux` had no size guard.** R15's guard covers
+  `build_claude_shell_cmd`, `launch_claude`, `launch_claude_print` and
+  `launch_claude_print_background`, but `pm cluster explore --bridged`
+  (`pm_core/cli/cluster.py`) delivers its prompt through a fifth path in the
+  same module: `launch_bridge_in_tmux` embeds the prompt in a shell command
+  (`python3 -m pm_core.bridge <sock> --cwd '<cwd>' --prompt '<escaped>'`) run
+  in a tmux pane, so the prompt is one argv entry to the bridge process and
+  the pane's shell fails with a raw `Argument list too long` above
+  `MAX_ARG_STRLEN` — exactly the field failure this PR exists to remove, in
+  the module the guard lives in. Verified in this sandbox: `/bin/true` with a
+  131,100-byte argument exits 126 with "Argument list too long"; 130,000 bytes
+  still succeeds. No current caller passes a large prompt (the cluster-explore
+  prompt is fixed text plus a temp-file path), so the practical risk today is
+  nil — but the guard's stated purpose is "defense in depth for builders we
+  did not audit and for future ones", and this path was unguarded.
+
+  Fixed the same way as the other three: above `PROMPT_ARG_LIMIT` the complete
+  prompt is written to a file (`_materialize_oversized_prompt`, which honours
+  the host `write_dir` / container `cwd` split) and passed as
+  `--prompt-file <path>`; the bridge reads it for its first turn and removes
+  it, since the file is a one-shot handoff from the launcher. Under the limit
+  the command is byte-identical to before (`--prompt '<escaped>'`).
+
+Checked and deliberately unchanged in this iteration:
+
+- **`pm_core/bridge.py`'s turn loop.** It sends each turn to `claude -p` over
+  **stdin** (`--input-format stream-json`), not argv, so the bridge's *session*
+  has no argv-size exposure — only the launcher's initial handoff did, which
+  is the part fixed above.
+- **`_materialize_oversized_prompt` vs the inline logic in
+  `build_claude_shell_cmd`.** The two build the same file + bootstrap; the
+  shell-command form additionally needs the file to be removed *after claude
+  exits* (`; rm -f` in the same command string), which the helper's
+  "caller deletes the returned path" contract cannot express. Left as-is.
+- **The PR-notes *fits* path prefers "every note represented" over "newest in
+  full".** When every note's one-line summary fits the budget, that path keeps
+  all of them and spends the leftover room on full text for the newest notes
+  (newest first); a note too big for the leftover room therefore still arrives
+  as a 200-character preview, with the marker saying so and naming
+  `pm pr note list`. A property probe over note counts (1-1000), note sizes
+  (10 B-5 KB) and ASCII/CJK text found this is the only case where a note that
+  *could* fit the budget is not upgraded: e.g. 150 short notes plus one 30 KB
+  newest note, or 50 CJK notes whose 200-character summaries already total
+  31 KB of the 35 KB budget. §19 records the same trade-off; the marker covers
+  it, and on this repo's data (all 488 PRs) the newest note is always in full,
+  so it is left as designed.
+- The other deliberate decisions recorded in §10, §14, §19 and §20
+  (`build_regression_test_prompt`'s body, single user-authored documents,
+  the watcher managed/target lists, the `_X = X` budget aliases,
+  `PromptTooLargeError` being uncaught at pane/CLI call sites → pr-a42a4f8).
+
+Verification: `tests/test_prompt_bounds.py` 107 cases (5 new) and
+`tests/test_claude_launcher.py` 37 cases (2 new) — 6 of the new ones
+failing-then-passing, verified by stashing the two source edits (the oversized
+bridge prompt was passed as a 150 KB shell argument, and `--prompt-file` was
+not parsed at all). The whole path was exercised end to
+end in this sandbox with a stub `claude` on `PATH`: the launcher's command
+string delivers a 150,016-byte prompt intact to the bridge's first turn
+(`delivered bytes: 150016 | matches full prompt: True`) and the prompt file is
+gone afterwards. Real-data sweep over all 488 real PRs × 4 builders is
+byte-identical to §19's numbers (impl 75,146 / review 77,616 / sign-off 92,165
+/ planner 80,652 B, max `pr-0b87a97`); a full-text diff of those 4 builders ×
+7 real PRs against an `origin/master` worktree shows only the intended
+differences (the 25-sibling plan-context cap, the 35 KB PR-notes budget and
+their markers). Full-suite failure set compared against an `origin/master`
+worktree baseline in the same sandbox. Evidence: `/pm-captures/review-2ac8-i4/`.

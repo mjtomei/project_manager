@@ -1143,15 +1143,30 @@ def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None,
 
 
 def launch_bridge_in_tmux(prompt: str | None, cwd: str, session_name: str) -> str:
-    """Launch a bridge in a tmux pane. Returns the socket path."""
+    """Launch a bridge in a tmux pane. Returns the socket path.
+
+    The prompt is handed to the bridge as a shell argument, so it is one argv
+    entry like every other prompt this module launches: an over-limit one
+    would make the pane fail with a raw "Argument list too long" (E2BIG)
+    before the bridge starts — the same failure ``build_claude_shell_cmd``
+    guards against.  Above ``PROMPT_ARG_LIMIT`` the complete prompt is written
+    to a file and passed with ``--prompt-file``, which the bridge reads (and
+    removes) for its first turn, so every instruction is preserved.
+    """
     import uuid
     from pm_core.tmux import split_pane_background
 
     socket_path = f"/tmp/pm-bridge-{uuid.uuid4().hex[:12]}.sock"
     bridge_cmd = f"python3 -m pm_core.bridge {socket_path} --cwd '{cwd}'"
     if prompt:
-        escaped = prompt.replace("'", "'\\''")
-        bridge_cmd += f" --prompt '{escaped}'"
+        # The bridge reads the prompt file itself, so only its path matters
+        # here (the returned bootstrap text is for claude-as-argv launches).
+        _bootstrap, prompt_file = _materialize_oversized_prompt(prompt, cwd=cwd)
+        if prompt_file:
+            bridge_cmd += f" --prompt-file {shlex.quote(prompt_file)}"
+        else:
+            escaped = prompt.replace("'", "'\\''")
+            bridge_cmd += f" --prompt '{escaped}'"
 
     split_pane_background(session_name, "v", bridge_cmd)
     return socket_path

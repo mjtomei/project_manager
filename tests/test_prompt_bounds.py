@@ -1430,3 +1430,68 @@ class TestPrShowCommand:
         assert "Conflicts (1): c.py" in result.output
         assert "Overlap (2): a.py, b.py" in result.output
         assert "Full record: /cap/pr-001/integration.json" in result.output
+
+
+# ---------------------------------------------------------------------------
+# the bridge launch path (the last argv-entry prompt path in that module)
+# ---------------------------------------------------------------------------
+
+class TestBridgePromptFile:
+    """``pm cluster explore --bridged`` passes its prompt to
+    ``python3 -m pm_core.bridge`` as a shell argument, so it is one argv entry
+    too: over the limit the launcher writes the full prompt to a file and the
+    bridge reads it with ``--prompt-file``."""
+
+    def _args(self, **kw):
+        from types import SimpleNamespace
+        base = {"prompt": None, "prompt_file": None}
+        base.update(kw)
+        return SimpleNamespace(**base)
+
+    def test_prompt_file_is_read_and_removed(self, tmp_path):
+        from pm_core import bridge
+        f = tmp_path / "pm_prompt.txt"
+        f.write_text("the complete instructions")
+        assert bridge._resolve_initial_prompt(
+            self._args(prompt_file=str(f))) == "the complete instructions"
+        assert not f.exists(), "the one-shot handoff file must be removed"
+
+    def test_prompt_file_takes_precedence(self, tmp_path):
+        from pm_core import bridge
+        f = tmp_path / "p.txt"
+        f.write_text("from file")
+        assert bridge._resolve_initial_prompt(
+            self._args(prompt="from argv", prompt_file=str(f))) == "from file"
+
+    def test_unreadable_prompt_file_falls_back_to_argv(self, tmp_path):
+        from pm_core import bridge
+        assert bridge._resolve_initial_prompt(
+            self._args(prompt="fallback",
+                       prompt_file=str(tmp_path / "missing.txt"))) == "fallback"
+
+    def test_prompt_without_a_file_is_unchanged(self):
+        from pm_core import bridge
+        assert bridge._resolve_initial_prompt(
+            self._args(prompt="hello")) == "hello"
+        assert bridge._resolve_initial_prompt(self._args()) is None
+
+    def test_bridge_parser_accepts_prompt_file(self, tmp_path, monkeypatch):
+        from pm_core import bridge
+        f = tmp_path / "p.txt"
+        f.write_text("from file")
+        seen = {}
+
+        class _Stop(Exception):
+            pass
+
+        def fake_bridge(socket_path, cwd, initial_prompt=None):
+            seen["prompt"] = initial_prompt
+            raise _Stop
+
+        monkeypatch.setattr(bridge, "Bridge", fake_bridge)
+        monkeypatch.setattr("sys.argv", ["pm_core.bridge", "/tmp/s.sock",
+                                         "--cwd", str(tmp_path),
+                                         "--prompt-file", str(f)])
+        with pytest.raises(_Stop):
+            bridge.main()
+        assert seen["prompt"] == "from file"
