@@ -973,7 +973,7 @@ def compute_candidate(workdir: str, head: str, base_sha: str,
         out["base_files"] = base_files.splitlines() if base_files else []
         out["pr_files"] = pr_files.splitlines() if pr_files else []
         out["overlap"] = sorted(set(out["base_files"]) & set(out["pr_files"]))
-        if out["base_files"]:
+        if out["base_files"] and pr is not None:
             try:
                 out["base_behavior_changes"] = base_behavior_changes(
                     workdir, mb, base_sha, pr=pr)
