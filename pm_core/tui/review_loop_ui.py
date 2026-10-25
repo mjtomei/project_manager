@@ -446,22 +446,7 @@ def _poll_loop_state_inner(app) -> None:
 
     # Announce completed loops and auto-merge passing PRs
     for state in newly_done:
-        verdict_icon = VERDICT_ICONS.get(state.latest_verdict, state.latest_verdict)
-        msg = (
-            f"Review loop done for {state.pr_id}: {verdict_icon} "
-            f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})"
-        )
-        if state.latest_verdict == "ERROR" and state.latest_output:
-            # Truncate for display but show enough to be useful
-            err_text = state.latest_output[:300]
-            msg += f"\n  Error: {err_text}"
-            from pm_core.paths import command_log_file
-            msg += f"\n  See log: {command_log_file()}"
-        app.log_message(msg, sticky=10)
-
-        # Auto-start next step: review pass → QA (then QA pass → merge)
-        if state.latest_verdict == VERDICT_PASS:
-            _start_qa_after_review(app, state.pr_id)
+        _announce_loop_done(app, state)
 
     # Review → QA hand-offs that met an unloadable project.yaml: retried
     # every tick until the file loads (RQ37), else a zz t loop or an
@@ -481,6 +466,30 @@ def _poll_loop_state_inner(app) -> None:
         if app._review_loop_timer:
             app._review_loop_timer.stop()
             app._review_loop_timer = None
+
+
+def _announce_loop_done(app, state) -> None:
+    """Say a finished loop's verdict, then hand a PASS on (review → QA)."""
+    verdict_icon = VERDICT_ICONS.get(state.latest_verdict, state.latest_verdict)
+    msg = (
+        f"Review loop done for {state.pr_id}: {verdict_icon} "
+        f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})"
+    )
+    if state.latest_verdict == "ERROR" and state.latest_output:
+        # Truncate for display but show enough to be useful
+        err_text = state.latest_output[:300]
+        msg += f"\n  Error: {err_text}"
+        from pm_core.paths import command_log_file
+        msg += f"\n  See log: {command_log_file()}"
+    # Held as well: the hand-off logs its own held confirmations in the
+    # same frame ("skipping QA", "→ sign-off", an "Error:"), which otherwise
+    # replaced this line before it ever painted (S53).
+    from pm_core.tui.auto_start import CONFIRM_HOLD_SECONDS
+    app.log_message(msg, sticky=10, hold=CONFIRM_HOLD_SECONDS)
+
+    # Auto-start next step: review pass → QA (then QA pass → merge)
+    if state.latest_verdict == VERDICT_PASS:
+        _start_qa_after_review(app, state.pr_id)
 
 
 def _refresh_tech_tree(app) -> None:

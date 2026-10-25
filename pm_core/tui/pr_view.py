@@ -7,6 +7,8 @@ access app state and call app methods (log_message, _load_state, etc.).
 import shlex
 import sys
 
+from rich.markup import escape
+
 from pm_core.paths import configure_logger
 from pm_core import store
 from pm_core.tui._shell import _run_shell, _run_shell_async
@@ -837,13 +839,16 @@ def _run_command_sync(app, parts: list[str]) -> None:
         if result.returncode != 0:
             _log.info("pm exit=%d stderr=%s",
                       result.returncode, result.stderr.strip()[:200])
+        # The command's output is text, not markup: a path such as
+        # ".../creds[work]/..." in a route remedy lost its "[work]" (S53).
         if result.stdout.strip():
-            app.log_message(result.stdout.strip().split("\n")[-1])
+            app.log_message(escape(result.stdout.strip().split("\n")[-1]))
         if result.returncode != 0 and result.stderr.strip():
-            app.log_message(f"Error: {result.stderr.strip().split(chr(10))[-1]}")
+            app.log_message(
+                f"Error: {escape(result.stderr.strip().split(chr(10))[-1])}")
     except Exception as e:
         _log.exception("command failed: %s", parts)
-        app.log_message(f"Error: {e}")
+        app.log_message(f"Error: {escape(str(e))}")
 
     # Reload state
     app._load_state()
@@ -887,11 +892,12 @@ async def _run_command_async(app, cmd: str, parts: list[str], working_message: s
                    proc.returncode, stdout_text[:200], stderr_text[:200])
 
         if stdout_text.strip():
-            app.log_message(stdout_text.strip().split("\n")[-1])
+            app.log_message(escape(stdout_text.strip().split("\n")[-1]))
         elif proc.returncode == 0:
             app.log_message(f"✓ {working_message} done")
         if proc.returncode != 0 and stderr_text.strip():
-            app.log_message(f"Error: {stderr_text.strip().split(chr(10))[-1]}")
+            app.log_message(
+                f"Error: {escape(stderr_text.strip().split(chr(10))[-1])}")
 
     except asyncio.TimeoutError:
         spinner_running = False
@@ -900,7 +906,7 @@ async def _run_command_async(app, cmd: str, parts: list[str], working_message: s
     except Exception as e:
         spinner_running = False
         _log.exception("command failed: %s", cmd)
-        app.log_message(f"Error: {e}")
+        app.log_message(f"Error: {escape(str(e))}")
     finally:
         if action_key:
             app._inflight_pr_action = None

@@ -466,6 +466,53 @@ def test_skip_qa_hand_off_lines_are_painted_after_the_review_done_line(
     assert _pr(app._root)["status"] == ("in_review" if held else "sign_off")
 
 
+@pytest.mark.parametrize("unloadable", [False, True],
+                         ids=["free", "unloadable"])
+def test_review_done_line_is_painted_before_the_skip_qa_hand_off(
+        tmp_path, unloadable):
+    """S53 story 7: the loop's own announcement logged "Review loop done …
+    PASS" (sticky, not held) and the skip_qa hand-off's held "skipping QA"
+    line in the same frame, so the done line was replaced before it ever
+    painted (absent from the cast).  It holds the line now: the hand-off's
+    lines are queued behind it and painted after it, in order."""
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from pm_core.tui import auto_start, review_loop_ui, signoff_ui
+    app = _make_app(tmp_path)
+
+    def skip_qa(d):
+        d["project"]["skip_qa"] = True
+        store.get_pr(d, "pr-001")["status"] = "in_review"
+    store.locked_update(app._root, skip_qa)
+    app._data = store.load(app._root)
+    shown, end_hold = _painting(app)
+    yaml_path = app._root / "project.yaml"
+    good = yaml_path.read_text()
+    if unloadable:
+        _write(yaml_path, "<<<<<<< HEAD\n" + good)
+    state = SimpleNamespace(pr_id="pr-001", latest_verdict=VERDICT_PASS,
+                            iteration=1, latest_output="")
+    with patch.object(auto_start, "is_enabled", return_value=True), \
+            patch.object(auto_start, "in_scope", return_value=True), \
+            patch.object(signoff_ui, "_driven", return_value=True), \
+            patch.object(signoff_ui, "step"), nullcontext():
+        review_loop_ui._announce_loop_done(app, state)
+    if unloadable:
+        _write(yaml_path, good)
+    from rich.text import Text
+    # The hand-off's lines wait behind it.
+    assert Text.from_markup(shown[-1]).plain == (
+        " Review loop done for pr-001: ✓ PASS (1 iteration)")
+    end_hold()
+    assert shown[-1] == (
+        " Auto-start: pr-001 review passed, skipping QA (skip_qa enabled)")
+    end_hold()
+    outcome = "Error: " if unloadable else "pr-001 → sign-off"
+    assert outcome in shown[-1]
+    assert _pr(app._root)["status"] == ("in_review" if unloadable
+                                        else "sign_off")
+
+
 def test_completion_wait_line_is_not_replaced_by_a_same_frame_resume(
         tmp_path):
     """S50 story 4: after a TUI restart the resume scan recovered a finished

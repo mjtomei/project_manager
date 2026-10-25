@@ -1124,3 +1124,35 @@ recorded with item 41.
         pre-fix; 6 mutations caught,
         `/pm-captures/review-e0e8-i14/mutation-checks.log`).  Full suite:
         `/pm-captures/review-e0e8-i14/full-suite.log`.
+42. (S53, RQ40 route failures on workflow roles, container + host modes;
+    live on 27258d15, captures `/pm-captures/scenarios/53`, REPORT.md.)
+    Four display defects, each with a failed Then live and a post-fix
+    replay:
+    (a) Auto-start's "Auto-start: starting <pr>" was only deferred while
+        the "targets +=" hold was active.  When `pm pr start` failed
+        within that hold (route down), the failure line (a newer held
+        confirmation) was queued and its flush dropped the older deferred
+        line, so the user never saw that a start was attempted.  During a
+        hold it is now queued with a hold of its own
+        (`test_starting_message_survives_a_start_that_fails_within_the_hold`;
+        the two older "deferred" tests now assert the queue).
+    (b) `pr_view.run_command` (TUI `s`, `d`, `i`, …) put the CLI's last
+        stdout/stderr line and exception text into log-line markup
+        unescaped, so a route remedy naming `/tmp/s53/creds[work]/…`
+        showed `/tmp/s53/creds/…` (the sign-off driver and auto-start
+        already escaped their copies).  All five sites escape now
+        (`tests/test_pr_view_command_text.py`).
+    (c) "Review loop done … PASS" was sticky but not held, so the skip_qa
+        hand-off's held lines logged in the same frame ("skipping QA",
+        "→ sign-off", an "Error:") replaced it before it ever painted.
+        The announcement (now `review_loop_ui._announce_loop_done`) holds
+        the line like the other confirmations, so the hand-off lines queue
+        behind it
+        (`test_review_done_line_is_painted_before_the_skip_qa_hand_off[free|unloadable]`).
+    (d) `pm model show` listed no Routes when only PR overrides select a
+        route.  Each PR override now gets one Routes line per distinct
+        route, naming the types it covers ("all types" when every type
+        follows it), resolved as its launches do
+        (`test_model_show_lists_routes_that_pr_overrides_select`).
+    8 mutations caught (`/pm-captures/scenarios/53/post-fix/tests/mutations.log`).
+    Full suite 3722 passed (`/pm-captures/scenarios/53/post-fix/tests/full-suite.log`).

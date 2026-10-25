@@ -894,10 +894,16 @@ async def check_and_start(app) -> None:
             _log.info("auto_start: starting ready PR %s", pr_id)
             # Forced past sticky messages, but not past the "targets +="
             # confirmation's hold (nor its queued confirmations waiting
-            # for their flush): then it's deferred until the hold ends.
+            # for their flush): then it's queued behind them with a hold
+            # of its own.  Merely deferred, it was dropped unseen when a
+            # start that failed within the hold queued its (newer) failure
+            # line (S53).
             from pm_core.tui.app import log_line_held
-            held = log_line_held(app)
-            app.log_message(f"Auto-start: starting {pr_id}", force=not held)
+            if log_line_held(app):
+                app.log_message(f"Auto-start: starting {pr_id}",
+                                force=True, hold=CONFIRM_HOLD_SECONDS)
+            else:
+                app.log_message(f"Auto-start: starting {pr_id}", force=True)
         else:
             # ``pm pr start --background`` no-ops when the window exists.
             _log.info("auto_start: ensuring impl window for in_progress PR %s",

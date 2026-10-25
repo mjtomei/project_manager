@@ -209,7 +209,10 @@ def test_starting_message_deferred_by_confirmation_hold(tmp_path):
             patch.object(auto_start, "_start_pr_quiet", _noop):
         asyncio.run(auto_start.check_and_start(app))
     assert shown[-1] == " Auto-start: targets += pr-x (1 total)"
-    assert app._log_held[0] == "Auto-start: starting pr-x"
+    assert [q[0] for q in app._log_held_queue] == ["Auto-start: starting pr-x"]
+    app._log_hold_until = 0.0
+    app.timers.pop(0)()  # the hold's flush
+    assert shown[-1] == " Auto-start: starting pr-x"
 
 
 # QA s13 (pr-0b87a97): ``g`` on a stop-before-merge target — the merge's
@@ -666,9 +669,68 @@ def test_starting_message_waits_for_queued_confirmations_flush(tmp_path):
             patch.object(auto_start, "_start_pr_quiet", _noop):
         asyncio.run(auto_start.check_and_start(app))
     assert shown[-1] == " Auto-start: targets += pr-x (1 total)"
-    assert app._log_held[0] == "Auto-start: starting pr-x"
+    assert [q[0] for q in app._log_held_queue] == [
+        "Auto-start: pr-y → sign-off", "Auto-start: starting pr-x"]
     app.timers.pop(0)()  # the hold's flush
     assert shown[-1] == " Auto-start: pr-y → sign-off"
     app._log_hold_until = 0.0
     app.timers.pop(0)()
     assert shown[-1] == " Auto-start: starting pr-x"
+
+
+# QA S53 story 2 (pr-592e4bd): with the work route down, ``A`` on a target
+# whose dependency is pending logged "targets +=" (held), then "starting
+# <dep>" (deferred by that hold), and ``pm pr start`` failed within the hold.
+# The failure line is a held confirmation, so it was queued, and being newer
+# it dropped the deferred "starting" line at the flush: the user never saw
+# that a start was attempted.
+
+def test_starting_message_survives_a_start_that_fails_within_the_hold(tmp_path):
+    import asyncio
+    app, shown = _stub_app()
+    app._data = {"project": {"name": "t", "repo": "/r",
+                             "base_branch": "master"},
+                 "prs": [{"id": "pr-x", "title": "X", "status": "pending",
+                          "branch": "b", "depends_on": []}]}
+    app._root = tmp_path
+    for attr, val in (("_auto_start", False), ("_auto_start_targets", {}),
+                      ("_auto_start_all", False), ("_auto_start_run_id", None),
+                      ("_auto_start_launching", set()),
+                      ("_stop_before_merge", set()), ("_review_loops", {}),
+                      ("_qa_loops", {}), ("_self_driving_qa", {}),
+                      ("_pending_merge_prs", set()),
+                      ("_merge_input_required_prs", set()),
+                      ("_session_name", None)):
+        setattr(app, attr, val)
+    app._watcher_manager = MagicMock()
+    app._watcher_manager.find_by_type.return_value = None
+    app._pane_idle_tracker = MagicMock()
+    app._pane_idle_tracker.is_tracked.return_value = False
+    app._update_display = app._load_state = lambda: None
+    app.run_worker = lambda coro, *a, **k: coro.close()
+    reason = ("work route 'claude-work' unavailable: router not reachable "
+              "at 127.0.0.1:1. Remedy: start the router; then launch the "
+              "impl session again")
+
+    class _P:
+        returncode = 1
+
+        async def communicate(self):
+            return b"", reason.encode()
+
+    async def fake_shell(*a, **k):
+        return _P()
+
+    auto_start.add_targets(app, ["pr-x"], default_policy=None,
+                           source="key:A")
+    with patch("pm_core.tui.watcher_ui.is_running", return_value=False), \
+            patch.object(auto_start, "_run_shell_async", fake_shell):
+        asyncio.run(auto_start.check_and_start(app))
+    assert shown[-1] == " Auto-start: targets += pr-x (1 total)"
+    app._log_hold_until = 0.0
+    app.timers.pop(0)()  # the "targets +=" hold ends
+    assert shown[-1] == " Auto-start: starting pr-x"
+    app._log_hold_until = 0.0
+    app.timers.pop(0)()  # the "starting" hold ends
+    assert "Auto-start: pm pr start pr-x failed" in shown[-1]
+    assert shown[-1].endswith(reason)

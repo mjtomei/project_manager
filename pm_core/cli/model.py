@@ -83,16 +83,33 @@ def model_show():
 
     # Router providers (worker routes): where those sessions actually go.
     from pm_core import worker_route
-    shown = False
+    from pm_core.model_config import get_pr_model_override
+    route_lines = []
     for st in SESSION_TYPES if resolvable else ():
         res = resolve_model_and_provider(st, project_data=data)
-        if not res.provider:
+        if res.provider:
+            route_lines.append(f"  {st:14s} {worker_route.describe(res)}")
+    # A PR override that selects a route sends that PR's sessions there
+    # too; resolved per type as its launches do (one line per distinct
+    # route, naming the types it covers).
+    for pr in (data.get("prs") or []) if resolvable else ():
+        if not (pr.get("model") or isinstance(pr.get("session_models"), dict)):
             continue
-        if not shown:
-            click.echo()
-            click.echo("Routes:")
-            shown = True
-        click.echo(f"  {st:14s} {worker_route.describe(res)}")
+        routes: dict[str, list[str]] = {}
+        for st in SESSION_TYPES:
+            res = resolve_model_and_provider(
+                st, pr_model=get_pr_model_override(pr, st), project_data=data)
+            if res.provider:
+                routes.setdefault(worker_route.describe(res), []).append(st)
+        for desc, types in routes.items():
+            label = ("all types" if len(types) == len(SESSION_TYPES)
+                     else ", ".join(types))
+            route_lines.append(f"  {pr.get('id')} ({label}) {desc}")
+    if route_lines:
+        click.echo()
+        click.echo("Routes:")
+        for line in route_lines:
+            click.echo(line)
 
     # Surface invalid model_config entries — unknown session types are
     # silently ignored at resolution time, so a typo would otherwise just

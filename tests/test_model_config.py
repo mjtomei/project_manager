@@ -669,3 +669,32 @@ def test_model_set_and_unset_fill_a_blank_block(tmp_path, monkeypatch, mc):
     result = runner.invoke(model_cli.model, ["unset", "signoff", "--project"])
     assert result.exit_code == 0, (result.output, result.exception)
     assert "model_config" not in store.load(tmp_path)["project"]
+
+
+def test_model_show_lists_routes_that_pr_overrides_select(tmp_path,
+                                                          monkeypatch):
+    """S53: with the route chosen only by PR overrides (`model:
+    provider:<route>`) `pm model show` listed the overrides but no Routes
+    section, so where those PRs' sessions go was not shown.  Each PR override
+    that selects a route gets one line per distinct route, naming the types
+    it covers."""
+    from click.testing import CliRunner
+    from pm_core import store, worker_route
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    monkeypatch.setattr(worker_route, "describe",
+                        lambda res, **kw: f"route={res.provider}")
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master"},
+                "prs": [{"id": "pr-a", "model": "provider:claude-work"},
+                        {"id": "pr-b", "model": "opus",
+                         "session_models": {"signoff": "provider:claude-work"}},
+                        {"id": "pr-c", "title": "no override"}]}, tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    out = CliRunner().invoke(model_cli.model, ["show"]).output
+    routes = out.split("Routes:\n", 1)[1].splitlines()
+    assert "  pr-a (all types) route=claude-work" in routes
+    # signoff and the types that inherit from it (none here) only.
+    b = [r for r in routes if r.startswith("  pr-b ")]
+    assert b == ["  pr-b (signoff) route=claude-work"], routes
+    assert not any("pr-c" in r for r in routes)
