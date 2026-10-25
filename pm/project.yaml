@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T21:39:10.052308+00:00'
+  updated_at: '2026-10-25T21:39:36.026404+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -23275,7 +23275,7 @@ prs:
       context/PR notes. Do not reuse prior sign-off as approval of these changes.'
     created_at: '2026-10-25T21:26:33Z'
     last_edited: '2026-10-25T21:26:33Z'
-  - id: note-307d7d6
+  - id: note-39f23a9
     text: 'Policy change (74d0916e, spec §31 cf410957), per your direction: bounds
       now cut accumulation only, never instructions.
 
@@ -23313,15 +23313,9 @@ prs:
       cut. Full suite 3,447 passed / 43 failed / 17 errors, failure set identical
       to an origin/master worktree baseline in this sandbox (signoff_integration,
       merge_publish, hook_events, and the test_git_ops::test_keeps_unpushed_merge
-      flake, which fails on master too).
-
-
-      Not done yet, next step if you want it: the `-p` print paths (launch_claude_print/_background)
-      can take the prompt on stdin instead of the bootstrap, which delivers it as
-      the actual turn with no model file-read. Held back so this change stays reviewable
-      on its own.'
+      flake, which fails on master too).'
     created_at: '2026-10-25T21:28:58Z'
-    last_edited: '2026-10-25T21:28:58Z'
+    last_edited: '2026-10-25T21:39:36Z'
   - id: note-440b9a9
     text: 'Constraint from the user (2026-10-25): no NEW `claude -p` usage — ''anthropic
       has gone back and forth with having that use API credits instead of subscription
