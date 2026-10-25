@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T21:17:00.497020+00:00'
+  updated_at: '2026-10-25T21:38:58.593032+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33818,6 +33818,22 @@ prs:
       here adds the TUI path and the ignored opus pin.'
     created_at: '2026-10-25T21:17:00Z'
     last_edited: '2026-10-25T21:17:00Z'
+  - id: note-c4f529f
+    text: 'Review c189 i1 (d5b7f5dd, test/spec only, no product change): S59 ff65f489
+      ([1m] live probe), S61 3ee69236 (no-model session drops an inherited subagent
+      pin) and 79b6ddd7 (ANTHROPIC_DEFAULT_FABLE_MODEL pinned; installed claude 2.1.310
+      reads only OPUS/SONNET/HAIKU/FABLE aliases) and spec 0e13c5f8 reviewed independently,
+      sound; 7 mutations caught. Fixed: (1) pre-existing order-dependent test failure:
+      qa_loop imports pm_core.cli under a patch of claude_launcher.prepare_workspace,
+      so cli.guide kept the mock and the guide trust test failed in partial runs;
+      tests/conftest.py now loads pm_core.cli first. (2) impl.md R8/§2/§3 and qa.md
+      RQ42 still said no-model sets nothing and open points a-c were undecided; recorded
+      S59-S61 decisions, moved the S60 block out of the QA24 list, added the classifier
+      gap (pr-1071c5a). Venv lacked markdown (3.10.3 installed). Full suite 3771 passed,
+      rc 0; /pm-captures/review-c189-i1. Open: user decision on the auto-mode classifier
+      probe (pr-1071c5a).'
+    created_at: '2026-10-25T21:38:58Z'
+    last_edited: '2026-10-25T21:38:58Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
