@@ -1283,12 +1283,28 @@ def _renew_launch(name: str, container_id: str = "") -> None:
                            stage="record launch ownership") from exc
 
 
-def recent_launch(name: str, grace: float) -> bool:
-    """Protect the gap between releasing the create lock and attaching a pane."""
+def recent_launch(name: str, grace: float, container_id: str | None = None) -> bool:
+    """Protect attachment by name and by rename-stable allocation identity."""
+    now = time.time()
     try:
-        return time.time() - _restart_generation_path(name).stat().st_mtime < grace
+        if now - _restart_generation_path(name).stat().st_mtime < grace:
+            return True
     except FileNotFoundError:
-        return False
+        pass
+    # Older installations may only have name generations. Avoid another runtime
+    # inspection until ID generations exist; inventory callers already know the ID.
+    if container_id is None:
+        if not (container_state_dir() / "identity-generations").exists():
+            return False
+        container_id = current_container_id(name)
+        if container_id is None:
+            raise OSError("Cannot determine allocation identity for attachment lease")
+    if container_id:
+        try:
+            return now - _identity_generation_path(container_id).stat().st_mtime < grace
+        except FileNotFoundError:
+            pass
+    return False
 
 
 @_runtime_domain_operation
@@ -1468,7 +1484,7 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
     # Ensure the push proxy is running (it may have died in a crash)
     if allowed_push_branch:
         from pm_core.push_proxy import (
-            start_push_proxy, get_proxy_socket_path, proxy_is_alive,
+            start_push_proxy, proxy_is_alive,
         )
         guard = (proxy_lock(session_tag, pr_id) if session_tag and pr_id
                  else contextlib.nullcontext(True))
@@ -1481,10 +1497,8 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
                 sock = start_push_proxy(name, str(workdir), allowed_push_branch,
                                         session_tag=session_tag, pr_id=pr_id)
             else:
-                sock = get_proxy_socket_path(name, session_tag=session_tag, pr_id=pr_id)
-                if not sock or not proxy_is_alive(sock):
-                    sock = start_push_proxy(name, str(workdir), allowed_push_branch,
-                                            session_tag=session_tag, pr_id=pr_id)
+                from pm_core.push_proxy import repair_unshared_proxy
+                sock = repair_unshared_proxy(name, str(workdir), allowed_push_branch)
             if not proxy_is_alive(sock):
                 raise launch_error(name, "proxy",
                                    f"push proxy at {sock} is not accepting connections",
@@ -2008,7 +2022,7 @@ def discard_unowned_container(name: str, *, container_id: str | None = None,
             # launcher may have just returned from create before attaching its
             # pane; only the captured owner may discard during that lease.
             if (not container_id or generation is None) and recent_launch(
-                    name, container_reaper.LAUNCH_GRACE):
+                    name, container_reaper.LAUNCH_GRACE, current):
                 return False
             if container_reaper.is_retained(name, current):
                 return False
@@ -2018,10 +2032,11 @@ def discard_unowned_container(name: str, *, container_id: str | None = None,
                 owners = container_reaper.live_owner_panes(name, current, strict=True)
             if set(owners) - (allowed_owner_panes or set()):
                 return False
-            remove_container(current)
-            # Removal by id cannot derive the original name's proxy key.
-            # Shared proxy release still checks the runtime for other users.
-            stop_push_proxy(name)
+            unshared_released = remove_container(current)
+            # Removal by ID cannot derive a shared key. A captured unshared
+            # mount, however, must never be followed by name-based cleanup.
+            if not unshared_released:
+                stop_push_proxy(name)
             return True
     except Exception:
         _log.warning("Could not safely discard container %s", name, exc_info=True)
@@ -2198,8 +2213,10 @@ def release_on_exit(name: str, cid: str, generation: str, runtime: str,
                      outcome.summary(), outcome.release_refused)
 
 
-def remove_container(name: str) -> None:
+def remove_container(name: str) -> bool:
     """Force-remove a container and its push proxy, then wait until it is gone.
+
+    Return True when an authoritative unshared proxy mount was handled.
 
     If another 'docker rm -f' is already in flight (e.g. the previous session's
     EXIT trap), this still blocks until the container has fully disappeared so
@@ -2207,9 +2224,11 @@ def remove_container(name: str) -> None:
     """
     from pm_core.push_proxy import (
         stop_push_proxy, capture_unshared_proxy, release_captured_unshared_proxy,
+        defer_unshared_release,
     )
     _log.info("remove_container: name=%s", name)
     proxy = capture_unshared_proxy(name)
+    pending = defer_unshared_release(proxy, name) if proxy else None
     _run_runtime("rm", "-f", name, check=False, timeout=30)
     # Wait for the container to be fully gone.  When another rm is already in
     # flight the daemon returns "removal already in progress" and our rm returns
@@ -2233,10 +2252,11 @@ def remove_container(name: str) -> None:
     # Release the push proxy only after the container is gone.  Failed
     # removal must leave the surviving container's push access intact.
     if proxy:
-        release_captured_unshared_proxy(proxy)
-        if proxy[0] == name:
-            return  # never follow a guarded release with an unguarded socket unlink
+        if release_captured_unshared_proxy(proxy):
+            pending.unlink(missing_ok=True)
+        return True  # the actual mount is authoritative, not a reusable runtime name
     stop_push_proxy(name)
+    return False
 
 
 def containers_for_pr(session_tag: str, pr_id: str) -> set[str] | None:

@@ -709,6 +709,9 @@ def start_push_proxy(container_name: str, workdir: str,
     # socket can be found after a TUI restart without a registry.
     sock_dir = os.path.join(tempfile.gettempdir(),
                             f"{_SOCKET_DIR_PREFIX}{container_name}")
+    if os.path.isdir(sock_dir) and unshared_proxy_in_use(os.path.join(sock_dir, "push.sock")):
+        from pm_core.container import ContainerError
+        raise ContainerError(f"Push proxy directory for '{container_name}' is still mounted by another allocation")
     os.makedirs(sock_dir, exist_ok=True)
     sock_path = os.path.join(sock_dir, "push.sock")
     # Remove stale socket before spawning (see above for why we handle
@@ -916,20 +919,19 @@ def release_proxy_if_unused(session_tag: str, pr_id: str,
         return existed
 
 
-def capture_unshared_proxy(name: str) -> tuple[str, str, tuple[int, int, int], str] | None:
-    """Find a renamed allocation's actual per-container socket before removal.
-
-    Only a managed container's expected proxy mount is authoritative. Capture
-    the socket generation so a new allocation using the original name cannot
-    lose its replacement proxy during delayed cleanup.
-    """
+def mounted_unshared_proxy(name: str) -> tuple[str, str, str] | None:
+    """Resolve the authoritative unshared mount, even when its socket is absent."""
     from pm_core import container as cm
     try:
         result = cm._run_runtime("inspect", name, check=False, timeout=10)
         if result.returncode != 0:
-            return None
+            if cm._container_absent(result.stderr or ""):
+                return None
+            raise cm.ContainerError(f"Cannot inspect mounted push proxy for '{name}'")
         rows = json.loads(result.stdout)
-        info = rows[0] if isinstance(rows, list) and rows else {}
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+            raise ValueError("incomplete container mount inspection")
+        info = rows[0]
         labels = (info.get("Config") or {}).get("Labels") or {}
         if labels.get(cm.LABEL_MANAGED) != "1":
             return None
@@ -941,37 +943,183 @@ def capture_unshared_proxy(name: str) -> tuple[str, str, tuple[int, int, int], s
                     or not source.name.startswith(_SOCKET_DIR_PREFIX + cm.CONTAINER_PREFIX)):
                 continue
             path = str(source / "push.sock")
-            stat = os.stat(path)
             original_name = source.name[len(_SOCKET_DIR_PREFIX):]
             current_name = (info.get("Name") or name).lstrip("/")
-            return original_name, path, (stat.st_dev, stat.st_ino, stat.st_ctime_ns), current_name
-    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError, AttributeError):
-        return None
+            return original_name, path, current_name
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError, AttributeError) as exc:
+        raise cm.ContainerError(f"Cannot inspect mounted push proxy for '{name}': {exc}") from exc
     return None
 
 
+def capture_unshared_proxy(name: str) -> tuple[str, str, tuple[int, int, int], str] | None:
+    """Capture the mounted socket generation before deleting its container."""
+    mount = mounted_unshared_proxy(name)
+    if mount is None:
+        return None
+    original, path, current = mount
+    try:
+        stat = os.stat(path)
+        identity = (stat.st_dev, stat.st_ino, stat.st_ctime_ns)
+    except FileNotFoundError:
+        identity = (0, 0, 0)  # mount is authoritative even without a socket
+    return original, path, identity, current
+
+
+def repair_unshared_proxy(name: str, workdir: str, allowed_branch: str) -> str:
+    """Repair the socket actually mounted by an existing allocation."""
+    from pm_core import container as cm
+    mount = mounted_unshared_proxy(name)
+    if mount is None:
+        raise cm.ContainerError(f"Cannot verify mounted push proxy for '{name}'")
+    original, path, current = mount
+    guard = (cm.launch_lock(original, timeout=0) if original != current
+             else contextlib.nullcontext(True))
+    with guard as locked:
+        if not locked:
+            raise cm.ContainerError(f"Push proxy owner '{original}' is being launched")
+        if not proxy_is_alive(path):
+            if original != current and cm.current_container_id(original) != "":
+                raise cm.ContainerError(f"Cannot repair another allocation's proxy '{original}'")
+            _start_proxy_subprocess(path, workdir, allowed_branch)
+        return path
+
+
+def _unshared_release_path(proxy) -> Path:
+    from pm_core import container as cm, container_reaper
+    key = hashlib.sha256(json.dumps(
+        [container_reaper._runtime_domain(), proxy], sort_keys=True).encode()).hexdigest()
+    return cm.container_state_dir() / "proxy-releases" / f"{key}.json"
+
+
+def defer_unshared_release(proxy, name: str = "") -> Path:
+    """Persist socket identity before attempting post-removal cleanup."""
+    from pm_core import container_reaper
+    path = _unshared_release_path(proxy)
+    labels = {}
+    if name:
+        from pm_core import container as cm
+        inspected = cm._run_runtime("inspect", name, check=False, timeout=10)
+        if inspected.returncode != 0:
+            raise cm.ContainerError(f"Cannot record proxy ownership for '{name}'")
+        labels = (json.loads(inspected.stdout)[0].get("Config") or {}).get("Labels") or {}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    import tempfile
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".release-")
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump({"proxy": proxy, "runtime_domain": container_reaper._runtime_domain(),
+                       "session_tag": labels.get("pm.session_tag"),
+                       "pr_id": labels.get("pm.pr_id")}, stream)
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    return path
+
+
+def retry_unshared_releases(scope, failures: dict[str, str]) -> list[str]:
+    """Retry only captured, domain-bound releases; never sweep arbitrary sockets."""
+    from pm_core import container as cm, container_reaper
+    domain = container_reaper._runtime_domain()
+    released = []
+    if domain is None:
+        return released
+    for record in (cm.container_state_dir() / "proxy-releases").glob("*.json"):
+        key = f"unshared {record.stem}"
+        try:
+            data = json.loads(record.read_text())
+            if data.get("runtime_domain") != domain:
+                continue
+            original, path, identity, current = data["proxy"]
+            parsed = cm.parse_container_name(original)
+            if scope.names is not None and not {original, current} & scope.names:
+                continue
+            tag = data.get("session_tag") or (parsed.session_tag if parsed else None)
+            pr_id = data.get("pr_id") or (parsed.pr_id() if parsed else None)
+            if scope.session_tag and tag != scope.session_tag:
+                continue
+            if scope.pr_id and pr_id != scope.pr_id:
+                continue
+            with cm.launch_lock(current, timeout=0) as locked:
+                if not locked:
+                    failures[f"push proxy {key}"] = "unshared proxy cleanup deferred: owner lock busy"
+                    continue
+                # Even if the socket was replaced, never inspect/delete by a
+                # stale name without checking the captured socket generation.
+                try:
+                    stat = os.stat(path)
+                    same = (stat.st_dev, stat.st_ino, stat.st_ctime_ns) == tuple(identity)
+                except FileNotFoundError:
+                    same = False
+                if same:
+                    owner = cm.current_container_id(current)
+                    if owner is None:
+                        raise cm.ContainerError("unshared proxy cleanup deferred: owner identity unknown")
+                    if owner:
+                        continue
+                    if not release_captured_unshared_proxy((original, path, tuple(identity), current)):
+                        failures[f"push proxy {key}"] = "unshared proxy cleanup deferred: another owner or launch remains"
+                        continue
+                record.unlink(missing_ok=True)
+                released.append(key)
+        except Exception as exc:
+            failures[f"push proxy {key}"] = str(exc)
+    return released
+
+
+def unshared_proxy_in_use(path: str) -> bool:
+    """A renamed allocation may still mount another name's socket directory."""
+    from pm_core import container as cm
+    listing = cm._run_runtime("ps", "-aq", check=False, timeout=30)
+    if listing.returncode != 0:
+        raise cm.ContainerError("Cannot inventory mounted push proxy users")
+    ids = listing.stdout.split()
+    if not ids:
+        return False
+    inspected = cm._run_runtime("inspect", "--format", "{{json .Mounts}}", *ids,
+                                check=False, timeout=60)
+    rows = inspected.stdout.splitlines()
+    if inspected.returncode != 0 or len(rows) != len(ids):
+        raise cm.ContainerError("Cannot inspect mounted push proxy users")
+    directory = os.path.realpath(str(Path(path).parent))
+    try:
+        for row in rows:
+            mounts = json.loads(row)
+            if not isinstance(mounts, list):
+                raise ValueError("invalid mounts")
+            if any(os.path.realpath(mount.get("Source", "")) == directory
+                   for mount in mounts):
+                return True
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise cm.ContainerError("Cannot inspect mounted push proxy users") from exc
+    return False
+
+
 def release_captured_unshared_proxy(
-        proxy: tuple[str, str, tuple[int, int, int], str]) -> None:
+        proxy: tuple[str, str, tuple[int, int, int], str]) -> bool:
     """Release a captured mount without stealing its original name's proxy."""
     from pm_core import container as cm
     original_name, path, identity, current_name = proxy
     if original_name == current_name:
-        # The caller already holds this allocation's launch lock.
+        # The caller already holds this allocation's launch lock. Its socket
+        # may nevertheless remain mounted by a previously renamed allocation.
+        if unshared_proxy_in_use(path):
+            return False
         _kill_proxy_socket(path, expected_identity=identity)
-        return
+        return True
     # Rename gives the old pathname a second potential owner. Serialize with
     # launch of the original name, and do not trust a socket captured after a
     # replacement has already published it. Never wait while holding the other
     # allocation's lock (two renamed allocations could otherwise deadlock).
     with cm.launch_lock(original_name, timeout=0) as locked:
         if not locked:
-            return
+            return False
         current = cm.current_container_id(original_name)
         if current is None:
             raise cm.ContainerError(f"Cannot verify proxy owner '{original_name}' after removal")
-        if current:
-            return
+        if current or unshared_proxy_in_use(path):
+            return False
         _kill_proxy_socket(path, expected_identity=identity)
+        return True
 
 
 def stop_push_proxy(container_name: str) -> None:
@@ -1002,7 +1150,7 @@ def stop_push_proxy(container_name: str) -> None:
         own_sock = os.path.join(tempfile.gettempdir(),
                                 f"{_SOCKET_DIR_PREFIX}{container_name}",
                                 "push.sock")
-        if os.path.exists(own_sock):
+        if os.path.exists(own_sock) and not unshared_proxy_in_use(own_sock):
             _kill_proxy_socket(own_sock)
         return
 
@@ -1023,7 +1171,8 @@ def stop_push_proxy(container_name: str) -> None:
     sock_path = os.path.join(tempfile.gettempdir(),
                              f"{_SOCKET_DIR_PREFIX}{key}",
                              "push.sock")
-    _kill_proxy_socket(sock_path)
+    if not unshared_proxy_in_use(sock_path):
+        _kill_proxy_socket(sock_path)
 
 
 def stop_all_proxies() -> None:

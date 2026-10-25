@@ -535,7 +535,8 @@ class TestCreateContainer:
             extra_ro_mounts={Path("/repo"): "/repo"},
         )
 
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert "/repo:/repo:ro" in args_str
 
     @patch("pm_core.container.image_exists", return_value=True)
@@ -552,7 +553,8 @@ class TestCreateContainer:
             extra_rw_mounts={Path("/scratch"): "/scratch"},
         )
 
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert "/scratch:/scratch" in args_str
         # Should NOT have :ro suffix
         assert "/scratch:/scratch:ro" not in args_str
@@ -571,7 +573,8 @@ class TestCreateContainer:
                 workdir=Path("/w"),
             )
 
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert "ANTHROPIC_API_KEY=sk-test" in args_str
         assert "CUSTOM_VAR=custom_val" in args_str
 
@@ -589,7 +592,8 @@ class TestCreateContainer:
              patch.object(Path, "exists", return_value=True):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert f"/home/user/.claude:{_CONTAINER_HOME}/.claude" in args_str
         # Should NOT be read-only
         assert f"/home/user/.claude:{_CONTAINER_HOME}/.claude:ro" not in args_str
@@ -617,7 +621,8 @@ class TestCreateContainer:
              patch.object(Path, "exists", return_value=True):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         # Hooks dir bind-mount: host ~/.pm/hooks → $CONTAINER_HOME/.pm/hooks
         assert f"/home/user/.pm/hooks:{_CONTAINER_HOME}/.pm/hooks" in args_str
         # Standalone receiver bind-mounted at the same absolute host path,
@@ -640,7 +645,8 @@ class TestCreateContainer:
             create_container(name="test", config=config, workdir=Path("/w"))
 
         # .claude.json should NOT be in the docker run args (no bind mount)
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert f"/home/user/.claude.json:{_CONTAINER_HOME}/.claude.json" not in args_str
         # Instead it should be copied via docker cp (second call after run)
         all_calls = mock_docker.call_args_list
@@ -663,7 +669,8 @@ class TestCreateContainer:
              patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert f"{fake_bin}:/usr/local/bin/claude:ro" in args_str
 
     @patch("pm_core.container.build_image")
@@ -733,7 +740,8 @@ class TestCreateContainer:
 
         assert cid == "id"
         # Should not contain /usr/local/bin/claude mount
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert "/usr/local/bin/claude" not in args_str
 
 
@@ -1178,7 +1186,8 @@ class TestCreateContainerPushProxy:
             "test", "/w", "pm/pr-123",
             session_tag=None, pr_id=None,
         )
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert "/tmp/pm-push-proxy-test:/run/pm-push-proxy" in args_str
 
     @patch("pm_core.container.image_exists", return_value=True)
@@ -1194,7 +1203,8 @@ class TestCreateContainerPushProxy:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert "push-proxy" not in args_str
 
     @patch("pm_core.container.image_exists", return_value=True)

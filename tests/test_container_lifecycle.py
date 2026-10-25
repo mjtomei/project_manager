@@ -906,7 +906,7 @@ class TestProxyRelease:
         monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw: _cp(125, err=stderr))
         stopped = MagicMock()
         monkeypatch.setattr(push_proxy, "stop_push_proxy", stopped)
-        with pytest.raises(cm.ContainerError, match="could not confirm removal"):
+        with pytest.raises(cm.ContainerError, match="Cannot inspect mounted push proxy"):
             cm.remove_container("pm-repo-ab12-review-pr-aaaa")
         stopped.assert_not_called()
 
@@ -926,7 +926,7 @@ class TestProxyRelease:
 
     def test_failed_removal_does_not_release_proxy(self, monkeypatch):
         from pm_core import push_proxy
-        monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw: _cp())
+        monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw: _cp(out='[{"Config":{"Labels":{}}}]'))
         ticks = iter([0, 11])
         monkeypatch.setattr(cm.time, "monotonic", lambda: next(ticks))
         stopped = MagicMock()

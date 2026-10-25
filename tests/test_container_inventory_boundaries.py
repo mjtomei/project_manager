@@ -46,6 +46,8 @@ def test_renamed_unshared_proxy_is_released_after_container_removal(monkeypatch,
 
     def runtime(*args, **kw):
         nonlocal removed
+        if args[0] == "ps":
+            return subprocess.CompletedProcess(args, 0, "", "")
         if args[0] == "rm":
             removed = True
             return subprocess.CompletedProcess(args, 0, "", "")

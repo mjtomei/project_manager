@@ -33,6 +33,7 @@ def test_delayed_exit_trap_preserves_restarted_container(tmp_path, monkeypatch, 
         f'if [ "$1" = ps ] && [ ! -f {shlex.quote(str(removed))} ]; then printf "%s\\n" {name}; fi\n'
         f'if [ "$1" = inspect ]; then\n'
         f'  if [ -f {shlex.quote(str(removed))} ]; then printf "No such container\\n" >&2; exit 1; fi\n'
+        '  if [ "$2" != "--format" ] && [ "$2" != "-f" ]; then printf \'[{"Config":{"Labels":{}}}]\\n\'; exit 0; fi\n'
         f'  case "$3" in *Id*State*) printf \'{name}\\texact-id\\ttrue\\trunning\\t{{}}\\n\';;\n'
         f'  *) printf "exact-id\\n";; esac\nfi\n')
     runtime.chmod(0o755)

@@ -12370,6 +12370,26 @@ prs:
       required.'
     created_at: '2026-10-25T23:07:11Z'
     last_edited: '2026-10-25T23:07:11Z'
+  - id: note-787590a
+    text: 'Review-loop 6427 i15 (main and inherited helper chatgpt/gpt-6-astra-high):
+      fixed rename-lost attachment leases across reuse/reap/preflight/restart; unshared
+      cleanup name fallback unlinking another allocation proxy; reuse repairing the
+      wrong derived socket; and failed/deferred socket cleanup becoming unretirable
+      after container deletion. Actual mounts now govern reuse/removal; surviving
+      mount users and fresh original-name launches are checked; captured unshared
+      releases persist before removal with runtime/socket identity and label scope
+      for retry. Existing ownership/lock/reaper architecture retained; impl and QA
+      specs clarified. Pre-fix reproductions: 5 lease failures/1 control and 4 proxy
+      failures. Integrated core 498 passed; final lease/launcher integration 155 passed;
+      final sanitized full suite 3760 passed, 5 existing-class warnings (3 AsyncMock,
+      2 Click deprecations). Corrected runtime fixture assumptions and stale sweep
+      mock signature; intermediate failed logs preserved. Evidence and complete per-file
+      notes: /pm-captures/review-6427-i15/per-file.md; final suite full-suite-final.log
+      there. Existing project.yaml handoff/model/manual-gate edits preserved outside
+      source commit. No real-container QA claim or waiver; next review, outstanding
+      runtime scenarios and independent sign-off remain required.'
+    created_at: '2026-10-25T23:37:07Z'
+    last_edited: '2026-10-25T23:37:07Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

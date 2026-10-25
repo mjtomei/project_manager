@@ -80,8 +80,10 @@ removed by automatic or scoped cleanup) when any of:
    hand off its own allocation by supplying the previously captured ID/generation,
    which must still match under the lock. Check the lease and capture that
    handoff before recovery can restart or recreate an allocation, since recovery
-   itself may advance its generation. Retention inspection and marker writes
-   use this lock too.
+   itself may advance its generation. The attachment lease also follows the
+   runtime-domain/container-ID generation timestamp across runtime renames;
+   both candidate selection and locked deletion, reuse, preflight, and ordinary
+   restart honor it. Retention inspection and marker writes use this lock too.
 
 Otherwise it is a candidate with a reason: `PR <id> is merged|closed`,
 `tmux session <s> gone`, `superseded QA run`, or `no owning pane`.
@@ -161,6 +163,15 @@ retryable cleanup rather than permission to delete by name.
   For renamed allocations, cleanup also takes the original name's launch lock
   non-blockingly and checks for a surviving replacement before unlinking that
   mount's socket; capturing the current socket inode alone is not ownership.
+  Reuse repairs an unshared proxy at its actual mounted directory, not the
+  renamed container's derived path. That mount is also authoritative on removal:
+  no additional name-based stop may unlink another allocation's proxy. Cleanup
+  checks all surviving mount users before unlinking, including renamed containers
+  sharing an originally unshared directory. Fresh launches refuse to replace a
+  directory still mounted by another allocation; name-based preflight release
+  uses the same surviving-user check. Captured unshared socket releases are
+  durable and runtime-domain/socket-generation bound, so failed or deferred cleanup
+  remains retryable after the container disappears without touching a replacement.
   Failed shared-proxy socket removal preserves its owner record for retry; proxy
   sweep failures and unavailable user inventories appear in CLI/TUI outcomes and
   persisted diagnostics, and successful retry clears those failures.

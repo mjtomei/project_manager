@@ -274,6 +274,10 @@ class TestPushProxyProtocol:
 
 
 class TestPushProxyLifecycle:
+    @pytest.fixture(autouse=True)
+    def no_container_runtime(self, monkeypatch):
+        monkeypatch.setattr("pm_core.push_proxy.unshared_proxy_in_use", lambda path: False)
+
     def test_start_and_stop(self):
         with patch("pm_core.push_proxy.PushProxy.start"), \
              patch("pm_core.push_proxy.PushProxy.stop"):

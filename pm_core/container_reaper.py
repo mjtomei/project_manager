@@ -820,7 +820,7 @@ def _decide(info: ContainerInfo, scope: Scope, cache: _PaneCache,
     if owners:
         return Decision(info, "keep", f"owned by live pane {', '.join(owners)}")
     try:
-        attaching = container_mod.recent_launch(info.name, LAUNCH_GRACE)
+        attaching = container_mod.recent_launch(info.name, LAUNCH_GRACE, info.id)
     except OSError:
         return Decision(info, "keep", "launch lease unreadable — ownership unknown")
     if attaching or info.created is not None and now - info.created < LAUNCH_GRACE:
@@ -882,7 +882,7 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
                 return False, "skipped: container restarted since owner release"
         if not d.released:
             try:
-                if container_mod.recent_launch(info.name, LAUNCH_GRACE):
+                if container_mod.recent_launch(info.name, LAUNCH_GRACE, info.id):
                     return False, "skipped: new owner attaching"
             except OSError:
                 return False, "skipped: launch lease unreadable — ownership unknown"
@@ -952,7 +952,7 @@ def spawn_detached_reap(pr_id: str | None = None,
 
 def _release_unused_proxies(scope: Scope, failures: dict[str, str]) -> list[str]:
     from pm_core import push_proxy
-    released: list[str] = []
+    released = push_proxy.retry_unshared_releases(scope, failures)
     domain = push_proxy.runtime_domain()
     if domain is None:
         return released
