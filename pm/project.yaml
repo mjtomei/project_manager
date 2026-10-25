@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T15:09:19.823820+00:00'
+  updated_at: '2026-10-25T15:55:42.009267+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22977,6 +22977,29 @@ prs:
       Still under the same iteration''s commit range; evidence /pm-captures/review-2ac8-i6/.'
     created_at: '2026-10-25T15:09:19Z'
     last_edited: '2026-10-25T15:09:19Z'
+  - id: note-9075f3b
+    text: 'Review-loop 240e i1 (native recovery after the E2BIG launch): the sign-off
+      return block was appended to the PR-notes block, so fit_prompt shrank the two
+      documents as one and its marker named `pm pr note list` for text that reader
+      does not contain — the silent loss R2/A1 forbids, and the same marker-accuracy
+      class as §7/§12/§20/§23. Reachable when a PR is large in several dimensions
+      at once plus a large agent-authored sign-off reason: a 30 KB reason with 400
+      notes, a 200 KB spec, 400 siblings and 400 deps left only 12,569 of the reason''s
+      30,000 bytes, explained only by the notes marker. Fixed by making the return
+      block a separate fit_prompt block in all four builders (`"signoff_return": (...,
+      "`pm pr show <pr-id>`", "sign-off return")`), placed exactly where the concatenation
+      put it (small prompts and all 488 real PRs x 4 builders hash identically before/after),
+      and `pm pr show` now prints the return record (verdict, hop, reviewed head,
+      reason, original/coerced reason, applied merge, apply error, return integration)
+      so the marker is a real reader. Tests: test_prompt_bounds 117 (2 new tests /
+      5 cases, parametrized over the four builders; all failing-then-passing). Full
+      suite 3486 passed / 1 failed (the documented environmental test_hook_events::test_installer_writes_standalone_receiver
+      with PM_HOST_HOME set; it passes without it) / 1 skipped; origin/master baseline
+      in the same sandbox 3367 passed / the same 1 failure. /pm-captures/review-240e-i0/
+      was absent (the failed E2BIG launch produced no evidence); used /pm-captures/review-2ac8-i6/
+      plus fresh independent sweeps.'
+    created_at: '2026-10-25T15:55:41Z'
+    last_edited: '2026-10-25T15:55:41Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
