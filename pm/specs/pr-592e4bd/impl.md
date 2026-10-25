@@ -1215,3 +1215,13 @@ recorded with item 42.
         own markup parser; fails with the fix reverted,
         `/pm-captures/review-0f64-i5/mutation-checks.log`).  Full suite
         3736 passed, rc 0 (`/pm-captures/review-0f64-i5/full-suite.log`).
+    (j) Review loop 0f64 i6: (d)'s PR Routes lines ignored `PM_MODEL`,
+        which beats every PR override, so with
+        `PM_MODEL=provider:<route>` a PR whose override is a plain model
+        read "pr-b (all types) route=<route>", as if its override chose
+        the route.  With `PM_MODEL` set no PR line is listed; the per-type
+        lines already show its route.
+        `test_model_show_pr_routes_defer_to_pm_model` (fails with the
+        check removed, `/pm-captures/review-0f64-i6/mutation-checks.log`).
+        Full suite 3737 passed, rc 0
+        (`/pm-captures/review-0f64-i6/full-suite.log`).

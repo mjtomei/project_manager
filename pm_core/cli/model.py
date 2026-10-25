@@ -1,5 +1,7 @@
 """CLI commands for model configuration."""
 
+import os
+
 import click
 
 from pm_core.cli.helpers import state_root
@@ -93,8 +95,10 @@ def model_show():
     # too; resolved per type as its launches do (one line per distinct
     # route, naming the types it covers).  Only the types the override
     # decides: the others (and the project-wide watcher) follow the
-    # project lines above.
-    for pr in (data.get("prs") or []) if resolvable else ():
+    # project lines above.  PM_MODEL beats every PR override, so then no
+    # override decides anything (the lines above already show its route).
+    pr_routes = resolvable and not os.environ.get("PM_MODEL")
+    for pr in (data.get("prs") or []) if pr_routes else ():
         if not (pr.get("model") or isinstance(pr.get("session_models"), dict)):
             continue
         routes: dict[str, list[str]] = {}

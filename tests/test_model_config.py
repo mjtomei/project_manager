@@ -804,6 +804,32 @@ def test_model_show_pr_routes_never_count_the_project_watcher(tmp_path,
     assert not any("watcher" in r for r in routes), routes
 
 
+def test_model_show_pr_routes_defer_to_pm_model(tmp_path, monkeypatch):
+    """Review 0f64 i6: with PM_MODEL set (it beats every PR override), the
+    PR Routes lines still credited each PR override with PM_MODEL's route,
+    so a PR whose override is a plain model read "pr-b (all types)
+    route=claude-work"."""
+    from click.testing import CliRunner
+    from pm_core import store, worker_route
+    from pm_core.cli import model as model_cli
+    monkeypatch.setenv("PM_MODEL", "provider:claude-work")
+    monkeypatch.setattr(worker_route, "describe",
+                        lambda res, **kw: f"route={res.provider}")
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master"},
+                "prs": [{"id": "pr-a", "model": "provider:other"},
+                        {"id": "pr-b", "model": "opus",
+                         "session_models": {"qa_scenario": "haiku"}}]},
+               tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    result = CliRunner().invoke(model_cli.model, ["show"])
+    assert result.exit_code == 0, result.output
+    routes = result.output.split("Routes:\n", 1)[1].splitlines()
+    assert any(r.split() == ["impl", "route=claude-work"] for r in routes)
+    assert not any(r.startswith(("  pr-a ", "  pr-b ")) for r in routes), \
+        routes
+
+
 @pytest.mark.parametrize("bad", [5, ["provider:claude-work"], {"x": 1}])
 def test_model_show_survives_a_non_string_pr_model(tmp_path, monkeypatch,
                                                    bad):
