@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T19:45:04.869805+00:00'
+  updated_at: '2026-10-25T20:44:01.760101+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33741,6 +33741,29 @@ prs:
       False). Earlier live probes used a model with no [1m].'
     created_at: '2026-10-25T19:45:04Z'
     last_edited: '2026-10-25T19:45:04Z'
+  - id: note-30008b0
+    text: 'QA S60 (2026-10-25, container mode, two PRs, real work route via recording
+      relay; captures /pm-captures/scenarios/60, REPORT.md): RQ42 held live on bd30befc.
+      A (provider:claude-work-relay) impl/review/sign-off/refiner/worker containers
+      and host Scenario 0: every child (general, Explore, fable-helper frontmatter,
+      explicit model fable) requested work/claude-opus-5-5, forwarded 200 with one
+      org hash (positive control a95ea673), 0 refused; nothing of A reached the main
+      stub. C (claude-opus-5-5) impl/review/QA containers had no /run/pm-route mount
+      (S58 gap closed), C pin, and every C child named claude-opus-5-5 (0 fable, 0
+      haiku). Bridge kill during an in-flight A worker child: route watch restarted
+      it (same socket path, new pid/birth) and resumed the ECONNRESET worker; both
+      QA PASS FINALIZE_DONE; push proxies unchanged. z d fresh review: remove before
+      create, new mounted container, --session-id without --resume; sign-off mounted
+      with ensure+pin. pm model show via= (0db93125) correct and byte-identical mid-run;
+      0 secrets. Spec-only commit 0e13c5f8 (needs independent review): the "no relay
+      request contains C id" Then failed as written because A own review/sign-off/s0
+      quote pm pr list (21 A-session requests); check by session. Also: the pinned
+      Agent tool has no model param, so real parents drop model fable unless told;
+      z d right after i is refused by the TUI busy guard; stub-routed container sessions
+      run in auto mode and need a classifier reply. Env: Chromium smoke RUN dropped
+      from the base image (as S53/S55/S58).'
+    created_at: '2026-10-25T20:44:01Z'
+    last_edited: '2026-10-25T20:44:01Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
