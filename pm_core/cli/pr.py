@@ -555,7 +555,11 @@ def _note_line(n: dict) -> str:
     """
     ts = n.get("created_at", "")
     ts_str = f" ({ts})" if ts else ""
-    return f"  {n.get('id', '?')}{ts_str}: {n['text']}"
+    # Tolerate a note with no ``text`` as well as no ``id`` (hand-edited or
+    # legacy project.yaml): both readers are the on-demand fallback for an
+    # abbreviated PR-notes block, so one malformed note must not raise and hide
+    # every note.
+    return f"  {n.get('id', '?')}{ts_str}: {n.get('text', '')}"
 
 
 @pr.command("show")

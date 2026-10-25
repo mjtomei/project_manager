@@ -614,8 +614,16 @@ def plan_deps():
             + bounded_join(
                 omitted_plans, lambda p: f"  - {p}",
                 max_items=_PLAN_LIST_MAX, max_bytes=_PLAN_LIST_BUDGET,
+                # `pm plan list` prints ids/names/status but *not* file paths,
+                # and plan files do not follow one convention (`pm/bugs.md`,
+                # `pm/plans/watchers.md`, `pm/plans/plan-<id>.md`, ...), so the
+                # project.yaml — which records each plan's `file:` — is the
+                # reader that actually yields the omitted paths.  This builder
+                # runs on the host, so the absolute path is readable.
                 omitted_note=lambda n: (
-                    f"  ... (+{n} more plan files; run `pm plan list`)"))
+                    f"  ... (+{n} more plan files; run `pm plan list` for "
+                    f"their ids and read each plan's `file:` in "
+                    f"`{root / 'project.yaml'}`)"))
             + "\n)\n")
 
     notes_block = notes.notes_section(root)

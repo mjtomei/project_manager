@@ -181,7 +181,11 @@ def _pr_note_full_line(n: dict) -> str:
     """
     ts = n.get("created_at", "")
     ts_str = f" ({ts})" if ts else ""
-    return f"- {n['text']}{ts_str}"
+    # Tolerate a note with no ``text`` (hand-edited or legacy project.yaml),
+    # the same shape ``_format_pr_notes`` already tolerates for ``id``: this
+    # function renders *every* note (including in ``_render_pr_notes``), so a
+    # direct index would crash the whole prompt builder on one bad note.
+    return f"- {n.get('text', '')}{ts_str}"
 
 
 def _render_pr_notes(notes: list[dict]) -> str:

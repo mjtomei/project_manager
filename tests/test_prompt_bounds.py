@@ -291,6 +291,26 @@ class TestPrNotesBounding:
         assert "abbreviated" in block
         assert notes[-1]["text"] not in block
 
+    def test_note_without_text_does_not_crash_the_builder(self):
+        """A hand-edited note with no ``text`` must not abort prompt
+        generation.
+
+        ``_format_pr_notes`` already tolerates a note with no ``id`` (the
+        shape the i3 fix made the on-demand readers accept); the shared
+        full-line renderer indexed ``n['text']`` directly, so one such note
+        raised KeyError in ``_render_pr_notes`` before any prompt existed.
+        """
+        pr = _pr(notes=[
+            {"id": "n1", "text": "kept note",
+             "created_at": "2026-01-01T00:00:00Z"},
+            {"id": "n2", "created_at": "2026-01-02T00:00:00Z"},  # no text
+        ])
+        block = prompt_gen._format_pr_notes(pr)
+        assert "kept note" in block
+        # The text-less note still renders (as an empty bullet), so the
+        # session sees that a note exists rather than losing it silently.
+        assert "(2026-01-02T00:00:00Z)" in block
+
 
 class TestReviewPromptBounding:
     def test_many_siblings_and_notes(self):
@@ -1382,6 +1402,50 @@ print("ok")
         # ... and the file is gone once the process has exited.
         assert not seen["path"].exists()
 
+    def test_launch_claude_retry_over_limit_bootstraps_then_removes_file(
+            self, tmp_path):
+        """Spec §4: the retry-on-failure path (failed resume -> fresh session
+        with the same prompt) must apply the guard too.
+
+        The first (resume) launch passes no prompt at all; the retry passes the
+        full prompt, so an unguarded retry would hand claude an oversized argv
+        entry even though the first launch was safe.
+        """
+        huge = "x" * (PROMPT_ARG_LIMIT + 1)
+        save_session(tmp_path, "key", "existing-session-id")
+        seen = []
+        files_seen = []
+
+        def fake_run(cmd, **kwargs):
+            files = list((tmp_path / "pm" / "prompts").glob("pm_prompt_*.txt"))
+            files_seen.append([(f.name, f.read_text()) for f in files])
+            seen.append(cmd)
+            # First launch (resume) fails -> retry with a fresh session.
+            return MagicMock(returncode=1 if len(seen) == 1 else 0)
+
+        patches = self._launch_patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+                patch("pm_core.claude_launcher.subprocess.run",
+                      side_effect=fake_run):
+            rc = launch_claude(huge, "key", tmp_path, cwd=str(tmp_path),
+                               resume=True)
+        assert rc == 0
+        assert len(seen) == 2
+        # The resume launch sends no prompt and writes no file.
+        assert "--resume" in seen[0] and "existing-session-id" in seen[0]
+        assert files_seen[0] == []
+        # The retry is a fresh session whose argv is a short bootstrap.
+        assert "--session-id" in seen[1] and "--resume" not in seen[1]
+        assert all(prompt_bytes(a) < 1000 for a in seen[1]
+                   if isinstance(a, str))
+        assert huge not in seen[1]
+        assert any("Read that file" in a for a in seen[1]
+                   if isinstance(a, str))
+        # ... and the complete prompt was on disk for the retry, then removed.
+        assert len(files_seen[1]) == 1
+        assert files_seen[1][0][1] == huge
+        assert not list((tmp_path / "pm" / "prompts").glob("pm_prompt_*.txt"))
+
     def test_launch_claude_print_over_limit_bootstraps_then_removes_file(
             self, tmp_path):
         huge = "x" * (PROMPT_ARG_LIMIT + 1)
@@ -1636,9 +1700,22 @@ class TestPlanDepsAndFixBounding:
             result = CliRunner().invoke(cli, ["-C", str(root), "plan", "deps"])
         assert result.exit_code == 0, result.output
         assert prompt_bytes(result.output) <= PROMPT_ARG_LIMIT + 300
-        # Both halves are bounded, and the omitted-file marker names a reader.
+        # Both halves are bounded, and the omitted-file marker names a reader
+        # that actually yields the omitted *paths*: `pm plan list` prints ids
+        # and names only, and plan files have no single path convention
+        # (`pm/bugs.md`, `pm/plans/watchers.md`, ...), so the marker also names
+        # project.yaml, which records each plan's `file:`.
         _assert_bounded(result.output, "Plan files omitted to fit",
-                        "run `pm plan list`")
+                        "run `pm plan list`", "project.yaml")
+        project_yaml = root / "project.yaml"
+        assert str(project_yaml) in result.output
+        assert project_yaml.is_file()
+        # The plans the prompt dropped are exactly the ones whose `file:`
+        # project.yaml records, so the named reader contains their paths.
+        import yaml
+        plans = yaml.safe_load(project_yaml.read_text())["plans"]
+        assert len(plans) == 400
+        assert all((root / p["file"]).is_file() for p in plans)
 
     def test_plan_deps_description_note_describes_the_kept_lines(self, tmp_path):
         """The "Descriptions above are abbreviated" note must describe the
@@ -1729,6 +1806,24 @@ class TestPrShowCommand:
             result = CliRunner().invoke(cli, ["-C", str(root)] + argv)
             assert result.exit_code == 0, (argv, result.output)
             assert "note with no id" in result.output
+
+    def test_note_without_text_does_not_crash_the_readers(self, tmp_path):
+        """The same tolerance for a missing ``text`` as for a missing ``id``.
+
+        Both readers render every note in one loop, so a single text-less
+        (hand-edited/legacy) note raised KeyError and hid the notes the
+        PR-notes omission marker points at.
+        """
+        root = _make_state(tmp_path, notes=[
+            {"id": "n1", "text": "has text",
+             "created_at": "2026-01-01T00:00:00Z"},
+            {"id": "n2", "created_at": "2026-01-02T00:00:00Z"},  # no text
+        ])
+        for argv in (["pr", "show", "pr-001"], ["pr", "note", "list", "pr-001"]):
+            result = CliRunner().invoke(cli, ["-C", str(root)] + argv)
+            assert result.exit_code == 0, (argv, result.output)
+            assert "has text" in result.output
+            assert "n2 (2026-01-02T00:00:00Z): " in result.output
 
     def test_prints_signoff_return(self, tmp_path):
         """`pm pr show` is the reader for a cut sign-off return block."""
