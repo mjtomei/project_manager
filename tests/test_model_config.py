@@ -804,6 +804,38 @@ def test_model_show_pr_routes_never_count_the_project_watcher(tmp_path,
     assert not any("watcher" in r for r in routes), routes
 
 
+def test_model_show_pr_route_line_is_not_split_by_project_effort(
+        tmp_path, monkeypatch):
+    """S55: a project session_effort (qa_scenario/qa_concretize high, the
+    production setup) split a PR routed for every type into two Routes
+    lines by effort, so neither said "all types".  One line per route; the
+    efforts that differ are named on it."""
+    from click.testing import CliRunner
+    from pm_core import store, worker_route
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    monkeypatch.setattr(
+        worker_route, "describe",
+        lambda res, **kw: f"route={res.provider} effort={res.effort or '(default)'}")
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master",
+                            "model_config": {"session_effort": {
+                                "qa_scenario": "high",
+                                "qa_concretize": "high"}}},
+                "prs": [{"id": "pr-a", "model": "provider:claude-work"},
+                        {"id": "pr-b", "model": "opus",
+                         "session_models": {"signoff": "provider:claude-work"}}]},
+               tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    out = CliRunner().invoke(model_cli.model, ["show"]).output
+    routes = out.split("Routes:\n", 1)[1].splitlines()
+    a = [r for r in routes if r.startswith("  pr-a ")]
+    assert a == ["  pr-a (all types) route=claude-work effort=high "
+                 "(qa_scenario, qa_concretize), (default) otherwise"], routes
+    assert [r for r in routes if r.startswith("  pr-b ")] == [
+        "  pr-b (signoff) route=claude-work effort=(default)"], routes
+
+
 def test_model_show_pr_routes_defer_to_pm_model(tmp_path, monkeypatch):
     """Review 0f64 i6: with PM_MODEL set (it beats every PR override), the
     PR Routes lines still credited each PR override with PM_MODEL's route,

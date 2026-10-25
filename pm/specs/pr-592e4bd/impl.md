@@ -1225,3 +1225,15 @@ recorded with item 42.
         check removed, `/pm-captures/review-0f64-i6/mutation-checks.log`).
         Full suite 3737 passed, rc 0
         (`/pm-captures/review-0f64-i6/full-suite.log`).
+    (k) QA S55 (live, container mode): (d) grouped a PR's Routes lines by
+        the whole description, effort included, so a project
+        `session_effort` (qa_scenario/qa_concretize high, the production
+        setup) split a PR routed for every type into two lines, neither
+        "all types".  Lines are now grouped by route without the effort;
+        efforts that differ are named on the line ("effort=high
+        (qa_scenario, qa_concretize), (default) otherwise").
+        `test_model_show_pr_route_line_is_not_split_by_project_effort`
+        (fails with the old grouping,
+        `/pm-captures/scenarios/55/post-fix/tests/mutations.log`).  Full
+        suite 3738 passed, rc 0
+        (`/pm-captures/scenarios/55/post-fix/tests/full-suite.log`).

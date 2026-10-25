@@ -1,5 +1,6 @@
 """CLI commands for model configuration."""
 
+import dataclasses
 import os
 
 import click
@@ -101,7 +102,10 @@ def model_show():
     for pr in (data.get("prs") or []) if pr_routes else ():
         if not (pr.get("model") or isinstance(pr.get("session_models"), dict)):
             continue
-        routes: dict[str, list[str]] = {}
+        # Grouped by route without the effort: a project session_effort
+        # (e.g. qa_scenario high) must not split one route into several
+        # lines, none of them "all types" (S55).
+        routes: dict[str, list[tuple[str, object]]] = {}
         for st in PR_SESSION_TYPES:
             pr_model = get_pr_model_override(pr, st)
             # A non-string PR model (hand-edited) selects no route; it is
@@ -111,11 +115,25 @@ def model_show():
             res = resolve_model_and_provider(
                 st, pr_model=pr_model, project_data=data)
             if res.provider:
-                routes.setdefault(worker_route.describe(res), []).append(st)
-        for desc, types in routes.items():
+                key = worker_route.describe(dataclasses.replace(res, effort=None))
+                routes.setdefault(key, []).append((st, res))
+        for items in routes.values():
+            types = [st for st, _ in items]
             label = ("all types" if len(types) == len(PR_SESSION_TYPES)
                      else ", ".join(types))
-            route_lines.append(f"  {pr.get('id')} ({label}) {desc}")
+            efforts: dict[str, list[str]] = {}
+            for st, res in items:
+                efforts.setdefault(res.effort or "(default)", []).append(st)
+            res = items[0][1]
+            if len(efforts) > 1:
+                common = max(efforts, key=lambda e: len(efforts[e]))
+                summary = ", ".join(f"{e} ({', '.join(sts)})"
+                                    for e, sts in efforts.items()
+                                    if e != common)
+                res = dataclasses.replace(
+                    res, effort=f"{summary}, {common} otherwise")
+            route_lines.append(
+                f"  {pr.get('id')} ({label}) {worker_route.describe(res)}")
     if route_lines:
         click.echo()
         click.echo("Routes:")
