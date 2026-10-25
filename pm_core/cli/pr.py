@@ -1601,6 +1601,15 @@ def pr_signoff_record(pr_id: str):
                        f"Regenerate with `pm pr signoff --fresh {pr_id}`.",
                        err=True)
             raise SystemExit(1)
+        justification = signoff_mod.approval_justification_problem(
+            pr_id, irec, sha)
+        if justification:
+            click.echo(
+                f"PR {pr_id}: cannot record {verdict}: {justification}. "
+                f"Add the pm-signoff-candidate / pm-signoff-evidence / "
+                f"pm-signoff-checks tags to report.html, then re-run "
+                f"`pm pr signoff record {pr_id}`.", err=True)
+            raise SystemExit(1)
 
     # Same earliest-step routing as the driver: a conflicted integration
     # can only go back to implementation.
@@ -1630,17 +1639,26 @@ def pr_signoff_record(pr_id: str):
               help="Record the result on the PR (what a sign-off verdict "
                    "binds to). Run from the base pm directory.")
 @click.option("--apply", "apply_", is_flag=True, default=False,
-              help="Merge a clean base into the PR branch (never the base).")
-def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool):
+              help="Apply a clean/resolved result to the PR branch (never "
+                   "the base) and re-record the applied candidate.")
+@click.option("--resolve/--no-resolve", "resolve", default=True,
+              help="Resolve metadata-only project.yaml conflicts by record "
+                   "id in the isolated candidate (default: yes).")
+def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
+                         resolve: bool):
     """Check integration with the latest base (isolated candidate).
 
     Fetches the configured base branch from the target repository and
     merges the PR HEAD with it in an isolated candidate — the PR worktree
-    and the base branch are untouched — and prints the result.  Read-only
-    by default (the sign-off launch records the check its verdict binds
-    to); ``--record`` stores it on the PR and in ``$CAP/integration.json``.
-    ``--apply`` then merges a *clean* result into the PR branch.  Exits 1
-    when the integration conflicts or the check fails.
+    and the base branch are untouched — and prints the result.  A conflict
+    confined to project.yaml is reconciled by record id (independent
+    additions survive; real field/deletion/ambiguity conflicts do not).
+    Read-only by default (the sign-off launch records the check its verdict
+    binds to); ``--record`` stores it on the PR and in
+    ``$CAP/integration.json``.  ``--apply`` merges a *clean* result, or
+    applies a *resolved* one and verifies the resulting tree, then
+    re-records the applied candidate.  Exits 1 when the integration
+    conflicts or the check fails.
     """
     from pm_core import integration
 
@@ -1648,10 +1666,22 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool):
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
-    if record or apply_:
-        rec = integration.check_integration(root, pr_id, data=data)
+    applied_clean = None
+    if apply_:
+        rec = integration.check_integration(root, pr_id, data=data,
+                                            resolve=resolve)
+        if rec.get("status") == integration.RESOLVED:
+            rec = integration.prepare(root, pr_id, data=data)
+        elif rec.get("status") == integration.CLEAN:
+            applied_clean, err = integration.apply_integration(root, pr_id, rec)
+            if err:
+                click.echo(f"Not applied: {err}", err=True)
+                raise SystemExit(1)
+    elif record:
+        rec = integration.check_integration(root, pr_id, data=data,
+                                            resolve=resolve)
     else:
-        rec = integration.run_check(data, pr_entry, root)
+        rec = integration.run_check(data, pr_entry, root, resolve=resolve)
     click.echo(f"PR {pr_id}: {integration.summary(rec)}")
     click.echo(f"  target: {rec.get('base_branch')} of {rec.get('target_repo')}")
     click.echo(f"  head:   {rec.get('head')}")
@@ -1661,13 +1691,32 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool):
     for label, key in (("conflicts", "conflicts"), ("changed on both sides", "overlap")):
         if rec.get(key):
             click.echo(f"  {label}: {', '.join(rec[key])}")
-    if apply_ and rec.get("status") == integration.CLEAN:
-        merged, err = integration.apply_integration(root, pr_id, rec)
-        if err:
-            click.echo(f"Not applied: {err}", err=True)
-            raise SystemExit(1)
-        click.echo(f"Merged {rec.get('base_branch')}@{rec['base_sha'][:12]} "
-                   f"into the PR branch as {merged[:12]}.")
+    resolution = rec.get("resolution") or {}
+    for entry in resolution.get("paths") or []:
+        click.echo(f"  resolved: {entry.get('path')} (by record id)")
+        for key, label in (("added_ours", "added from PR"),
+                           ("added_theirs", "added from base"),
+                           ("merged_fields", "merged fields"),
+                           ("removed", "removed")):
+            values = entry.get(key) or []
+            if values:
+                click.echo(f"    {label}: {', '.join(map(str, values[:10]))}")
+    for entry in resolution.get("unresolved") or []:
+        click.echo(f"  unresolved: {entry.get('path')}: "
+                   f"{entry.get('conflicts')}", err=True)
+    if applied_clean:
+        click.echo(f"Merged {rec.get('base_branch')}@"
+                   f"{(rec.get('base_sha') or '')[:12]} into the PR branch as "
+                   f"{applied_clean[:12]}.")
+    if resolution.get("applied_merge_sha"):
+        click.echo(f"  applied to the PR branch as "
+                   f"{resolution['applied_merge_sha'][:12]}")
+    if rec.get("apply_error"):
+        click.echo(f"  not applied: {rec['apply_error']}", err=True)
+    if resolution.get("diff_path"):
+        click.echo(f"  resolution delta: {resolution['diff_path']}")
+    for change in (rec.get("base_behavior_changes") or [])[:10]:
+        click.echo(f"  base behaviour: {change}")
     if record or apply_:
         trigger_tui_refresh()
     if rec.get("status") not in integration.MERGEABLE:
@@ -2026,7 +2075,10 @@ def _publish_candidate(data: dict, root: Path, pr_entry: dict,
     from pm_core import integration
     pr_id = pr_entry["id"]
     branch = pr_entry.get("branch", "")
-    cand = integration.compute_candidate(workdir, head, base_sha)
+    # The merge step never resolves anything: the approved candidate was
+    # already resolved at sign-off (and applied to the branch).  Recompute
+    # without resolution and require the exact approved tree.
+    cand = integration.compute_candidate(workdir, head, base_sha, resolve=False)
     if cand.get("status") not in integration.MERGEABLE \
             or cand.get("candidate_tree") != bound["candidate_tree"]:
         _return_to_signoff(

@@ -1,5 +1,7 @@
 """Claude prompt generation for PR work sessions."""
 
+from pathlib import Path
+
 from pm_core import store, notes
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
@@ -414,6 +416,7 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         f"- Target: `{rec.get('base_branch')}` of `{rec.get('target_repo')}`",
         f"- Fetched base revision: `{base_sha or '?'}`",
         f"- PR HEAD checked: `{rec.get('head') or '?'}`",
+        f"- Candidate tree: `{(rec.get('candidate_tree') or '?')[:12]}`",
         f"- Result: **{rec.get('status')}** — {integ.summary(rec)}",
     ]
     if rec.get("merge_base") and base_sha:
@@ -428,9 +431,61 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
     if rec.get("conflicts"):
         lines.append("- Conflicting paths: "
                      + ", ".join(f"`{f}`" for f in rec["conflicts"]))
+    resolution = rec.get("resolution") or {}
+    if resolution:
+        lines.append("")
+        lines.append("**Metadata conflict resolution (pm, by record id):**")
+        for entry in resolution.get("paths") or []:
+            bits = [f"`{entry.get('path')}`"]
+            for key, label in (("added_ours", "added from the PR"),
+                               ("added_theirs", "added from the base"),
+                               ("merged_fields", "merged records"),
+                               ("removed", "removed")):
+                values = entry.get(key) or []
+                if values:
+                    bits.append(f"{label}: "
+                                + ", ".join(f"`{v}`" for v in values[:10]))
+            lines.append("- " + "; ".join(bits))
+        resolved_from = resolution.get("resolved_from") or {}
+        if resolved_from.get("head"):
+            lines.append(
+                f"- Resolved from PR HEAD `{resolved_from['head'][:12]}` "
+                f"against base "
+                f"`{(resolved_from.get('base_sha') or '?')[:12]}` (merge-base "
+                f"`{(resolved_from.get('merge_base') or '?')[:12]}`).")
+        if resolution.get("applied_merge_sha"):
+            lines.append(
+                f"- Applied to the PR branch as "
+                f"`{resolution['applied_merge_sha'][:12]}`: the branch now "
+                "includes the base merge, so review/verify the integrated "
+                "result. The PR's own changes remain "
+                f"`git diff {base_sha[:12] if base_sha else '<base>'}...HEAD`; "
+                f"`git diff {resolved_from.get('head', '<old head>')[:12]} "
+                "HEAD` shows exactly what the resolution added.")
+        elif rec.get("apply_error"):
+            lines.append(f"- **Not applied**: {rec['apply_error']}. A "
+                         f"{SIGNOFF_MERGE} is blocked until the resolution can "
+                         "be applied to the branch (clean the workdir).")
+        for entry in resolution.get("unresolved") or []:
+            lines.append(f"- **Unresolved** `{entry.get('path')}`: "
+                         f"{entry.get('conflicts')}")
+        diff_path = resolution.get("diff_path")
+        if diff_path:
+            lines.append(f"- Resolution delta: `$CAP/{Path(diff_path).name}`")
+    behavior = rec.get("base_behavior_changes") or []
+    if behavior:
+        lines.append("")
+        lines.append("**Base changes that can change behaviour** (assess "
+                     "these even when Git reports a clean merge; metadata is "
+                     "not an automatic exemption):")
+        for change in behavior[:20]:
+            lines.append(f"- {change}")
+        if rec.get("base_behavior_count", len(behavior)) > 20:
+            lines.append(f"- … {rec['base_behavior_count'] - 20} more")
     if rec.get("status") == integ.CONFLICT:
-        lines.append(f"- A conflicted integration can only route "
-                     f"**{SIGNOFF_IMPL}** (pm enforces this).")
+        lines.append(f"- A conflicted integration that pm could not resolve "
+                     f"safely can only route **{SIGNOFF_IMPL}** (pm enforces "
+                     "this).")
     return "\n" + "\n".join(lines) + "\n"
 
 
@@ -519,23 +574,38 @@ isolated candidate (your worktree and the base branch were not touched):
 {integration_block}
 ## What to do
 
-0. **Check integration with the latest base.** Sign-off owns integration: a
+0. **Assess integration with the latest base.** Sign-off owns integration: a
    {SIGNOFF_MERGE} certifies this PR *combined with the base revision above*,
    and the merge step publishes exactly that candidate — it never resolves
    conflicts. You may refresh the check with
    `pm pr signoff integrate {pr_id}` (read-only: it fetches and computes
-   the candidate). Your verdict
-   is bound to the check shown above; if a refresh shows the base moved,
-   say so in the report — the merge step re-runs sign-off when the base it
-   approved is no longer current. Read what changed on the base since the
-   PR branched and judge
-   whether it interacts with this PR: conflicts, semantic overlap (the same
-   behaviour, APIs, data or tests changed on both sides) or changed
-   behaviour the PR relies on. Line/file counts alone are not the rule.
+   the candidate). Your verdict is bound to the check shown above; if a
+   refresh shows the base moved, say so in the report — the merge step
+   re-runs sign-off when the base it approved is no longer current.
+
+   If pm **resolved a metadata-only conflict** (shown above), inspect the
+   resolution delta and the integrated branch. Confirm that every record
+   from both sides survived, that no real field/deletion/ambiguity conflict
+   was papered over, and that the resolution is semantically right — not
+   merely that Git is happy. The base may also change behaviour-relevant
+   configuration (model settings, dependencies, statuses, skip_qa, …) even
+   when it merges cleanly; **metadata is not an automatic exemption**. Judge
+   the combined code, not the PR in isolation.
+
+   Then decide the earliest stage that genuinely needs to run:
+   - the resolution or a base interaction needs code work → **{SIGNOFF_IMPL}**;
+   - the combined change needs a code-quality/correctness review →
+     **{SIGNOFF_REVIEW}**;
+   - the base change could affect behaviour QA demonstrated → **{SIGNOFF_REQA}**;
+   - nothing would benefit from another review/QA pass → **{SIGNOFF_MERGE}**
+     and **explicitly state which existing evidence you are reusing and why**
+     (or which targeted checks you ran) — see the report contract below.
+     A resolved candidate is never approved on an unstated assumption.
+
    Never merge the base into the branch, push the base branch, or run any
    backend merge (`pm pr merge`, `gh pr merge`) yourself — on a return pm
-   merges a clean base into the PR branch for the next step, and
-   conflicts go to implementation.
+   integrates the base for the next step, and unresolved conflicts go to
+   implementation.
 
 1. **Read the diff**: run `{diff_cmd}`.
 
@@ -617,12 +687,24 @@ isolated candidate (your worktree and the base branch were not touched):
    <meta name="pm-signoff-head" content="<PR HEAD sha you reviewed>">
    <meta name="pm-signoff-base" content="<base revision sha you integrated with>">
    <meta name="pm-signoff-reason" content="<one or two sentences: why this route>">
+   <meta name="pm-signoff-candidate" content="<candidate tree sha from the integration section>">
+   <meta name="pm-signoff-evidence" content="review@<sha>,qa@<sha>">
+   <meta name="pm-signoff-evidence-reason" content="<why that evidence still covers the candidate>">
+   <meta name="pm-signoff-checks" content="<targeted checks you ran, if any>">
    ```
 
    A human approval (`pm pr signoff record`) is refused unless these match
-   the current HEAD and the recorded integration check. Include an
-   **Integration** section in the report: target base revision, result,
-   overlapping files and your semantic assessment.
+   the current HEAD and the recorded integration check. **`pm-signoff-candidate`
+   is required whenever pm resolved a conflict** (it must equal the candidate
+   tree above), and a {SIGNOFF_MERGE} on a resolved or behaviourally-changed
+   base also requires an explicit reuse/checks statement: name the evidence
+   stages and revisions you are reusing with `pm-signoff-evidence` plus
+   `pm-signoff-evidence-reason`, or the targeted checks you ran with
+   `pm-signoff-checks`. Do not leave it implicit. Include an **Integration**
+   section in the report: target base revision, result, overlapping files,
+   any metadata resolution (which records were combined, what you verified),
+   behaviour-relevant base changes, the evidence you reused (with revisions)
+   and your semantic assessment.
 
    ### Suggested shape — adapt as needed to serve the goal above
 
@@ -763,11 +845,15 @@ isolated candidate (your worktree and the base branch were not touched):
    - **{SIGNOFF_MERGE}** — all three steps met their criteria: the evidence
      supports the diff and the QA was rigorous, **and** the PR integrates
      with the latest base conflict-free with no interaction that needs more
-     work or verification. This is a RECOMMENDATION to merge bound to the
-     reviewed HEAD and base revision — sign-off never merges itself; the PR
+     work or verification. A metadata-only conflict pm resolved by record id
+     does not by itself require another stage — but only if you verified the
+     resolution and explicitly recorded which existing evidence you are
+     reusing (or the targeted checks you ran) and why it still covers the
+     candidate. This is a RECOMMENDATION to merge bound to the reviewed HEAD,
+     base revision and candidate tree — sign-off never merges itself; the PR
      is reported ready_to_merge and the merge decision is made later. If the
-     PR or the base moves before the merge, the merge is refused and
-     sign-off re-runs.
+     PR, the base or the candidate moves before the merge, the merge is
+     refused and sign-off re-runs.
    - **{SIGNOFF_IMPL}** — covers the **Implementation** step. Purpose of impl:
      deliver the PR's required behavior and an implementation spec. Criteria:
      the diff implements every requirement in the spec/description; an impl

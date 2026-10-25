@@ -33,6 +33,7 @@ the step it returns to.
 from __future__ import annotations
 
 import contextlib
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -173,6 +174,9 @@ def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
             for k, v in (extra or {}).items():
                 if v is not None:
                     record[k] = v
+            record["evidence"] = _evidence_block(
+                pr, sha, integration or (pr.get("integration") or {}),
+                verdict=verdict)
             pr["signoff"] = record
             # A new sign-off decision closes the previous return episode.
             ret = pr.get("signoff_return")
@@ -292,6 +296,148 @@ def invalidate_signoff(root: Path, pr_id: str, reason: str) -> None:
     store.locked_update(root, _apply)
 
 
+# --- Evidence provenance + explicit reuse ---------------------------------
+# A resolved integration changes the commit the sign-off report reviews (the
+# base is merged into the branch), so "the old review/QA evidence still
+# covers this" must be an explicit, recorded judgment — not something pm
+# invents by assuming the change was harmless.  PM records the revisions the
+# available evidence was produced against and the agent's reuse statement;
+# the merge gate refuses a resolved/behaviourally-changed approval that has
+# none.
+
+def _qa_evidence(pr_id: str) -> dict | None:
+    """Latest QA evidence and the revision it exercised, when recorded."""
+    import json
+    from pm_core.paths import latest_qa_status_path
+    path = latest_qa_status_path(pr_id)
+    if path is None:
+        return None
+    try:
+        status = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {"status_file": str(path), "error": "unreadable"}
+    resume = None
+    try:
+        resume = json.loads((path.parent / "qa_resume.json").read_text())
+    except (OSError, ValueError):
+        resume = None
+    resume = resume or {}
+    return {
+        "overall": status.get("overall"),
+        "planner_head": resume.get("planner_head"),
+        "planner_code_changes": list(resume.get("planner_code_changes") or []),
+        "status_file": str(path),
+    }
+
+
+def _report_evidence(pr_id: str, reviewed_head: str | None) -> dict:
+    """The reuse statement from a report written for *reviewed_head*."""
+    meta = report_meta(pr_id)
+    meta_head = (meta.get("head") or "").strip()
+    if meta_head and reviewed_head \
+            and not reviewed_head.startswith(meta_head):
+        # A report left by an earlier run: its statement is not about this
+        # revision and must not be attributed to it.
+        meta = {}
+    reused = (meta.get("evidence") or "").strip()
+    return {
+        "report_head": meta_head or None,
+        "report_base": meta.get("base") or None,
+        "report_candidate": meta.get("candidate") or None,
+        "reused": [x.strip() for x in re.split(r"[,\s]+", reused) if x.strip()],
+        "reason": meta.get("evidence-reason") or None,
+        "checks": meta.get("checks") or None,
+    }
+
+
+_VERDICT_STAGE = {
+    SIGNOFF_MERGE: "merge", SIGNOFF_REQA: "qa", SIGNOFF_REVIEW: "review",
+    SIGNOFF_IMPL: "impl", SIGNOFF_BLOCKED: "blocked",
+}
+
+
+def _evidence_block(pr: dict, reviewed_head: str | None,
+                    integration: dict | None,
+                    verdict: str | None = None) -> dict:
+    """The provenance recorded on ``pr["signoff"]["evidence"]``."""
+    prior = pr.get("signoff") or {}
+    prior_block = None
+    if prior.get("verdict"):
+        prior_block = {k: prior.get(k) for k in ("verdict", "sha", "ts",
+                                                  "origin", "invalidated")}
+        prior_block["integration"] = prior.get("integration")
+    full = pr.get("integration") or {}
+    qa = _qa_evidence(pr["id"])
+    review_sha, review_note = None, (
+        "pm does not record the revision the review ran on")
+    if qa and qa.get("planner_head") and not qa.get("planner_code_changes"):
+        # QA runs after review and records the revision it exercised.  When
+        # QA committed nothing, review saw that same revision.
+        review_sha = qa["planner_head"]
+        review_note = ("inferred: QA exercised this revision and recorded no "
+                       "code changes")
+    return {
+        "reviewed_head": reviewed_head,
+        "required_return_stage": _VERDICT_STAGE.get(verdict, verdict),
+        "candidate_tree": (integration or {}).get("candidate_tree")
+        or full.get("candidate_tree"),
+        "resolved_from": (integration or {}).get("resolved_from")
+        or full.get("resolved_from"),
+        "review": {
+            "reviewed_at": pr.get("reviewed_at"),
+            "sha": review_sha,
+            "sha_source": "inferred-from-qa" if review_sha else None,
+            "note": review_note,
+        },
+        "qa": qa,
+        "prior_signoff": prior_block,
+        **_report_evidence(pr["id"], reviewed_head),
+    }
+
+
+def approval_justification_problem(pr_id: str, integration: dict | None,
+                                   head: str | None) -> str | None:
+    """Why a MERGE lacks the explicit evidence statement it requires, or None.
+
+    Applies only when the candidate carries a resolution or a base change
+    that can alter behaviour: the report must name the candidate (resolved
+    candidates) and state which existing evidence is reused and why, or which
+    targeted checks were run.  This is the "explicit reuse" requirement; an
+    unstated assumption never becomes an approval.
+    """
+    rec = integration or {}
+    resolution = rec.get("resolution") or {}
+    behavior = rec.get("base_behavior_changes") or []
+    if not resolution and not behavior:
+        return None
+    meta = report_meta(pr_id)
+    meta_head = (meta.get("head") or "").strip()
+    if not meta_head:
+        return ("report.html has no pm-signoff-head tag; it cannot be tied to "
+                "the reviewed HEAD")
+    if not head or not head.startswith(meta_head):
+        return (f"report.html reviewed HEAD {meta_head[:12]}, but sign-off "
+                f"reviewed {(head or '?')[:12]}")
+    if resolution:
+        candidate = rec.get("candidate_tree") or ""
+        named = (meta.get("candidate") or "").strip()
+        if not named or not candidate.startswith(named):
+            return ("report.html does not name the approved candidate tree "
+                    f"(pm-signoff-candidate {candidate[:12] or '?'})")
+        if not resolution.get("applied_merge_sha"):
+            return ("the resolved candidate was not applied to the PR branch")
+        if resolution.get("unresolved"):
+            return "the integration resolution left unresolved conflicts"
+    reused = (meta.get("evidence") or "").strip()
+    reason = (meta.get("evidence-reason") or "").strip()
+    checks = (meta.get("checks") or "").strip()
+    if not checks and not (reused and reason):
+        return ("report.html must state which existing evidence is reused "
+                "and why (pm-signoff-evidence + pm-signoff-evidence-reason) "
+                "or which targeted checks were run (pm-signoff-checks)")
+    return None
+
+
 def effective_verdict(verdict: str | None, integration: dict | None,
                       head: str | None) -> tuple[str | None, str | None]:
     """Earliest-step routing pm enforces on a router verdict.
@@ -315,6 +461,21 @@ def effective_verdict(verdict: str | None, integration: dict | None,
             f"{rec.get('base_branch')}@{(rec.get('base_sha') or '?')[:8]} "
             f"conflicts ({', '.join((rec.get('conflicts') or [])[:5])}); "
             "reconciling it is implementation work")
+    if of_head and rec.get("status") == integ.RESOLVED:
+        resolution = rec.get("resolution") or {}
+        if resolution.get("unresolved"):
+            reasons = "; ".join(
+                str(u.get("conflicts")) for u in resolution["unresolved"][:3])
+            return SIGNOFF_IMPL, (
+                f"{verdict} coerced to {SIGNOFF_IMPL}: pm could not resolve "
+                f"the metadata conflict safely ({reasons})")
+        if verdict == SIGNOFF_MERGE and not resolution.get("applied_merge_sha"):
+            why = rec.get("apply_error") or "the workdir could not take the merge"
+            return SIGNOFF_BLOCKED, (
+                f"{SIGNOFF_MERGE} coerced to {SIGNOFF_BLOCKED}: the "
+                f"metadata-only conflict was resolved in the isolated "
+                f"candidate but could not be applied to the PR branch "
+                f"({why}); clean the workdir and re-run sign-off")
     if verdict == SIGNOFF_MERGE and not integ.valid_for(rec, head):
         if not of_head:
             why = "no integration check of the current HEAD"
@@ -378,6 +539,50 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
         return (f"PR {pr_id}: the approval targets "
                 f"{bound.get('base_branch')!r}, but the project merges into "
                 f"{base_branch!r}. Re-run `pm pr signoff --fresh {pr_id}`.")
+    # The approval names the exact head/candidate it reviewed.  A re-check
+    # that produced another candidate (a moved base, a changed resolution)
+    # makes the approval stale even before the merge re-fetches anything.
+    current = pr.get("integration") or {}
+    if bound.get("head") and current.get("head") \
+            and current["head"] != bound["head"]:
+        return (f"PR {pr_id}: the integration was re-checked at another HEAD "
+                f"({(current['head'] or '?')[:12]} != "
+                f"{(bound['head'] or '?')[:12]}); the approval no longer "
+                f"matches. Re-run `pm pr signoff --fresh {pr_id}`.")
+    if bound.get("candidate_tree") and current.get("candidate_tree") \
+            and current["candidate_tree"] != bound["candidate_tree"]:
+        return (f"PR {pr_id}: the integration candidate changed since "
+                f"sign-off ({current['candidate_tree'][:12]} != "
+                f"{bound['candidate_tree'][:12]}); re-run `pm pr signoff "
+                f"--fresh {pr_id}`.")
+    bound_resolution = bound.get("resolution_digest")
+    if bound_resolution:
+        current_digest = current.get("resolution_digest") \
+            or integ._resolution_digest(current.get("resolution"))
+        if current_digest != bound_resolution:
+            return (f"PR {pr_id}: the metadata resolution changed since "
+                    f"sign-off; re-run `pm pr signoff --fresh {pr_id}`.")
+        resolution = current.get("resolution") or {}
+        if resolution.get("unresolved"):
+            return (f"PR {pr_id}: the integration resolution left unresolved "
+                    f"conflicts; the candidate is not conflict-free. Re-run "
+                    f"`pm pr signoff --fresh {pr_id}`.")
+        if not resolution.get("applied_merge_sha"):
+            return (f"PR {pr_id}: the resolved candidate was not applied to "
+                    f"the PR branch; clean the workdir and re-run "
+                    f"`pm pr signoff --fresh {pr_id}`.")
+        problem = approval_justification_problem(pr_id, current, current_sha)
+        if problem:
+            return (f"PR {pr_id}: cannot merge the resolved candidate — "
+                    f"{problem}. Fix report.html and run `pm pr signoff "
+                    f"record {pr_id}`, or re-run sign-off.")
+    elif current.get("base_behavior_changes"):
+        problem = approval_justification_problem(pr_id, current, current_sha)
+        if problem:
+            return (f"PR {pr_id}: the base brings behavioural changes and the "
+                    f"report does not state the evidence/checks relied on — "
+                    f"{problem}. Fix report.html and run `pm pr signoff "
+                    f"record {pr_id}`, or re-run sign-off.")
     recorded_hash = (pr.get("signoff") or {}).get("report_hash")
     if recorded_hash:
         import hashlib
@@ -465,13 +670,25 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
 
         # Integration check against the latest configured base (fetch +
         # isolated candidate), recorded on the PR before the prompt is built
-        # so the router reviews — and its verdict binds to — that base.
+        # so the router reviews — and its verdict binds to — that base.  A
+        # metadata-only conflict is resolved in the isolated candidate and
+        # applied to the branch, then re-checked: the router reviews the
+        # integrated code and the report/verdict bind to that exact
+        # candidate.
         from pm_core import integration
         root = state_root()
         rec: dict = {}
         try:
-            rec = integration.check_integration(root, pr_id)
+            rec = integration.prepare(root, pr_id)
             print(f"Integration: {integration.summary(rec)}")
+            if rec.get("resolution"):
+                for entry in (rec["resolution"].get("paths") or []):
+                    print(f"  resolved {entry.get('path')} by record id")
+                if rec["resolution"].get("applied_merge_sha"):
+                    print("  applied to the PR branch as "
+                          f"{rec['resolution']['applied_merge_sha'][:12]}")
+                if rec.get("apply_error"):
+                    print(f"  not applied: {rec['apply_error']}")
             data = store.load(root)
         except Exception as e:  # never block the sign-off launch on it
             _log.warning("sign-off integration check for %s: %s", pr_id, e)
@@ -703,10 +920,12 @@ def build_return_record(pr: dict, verdict: str, hop: str, *,
         reason = meta.get("reason") or None
     rec = pr.get("integration") or {}
     integ = None
-    if rec and rec.get("head") == reviewed_head:
+    if rec and (rec.get("head") == reviewed_head
+                or (rec.get("resolution") or {}).get("applied_merge_sha")):
         integ = {k: rec.get(k) for k in (
             "target_repo", "base_branch", "base_sha", "merge_base", "status",
-            "conflicts", "overlap", "error")}
+            "conflicts", "overlap", "error", "resolution",
+            "base_behavior_changes")}
     now = datetime.now(timezone.utc).isoformat()
     out = {
         "verdict": verdict, "hop": hop,
@@ -849,6 +1068,31 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
         if integ.get("overlap"):
             lines.append("Changed on both sides: "
                          + ", ".join(f"`{c}`" for c in integ["overlap"]))
+        resolution = integ.get("resolution") or {}
+        if resolution:
+            paths = [p.get("path") for p in resolution.get("paths") or []
+                     if p.get("path")]
+            lines.append(
+                "pm resolved the metadata conflict by record id in "
+                + ", ".join(f"`{p}`" for p in paths or ["project.yaml"])
+                + " (both sides' independent records are kept; real field, "
+                "deletion and ambiguity conflicts are never auto-resolved).")
+            resolved_from = resolution.get("resolved_from") or {}
+            if resolved_from.get("head"):
+                lines.append(
+                    f"Resolved from PR HEAD `{resolved_from['head'][:12]}` "
+                    f"against base `{(resolved_from.get('base_sha') or '?')[:12]}`.")
+            if resolution.get("applied_merge_sha"):
+                lines.append(
+                    f"pm applied that resolution and merged the base into the "
+                    f"branch as `{resolution['applied_merge_sha'][:12]}` — "
+                    "review/verify the integrated result, not only the PR's "
+                    "own diff.")
+        if integ.get("base_behavior_changes"):
+            lines.append(
+                "The new base also changes behaviour-relevant configuration: "
+                + "; ".join(str(b) for b in integ["base_behavior_changes"][:10])
+                + ". Assess whether the evidence still covers it.")
     applied = rec.get("applied") or {}
     if applied.get("merge_sha"):
         lines.append(
@@ -990,11 +1234,19 @@ def _prepare_bounce(root: Path, pr_id: str, verdict: str, hop: str,
     applied, apply_error = None, None
     rec = pr.get("integration") or {}
     if pr.get("status") == "sign_off" and rec.get("head") == sha \
-            and rec.get("status") == integ.CLEAN:
+            and rec.get("status") in (integ.CLEAN, integ.RESOLVED):
         merge_sha, apply_error = integ.apply_integration(root, pr_id, rec)
         if merge_sha:
             applied = {"from_head": sha, "merge_sha": merge_sha,
                        "base_sha": rec.get("base_sha")}
+            # The return record's integration snapshot must show the applied
+            # resolution: the next stage is looking at the integrated branch.
+            rec = dict(rec)
+            resolution = dict(rec.get("resolution") or {})
+            if resolution:
+                resolution["applied_merge_sha"] = merge_sha
+                rec["resolution"] = resolution
+            pr = dict(pr, integration=rec)
             _log.info("sign-off %s: integrated %s@%s into the branch as %s",
                       pr_id, rec.get("base_branch"),
                       (rec.get("base_sha") or "")[:8], merge_sha[:8])
@@ -1124,6 +1376,13 @@ def _step_signoff_locked(root: Path, pr_entry: dict, *, session: str,
         if tverdict is not None:
             # launched == current_sha here (or HEAD is unknown).
             verdict, coerced = effective_verdict(tverdict, irec, current_sha)
+            if verdict == SIGNOFF_MERGE:
+                problem = approval_justification_problem(
+                    pr_id, irec, current_sha)
+                if problem:
+                    verdict, coerced = SIGNOFF_BLOCKED, (
+                        f"{SIGNOFF_MERGE} coerced to {SIGNOFF_BLOCKED}: "
+                        f"{problem}")
             original = tverdict if coerced else None
             bound = integ.binding(irec) if (
                 current_sha and irec.get("head") == current_sha) else None

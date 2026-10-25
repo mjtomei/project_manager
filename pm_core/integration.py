@@ -22,29 +22,43 @@ Statuses:
   candidate is the HEAD's own tree.
 * ``clean`` — the base moved and merges without conflicts; the candidate
   tree is the merge result.
+* ``resolved`` — the merge conflicted only in ``project.yaml`` file(s) and
+  pm's record-aware resolver combined both sides safely; the candidate tree
+  is the conflict-free merge with the resolved documents.  ``resolution``
+  records exactly what was combined (see :func:`resolve_project_yaml`).
 * ``conflict`` — merging the base conflicts (``conflicts`` lists paths);
-  reconciling is implementation work.
+  reconciling is implementation work.  ``resolution`` carries a failed
+  attempt's details when the conflict was metadata-only.
 * ``in_base`` — the PR HEAD is already contained in the base (merged).
 * ``error`` — the check could not run (no workdir, fetch failed, ...).
 
-:func:`apply_integration` merges a *clean* base into the PR branch; pm uses
-it when sign-off routes work back, so the revalidating step sees the
-integrated code.  It never leaves a half-merge behind.
+:func:`apply_integration` merges a *clean* base into the PR branch (or
+applies a *resolved* candidate's resolution and verifies the resulting tree
+matches the candidate); pm uses it when sign-off routes work back, so the
+revalidating step sees the integrated code.  It never leaves a half-merge
+behind.  :func:`prepare` is what a sign-off launch runs: check, apply a
+resolved candidate, re-check, and record the resolution provenance.
 """
 
 from __future__ import annotations
 
 import contextlib
+import difflib
 import functools
+import hashlib
+import io
 import json
 import os
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+import yaml
 
 from pm_core import git_ops, store
 from pm_core.paths import configure_logger
@@ -53,12 +67,13 @@ _log = configure_logger("pm.integration")
 
 UP_TO_DATE = "up_to_date"
 CLEAN = "clean"
+RESOLVED = "resolved"
 CONFLICT = "conflict"
 IN_BASE = "in_base"
 ERROR = "error"
 
 # Statuses whose candidate may be published (conflict-free, not yet merged).
-MERGEABLE = (UP_TO_DATE, CLEAN)
+MERGEABLE = (UP_TO_DATE, CLEAN, RESOLVED)
 
 # Where the fetched base revision is pinned in the PR workdir, so the
 # candidate's objects stay reachable and no shared ref (FETCH_HEAD,
@@ -70,7 +85,12 @@ _YAML_LIST_LIMIT = 40
 
 # Keys of an integration record a sign-off verdict binds to.
 BINDING_KEYS = ("target_repo", "base_branch", "base_sha", "candidate_tree",
-                "status", "head")
+                "status", "head", "resolution_digest")
+
+# Bounds for state / artifacts.  project.yaml keeps summaries; the full
+# resolution (and its diff) lives in $CAP/<pr>/integration.json.
+_BEHAVIOR_LIMIT = 30
+_DIFF_LINE_LIMIT = 1500
 
 
 def _git(*args: str, cwd) -> subprocess.CompletedProcess:
@@ -210,6 +230,520 @@ def remote_ref(workdir: str, target_repo: str, ref: str) -> str | None:
     return None
 
 
+# --- structured project.yaml resolution ------------------------------------
+# Git reports a conflict for two branches that independently appended records
+# to project.yaml, but the documents are mergeable by record id.  This
+# resolver is deliberately *not* ``store.merge_3way``: that policy lets the
+# live state win true conflicts, which is right for pm's own stash-pop but
+# wrong for an integration candidate that a human will approve.  Here a real
+# field conflict, a deletion/edit conflict or an ambiguous record is a
+# conflict — never a silent side selection.
+
+_MISSING = object()
+_DELETED = object()
+
+
+def resolve_project_yaml(base_text: str | None, ours_text: str | None,
+                         theirs_text: str | None):
+    """Merge three versions of a project.yaml document by record id.
+
+    *base_text* is the merge-base version (``None`` when the file did not
+    exist there), *ours_text* the PR branch's version and *theirs_text* the
+    new base's version.  Returns ``(merged_text, details)``; on any real
+    conflict, ambiguity or failed validation returns ``(None, details)``
+    with a human-readable ``conflicts`` list.  ``details["actions"]`` names
+    the record ids added/removed/changed per list path.
+    """
+    try:
+        base = _parse_yaml(base_text)
+        ours = _parse_yaml(ours_text)
+        theirs = _parse_yaml(theirs_text)
+    except (yaml.YAMLError, ValueError) as e:
+        return None, {"error": f"cannot parse project.yaml: {e}"}
+    if not isinstance(ours, dict) or not isinstance(theirs, dict):
+        return None, {"error": "project.yaml is not a mapping on one side"}
+    if base is not _MISSING and not isinstance(base, dict):
+        return None, {"error": "project.yaml base is not a mapping"}
+    ambiguous = (_duplicate_id_problems(ours, "PR branch")
+                 + _duplicate_id_problems(theirs, "new base")
+                 + (_duplicate_id_problems(base, "merge base")
+                    if base is not _MISSING else []))
+    if ambiguous:
+        return None, {"conflicts": ambiguous}
+
+    actions: dict = {}
+    merged, conflicts = _merge_value(base, ours, theirs, "", actions)
+    if conflicts:
+        return None, {"conflicts": conflicts, "actions": actions}
+    problems = (_preservation_problems(base, ours, merged, "PR branch")
+                + _preservation_problems(base, theirs, merged, "new base"))
+    problems += _shape_problems(merged)
+    if problems:
+        return None, {"conflicts": problems, "actions": actions}
+    try:
+        return _dump_project_yaml(merged), {"actions": actions}
+    except (yaml.YAMLError, ValueError) as e:
+        return None, {"error": f"cannot serialize project.yaml: {e}"}
+
+
+def _parse_yaml(text: str | None):
+    if text is None:
+        return _MISSING
+    if not text.strip():
+        return {}
+    return yaml.safe_load(text)
+
+
+def _dump_project_yaml(data: dict) -> str:
+    """Serialize exactly like :func:`pm_core.store.save` (byte-stable)."""
+    buf = io.StringIO()
+    buf.write(store._YAML_HEADER)
+    yaml.dump(data, buf, Dumper=store._yaml_dumper(data),
+              default_flow_style=False, sort_keys=False, allow_unicode=True)
+    return buf.getvalue()
+
+
+def _is_id_list(value) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(e, dict) and "id" in e for e in value)
+
+
+def _duplicate_id_problems(data, label: str) -> list[str]:
+    """A document whose id-keyed list repeats an id is ambiguous."""
+    if not isinstance(data, dict):
+        return []
+    problems: list[str] = []
+    for path, value in data.items():
+        if not _is_id_list(value):
+            continue
+        seen: set = set()
+        for entry in value:
+            rec_id = entry["id"]
+            if rec_id in seen:
+                problems.append(
+                    f"{path}: duplicate record id {rec_id!r} on the {label} "
+                    "side (ambiguous)")
+            seen.add(rec_id)
+    return problems
+
+
+def _record_action(actions: dict, path: str, kind: str,
+                   side: str | None = None, rec_id: str | None = None) -> None:
+    entry = actions.setdefault(
+        path or "<root>",
+        {"added": {"PR branch": [], "new base": []}, "removed": [],
+         "changed": []})
+    if kind == "added":
+        entry["added"].setdefault(side, []).append(rec_id)
+    elif kind == "removed":
+        entry["removed"].append(rec_id)
+    elif kind == "changed":
+        entry["changed"].append(rec_id)
+
+
+def _merge_value(base, ours, theirs, path: str, actions: dict):
+    """``(value, conflicts)`` for one position in the document tree."""
+    if ours == theirs:
+        return ours, []
+    if base is not _MISSING and ours == base:
+        return theirs, []
+    if base is not _MISSING and theirs == base:
+        return ours, []
+    if isinstance(ours, dict) and isinstance(theirs, dict):
+        if base is _MISSING:
+            return None, [f"{path or '<root>'}: added on both sides with "
+                          "different content"]
+        if not isinstance(base, dict):
+            return None, [f"{path or '<root>'}: type conflict"]
+        return _merge_dict(base, ours, theirs, path, actions)
+    if _is_id_list(ours) and _is_id_list(theirs) \
+            and (base is _MISSING or _is_id_list(base)):
+        if base is _MISSING:
+            return None, [f"{path or '<root>'}: records added on both sides "
+                          "with different content"]
+        return _merge_id_list(base, ours, theirs, path, actions)
+    return None, [f"{path or '<root>'}: changed differently on both sides"]
+
+
+def _merge_dict(base: dict, ours: dict, theirs: dict, path: str, actions: dict):
+    out: dict = {}
+    conflicts: list[str] = []
+    keys: list = list(base)
+    keys += [k for k in ours if k not in keys]
+    keys += [k for k in theirs if k not in keys]
+    for key in keys:
+        in_b, in_o, in_t = key in base, key in ours, key in theirs
+        key_path = f"{path}.{key}" if path else str(key)
+        if in_o and in_t:
+            value, problems = _merge_value(
+                base[key] if in_b else _MISSING, ours[key], theirs[key],
+                key_path, actions)
+            if problems:
+                conflicts.extend(problems)
+            else:
+                out[key] = value
+        elif in_o:
+            if in_b:
+                if ours[key] == base[key]:
+                    _record_action(actions, path, "removed", rec_id=str(key))
+                else:
+                    conflicts.append(
+                        f"{key_path}: deleted on the new base, changed on the "
+                        "PR branch")
+            else:
+                out[key] = ours[key]           # added by the PR branch
+        elif in_t:
+            if in_b:
+                if theirs[key] == base[key]:
+                    _record_action(actions, path, "removed", rec_id=str(key))
+                else:
+                    conflicts.append(
+                        f"{key_path}: deleted on the PR branch, changed on the "
+                        "new base")
+            else:
+                out[key] = theirs[key]         # added by the new base
+        # absent from both sides: deleted by both
+    return out, conflicts
+
+
+def _merge_id_list(base: list, ours: list, theirs: list, path: str,
+                   actions: dict):
+    b = {e["id"]: e for e in base}
+    o = {e["id"]: e for e in ours}
+    t = {e["id"]: e for e in theirs}
+    for label, seq in (("PR branch", [e["id"] for e in ours]),
+                       ("new base", [e["id"] for e in theirs]),
+                       ("merge base", [e["id"] for e in base])):
+        if len(seq) != len(set(seq)):
+            return None, [f"{path or '<root>'}: duplicate record id on the "
+                          f"{label} side"]
+
+    conflicts: list[str] = []
+    results: dict = {}
+    for rec_id in list(b) + [i for i in o if i not in b] \
+            + [i for i in t if i not in b and i not in o]:
+        rec_path = f"{path}[{rec_id}]"
+        in_b, in_o, in_t = rec_id in b, rec_id in o, rec_id in t
+        if in_o and in_t:
+            value, problems = _merge_value(
+                b[rec_id] if in_b else _MISSING, o[rec_id], t[rec_id],
+                rec_path, actions)
+            if problems:
+                conflicts.extend(problems)
+                continue
+            results[rec_id] = value
+            if in_b and o[rec_id] != b[rec_id] \
+                    and t[rec_id] != b[rec_id] and o[rec_id] != t[rec_id]:
+                _record_action(actions, path, "changed", rec_id=rec_id)
+            elif not in_b:
+                _record_action(actions, path, "added",
+                               side="PR branch", rec_id=rec_id)
+                _record_action(actions, path, "added",
+                               side="new base", rec_id=rec_id)
+        elif in_b and in_o:
+            if o[rec_id] == b[rec_id]:
+                results[rec_id] = _DELETED
+                _record_action(actions, path, "removed", rec_id=rec_id)
+            else:
+                conflicts.append(f"{rec_path}: deleted on the new base, "
+                                 "changed on the PR branch")
+        elif in_b and in_t:
+            if t[rec_id] == b[rec_id]:
+                results[rec_id] = _DELETED
+                _record_action(actions, path, "removed", rec_id=rec_id)
+            else:
+                conflicts.append(f"{rec_path}: deleted on the PR branch, "
+                                 "changed on the new base")
+        elif in_o:
+            results[rec_id] = o[rec_id]
+            _record_action(actions, path, "added",
+                           side="PR branch", rec_id=rec_id)
+        elif in_t:
+            results[rec_id] = t[rec_id]
+            _record_action(actions, path, "added",
+                           side="new base", rec_id=rec_id)
+        else:
+            results[rec_id] = _DELETED         # deleted by both
+
+    if conflicts:
+        return None, conflicts
+
+    base_seq = [e["id"] for e in base]
+    ours_seq = [e["id"] for e in ours]
+    theirs_seq = [e["id"] for e in theirs]
+    common = [i for i in base_seq if i in o and i in t]
+    o_order = [i for i in ours_seq if i in common]
+    t_order = [i for i in theirs_seq if i in common]
+    if o_order != common and t_order != common and o_order != t_order:
+        return None, [f"{path or '<root>'}: both sides reordered records "
+                      "differently"]
+    order = o_order if o_order != common else (
+        t_order if t_order != common else common)
+    order = [i for i in order
+             if results.get(i) is not _DELETED and i in results]
+    for seq in (ours_seq, theirs_seq):
+        for rec_id in seq:
+            if rec_id in results and results[rec_id] is not _DELETED \
+                    and rec_id not in order:
+                order.append(rec_id)
+    return [results[i] for i in order], []
+
+
+def _preservation_problems(base, side, merged, label: str) -> list[str]:
+    """Verify every change *side* made to *base* survived into *merged*."""
+    problems: list[str] = []
+
+    def walk(b, s, m, path: str) -> None:
+        if s == b:
+            return
+        if isinstance(s, dict) and isinstance(m, dict):
+            bd = b if isinstance(b, dict) else {}
+            for key, value in s.items():
+                key_path = f"{path}.{key}" if path else str(key)
+                if key not in bd or bd[key] != value:
+                    if key not in m:
+                        problems.append(f"{label} change lost: {key_path}")
+                    else:
+                        walk(bd.get(key, _MISSING), value, m[key], key_path)
+            for key in bd:
+                if key not in s and key in m:
+                    problems.append(
+                        f"{label} deletion lost: "
+                        f"{f'{path}.{key}' if path else key}")
+        elif _is_id_list(s) and isinstance(m, list) and _is_id_list(m):
+            bm = {e["id"]: e for e in b} if _is_id_list(b) else {}
+            mm = {e["id"]: e for e in m}
+            for entry in s:
+                rec_id = entry["id"]
+                rec_path = f"{path}[{rec_id}]"
+                if rec_id not in mm:
+                    if rec_id not in bm or bm[rec_id] != entry:
+                        problems.append(f"{label} record lost: {rec_path}")
+                    continue
+                walk(bm.get(rec_id, _MISSING), entry, mm[rec_id], rec_path)
+            for rec_id in bm:
+                if rec_id not in {e["id"] for e in s} and rec_id in mm:
+                    problems.append(
+                        f"{label} record deletion lost: {path}[{rec_id}]")
+        elif s != m:
+            problems.append(
+                f"{label} change not preserved at {path or '<root>'}")
+
+    walk(base, side, merged, "")
+    return problems
+
+
+def _shape_problems(data) -> list[str]:
+    """Read-only shape/status validation of the merged document."""
+    from pm_core.pr_utils import VALID_PR_STATES
+    from pm_core.store import VALID_PLAN_STATUSES
+
+    if not isinstance(data, dict):
+        return ["merged project.yaml is not a mapping"]
+    problems: list[str] = []
+    prs = data.get("prs")
+    pr_ids: set = set()
+    if prs is not None:
+        if not isinstance(prs, list):
+            problems.append("merged prs is not a list")
+        else:
+            for entry in prs:
+                if not isinstance(entry, dict) \
+                        or not isinstance(entry.get("id"), str) \
+                        or not entry["id"]:
+                    problems.append("merged prs entry without a string id")
+                    continue
+                if entry["id"] in pr_ids:
+                    problems.append(f"merged project.yaml has duplicate PR "
+                                    f"id {entry['id']}")
+                pr_ids.add(entry["id"])
+                if entry.get("status") not in VALID_PR_STATES:
+                    problems.append(
+                        f"merged PR {entry['id']} has invalid status "
+                        f"{entry.get('status')!r}")
+    plans = data.get("plans")
+    plan_ids: set = set()
+    parents: dict = {}
+    if plans is not None:
+        if not isinstance(plans, list):
+            problems.append("merged plans is not a list")
+        else:
+            for entry in plans:
+                if not isinstance(entry, dict) \
+                        or not isinstance(entry.get("id"), str) \
+                        or not entry["id"]:
+                    problems.append("merged plans entry without a string id")
+                    continue
+                if entry["id"] in plan_ids:
+                    problems.append(f"merged project.yaml has duplicate plan "
+                                    f"id {entry['id']}")
+                plan_ids.add(entry["id"])
+                if entry.get("status") not in VALID_PLAN_STATUSES:
+                    problems.append(
+                        f"merged plan {entry['id']} has invalid status "
+                        f"{entry.get('status')!r}")
+                parents[entry["id"]] = entry.get("parent")
+            for plan_id, parent in parents.items():
+                if parent is not None and parent not in plan_ids:
+                    problems.append(
+                        f"merged plan {plan_id} references missing parent "
+                        f"{parent!r}")
+            for plan_id in plan_ids:
+                seen: set = set()
+                current = plan_id
+                while current is not None:
+                    if current in seen:
+                        problems.append(
+                            f"merged plans have a cycle involving {plan_id}")
+                        break
+                    seen.add(current)
+                    current = parents.get(current)
+    return problems
+
+
+def _resolution_digest(resolution: dict | None) -> str | None:
+    """Canonical digest of a resolution's identity-bearing fields."""
+    if not resolution:
+        return None
+    payload = {k: resolution.get(k) for k in (
+        "resolver", "paths", "unresolved", "base_tree", "head_tree",
+        "candidate_tree", "applied_merge_sha", "resolved_from")}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+
+
+# --- base interaction summary ---------------------------------------------
+# A clean git merge is not automatically behaviour-neutral: a new base can
+# change model settings, dependencies, statuses or other configuration that
+# changes what the PR's evidence actually exercised.  PM surfaces those
+# changes; the sign-off agent decides whether they need a follow-up stage.
+
+_CONFIG_NAMES = {"pyproject.toml", "setup.py", "setup.cfg", "package.json",
+                 "Dockerfile", "install.sh", "Makefile"}
+_PROJECT_BEHAVIOR_KEYS = ("model_config", "skip_qa", "base_branch", "backend",
+                          "nested_podman", "libyaml")
+_PR_BEHAVIOR_FIELDS = ("status", "depends_on", "model", "session_models",
+                       "plan")
+
+
+def base_behavior_changes(workdir: str, merge_base: str,
+                          base_sha: str, pr: dict | None = None) -> list[str]:
+    """Human-readable behavioural changes the new base brings, or [].
+
+    *pr* (the PR being integrated) focuses the project.yaml part on records
+    that can affect it — its own entry, its dependencies and its plan —
+    instead of listing every other PR's status churn.
+    """
+    r = _git("diff", "--name-only", merge_base, base_sha, cwd=workdir)
+    changed = [p for p in (r.stdout or "").splitlines() if p.strip()]
+    out: list[str] = []
+    for path in changed:
+        if Path(path).name == "project.yaml":
+            out.extend(_project_yaml_behavior_changes(
+                workdir, merge_base, base_sha, path, pr=pr))
+        elif _is_config_path(path):
+            out.append(f"`{path}` changed on the base")
+    return out[:500]
+
+
+def _is_config_path(path: str) -> bool:
+    name = Path(path).name
+    return (name in _CONFIG_NAMES
+            or (name.startswith("requirements")
+                and name.endswith((".txt", ".in")))
+            or path.startswith(".github/workflows/"))
+
+
+def _show_yaml(workdir: str, rev: str, path: str):
+    r = _git("show", f"{rev}:{path}", cwd=workdir)
+    if r.returncode != 0:
+        return None
+    try:
+        return yaml.safe_load(r.stdout or "") or {}
+    except yaml.YAMLError:
+        return None
+
+
+def _short(value) -> str:
+    text = json.dumps(value, default=str)
+    return text if len(text) <= 80 else text[:77] + "..."
+
+
+def _diff_leaves(old, new, path: str, out: list[str]) -> None:
+    if isinstance(old, dict) and isinstance(new, dict):
+        for key in list(old) + [k for k in new if k not in old]:
+            _diff_leaves(old.get(key), new.get(key), f"{path}.{key}", out)
+        return
+    if old != new:
+        out.append(f"{path} changed ({_short(old)} -> {_short(new)})")
+
+
+def _project_yaml_behavior_changes(workdir: str, merge_base: str,
+                                   base_sha: str, path: str,
+                                   pr: dict | None = None) -> list[str]:
+    old = _show_yaml(workdir, merge_base, path)
+    new = _show_yaml(workdir, base_sha, path)
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return [f"`{path}` changed on the base"]
+    out: list[str] = []
+    old_project = old.get("project") or {}
+    new_project = new.get("project") or {}
+    for key in _PROJECT_BEHAVIOR_KEYS:
+        if old_project.get(key) != new_project.get(key):
+            if key == "model_config":
+                _diff_leaves(old_project.get(key) or {},
+                             new_project.get(key) or {},
+                             f"`{path}`: project.model_config", out)
+            else:
+                out.append(
+                    f"`{path}`: project.{key} changed "
+                    f"({_short(old_project.get(key))} -> "
+                    f"{_short(new_project.get(key))})")
+    focus = (pr or {}).get("id")
+    deps = set((pr or {}).get("depends_on") or [])
+    focus_plan = (pr or {}).get("plan")
+
+    def relevant(rec_id) -> bool:
+        # Without a PR context list everything; with one, only records that
+        # can gate or change this PR's run.
+        return focus is None or rec_id == focus or rec_id in deps
+
+    old_prs = {p.get("id"): p for p in old.get("prs") or []
+               if isinstance(p, dict)}
+    new_prs = {p.get("id"): p for p in new.get("prs") or []
+               if isinstance(p, dict)}
+    for pr_id, entry in new_prs.items():
+        if not pr_id or not relevant(pr_id):
+            continue
+        if pr_id not in old_prs:
+            out.append(f"`{path}`: base added PR {pr_id} "
+                       f"({entry.get('status')})")
+            continue
+        for field in _PR_BEHAVIOR_FIELDS:
+            if old_prs[pr_id].get(field) != entry.get(field):
+                out.append(
+                    f"`{path}`: base changed {pr_id}.{field} "
+                    f"({_short(old_prs[pr_id].get(field))} -> "
+                    f"{_short(entry.get(field))})")
+    for pr_id in old_prs:
+        if pr_id not in new_prs and relevant(pr_id):
+            out.append(f"`{path}`: base removed PR {pr_id}")
+    old_plans = {p.get("id"): p for p in old.get("plans") or []
+                 if isinstance(p, dict)}
+    new_plans = {p.get("id"): p for p in new.get("plans") or []
+                 if isinstance(p, dict)}
+    for plan_id, entry in new_plans.items():
+        if focus is not None and plan_id != focus_plan:
+            continue
+        if plan_id in old_plans \
+                and old_plans[plan_id].get("status") != entry.get("status"):
+            out.append(
+                f"`{path}`: base changed plan {plan_id}.status "
+                f"({old_plans[plan_id].get('status')} -> "
+                f"{entry.get('status')})")
+    return out
+
+
 # --- candidate -------------------------------------------------------------
 
 def is_ancestor(cwd, a: str, b: str) -> bool:
@@ -236,13 +770,20 @@ def _merge_tree(workdir: str, head: str, base_sha: str):
     return None, [], _detail(r) or "git merge-tree failed"
 
 
-def _worktree_merge(workdir: str, head: str, base_sha: str):
-    """Merge in a temporary detached worktree: ``(tree|None, conflicts, error)``."""
+def _worktree_merge(workdir: str, head: str, base_sha: str,
+                    resolve: bool = False):
+    """Merge in a temporary detached worktree.
+
+    Returns ``(tree|None, conflicts, error, resolution|None)``.  With
+    *resolve*, a conflict confined to ``project.yaml`` files is reconciled
+    with :func:`resolve_project_yaml` in the same throwaway worktree.
+    """
     with _repo_lock(workdir):
-        return _worktree_merge_locked(workdir, head, base_sha)
+        return _worktree_merge_locked(workdir, head, base_sha, resolve)
 
 
-def _worktree_merge_locked(workdir: str, head: str, base_sha: str):
+def _worktree_merge_locked(workdir: str, head: str, base_sha: str,
+                           resolve: bool = False):
     tmp = Path(tempfile.mkdtemp(prefix="pm-integrate-"))
     # A unique basename gives a unique admin dir (.git/worktrees/<name>).
     wt = tmp / f"candidate-{secrets.token_hex(4)}"
@@ -251,7 +792,7 @@ def _worktree_merge_locked(workdir: str, head: str, base_sha: str):
         add = _git(*no_hooks, "worktree", "add", "--detach", "--quiet",
                    str(wt), head, cwd=workdir)
         if add.returncode != 0:
-            return None, [], f"candidate worktree failed: {_detail(add)}"
+            return None, [], f"candidate worktree failed: {_detail(add)}", None
         # rerere off: the rr-cache is shared with the PR worktree, and a
         # replayed resolution would make the candidate depend on local
         # history (with rerere.autoUpdate it stages the replayed paths, so a
@@ -261,11 +802,16 @@ def _worktree_merge_locked(workdir: str, head: str, base_sha: str):
                  "merge", "--no-commit", "--no-ff", "--no-edit", base_sha, cwd=wt)
         if m.returncode == 0:
             tree = _out(_git("write-tree", cwd=wt))
-            return (tree or None), [], (None if tree else "write-tree failed")
+            return (tree or None), [], (None if tree else "write-tree failed"), None
         conflicts = _out(_git("diff", "--name-only", "--diff-filter=U", cwd=wt))
-        if conflicts:
-            return None, sorted(conflicts.splitlines()), None
-        return None, [], f"candidate merge failed: {_detail(m)}"
+        if not conflicts:
+            return None, [], f"candidate merge failed: {_detail(m)}", None
+        conflicts = sorted(conflicts.splitlines())
+        if resolve and _all_resolvable(conflicts):
+            tree, resolution = _resolve_worktree_conflicts(
+                wt, workdir, head, base_sha, conflicts)
+            return tree, conflicts, None, resolution
+        return None, conflicts, None, None
     finally:
         removed = _git("worktree", "remove", "--force", str(wt),
                        cwd=workdir).returncode == 0
@@ -274,14 +820,151 @@ def _worktree_merge_locked(workdir: str, head: str, base_sha: str):
             _git("worktree", "prune", cwd=workdir)
 
 
-def compute_candidate(workdir: str, head: str, base_sha: str) -> dict:
+def _all_resolvable(conflicts: list[str]) -> bool:
+    """Only project.yaml conflicts can be resolved automatically."""
+    return bool(conflicts) and all(
+        Path(c).name == "project.yaml" for c in conflicts)
+
+
+def _write_resolved(target: Path, text: str) -> None:
+    """Write a resolved document, lifting pm's read-only state-file mode."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        try:
+            target.chmod(target.stat().st_mode | stat.S_IWUSR)
+        except OSError:
+            pass
+    target.write_text(text, encoding="utf-8")
+
+
+def _stage_text(cwd, path: str, stage: int) -> str | None:
+    """Index stage *stage* of *path* as text (``None`` when absent)."""
+    r = _git("show", f":{stage}:{path}", cwd=cwd)
+    return r.stdout if r.returncode == 0 else None
+
+
+def _unified_diff(old: str, new: str, fromfile: str, tofile: str) -> str:
+    lines = list(difflib.unified_diff(
+        (old or "").splitlines(), (new or "").splitlines(),
+        fromfile=fromfile, tofile=tofile, lineterm="", n=3))
+    if len(lines) > _DIFF_LINE_LIMIT:
+        lines = lines[:_DIFF_LINE_LIMIT] + ["... (truncated)"]
+    return "\n".join(lines)
+
+
+def _resolve_worktree_conflicts(wt: Path, workdir: str, head: str,
+                                base_sha: str, conflicts: list[str]):
+    """Resolve every conflicted project.yaml in *wt*; ``(tree|None, record)``."""
+    paths: list[dict] = []
+    unresolved: list[dict] = []
+    diff_parts: list[str] = []
+    for path in conflicts:
+        ours_text = _stage_text(wt, path, 2)
+        theirs_text = _stage_text(wt, path, 3)
+        base_text = _stage_text(wt, path, 1)
+        merged, detail = resolve_project_yaml(base_text, ours_text, theirs_text)
+        detail = dict(detail or {})
+        detail["path"] = path
+        if merged is None:
+            unresolved.append({
+                "path": path,
+                "conflicts": detail.get("conflicts")
+                or [detail.get("error") or "unresolved"],
+            })
+            paths.append(detail)
+            continue
+        target = Path(wt, path)
+        try:
+            _write_resolved(target, merged)
+        except OSError as e:
+            unresolved.append({"path": path,
+                               "conflicts": [f"cannot write resolved file: {e}"]})
+            paths.append(detail)
+            continue
+        add = _git("add", "--", path, cwd=wt)
+        if add.returncode != 0:
+            unresolved.append({"path": path,
+                               "conflicts": [f"git add failed: {_detail(add)}"]})
+            paths.append(detail)
+            continue
+        detail["blob"] = _out(_git("rev-parse", f":{path}", cwd=wt)) or None
+        actions = detail.get("actions") or {}
+        detail["records"] = _record_counts(actions)
+        detail["added_ours"] = _action_ids(actions, "added", "PR branch")
+        detail["added_theirs"] = _action_ids(actions, "added", "new base")
+        detail["merged_fields"] = _action_ids(actions, "changed")
+        detail["removed"] = _action_ids(actions, "removed")
+        diff_parts.append(f"### {path}")
+        diff_parts.append(_unified_diff(
+            ours_text or "", merged, f"{head[:12]}:{path} (PR branch)",
+            f"{path} (resolved)"))
+        diff_parts.append(_unified_diff(
+            theirs_text or "", merged, f"{base_sha[:12]}:{path} (new base)",
+            f"{path} (resolved)"))
+        paths.append(detail)
+
+    resolution: dict = {
+        "resolver": "project-yaml-records/v1",
+        "paths": paths,
+        "unresolved": unresolved,
+        "base_tree": _out(_git("rev-parse", f"{base_sha}^{{tree}}",
+                               cwd=workdir)) or None,
+        "head_tree": _out(_git("rev-parse", f"{head}^{{tree}}",
+                               cwd=workdir)) or None,
+        "diff": "\n".join(diff_parts).strip() + "\n" if diff_parts else "",
+    }
+    if unresolved:
+        _git("merge", "--abort", cwd=wt)
+        return None, resolution
+    tree = _out(_git("write-tree", cwd=wt))
+    if not tree:
+        _git("merge", "--abort", cwd=wt)
+        resolution["unresolved"].append(
+            {"path": "*", "conflicts": ["git write-tree failed"]})
+        return None, resolution
+    resolution["candidate_tree"] = tree
+    return tree, resolution
+
+
+def _action_ids(actions: dict, kind: str, side: str | None = None) -> list[str]:
+    """Flatten top-level record-list actions into the ids they touched."""
+    out: list[str] = []
+    for path, entry in actions.items():
+        if "[" in path or "." in path:
+            continue                       # a field/record-level detail
+        if kind == "added":
+            out.extend((entry.get("added") or {}).get(side) or [])
+        else:
+            out.extend(entry.get(kind) or [])
+    return sorted({str(i) for i in out})
+
+
+def _record_counts(actions: dict) -> dict:
+    """Bounded record counts for the compact summary."""
+    out: dict = {}
+    for path, entry in actions.items():
+        added = entry.get("added") or {}
+        out[path] = {
+            "added_ours": len(added.get("PR branch") or []),
+            "added_theirs": len(added.get("new base") or []),
+            "changed": len(entry.get("changed") or []),
+            "removed": len(entry.get("removed") or []),
+        }
+    return out
+
+
+def compute_candidate(workdir: str, head: str, base_sha: str,
+                      *, resolve: bool = True, pr: dict | None = None) -> dict:
     """Integration of *head* with *base_sha*, without touching the worktree.
 
     Returns ``{status, candidate_tree, conflicts, merge_base, base_files,
-    pr_files, overlap, error?}``.
+    pr_files, overlap, resolution?, base_behavior_changes, error?}``.  With
+    *resolve*, a conflict confined to ``project.yaml`` is reconciled by
+    record id in an isolated worktree; real conflicts are left alone.
     """
     out: dict = {"conflicts": [], "base_files": [], "pr_files": [],
-                 "overlap": [], "candidate_tree": None}
+                 "overlap": [], "candidate_tree": None,
+                 "resolution": None, "base_behavior_changes": []}
     mb = _out(_git("merge-base", head, base_sha, cwd=workdir))
     out["merge_base"] = mb or None
     if mb:
@@ -290,6 +973,13 @@ def compute_candidate(workdir: str, head: str, base_sha: str) -> dict:
         out["base_files"] = base_files.splitlines() if base_files else []
         out["pr_files"] = pr_files.splitlines() if pr_files else []
         out["overlap"] = sorted(set(out["base_files"]) & set(out["pr_files"]))
+        if out["base_files"]:
+            try:
+                out["base_behavior_changes"] = base_behavior_changes(
+                    workdir, mb, base_sha, pr=pr)
+            except Exception as e:  # never fail the check on the summary
+                _log.warning("base interaction summary failed: %s", e)
+                out["base_behavior_error"] = str(e)
 
     # In-base first: a HEAD equal to the base (a PR with no commits of its
     # own) is "contained", not "up to date" — there is nothing to publish.
@@ -302,14 +992,32 @@ def compute_candidate(workdir: str, head: str, base_sha: str) -> dict:
                                           cwd=workdir)) or None
         return out
 
+    resolution = None
     if _git_version() >= (2, 38):
         tree, conflicts, err = _merge_tree(workdir, head, base_sha)
+        if not err and conflicts and resolve and _all_resolvable(conflicts):
+            wtree, _wconf, werr, resolution = _worktree_merge(
+                workdir, head, base_sha, resolve=True)
+            if werr:
+                resolution = dict(resolution or {})
+                resolution.setdefault("unresolved", []).extend(
+                    {"path": p, "conflicts": [werr]} for p in conflicts)
+                resolution["error"] = werr
+                tree = None
+            else:
+                tree = wtree
     else:
-        tree, conflicts, err = _worktree_merge(workdir, head, base_sha)
+        tree, conflicts, err, resolution = _worktree_merge(
+            workdir, head, base_sha, resolve=resolve)
     if err:
         out.update(status=ERROR, error=err)
     elif conflicts:
-        out.update(status=CONFLICT, conflicts=conflicts)
+        if tree:
+            out.update(status=RESOLVED, conflicts=conflicts,
+                       candidate_tree=tree, resolution=resolution)
+        else:
+            out.update(status=CONFLICT, conflicts=conflicts,
+                       resolution=resolution)
     else:
         out.update(status=CLEAN, candidate_tree=tree)
     return out
@@ -317,8 +1025,14 @@ def compute_candidate(workdir: str, head: str, base_sha: str) -> dict:
 
 # --- check + record --------------------------------------------------------
 
-def run_check(data: dict, pr: dict, root: Path | None = None) -> dict:
-    """Fetch the base and compute the candidate for *pr* (no state writes)."""
+def run_check(data: dict, pr: dict, root: Path | None = None,
+              *, resolve: bool = True, base_sha: str | None = None) -> dict:
+    """Fetch the base and compute the candidate for *pr* (no state writes).
+
+    *base_sha* re-checks against an already-fetched revision instead of
+    fetching again (used right after applying a resolution, so the record
+    and the applied merge name the same base).
+    """
     record: dict = {"checked_at": _now()}
     workdir = pr.get("workdir")
     if not workdir or not Path(workdir).is_dir():
@@ -344,12 +1058,15 @@ def run_check(data: dict, pr: dict, root: Path | None = None) -> dict:
     if not target_repo:
         record.update(status=ERROR, error="no target repository")
         return record
-    base_sha, err = fetch_base(workdir, target_repo, base_branch)
+    if base_sha is None:
+        base_sha, err = fetch_base(workdir, target_repo, base_branch)
+        if err:
+            record["base_sha"] = None
+            record.update(status=ERROR, error=err)
+            return record
     record["base_sha"] = base_sha
-    if err:
-        record.update(status=ERROR, error=err)
-        return record
-    record.update(compute_candidate(workdir, head, base_sha))
+    record.update(compute_candidate(workdir, head, base_sha, resolve=resolve,
+                                    pr=pr))
     return record
 
 
@@ -369,13 +1086,47 @@ def _cwd_checkout_of(pr: dict) -> str | None:
 def compact(record: dict) -> dict:
     """The project.yaml form of an integration record (lists truncated)."""
     out = {k: v for k, v in record.items()
-           if k not in ("base_files", "pr_files")}
+           if k not in ("base_files", "pr_files", "resolution")}
     for k in ("conflicts", "overlap"):
         vals = list(record.get(k) or [])
         out[k] = vals[:_YAML_LIST_LIMIT]
         if len(vals) > _YAML_LIST_LIMIT:
             out[f"{k}_total"] = len(vals)
     out["base_files_count"] = len(record.get("base_files") or [])
+    resolution = record.get("resolution")
+    if resolution:
+        out["resolution"] = _compact_resolution(resolution)
+    behavior = list(record.get("base_behavior_changes") or [])
+    out["base_behavior_changes"] = behavior[:_BEHAVIOR_LIMIT]
+    if len(behavior) > _BEHAVIOR_LIMIT:
+        out["base_behavior_count"] = len(behavior)
+    out["resolution_digest"] = _resolution_digest(resolution)
+    return out
+
+
+def _compact_resolution(resolution: dict) -> dict:
+    out: dict = {}
+    for key in ("resolver", "base_tree", "head_tree", "candidate_tree",
+                "applied_merge_sha", "resolved_from", "diff_path", "error"):
+        if resolution.get(key) is not None:
+            out[key] = resolution[key]
+    paths = []
+    for entry in resolution.get("paths") or []:
+        paths.append({
+            "path": entry.get("path"),
+            "resolver": entry.get("resolver"),
+            "blob": entry.get("blob"),
+            "added_ours": list(entry.get("added_ours") or [])[:20],
+            "added_theirs": list(entry.get("added_theirs") or [])[:20],
+            "merged_fields": list(entry.get("merged_fields") or [])[:20],
+            "removed": list(entry.get("removed") or [])[:20],
+            "records": entry.get("records") or {},
+        })
+    out["paths"] = paths[:_YAML_LIST_LIMIT]
+    unresolved = list(resolution.get("unresolved") or [])
+    out["unresolved"] = unresolved[:_YAML_LIST_LIMIT]
+    if len(unresolved) > _YAML_LIST_LIMIT:
+        out["unresolved_total"] = len(unresolved)
     return out
 
 
@@ -385,28 +1136,14 @@ def integration_json_path(pr_id: str) -> Path | None:
     return croot / pr_id / "integration.json" if croot else None
 
 
-def check_integration(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
-    """Run the integration check for *pr_id* and record it.
+def resolution_diff_path(pr_id: str) -> Path | None:
+    from pm_core.paths import captures_root
+    croot = captures_root()
+    return croot / pr_id / "integration-resolution.diff" if croot else None
 
-    Writes ``pr["integration"]`` (compact) and ``$CAP/integration.json``
-    (full).  Never raises for git/network problems: they come back as
-    ``status: error``.
-    """
-    if data is None:
-        data = store.load(root)
-    pr = store.get_pr(data, pr_id)
-    if pr is None:
-        raise ValueError(f"PR {pr_id} not found")
-    record = run_check(data, pr, root)
-    _log.info("integration %s: %s base=%s head=%s", pr_id, record.get("status"),
-              (record.get("base_sha") or "")[:8], (record.get("head") or "")[:8])
 
-    def _apply(d):
-        p = store.get_pr(d, pr_id)
-        if p is not None:
-            p["integration"] = compact(record)
-
-    store.locked_update(root, _apply)
+def _write_artifacts(pr_id: str, record: dict) -> None:
+    """Write the full record + the human-readable resolution delta."""
     path = integration_json_path(pr_id)
     if path is not None:
         try:
@@ -414,7 +1151,128 @@ def check_integration(root: Path, pr_id: str, *, data: dict | None = None) -> di
             path.write_text(json.dumps(record, indent=2) + "\n")
         except OSError as e:
             _log.warning("integration.json for %s: %s", pr_id, e)
+    resolution = record.get("resolution") or {}
+    diff = resolution.get("diff")
+    diff_path = resolution_diff_path(pr_id)
+    if diff_path is not None and (diff or resolution.get("diff_path")):
+        try:
+            diff_path.parent.mkdir(parents=True, exist_ok=True)
+            if diff:
+                diff_path.write_text(diff)
+            resolution["diff_path"] = str(diff_path)
+        except OSError as e:
+            _log.warning("integration resolution diff for %s: %s", pr_id, e)
+
+
+def _record_check(root: Path, pr_id: str, record: dict) -> dict:
+    """Record *record* on the PR, carrying resolution provenance forward.
+
+    A re-check after pm applied a resolved candidate sees a clean/up-to-date
+    merge; the resolution that produced the applied head must stay visible
+    (and bound), so it is carried when the applied merge is an ancestor of
+    the new HEAD.
+    """
+    try:
+        old_pr = store.get_pr(store.load(root), pr_id) or {}
+    except Exception:
+        old_pr = {}
+    old = old_pr.get("integration") or {}
+    if not record.get("resolution") and old.get("resolution"):
+        applied = (old.get("resolution") or {}).get("applied_merge_sha")
+        workdir = old_pr.get("workdir")
+        new_head = record.get("head")
+        if applied and workdir and new_head and Path(workdir).is_dir() \
+                and (applied == new_head
+                     or is_ancestor(workdir, applied, new_head)):
+            carried = dict(old["resolution"])
+            carried.pop("diff", None)      # compact state never holds it
+            record["resolution"] = carried
+            record["resolution_digest"] = _resolution_digest(carried)
+            record["resolved_from"] = carried.get("resolved_from")
+            old_behavior = list(old.get("base_behavior_changes") or [])
+            if old_behavior:
+                record["base_behavior_changes"] = list(dict.fromkeys(
+                    old_behavior + list(record.get("base_behavior_changes")
+                                        or [])))
+
+    # Artifacts first: they set the resolution diff path the compact record
+    # carries (the full diff itself never goes into project.yaml).
+    _write_artifacts(pr_id, record)
+    record["resolution_digest"] = _resolution_digest(record.get("resolution"))
+
+    def _apply(d):
+        p = store.get_pr(d, pr_id)
+        if p is not None:
+            p["integration"] = compact(record)
+
+    store.locked_update(root, _apply)
     return record
+
+
+def check_integration(root: Path, pr_id: str, *, data: dict | None = None,
+                      resolve: bool = True,
+                      base_sha: str | None = None) -> dict:
+    """Run the integration check for *pr_id* and record it.
+
+    Writes ``pr["integration"]`` (compact) and ``$CAP/integration.json``
+    (full), plus the resolution delta when there was one.  Never raises for
+    git/network problems: they come back as ``status: error``.
+    """
+    if data is None:
+        data = store.load(root)
+    pr = store.get_pr(data, pr_id)
+    if pr is None:
+        raise ValueError(f"PR {pr_id} not found")
+    record = run_check(data, pr, root, resolve=resolve, base_sha=base_sha)
+    _log.info("integration %s: %s base=%s head=%s", pr_id, record.get("status"),
+              (record.get("base_sha") or "")[:8], (record.get("head") or "")[:8])
+    return _record_check(root, pr_id, record)
+
+
+def prepare(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
+    """Sign-off's integration step: check, apply a resolution, re-check.
+
+    A metadata-only conflict is resolved in the isolated candidate, then the
+    same deterministic resolution is applied to the PR branch (so every
+    backend can publish the candidate; GitHub refuses a conflicted branch).
+    The branch is re-checked afterwards and the resolution provenance is
+    carried onto the clean/up-to-date record the sign-off verdict binds to.
+    A workdir that cannot take the merge keeps the ``resolved`` record plus
+    ``apply_error``; sign-off cannot approve it.
+    """
+    record = check_integration(root, pr_id, data=data)
+    if record.get("status") != RESOLVED:
+        return record
+    merged, err = apply_integration(root, pr_id, record)
+    if not merged:
+        record["apply_error"] = err
+        _log.warning("sign-off %s: resolved integration not applied: %s",
+                     pr_id, err)
+        return _record_check(root, pr_id, record)
+    previous = record
+    # Re-check against the exact revision just applied, not a fresh fetch: a
+    # base that moved during the apply must not silently make the recorded
+    # candidate describe a different merge (the merge gate re-fetches and
+    # returns the PR to sign-off if the base is no longer current).
+    record = check_integration(root, pr_id, base_sha=previous.get("base_sha"))
+    resolution = dict(previous.get("resolution") or {})
+    resolution["applied_merge_sha"] = merged
+    resolution["resolved_from"] = {
+        "head": previous.get("head"),
+        "base_sha": previous.get("base_sha"),
+        "merge_base": previous.get("merge_base"),
+        "status": previous.get("status"),
+    }
+    record["resolution"] = resolution
+    record["resolved_from"] = resolution["resolved_from"]
+    # The post-apply check sees no base diff (the base is in the branch now),
+    # but the base interactions the agent must assess are still relevant.
+    record["base_behavior_changes"] = list(
+        previous.get("base_behavior_changes") or [])
+    _log.info("sign-off %s: resolved and applied %s@%s as %s", pr_id,
+              previous.get("base_branch"),
+              (previous.get("base_sha") or "")[:8], merged[:8])
+    return _record_check(root, pr_id, record)
 
 
 def binding(record: dict | None) -> dict | None:
@@ -426,9 +1284,15 @@ def binding(record: dict | None) -> dict | None:
 
 def valid_for(record: dict | None, head: str | None) -> bool:
     """Whether *record* is a mergeable integration check of *head*."""
-    return bool(record and head and record.get("head") == head
-                and record.get("status") in MERGEABLE
-                and record.get("base_sha") and record.get("candidate_tree"))
+    if not (record and head and record.get("head") == head
+            and record.get("status") in MERGEABLE
+            and record.get("base_sha") and record.get("candidate_tree")):
+        return False
+    if record.get("status") == RESOLVED:
+        resolution = record.get("resolution") or {}
+        if not resolution or resolution.get("unresolved"):
+            return False
+    return True
 
 
 def summary(record: dict) -> str:
@@ -441,10 +1305,20 @@ def summary(record: dict) -> str:
         n = len(record.get("overlap") or [])
         return (f"merges cleanly with {base}"
                 + (f" ({n} file(s) changed on both sides)" if n else ""))
+    if status == RESOLVED:
+        paths = [p.get("path") for p in
+                 (record.get("resolution") or {}).get("paths") or []
+                 if p.get("path")]
+        return (f"conflicts with {base} resolved by record "
+                f"({', '.join(paths) or 'project.yaml'})")
     if status == CONFLICT:
         files = record.get("conflicts") or []
-        return (f"CONFLICTS with {base}: {', '.join(files[:5])}"
+        text = (f"CONFLICTS with {base}: {', '.join(files[:5])}"
                 + (" ..." if len(files) > 5 else ""))
+        unresolved = (record.get("resolution") or {}).get("unresolved") or []
+        if unresolved:
+            text += " (metadata resolution not possible)"
+        return text
     if status == IN_BASE:
         return f"already contained in {base}"
     return f"integration check failed: {record.get('error') or 'unknown error'}"
@@ -454,21 +1328,27 @@ def summary(record: dict) -> str:
 
 def apply_integration(root: Path, pr_id: str, record: dict | None = None,
                       *, data: dict | None = None) -> tuple[str | None, str | None]:
-    """Merge the recorded clean base revision into the PR branch.
+    """Merge the recorded base revision into the PR branch.
 
-    Only for a ``clean`` record of the workdir's current HEAD, on the PR
-    branch, with a clean tree and no merge in progress.  Returns
-    ``(merge_sha, None)`` or ``(None, reason)``; a failed merge is aborted
-    so no half-merge is left.  Never touches the base branch and never
-    pushes (the merge step pushes the approved PR head where needed).
+    For a ``clean`` record this is a plain merge.  For a ``resolved`` record
+    the same deterministic record-aware resolution is re-applied to the
+    conflicted ``project.yaml`` files and the resulting tree must equal the
+    recorded candidate tree before the merge is committed.
+
+    Only for a record of the workdir's current HEAD, on the PR branch, with a
+    clean tree and no merge in progress.  Returns ``(merge_sha, None)`` or
+    ``(None, reason)``; a failed merge is aborted so no half-merge is left.
+    Never touches the base branch and never pushes (the merge step pushes the
+    approved PR head where needed).
     """
     if data is None:
         data = store.load(root)
     pr = store.get_pr(data, pr_id) or {}
     if record is None:
         record = pr.get("integration") or {}
-    if record.get("status") != CLEAN:
-        return None, f"integration is {record.get('status')}, not clean"
+    status = record.get("status")
+    if status not in (CLEAN, RESOLVED):
+        return None, f"integration is {status}, not clean/resolved"
     workdir = pr.get("workdir")
     if not workdir or not Path(workdir).is_dir():
         return None, "no PR workdir"
@@ -487,6 +1367,10 @@ def apply_integration(root: Path, pr_id: str, record: dict | None = None,
     base_sha = record.get("base_sha")
     msg = (f"Integrate {record.get('base_branch')}@{base_sha[:8]} into "
            f"{branch or 'PR branch'}")
+    if status == RESOLVED:
+        return _apply_resolution(root, pr_id, record, workdir, head, base_sha,
+                                 msg)
+
     m = _git("merge", "--no-ff", "-m", msg, base_sha, cwd=workdir)
     if m.returncode != 0:
         _git("merge", "--abort", cwd=workdir)
@@ -497,6 +1381,79 @@ def apply_integration(root: Path, pr_id: str, record: dict | None = None,
         _log.warning("integration apply %s: tree %s != candidate %s",
                      pr_id, tree[:8], record["candidate_tree"][:8])
     return merged or None, None
+
+
+def _apply_resolution(root: Path, pr_id: str, record: dict, workdir: str,
+                      head: str, base_sha: str, msg: str):
+    """Merge *base_sha* and re-apply the recorded project.yaml resolution."""
+    no_hooks = ("-c", "core.hooksPath=/dev/null")
+    expected = record.get("candidate_tree")
+    resolution = record.get("resolution") or {}
+    recorded = {p.get("path"): p for p in resolution.get("paths") or []}
+    m = _git(*no_hooks, "-c", "rerere.enabled=false", "merge", "--no-commit",
+             "--no-ff", base_sha, cwd=workdir)
+    if m.returncode == 0:
+        # The workdir merged without conflict (the base moved under the
+        # recorded check, or the branch already carries the change): the
+        # candidate must still match exactly.
+        tree = _out(_git("write-tree", cwd=workdir))
+        if not expected or tree != expected:
+            _git("reset", "--hard", head, cwd=workdir)
+            return None, ("the resolved merge produced a different tree "
+                          f"({(tree or '?')[:12]} != {(expected or '?')[:12]})")
+        commit = _git(*no_hooks, "-c", "user.name=pm", "-c", "user.email=pm@localhost",
+                      "commit", "--no-edit", cwd=workdir)
+        if commit.returncode != 0:
+            _git("reset", "--hard", head, cwd=workdir)
+            return None, f"merge commit failed: {_detail(commit)}"
+        return _out(_git("rev-parse", "HEAD", cwd=workdir)) or None, None
+
+    conflicts = _out(_git("diff", "--name-only", "--diff-filter=U", cwd=workdir))
+    conflicts = sorted(conflicts.splitlines()) if conflicts else []
+    if not conflicts:
+        _git("merge", "--abort", cwd=workdir)
+        return None, f"merge failed: {_detail(m)}"
+    for path in conflicts:
+        entry = recorded.get(path)
+        if entry is None or Path(path).name != "project.yaml":
+            _git("merge", "--abort", cwd=workdir)
+            return None, (f"unexpected conflict in {path} (not part of the "
+                          "recorded resolution)")
+        merged, detail = resolve_project_yaml(
+            _stage_text(workdir, path, 1),
+            _stage_text(workdir, path, 2),
+            _stage_text(workdir, path, 3))
+        if merged is None:
+            _git("merge", "--abort", cwd=workdir)
+            why = (detail or {}).get("conflicts") or [(detail or {}).get("error")]
+            return None, f"resolution of {path} failed: {why}"
+        target = Path(workdir, path)
+        _write_resolved(target, merged)
+        add = _git("add", "--", path, cwd=workdir)
+        if add.returncode != 0:
+            _git("merge", "--abort", cwd=workdir)
+            return None, f"git add {path} failed: {_detail(add)}"
+        blob = _out(_git("rev-parse", f":{path}", cwd=workdir))
+        if entry.get("blob") and blob != entry["blob"]:
+            _git("merge", "--abort", cwd=workdir)
+            return None, (f"the resolution of {path} is not deterministic "
+                          f"(blob {blob[:12]} != recorded "
+                          f"{entry['blob'][:12]})")
+    left = _out(_git("diff", "--name-only", "--diff-filter=U", cwd=workdir))
+    if left:
+        _git("merge", "--abort", cwd=workdir)
+        return None, f"unresolved conflicts remain: {left.split()}"
+    tree = _out(_git("write-tree", cwd=workdir))
+    if not expected or tree != expected:
+        _git("merge", "--abort", cwd=workdir)
+        return None, ("the resolved merge produced a different tree "
+                      f"({(tree or '?')[:12]} != {(expected or '?')[:12]})")
+    commit = _git(*no_hooks, "-c", "user.name=pm", "-c", "user.email=pm@localhost",
+                  "commit", "-m", msg, cwd=workdir)
+    if commit.returncode != 0:
+        _git("merge", "--abort", cwd=workdir)
+        return None, f"merge commit failed: {_detail(commit)}"
+    return _out(_git("rev-parse", "HEAD", cwd=workdir)) or None, None
 
 
 # --- publication helpers (used by `pm pr merge`) --------------------------

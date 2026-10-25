@@ -1,0 +1,266 @@
+# pr-5cee3d5 — Resolve integration conflicts at sign-off; reuse unaffected evidence
+
+## Problem
+
+Sign-off owns integration (`pm_core/integration.py`, pr-ac10f03). Its check
+computes the merge of the PR HEAD with the fetched base in an isolated
+candidate and records `up_to_date` / `clean` / `conflict` / `in_base` /
+`error`. A `conflict` can only route `SIGNOFF_IMPL`
+(`signoff.effective_verdict`), so even a metadata-only `pm/project.yaml`
+conflict — two branches independently appending records — restarts
+implementation, full review and full QA (PR #250).
+
+The fix must make a *safe* structured resolution part of sign-off, expose its
+provenance, let the sign-off agent decide the follow-up stage (impl / review /
+qa / merge-only), and let evidence produced on the pre-merge revision be
+reused explicitly when the agent judges it still covers the resolved
+candidate. The merge step keeps publishing only the exact approved,
+conflict-free candidate.
+
+## Requirements (grounded)
+
+### R1. Structured project.yaml resolution in an isolated candidate
+`integration.compute_candidate(workdir, head, base_sha)` gains a resolution
+attempt when the git merge conflicts **only** in files named `project.yaml`
+(any directory, in practice `pm/project.yaml`). The resolution runs in a
+throwaway detached worktree (`_worktree_merge_locked` family) — the PR
+worktree, its index/branch, and the base are never touched.
+
+New resolver `integration.resolve_project_yaml(base_text, ours_text,
+theirs_text)`:
+- Merge mappings recursively: a key/value changed on one side and untouched on
+  the other is taken; both changed to the same value is taken; both changed
+  differently is a **conflict** (never "theirs wins" as
+  `store.merge_3way` does).
+- Lists of id-keyed entries (`prs`, `plans`, and nested lists such as notes)
+  merge by `id`: independent additions from both sides survive; an entry
+  changed on one side only is taken; entries changed on both sides merge field
+  by field; a field changed differently on both sides is a conflict; a record
+  deleted on one side and edited on the other is a conflict; the same id added
+  independently on both sides with different content is an ambiguous record
+  and a conflict; duplicate ids within one side are ambiguous and a conflict.
+  Ordering changes are preserved when only one side reordered; conflicting
+  reorders are a conflict.
+- Non-id lists (`depends_on`, etc.) and scalars are atomic: both changed
+  differently is a conflict.
+- After merging, validate that **neither side lost a change**: for every leaf
+  or id-entry where each side differs from base, the merged result must carry
+  that side's value (or the same value both sides chose). Any violation fails
+  the resolution.
+- Validate the merged document's shape read-only: top-level mapping,
+  `prs`/`plans` id-keyed with unique ids, valid PR statuses
+  (`pr_utils.VALID_PR_STATES`), valid plan statuses/parents/no cycles. Invalid
+  shape fails the resolution.
+- Serialize with pm's writer (`store._YAML_HEADER` + `yaml.dump(...,
+  Dumper=store._yaml_dumper(data), default_flow_style=False,
+  sort_keys=False, allow_unicode=True)`) so output is deterministic and
+  byte-identical to `store.save` for unchanged data.
+
+If any resolver returns a conflict or fails validation, the candidate stays
+`CONFLICT`; the partial resolution record is retained (visible, never silently
+applied). Non-`project.yaml` conflicts are never resolved automatically.
+
+### R2. Resolved candidate status + provenance
+New status `integration.RESOLVED` added to `MERGEABLE`. `compute_candidate`
+returns, for a successful resolution:
+- `candidate_tree` (the fully merged tree, conflict-free),
+- `resolution` = `{paths: [{path, resolver, added_ours, added_theirs,
+  merged_fields, removed, records, blob}], unresolved: [], diff: <text>,
+  base_tree, head_tree}`,
+- `base_behavior_changes` (R3).
+`compact()` keeps a bounded resolution summary and a `resolution_digest`
+(sha256 over canonical resolution JSON). The full record (including the diff)
+goes to `$CAP/<pr>/integration.json`; the human-readable delta goes to
+`$CAP/<pr>/integration-resolution.diff`.
+
+`summary()` renders resolved candidates ("conflicts with master@… resolved by
+record (N added from PR, M from base)") and failed resolutions.
+
+### R3. Do not exempt metadata; surface new-base interactions
+`compute_candidate` computes `base_behavior_changes` for every check with a
+non-empty base diff (clean merge included):
+- for changed `project.yaml` files: diffs of `project.model_config`,
+  `project.skip_qa`, `project.base_branch`, `project.backend`,
+  `project.nested_podman`, `project.libyaml`, PR `status` / `depends_on` /
+  `model` / `session_models` / `plan`, plan `status`;
+- for changed dependency/config paths (`pyproject.toml`, `requirements*.txt`,
+  `setup.py`/`setup.cfg`, `package.json`, `Dockerfile`, `install.sh`): the
+  path with a one-line note.
+Recorded (bounded) in the integration record and shown in the sign-off prompt
+so the agent must weigh them even when Git reports a clean merge. PM does not
+auto-approve or auto-reject on them — the agent decides and must say so.
+
+### R4. Apply the resolved merge to the PR branch before sign-off runs
+For the GitHub backend `gh pr merge` cannot merge a conflicted branch, and
+sign-off's report/verdict must bind to a candidate that can actually be
+published. So the sign-off launch
+(`signoff.launch_signoff_window`) runs a new
+`integration.prepare(root, pr_id)`:
+1. `check_integration` (records the check; resolves metadata-only conflicts in
+   the isolated candidate).
+2. If status is `RESOLVED`, `apply_integration` merges the base into the PR
+   branch and applies the same deterministic resolution to the conflicted
+   `project.yaml` files (recomputing it from index stages), commits the merge,
+   and verifies the resulting tree **equals** `candidate_tree` before
+   committing; on any mismatch or remaining conflict it aborts the merge and
+   restores the original HEAD.
+3. Re-runs the check against the **same** base revision (no second fetch, so
+   a base that moves during the apply cannot make the record describe a
+   different merge) and records it with the resolution provenance carried
+   forward (`resolution.applied_merge_sha`,
+   `resolution.resolved_from = {head, base_sha, merge_base, status}`,
+   `resolution_digest`, and the pre-apply `base_behavior_changes`).
+Dirty workdirs are never touched: apply refuses and the record keeps
+`RESOLVED` with `apply_error`; a MERGE on it is blocked (R6).
+
+`apply_integration` also handles `RESOLVED` for sign-off bounces (R5), and
+refuses any record whose head no longer matches, whose workdir is not on the
+PR branch, or that has a merge in progress.
+
+### R5. Agent decides the return stage; bounces see integrated code
+`effective_verdict` keeps conflicts → `IMPL` for unresolved candidates, and
+allows MERGE / REVIEW / REQA for `RESOLVED` candidates that were applied.
+`_prepare_bounce` integrates a `RESOLVED` record the same way it integrates a
+`CLEAN` one (via `apply_integration`), so review/QA run on the integrated
+tree. The return record (`build_return_record`, `format_signoff_return`) adds
+the resolution summary, `applied_merge_sha`, and the original
+`resolved_from` revisions; the prompt tells the next stage to verify the
+integrated result, not only the PR's own diff.
+
+### R6. Evidence provenance and explicit reuse
+`record_signoff_verdict` gains an `evidence` block on `pr["signoff"]`:
+- `reviewed_head` (the revision sign-off reviewed),
+- `resolved_from` (the pre-resolution head/base/merge-base when applicable),
+- `review` (recorded `reviewed_at`; when QA recorded `planner_head` and no
+  `planner_code_changes`, that revision is recorded as the review's with
+  `sha_source: inferred-from-qa` — otherwise pm states it does not record
+  the review revision),
+- `qa` (latest `qa_status.json` `overall`, plus `planner_head` and
+  `planner_code_changes` from its sibling `qa_resume.json`),
+- `prior_signoff` (previous record's sha/verdict/ts, if any),
+- `required_return_stage` (the verdict mapped to its stage),
+- agent-declared reuse from `report.html` meta tags (only trusted when the
+  report's `pm-signoff-head` matches the reviewed head):
+  `pm-signoff-evidence` (`stage@sha,…`), `pm-signoff-evidence-reason`,
+  `pm-signoff-checks`, `pm-signoff-candidate`.
+`pr_signoff_record` and the auto-sequence driver refuse/coerce a `MERGE` when
+the integration carries a `resolution` or `base_behavior_changes` but the
+report does not state (a) the candidate tree (`pm-signoff-candidate`) for
+resolved candidates and (b) which evidence is reused / which targeted checks
+were run, with a reason. A resolved MERGE additionally requires
+`resolution.applied_merge_sha`. This makes reuse an explicit, recorded act
+instead of an invented approval.
+
+The sign-off prompt (`_signoff_integration_block` + step 0 + report contract)
+renders the resolution (paths, ids added/changed/removed, unresolved), the
+delta file path, the applied merge, the base behavior changes, the available
+evidence revisions, and instructions: metadata-only conflicts are not an
+automatic exemption; state reuse or the targeted checks; choose the earliest
+affected stage.
+
+### R7. Merge gate / publication identity
+`merge_gate_refusal` additionally requires:
+- the PR's current `integration` record still has the bound `head` and
+  `candidate_tree` (a re-check that produced a different candidate
+  invalidates the approval);
+- for a bound `resolution_digest`: the current record carries the same digest,
+  `resolution.applied_merge_sha` is set, `resolution.unresolved` is empty, and
+  the report justification of R6 is present;
+- for `base_behavior_changes`: the report justification of R6 is present.
+`BINDING_KEYS` gains `resolution_digest`.
+`_publish_candidate` recomputes the candidate with `resolve=False` and
+refuses when the tree differs (now covering the resolved/applied head), so
+the merge step can never introduce a new resolution. Base movement still
+invalidates and returns to sign-off.
+
+### R8. CLI / user-visible flow
+`pm pr signoff integrate <pr>`:
+- `--resolve/--no-resolve` (default resolve),
+- prints the resolution summary, unresolved conflicts, applied merge and the
+  delta file path; exits 1 on unresolved conflict/error;
+- `--apply` applies a `CLEAN` or `RESOLVED` candidate (the existing clean
+  behavior is preserved).
+`--record` still records the check the verdict binds to.
+
+### R9. Regression coverage
+Real-git tests (new `tests/test_signoff_resolution.py` plus resolver unit
+tests):
+1. #250 reproduction: base and branch each append distinct PR entries (and
+   notes) to `pm/project.yaml`; integration resolves; both/all records survive
+   in the published merge tree; a bound sign-off with the required report tags
+   merges; review/QA evidence revisions and reuse are recorded; a fresh
+   sign-off is still required (no merge without a new record).
+2. Same record/field conflict → `CONFLICT`, no resolution, MERGE coerced to
+   IMPL.
+3. Deletion vs edit → `CONFLICT`.
+4. Non-project.yaml (code) conflict → `CONFLICT`, never auto-resolved.
+5. Clean base change to `project.model_config` → `CLEAN` but
+   `base_behavior_changes` non-empty and a MERGE requires the justification
+   tags.
+6. Stale candidate identity: base moved after approval → refused/invalidated;
+   a re-check with a different candidate tree → refused.
+7. Preservation: resolution never changes the PR workdir HEAD/branch/dirty
+   files; captures/evidence files survive.
+8. Bounce to REVIEW applies the resolution and the branch tree equals the
+   candidate.
+9. Prompt/CLI surfaces: sign-off prompt names the resolution, candidate,
+   evidence instructions; `integrate` prints the resolution.
+
+## Implicit requirements
+
+- **Determinism.** The resolver must produce the same bytes at check time and
+  at apply/merge time, or the merge gate would refuse every resolved
+  candidate. Hence: fixed merge order (base order, then ours-only additions,
+  then theirs-only additions), pm's serializer, no timestamps in the
+  serialized document.
+- **Read-only check.** `run_check` must not write the PR worktree, index,
+  branch, or base; only the explicit `apply_integration` step does.
+- **Locking.** Resolution worktrees/fetches stay inside `_repo_lock`; the
+  project.yaml record writes stay inside `store.locked_update`.
+- **Backward compatibility.** `CLEAN`/`UP_TO_DATE` approvals without a report
+  keep working; the new justification requirement only applies when the
+  record carries a resolution or behavioral base changes.
+- **Bounded output.** Resolution details/diffs are capped in `project.yaml`
+  (`compact`) and in the artifacts; no full project.yaml copies in state.
+- **Existing evidence untouched.** Captures, `qa_status.json`, `qa_resume.json`
+  and prior `report.html` files are read, never rewritten.
+
+## Edge cases
+
+- `project.yaml` absent on one side (add/add or modify/delete): a missing
+  base with two different added documents is ambiguous → conflict; a
+  modify/delete is a deletion/edit conflict → conflict.
+- YAML parse failure on any stage → conflict (no resolution).
+- Duplicate ids / non-list / non-mapping documents → conflict.
+- The resolution changes only `pm/project.yaml`; any other conflicted path
+  aborts the attempt and keeps the original conflict list.
+- Workdir dirty / detached HEAD / merge in progress → apply refused; record
+  keeps `RESOLVED` + `apply_error`; MERGE blocked; a bounce records the error.
+- Base moves between the applied resolution and the merge → merge gate /
+  publish refuses, invalidates, returns to sign-off.
+- Head moves (agent commits) after the applied resolution → stale approval;
+  sign-off re-runs on the new head.
+- A resolved candidate with an empty diff (both sides made the same change) is
+  still recorded as resolved; the report requirement still applies because a
+  conflict was reconciled.
+- `store.merge_3way` (the live-state stash-pop path) is unchanged; the new
+  resolver is integration-specific because its conflict policy differs.
+- Old git (< 2.38) and new git both resolve; the worktree path is used for
+  resolution regardless of `merge-tree`.
+
+## Ambiguities resolved (no [UNRESOLVED] items)
+
+- **Apply the resolution at sign-off vs only at merge.** Chosen: apply at
+  sign-off (R4). GitHub's `gh pr merge` cannot merge a conflicted branch, and
+  the approved candidate must be publishable. The check stays read-only; the
+  apply is a separate, recorded step whose result is re-checked and bound.
+- **Automatic resolution scope.** Chosen: only when *all* conflicts are
+  `project.yaml`; mixed conflicts stay unresolved so no partial resolution is
+  silently applied.
+- **Enforcement of evidence reuse.** Chosen: a resolved (or behaviorally
+  changed) MERGE requires an explicit report statement, enforced at record and
+  merge-gate time; otherwise the agent may still route REVIEW/REQA/IMPL
+  without one.
+- **"Behavioral configuration" set.** Chosen: the explicit `project.yaml`
+  keys/paths in R3; anything else is covered by the generic overlap listing
+  and the agent's judgment.
