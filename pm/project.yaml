@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T01:20:30.438612+00:00'
+  updated_at: '2026-10-25T14:28:49.054081+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22791,6 +22791,48 @@ prs:
       `pm autostart list` — all registered).'
     created_at: '2026-10-25T01:20:30Z'
     last_edited: '2026-10-25T01:20:30Z'
+  - id: note-a39fd8f
+    text: 'Review-loop 2ac8 i4 (05b05231): delivery-path audit. One gap fixed: launch_bridge_in_tmux
+      was the last argv-entry prompt path in claude_launcher.py without a size guard,
+      and pm cluster explore --bridged delivers its prompt through it. The prompt
+      is embedded in the tmux shell command (python3 -m pm_core.bridge <sock> --cwd
+      <cwd> --prompt <escaped>), so it is one argv entry to the bridge process and
+      above MAX_ARG_STRLEN the pane fails with a raw "Argument list too long" (verified:
+      /bin/true with a 131,100-byte arg exits 126; 130,000 succeeds). No current caller
+      passes a large prompt (cluster-explore builds fixed text plus a temp-file path),
+      so the practical risk today is nil, but R15 exists as defense in depth for exactly
+      the paths the audit did not enumerate. Fixed like the other three: above PROMPT_ARG_LIMIT
+      the complete prompt goes to a file (_materialize_oversized_prompt, honouring
+      the host write_dir / container cwd split) and is passed as --prompt-file; pm_core.bridge
+      reads it for its first turn and removes it (one-shot handoff). Under the limit
+      the command is byte-identical. The bridge own turns go to claude -p over stdin
+      (stream-json), not argv, so only the launcher handoff needed the guard.
+
+
+      Tests: test_prompt_bounds 107 (5 new) + test_claude_launcher 37 (2 new), 6 failing-then-passing;
+      end-to-end with a stub claude delivered a 150,016-byte prompt intact to the
+      bridge first turn, file gone afterwards.
+
+
+      Independent re-verification: real-data sweep over all 488 PRs x 4 builders byte-identical
+      to the recorded maxima (impl 75,146 / review 77,616 / sign-off 92,165 / planner
+      80,652 B, max pr-0b87a97); a full-text diff of 4 builders x 7 real PRs against
+      an origin/master worktree shows only the intended caps (25-sibling plan context,
+      35 KB PR notes) and their markers; every omission marker re-checked against
+      a command that prints the omitted text (pm pr note list, pm pr show, pm pr spec,
+      pm pr graph, pm pr list --plan, pm qa list, pm qa mocks show, pm qa captures-path,
+      pm plan list); full-suite failure set byte-identical to an origin/master worktree
+      baseline in this sandbox (55 failed / 17 errors, all test_signoff_integration
+      / test_merge_publish / test_markdown_render / test_hook_events / the flaky test_git_ops::test_keeps_unpushed_merge).
+
+
+      Spec section 21 also records, deliberately unchanged: the PR-notes fits path
+      prefers "every note represented" over "newest in full" when the summaries already
+      fill the budget (reachable with ~150 short notes plus one 30 KB newest note,
+      or 50 CJK notes); the marker covers it and all 488 real PRs keep the newest
+      note in full. Evidence: /pm-captures/review-2ac8-i4/.'
+    created_at: '2026-10-25T14:28:48Z'
+    last_edited: '2026-10-25T14:28:48Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
