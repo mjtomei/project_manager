@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T18:05:55.704412+00:00'
+  updated_at: '2026-10-25T18:40:54.828796+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33692,6 +33692,26 @@ prs:
       Not exercised: a C review container (not in the When).'
     created_at: '2026-10-25T18:05:55Z'
     last_edited: '2026-10-25T18:05:55Z'
+  - id: note-b0be249
+    text: 'QA S57 (2026-10-25, host, real Claude 2.1.310 vs router/router2/main stubs;
+      captures /pm-captures/scenarios/57, REPORT.md): PASS on a9a3c002, no code change;
+      host pm model show rechecked on 70cf9c94 (S58 0db93125), identical. 2a6b14d4
+      held live: one Routes line per route with differing efforts named (P all-types
+      mixed, Q 10-type, R signoff claude-work2, S 10-type + claude-missing NOT CONFIGURED),
+      PM_EFFORT single high, PM_MODEL 12 per-type lines; 5 pm model show runs during
+      live impl/review/QA byte-identical. Launches matched the lines: stub-logged
+      output_config.effort high for refiner/worker, low for P review and R sign-off,
+      Claude default (xhigh) for no-flag roles; P on router only, Q impl on main then
+      router after the qfix edit + --fresh, R sign-off router2 only, S sign-off fails
+      closed with no request; 0 secrets. Filed pr-6dcca52 (TUI "Error: Error:" prefix,
+      pre-existing); pr-6082c0d note (failed sign-off still moves qa->sign_off). Harness:
+      stub planner skips Step 0, so commit QA specs in bootstrap (S55 setup_proj lines
+      19-20); story3 attempt1 kept invalid. For next QA: after a follow-up typed into
+      a QA worker pane, Claude emitted Stop but no new idle_prompt for 15+ min, so
+      the hook-gated poll never collected that PASS (P s3/s4 run left running); cause
+      unverified.'
+    created_at: '2026-10-25T18:40:54Z'
+    last_edited: '2026-10-25T18:40:54Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
