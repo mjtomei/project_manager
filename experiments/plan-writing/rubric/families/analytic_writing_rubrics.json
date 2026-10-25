@@ -1,0 +1,242 @@
+{
+  "id": "analytic_writing_rubrics",
+  "title": "Analytic writing rubrics: AAC&U Written Communication VALUE rubric and 6+1 Trait Writing rubric (grades 3–12), as published",
+  "framing": [
+    {
+      "source_ref": "aacu-value",
+      "quote": "Written communication is the development and expression of ideas in writing. Written communication involves learning to work in many genres and styles. It can involve working with many different writing technologies, and mixing texts, data, and images.",
+      "locator": "Definition, pp. 1–2",
+      "snapshot_file": "/tmp/claude-1000/-workspace/b71b5724-c9d8-4ec3-a66f-cccab8a3612b/scratchpad/ext/f2/aacu_written_communication.txt"
+    },
+    {
+      "source_ref": "aacu-value",
+      "quote": "The central question guiding the rubric is \"How well does writing respond to the needs of audience(s) for the work?\"",
+      "locator": "Framing Language, p. 1",
+      "snapshot_file": "/tmp/claude-1000/-workspace/b71b5724-c9d8-4ec3-a66f-cccab8a3612b/scratchpad/ext/f2/aacu_written_communication.txt"
+    },
+    {
+      "source_ref": "aacu-value",
+      "quote": "Evaluators using this rubric must have information about the assignments or purposes for writing guiding writers' work.",
+      "locator": "Framing Language, p. 1",
+      "snapshot_file": "/tmp/claude-1000/-workspace/b71b5724-c9d8-4ec3-a66f-cccab8a3612b/scratchpad/ext/f2/aacu_written_communication.txt"
+    },
+    {
+      "source_ref": "aacu-value",
+      "quote": "The rubrics are intended for institutional-level use in evaluating and discussing student learning, not for grading.",
+      "locator": "p. 1 preamble",
+      "snapshot_file": "/tmp/claude-1000/-workspace/b71b5724-c9d8-4ec3-a66f-cccab8a3612b/scratchpad/ext/f2/aacu_written_communication.txt"
+    },
+    {
+      "source_ref": "six-traits",
+      "quote": "The rubrics are field tested, research-based, teacher friendly and designed for easier use across text types (i.e., informative/explanatory, argument, and narrative writing).",
+      "locator": "https://educationnorthwest.org/resources/61-trait-rubrics (March 2021)",
+      "snapshot_file": "/tmp/claude-1000/-workspace/b71b5724-c9d8-4ec3-a66f-cccab8a3612b/scratchpad/ext/f2/en_61_trait_rubrics_page.txt"
+    }
+  ],
+  "criteria": [
+    {
+      "id": "aacu_context_purpose",
+      "name": "Context of and Purpose for Writing",
+      "definition": {
+        "text": "Includes considerations of audience, purpose, and the circumstances surrounding the writing task(s).",
+        "ref": "aacu-value",
+        "locator": "Written Communication VALUE Rubric, p. 2 rubric table, row \"Context of and Purpose for Writing\"; quote from table row description; PDF archived at https://web.archive.org/web/20210918161231/https://www.aacu.org/sites/default/files/files/VALUE/WrittenCommunication.pdf"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 4
+      },
+      "examples": []
+    },
+    {
+      "id": "aacu_content_development",
+      "name": "Content Development",
+      "definition": {
+        "text": "The ways in which the text explores and represents its topic in relation to its audience and purpose.",
+        "ref": "aacu-value",
+        "locator": "Written Communication VALUE Rubric, p. 2 rubric table, row \"Content Development\"; quote from Glossary, \"Content Development\" (the table row has no description); PDF archived at https://web.archive.org/web/20210918161231/https://www.aacu.org/sites/default/files/files/VALUE/WrittenCommunication.pdf"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 4
+      },
+      "examples": []
+    },
+    {
+      "id": "aacu_genre_conventions",
+      "name": "Genre and Disciplinary Conventions",
+      "definition": {
+        "text": "Formal and informal rules inherent in the expectations for writing in particular forms and/or academic fields (please see glossary).",
+        "ref": "aacu-value",
+        "locator": "Written Communication VALUE Rubric, p. 2 rubric table, row \"Genre and Disciplinary Conventions\"; quote from table row description; PDF archived at https://web.archive.org/web/20210918161231/https://www.aacu.org/sites/default/files/files/VALUE/WrittenCommunication.pdf"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 4
+      },
+      "examples": []
+    },
+    {
+      "id": "aacu_sources_evidence",
+      "name": "Sources and Evidence",
+      "definition": {
+        "text": "Evidence: Source material that is used to extend, in purposeful ways, writers' ideas in a text. [...] Sources: Texts (written, oral, behavioral, visual, or other) that writers draw on as they work for a variety of purposes -- to extend, argue with, develop, define, or shape their ideas, for example.",
+        "ref": "aacu-value",
+        "locator": "Written Communication VALUE Rubric, p. 2 rubric table, row \"Sources and Evidence\"; quote from Glossary, \"Evidence\" and \"Sources\" (the table row has no description); PDF archived at https://web.archive.org/web/20210918161231/https://www.aacu.org/sites/default/files/files/VALUE/WrittenCommunication.pdf"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 4
+      },
+      "examples": []
+    },
+    {
+      "id": "aacu_syntax_mechanics",
+      "name": "Control of Syntax and Mechanics",
+      "definition": {
+        "text": null,
+        "ref": "aacu-value",
+        "locator": "Written Communication VALUE Rubric, p. 2 rubric table, row \"Control of Syntax and Mechanics\"; quote from table row has no description and the glossary has no entry; see levels; PDF archived at https://web.archive.org/web/20210918161231/https://www.aacu.org/sites/default/files/files/VALUE/WrittenCommunication.pdf"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 4
+      },
+      "examples": []
+    },
+    {
+      "id": "six_traits_ideas",
+      "name": "Ideas",
+      "definition": {
+        "text": "Does the writer engage the reader with fresh information or perspective on a focused topic?",
+        "ref": "six-traits",
+        "locator": "6+1 Trait Writing Rubrics: Grades 3–12 (© 2021 Education Northwest; \"refined rubrics\" released 2018), trait IDEAS, pp. 2–3, quote is the trait's \"KEY QUESTION\", levels are the unlabeled first row; https://educationnorthwest.org/sites/default/files/resources/traits-rubrics-3-12.pdf"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 6
+      },
+      "examples": []
+    },
+    {
+      "id": "six_traits_organization",
+      "name": "Organization",
+      "definition": {
+        "text": "Does the organizational structure enhance the ideas and make them easier to understand?",
+        "ref": "six-traits",
+        "locator": "6+1 Trait Writing Rubrics: Grades 3–12 (© 2021 Education Northwest; \"refined rubrics\" released 2018), trait ORGANIZATION, pp. 4–5, quote is the trait's \"KEY QUESTION\", levels are the unlabeled first row; https://educationnorthwest.org/sites/default/files/resources/traits-rubrics-3-12.pdf"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 6
+      },
+      "examples": []
+    },
+    {
+      "id": "six_traits_voice",
+      "name": "Voice",
+      "definition": {
+        "text": "Is the voice appropriate to the task, purpose, and audience?",
+        "ref": "six-traits",
+        "locator": "6+1 Trait Writing Rubrics: Grades 3–12 (© 2021 Education Northwest; \"refined rubrics\" released 2018), trait VOICE, pp. 6, quote is the trait's \"KEY QUESTION\", levels are the unlabeled first row; https://educationnorthwest.org/sites/default/files/resources/traits-rubrics-3-12.pdf"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 6
+      },
+      "examples": []
+    },
+    {
+      "id": "six_traits_word_choice",
+      "name": "Word Choice",
+      "definition": {
+        "text": "Does the language convey precise and compelling meaning and/or create a vivid picture for the reader?",
+        "ref": "six-traits",
+        "locator": "6+1 Trait Writing Rubrics: Grades 3–12 (© 2021 Education Northwest; \"refined rubrics\" released 2018), trait WORD CHOICE, pp. 7–8, quote is the trait's \"KEY QUESTION\", levels are the unlabeled first row; https://educationnorthwest.org/sites/default/files/resources/traits-rubrics-3-12.pdf"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 6
+      },
+      "examples": []
+    },
+    {
+      "id": "six_traits_sentence_fluency",
+      "name": "Sentence Fluency",
+      "definition": {
+        "text": "Does the writer control sentences so the text flows smoothly when read aloud?",
+        "ref": "six-traits",
+        "locator": "6+1 Trait Writing Rubrics: Grades 3–12 (© 2021 Education Northwest; \"refined rubrics\" released 2018), trait SENTENCE FLUENCY, pp. 9–10, quote is the trait's \"KEY QUESTION\", levels are the unlabeled first row; https://educationnorthwest.org/sites/default/files/resources/traits-rubrics-3-12.pdf"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 6
+      },
+      "examples": []
+    },
+    {
+      "id": "six_traits_conventions",
+      "name": "Conventions",
+      "definition": {
+        "text": "How well does the text illustrate the writer’s proficiency with grade-appropriate conventions?",
+        "ref": "six-traits",
+        "locator": "6+1 Trait Writing Rubrics: Grades 3–12 (© 2021 Education Northwest; \"refined rubrics\" released 2018), trait CONVENTIONS, pp. 11–12, quote is the trait's \"KEY QUESTION\", levels are the unlabeled first row; https://educationnorthwest.org/sites/default/files/resources/traits-rubrics-3-12.pdf"
+      },
+      "condition": "(Note: For the trait of conventions, grade level matters. Expectations should be based on grade level and include only skills that have been taught.)",
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 6
+      },
+      "examples": []
+    },
+    {
+      "id": "six_traits_presentation",
+      "name": "Presentation",
+      "definition": {
+        "text": "Is the finished piece easy to read, polished in presentation, and pleasing to the eye?",
+        "ref": "six-traits",
+        "locator": "6+1 Trait Writing Rubrics: Grades 3–12 (© 2021 Education Northwest; \"refined rubrics\" released 2018), trait PRESENTATION, pp. 13–14, quote is the trait's \"KEY QUESTION\", levels are the unlabeled first row; https://educationnorthwest.org/sites/default/files/resources/traits-rubrics-3-12.pdf"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 6
+      },
+      "examples": []
+    }
+  ]
+}

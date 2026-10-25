@@ -1,0 +1,1293 @@
+{
+  "id": "plain_language_and_style",
+  "title": "Plain-language and style guidance, item by item: ISO 24495-1, Federal Plain Language Guidelines, SEC Plain English Handbook, Google Technical Writing One/Two, GOV.UK, Microsoft, Write the Docs, Diátaxis",
+  "framing": [
+    {
+      "source_ref": "iso24495",
+      "quote_source_ref": "narratology-iso24495",
+      "quote": "Plain language is communication in which wording, structure and design are so clear that intended readers can easily find what they need, understand what they find, and use that information.",
+      "locator": "ISO 24495-1:2023 clause 3.1 as quoted by Narratology",
+      "snapshot_file": "/tmp/claude-1000/-workspace/b71b5724-c9d8-4ec3-a66f-cccab8a3612b/scratchpad/ext/f2/iso24495_narratology.txt"
+    },
+    {
+      "source_ref": "iso24495",
+      "quote": "However, it is also applicable, for example, to technical writing, legislative drafting or using controlled languages.",
+      "locator": "ISO 24495-1:2023 abstract, iso.org/standard/78907.html (Wayback capture 2024-09-12)",
+      "snapshot_file": "/tmp/claude-1000/-workspace/b71b5724-c9d8-4ec3-a66f-cccab8a3612b/scratchpad/ext/f2/iso24495_iso_page_wb.txt"
+    },
+    {
+      "source_ref": "fplg",
+      "quote": "The first rule of plain language is: write for your audience.",
+      "locator": "I. Think about your audience, printed p. 1",
+      "snapshot_file": "/tmp/claude-1000/-workspace/b71b5724-c9d8-4ec3-a66f-cccab8a3612b/scratchpad/ext/f2/fplg.txt"
+    }
+  ],
+  "criteria": [
+    {
+      "id": "iso24495_relevant",
+      "name": "Principle 1: relevant",
+      "definition": {
+        "text": "Principle 1: Readers get what they need (relevant).",
+        "ref": "narratology-iso24495",
+        "locator": "ISO 24495-1:2023 governing principles, as quoted on narratology.co.uk \"Plain language ISO 24495\" (section \"Plain language governing principles\"); ISO OBP preview not used (requires accepting ISO terms of use; scripted fetch returned 403); quote_source_ref narratology-iso24495"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "iso24495_findable",
+      "name": "Principle 2: findable",
+      "definition": {
+        "text": "Principle 2: Readers can easily find what they need (findable).",
+        "ref": "narratology-iso24495",
+        "locator": "ISO 24495-1:2023 governing principles, as quoted on narratology.co.uk \"Plain language ISO 24495\" (section \"Plain language governing principles\"); ISO OBP preview not used (requires accepting ISO terms of use; scripted fetch returned 403); quote_source_ref narratology-iso24495"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "iso24495_understandable",
+      "name": "Principle 3: understandable",
+      "definition": {
+        "text": "Principle 3: Readers can easily understand what they find (understandable).",
+        "ref": "narratology-iso24495",
+        "locator": "ISO 24495-1:2023 governing principles, as quoted on narratology.co.uk \"Plain language ISO 24495\" (section \"Plain language governing principles\"); ISO OBP preview not used (requires accepting ISO terms of use; scripted fetch returned 403); quote_source_ref narratology-iso24495"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "iso24495_usable",
+      "name": "Principle 4: usable",
+      "definition": {
+        "text": "Principle 4: Readers can easily use the information (usable).",
+        "ref": "narratology-iso24495",
+        "locator": "ISO 24495-1:2023 governing principles, as quoted on narratology.co.uk \"Plain language ISO 24495\" (section \"Plain language governing principles\"); ISO OBP preview not used (requires accepting ISO terms of use; scripted fetch returned 403); quote_source_ref narratology-iso24495"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_audience",
+      "name": "Identify and write for your audience",
+      "definition": {
+        "text": "Identifying your audience will do more than ensure that you write clearly. It will also help you focus on the audience’s needs.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), I. Think about your audience > a. Identify and write for your audience, printed p. 2 (PDF p. 8)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_separate_audiences",
+      "name": "Address separate audiences separately",
+      "definition": {
+        "text": "Documents that mix material intended for different audiences may confuse readers. By addressing different audiences in the same place, you make it harder for each audience to find the material that applies to them.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), I. Think about your audience > b. Address separate audiences separately, printed p. 3 (PDF p. 9)"
+      },
+      "condition": "Many documents address more than one audience.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_organize_needs",
+      "name": "Organize to meet your readers’ needs",
+      "definition": {
+        "text": "Think through the questions your audience is likely to ask and then organize your material in the order they’d ask them.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), II. Organize > a. Organize to meet your readers’ needs, printed p. 6 (PDF p. 12)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_one_person",
+      "name": "Address one person, not a group",
+      "definition": {
+        "text": "Remember that even though your document may affect a thousand or a million people, you are speaking to the one person who is reading it.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), II. Organize > b. Address one person, not a group, printed p. 10 (PDF p. 16)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "fplg-1"
+      ]
+    },
+    {
+      "id": "fplg_headings",
+      "name": "Use lots of useful headings",
+      "definition": {
+        "text": "The best-organized document will still be difficult for users to follow if they can’t see how it’s organized. An effective way to reveal your document’s organization is to use lots of useful headings.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), II. Organize > c. Use lots of useful headings, printed p. 11 (PDF p. 17)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_short_sections",
+      "name": "Write short sections",
+      "definition": {
+        "text": "Short sections break up material so it appears easier to comprehend. Long, dense sections with no white space are visually unappealing, and give the impression your document is difficult to understand.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), II. Organize > d. Write short sections, printed p. 15 (PDF p. 21)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_active_voice",
+      "name": "Use active voice",
+      "definition": {
+        "text": "Active voice makes it clear who is supposed to do what. It eliminates ambiguity about responsibilities.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > a. Words > 1. Verbs > i. Use active voice, printed p. 20 (PDF p. 26)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_simple_words",
+      "name": "Use short, simple words",
+      "definition": {
+        "text": "In making your word choices, pick the familiar or frequently used word over the unusual or obscure.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > a. Words > 3. Other word issues > i. Use short, simple words, printed p. 36 (PDF p. 42)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "fplg-2"
+      ]
+    },
+    {
+      "id": "fplg_omit_words",
+      "name": "Omit unnecessary words",
+      "definition": {
+        "text": "To address the problem, writers must become more critical of their own writing. They must consider whether they need every word.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > a. Words > 3. Other word issues > ii. Omit unnecessary words, printed p. 38 (PDF p. 44)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_definitions",
+      "name": "Dealing with definitions",
+      "definition": {
+        "text": "We have ONE rule for dealing with definitions: use them rarely.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > a. Words > 3. Other word issues > iii. Dealing with definitions, printed p. 41 (PDF p. 47)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_same_term",
+      "name": "Use the same term consistently for a specific thought or object",
+      "definition": {
+        "text": "You will confuse your audience if you use different terms for the same concept.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > a. Words > 3. Other word issues > iv. Use the same term consistently for a specific thought or object, printed p. 45 (PDF p. 51)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_jargon",
+      "name": "Avoid legal, foreign, and technical jargon",
+      "definition": {
+        "text": "Jargon is unnecessarily complicated, technical language used to impress, rather than to inform, your audience.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > a. Words > 3. Other word issues > v. Avoid legal, foreign, and technical jargon, printed p. 46 (PDF p. 52)"
+      },
+      "condition": "When we say not to use jargon, we’re not advocating leaving out necessary technical terms; we are saying to make sure your other language is as clear as possible.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_short_sentences",
+      "name": "Write short sentences",
+      "definition": {
+        "text": "Express only one idea in each sentence. Long, complicated sentences often mean that you aren’t sure about what you want to say.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > b. Sentences > 1. Write short sentences, printed p. 50 (PDF p. 56)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_main_idea_first",
+      "name": "Place the main idea before exceptions and conditions",
+      "definition": {
+        "text": "Material is much easier to follow if you start with the main idea and then cover exceptions and conditions.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > b. Sentences > 4. Place the main idea before exceptions and conditions, printed p. 56 (PDF p. 62)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_topic_sentence",
+      "name": "Have a topic sentence",
+      "definition": {
+        "text": "Establish a context for your audience before you provide them with the details.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > c. Paragraphs > 1. Have a topic sentence, printed p. 63 (PDF p. 69)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_transitions",
+      "name": "Use transition words",
+      "definition": {
+        "text": "But a transition word or phrase (usually in the topic sentence) clearly tells the audience whether the paragraph expands on the paragraph before, contrasts with it, or takes a completely different direction.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > c. Paragraphs > 2. Use transition words, printed p. 64 (PDF p. 70)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_short_paragraphs",
+      "name": "Write short paragraphs",
+      "definition": {
+        "text": "Long paragraphs discourage your audience from even trying to understand your material. Short paragraphs are easier to read and understand.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > c. Paragraphs > 3. Write short paragraphs, printed p. 66 (PDF p. 72)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_one_topic",
+      "name": "Cover only one topic in each paragraph",
+      "definition": {
+        "text": "Limit each paragraph or section to one topic to make it easier for your audience to understand your information.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > c. Paragraphs > 4. Cover only one topic in each paragraph, printed p. 68 (PDF p. 74)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_examples",
+      "name": "Use examples",
+      "definition": {
+        "text": "Examples help you clarify complex concepts, even in regulations. They are an ideal way to help your readers.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > d. Other aids to clarity > 1. Use examples, printed p. 70 (PDF p. 76)"
+      },
+      "condition": "The more complex the concept you are writing about, the more you should consider using an example.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_lists",
+      "name": "Use lists",
+      "definition": {
+        "text": "Vertical lists highlight a series of requirements or other information in a visually clear way.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > d. Other aids to clarity > 2. Use lists, printed p. 71 (PDF p. 77)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_tables",
+      "name": "Use tables to make complex material easier to understand",
+      "definition": {
+        "text": "Tables help your audience see relationships that are often times hidden in dense text.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > d. Other aids to clarity > 3. Use tables to make complex material easier to understand, printed p. 74 (PDF p. 80)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_illustrations",
+      "name": "Consider using illustrations",
+      "definition": {
+        "text": "However, even in these documents, you can use illustrations to good effect.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > d. Other aids to clarity > 4. Consider using illustrations, printed p. 77 (PDF p. 83)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_emphasis",
+      "name": "Use emphasis to highlight important concepts",
+      "definition": {
+        "text": "Use bold and italics to make important concepts stand out. While it is difficult to use these techniques in regulations, emphasis helps bring out important points in other documents. Limit emphasis to important information, otherwise you’ll dilute its impact.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > d. Other aids to clarity > 5. Use emphasis to highlight important concepts, printed p. 82 (PDF p. 88)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_cross_refs",
+      "name": "Minimize cross-references",
+      "definition": {
+        "text": "Numerous cross-references can confuse users and make them less attentive to your message.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > d. Other aids to clarity > 6. Minimize cross-references, printed p. 83 (PDF p. 89)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "fplg_design",
+      "name": "Design your document for easy reading",
+      "definition": {
+        "text": "Documents that are easy on the eye are far easier to understand than more traditional styles.",
+        "ref": "fplg",
+        "locator": "Federal Plain Language Guidelines (March 2011, Rev. 1 May 2011), III. Write your document > d. Other aids to clarity > 7. Design your document for easy reading, printed p. 88 (PDF p. 94)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "sec_active_voice",
+      "name": "Use the active voice with strong verbs",
+      "definition": {
+        "text": "The plodding verbosity of most disclosure documents makes readers yearn for clear words and short sentences. The quickest fix lies in using the active voice with strong verbs.",
+        "ref": "sec-plain-english",
+        "locator": "A Plain English Handbook (SEC, 1998), Chapter 6 Writing in Plain English > Use the active voice with strong verbs, printed p. 19 (PDF p. 25)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "sec-plain-english-1"
+      ]
+    },
+    {
+      "id": "sec_personal_pronouns",
+      "name": "Try personal pronouns",
+      "definition": {
+        "text": "No matter how sophisticated your audience is, if you use personal pronouns the clarity of your writing will dramatically improve.",
+        "ref": "sec-plain-english",
+        "locator": "A Plain English Handbook (SEC, 1998), Chapter 6 Writing in Plain English > Try personal pronouns, printed p. 22 (PDF p. 28)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "sec-plain-english-2"
+      ]
+    },
+    {
+      "id": "sec_abstractions",
+      "name": "Bring abstractions down to earth",
+      "definition": {
+        "text": "And yet, it’s far easier to comprehend a concept or a situation when your mind can form images.",
+        "ref": "sec-plain-english",
+        "locator": "A Plain English Handbook (SEC, 1998), Chapter 6 Writing in Plain English > Bring abstractions down to earth, printed p. 23 (PDF p. 29)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "sec-plain-english-3"
+      ]
+    },
+    {
+      "id": "sec_superfluous",
+      "name": "Omit superfluous words",
+      "definition": {
+        "text": "Words are superfluous when they can be replaced with fewer words that mean the same thing.",
+        "ref": "sec-plain-english",
+        "locator": "A Plain English Handbook (SEC, 1998), Chapter 6 Writing in Plain English > Omit superfluous words, printed p. 25 (PDF p. 31)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "sec-plain-english-4"
+      ]
+    },
+    {
+      "id": "sec_positive",
+      "name": "Write in the “positive”",
+      "definition": {
+        "text": "Positive sentences are shorter and easier to understand than their negative counterparts.",
+        "ref": "sec-plain-english",
+        "locator": "A Plain English Handbook (SEC, 1998), Chapter 6 Writing in Plain English > Write in the “positive”, printed p. 27 (PDF p. 33)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "sec_short_sentences",
+      "name": "Use short sentences",
+      "definition": {
+        "text": "The longer and more complex a sentence, the harder it is for readers to understand any single portion of it.",
+        "ref": "sec-plain-english",
+        "locator": "A Plain English Handbook (SEC, 1998), Chapter 6 Writing in Plain English > Use short sentences, printed p. 28 (PDF p. 34)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "sec-plain-english-5",
+        "sec-plain-english-6"
+      ]
+    },
+    {
+      "id": "sec_jargon",
+      "name": "Replace jargon and legalese with short, common words",
+      "definition": {
+        "text": "Ruthlessly eliminate jargon and legalese. Instead, use short, common words to get your points across.",
+        "ref": "sec-plain-english",
+        "locator": "A Plain English Handbook (SEC, 1998), Chapter 6 Writing in Plain English > Replace jargon and legalese with short, common words, printed p. 30 (PDF p. 36)"
+      },
+      "condition": "In those instances where there is no plain English alternative, explain what the term means when you first use it.",
+      "levels": null,
+      "examples": [
+        "sec-plain-english-7"
+      ]
+    },
+    {
+      "id": "sec_svo",
+      "name": "Keep the subject, verb, and object close together",
+      "definition": {
+        "text": "The natural word order of English speakers is subject-verb-object. Your sentences will be clearer if you follow this order as closely as possible.",
+        "ref": "sec-plain-english",
+        "locator": "A Plain English Handbook (SEC, 1998), Chapter 6 Writing in Plain English > Keep the subject, verb, and object close together, printed p. 32 (PDF p. 38)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "sec_if_then",
+      "name": "Write using “if-then” conditionals",
+      "definition": {
+        "text": "Conditional statements are very common in disclosure documents— although they are rarely written that way. When we rewrote the last example as a conditional, we followed the natural English word order very closely.",
+        "ref": "sec-plain-english",
+        "locator": "A Plain English Handbook (SEC, 1998), Chapter 6 Writing in Plain English > Write using “if-then” conditionals, printed p. 33 (PDF p. 39)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "sec_parallel",
+      "name": "Keep your sentence structure parallel",
+      "definition": {
+        "text": "A long sentence often fails without a parallel structure. Parallelism simply means ensuring a list or series of items is presented using parallel parts of speech, such as nouns or verbs.",
+        "ref": "sec-plain-english",
+        "locator": "A Plain English Handbook (SEC, 1998), Chapter 6 Writing in Plain English > Keep your sentence structure parallel, printed p. 34 (PDF p. 40)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "sec_respectively",
+      "name": "Steer clear of “respectively”",
+      "definition": {
+        "text": "Whenever you use “respectively,” you force your reader to go back and match up what belongs to what.",
+        "ref": "sec-plain-english",
+        "locator": "A Plain English Handbook (SEC, 1998), Chapter 6 Writing in Plain English > Steer clear of “respectively”, printed p. 35 (PDF p. 41)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "sec_hierarchy",
+      "name": "Hierarchy",
+      "definition": {
+        "text": "Much like an outline, a document’s hierarchy shows how you’ve organized the information and helps the reader to understand the relationship between different levels of information.",
+        "ref": "sec-plain-english",
+        "locator": "A Plain English Handbook (SEC, 1998), Chapter 7 Designing the Document > Hierarchy (first of the chapter's five basic design elements), printed p. 39 (PDF p. 45)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "sec_emphasis",
+      "name": "Emphasizing text",
+      "definition": {
+        "text": "Whatever method you choose to highlight information, use it consistently throughout your document so your readers can recognize how you flag important information.",
+        "ref": "sec-plain-english",
+        "locator": "A Plain English Handbook (SEC, 1998), Chapter 7 Designing the Document > Typography > Emphasizing text, printed p. 43 (PDF p. 49)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "sec-plain-english-8"
+      ]
+    },
+    {
+      "id": "sec_paragraph_length",
+      "name": "Keep paragraph length relatively short",
+      "definition": {
+        "text": "To reduce dense text, keep paragraphs as short as possible.",
+        "ref": "sec-plain-english",
+        "locator": "A Plain English Handbook (SEC, 1998), Chapter 7 Designing the Document > Layout > Keep paragraph length relatively short, printed p. 48 (PDF p. 54)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "sec_tables",
+      "name": "Use tables to increase clarity",
+      "definition": {
+        "text": "Use tables to increase clarity and cut down text. Tables often convey information more quickly and clearly than text.",
+        "ref": "sec-plain-english",
+        "locator": "A Plain English Handbook (SEC, 1998), Chapter 7 Designing the Document > Layout > Use tables to increase clarity, printed p. 48 (PDF p. 54)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_scope",
+      "name": "State your document's scope",
+      "definition": {
+        "text": "A good document begins by defining its scope. [...] A better document additionally defines its non-scope—the topics not covered that the target audience might reasonably expect your document to cover.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Documents > State your document's scope (https://developers.google.com/tech-writing/one/documents)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_state_audience",
+      "name": "State your audience",
+      "definition": {
+        "text": "A good document explicitly specifies its audience. [...] Beyond the audience's role, a good audience declaration might also specify any prerequisite knowledge or experience.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Documents > State your audience (https://developers.google.com/tech-writing/one/documents)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_key_points_first",
+      "name": "Summarize key points at the start",
+      "definition": {
+        "text": "Imagine that your peers might only read the first paragraph of your document. Therefore, ensure that the start of your document answers your readers' essential questions.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Documents > Summarize key points at the start (https://developers.google.com/tech-writing/one/documents)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "google-tw1-1"
+      ]
+    },
+    {
+      "id": "gtw_write_for_audience",
+      "name": "Write for your audience",
+      "definition": {
+        "text": "After defining the audience's needs, organize the document to help readers get the information they need.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Documents > Write for your audience (https://developers.google.com/tech-writing/one/documents)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_define_audience",
+      "name": "Define your audience",
+      "definition": {
+        "text": "Begin by identifying your audience's role(s).",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Audience > Define your audience (https://developers.google.com/tech-writing/one/audience)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_needs_to_learn",
+      "name": "Determine what your audience needs to learn",
+      "definition": {
+        "text": "Write down a list of everything your target audience needs to learn to accomplish goals.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Audience > Determine what your audience needs to learn (https://developers.google.com/tech-writing/one/audience)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_fit_audience",
+      "name": "Fit documentation to your audience",
+      "definition": {
+        "text": "Writing to meet your audience's needs requires unselfish empathy. You must create explanations that satisfy your audience's curiosity rather than your own.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Audience > Fit documentation to your audience (https://developers.google.com/tech-writing/one/audience)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "google-tw1-2"
+      ]
+    },
+    {
+      "id": "gtw_define_terms",
+      "name": "Define new or unfamiliar terms",
+      "definition": {
+        "text": "When writing or editing, learn to recognize terms that might be unfamiliar to some or all of your target audience. [...] If your document is introducing the term, define the term.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Words > Define new or unfamiliar terms (https://developers.google.com/tech-writing/one/words)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_terms_consistently",
+      "name": "Use terms consistently",
+      "definition": {
+        "text": "The moral: apply the same unambiguous word or term consistently throughout your document.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Words > Use terms consistently (https://developers.google.com/tech-writing/one/words)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_ambiguous_pronouns",
+      "name": "Recognize ambiguous pronouns",
+      "definition": {
+        "text": "In many cases, you should simply avoid the pronoun and just reuse the noun. However, the utility of a pronoun sometimes outweighs its risk (as in this sentence).",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Words > Recognize ambiguous pronouns (https://developers.google.com/tech-writing/one/words)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "google-tw1-3"
+      ]
+    },
+    {
+      "id": "gtw_active_voice",
+      "name": "Prefer active voice to passive voice",
+      "definition": {
+        "text": "Use the active voice most of the time. Use the passive voice sparingly.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Active voice vs. passive voice > Prefer active voice to passive voice (https://developers.google.com/tech-writing/one/active-voice)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_strong_verbs",
+      "name": "Choose strong verbs",
+      "definition": {
+        "text": "To engage and educate readers, choose precise, strong, specific verbs.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Clear sentences > Choose strong verbs (https://developers.google.com/tech-writing/one/clear-sentences)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_adjectives_adverbs",
+      "name": "Minimize certain adjectives and adverbs (optional)",
+      "definition": {
+        "text": "That's because adjectives and adverbs tend to be too loosely defined and subjective for technical readers. Worse, adjectives and adverbs can make technical documentation sound dangerously like marketing material.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Clear sentences > Minimize certain adjectives and adverbs (optional) (https://developers.google.com/tech-writing/one/clear-sentences)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "google-tw1-4"
+      ]
+    },
+    {
+      "id": "gtw_single_idea",
+      "name": "Focus each sentence on a single idea",
+      "definition": {
+        "text": "Focus each sentence on a single idea, thought, or concept.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Short sentences > Focus each sentence on a single idea (https://developers.google.com/tech-writing/one/short-sentences)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_sentences_to_lists",
+      "name": "Convert some long sentences to lists",
+      "definition": {
+        "text": "Inside many long technical sentences is a list yearning to break free.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Short sentences > Convert some long sentences to lists (https://developers.google.com/tech-writing/one/short-sentences)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_extraneous_words",
+      "name": "Eliminate or reduce extraneous words",
+      "definition": {
+        "text": "Many sentences contain filler—textual junk food that consumes space without nourishing the reader.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Short sentences > Eliminate or reduce extraneous words (https://developers.google.com/tech-writing/one/short-sentences)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "google-tw1-5"
+      ]
+    },
+    {
+      "id": "gtw_list_type",
+      "name": "Choose the correct type of list",
+      "definition": {
+        "text": "Use a bulleted list for unordered items; use a numbered list for ordered items.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Lists and tables > Choose the correct type of list (https://developers.google.com/tech-writing/one/lists-and-tables)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_parallel_lists",
+      "name": "Keep list items parallel",
+      "definition": {
+        "text": "Effective lists are parallel; defective lists tend to be nonparallel.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Lists and tables > Keep list items parallel (https://developers.google.com/tech-writing/one/lists-and-tables)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_useful_tables",
+      "name": "Create useful tables",
+      "definition": {
+        "text": "Label each column with a meaningful header. Don't make readers guess what each column holds. Avoid putting too much text into a table cell.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Lists and tables > Create useful tables (https://developers.google.com/tech-writing/one/lists-and-tables)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_introduce_lists",
+      "name": "Introduce each list and table",
+      "definition": {
+        "text": "We recommend introducing each list and table with a sentence that tells readers what the list or table represents. In other words, give the list or table context.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Lists and tables > Introduce each list and table (https://developers.google.com/tech-writing/one/lists-and-tables)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_opening_sentence",
+      "name": "Write a great opening sentence",
+      "definition": {
+        "text": "The opening sentence is the most important sentence of any paragraph. [...] Good opening sentences establish the paragraph's central point.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Paragraphs > Write a great opening sentence (https://developers.google.com/tech-writing/one/paragraphs)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "google-tw1-6"
+      ]
+    },
+    {
+      "id": "gtw_single_topic",
+      "name": "Focus each paragraph on a single topic",
+      "definition": {
+        "text": "A paragraph should represent an independent unit of logic. Restrict each paragraph to the current topic.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Paragraphs > Focus each paragraph on a single topic (https://developers.google.com/tech-writing/one/paragraphs)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "google-tw1-7"
+      ]
+    },
+    {
+      "id": "gtw_paragraph_length",
+      "name": "Don't make paragraphs too long or too short",
+      "definition": {
+        "text": "Readers generally welcome paragraphs containing three to five sentences, but will avoid paragraphs containing more than about seven sentences. [...] Conversely, don't make paragraphs too short.",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Paragraphs > Don't make paragraphs too long or too short (https://developers.google.com/tech-writing/one/paragraphs)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_what_why_how",
+      "name": "Answer what, why, and how",
+      "definition": {
+        "text": "Good paragraphs answer the following three questions: What are you trying to tell your reader? Why is it important for the reader to know this? How should the reader use this knowledge? Alternatively, how should the reader know your point to be true?",
+        "ref": "google-tw1",
+        "locator": "Technical Writing One > Paragraphs > Answer what, why, and how (https://developers.google.com/tech-writing/one/paragraphs)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "google-tw1-8"
+      ]
+    },
+    {
+      "id": "gtw_outline",
+      "name": "Outline a document",
+      "definition": {
+        "text": "Starting with a structured, high-level outline can help you group topics and determine where more detail is needed.",
+        "ref": "google-tw2",
+        "locator": "Technical Writing Two > Organizing large documents > Organize a document > Outline a document (https://developers.google.com/tech-writing/two/large-docs)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "google-tw2-1"
+      ]
+    },
+    {
+      "id": "gtw_introduce",
+      "name": "Introduce a document",
+      "definition": {
+        "text": "If readers of your documentation can't find relevance in the subject, they are likely to ignore it. To set the ground rules for your users, we recommend providing an introduction that includes the following information: What the document covers. What prior knowledge you expect readers to have. What the document doesn't cover.",
+        "ref": "google-tw2",
+        "locator": "Technical Writing Two > Organizing large documents > Organize a document > Introduce a document (https://developers.google.com/tech-writing/two/large-docs)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "google-tw2-2",
+        "google-tw2-3"
+      ]
+    },
+    {
+      "id": "gtw_navigation",
+      "name": "Add navigation",
+      "definition": {
+        "text": "Providing navigation and signposting for your readers ensures they can find what they are looking for and the information they need to get unstuck.",
+        "ref": "google-tw2",
+        "locator": "Technical Writing Two > Organizing large documents > Add navigation (https://developers.google.com/tech-writing/two/large-docs)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_task_headings",
+      "name": "Prefer task-based headings",
+      "definition": {
+        "text": "Choose a heading that describes the task your reader is working on. Avoid headings that rely on unfamiliar terminology or tools.",
+        "ref": "google-tw2",
+        "locator": "Technical Writing Two > Organizing large documents > Add navigation > Prefer task-based headings (https://developers.google.com/tech-writing/two/large-docs)"
+      },
+      "condition": "Unless your readers are already very experienced with the terminology and concepts for this topic, a more familiar heading might be preferable",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gtw_text_under_heading",
+      "name": "Provide text under each heading",
+      "definition": {
+        "text": "Most readers appreciate at least a brief introduction under each heading to provide some context.",
+        "ref": "google-tw2",
+        "locator": "Technical Writing Two > Organizing large documents > Add navigation > Provide text under each heading (https://developers.google.com/tech-writing/two/large-docs)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": [
+        "google-tw2-4"
+      ]
+    },
+    {
+      "id": "gtw_progressive",
+      "name": "Disclose information progressively",
+      "definition": {
+        "text": "Readers are more likely to be receptive to longer documents that progressively disclose new information to them when they need it.",
+        "ref": "google-tw2",
+        "locator": "Technical Writing Two > Organizing large documents > Disclose information progressively (https://developers.google.com/tech-writing/two/large-docs)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "govuk_user_needs",
+      "name": "Write content to meet user needs",
+      "definition": {
+        "text": "Publish only what’s needed to meet that user need and nothing more.",
+        "ref": "gov-uk-writing-guidelines",
+        "locator": "GOV.UK content and publishing guidance, Writing guidelines, https://guidance.publishing.service.gov.uk/writing-to-gov-uk-standards/writing-guidelines/meet-user-needs/ (page)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "govuk_frontload",
+      "name": "Frontload your content",
+      "definition": {
+        "text": "Put the most important information first. The quicker you get to the point, the greater the chance your users will see the information you want them to.",
+        "ref": "gov-uk-writing-guidelines",
+        "locator": "GOV.UK content and publishing guidance, Writing guidelines, https://guidance.publishing.service.gov.uk/writing-to-gov-uk-standards/writing-guidelines/clear-structure/ > Frontload your content"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "govuk_headings",
+      "name": "Break up the text with headings",
+      "definition": {
+        "text": "Write headings that are: descriptive – avoid generic headings like ‘Introduction’ frontloaded – put the most important information first [...] removable – the content should still make sense with the headings removed",
+        "ref": "gov-uk-writing-guidelines",
+        "locator": "GOV.UK content and publishing guidance, Writing guidelines, https://guidance.publishing.service.gov.uk/writing-to-gov-uk-standards/writing-guidelines/clear-structure/ > Break up the text with headings"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "govuk_lists_steps",
+      "name": "Use bullet point lists and steps",
+      "definition": {
+        "text": "Bullet point lists and steps can: reduce duplication make lists easier to read",
+        "ref": "gov-uk-writing-guidelines",
+        "locator": "GOV.UK content and publishing guidance, Writing guidelines, https://guidance.publishing.service.gov.uk/writing-to-gov-uk-standards/writing-guidelines/clear-structure/ > Use bullet point lists and steps"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "govuk_specialists_too",
+      "name": "Write clearly for specialists too",
+      "definition": {
+        "text": "Even when writing for a specialist audience, you still need to make sure everyone can understand what the content is about.",
+        "ref": "gov-uk-writing-guidelines",
+        "locator": "GOV.UK content and publishing guidance, Writing guidelines, https://guidance.publishing.service.gov.uk/writing-to-gov-uk-standards/writing-guidelines/clear-language/ > Write clearly for specialists too"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "govuk_words_to_avoid",
+      "name": "Know about words to avoid",
+      "definition": {
+        "text": "Do not use formal or long words when easy or short ones will do. [...] Avoid government ‘buzzwords’ and jargon. Often, these words are too vague and can lead to misinterpretation or empty, meaningless text.",
+        "ref": "gov-uk-writing-guidelines",
+        "locator": "GOV.UK content and publishing guidance, Writing guidelines, https://guidance.publishing.service.gov.uk/writing-to-gov-uk-standards/writing-guidelines/clear-language/ > Know about words to avoid"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "govuk_specialist_language",
+      "name": "Use specialist language if needed",
+      "definition": {
+        "text": "They’re not always jargon. You just need to explain what they mean the first time you use them.",
+        "ref": "gov-uk-writing-guidelines",
+        "locator": "GOV.UK content and publishing guidance, Writing guidelines, https://guidance.publishing.service.gov.uk/writing-to-gov-uk-standards/writing-guidelines/clear-language/ > Use specialist language if needed"
+      },
+      "condition": "Where you need to use specialist terms, you can.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "govuk_active_voice",
+      "name": "Use the active voice",
+      "definition": {
+        "text": "Use the active voice rather than the passive voice.",
+        "ref": "gov-uk-writing-guidelines",
+        "locator": "GOV.UK content and publishing guidance, Writing guidelines, https://guidance.publishing.service.gov.uk/writing-to-gov-uk-standards/writing-guidelines/clear-language/ > Use the active voice"
+      },
+      "condition": "when the outcome is more important than the agent of the action",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "govuk_short_chunks",
+      "name": "Keep paragraphs and sentences short",
+      "definition": {
+        "text": "Keep chunks of text short. Paragraphs should have no more than 5 sentences each. Try to split up sentences that are over 25 words long.",
+        "ref": "gov-uk-writing-guidelines",
+        "locator": "GOV.UK content and publishing guidance, Writing guidelines, https://guidance.publishing.service.gov.uk/writing-to-gov-uk-standards/writing-guidelines/clear-language/ > Keep paragraphs and sentences short"
+      },
+      "condition": "There’s no maximum or minimum overall page length.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "govuk_tone",
+      "name": "Use the right tone",
+      "definition": {
+        "text": "The ‘tone of voice’ for GOV.UK content is: specific informative clear and concise brisk, but not terse incisive (friendliness can lead to a lack of precision and unnecessary words) – but remain human (not a faceless machine) serious but not pompous emotionless – adjectives can be subjective and make the text sound more emotive and like spin",
+        "ref": "gov-uk-writing-guidelines",
+        "locator": "GOV.UK content and publishing guidance, Writing guidelines, https://guidance.publishing.service.gov.uk/writing-to-gov-uk-standards/writing-guidelines/right-tone/ (page opening)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ms_bigger_ideas",
+      "name": "Use bigger ideas, fewer words",
+      "definition": {
+        "text": "Our modern design hinges on crisp minimalism. Shorter is always better.",
+        "ref": "ms-style",
+        "locator": "Microsoft Writing Style Guide, Top 10 tips for Microsoft style and voice > Use bigger ideas, fewer words (https://learn.microsoft.com/en-us/style-guide/top-10-tips-style-voice)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ms_write_like_speak",
+      "name": "Write like you speak",
+      "definition": {
+        "text": "Write like you speak. Read your text aloud. Avoid jargon and overly complex or technical language. It should sound like a friendly conversation.",
+        "ref": "ms-style",
+        "locator": "Microsoft Writing Style Guide, Top 10 tips > Write like you speak"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ms_point_fast",
+      "name": "Get to the point fast",
+      "definition": {
+        "text": "Lead with what's most important. Front-load keywords for scanning. Make customer choices and next steps obvious.",
+        "ref": "ms-style",
+        "locator": "Microsoft Writing Style Guide, Top 10 tips > Get to the point fast"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ms_be_brief",
+      "name": "Be brief",
+      "definition": {
+        "text": "Give customers just enough information to make decisions confidently. Prune every excess word.",
+        "ref": "ms-style",
+        "locator": "Microsoft Writing Style Guide, Top 10 tips > Be brief"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ms_crisp_clear",
+      "name": "Crisp and clear",
+      "definition": {
+        "text": "We’re to the point. We write for scanning first, reading second. We make it simple above all.",
+        "ref": "ms-style",
+        "locator": "Microsoft Writing Style Guide, Microsoft's brand voice: Above all, simple and human > Crisp and clear (https://learn.microsoft.com/en-us/style-guide/brand-voice-above-all-simple-human)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ms_lend_a_hand",
+      "name": "Ready to lend a hand",
+      "definition": {
+        "text": "We show customers we’re on their side. We anticipate their real needs and offer great information at just the right time.",
+        "ref": "ms-style",
+        "locator": "Microsoft Writing Style Guide, Microsoft's brand voice > Ready to lend a hand"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "wtd_arid",
+      "name": "ARID",
+      "definition": {
+        "text": "Accept (some) Repetition In Documentation. [...] It means: try to keep things as DRY as possible but also recognize that you’ll inevitably need some amount of “moisture” to produce documentation.",
+        "ref": "wtd-principles",
+        "locator": "Write the Docs, Documentation principles, Principles for great content > ARID (https://www.writethedocs.org/guide/writing/docs-principles/)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "wtd_skimmable",
+      "name": "Skimmable",
+      "definition": {
+        "text": "Structure content to help readers identify and skip over concepts which they already understand or are not relevant to their immediate questions.",
+        "ref": "wtd-principles",
+        "locator": "Write the Docs, Documentation principles, Principles for great content > Skimmable (https://www.writethedocs.org/guide/writing/docs-principles/)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "wtd_exemplary",
+      "name": "Exemplary",
+      "definition": {
+        "text": "Include (some) examples and tutorials in content. [...] Try to write examples for the most common use cases, but not for everything.",
+        "ref": "wtd-principles",
+        "locator": "Write the Docs, Documentation principles, Principles for great content > Exemplary (https://www.writethedocs.org/guide/writing/docs-principles/)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "wtd_consistent",
+      "name": "Consistent",
+      "definition": {
+        "text": "Use consistent language and formatting in content.",
+        "ref": "wtd-principles",
+        "locator": "Write the Docs, Documentation principles, Principles for great content > Consistent (https://www.writethedocs.org/guide/writing/docs-principles/)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "wtd_current",
+      "name": "Current",
+      "definition": {
+        "text": "Consider incorrect documentation to be worse than missing documentation.",
+        "ref": "wtd-principles",
+        "locator": "Write the Docs, Documentation principles, Principles for great content > Current (https://www.writethedocs.org/guide/writing/docs-principles/)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "wtd_cumulative",
+      "name": "Cumulative",
+      "definition": {
+        "text": "Content should be ordered to cover prerequisite concepts first.",
+        "ref": "wtd-principles",
+        "locator": "Write the Docs, Documentation principles, Principles for publications > Cumulative (https://www.writethedocs.org/guide/writing/docs-principles/)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "wtd_complete",
+      "name": "Complete",
+      "definition": {
+        "text": "Within each publication, cover concepts in full, or not at all.",
+        "ref": "wtd-principles",
+        "locator": "Write the Docs, Documentation principles, Principles for publications > Complete (https://www.writethedocs.org/guide/writing/docs-principles/)"
+      },
+      "condition": "Publishing partially completed documentation must be done cautiously. To avoid misleading readers, make every effort to clearly state, up front, that a particular concept is only covered partially.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "wtd_beautiful",
+      "name": "Beautiful",
+      "definition": {
+        "text": "Visual style should be intentional and aesthetically pleasing.",
+        "ref": "wtd-principles",
+        "locator": "Write the Docs, Documentation principles, Principles for publications > Beautiful (https://www.writethedocs.org/guide/writing/docs-principles/)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "diataxis_functional_quality",
+      "name": "Functional quality",
+      "definition": {
+        "text": "We need documentation to meet standards of accuracy, completeness, consistency, usefulness, precision and so on. We can call these aspects of its functional quality. Documentation that fails to meet any one of them is failing to perform one of its key functions.",
+        "ref": "diataxis",
+        "locator": "Diátaxis, Quality > Functional quality (https://diataxis.fr/quality/)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "diataxis_deep_quality",
+      "name": "Deep quality",
+      "definition": {
+        "text": "Think of characteristics such as: feeling good to use having flow fitting to human needs being beautiful anticipating the user Unlike the characteristics of functional quality, they cannot be checked or measured, but they can still be clearly identified.",
+        "ref": "diataxis",
+        "locator": "Diátaxis, Quality > Deep quality (https://diataxis.fr/quality/)"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "diataxis_expectations_guidance",
+      "name": "Expectations and guidance",
+      "definition": {
+        "text": "Each piece of content is of a kind that not only has one particular job to do, that job is also clearly distinguished from and contrasted with the other functions of documentation.",
+        "ref": "diataxis",
+        "locator": "Diátaxis, The map > Expectations and guidance (https://diataxis.fr/map/)"
+      },
+      "condition": "The user whose needs Diátaxis serves is the practitioner in a domain of skill",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "diataxis_blur",
+      "name": "Blur",
+      "definition": {
+        "text": "When these distinctions are allowed to blur, the different kinds of documentation bleed into each other. Writing style and content make their way into inappropriate places.",
+        "ref": "diataxis",
+        "locator": "Diátaxis, The map > Blur (https://diataxis.fr/map/)"
+      },
+      "condition": "The user whose needs Diátaxis serves is the practitioner in a domain of skill",
+      "levels": null,
+      "examples": []
+    }
+  ]
+}

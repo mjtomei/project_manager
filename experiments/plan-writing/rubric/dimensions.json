@@ -16,7 +16,7 @@
       "id": "purpose_and_audience",
       "name": "Purpose, context and audience",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "The document states what problem it addresses, why now, for whom, and what decision or action it asks of the reader, and its content is selected for that reader's needs.",
+      "definition": "The reader can tell what problem the document addresses, for whom, and what decision or action it asks of them, as far as the reader does not already know; its content is selected for that reader's needs.",
       "track_notes": {"continuation": "The section serves the purpose the prefix has established and the role the section's position implies."},
       "references": ["aacu-value", "iso24495", "fplg", "pep1", "kep-template", "shapeup-pitch", "google-design-docs", "grice"],
       "derived_from": "AAC&U 'context of and purpose for writing'; ISO 24495 'relevant'; PEP motivation, KEP motivation/goals, Shape Up problem and appetite, Google 'context and scope'; Grice's maxim of relation.",
@@ -34,7 +34,7 @@
       "score_anchors": {
         "1": "Purpose absent or wrong; content generic or aimed at no identifiable reader.",
         "3": "Purpose recoverable but late or vague; some content serves no reader need.",
-        "5": "Problem, reader and requested decision clear early; content consistently selected for that reader."
+        "5": "What the reader needs to know about the problem and the requested decision is clear early; content consistently selected for that reader."
       },
       "candidate_measures": [
         {"name": "judge_purpose", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference on this dimension."}
@@ -91,6 +91,7 @@
       ],
       "not_a_defect": ["Useful elaboration, reasoning or design detail that is consistent with the input, even when the input never mentions it.", "Explicitly marked proposals or assumptions."],
       "examples": {
+        "context": {"text": "Two URNs are lexically equivalent if they are octet-by-octet equal\n   after the following preprocessing:\n\n           1. normalize the case of the leading \"urn:\" token\n           2. normalize the case of the NID\n           3. normalizing the case of any %-escaping\n\n   Note that %-escaping MUST NOT be removed.", "ref": "rfc5134-erratum-1325", "locator": "RFC 2141 Section 5, the rule the registration restates"},
         "strong": {"text": "Rules for Lexical Equivalence:\n\n         The namespace-specific part of the URN is case-sensitive.", "ref": "rfc5134-erratum-1325", "locator": "RFC 5134 Section 2 as published (weaker) and as corrected (stronger)", "note": "The source rule (RFC 2141) compares 'urn:' and the namespace id case-insensitively; the published text claimed the entire URN is case-sensitive."},
         "weak": {"text": "Rules for Lexical Equivalence:\n\n         The entire URN is case-sensitive.", "ref": "rfc5134-erratum-1325", "locator": "RFC 5134 Section 2 as published (weaker) and as corrected (stronger)"}
       },
@@ -123,6 +124,7 @@
       ],
       "not_a_defect": ["Requirements consolidated into one statement that still implies each.", "A requirement deliberately deferred with a stated reason."],
       "examples": {
+        "context": {"text": "8.3 MKCOL Method\n\n   The MKCOL method is used to create a new collection. All DAV\n   compliant resources MUST support the MKCOL method.", "ref": "rfc4918-erratum-1430", "locator": "RFC 2518 Section 8.3, the predecessor text"},
         "strong": {"text": "9.3 MKCOL Method\n\n   The MKCOL method is used to create a new collection. All DAV compliant\n   resources MUST support the MKCOL method.\n\n   MKCOL creates a new collection resource at the location specified by\n   the Request-URI. [...]", "ref": "rfc4918-erratum-1430", "locator": "RFC 4918 Section 9.3 as published (weaker) and as corrected (stronger)", "note": "The predecessor (RFC 2518 Section 8.3) required every DAV-compliant resource to support MKCOL; the revision dropped that requirement."},
         "weak": {"text": "9.3.  MKCOL Method\n\n   MKCOL creates a new collection resource at the location specified by\n   the Request-URI. [...]", "ref": "rfc4918-erratum-1430", "locator": "RFC 4918 Section 9.3 as published (weaker) and as corrected (stronger)"}
       },
@@ -144,7 +146,7 @@
       "id": "scope_and_abstraction",
       "name": "Scope and level of abstraction",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "The document works at the level of detail its kind and stage call for: it fixes the decisions a reader must review now, states goals and non-goals, and leaves implementation choices that do not affect those decisions to the people who implement them.",
+      "definition": "The document works at the level of detail its kind and stage call for: it fixes the decisions a reader must review now and leaves implementation choices that do not affect those decisions to the people who implement them.",
       "track_notes": {"continuation": "The section's level of detail matches the prefix's and the section's role; a reference-level section may be detailed where an overview section may not."},
       "references": ["iso29148", "incose-gtwr", "google-design-docs", "shapeup-principles", "rfc4101", "kep-template", "nasa-se-handbook", "diataxis"],
       "derived_from": "ISO 29148 and INCOSE 'appropriate' level and solution-free requirements; NASA implementation-free requirements; Google design docs ('really implementation manuals'); Shape Up 'rough, solved, bounded' (wireframes too concrete, words too abstract; no-gos as the boundary); RFC 4101 detail for implementors gets in the way of review; KEP goals/non-goals; Diátaxis separation of purposes.",
@@ -162,7 +164,7 @@
       "score_anchors": {
         "1": "Mostly implementation steps or so abstract that nothing is decided.",
         "3": "Right level overall with notable stretches of unmotivated implementation detail or vagueness.",
-        "5": "Detail tracks the decisions; boundaries and non-goals explicit."
+        "5": "Detail tracks the decisions."
       },
       "candidate_measures": [
         {"name": "judge_abstraction", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge; must cite the passages it considers premature."},
@@ -175,7 +177,7 @@
       "id": "rationale_and_alternatives",
       "name": "Rationale, trade-offs and alternatives",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "Decisions come with the reasons for them, the trade-offs accepted and the credible alternatives rejected.",
+      "definition": "Decisions a reader would question come with their reasons, and with the trade-offs accepted and alternatives rejected where real alternatives existed.",
       "track_notes": {"continuation": "Applies when the section makes or defends decisions; a purely descriptive section is judged on whether it supports decisions made elsewhere."},
       "references": ["iso42010", "rust-rfc-template", "pep1", "google-design-docs", "kep-template", "nasa-se-handbook", "aacu-value"],
       "derived_from": "ISO 42010 decision rationale; Rust RFC 'drawbacks' and 'rationale and alternatives'; PEP rationale and rejected ideas; Google 'alternatives considered'; KEP alternatives; NASA trade studies; AAC&U 'sources and evidence'.",
@@ -192,7 +194,7 @@
       "score_anchors": {
         "1": "Decisions asserted without reasons.",
         "3": "Reasons for main decisions; trade-offs or alternatives thin or straw-man.",
-        "5": "Each consequential decision has specific reasons, accepted costs and credible alternatives."
+        "5": "Decisions a reader would question have specific reasons, with accepted costs and credible alternatives where they existed."
       },
       "candidate_measures": [
         {"name": "judge_rationale", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference."}
@@ -318,6 +320,7 @@
       ],
       "not_a_defect": ["A value changed with an explicit note (\"revised from 30 to 14 days after section 4\")."],
       "examples": {
+        "context": {"text": "   A PA-TNC message MUST contain a PA-TNC header (defined in section\n   3.6.  followed by a sequence of zero or more PA-TNC attributes.", "ref": "rfc5792-erratum-3935", "locator": "RFC 5792 Section 4, elsewhere in the same document"},
         "strong": {"text": "Each PA-TNC message may\ncontain zero or more attributes associated with the functional\ncomponent identified in the component type (PA Subtype) of the\nPosture Broker (PB) protocol.", "ref": "rfc5792-erratum-3935", "locator": "RFC 5792 Section 3.1 as published (weaker) and as corrected (stronger)", "note": "Section 4 of the same RFC says a message carries 'zero or more' attributes; the published Section 3.1 said 'one or more'."},
         "weak": {"text": "Each PA-TNC message may\ncontain one or more attributes associated with the functional\ncomponent identified in the component type (PA Subtype) of the\nPosture Broker (PB) protocol.", "ref": "rfc5792-erratum-3935", "locator": "RFC 5792 Section 3.1 as published (weaker) and as corrected (stronger)"}
       },
@@ -338,7 +341,7 @@
       "id": "risks_and_open_questions",
       "name": "Risks, uncertainty and open questions",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "The document states what could go wrong, what is unknown and which questions remain open. Claims carry the confidence their evidence supports, and what was verified is distinguished from what is inferred or assumed.",
+      "definition": "Where something could go wrong, is unknown or remains open and the reader needs to know it, the document says so. Claims carry the confidence their evidence supports, and what was verified is distinguished from what is inferred or assumed.",
       "track_notes": {"continuation": "Applies when the section's role includes risks or unresolved questions, or when it makes claims whose uncertainty the prefix has flagged."},
       "references": ["kep-template", "rust-rfc-template", "pep1", "shapeup-pitch", "rfc3552", "oxide-rfd1", "google-design-docs", "icd203", "kent-wep", "ipcc-uncertainty"],
       "derived_from": "KEP risks and mitigations; Rust unresolved questions; PEP open issues and security implications; Shape Up rabbit holes; RFC 3552 security considerations; Oxide RFD discussion states; Google cross-cutting concerns; ICD 203 analytic standards (express uncertainty, separate information from assumptions and judgments); Kent's words of estimative probability and the IPCC uncertainty guidance for calibrated language.",
@@ -356,8 +359,8 @@
       },
       "score_anchors": {
         "1": "No risks or open questions where clearly needed; false certainty, or guesses stated as findings.",
-        "3": "Some specific risks; others generic or missing; confidence not always matched to evidence.",
-        "5": "Specific risks with mitigations, explicit unknowns and reviewer questions; every claim as certain as its evidence and no more."
+        "3": "Some risks or unknowns the reader needs are generic or missing; confidence not always matched to evidence.",
+        "5": "The risks, unknowns and open questions the reader needs are stated specifically; every claim as certain as its evidence and no more."
       },
       "candidate_measures": [
         {"name": "judge_risks", "kind": "judge", "status": "needs_calibration", "description": "Rubric judge score and paired preference."},
@@ -370,7 +373,7 @@
       "id": "verifiability",
       "name": "Verifiability and success criteria",
       "applies_to": ["whole_document", "continuation"],
-      "definition": "The document says how anyone will know it succeeded: requirements are testable, acceptance and test plans are concrete, and milestones or graduation criteria are checkable.",
+      "definition": "Where the document sets requirements, goals or milestones, it says how anyone will know they are met: requirements are testable and acceptance checks are concrete.",
       "track_notes": {"continuation": "Applies to sections that state requirements, tests or milestones."},
       "references": ["iso29148", "incose-gtwr", "nasa-se-handbook", "kep-template", "rfc8174"],
       "derived_from": "ISO 29148 and INCOSE 'verifiable'; NASA requirement verification; KEP test plan and graduation criteria; RFC 8174 requirement keywords as testable obligations.",
@@ -385,7 +388,7 @@
         "weak": {"text": "For up to 12 aircraft, the small display format shall be used. Otherwise, the large display format shall be used.", "ref": "berry-ambiguity", "locator": "Section 5.1, examples E38 and E39, p. 20"}
       },
       "score_anchors": {
-        "1": "No checkable criteria.",
+        "1": "Requirements or goals with no way to check them.",
         "3": "Some concrete tests; key requirements lack checks.",
         "5": "Every material requirement has a concrete check, including failure cases."
       },
@@ -442,6 +445,7 @@
       ],
       "not_a_defect": ["A different but clear writing style.", "A short bridge sentence that recalls a point from much earlier in the prefix."],
       "examples": {
+        "context": {"text": "1.2.  Use of RBNF\n\nThe message formats in this document are illustrated using Routing Backus-Naur Form (RBNF) encoding, as specified in [RFC5511].  The use of RBNF is illustrative only and may elide certain important details; the normative specification of messages is found in the prose description.  If there is any divergence between the RBNF and the prose, the prose is considered authoritative.", "ref": "pce-vendor-drafts", "locator": "Section 1.2, earlier in the same draft"},
         "strong": {"text": "The message formats in this document are specified using RBNF encoding as specified in [RFC5511].", "ref": "pce-vendor-drafts", "locator": "Section 2, revision -10 (weaker) and -11 (stronger)", "note": "Section 1.2 already expanded RBNF; a reviewer flagged the repetition and the next revision stopped re-expanding it (it kept the sentence, so the fix is partial)."},
         "weak": {"text": "The message formats in this document are specified using Routing Backus-Naur Format (RBNF) encoding as specified in [RFC5511].", "ref": "pce-vendor-drafts", "locator": "Section 2, revision -10 (weaker) and -11 (stronger)"}
       },

@@ -70,32 +70,60 @@ Readers who steer projects from agent-written reports without reading the code d
 
 Each concern has at least one concern-tagged fixture whose target is its primary dimension. Lost requirements, for example, has `coverage_lost_requirement`, and unmarked uncertainty has `risks_caveats_removed`.
 
+## Rubric sets
+
+The same documents can be scored in several ways, so that criteria and whole rubrics can be compared and pruned later. Nothing is pruned yet.
+
+- **The aggregate rubric** (`aggregate`, the dimensions below) keeps a criterion only when at least two independent source families name it, as described under Derivation.
+- **Family rubrics** ([families.md](families.md)) give each survey family its own rubric, built only from that family's guidance. Their criteria need not pass the two-family filter. Each criterion is a source's own heading or rule with a verbatim quote, a locator and any condition the source attaches ("if applicable", "where appropriate"). It carries the source's published score levels where they exist and generic levels where they do not. Examples are attached only when the same source prints them under that criterion. Families whose sources supply methods, bias checks or examples rather than writing criteria are listed as such, with no criteria made up for them: judge reliability, published examples, the generated-text evaluation methods, and the readability and lexical-diversity measures with their published critiques.
+
+The families cover technical writing (requirement standards, architecture and design practice, the corpus's process templates, plain language and style, analytic tradecraft) and writing in general:
+- general style guidance: Strunk 1918, Quiller-Couch, Orwell, Zinsser;
+- writing-assessment rubrics: NAEP, GRE, IELTS, ACT;
+- analytic writing rubrics: AAC&U VALUE, 6+1 Traits;
+- text organization: Gopen and Swan, Grice, Minto;
+- generic text measures: readability formulas, MTLD.
+
+The writing-assessment family also lists openly licensed human-scored essay datasets (such as ELLIPSE) that could later calibrate judges on general writing quality.
+
+Some rubrics' level tables are all rights reserved or licensed only for member or classroom use: AAC&U VALUE, 6+1 Traits, GRE, IELTS and ACT. Their criteria, short quoted definitions and scales are in the repo. The level tables are kept in a local, gitignored `restricted/levels.json`, flagged `levels_restricted` and marked `licence: restricted` in references.json. When the local file is present a judge sees the published levels; otherwise it sees the generic levels. Each rendered criterion records which it used (`levels_source`: published, restricted_local or generic), so results from the two cases are never mixed unknowingly.
+
+`list_rubrics()` gives the selectable ids. `render_judge(..., rubric_id=...)` and `render_single(..., rubric_id=...)` render any of them, `criteria=` selects criteria by id, and `sources=` selects a family's criteria by source (for example only PEP 1 and PEP 12 within `process_templates`). Results are identified by rubric id and criterion id, and every family criterion keeps its source reference, so scores can be compared across rubrics and criteria and pruned by source.
+
+Several family criteria rest on second-hand quotations because the primary text is paywalled or offline: ISO/IEC/IEEE 29148 (via a NARA document quoting the 2011 edition), ISO 24495-1 (via a consultancy page), Grice (via the Stanford Encyclopedia and other quotations) and Minto (via reading notes). Their definitions record the source they were checked against in `via`, and families.md shows it.
+
 ## Judge templates
 
-[templates/whole_document.md](templates/whole_document.md) shows the brief and two documents. [templates/continuation.md](templates/continuation.md) shows the prefix, the optional section request given to the generator, and two candidate next sections. [templates/whole_document_single.md](templates/whole_document_single.md) and [templates/continuation_single.md](templates/continuation_single.md) show one document or section, for cases with nothing to compare against, such as a single report.
+[templates/whole_document.md](templates/whole_document.md) shows the brief and two documents. [templates/continuation.md](templates/continuation.md) shows the prefix, the optional section request given to the generator, and two candidate next sections. [templates/whole_document_single.md](templates/whole_document_single.md) and [templates/continuation_single.md](templates/continuation_single.md) show one document or section, for cases with nothing to compare against, such as a single report. All rubric sets use the same templates, so differences between rubrics come from their criteria alone.
 
-The prompts are kept short so that the measure carries as little of the rubric authors' own judgment as possible. A judge sees each applicable dimension's name, definition and score anchors, and nothing else from the dimension reference below: detection guidance, not-a-fault lists and continuation notes are for people reading the rubric. Every other line of the prompt is either mechanics or one of the instructions in this table, each with what it rests on:
+The prompts follow the reader's review preferences:
+- They give no explanation of the A/B labels and no generic warnings.
+- They ask for no evidence quotations or rationales.
+- A reply may contain notes, but it must end with the JSON object.
+
+For each criterion a judge sees its name, definition, any condition from its source, its scale and levels, and the published examples attached to it. An example is left out when it shares an 8-word run with the case being judged, so a fixture never shows the judge its own pair. Detection guidance, not-a-fault lists and continuation notes in the dimension reference below are for people reading the rubric. Every other line of the prompt is mechanics or one of these instructions:
 
 | Prompt instruction | Basis |
 |---|---|
-| The labels A and B and their order say nothing about who wrote the documents. | plan-doc-eval: "Randomize pair order and hide origin labels." |
-| Score each dimension by its definition and anchors; quote or point to the passages first. | G-Eval and Prometheus: per-criterion scoring against a rubric, with the evidence before the score. |
-| Judge content, not length. | Verbosity bias (Saito et al.) and length-controlled AlpacaEval; plan-doc-eval asks for length sensitivity to be measured. |
 | Material the brief (or prefix) does not mention is not a fault by itself. | The user's criterion in [plan-session-sources-2026-10-19.md](../../../pm/docs/plan-session-sources-2026-10-19.md): "additional material not explicitly discussed is not automatically wrong." |
-| Continuations: do not reward imitating the prefix author's personal style. | plan-doc-eval: stylistic continuity with the prefix "favors the original author". |
-| Continuations: read "the brief" in a definition as the prefix plus the section request. | Mechanics: continuation cases have no brief. |
+| Leaving out caveats, explanations or sections that the document's purpose, kind, audience or stage does not need is not a fault. | The reader's review preferences (2026-10-24). The aggregate definitions and anchors are worded to match: rationale, risks, verifiability and scope apply where the document calls for them. |
+| Continuations: read "the brief" in a criterion as the prefix plus the section request. | Mechanics: continuation cases have no brief. |
 | No brief: judge against what the document establishes (and the material it describes). | Mechanics: some published pairs have no recoverable brief. |
-| The overall preference or score is made separately from the dimension scores. | Keeps dimensions distinct, so disagreements between them stay visible (plan-doc-eval reports results by rubric dimension). |
+| The overall preference or score is separate from the criterion scores. | Keeps criteria distinct, so disagreements between them stay visible. |
 
-The definitions and anchors are still the rubric authors' wording of the cited sources; the dimension reference gives each one's sources. The rest of the contract:
+The aggregate definitions and anchors are the rubric authors' wording of the cited sources, and so are the generic levels used by family criteria without published levels. Everything else a judge sees in a family rubric is quoted. The rest of the contract:
 
-- **Blinded pairs.** Candidates appear only as A and B. The templates take no origin, source, URL or provenance fields. Randomising order and running swapped pairs is the runner's job.
-- **Track separation.** `render_judge()` lists only the dimensions that apply to the case type. The two tracks use different templates and are never pooled.
+- **Blinded pairs.** Candidates appear only as A and B. The templates take no origin, source, URL or provenance fields. Randomising order and running swapped pairs is the runner's job. The prompts no longer tell judges to ignore length or the prefix author's style, so the length and style-continuity covariates measure raw sensitivity, which is what plan-doc-eval asks for.
+- **Track separation.** Only criteria that apply to the case type are listed. The two tracks use different templates and are never pooled.
 - **Single-document judging.** `render_single()` takes the same inputs as `render_judge()` with one document. Whether paired preferences and single scores agree is itself a calibration question.
-- **Output contract.** Paired: a JSON object with one row per dimension (`dimension`, `evidence`, `rationale`, `score_a`, `score_b`, `preference`), plus `overall_preference` and `overall_rationale`. Single: rows with `score` instead, plus `overall_score` and `overall_rationale`. `validate_judgment()` checks either (`single=True` for the second), so the runner can treat a malformed reply as a failed evaluation rather than a score.
-- **Case mapping.** The case catalog's `pm_plan` cases are whole-document cases: the runner passes the instruction and the recovered conversation as the brief, with `document_kind` "PM plan", so fidelity is judged against the human turns. Brief attachments are appended to the brief text for the same reason. Reports are whole-document cases too: the brief is the request and `material` holds what the report describes (diffs, code excerpts, logs, test output), shown in its own section; fidelity's definition covers it. A case with no brief at all must say so with `no_brief=True`.
+- **Output contract.** The reply ends with a JSON object, extracted by `extract_judgment()`.
+  - Paired replies have one row per criterion (`criterion`, `score_a`, `score_b`, `preference`) plus `overall_preference`.
+  - Single replies have rows with `score` plus `overall_score` (1–5).
+  - Scores use each criterion's own scale.
+  - `validate_judgment(judgment, criteria, single=...)` checks a reply against the rendered criteria, so the runner can treat a malformed reply as a failed evaluation rather than a score. Extra keys a judge adds are not errors.
+- **Case mapping.** The case catalog's `pm_plan` cases are whole-document cases: the runner passes the instruction and the recovered conversation as the brief, with `document_kind` "PM plan", so fidelity is judged against the human turns. Brief attachments are appended to the brief text for the same reason. Reports are whole-document cases too: the brief is the request and `material` holds what the report describes (diffs, code excerpts, logs, test output), shown in its own section. A case with no brief at all must say so with `no_brief=True`.
 
-Render a fixture's prompt with `python3 experiments/plan-writing/rubric.py --render whole_document`, `--render continuation` or `--render <fixture id>`, and add `--single strong` or `--single weak` for the single-document prompt; `--write-doc` regenerates the dimension reference below.
+Render a fixture's prompt with `python3 experiments/plan-writing/rubric.py --render <fixture id or case type>`, add `--rubric <id>` for a family rubric (`--list-rubrics` lists them) and `--single strong` or `--single weak` for the single-document prompt. `--write-doc` regenerates the dimension reference below and families.md.
 
 ## What calibration must establish
 
@@ -103,7 +131,8 @@ The runner and calibration PR decides which of these measures are usable. For ea
 
 - Consistency across repeated judgments and across swapped order (position bias, MT-Bench).
 - Agreement between frontier and JEV judges, and with automatic candidates where they exist.
-- Sensitivity to length (the `length_ratio` covariate, length-controlled AlpacaEval), to formatting (the `format_density` covariate, format bias), to source identity and, for continuations, to style match (the `style_distance` covariate). The prompts tell judges not to reward length or style imitation, so these measure what is left after the instruction.
+- Sensitivity to length (the `length_ratio` covariate, length-controlled AlpacaEval), to formatting (the `format_density` covariate, format bias), to source identity and, for continuations, to style match (the `style_distance` covariate).
+- How the rubric sets compare on the same documents: agreement between the aggregate rubric and each family rubric, and which family criteria add information the others do not. This is the evidence for later pruning.
 - Agreement between paired preferences and single-document scores on the same documents, so each mode is used only where it is reliable.
 - Whether the fixtures come out in the expected direction on their target dimension without moving the other dimensions as much. Dimensions listed in a fixture's `also_moves` are allowed to move and are left out of that comparison; read a judge that moves them as consistent with the source's framing, not as confusing dimensions. This is the check that dimensions stay distinct. A judge that scores every dimension from one overall impression will fail it. Huang et al. find that fine-tuned judges generalise poorly beyond the evaluation scheme they were trained on, so this has to be checked for each judge.
 
@@ -153,7 +182,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 ### purpose_and_audience — Purpose, context and audience
 
-**Definition.** The document states what problem it addresses, why now, for whom, and what decision or action it asks of the reader, and its content is selected for that reader's needs.
+**Definition.** The reader can tell what problem the document addresses, for whom, and what decision or action it asks of them, as far as the reader does not already know; its content is selected for that reader's needs.
 
 **Continuation.** The section serves the purpose the prefix has established and the role the section's position implies.
 
@@ -181,7 +210,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 > This Summary does not purport to be complete and is qualified in its entirety by the more detailed information contained in the Proxy Statement and the Appendices hereto, all of which should be carefully reviewed.
 
-**Score anchors.** 1: Purpose absent or wrong; content generic or aimed at no identifiable reader. 3: Purpose recoverable but late or vague; some content serves no reader need. 5: Problem, reader and requested decision clear early; content consistently selected for that reader.
+**Score anchors.** 1: Purpose absent or wrong; content generic or aimed at no identifiable reader. 3: Purpose recoverable but late or vague; some content serves no reader need. 5: What the reader needs to know about the problem and the requested decision is clear early; content consistently selected for that reader.
 
 **Candidate measures** (readiness: calibration_required).
 
@@ -330,7 +359,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 ### scope_and_abstraction — Scope and level of abstraction
 
-**Definition.** The document works at the level of detail its kind and stage call for: it fixes the decisions a reader must review now, states goals and non-goals, and leaves implementation choices that do not affect those decisions to the people who implement them.
+**Definition.** The document works at the level of detail its kind and stage call for: it fixes the decisions a reader must review now and leaves implementation choices that do not affect those decisions to the people who implement them.
 
 **Continuation.** The section's level of detail matches the prefix's and the section's role; a reference-level section may be detailed where an overview section may not.
 
@@ -383,7 +412,7 @@ The dimensions come from published guidance and are not yet validated against pr
 > an error if any other metaclass is found. This would cause any subclass of both
 > that implementation and a ``TypedMapping`` protocol to trigger an error at runtime.
 
-**Score anchors.** 1: Mostly implementation steps or so abstract that nothing is decided. 3: Right level overall with notable stretches of unmotivated implementation detail or vagueness. 5: Detail tracks the decisions; boundaries and non-goals explicit.
+**Score anchors.** 1: Mostly implementation steps or so abstract that nothing is decided. 3: Right level overall with notable stretches of unmotivated implementation detail or vagueness. 5: Detail tracks the decisions.
 
 **Candidate measures** (readiness: automatic_candidate).
 
@@ -394,7 +423,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 ### rationale_and_alternatives — Rationale, trade-offs and alternatives
 
-**Definition.** Decisions come with the reasons for them, the trade-offs accepted and the credible alternatives rejected.
+**Definition.** Decisions a reader would question come with their reasons, and with the trade-offs accepted and alternatives rejected where real alternatives existed.
 
 **Continuation.** Applies when the section makes or defends decisions; a purely descriptive section is judged on whether it supports decisions made elsewhere.
 
@@ -428,7 +457,7 @@ The dimensions come from published guidance and are not yet validated against pr
 >
 > By not doing this, conditionally including attributes is slightly less ergonomic than it can be.
 
-**Score anchors.** 1: Decisions asserted without reasons. 3: Reasons for main decisions; trade-offs or alternatives thin or straw-man. 5: Each consequential decision has specific reasons, accepted costs and credible alternatives.
+**Score anchors.** 1: Decisions asserted without reasons. 3: Reasons for main decisions; trade-offs or alternatives thin or straw-man. 5: Decisions a reader would question have specific reasons, with accepted costs and credible alternatives where they existed.
 
 **Candidate measures** (readiness: calibration_required).
 
@@ -602,7 +631,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 ### risks_and_open_questions — Risks, uncertainty and open questions
 
-**Definition.** The document states what could go wrong, what is unknown and which questions remain open. Claims carry the confidence their evidence supports, and what was verified is distinguished from what is inferred or assumed.
+**Definition.** Where something could go wrong, is unknown or remains open and the reader needs to know it, the document says so. Claims carry the confidence their evidence supports, and what was verified is distinguished from what is inferred or assumed.
 
 **Continuation.** Applies when the section's role includes risks or unresolved questions, or when it makes claims whose uncertainty the prefix has flagged.
 
@@ -639,7 +668,7 @@ The dimensions come from published guidance and are not yet validated against pr
 >
 > There are no known drawbacks to this proposal.
 
-**Score anchors.** 1: No risks or open questions where clearly needed; false certainty, or guesses stated as findings. 3: Some specific risks; others generic or missing; confidence not always matched to evidence. 5: Specific risks with mitigations, explicit unknowns and reviewer questions; every claim as certain as its evidence and no more.
+**Score anchors.** 1: No risks or open questions where clearly needed; false certainty, or guesses stated as findings. 3: Some risks or unknowns the reader needs are generic or missing; confidence not always matched to evidence. 5: The risks, unknowns and open questions the reader needs are stated specifically; every claim as certain as its evidence and no more.
 
 **Candidate measures** (readiness: automatic_candidate).
 
@@ -650,7 +679,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 ### verifiability — Verifiability and success criteria
 
-**Definition.** The document says how anyone will know it succeeded: requirements are testable, acceptance and test plans are concrete, and milestones or graduation criteria are checkable.
+**Definition.** Where the document sets requirements, goals or milestones, it says how anyone will know they are met: requirements are testable and acceptance checks are concrete.
 
 **Continuation.** Applies to sections that state requirements, tests or milestones.
 
@@ -676,7 +705,7 @@ The dimensions come from published guidance and are not yet validated against pr
 
 > For up to 12 aircraft, the small display format shall be used. Otherwise, the large display format shall be used.
 
-**Score anchors.** 1: No checkable criteria. 3: Some concrete tests; key requirements lack checks. 5: Every material requirement has a concrete check, including failure cases.
+**Score anchors.** 1: Requirements or goals with no way to check them. 3: Some concrete tests; key requirements lack checks. 5: Every material requirement has a concrete check, including failure cases.
 
 **Candidate measures** (readiness: automatic_candidate).
 

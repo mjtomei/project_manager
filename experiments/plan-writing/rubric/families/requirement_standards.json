@@ -1,0 +1,693 @@
+{
+  "id": "requirement_standards",
+  "title": "Requirement-statement and requirement-set quality (ISO/IEC/IEEE 29148, INCOSE GtWR v4, NASA SE Handbook App. C, RFC 2119/8174)",
+  "criteria": [
+    {
+      "id": "iso29148_implementation_free",
+      "name": "Implementation-Free",
+      "definition": {
+        "text": "The requirement, while addressing what is necessary and sufficient in the system, avoids placing unnecessary constraints on the architectural design. The objective is to be implementation-independent. The requirement states what is required, not how the requirement should be met.",
+        "ref": "iso29148",
+        "locator": "ISO/IEC/IEEE 29148:2011, characteristics of individual requirements, as quoted in NARA IR Quality Standards, Table 2 'Implementation-Free'",
+        "via": [
+          "nara-ir-quality-standards"
+        ]
+      },
+      "condition": null,
+      "document_kind": "requirement",
+      "levels": null,
+      "examples": [],
+      "note": "ISO text is paywalled and the ISO OBP preview was not reachable by script (403); the VDE preview of ISO/IEC/IEEE 29148:2018 stops at clause 3. Quote is the 'IEEE:' text that NARA's IR Quality Standards attributes to the standard; NARA says its standards are 'based upon, but are not identical to the ISO/IEC/IEEE 29148:2011 standard', so wording is the 2011 edition and may carry NARA edits."
+    },
+    {
+      "id": "iso29148_unambiguous",
+      "name": "Unambiguous",
+      "definition": {
+        "text": "The requirement is stated in such a way so that it can be interpreted in only one way. The requirement is stated simply and is easy to understand.",
+        "ref": "iso29148",
+        "locator": "ISO/IEC/IEEE 29148:2011, characteristics of individual requirements, as quoted in NARA IR Quality Standards, Table 2 'Unambiguous'",
+        "via": [
+          "nara-ir-quality-standards"
+        ]
+      },
+      "condition": null,
+      "document_kind": "requirement",
+      "levels": null,
+      "examples": [],
+      "note": "ISO text is paywalled and the ISO OBP preview was not reachable by script (403); the VDE preview of ISO/IEC/IEEE 29148:2018 stops at clause 3. Quote is the 'IEEE:' text that NARA's IR Quality Standards attributes to the standard; NARA says its standards are 'based upon, but are not identical to the ISO/IEC/IEEE 29148:2011 standard', so wording is the 2011 edition and may carry NARA edits."
+    },
+    {
+      "id": "iso29148_consistent",
+      "name": "Consistent",
+      "definition": {
+        "text": "The requirement is free of conflicts with other requirements.",
+        "ref": "iso29148",
+        "locator": "ISO/IEC/IEEE 29148:2011, characteristics of individual requirements, as quoted in NARA IR Quality Standards, Table 2 'Consistent'",
+        "via": [
+          "nara-ir-quality-standards"
+        ]
+      },
+      "condition": null,
+      "document_kind": "requirement",
+      "levels": null,
+      "examples": [],
+      "note": "ISO text is paywalled and the ISO OBP preview was not reachable by script (403); the VDE preview of ISO/IEC/IEEE 29148:2018 stops at clause 3. Quote is the 'IEEE:' text that NARA's IR Quality Standards attributes to the standard; NARA says its standards are 'based upon, but are not identical to the ISO/IEC/IEEE 29148:2011 standard', so wording is the 2011 edition and may carry NARA edits."
+    },
+    {
+      "id": "iso29148_traceable",
+      "name": "Traceable",
+      "definition": {
+        "text": "The requirement is upwards traceable to specific documented stakeholder statement(s) of need (e.g., the Business Case or Business Need.) The requirement is also downwards traceable to the specific requirements in the lower tier requirements specification or other system definition artifacts.",
+        "ref": "iso29148",
+        "locator": "ISO/IEC/IEEE 29148:2011, characteristics of individual requirements, as quoted in NARA IR Quality Standards, Table 2 'Traceable'",
+        "via": [
+          "nara-ir-quality-standards"
+        ]
+      },
+      "condition": null,
+      "document_kind": "requirement",
+      "levels": null,
+      "examples": [],
+      "note": "ISO text is paywalled and the ISO OBP preview was not reachable by script (403); the VDE preview of ISO/IEC/IEEE 29148:2018 stops at clause 3. Quote is the 'IEEE:' text that NARA's IR Quality Standards attributes to the standard; NARA says its standards are 'based upon, but are not identical to the ISO/IEC/IEEE 29148:2011 standard', so wording is the 2011 edition and may carry NARA edits. The parenthetical '(e.g., the Business Case or Business Need.)' is probably a NARA substitution."
+    },
+    {
+      "id": "iso29148_set_complete",
+      "name": "Complete",
+      "definition": {
+        "text": "The set of requirements needs no further amplification because it contains everything pertinent to the definition of the system or system element being specified. In addition, the set contains no To Be Defined (TBD), To Be Specified (TBS), or To Be Resolved (TBR) clauses.",
+        "ref": "iso29148",
+        "locator": "ISO/IEC/IEEE 29148:2011, characteristics of a set of requirements, as quoted in NARA IR Quality Standards, Table 1 'Complete'",
+        "via": [
+          "nara-ir-quality-standards"
+        ]
+      },
+      "condition": "Resolution of the TBx designations may be iterative and there is an acceptable timeframe for TBx items, determined by risks and dependencies.",
+      "document_kind": "set of requirements",
+      "levels": null,
+      "examples": [],
+      "note": "ISO text is paywalled and the ISO OBP preview was not reachable by script (403); the VDE preview of ISO/IEC/IEEE 29148:2018 stops at clause 3. Quote is the 'IEEE:' text that NARA's IR Quality Standards attributes to the standard; NARA says its standards are 'based upon, but are not identical to the ISO/IEC/IEEE 29148:2011 standard', so wording is the 2011 edition and may carry NARA edits."
+    },
+    {
+      "id": "iso29148_priority",
+      "name": "Prioritized",
+      "definition": {
+        "text": "The stakeholder priority of each requirement should be identified. The priority is not intended to imply that some requirements are not necessary, but it may indicate what requirements are candidates for the trade space when decisions regarding alternatives are necessary.",
+        "ref": "iso29148",
+        "locator": "ISO/IEC/IEEE 29148:2011 (requirement attribute, not a characteristic), as quoted in NARA IR Quality Standards, Table 2 'Prioritized'",
+        "via": [
+          "nara-ir-quality-standards"
+        ]
+      },
+      "condition": null,
+      "document_kind": "requirement",
+      "levels": null,
+      "examples": [],
+      "note": "ISO text is paywalled and the ISO OBP preview was not reachable by script (403); the VDE preview of ISO/IEC/IEEE 29148:2018 stops at clause 3. Quote is the 'IEEE:' text that NARA's IR Quality Standards attributes to the standard; NARA says its standards are 'based upon, but are not identical to the ISO/IEC/IEEE 29148:2011 standard', so wording is the 2011 edition and may carry NARA edits."
+    },
+    {
+      "id": "incose_c1_necessary",
+      "name": "C1 - Necessary",
+      "definition": {
+        "text": "The need statement or requirement statement defines capability, characteristic, constraint, or quality factor needed or required to satisfy a lifecycle concept, need, source, or higher-level requirement.",
+        "ref": "incose-gtwr",
+        "locator": "INCOSE GtWR v4 (INCOSE-TP-2010-006-04, 1 July 2023), Section 2.2, Definition, p. 35"
+      },
+      "condition": null,
+      "document_kind": "individual need or requirement statement",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "incose_c2_appropriate",
+      "name": "C2 - Appropriate",
+      "definition": {
+        "text": "The specific intent and amount of detail of the need or requirement statement is appropriate to the level (the level of abstraction, organization, or system architecture) of the entity to which it refers.",
+        "ref": "incose-gtwr",
+        "locator": "INCOSE GtWR v4 (INCOSE-TP-2010-006-04, 1 July 2023), Section 2.3, Definition, p. 38"
+      },
+      "condition": null,
+      "document_kind": "individual need or requirement statement",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "incose_c3_unambiguous",
+      "name": "C3 - Unambiguous",
+      "definition": {
+        "text": "Need statements and requirement statements must be stated such that their intent is clear and can be interpreted in only one way by all the intended audiences.",
+        "ref": "incose-gtwr",
+        "locator": "INCOSE GtWR v4 (INCOSE-TP-2010-006-04, 1 July 2023), Section 2.4, Definition, p. 41"
+      },
+      "condition": null,
+      "document_kind": "individual need or requirement statement",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "incose_c4_complete",
+      "name": "C4 - Complete",
+      "definition": {
+        "text": "The need statement sufficiently describes the necessary capability, characteristic, constraint, conditions, or quality factor to meet the lifecycle concept or source from which it was transformed. The requirement statement sufficiently describes the necessary capability, characteristic, constraint, conditions, or quality factor to meet the need, source, or higher-level requirement from which it was transformed.",
+        "ref": "incose-gtwr",
+        "locator": "INCOSE GtWR v4 (INCOSE-TP-2010-006-04, 1 July 2023), Section 2.5, Definition, p. 43"
+      },
+      "condition": null,
+      "document_kind": "individual need or requirement statement",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "incose_c5_singular",
+      "name": "C5 - Singular",
+      "definition": {
+        "text": "The need statement or requirement statement should state a single capability, characteristic, constraint, or quality factor.",
+        "ref": "incose-gtwr",
+        "locator": "INCOSE GtWR v4 (INCOSE-TP-2010-006-04, 1 July 2023), Section 2.6, Definition, p. 44"
+      },
+      "condition": null,
+      "document_kind": "individual need or requirement statement",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "incose_c6_feasible",
+      "name": "C6 - Feasible",
+      "definition": {
+        "text": "The need or requirement can be realized within entity constraints (for example: cost, schedule, technical, legal, ethical, safety) with acceptable risk.",
+        "ref": "incose-gtwr",
+        "locator": "INCOSE GtWR v4 (INCOSE-TP-2010-006-04, 1 July 2023), Section 2.7, Definition, p. 46"
+      },
+      "condition": null,
+      "document_kind": "individual need or requirement statement",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "incose_c7_verifiable_validatable",
+      "name": "C7 – Verifiable/Validatable",
+      "definition": {
+        "text": "The need statement is structured and worded such that its realization can be validated to the approving authority’s satisfaction. The requirement statement is structured and worded such that its realization can be verified to the approving authority’s satisfaction.",
+        "ref": "incose-gtwr",
+        "locator": "INCOSE GtWR v4 (INCOSE-TP-2010-006-04, 1 July 2023), Section 2.8, Definition, p. 47"
+      },
+      "condition": null,
+      "document_kind": "individual need or requirement statement",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "incose_c8_correct",
+      "name": "C8 - Correct",
+      "definition": {
+        "text": "The need statement must be an accurate representation of the lifecycle concept or source from which it was transformed. The requirement statement must be an accurate representation of the need, source, or higher- level requirement from which it was transformed.",
+        "ref": "incose-gtwr",
+        "locator": "INCOSE GtWR v4 (INCOSE-TP-2010-006-04, 1 July 2023), Section 2.9, Definition, p. 49"
+      },
+      "condition": null,
+      "document_kind": "individual need or requirement statement",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "incose_c9_conforming",
+      "name": "C9 - Conforming",
+      "definition": {
+        "text": "Statements and expressions of individual needs and requirements should conform to an approved standard pattern and style guide or standard for writing and managing needs and requirements.",
+        "ref": "incose-gtwr",
+        "locator": "INCOSE GtWR v4 (INCOSE-TP-2010-006-04, 1 July 2023), Section 2.10, Definition, p. 51"
+      },
+      "condition": null,
+      "document_kind": "individual need or requirement statement",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "incose_c10_complete",
+      "name": "C10 - Complete",
+      "definition": {
+        "text": "The set of needs and set of requirements for an entity should stand alone such that it sufficiently describes the necessary capabilities, characteristics, functionality, performance, drivers, constraints, conditions, interactions, standards, regulations, safety, security, resilience, and quality factors without requiring other sets of needs or sets of requirements at the appropriate level of abstraction.",
+        "ref": "incose-gtwr",
+        "locator": "INCOSE GtWR v4 (INCOSE-TP-2010-006-04, 1 July 2023), Section 3.1, Definition, p. 53"
+      },
+      "condition": null,
+      "document_kind": "set of needs or set of requirements",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "incose_c11_consistent",
+      "name": "C11 - Consistent",
+      "definition": {
+        "text": "A set of needs and a set of requirements is consistent if contains individual needs or requirements that are: • unique; • do not conflict with or overlap with others in the set; • makes use of homogeneous units and measurement systems; and • are developed using a consistent language (that is, the same words are used throughout the set to mean the same thing); and use terms that are consistent with the architectural model, project glossary, and project data dictionary.",
+        "ref": "incose-gtwr",
+        "locator": "INCOSE GtWR v4 (INCOSE-TP-2010-006-04, 1 July 2023), Section 3.2, Definition, p. 56"
+      },
+      "condition": null,
+      "document_kind": "set of needs or set of requirements",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "incose_c12_feasible",
+      "name": "C12 - Feasible",
+      "definition": {
+        "text": "A set of needs and a set of requirements is feasible if it can be realized within entity constraints (such as cost, schedule, technical) with acceptable risk.",
+        "ref": "incose-gtwr",
+        "locator": "INCOSE GtWR v4 (INCOSE-TP-2010-006-04, 1 July 2023), Section 3.3, Definition, p. 58"
+      },
+      "condition": null,
+      "document_kind": "set of needs or set of requirements",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "incose_c13_comprehensible",
+      "name": "C13 - Comprehensible",
+      "definition": {
+        "text": "The set of needs and the set of resulting requirements must each be written such that it is clear as to what is expected of the entity and its relation to the macro system of which it is a part.",
+        "ref": "incose-gtwr",
+        "locator": "INCOSE GtWR v4 (INCOSE-TP-2010-006-04, 1 July 2023), Section 3.4, Definition, p. 60"
+      },
+      "condition": null,
+      "document_kind": "set of needs or set of requirements",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "incose_c14_able_to_be_validated",
+      "name": "C14 - Able to be Validated",
+      "definition": {
+        "text": "It must be possible to validate that the set of needs will lead to the achievement of the product goals and objectives, stakeholder expectations, risks, and lifecycle concepts within the constraints (such as cost, schedule, technical, legal and regulatory compliance) with acceptable risk. It must be possible to validate that the set of requirements will lead to the achievement of the set of needs and higher-level requirements within the constraints (such as cost, schedule, technical, and regulatory compliance) with acceptable risk.",
+        "ref": "incose-gtwr",
+        "locator": "INCOSE GtWR v4 (INCOSE-TP-2010-006-04, 1 July 2023), Section 3.5, Definition, p. 61"
+      },
+      "condition": null,
+      "document_kind": "set of needs or set of requirements",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "incose_c15_correct",
+      "name": "C15 - Correct",
+      "definition": {
+        "text": "The set of needs must be an accurate representation of the lifecycle concepts or sources from which it was transformed. The set of requirements must be an accurate representation of the needs, sources, or higher- level requirements from which it was transformed.",
+        "ref": "incose-gtwr",
+        "locator": "INCOSE GtWR v4 (INCOSE-TP-2010-006-04, 1 July 2023), Section 3.6, Definition, p. 62"
+      },
+      "condition": null,
+      "document_kind": "set of needs or set of requirements",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c1_use_of_correct_terms",
+      "name": "C.1 Use of Correct Terms",
+      "definition": {
+        "text": "Shall = requirement Will = facts or declaration of purpose Should = goal",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.1, p. 236"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c2_personnel_requirement",
+      "name": "Personnel Requirement",
+      "definition": {
+        "text": "The requirement is in the form “responsible party shall perform such and such.” In other words, use the active, rather than the passive voice.",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.2 Editorial Checklist, p. 236"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c2_product_requirement",
+      "name": "Product Requirement",
+      "definition": {
+        "text": "The requirement is in the form “product ABC shall XYZ.” … The requirement uses consistent terminology to refer to the product and its lower-level entities. Complete with tolerances for qualitative/performance values",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.2 Editorial Checklist, p. 236"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c2_free_of_implementation",
+      "name": "Is the requirement free of implementation?",
+      "definition": {
+        "text": "Is the requirement free of implementation? (Requirements should state WHAT is needed, NOT HOW to provide it; i.e., state the problem not the solution. Ask, “Why do you need the requirement?” The answer may point to the real requirement.)",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.2 Editorial Checklist, p. 236"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c2_free_of_operations",
+      "name": "Free of descriptions of operations?",
+      "definition": {
+        "text": "Free of descriptions of operations? (Is this a need the product should satisfy or an activity involving the product? Sentences like “The operator shall…” are almost always operational statements not requirements.)",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.2 Editorial Checklist, p. 236"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c3_grammar_spelling",
+      "name": "C.3 General Goodness Checklist (grammar and spelling)",
+      "definition": {
+        "text": "The requirement is grammatically correct. The requirement is free of typos, misspellings, and punctuation errors.",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.3, p. 236"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c3_template_style",
+      "name": "C.3 General Goodness Checklist (template and style)",
+      "definition": {
+        "text": "The requirement complies with the project’s template and style rules.",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.3, p. 237"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c3_stated_positively",
+      "name": "C.3 General Goodness Checklist (stated positively)",
+      "definition": {
+        "text": "The requirement is stated positively (as opposed to negatively, i.e., “shall not”).",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.3, p. 237"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c3_tbd_tbr",
+      "name": "C.3 General Goodness Checklist (TBD/TBR)",
+      "definition": {
+        "text": "The use of “To Be Determined” (TBD) values should be minimized. It is better to use a best estimate for a value and mark it “To Be Resolved” (TBR) with the rationale along with what should be done to eliminate the TBR, who is responsible for its elimination, and by when it should be eliminated.",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.3, p. 237"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c3_rationale",
+      "name": "C.3 General Goodness Checklist (rationale)",
+      "definition": {
+        "text": "The requirement is accompanied by an intelligible rationale, including any assumptions. Can you validate (concur with) the assumptions? Assumptions should be confirmed before baselining.",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.3, p. 237"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c3_proper_section",
+      "name": "C.3 General Goodness Checklist (location)",
+      "definition": {
+        "text": "The requirement is located in the proper section of the document (e.g., not in an appendix).",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.3, p. 237"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c4_clarity",
+      "name": "Clarity",
+      "definition": {
+        "text": "Are the requirements clear and unambiguous? (Are all aspects of the requirement understandable and not subject to misinterpretation? Is the requirement free from indefinite pronouns (this, these) and ambiguous terms (e.g., “as appropriate,” “etc.,” “and/or,” “but not limited to”)?) Are the requirements concise and simple? Do the requirements express only one thought per requirement statement",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.4 Requirements Validation Checklist, p. 237"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c4_completeness",
+      "name": "Completeness",
+      "definition": {
+        "text": "Are requirements stated as completely as possible? Have all incomplete requirements been captured as TBDs or TBRs and a complete listing of them maintained with the requirements? Are any requirements missing? … Have all assumptions been explicitly stated?",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.4 Requirements Validation Checklist, p. 237"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c4_compliance",
+      "name": "Compliance",
+      "definition": {
+        "text": "Are all requirements at the correct level (e.g., system, segment, element, subsystem)? Are requirements free of implementation specifics? (Requirements should state what is needed, not how to provide it.) Are requirements free of descriptions of operations?",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.4 Requirements Validation Checklist, pp. 237-238"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c4_consistency",
+      "name": "Consistency",
+      "definition": {
+        "text": "Are the requirements stated consistently without contradicting themselves or the requirements of related systems? Is the terminology consistent with the user and sponsor’s terminology? With the project glossary? Is the terminology consistently used throughout the document?",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.4 Requirements Validation Checklist, p. 238"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c4_traceability",
+      "name": "Traceability",
+      "definition": {
+        "text": "Are all requirements needed? Is each requirement necessary to meet the parent requirement? … Are all requirements (functions, structures, and constraints) bidirectionally traceable to higher-level requirements or mission or system-of-interest scope",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.4 Requirements Validation Checklist, p. 238"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c4_correctness",
+      "name": "Correctness",
+      "definition": {
+        "text": "Is each requirement correct? Is each stated assumption correct? Assumptions should be confirmed before the document can be baselined. Are the requirements technically feasible?",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.4 Requirements Validation Checklist, p. 238"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c4_functionality",
+      "name": "Functionality",
+      "definition": {
+        "text": "Are all described functions necessary and together sufficient to meet mission and system goals and objectives?",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.4 Requirements Validation Checklist, p. 238"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c4_performance",
+      "name": "Performance",
+      "definition": {
+        "text": "Are all required performance specifications and margins listed (e.g., consider timing, throughput, storage size, latency, accuracy and precision)? Is each performance requirement realistic? Are the tolerances overly tight?",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.4 Requirements Validation Checklist, p. 238"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c4_interfaces",
+      "name": "Interfaces",
+      "definition": {
+        "text": "Are all external interfaces clearly defined? … Are all internal interfaces clearly defined? Are all interfaces necessary, sufficient, and consistent with each other?",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.4 Requirements Validation Checklist, pp. 238-239"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c4_maintainability",
+      "name": "Maintainability",
+      "definition": {
+        "text": "Have the requirements for maintainability of the system been specified in a measurable, verifiable manner? Are requirements written so that ripple effects from changes are minimized (i.e., requirements are as weakly coupled as possible)?",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.4 Requirements Validation Checklist, p. 239"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c4_reliability",
+      "name": "Reliability",
+      "definition": {
+        "text": "Are clearly defined, measurable, and verifiable reliability requirements specified? Are there error detection, reporting, handling, and recovery requirements? Are undesired events (e.g., single-event upset, data loss or scrambling, operator error) considered and their required responses specified?",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.4 Requirements Validation Checklist, p. 239"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c4_verifiability_testability",
+      "name": "Verifiability/Testability",
+      "definition": {
+        "text": "Can the system be tested, demonstrated, inspected, or analyzed to show that it satisfies requirements? … Does a means exist to measure the accomplishment of the requirement and verify compliance? Can the criteria for verification be stated? … Are the requirements free of unverifiable terms (e.g., flexible, easy, sufficient, safe, ad hoc, adequate, accommodate, user-friendly, usable",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.4 Requirements Validation Checklist, p. 239"
+      },
+      "condition": null,
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "nasa_c4_data_usage",
+      "name": "Data Usage",
+      "definition": {
+        "text": "are “don’t care” conditions truly “don’t care”? … Are “don’t care” conditions values explicitly stated?",
+        "ref": "nasa-se-handbook",
+        "locator": "NASA/SP-2016-6105 Rev 2, Appendix C 'How to Write a Good Requirement - Checklist', C.4 Requirements Validation Checklist, p. 239"
+      },
+      "condition": "Where applicable",
+      "document_kind": "requirements document (requirement statements)",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc2119_key_words",
+      "name": "MUST / MUST NOT / SHOULD / SHOULD NOT / MAY",
+      "definition": {
+        "text": "MUST This word, or the terms \"REQUIRED\" or \"SHALL\", mean that the definition is an absolute requirement of the specification. … SHOULD This word, or the adjective \"RECOMMENDED\", mean that there may exist valid reasons in particular circumstances to ignore a particular item, but the full implications must be understood and carefully weighed before choosing a different course.",
+        "ref": "rfc2119",
+        "locator": "RFC 2119, Sections 1-5"
+      },
+      "condition": null,
+      "document_kind": "specification using BCP 14 key words",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc2119_guidance_imperatives",
+      "name": "Guidance in the use of these Imperatives",
+      "definition": {
+        "text": "Imperatives of the type defined in this memo must be used with care and sparingly. In particular, they MUST only be used where it is actually required for interoperation or to limit behavior which has potential for causing harm (e.g., limiting retransmisssions) For example, they must not be used to try to impose a particular method on implementors where the method is not required for interoperability.",
+        "ref": "rfc2119",
+        "locator": "RFC 2119, Section 6"
+      },
+      "condition": null,
+      "document_kind": "specification using BCP 14 key words",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc2119_security_considerations",
+      "name": "Security Considerations",
+      "definition": {
+        "text": "Document authors should take the time to elaborate the security implications of not following recommendations or requirements as most implementors will not have had the benefit of the experience and discussion that produced the specification.",
+        "ref": "rfc2119",
+        "locator": "RFC 2119, Section 7"
+      },
+      "condition": null,
+      "document_kind": "specification using BCP 14 key words",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc8174_uppercase_only",
+      "name": "Clarifying Capitalization of Key Words",
+      "definition": {
+        "text": "The words have the meanings specified herein only when they are in all capitals. o When these words are not capitalized, they have their normal English meanings and are not affected by this document.",
+        "ref": "rfc8174",
+        "locator": "RFC 8174, Section 2 (NEW text)"
+      },
+      "condition": null,
+      "document_kind": "specification using BCP 14 key words",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc8174_key_words_optional",
+      "name": "Clarifying Capitalization of Key Words",
+      "definition": {
+        "text": "These words can be used as defined here, but using them is not required. Specifically, normative text does not require the use of these key words. They are used for clarity and consistency when that is what's wanted, but a lot of normative text does not use them and is still normative.",
+        "ref": "rfc8174",
+        "locator": "RFC 8174, Section 2 (NEW text)"
+      },
+      "condition": null,
+      "document_kind": "specification using BCP 14 key words",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "rfc8174_boilerplate",
+      "name": "Clarifying Capitalization of Key Words",
+      "definition": {
+        "text": "Authors who follow these guidelines should incorporate this phrase near the beginning of their document: The key words \"MUST\", \"MUST NOT\", \"REQUIRED\", \"SHALL\", \"SHALL NOT\", \"SHOULD\", \"SHOULD NOT\", \"RECOMMENDED\", \"NOT RECOMMENDED\", \"MAY\", and \"OPTIONAL\" in this document are to be interpreted as described in BCP 14 [RFC2119] [RFC8174] when, and only when, they appear in all capitals, as shown here.",
+        "ref": "rfc8174",
+        "locator": "RFC 8174, Section 2 (NEW text)"
+      },
+      "condition": "Authors who follow these guidelines",
+      "document_kind": "specification using BCP 14 key words",
+      "levels": null,
+      "examples": []
+    }
+  ]
+}

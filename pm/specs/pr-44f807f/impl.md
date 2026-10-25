@@ -89,6 +89,29 @@
   render and validate; material and no-brief rendering; every example and
   fixture text cites a reference and locator; fixtures exist for every concern.
 
+9. **Family rubrics** (reader review request, 2026-10-24). Alongside the
+   aggregate rubric, give each survey family its own selectable rubric built only
+   from that family's guidance (`rubric/families.json`, `rubric/families/*.json`,
+   `rubric/examples.json`, generated `rubric/families.md`). Family criteria need
+   not pass the two-family filter; each is a source's own heading or rule with a
+   verbatim quote, locator, any condition the source attaches, published levels
+   where they exist and same-source examples. Families that supply methods, bias
+   checks or examples are listed as such without invented criteria. Results are
+   identified by rubric id and criterion id; nothing is pruned. Add general
+   writing sources and generic measures as well as technical ones (user request,
+   2026-10-24): general style guidance, writing-assessment rubrics with published
+   levels, readability and lexical measures.
+
+10. **Prompt preferences** (reader review, 2026-10-24), for every rubric set: no
+    A/B-label explanation or generic warnings; no required evidence quotations or
+    rationales; the reply may hold notes but ends with the JSON object
+    (`extract_judgment()`); definitions and anchors do not penalise leaving out
+    caveats, explanations or sections the document's purpose, kind, audience or
+    stage does not need; published stronger/weaker examples with needed context
+    are shown per criterion, held out from any case they overlap; numeric example
+    scores only where the source publishes them. The reader's earlier edits are in
+    a host library document this workdir cannot read; they still need merging.
+
 ## Implicit requirements
 
 - The runner PR (pr-… "Document evaluation runner and evaluator calibration")
@@ -106,10 +129,11 @@
   (or prefix) does not mention is not a fault by itself (the user's criterion).
 - Minimal prompts (user request 2026-10-24: minimise the rubric authors'
   influence outside sourced pairs and cited concerns). Judges see each
-  dimension's name, definition and anchors only; detection guidance,
-  not-a-fault lists and track notes are reference material in rubric.md. Every
-  other prompt instruction is mechanics or listed with its basis in rubric.md's
-  ledger. Fixtures carry no `document_kind`, since the strings would be ours.
+  criterion's name, definition, source condition, scale and levels, and its
+  published examples (requirement 10); detection guidance, not-a-fault lists and
+  track notes are reference material in rubric.md. Every other prompt
+  instruction is mechanics or listed with its basis in rubric.md's ledger.
+  Fixtures carry no `document_kind`, since the strings would be ours.
 - Continuation judges see the prefix; the continuity dimension rewards content
   and structural continuity, and explicitly tells judges not to reward
   idiosyncratic stylistic mimicry (the plan flags stylistic continuity as a bias

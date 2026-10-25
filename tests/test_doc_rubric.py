@@ -18,7 +18,8 @@ REFS = rubric.load_references()
 FIXTURES = rubric.load_fixtures()
 DIMS = RUBRIC["dimensions"]
 DIM_IDS = [d["id"] for d in DIMS]
-EXTERNAL_KINDS = {"standard", "guideline", "process_template", "rubric", "paper", "book", "tool", "example_source"}
+EXTERNAL_KINDS = {"standard", "guideline", "process_template", "rubric", "paper", "book", "tool", "example_source", "dataset",
+                  "secondary_source", "secondary_notes", "course_material", "encyclopedia", "thesis"}
 CONCERN_IDS = [c["id"] for c in RUBRIC["concerns"]]
 
 
@@ -88,6 +89,7 @@ def test_references_well_formed():
              + [d["examples"][side]["ref"] for side in ("strong", "weak")]}
     cited |= {f["provenance"][part]["ref"] for f in FIXTURES for part in f["provenance"]}
     cited |= {f["source_framing"]["ref"] for f in FIXTURES}
+    cited |= {r for f in rubric.load_families()["families"] for r in f["sources"]}
     assert set(RUBRIC["judge_design_references"]) <= set(REFS)
     cited |= set(RUBRIC["judge_design_references"])
     assert set(REFS) <= cited, "uncited references: " + ", ".join(sorted(set(REFS) - cited))
@@ -212,6 +214,12 @@ class TestFixture:
         assert "{{" not in prompt.replace(fixture[variant], "")
         assert "### " + fixture["dimension"] + " — " in prompt
 
+    @pytest.mark.parametrize("single", [False, True])
+    def test_own_pair_is_held_out_of_the_examples(self, fixture, single):
+        prompt = rubric.render_fixture_single(fixture) if single else rubric.render_fixture(fixture)
+        criteria = prompt.split("\n## Criteria\n", 1)[1].split("\n## Scoring\n", 1)[0]
+        assert not rubric._overlaps(criteria, [fixture["strong"], fixture["weak"]])
+
     def test_prompt_does_not_leak_provenance(self, fixture):
         prompt = rubric.render_fixture(fixture)
         for part in fixture["provenance"].values():
@@ -253,7 +261,6 @@ def test_continuation_template_renders_with_prefix():
     assert not rubric.PLACEHOLDER.search(prompt)
     for d in DIMS:
         assert "### " + d["id"] + " — " in prompt
-    assert "imitating the prefix author's personal style" in prompt
 
 
 ALL_TEMPLATES = list(rubric.TEMPLATES.values()) + list(rubric.SINGLE_TEMPLATES.values())
@@ -276,15 +283,15 @@ def test_single_templates_render():
     assert "Document kind: sign-off report." in prompt
     assert "Document A" not in prompt and "preference" not in prompt and "<material>" not in prompt
     assert not rubric.PLACEHOLDER.search(prompt)
-    schema = json.loads(prompt.split("in this shape:\n\n", 1)[1].split("\n\nScores are integers", 1)[0])
-    assert set(schema) == {"dimensions", "overall_score", "overall_rationale"}
-    assert all(set(r) == {"dimension", "evidence", "rationale", "score"} for r in schema["dimensions"])
+    schema = _schema(prompt)
+    assert set(schema) == {"criteria", "overall_score"}
+    assert all(set(r) == {"criterion", "score"} for r in schema["criteria"])
     assert "### continuity — " not in prompt
     prompt = rubric.render_single("continuation", prefix="PREFIX TEXT", document="NEXT ONLY",
                                   section_request="Write the migration section.")
     assert prompt.index("PREFIX TEXT") < prompt.index("NEXT ONLY")
     assert "The request for this section: Write the migration section." in prompt
-    assert "### continuity — " in prompt and "imitating the prefix author's personal style" in prompt
+    assert "### continuity — " in prompt
     assert not rubric.PLACEHOLDER.search(prompt)
 
 
@@ -312,7 +319,7 @@ def test_render_single_rejects_wrong_inputs():
         rubric.render_single("whole_document", brief="b", document="a", dimensions=[])
 
 
-def test_prompt_carries_only_definitions_and_anchors():
+def test_prompt_carries_definitions_anchors_and_examples_only():
     # Detection guidance, track notes and not-a-fault lists are reference material, not judge input.
     for case_type in rubric.CASE_TYPES:
         kw = {"brief": "b"} if case_type == "whole_document" else {"prefix": "p"}
@@ -320,8 +327,13 @@ def test_prompt_carries_only_definitions_and_anchors():
         for d in rubric.dimensions_for(case_type):
             assert d["definition"] in prompt
             assert all(v in prompt for v in d["score_anchors"].values())
+            ex = d["examples"]
+            assert ex["strong"]["text"] in prompt and ex["weak"]["text"] in prompt
+            if ex.get("context"):
+                assert ex["context"]["text"] in prompt
             texts = d["detection_guidance"] + d["not_a_defect"] + list(d.get("track_notes", {}).values())
-            assert not any(t in prompt for t in texts), d["id"]
+            texts += [ex["strong"].get("note", "")]
+            assert not any(t and t in prompt for t in texts), d["id"]
 
 
 def test_document_text_is_not_re_expanded():
@@ -364,8 +376,17 @@ def test_dimension_subset():
                                  dimensions=["concision", "fidelity"])
     assert "### concision — " in prompt and "### fidelity — " in prompt
     assert "### clarity_and_precision — " not in prompt
-    schema = json.loads(prompt.split("in this shape:\n\n", 1)[1].split("\n\nScores are integers", 1)[0])
-    assert [r["dimension"] for r in schema["dimensions"]] == ["fidelity", "concision"]
+    schema = _schema(prompt)
+    assert [r["criterion"] for r in schema["criteria"]] == ["fidelity", "concision"]
+    assert rubric.render_judge("whole_document", brief="b", document_a="a", document_b="c",
+                               criteria=["concision", "fidelity"]) == prompt
+    with pytest.raises(ValueError):
+        rubric.render_judge("whole_document", brief="b", document_a="a", document_b="c",
+                            criteria=["concision"], dimensions=["concision"])
+
+
+def _schema(prompt):
+    return json.loads(prompt.split("in this shape:\n\n", 1)[1].split("\n\nEach score uses", 1)[0])
 
 
 def test_fill_rejects_missing_and_unused_values():
@@ -378,9 +399,8 @@ def test_fill_rejects_missing_and_unused_values():
 # ---- judgment contract ------------------------------------------------------
 
 def _judgment(ids, **over):
-    j = {"dimensions": [{"dimension": i, "evidence": ["q"], "rationale": "r", "score_a": 4, "score_b": 2,
-                         "preference": "A"} for i in ids],
-         "overall_preference": "A", "overall_rationale": "r"}
+    j = {"criteria": [{"criterion": i, "score_a": 4, "score_b": 2, "preference": "A"} for i in ids],
+         "overall_preference": "A"}
     j.update(over)
     return j
 
@@ -388,37 +408,58 @@ def _judgment(ids, **over):
 def test_validate_judgment():
     ids = [d["id"] for d in rubric.dimensions_for("continuation")]
     assert rubric.validate_judgment(_judgment(ids), ids) == []
+    # No evidence or rationale is required, and extra keys a judge adds are not an error.
+    chatty = _judgment(ids)
+    chatty["criteria"][0]["rationale"] = "r"
+    assert rubric.validate_judgment(chatty, ids) == []
     assert rubric.validate_judgment([], ids)
-    assert any("missing dimension" in p for p in rubric.validate_judgment(_judgment(ids[1:]), ids))
+    assert any("missing criterion" in p for p in rubric.validate_judgment(_judgment(ids[1:]), ids))
     bad = _judgment(ids)
-    bad["dimensions"][0]["score_a"] = 7
-    bad["dimensions"][1]["preference"] = "first"
+    bad["criteria"][0]["score_a"] = 7
+    bad["criteria"][1]["preference"] = "first"
     problems = rubric.validate_judgment(bad, ids)
     assert any("score_a" in p for p in problems) and any("preference" in p for p in problems)
     assert rubric.validate_judgment(_judgment(ids, overall_preference=None), ids)
     dup = _judgment(ids)
-    dup["dimensions"].append(dict(dup["dimensions"][0]))
+    dup["criteria"].append(dict(dup["criteria"][0]))
     assert any("duplicate" in p for p in rubric.validate_judgment(dup, ids))
     odd = _judgment(ids)
-    odd["dimensions"][0]["dimension"] = ["not", "hashable"]
-    odd["dimensions"][1]["evidence"] = "q"
-    problems = rubric.validate_judgment(odd, ids)
-    assert any("malformed" in p for p in problems) and any("evidence" in p for p in problems)
+    odd["criteria"][0]["criterion"] = ["not", "hashable"]
+    assert any("malformed" in p for p in rubric.validate_judgment(odd, ids))
+
+
+def test_validate_uses_each_criterion_scale():
+    crit = [{"id": "four_level", "scale": {"min": 1, "max": 4}}, {"id": "six_level", "scale": {"min": 1, "max": 6}}]
+    ok = {"criteria": [{"criterion": "four_level", "score": 4}, {"criterion": "six_level", "score": 6}],
+          "overall_score": 3}
+    assert rubric.validate_judgment(ok, crit, single=True) == []
+    ok["criteria"][0]["score"] = 5
+    assert any("four_level: score not an integer 1-4" in p for p in rubric.validate_judgment(ok, crit, single=True))
 
 
 def test_validate_single_judgment():
     ids = [d["id"] for d in rubric.dimensions_for("whole_document")]
-    good = {"dimensions": [{"dimension": i, "evidence": ["q"], "rationale": "r", "score": 3} for i in ids],
-            "overall_score": 4, "overall_rationale": "r"}
+    good = {"criteria": [{"criterion": i, "score": 3} for i in ids], "overall_score": 4}
     assert rubric.validate_judgment(good, ids, single=True) == []
     # A paired reply is not a valid single reply, and the reverse.
     assert rubric.validate_judgment(_judgment(ids), ids, single=True)
     assert rubric.validate_judgment(good, ids)
     bad = json.loads(json.dumps(good))
-    bad["dimensions"][0]["score"] = True
+    bad["criteria"][0]["score"] = True
     bad["overall_score"] = 6
     problems = rubric.validate_judgment(bad, ids, single=True)
     assert any(": score not" in p for p in problems) and any("overall_score" in p for p in problems)
+
+
+def test_extract_judgment_takes_the_final_json_object():
+    obj = {"criteria": [{"criterion": "x", "score": 3}], "overall_score": 3}
+    text = json.dumps(obj)
+    assert rubric.extract_judgment(text) == obj
+    assert rubric.extract_judgment("Notes {not json} and {\"a\": 1}.\n\n" + text + "\n") == obj
+    assert rubric.extract_judgment("Notes.\n```json\n" + json.dumps(obj, indent=2) + "\n```\n") == obj
+    for bad in ("no json here", text + "\nTrailing words.", "[1, 2]"):
+        with pytest.raises(ValueError):
+            rubric.extract_judgment(bad)
 
 
 def test_render_fixture_rejects_bad_slot():
@@ -428,11 +469,19 @@ def test_render_fixture_rejects_bad_slot():
         rubric.render_fixture_single(FIXTURES[0], variant="A")
 
 
-def test_write_doc_replaces_file_by_rename(tmp_path, monkeypatch):
-    # A rename never exposes a partial rubric.md to a concurrent reader or --write-doc.
-    for name in ("dimensions.json", "references.json", "rubric.md"):
+RUBRIC_FILES = ("dimensions.json", "references.json", "families.json", "examples.json", "rubric.md", "families.md")
+
+
+def _copy_rubric(tmp_path):
+    for name in RUBRIC_FILES:
         (tmp_path / name).write_text((EXP / "rubric" / name).read_text())
-    (tmp_path / "fixtures").symlink_to(EXP / "rubric" / "fixtures")
+    for name in ("fixtures", "families"):
+        (tmp_path / name).symlink_to(EXP / "rubric" / name)
+
+
+def test_write_doc_replaces_file_by_rename(tmp_path, monkeypatch):
+    # A rename never exposes a partial rubric.md or families.md to a concurrent reader or --write-doc.
+    _copy_rubric(tmp_path)
     doc = tmp_path / "rubric.md"
     doc.chmod(0o640)
     before = doc.stat().st_ino
@@ -440,13 +489,13 @@ def test_write_doc_replaces_file_by_rename(tmp_path, monkeypatch):
     rubric.write_doc()
     assert doc.read_text() == (EXP / "rubric" / "rubric.md").read_text()
     assert doc.stat().st_ino != before and doc.stat().st_mode & 0o777 == 0o640
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["dimensions.json", "fixtures", "references.json", "rubric.md"]
+    assert (tmp_path / "families.md").read_text() == (EXP / "rubric" / "families.md").read_text()
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(RUBRIC_FILES + ("fixtures", "families"))
 
 
 def test_write_doc_interrupt_after_temp_created_leaves_no_temp(tmp_path, monkeypatch):
     # Ctrl-C can land the moment the temp file exists; the cleanup must still know its name and remove it.
-    for name in ("dimensions.json", "references.json", "rubric.md"):
-        (tmp_path / name).write_text((EXP / "rubric" / name).read_text())
+    _copy_rubric(tmp_path)
     monkeypatch.setattr(rubric, "RUBRIC", tmp_path)
 
     def interrupted_open(file, mode="r", *args, **kwargs):
@@ -456,7 +505,7 @@ def test_write_doc_interrupt_after_temp_created_leaves_no_temp(tmp_path, monkeyp
     monkeypatch.setattr(rubric, "open", interrupted_open, raising=False)
     with pytest.raises(KeyboardInterrupt):
         rubric.write_doc()
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["dimensions.json", "references.json", "rubric.md"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(RUBRIC_FILES + ("fixtures", "families"))
     assert (tmp_path / "rubric.md").read_text() == (EXP / "rubric" / "rubric.md").read_text()
 
 
@@ -466,3 +515,148 @@ def test_write_doc_rejects_missing_markers(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="GENERATED"):
         rubric.write_doc()
     assert (tmp_path / "rubric.md").read_text() == "hand-written text, markers deleted\n"
+
+
+# ---- family rubrics -----------------------------------------------------------
+
+FAMILIES = rubric.load_families()
+POOL = rubric.load_examples()
+RUBRIC_IDS = rubric.list_rubrics()
+
+
+def _family_data(fid):
+    return json.loads((EXP / "rubric" / "families" / (fid + ".json")).read_text())
+
+
+def test_families_index():
+    ids = [f["id"] for f in FAMILIES["families"]]
+    assert len(ids) == len(set(ids))
+    assert RUBRIC_IDS == ["aggregate"] + [f["id"] for f in FAMILIES["families"] if f["rubric"]]
+    files = {p.stem for p in (EXP / "rubric" / "families").glob("*.json")}
+    assert files == {f["id"] for f in FAMILIES["families"] if f["rubric"]}
+    for f in FAMILIES["families"]:
+        assert f["contributes"] and set(f["sources"]) <= set(REFS), f["id"]
+        # A family that supplies methods, bias checks or examples is listed as such, with no invented criteria.
+        assert ("criteria" in f["contributes"]) == f["rubric"]
+        for n in f["not_criteria"]:
+            assert n["source_ref"] in REFS and n["contributes"] in {"methods", "bias_checks", "examples"} and n["note"].strip()
+    assert {"methods", "bias_checks", "examples"} <= {c for f in FAMILIES["families"] for c in f["contributes"]}
+    generic = FAMILIES["generic_levels"]
+    assert set(map(int, generic["levels"])) <= set(range(generic["scale"]["min"], generic["scale"]["max"] + 1))
+
+
+@pytest.mark.parametrize("fid", RUBRIC_IDS[1:])
+def test_family_criteria_are_sourced(fid):
+    data = _family_data(fid)
+    ids = [c["id"] for c in data["criteria"]]
+    assert ids and len(ids) == len(set(ids)) and all(re.fullmatch(r"[a-z0-9_]+", i) for i in ids)
+    for c in data["criteria"]:
+        d = c["definition"]
+        assert c["name"].strip() and d["ref"] in REFS and d["locator"].strip() and set(d.get("via", [])) <= set(REFS)
+        # Every criterion is stated by its source; a criterion may lack prose only if the source publishes levels.
+        assert (d["text"] or "").strip() or c["levels"] or c.get("levels_restricted"), c["id"]
+        # Level tables from sources that forbid republishing never reach the repo.
+        if REFS[d["ref"]].get("licence") == "restricted":
+            assert not c["levels"] and "sub_criteria" not in c
+            if c.get("levels_restricted"):
+                assert c["published_scale"]["min"] < c["published_scale"]["max"]
+        if c["levels"]:
+            lo, hi = c["scale"]["min"], c["scale"]["max"]
+            assert {int(k) for k in c["levels"]} <= set(range(lo, hi + 1)) and all(v.strip() for v in c["levels"].values())
+        for e in c["examples"]:
+            assert e in POOL, (c["id"], e)
+
+
+def test_example_pool():
+    used = {e for fid in RUBRIC_IDS[1:] for c in _family_data(fid)["criteria"] for e in c["examples"]}
+    assert used == set(POOL)
+    for e in POOL.values():
+        sides = [s for s in (e["stronger"], e["weaker"]) if s]
+        assert sides and all(s["text"].strip() and s["ref"] in REFS and s["locator"].strip() for s in sides)
+        if e["context"]:
+            assert e["context"]["text"].strip() and e["context"]["ref"] in REFS
+        if e["scores"]:
+            assert e["scores"]["text"].strip() and e["scores"]["locator"].strip()
+
+
+def test_family_refs_are_cited_from_the_index():
+    cited = {r for f in FAMILIES["families"] for r in f["sources"]}
+    for fid in RUBRIC_IDS[1:]:
+        assert {c["definition"]["ref"] for c in _family_data(fid)["criteria"]} <= cited
+    assert {(e["stronger"] or e["weaker"])["ref"] for e in POOL.values()} <= cited
+
+
+@pytest.mark.parametrize("rid", RUBRIC_IDS)
+@pytest.mark.parametrize("case_type", rubric.CASE_TYPES)
+def test_every_rubric_renders_paired_and_single(rid, case_type):
+    kw = {"brief": "BRIEF"} if case_type == "whole_document" else {"prefix": "PREFIX"}
+    crit = rubric.criteria_for(case_type, rid)
+    for prompt, single in ((rubric.render_judge(case_type, document_a="DOC A", document_b="DOC B", rubric_id=rid, **kw), False),
+                           (rubric.render_single(case_type, document="DOC", rubric_id=rid, **kw), True)):
+        assert not rubric.PLACEHOLDER.search(prompt.split("## Criteria", 1)[0] + prompt.split("## Scoring", 1)[1])
+        for c in crit:
+            assert "### " + c["id"] + " — " + c["name"] in prompt
+        schema = _schema(prompt)
+        assert [r["criterion"] for r in schema["criteria"]] == [c["id"] for c in crit]
+        reply = "Notes first.\n\n" + json.dumps(schema).replace('"A|B|tie"', '"tie"')
+        assert rubric.validate_judgment(rubric.extract_judgment(reply), crit, single=single) == []
+        # No evidence quotations or rationales are asked for.
+        assert '"evidence"' not in prompt and '"rationale"' not in prompt and "quote or point" not in prompt
+
+
+def test_family_prompt_carries_sources_definitions_and_levels():
+    crit = rubric.criteria_for("whole_document", "analytic_writing_rubrics")
+    prompt = rubric.render_judge("whole_document", brief="b", document_a="a", document_b="c",
+                                 rubric_id="analytic_writing_rubrics")
+    for c in crit:
+        if c["definition"]:
+            assert c["definition"] in prompt
+        assert all(v in prompt for v in c["levels"].values())
+        assert "Scale %d to %d:" % (c["scale"]["min"], c["scale"]["max"]) in prompt
+
+
+def test_levels_source_is_recorded(monkeypatch):
+    generic = FAMILIES["generic_levels"]["levels"]
+    monkeypatch.setattr(rubric, "load_restricted_levels", lambda: {})
+    for fid in RUBRIC_IDS[1:]:
+        raw = {c["id"]: c for c in _family_data(fid)["criteria"]}
+        for c in rubric.criteria_for("whole_document", fid):
+            assert c["levels_source"] == ("published" if raw[c["id"]]["levels"] else "generic")
+            assert (c["levels"] == generic) == (c["levels_source"] == "generic")
+
+
+def test_restricted_levels_used_when_present(monkeypatch):
+    fid = "analytic_writing_rubrics"
+    raw = next(c for c in _family_data(fid)["criteria"] if c.get("levels_restricted"))
+    levels = {str(k): "LEVEL %d" % k for k in range(raw["published_scale"]["min"], raw["published_scale"]["max"] + 1)}
+    monkeypatch.setattr(rubric, "load_restricted_levels", lambda: {fid: {raw["id"]: {"levels": levels}}})
+    c = next(c for c in rubric.criteria_for("whole_document", fid) if c["id"] == raw["id"])
+    assert c["levels_source"] == "restricted_local" and c["levels"] == levels and c["scale"] == raw["published_scale"]
+
+
+def test_source_filter_within_a_family():
+    pep = rubric.criteria_for("whole_document", "process_templates", sources=["pep1"])
+    assert pep and all(c["source_ref"] == "pep1" for c in pep)
+    prompt = rubric.render_judge("whole_document", brief="b", document_a="a", document_b="c",
+                                 rubric_id="process_templates", sources=["pep1"])
+    assert [r["criterion"] for r in _schema(prompt)["criteria"]] == [c["id"] for c in pep]
+    for bad in ([], ["no-such-ref"]):
+        with pytest.raises(ValueError):
+            rubric.criteria_for("whole_document", "process_templates", sources=bad)
+    with pytest.raises(ValueError):
+        rubric.criteria_for("whole_document", "aggregate", sources=["pep1"])
+    with pytest.raises(ValueError):
+        rubric.load_rubric_set("judge_reliability")
+
+
+def test_families_doc_is_current():
+    assert (EXP / "rubric" / "families.md").read_text() == rubric.families_markdown(), \
+        "run: python3 experiments/plan-writing/rubric.py --write-doc"
+
+
+@pytest.mark.parametrize("rid", RUBRIC_IDS)
+def test_fixtures_render_with_every_rubric(rid):
+    for fixture in FIXTURES:
+        for prompt in (rubric.render_fixture(fixture, rubric_id=rid), rubric.render_fixture_single(fixture, rubric_id=rid)):
+            criteria = prompt.split("\n## Criteria\n", 1)[1].split("\n## Scoring\n", 1)[0]
+            assert not rubric._overlaps(criteria, [fixture["strong"], fixture["weak"]])

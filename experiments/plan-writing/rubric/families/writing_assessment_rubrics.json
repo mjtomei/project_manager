@@ -1,0 +1,296 @@
+{
+  "id": "writing_assessment_rubrics",
+  "title": "Published scoring guides of NAEP (To Explain), GRE Analytical Writing, IELTS Writing Task 2 and ACT Writing",
+  "criteria": [
+    {
+      "id": "naep_development_of_ideas",
+      "name": "Development of Ideas",
+      "definition": {
+        "text": "Development of ideas is effective in relation to the writer’s purpose and audience. • The depth and complexity of ideas are effective in relation to the writer’s purpose and audience. • Approaches to thinking and writing (e.g., analyzing, synthesizing) are used effectively in relation to the writer’s purpose and audience. • The details and examples used to develop ideas are specific and effective in relation to the writer’s purpose and audience.",
+        "ref": "naep-writing-2011",
+        "locator": "NAEP 2011 Writing Framework (NAGB), Chapter 4, Exhibit 4.1 Criteria for Evaluating Responses"
+      },
+      "condition": "Although not all forms of writing require the same kind or extent of development (e.g., a detailed analysis of a problem versus a brief business letter or memorandum), effective writing is dependent on writers’ ability to anticipate the questions that might arise in the reader’s mind. Effective writers judiciously address those questions, with the depth and extent of the development of ideas determined by the difficulty of the material to be explained and by the purpose and audience for the writing.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "naep_organization_of_ideas",
+      "name": "Organization of Ideas",
+      "definition": {
+        "text": "Organization is logical in relation to the writer’s purpose and audience. • Text structure is logical and effective in relation to the writer’s purpose and to the approaches to thinking and writing that the writer has used. • Coherence is maintained within and between paragraphs. • Focus is maintained throughout the response.",
+        "ref": "naep-writing-2011",
+        "locator": "NAEP 2011 Writing Framework (NAGB), Chapter 4, Exhibit 4.1 Criteria for Evaluating Responses"
+      },
+      "condition": "Students may respond to the topic, purpose, and/or audience in any number of different ways to best accomplish the demands of the writing task, leading to many kinds of effective text structures.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "naep_language_facility_conventions",
+      "name": "Language Facility and Conventions",
+      "definition": {
+        "text": "Language facility and conventions support clarity of expression and the effectiveness of the writing in relation to the writer’s purpose and audience. • Sentence structure is well controlled and sentence variety is appropriate for the writer’s purpose and audience. • Precise and appropriate word choice supports clarity of expression and enhances the presentation of the writer’s ideas. • Voice and tone are effective in relation to the writer’s purpose and audience. • Grammar, usage, and mechanics (capitalization, punctuation, and spelling) support clarity of expression and enhance the presentation of the writer’s ideas.",
+        "ref": "naep-writing-2011",
+        "locator": "NAEP 2011 Writing Framework (NAGB), Chapter 4, Exhibit 4.1 Criteria for Evaluating Responses"
+      },
+      "condition": "Effective writing also involves adapting word choice, voice, and tone depending on the purpose, audience, and/or topic of a writing task.",
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "naep_holistic_to_explain",
+      "name": "Preliminary Holistic Scoring Guide for To Explain",
+      "definition": {
+        "text": "The holistic approach to scoring focuses on an evaluation of the whole response rather than on its individual parts (Myers, 1980). That is, a response will not be evaluated with a separate score for each writing feature, and an overall score will not be derived by adding together scores for each separate feature.",
+        "ref": "naep-writing-2011",
+        "locator": "NAEP 2011 Writing Framework, Appendix C2, printed pp. 68–71 (identical wording, modulo commas and \"e.g.\"→\"for example\", in the 2017 framework Appendix B2)"
+      },
+      "condition": "The effectiveness of these features will be evaluated in relation to the purpose and audience specified in the writing task.",
+      "scale": {
+        "min": 0,
+        "max": 6
+      },
+      "levels": {
+        "6": "Responses in this range demonstrate effective skill in responding to the writing task. All elements of the response are well controlled and effectively support the writer’s purpose, audience, and form.\n• The response provides a thoughtful and insightful explanation of the subject by fully examining the topic as a whole, by identifying and fully discussing significant parts of the subject, and/or by evaluating and fully discussing the importance of the parts.\n• The explanation maintains an effective balance between broad assertions and well chosen general and specific details and examples to fully support understanding. Approaches to the development of ideas (e.g., analyzing, evaluating, narrating, etc.) are used skillfully to support the clarity of the explanation.\n• Ideas are clearly focused on the topic throughout the response. Organization demonstrates a logical, well-executed progression of ideas that supports the clarity of the explanation and is relevant to the writer’s approaches to organization (e.g., summarizing, narrating, etc.). Transitions effectively convey relationships among ideas.\n• Sentence structure is well controlled and varied to communicate relationships among ideas. Word choice is specific, precise, and evaluative and supports the clarity of the explanation. Voice and tone are well controlled and effective for the writer’s purpose and audience.\n• Though there may be a few minor errors in grammar, usage, and mechanics, meaning is clear throughout the response.",
+        "5": "Responses in this range demonstrate competent skill in responding to the writing task. Elements are usually well controlled and clearly support the writer’s purpose, audience, and form.\n• The response provides a clear explanation of the subject by examining the topic as a whole, identifying and discussing various parts of the subject, and/or by evaluating and discussing the importance of those parts.\n• The explanation usually maintains an effective balance between broad assertions and general and specific details and examples to support the clarity of the explanation. Approaches to the development of ideas are usually used skillfully to support the clarity of the explanation.\n• Ideas are usually focused on the topic. Organization is clear and may demonstrate a logical progression of ideas that supports the clarity of the explanation and is relevant to the writer’s approaches to organization. Transitions clearly convey relationships among ideas.\n• Sentence structure is well controlled to communicate relationships among ideas and varied as appropriate for the writer’s purpose. Word choice is usually specific and precise, and it usually supports the clarity of the explanation. Voice and tone are usually controlled and effective for the writer’s purpose and audience.\n• Grammar, usage, and mechanics are usually correct with a few distracting errors, but meaning is clear.",
+        "4": "Responses in this range demonstrate adequate skill in responding to the writing task. Most elements are controlled and support the writer’s purpose, audience, and form.\n• The response provides an explanation by addressing most parts of the subject and may include an evaluation of the importance of some of these parts.\n• The explanation maintains an adequate balance between broad assertions and specific examples and details. While details and examples adequately support the clarity of the explanation, their development may be somewhat uneven. Approaches to the development of ideas are adequate, but their relevance to the explanation may not always be clear.\n• Ideas are usually focused on the topic and an organizational structure is evident. Ideas are logically grouped and adequately reflect the writer’s use of relevant approaches to organization. Relationships among ideas are mostly clear.\n• Sentence structure is adequately controlled and somewhat varied to communicate relationships among ideas. Word choice is sometimes specific and adequately supports the clarity of the explanation. Voice and tone are mostly controlled and usually effective for the writer’s purpose and audience.\n• Grammar, usage, and mechanics are mostly correct with some distracting errors, but meaning is clear.",
+        "3": "Responses in this range demonstrate developing skill in responding to the writing task. Some elements are controlled and provide some support for the writer’s purpose, audience, and form.\n• The response provides some explanation of the subject.\n• The explanation may provide both broad assertions and general and specific examples, but the balance may be uneven and only somewhat controlled. Some relevant details and examples are used, but they are not developed enough to support the explanation, or they may be unevenly developed. Approaches to the development of ideas are evident, but they may not be clearly relevant to the explanation.\n• Most ideas are focused on the topic. The response uses a simple organizational structure, and for the most part, ideas are logically grouped. There may be some evidence of approaches to organization, but they may not be clearly relevant, or they may be confusing. Relationships among ideas are sometimes unclear.\n• Sentence structure is usually correct and there may be a little sentence variety to communicate relationships among ideas. Word choice is usually clear and sometimes specific, but at times it may not be appropriate for the writer’s purpose. Voice and tone show some understanding of what is appropriate for the writer’s purpose and audience.\n• Grammar, usage, and mechanics are mostly correct but with some distracting errors that may occasionally impede understanding.",
+        "2": "Responses in this range demonstrate marginal skill in responding to the writing task. Elements are sometimes controlled but provide weak support for the writer’s purpose, audience, and form.\n• The response provides a little explanation of the subject.\n• A balance between broad assertions and general and specific examples may not be evident. If details and examples are present, they are brief, general, or inadequately developed, and they may not be clearly relevant to the explanation. There may be minimal evidence of relevant approaches to the development of ideas.\n• Some ideas may not be clearly focused on the topic. The response shows an attempt to organize thoughts by grouping ideas, and there may be minimal evidence of approaches to organization. However, relationships among ideas are often illogical or unclear.\n• Sentence structure is sometimes correct, but there is little, if any, sentence variety. Word choice is rarely specific and does little to support the clarity of the explanation. Voice and tone show little understanding of what is appropriate for the writer’s purpose and audience.\n• Grammar, usage, and mechanics are usually correct but with many distracting errors that impede understanding.",
+        "1": "Responses in this range demonstrate little or no skill in responding to the writing task. Elements are seldom controlled and provide almost no support for the writer’s purpose, audience, and form.\n• The response may provide little or no explanation of the subject.\n• If any details or examples are present, they are brief, general, undeveloped, or not relevant to the explanation.\n• The response shows an attempt to organize thoughts by grouping ideas, but groupings are illogical and there is little or no evidence of relevant approaches to organization. Relationships among ideas are mostly unclear.\n• Sentence structure is often incorrect; word choice is often unclear and inappropriate; and there is little or no control of appropriate voice and tone.\n• Grammar, usage, and mechanics are sometimes correct but with frequent distracting errors that often impede understanding.\n• The response may be too brief to support a sound judgment about the development of ideas, organization, or language facility and conventions.",
+        "0": "Unscorable: Response is too brief to score; not written in English; off topic; or illegible."
+      },
+      "examples": []
+    },
+    {
+      "id": "gre_issue_holistic",
+      "name": "“Analyze an Issue” task scoring guide",
+      "definition": {
+        "text": "In addressing the specific task directions, a 6 response presents a cogent, well-articulated analysis of the issue and conveys meaning skillfully.",
+        "ref": "gre-aw-scoring",
+        "locator": "ETS, GRE General Test Analytical Writing scoring page, \"Analyze an Issue\" task scoring guide"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 0,
+        "max": 6
+      },
+      "examples": []
+    },
+    {
+      "id": "gre_argument_holistic",
+      "name": "“Analyze an Argument” task scoring guide (for General Tests administered before September 22, 2023)",
+      "definition": {
+        "text": "In addressing the specific task directions, a 6 response presents a cogent, well-articulated examination of the argument and conveys meaning skillfully.",
+        "ref": "gre-aw-scoring",
+        "locator": "ETS, GRE General Test Analytical Writing scoring page, \"Analyze an Argument\" task scoring guide (retired task)"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 0,
+        "max": 6
+      },
+      "examples": []
+    },
+    {
+      "id": "gre_issue_respond_instructions",
+      "name": "Respond to the specific instructions on the issue",
+      "definition": {
+        "text": "In an actual test, trained GRE readers will read your response and evaluate its overall quality according to how well you do each of the following: ... Respond to the specific instructions on the issue",
+        "ref": "gre-practice-test-3",
+        "locator": "GRE Practice General Test #3, Analytical Writing Sample Essays and Commentaries (large print, 2023), p. 5 reader-evaluation list"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gre_issue_complexities",
+      "name": "Consider the complexities of the issue",
+      "definition": {
+        "text": "In an actual test, trained GRE readers will read your response and evaluate its overall quality according to how well you do each of the following: ... Consider the complexities of the issue",
+        "ref": "gre-practice-test-3",
+        "locator": "GRE Practice General Test #3, Analytical Writing Sample Essays and Commentaries (large print, 2023), p. 5 reader-evaluation list"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gre_issue_organize_develop_express",
+      "name": "Organize, develop, and express your ideas",
+      "definition": {
+        "text": "In an actual test, trained GRE readers will read your response and evaluate its overall quality according to how well you do each of the following: ... Organize, develop, and express your ideas",
+        "ref": "gre-practice-test-3",
+        "locator": "GRE Practice General Test #3, Analytical Writing Sample Essays and Commentaries (large print, 2023), p. 5 reader-evaluation list"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gre_issue_support",
+      "name": "Support your position with relevant reasons and/or examples",
+      "definition": {
+        "text": "In an actual test, trained GRE readers will read your response and evaluate its overall quality according to how well you do each of the following: ... Support your position with relevant reasons and/or examples",
+        "ref": "gre-practice-test-3",
+        "locator": "GRE Practice General Test #3, Analytical Writing Sample Essays and Commentaries (large print, 2023), p. 5 reader-evaluation list"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "gre_issue_control_conventions",
+      "name": "Control the elements of standard written English",
+      "definition": {
+        "text": "In an actual test, trained GRE readers will read your response and evaluate its overall quality according to how well you do each of the following: ... Control the elements of standard written English",
+        "ref": "gre-practice-test-3",
+        "locator": "GRE Practice General Test #3, Analytical Writing Sample Essays and Commentaries (large print, 2023), p. 5 reader-evaluation list"
+      },
+      "condition": null,
+      "levels": null,
+      "examples": []
+    },
+    {
+      "id": "ielts_t2_task_response",
+      "name": "Task Response",
+      "definition": {
+        "text": "The TR criterion assesses: how fully the candidate responds to the task. how adequately the main ideas are extended and supported. how relevant the candidate’s ideas are to the task. how clearly the candidate opens the discourse, establishes their position and formulates conclusions. how appropriate the format of the response is to the task.",
+        "ref": "ielts-writing-kac",
+        "locator": "IELTS Writing Key Assessment Criteria (ielts.org PDF), Task 2 / Task 1 and Task 2, TASK RESPONSE (TR); levels: IELTS Writing Task 2 Band Descriptors (updated May 2023)"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 0,
+        "max": 9
+      },
+      "examples": []
+    },
+    {
+      "id": "ielts_t2_coherence_cohesion",
+      "name": "Coherence and Cohesion",
+      "definition": {
+        "text": "This criterion is concerned with the overall organisation and logical development of the message: how the response organises and links information, ideas and language. Coherence refers to the linking of ideas through logical sequencing, while cohesion refers to the varied and appropriate use of cohesive devices (e.g. logical connectors, conjunctions and pronouns) to assist in making clear the relationships between and within sentences.",
+        "ref": "ielts-writing-kac",
+        "locator": "IELTS Writing Key Assessment Criteria (ielts.org PDF), Task 2 / Task 1 and Task 2, COHERENCE AND COHESION (CC); levels: Task 2 Band Descriptors"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 0,
+        "max": 9
+      },
+      "examples": []
+    },
+    {
+      "id": "ielts_t2_lexical_resource",
+      "name": "Lexical Resource",
+      "definition": {
+        "text": "This criterion refers to the range of vocabulary the candidate has used and the accuracy and appropriacy of that use in terms of the specific task.",
+        "ref": "ielts-writing-kac",
+        "locator": "IELTS Writing Key Assessment Criteria (ielts.org PDF), Task 2 / Task 1 and Task 2, LEXICAL RESOURCE (LR); levels: Task 2 Band Descriptors"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 0,
+        "max": 9
+      },
+      "examples": []
+    },
+    {
+      "id": "ielts_t2_grammatical_range_accuracy",
+      "name": "Grammatical Range and Accuracy",
+      "definition": {
+        "text": "This criterion refers to the range and accurate use of the candidate’s grammatical resource via the candidate’s writing at sentence level.",
+        "ref": "ielts-writing-kac",
+        "locator": "IELTS Writing Key Assessment Criteria (ielts.org PDF), Task 2 / Task 1 and Task 2, GRAMMATICAL RANGE AND ACCURACY (GRA); levels: Task 2 Band Descriptors"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 0,
+        "max": 9
+      },
+      "examples": []
+    },
+    {
+      "id": "act_ideas_analysis",
+      "name": "Ideas and Analysis",
+      "definition": {
+        "text": "Ideas and Analysis—Scores in this domain reflect the ability to generate productive ideas and engage critically with multiple perspectives on the given issue. Competent writers understand the issue they are invited to address, the purpose for writing, and the audience. They generate ideas that are relevant to the situation.",
+        "ref": "act-writing-scores",
+        "locator": "ACT, Writing scores page (domain definitions); levels: The ACT Writing Test Scoring Rubric (PDF, 2015), column \"Ideas and Analysis\""
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 6
+      },
+      "examples": []
+    },
+    {
+      "id": "act_development_support",
+      "name": "Development and Support",
+      "definition": {
+        "text": "Development and Support—Scores in this domain reflect the ability to discuss ideas, offer rationale, and bolster an argument. Competent writers explain and explore their ideas, discuss implications, and illustrate through examples. They help the reader understand their thinking about the issue.",
+        "ref": "act-writing-scores",
+        "locator": "ACT, Writing scores page (domain definitions); levels: The ACT Writing Test Scoring Rubric (PDF, 2015), column \"Development and Support\""
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 6
+      },
+      "examples": []
+    },
+    {
+      "id": "act_organization",
+      "name": "Organization",
+      "definition": {
+        "text": "Organization—Scores in this domain reflect the ability to organize ideas with clarity and purpose. Organizational choices are integral to effective writing. Competent writers arrange their essay in a way that clearly shows the relationship between ideas, and they guide the reader through their discussion.",
+        "ref": "act-writing-scores",
+        "locator": "ACT, Writing scores page (domain definitions); levels: The ACT Writing Test Scoring Rubric (PDF, 2015), column \"Organization\""
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 6
+      },
+      "examples": []
+    },
+    {
+      "id": "act_language_use_conventions",
+      "name": "Language Use and Conventions",
+      "definition": {
+        "text": "Language Use and Conventions—Scores in this domain reflect the ability to use written language to convey arguments with clarity. Competent writers make use of the conventions of grammar, syntax, word usage, and mechanics. They are also aware of their audience and adjust the style and tone of their writing to communicate effectively.",
+        "ref": "act-writing-scores",
+        "locator": "ACT, Writing scores page (domain definitions); levels: The ACT Writing Test Scoring Rubric (PDF, 2015), column \"Language Use\" (the PDF column header; the scores page names the domain \"Language Use and Conventions\")"
+      },
+      "condition": null,
+      "levels": null,
+      "levels_restricted": true,
+      "published_scale": {
+        "min": 1,
+        "max": 6
+      },
+      "examples": []
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "id": "generated_text_evaluation",
+  "title": "SummEval human-evaluation dimensions (coherence, consistency, fluency, relevance; 1–5)",
+  "framing": [
+    {
+      "source_ref": "summeval",
+      "quote": "Model outputs were evaluated along the following four dimensions, as in Kryściński et al. (2019):",
+      "locator": "Section 4.3",
+      "snapshot_file": "/tmp/claude-1000/-workspace/b71b5724-c9d8-4ec3-a66f-cccab8a3612b/scratchpad/ext/f2/summeval.txt"
+    }
+  ],
+  "criteria": [
+    {
+      "id": "summeval_coherence",
+      "name": "Coherence",
+      "definition": {
+        "text": "Coherence - the collective quality of all sentences. We align this dimension with the DUC quality question (Dang, 2005) of structure and coherence whereby \"the summary should be well-structured and well-organized. The summary should not just be a heap of related information, but should build from sentence to sentence to a coherent body of information about a topic.\"",
+        "ref": "summeval",
+        "locator": "Fabbri et al. 2021 (arXiv 2007.12626v5), Section 4.3 Human Annotations; annotator-facing definition from Appendix Figure 3 (data collection interface, image; transcribed by OCR and checked against the image)"
+      },
+      "source_scope": "In this task you will evaluate the quality of summaries written for a news article.",
+      "condition": null,
+      "annotator_definition": "Coherence: The rating measures the quality of all sentences collectively, to the fit together and sound naturally. Consider the quality of the summary as a whole.",
+      "scale": {
+        "min": 1,
+        "max": 5
+      },
+      "levels": {
+        "1": "worst",
+        "5": "best"
+      },
+      "examples": []
+    },
+    {
+      "id": "summeval_consistency",
+      "name": "Consistency",
+      "definition": {
+        "text": "Consistency - the factual alignment between the summary and the summarized source. A factually consistent summary contains only statements that are entailed by the source document. Annotators were also asked to penalize summaries that contained hallucinated facts.",
+        "ref": "summeval",
+        "locator": "Fabbri et al. 2021 (arXiv 2007.12626v5), Section 4.3 Human Annotations; annotator-facing definition from Appendix Figure 3 (data collection interface, image; transcribed by OCR and checked against the image)"
+      },
+      "source_scope": "In this task you will evaluate the quality of summaries written for a news article.",
+      "condition": null,
+      "annotator_definition": "Consistency: The rating measures whether the facts in the summary are consistent with the facts in the original article. Consider whether the summary does reproduce all facts accurately and does not make up untrue information.",
+      "scale": {
+        "min": 1,
+        "max": 5
+      },
+      "levels": {
+        "1": "worst",
+        "5": "best"
+      },
+      "examples": []
+    },
+    {
+      "id": "summeval_fluency",
+      "name": "Fluency",
+      "definition": {
+        "text": "Fluency - the quality of individual sentences. Drawing again from the DUC quality guidelines, sentences in the summary \"should have no formatting problems, capitalization errors or obviously ungrammatical sentences (e.g., fragments, missing components) that make the text difficult to read.\"",
+        "ref": "summeval",
+        "locator": "Fabbri et al. 2021 (arXiv 2007.12626v5), Section 4.3 Human Annotations; annotator-facing definition from Appendix Figure 3 (data collection interface, image; transcribed by OCR and checked against the image)"
+      },
+      "source_scope": "In this task you will evaluate the quality of summaries written for a news article.",
+      "condition": null,
+      "annotator_definition": "Fluency This rating measures the quality of individual sentences, are they well-written and grammatically correct. Consider the quality of individual sentences.",
+      "scale": {
+        "min": 1,
+        "max": 5
+      },
+      "levels": {
+        "1": "worst",
+        "5": "best"
+      },
+      "examples": []
+    },
+    {
+      "id": "summeval_relevance",
+      "name": "Relevance",
+      "definition": {
+        "text": "Relevance - selection of important content from the source. The summary should include only important information from the source document. Annotators were instructed to penalize summaries which contained redundancies and excess information.",
+        "ref": "summeval",
+        "locator": "Fabbri et al. 2021 (arXiv 2007.12626v5), Section 4.3 Human Annotations; annotator-facing definition from Appendix Figure 3 (data collection interface, image; transcribed by OCR and checked against the image)"
+      },
+      "source_scope": "In this task you will evaluate the quality of summaries written for a news article.",
+      "condition": null,
+      "annotator_definition": "Relevance: The rating measures how well the summary captures the key points of the article. Consider whether all and only the important aspects are contained in the summary.",
+      "scale": {
+        "min": 1,
+        "max": 5
+      },
+      "levels": {
+        "1": "worst",
+        "5": "best"
+      },
+      "examples": []
+    }
+  ]
+}

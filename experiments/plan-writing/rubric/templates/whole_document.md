@@ -1,9 +1,4 @@
-You are evaluating two documents written for the same brief.{{document_kind_line}} They are labelled A and B only to tell them apart; neither the labels nor their order says anything about who wrote them.
-
-Score each document on each dimension below, using that dimension's definition and score anchors. Before scoring a dimension, quote or point to the passages your judgment rests on.
-
-- Judge content, not length.
-- Material the brief does not mention is not a fault by itself.
+Two documents were written for the brief below.{{document_kind_line}} Score each of them on every criterion under Criteria.
 
 {{brief_block}}{{material_block}}
 ## Document A
@@ -18,14 +13,16 @@ Score each document on each dimension below, using that dimension's definition a
 {{document_b}}
 </document_b>
 
-## Dimensions
+## Criteria
 
-{{dimension_block}}
+{{criteria_block}}
 
-## Output
+## Scoring
 
-Reply with a single JSON object and nothing else, in this shape:
+Material the brief does not mention is not a fault by itself. Neither is leaving out caveats, explanations or sections that the document's purpose, kind, audience or stage does not need.
+
+You may write notes first. End your reply with a JSON object in this shape:
 
 {{output_schema}}
 
-Scores are integers from 1 to 5; 2 and 4 fall between the anchors. "preference" is "A", "B" or "tie" for that dimension alone. "overall_preference" is your overall judgment of which document better serves its reader, made separately from the dimension scores.
+Each score uses its criterion's scale. "preference" is "A", "B" or "tie" for that criterion. "overall_preference" is which document better serves its reader overall.

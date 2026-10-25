@@ -2,3 +2,6 @@ data/
 __pycache__/
 # write_doc() temp file; only a killed --write-doc can leave one behind
 rubric/.rubric.md.*
+rubric/.families.md.*
+# published levels whose licences forbid republishing; kept local (see rubric/families.md)
+rubric/restricted/
