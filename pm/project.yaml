@@ -34330,7 +34330,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T02:16:05.181654+00:00'
-  updated_at: '2026-10-25T16:14:28.448397+00:00'
+  updated_at: '2026-10-25T18:38:43.745997+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34362,3 +34362,35 @@ prs:
       yaml/after-wfix.yaml).'
     created_at: '2026-10-25T16:14:28Z'
     last_edited: '2026-10-25T16:14:28Z'
+  - id: note-5dd49f3
+    text: 'QA S57 (pr-592e4bd, 2026-10-25) same class for sign-off: `pm pr signoff
+      <S>` where S has session_models signoff: provider:claude-missing (unconfigured)
+      exits 1 with the one-line provider Error, but S had already moved qa -> sign_off
+      and got a cloned workdir (and Integration ran); the TUI `i` on S then failed
+      the same way, S stays sign_off. Evidence /pm-captures/scenarios/57/story4 (events.log,
+      signoff-S.stderr).'
+    created_at: '2026-10-25T18:38:43Z'
+    last_edited: '2026-10-25T18:38:43Z'
+- id: pr-6dcca52
+  plan: bugs
+  title: 'Bug: TUI s/d/i command failures show a doubled "Error: Error:" prefix'
+  branch: pm/pr-6dcca52-bug-tui-s-d-i-command-failures-show-a-doubled-erro
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/pr_view.py run_command (sync ~line 850 and async ~line
+    902; same on origin/master lines 843/894) logs f"Error: {last stderr line}", but
+    pm main() already prints its CLI errors as "Error: ...", so the TUI log reads
+    "Error: Error: provider ..." . Repro (QA S57 story 4, pr-592e4bd): a PR in qa
+    whose session_models signoff is provider:<unconfigured>; highlight it and press
+    i; TUI log: "Error: Error: provider ''claude-missing'' is not configured in ~/.pm/providers.yaml
+    ...". Fix: do not add the prefix when the line already starts with "Error:". Evidence
+    /pm-captures/scenarios/57/story4/tui-log-lines-iS.txt.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-25T18:38:33.741952+00:00'
+  updated_at: '2026-10-25T18:38:33.741952+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
