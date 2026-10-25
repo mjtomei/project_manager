@@ -11918,6 +11918,22 @@ prs:
       like the other cleanup helpers.'
     created_at: '2026-10-22T17:23:20Z'
     last_edited: '2026-10-22T17:23:20Z'
+  - id: note-35c035a
+    text: 'QA scenario 2 (2026-10-25, chatgpt/gpt-6.1-sol-high) blocked before workers:
+      isolated root /scratch/qa-s2-20261025T160208Z-1277, A=pr-c74cef2 B=pr-9bfa451;
+      editable venv pm which=/workspace/pm_core, fixture committed/pushed, actual
+      isolated TUI running. Verified rootless podman info graphRoot/runRoot under
+      that root (XDG rootless paths, not controller storage). pm container build-base
+      failed STEP17 Chromium smoke: inotify_init() failed: Too many open files (24);
+      repeated GPU process launch error_code=1002; GPU process is not usable; build
+      exit1, no pm-dev image. Did not bypass smoke or change host limits; no QA lifecycle
+      stories executed. Evidence /pm-captures/scenarios/2/prerequisites (cast/mp4,
+      complete transcript, manifest) and inventories/provisioning-failure. Also pm
+      pr show is not a supported command on tested HEAD38ec06b7; use supported PR/TUI
+      result surfaces or clarify that prerequisite next run. Preserve prior note-bb79557.
+      No implementation fix claimed.'
+    created_at: '2026-10-25T16:06:59Z'
+    last_edited: '2026-10-25T16:06:59Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
