@@ -1876,13 +1876,47 @@ class TestPlanPromptBounding:
     """The plan builders print their prompt when claude is unavailable, so
     the printed output is the assembled prompt (plus a short banner)."""
 
-    def test_plan_review_many_prs_bounded(self, tmp_path):
-        root = _make_plan_state(tmp_path, plan_prs=300, other_prs=300)
+    def test_plan_review_inlines_every_pr_description_whole(self, tmp_path):
+        """A plan review's per-PR descriptions, tests and files are the
+        material the review works from, so they are inlined whole (§31 — only
+        PR notes and pure enumerations are bounded).
+
+        This used to fall back to a one-line listing above
+        ``PROMPT_ARG_LIMIT``.  That fallback predates the launcher's
+        file-backed delivery and is now an unnecessary truncation: the
+        complete prompt is written to a file and passed as a short bootstrap.
+        """
+        root = _make_plan_state(tmp_path, plan_prs=300, other_prs=0)
         with patch("pm_core.cli.plan.find_claude", return_value=None):
             result = CliRunner().invoke(
                 cli, ["-C", str(root), "plan", "review", "pl-001"])
         assert result.exit_code == 0, result.output
-        assert prompt_bytes(result.output) <= PROMPT_ARG_LIMIT + 300
+        # Every PR's description is inlined; nothing was replaced by the
+        # brief listing and its "fetch it yourself" note.
+        assert result.output.count("description: " + "d" * 500) == 300
+        assert "too many PRs" not in result.output
+        assert "The list above is abbreviated" not in result.output
+        # The full prompt is over one argv entry, and the launcher carries it
+        # intact by file (the plan review runs with no cwd).
+        _assert_preserved_over_limit(result.output, tmp_path)
+
+    def test_plan_review_never_truncates_pr_detail_to_fit(self, tmp_path):
+        """The defect this pins: the brief fallback fired whenever the full
+        prompt crossed ``PROMPT_ARG_LIMIT``, dropping every description even
+        though file-backed delivery was available.  A large-description plan
+        must keep all of them."""
+        root = _make_plan_state(tmp_path, plan_prs=40, other_prs=0)
+        data = store.load(root)
+        for pr in data["prs"]:
+            pr["description"] = "E" * 5_000
+        store.save(data, root)
+        with patch("pm_core.cli.plan.find_claude", return_value=None):
+            result = CliRunner().invoke(
+                cli, ["-C", str(root), "plan", "review", "pl-001"])
+        assert result.exit_code == 0, result.output
+        assert result.output.count("description: " + "E" * 5_000) == 40
+        assert "too many PRs" not in result.output
+        _assert_preserved_over_limit(result.output, tmp_path)
 
     def test_plan_deps_many_prs_bounded(self, tmp_path):
         root = _make_plan_state(tmp_path, plan_prs=200, other_prs=0)
@@ -1900,16 +1934,28 @@ class TestPlanPromptBounding:
         assert prompt_bytes(result.output) <= PROMPT_ARG_LIMIT + 300
 
     def test_plan_lists_bound_long_titles_too(self, tmp_path):
-        """The plan listings are count-capped, but their lines carry
-        user-authored titles — a byte budget has to bound the product."""
+        """The plan *listings* are count-capped, but their lines carry
+        user-authored titles — a byte budget has to bound the product.
+
+        ``plan review`` is the exception: its own PRs' descriptions are the
+        material under review and are inlined whole (§31), so only the
+        cross-plan listing beside them is bounded.
+        """
         root = _make_plan_state(tmp_path, plan_prs=40, other_prs=300,
                                 title_size=4_000)
-        for argv in (["plan", "review", "pl-001"], ["plan", "breakdown", "pl-001"],
-                     ["plan", "deps"]):
+        for argv in (["plan", "breakdown", "pl-001"], ["plan", "deps"]):
             with patch("pm_core.cli.plan.find_claude", return_value=None):
                 result = CliRunner().invoke(cli, ["-C", str(root)] + argv)
             assert result.exit_code == 0, (argv, result.output)
             assert prompt_bytes(result.output) <= PROMPT_ARG_LIMIT + 300, argv
+        with patch("pm_core.cli.plan.find_claude", return_value=None):
+            result = CliRunner().invoke(
+                cli, ["-C", str(root), "plan", "review", "pl-001"])
+        assert result.exit_code == 0, result.output
+        # The cross-plan listing is still bounded and names its reader.
+        assert "more; run `pm pr list` to see all PRs)" in result.output
+        # The plan's own PRs are inlined whole even though that overflows.
+        _assert_preserved_over_limit(result.output, tmp_path)
 
 
 class TestGuidePromptBounding:

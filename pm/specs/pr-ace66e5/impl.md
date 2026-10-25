@@ -2079,3 +2079,81 @@ this sandbox (42 failed / 17 errors / 3448 passed vs 42 / 17 / 3309; all
 environmental). The dirty-tree run adds only the documented
 `test_git_ops::TestPullRebase::test_keeps_unpushed_merge` proxy flake, which
 passes with the tree clean. Evidence: `/pm-captures/review-4029-i1/`.
+
+## 33. Review-loop follow-ups (review loop 4029, iteration 2)
+
+Iteration 2 ran natively in the review container (the controller's
+`pr-592e4bd` runtime still passes this review prompt as one argv entry, so the
+first launch failed with E2BIG; the recovery read the complete native prompt
+from a file). It re-ran the §19-§32 method — sweep every reachable builder,
+then check every omission marker in the environment the session reads it in —
+plus the delivery paths end to end, and found one policy violation: the last
+builder still truncating instruction text under the pre-§31 "bound the
+builder" policy.
+
+- **`pm plan review` still truncated every PR's description, tests and files.**
+  When the full prompt crossed `_PROMPT_ARG_LIMIT`, `plan_review` replaced the
+  plan's per-PR detail with a one-line listing (id/title/status) plus a note
+  telling the session to run `pm pr show <id>` for each description before
+  reviewing it. That fallback is the original fix from this PR's prehistory —
+  it predates the launcher guard — and §31 supersedes it: a PR description is
+  instruction-shaped (the material the plan review works from), so it is
+  inlined whole, and an over-limit prompt is delivered by the launcher's
+  file-backed bootstrap instead. `launch_claude` (the plan builders' launch
+  path, no `cwd`) gained a temp-file fallback in this PR, so the complete
+  prompt is deliverable even without a workdir.
+
+  Reachable on this repo's real data, not just a fixture: `pm plan review bugs`
+  fired the fallback and built a 24,866-byte brief prompt with **no PR
+  descriptions**, while the full prompt (146 descriptions) is 270,833 bytes;
+  `improvements` 199,085 B (54 descriptions) and `plan-regression` 131,396 B
+  (45) had the same degradation. The session could only recover them by
+  running `pm pr show` once per PR — exactly the "unnecessary truncation" §31
+  rejects.
+
+  Fixed by deleting the fallback (`_format_pr_brief`, `_brief_list`,
+  `_PLAN_BRIEF_BUDGET`): the plan's own PRs are always inlined whole. The
+  cross-plan `other_prs_context` listing remains a bounded enumeration
+  (`pm pr list` marker), and `pm plan deps`' one-line description excerpt
+  (300 chars, `pm pr show <id>` reader) remains as recorded in §31 — both are
+  accumulated listings, not the document set under review. `_PROMPT_ARG_LIMIT`
+  stays defined (R1 keeps it importable); it is no longer read inside
+  `plan.py`.
+
+- **Tests.** `test_plan_review_many_prs_bounded` (which pinned the old
+  fallback) is replaced by two tests: 300 plan PRs and 40 x 5 KB descriptions
+  assert every `description:` line is inlined, no "too many PRs"/"list above is
+  abbreviated" note appears, and `_assert_preserved_over_limit` carries the
+  over-limit prompt to claude by file. `test_plan_lists_bound_long_titles_too`
+  now asserts the cross-plan listing stays bounded while the plan's own PRs
+  are whole. All three fail on the pre-fix source (the brief prompt measured
+  56,615 B with no descriptions; verified by stashing `pm_core/cli/plan.py`).
+
+Verification: `tests/test_prompt_bounds.py` 138 (was 137) and
+`test_claude_launcher` 37; related suites (prompt_bounds, claude_launcher,
+plan_review, plan_parser, bug_fix_flow_prompts, regression_prompts, spec_gen,
+qa_instructions, signoff, notes, pr_notes) 525 passed. Real-data sweep over all
+491 PRs x 4 builders is unchanged (impl 172,964 / review 175,397 / sign-off
+189,949 / planner 113,196 B — measured with this section inlined; the
+self-reference §31 notes shifts them by this paragraph's bytes; only
+pr-ace66e5 is over the limit and goes out by file). Real plan builders:
+`plan review bugs` 270,833 B (was the 24,866 B
+brief fallback), `improvements` 199,085, `plan-regression` 131,396, `watchers`
+39,382, `tui-ux` 45,659, `plan breakdown bugs` 5,693, `plan deps` 521,551
+(every plan file inlined whole per §31, delivered by file). The pathological
+fixture (every collection and instruction maxed) keeps every instruction block
+whole in every reachable builder; `plan review` 198,214 B with all 300
+descriptions, `plan deps` 188,854 B, `plan breakdown` 89,301 B. The launcher
+was exercised end to end with a stub `claude`: `launch_claude` with no `cwd`
+and a 270,011-byte prompt passes a 199-byte argv, the named temp file is
+byte-identical to the prompt and is removed after the run; an over-limit
+`build_claude_shell_cmd` produces a 277-byte command whose named file is
+delivered and removed; under-limit prompts still use `$(cat ...)`; no writable
+location raises `PromptTooLargeError`; `launch_claude_print` delivers its
+over-limit prompt by file too. Full suite on the dirty tree 43 failed / 17
+errors / 3448 passed; the failure set is byte-identical to an `origin/master`
+worktree baseline in the same sandbox (43 / 17 / 3308: 36 `test_merge_publish`,
+22 `test_signoff_integration`, 1 `test_hook_events` — which passes with
+`PM_HOST_HOME` unset — and the dirty-tree `test_git_ops` proxy flake, which
+passes with the tree clean). Evidence: `/pm-captures/review-4029-i2/`.
+

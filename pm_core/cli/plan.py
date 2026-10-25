@@ -14,7 +14,6 @@ from pm_core.plans import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
 from pm_core.prompt_bounds import (
     PLAN_LIST_BUDGET, PLAN_LIST_MAX, PROMPT_ARG_LIMIT, bounded_join,
-    prompt_bytes,
 )
 from pm_core.prompt_gen import tui_section
 
@@ -30,10 +29,6 @@ _PLAN_LIST_MAX = PLAN_LIST_MAX
 # A count cap alone does not bound a listing whose lines carry user-authored
 # titles; this bounds the product.  Real listings here run 0.4-14.5 KB.
 _PLAN_LIST_BUDGET = PLAN_LIST_BUDGET
-# The plan-review fallback lists every PR one line each (no count cap, as
-# before the audit); this byte budget only trims it when titles make the lines
-# huge.  Sized above the largest real listing so the fallback is unchanged.
-_PLAN_BRIEF_BUDGET = 40_000
 # One-line PR summaries inline the description; truncate it so 40 large
 # descriptions (11 KB each in this project) cannot blow the prompt budget.
 _PLAN_DESC_CHARS = 300
@@ -321,19 +316,6 @@ def plan_review(plan_id: str | None, fresh: bool):
         workdir_str = f"\n    workdir: {workdir}" if workdir else ""
         return f"  {pr['id']}: {pr.get('title', '???')} [{status}]{dep_str}{gh_str}{branch_str}{workdir_str}{desc_str}{tests_str}{files_str}"
 
-    def _format_pr_brief(pr):
-        """One-line PR summary — no description/tests/files inlined.
-
-        Used as a fallback when inlining full detail for every PR would push
-        the prompt past the argv size limit.
-        """
-        deps = pr.get("depends_on") or []
-        dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-        status = pr.get("status", "pending")
-        gh_num = pr.get("gh_pr_number")
-        gh_str = f" PR #{gh_num}" if gh_num else ""
-        return f"  {pr['id']}: {pr.get('title', '???')} [{status}]{gh_str}{dep_str}"
-
     pr_list = "\n".join(_format_pr(pr) for pr in plan_prs) if plan_prs else "(no PRs linked to this plan)"
 
     other_prs_context = ""
@@ -415,35 +397,14 @@ sessions reading either side find the connection.
 After fixing, summarize what was changed.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
-        # Inline full per-PR detail by default, but if doing so pushes the
-        # prompt past the argv size limit (large plans), fall back to a brief
-        # one-line listing and let the session pull detail with `pm pr show`.
-        # The brief form keeps listing every PR (it is already one line each);
-        # the byte budget only trims it when titles make the lines huge, which
-        # is why it is far more generous than _PLAN_LIST_BUDGET.
-        def _brief_list(prs: list[dict], budget: int = _PLAN_BRIEF_BUDGET) -> str:
-            return bounded_join(
-                prs, _format_pr_brief, max_bytes=budget,
-                omitted_note=lambda n: (
-                    f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
-            )
-
+        # Every PR's description, tests and files are inlined whole: they are
+        # the material this review works from, so they are never truncated
+        # (spec §31 — only PR notes and pure enumerations are bounded).  A
+        # plan large enough to push the prompt over one argv entry is delivered
+        # by the launcher's file-backed bootstrap, which carries the complete
+        # prompt; the session then reviews the real descriptions rather than
+        # fetching each one with `pm pr show`.
         prompt = _post_load_prompt(pr_list, "")
-        if prompt_bytes(prompt) > _PROMPT_ARG_LIMIT:
-            note = (
-                "\n(This plan has too many PRs to inline each description here. "
-                "The list above is abbreviated — run `pm pr show <id>` to read "
-                "the full description, tests, and files of any PR before "
-                "reviewing it.)\n"
-            )
-            prompt = _post_load_prompt(_brief_list(plan_prs), note)
-            # Second safety net: even the brief form can exceed the limit when
-            # the static prompt text plus the bounded other-PR context is
-            # large.  Shrink the listing further and defer everything to the
-            # on-demand commands.
-            if prompt_bytes(prompt) > _PROMPT_ARG_LIMIT:
-                prompt = _post_load_prompt(
-                    _brief_list(plan_prs, _PLAN_BRIEF_BUDGET // 4), note)
     else:
         # Pre-load: no PRs in project.yaml yet — review the plan file's PR section
         prompt = f"""\

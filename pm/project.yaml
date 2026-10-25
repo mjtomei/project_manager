@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T22:14:10.631713+00:00'
+  updated_at: '2026-10-25T22:50:54.118831+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -23345,6 +23345,57 @@ prs:
       183,233 / planner 113,196 B; pr-ace66e5 delivered by file). Evidence /pm-captures/review-4029-i1/.'
     created_at: '2026-10-25T22:14:10Z'
     last_edited: '2026-10-25T22:14:10Z'
+  - id: note-4530dee
+    text: 'Review-loop 4029 i2 (native recovery; the controller pr-592e4bd runtime
+      still passes this review prompt as one argv entry, so the first launch hit E2BIG
+      — not evidence this branch is broken). Re-ran the §19-§32 method (sweep every
+      reachable builder, check every omission marker in the environment the session
+      reads it in, exercise the delivery paths) and found one policy violation, the
+      last builder still truncating instruction text under the pre-§31 bound-the-builder
+      policy.
+
+
+      FIXED — pm plan review truncated every PR description, tests and files. Above
+      _PROMPT_ARG_LIMIT it replaced the plan own per-PR detail with a one-line id/title/status
+      listing plus a note telling the session to run pm pr show <id> for each description
+      before reviewing it. That fallback predates the launcher guard; §31 makes a
+      PR description instruction-shaped (the material the plan review works from)
+      and requires file-backed delivery instead. Reachable on real data: pm plan review
+      bugs fired the fallback and built a 24,866-byte brief prompt with NO descriptions,
+      while the full prompt (146 descriptions) is 270,833 bytes; improvements 199,085
+      B (54 descriptions) and plan-regression 131,396 B (45) were degraded the same
+      way. Removed _format_pr_brief, _brief_list and _PLAN_BRIEF_BUDGET so the plan
+      own PRs are always inlined whole; launch_claude (the plan builders launch path,
+      no cwd) delivers the complete prompt through its temp-file bootstrap. The cross-plan
+      other_prs_context listing stays a bounded enumeration (pm pr list), and plan
+      deps one-line description excerpt (300 chars, pm pr show <id>) stays as recorded
+      in §31 — both accumulated listings, not the document set under review. _PROMPT_ARG_LIMIT
+      stays defined (R1 keeps it importable); it is no longer read inside plan.py.
+
+
+      Tests: test_prompt_bounds 138 (was 137) and test_claude_launcher 37; the replaced/updated
+      plan tests (300 PRs, 40 x 5 KB descriptions) fail on the pre-fix source (brief
+      prompt 56,615 B, descriptions absent; verified by stashing plan.py). Related
+      suites (prompt_bounds, claude_launcher, plan_review, plan_parser, bug_fix_flow_prompts,
+      regression_prompts, spec_gen, qa_instructions, signoff, notes, pr_notes) 525
+      passed. Real-data sweep over all 491 PRs x 4 builders: no builder raises, deterministic,
+      max impl 172,964 / review 175,397 / sign-off 189,949 / planner 113,196 B (pr-ace66e5
+      by file). Real plan builders: review bugs 270,833, improvements 199,085, plan-regression
+      131,396, watchers 39,382, tui-ux 45,659, breakdown bugs 5,693, deps 521,551
+      (every plan file whole per §31, delivered by file). Pathological fixture: every
+      instruction block whole in every reachable builder (plan review 198,214 B with
+      all 300 descriptions; deps 188,854; breakdown 89,301). Launcher e2e with a stub
+      claude: launch_claude with no cwd and a 270,011-byte prompt passes a 199-byte
+      argv, the named temp file is byte-identical and removed; over-limit build_claude_shell_cmd
+      is a 277-byte command whose file is delivered and removed; under-limit still
+      $(cat); no writable location raises PromptTooLargeError; launch_claude_print
+      delivers by file. Full suite 43 failed / 17 errors / 3448 passed, failure set
+      byte-identical to an origin/master worktree baseline in this sandbox (43 / 17
+      / 3308: 36 test_merge_publish, 22 test_signoff_integration, 1 test_hook_events
+      — passes with PM_HOST_HOME unset — and the dirty-tree test_git_ops proxy flake,
+      passes clean). Evidence /pm-captures/review-4029-i2/.'
+    created_at: '2026-10-25T22:50:54Z'
+    last_edited: '2026-10-25T22:50:54Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
