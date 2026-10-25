@@ -1024,6 +1024,30 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     observations: pr-7cf1fe4, pr-748e708 (an impl container and QA
     containers in separate pm processes share one push proxy key),
     pr-1139060. Same scratch-only limits as the fourteenth pass.
+    Done: S53 (NEEDS_WORK, fixes 66404830) and S54 (PASS) ran live
+    (REPORT.md in `/pm-captures/scenarios/53`, `54`). S52 never ran:
+    in run a871abafdd8bbc20 its worker window died within seconds of
+    every launch (10 relaunches, INPUT_REQUIRED by infrastructure; only
+    the refiner output and `/pm-captures/scenarios/52/{scenario.json,
+    prompt.md,verdict.md}` exist). Keep that directory as the record of
+    the failed attempt. S53/S54 do not cover S52's Thens.
+  - Twenty-second pass (S55+, native run a31ac0ae57566deb):
+    - S55 carries S52 forward unchanged in intent (RQ39 three-PR
+      concurrent lifecycle, bridge kill, review/sign-off relaunch,
+      unmounted impl container refusal and replacement). It is adapted to
+      the current head and writes to `/pm-captures/scenarios/55`. Harness:
+      `/pm-captures/scenarios/53/scripts` (the S52 network pattern
+      already applied: router stub on 127.0.0.1, main stub on 10.0.2.100,
+      `cidr=10.1.2.0/24`). Build the base image without the Chromium
+      smoke step if `pm container build-base` fails there (S53 setup).
+      Since 66404830/14d72926, `pm model show` Routes has one line per PR
+      override ("<pr> (all types) route=…", "<pr> (signoff) route=…").
+    - S56 is the delta for review loop 0f64 i1–i6 (14d72926, ac202207,
+      1dc3e618, 6bd59adf, 690a9fe1, 3a0c32e6), none run live: PR Routes
+      only for the types an override decides, never the watcher; a
+      non-string or empty PR `model`; PR Routes deferring to `PM_MODEL`;
+      the TUI command bar and review-loop ERROR text keeping brackets.
+      Host mode, S54 harness (`/pm-captures/scenarios/54/scripts`).
 
 ## 3. Edge cases
 
