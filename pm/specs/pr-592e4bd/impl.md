@@ -203,7 +203,17 @@ account.
   `CLAUDE_CODE_AUTO_MODE_MODEL=<route prefix>/claude-sonnet-5`
   (`providers.route_classifier_model`: Claude's own default, through the
   route; nothing for an unprefixed route model, whose default already goes
-  to the same backend; an `alias_models` entry wins). A main-account
+  to the same backend; an `alias_models` entry wins). Only a route that
+  serves Claude models (the name after the prefix is `claude-…`) gets
+  the pin (review loop c189 i2): the host router's `deepseek/`, `z-ai/`
+  and `chatgpt/` prefixes (the DeepSeek, GLM and Astra trial routes) are
+  other vendors' namespaces with no `claude-sonnet-5`
+  (`/pm-captures/review-c189-i2/router-v1-models.txt`), so f0031965's
+  `<prefix>/claude-sonnet-5` named a model no backend serves. Those
+  sessions keep the classifier Claude picks, as before this PR. A router
+  session with no pin also drops an inherited value, so `pm` run inside a
+  work-routed session does not put another route's classifier on the
+  work account. A main-account
   (`claude`-type) session removes an inherited value (`env -u`; dropped
   from the `claude -p` run env), so its classifier keeps Claude's default
   on that account. `local`/`openai` providers are the user's own endpoints

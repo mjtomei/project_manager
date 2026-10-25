@@ -294,12 +294,40 @@ class TestClassifierRoute:
                                "CLAUDE_CODE_AUTO_MODE_MODEL": "work/other"})
         assert p.env_vars()["CLAUDE_CODE_AUTO_MODE_MODEL"] == "work/other"
 
-    def test_unprefixed_route_model_leaves_the_classifier_default(self):
-        # The router sends an unprefixed model, and so Claude's default
-        # classifier, to the same backend.
+    # Route models the host router lists (GET /v1/models, review c189 i2:
+    # /pm-captures/review-c189-i2/router-v1-models.txt).  It lists no
+    # claude-sonnet-5 under the deepseek/, z-ai/ or chatgpt/ prefixes, which
+    # the DeepSeek, GLM and Astra trial routes use.
+    UNPINNED = ["claude-opus-5-5",  # unprefixed: the router's default backend
+                "deepseek/deepseek-v4.1-flash-1017", "z-ai/glm-5.3-flash",
+                "chatgpt/gpt-6-astra-high"]
+
+    @pytest.mark.parametrize("model", UNPINNED)
+    def test_route_without_claude_models_leaves_the_classifier_to_claude(
+            self, model):
         p = ProviderConfig(name=ROUTE, type="router", api_base="http://x:1",
-                           model="claude-opus-5-5")
+                           model=model)
         assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in p.env_vars()
+        assert "CLAUDE_CODE_AUTO_MODE_MODEL" in p.unset_env_vars()
+
+    @pytest.mark.parametrize("model", UNPINNED)
+    def test_unpinned_route_drops_another_routes_inherited_value(
+            self, pm_home_dir, monkeypatch, model):
+        # pm run inside a work-routed session exports work/claude-sonnet-5;
+        # it must not put this route's classifier on the work account.
+        monkeypatch.setenv("CLAUDE_CODE_AUTO_MODE_MODEL", self.CLASSIFIER)
+        _write_providers(pm_home_dir, model=model)
+        cmd = self._build(provider=ROUTE)
+        assert "CLAUDE_CODE_AUTO_MODE_MODEL=" not in cmd
+        assert self._shell_env(cmd) == "unset"
+        from pm_core.claude_launcher import _resolve_provider
+        _, _, run_env = _resolve_provider(provider=ROUTE)
+        assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in run_env
+
+    def test_pinned_route_does_not_also_unset_it(self):
+        p = ProviderConfig(name=ROUTE, type="router", api_base="http://x:1",
+                           model=MODEL)
+        assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in p.unset_env_vars()
 
     @pytest.mark.parametrize("model", [None, "claude-opus-5-5"])
     def test_main_account_session_drops_an_inherited_value(
@@ -337,6 +365,10 @@ class TestClassifierRoute:
         _write_providers(pm_home_dir)
         lines = _router_detail_lines(get_provider(ROUTE, strict=True))
         assert f"auto-mode classifier: {self.CLASSIFIER}" in lines
+        _write_providers(pm_home_dir, model="deepseek/deepseek-v4.1-flash-1017")
+        lines = _router_detail_lines(get_provider(ROUTE, strict=True))
+        assert any(line.startswith("auto-mode classifier: not pinned")
+                   for line in lines)
 
 
 class TestSubagentPin:
@@ -505,6 +537,9 @@ class TestSubagentPin:
         monkeypatch.delenv("PM_PROVIDER", raising=False)
         monkeypatch.delenv("CLAUDE_CODE_SUBAGENT_MODEL", raising=False)
         monkeypatch.delenv("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", raising=False)
+        # A routed caller's classifier pin, which main sessions also drop
+        # (TestClassifierRoute); set when the suite runs in a routed session.
+        monkeypatch.delenv("CLAUDE_CODE_AUTO_MODE_MODEL", raising=False)
         # Nothing to drop: the process environment is used as is.
         assert _resolve_provider()[2] is None
         monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", f"{MODEL}[1m]")

@@ -778,7 +778,11 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
   route prefix requests `<prefix>/claude-sonnet-5` (its launch env carries
   `CLAUDE_CODE_AUTO_MODE_MODEL=work/claude-sonnet-5`, or the provider's
   `alias_models` value), which the work account answers; no classifier
-  request names an unprefixed model. A main-account (plain or no-model)
+  request names an unprefixed model. A router whose model is not a
+  Claude model (`deepseek/…`, `z-ai/…`, `chatgpt/…`; review loop c189 i2)
+  gets no classifier pin and drops an inherited one: its launch env has
+  no `CLAUDE_CODE_AUTO_MODE_MODEL`, and no classifier request names
+  `<prefix>/claude-sonnet-5`. A main-account (plain or no-model)
   session sets no classifier model and drops an inherited one (`env -u`),
   so it classifies on Claude's default on the main account, also when pm
   runs inside a routed session. `pm provider list` shows the route's

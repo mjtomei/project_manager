@@ -56,8 +56,8 @@ def _router_detail_lines(p) -> list[str]:
     from pm_core.providers import AUTO_MODE_MODEL_ENV
     classifier = p.env_vars().get(AUTO_MODE_MODEL_ENV)
     lines.append("auto-mode classifier: "
-                 + (classifier or "Claude's default (unprefixed: the router's "
-                    "default backend)"))
+                 + (classifier or "not pinned (Claude picks it; set "
+                    f"alias_models {AUTO_MODE_MODEL_ENV} to pin one)"))
     return lines
 
 

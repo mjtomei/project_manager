@@ -96,11 +96,17 @@ def route_classifier_model(model: str | None) -> str | None:
     Claude Code's own classifier default under the route's prefix
     (``work/claude-opus-5-5[1m]`` -> ``work/claude-sonnet-5``).  None for a
     model without a prefix: the router sends it, and so the default
-    classifier, to the same backend.
+    classifier, to the same backend.  None too when the route does not
+    serve Claude models (``deepseek/…``, ``z-ai/…``, ``chatgpt/…``): such a
+    prefix names another vendor's models, so ``<prefix>/claude-sonnet-5``
+    would be a model no backend has, and the classifier is left to Claude.
     """
     if not model or "/" not in model:
         return None
-    return f"{model.split('/', 1)[0]}/{CLASSIFIER_DEFAULT_MODEL}"
+    prefix, name = model.split("/", 1)
+    if not name.startswith("claude-"):
+        return None
+    return f"{prefix}/{CLASSIFIER_DEFAULT_MODEL}"
 
 
 def subagent_pin_env(model: str | None,
@@ -231,10 +237,15 @@ class ProviderConfig:
         variables the claude-mixed launcher unsets.  A main-account
         (``claude``) session drops a classifier pin inherited from a routed
         caller, so its auto-mode classifier stays on Claude's default on
-        that account (a router session sets its own, env_vars).
+        that account (a router session sets its own, env_vars).  So does a
+        router session that sets none (route_classifier_model): another
+        route's pin must not put its classifier on that route's account.
         """
         if self.type == "router":
-            return ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+            unset = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+            if AUTO_MODE_MODEL_ENV not in self.env_vars():
+                unset += (AUTO_MODE_MODEL_ENV,)
+            return unset
         if self.type == "claude":
             return (AUTO_MODE_MODEL_ENV,)
         return ()
