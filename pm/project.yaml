@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T18:12:03.549362+00:00'
+  updated_at: '2026-10-25T18:55:57.287012+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -23143,6 +23143,64 @@ prs:
       / 17 / 3309). Evidence /pm-captures/review-240e-i4/. (2026-10-25T18:20:00Z)'
     created_at: '2026-10-25T18:12:03Z'
     last_edited: '2026-10-25T18:12:03Z'
+  - id: note-5ff060b
+    text: 'Review-loop 240e i5 (native recovery; the controller''s pr-592e4bd runtime
+      still passes this review prompt as one argv entry, so its first launch hit E2BIG
+      — not evidence the source on this branch is broken). Re-ran the §19-§28 method
+      (sweep every reachable builder, then check every omission marker in the environment
+      the session reads it in) plus the delivery paths end to end. Three marker-accuracy
+      defects fixed, all in code this PR added.
+
+
+      (1) The sign-off QA-scenario block is a fit_prompt block whose pointer was `pm
+      qa captures-path <pr-id>` — a command that prints the captures directory, while
+      fit_prompt''s marker says "Read the full text: <pointer>". A cut scenario listing
+      therefore told the session to read a path-printing command. It now uses `$CAP/scenarios/<n>/verdict.md`
+      (the reader `_persist_scenario_verdicts` writes, already named by the block''s
+      own count marker) via one shared `_QA_SCENARIOS_READER`. Reachable: the per-line
+      caps are in characters (120-char title / 200-char reason), so 40 multi-byte
+      scenarios build a ~40 KB block and a PR large in several dimensions makes fit_prompt
+      shrink it; §27 had recorded this pointer as unreachable from an ASCII estimate.
+      Real data never fires it.
+
+
+      (2) A note with a present-but-null `text:` (or `id:`) rendered the literal "None"
+      in the prompt and in both on-demand readers (`pm pr show`, `pm pr note list`),
+      and the bounded renderer counted the null-text note as "abbreviated" because
+      its full line differed from its summary. `_pr_note_full_line` / `_note_line`
+      now use `or ''''` / `or ''?''` (i4 fixed the missing-key shape; a null value
+      is the same shape). The remaining `n["text"]` sites are the pm pr edit / note
+      delete display paths — filed as pr-bebc2e9 rather than expanded into this PR.
+
+
+      (3) The session-notes marker claimed `pm/notes-local.txt` was "in the project
+      root"; it is gitignored (notes.ensure_notes_file), so it is absent from a container
+      workdir clone. The marker now names `pm/notes.txt` in the project root and says
+      `pm/notes-local.txt` is local to the machine running pm (the local text is still
+      inlined from the host up to the budget). `pm/notes.txt` is tracked, so the container
+      half is real.
+
+
+      Verification: tests/test_prompt_bounds.py 131 (3 new tests, all failing-then-passing
+      — QA fit marker named `pm qa captures-path pr-x` on the unfixed source, the
+      null-text note rendered "None", the null-id/text readers printed "None"; the
+      notes-marker assertions failed on the old wording) and test_claude_launcher
+      37; related suites 447 passed. Real-data sweep over all 488 PRs x 4 builders
+      byte-identical before/after (impl 75,146 / review 77,616 / sign-off 92,165 /
+      planner 80,652 B, max pr-0b87a97; 1,952 prompts, 0 errors, deterministic); the
+      all-collections-maxed pathological fixture is unchanged (sign-off 119,700 B
+      highest, every marker names a reader); the CJK sign-off fixture at the per-line
+      caps now renders `... Read the full text: `$CAP/scenarios/<n>/verdict.md` for
+      all verdicts ...`. Launcher bootstrap re-exercised with a stub claude (123,007-byte
+      CJK prompt → 322-byte command, max argv entry 184 B, complete file on disk,
+      removed after) and the bridge --prompt-file handoff (123,007-byte prompt delivered
+      intact to the bridge''s first turn, file removed). Clean-tree full suite 42
+      failed / 17 errors / 3442 passed, failure set byte-identical to the i4 clean-tree
+      baseline (the delta is this iteration''s 3 new tests; 22 test_signoff_integration,
+      19+17 test_merge_publish, 1 test_hook_events, all environmental). Evidence /pm-captures/review-240e-i5/.
+      (2026-10-25T18:56:00Z)'
+    created_at: '2026-10-25T18:55:57Z'
+    last_edited: '2026-10-25T18:55:57Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
