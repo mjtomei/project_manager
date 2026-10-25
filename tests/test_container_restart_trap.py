@@ -53,6 +53,7 @@ def test_delayed_exit_trap_preserves_restarted_container(tmp_path, monkeypatch, 
             time.sleep(0.01)
         assert entered.exists(), "generated command did not reach exec"
         if restart:
+            monkeypatch.setattr(container, "current_container_id", lambda _: "exact-id")
             monkeypatch.setattr(container, "_run_runtime", lambda *a, **k:
                                 subprocess.CompletedProcess(a, 0, "", ""))
             monkeypatch.setattr(container, "_wait_for_setup", lambda *a: None)

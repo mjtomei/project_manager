@@ -131,7 +131,7 @@ retryable cleanup rather than permission to delete by name.
   synchronously; it kicks a background, PR-scoped reconcile (old windows are
   already killed by `_cleanup_stale_scenario_windows`, so they are unowned).
 - **Merge**: `pr_cleanup.cleanup_pr_containers` covers every kind for the PR
-  (labels + name parse), and CLI `_finalize_merge` launches a detached
+  (the shared label-first inventory, including renamed allocations), and CLI `_finalize_merge` launches a detached
   PR-scoped reap after killing windows (the merge is not blocked).
 - **Push proxies**: a shared `(session_tag, pr_id)` proxy is stopped only
   when the runtime reports **no container** (any state) labeled/named for
@@ -155,13 +155,25 @@ retryable cleanup rather than permission to delete by name.
   before publishing their ready socket, so an immediate stop cannot bypass cleanup.
   A readiness timeout or interrupted startup terminates and reaps the spawned
   child before returning failure; a delayed daemon cannot publish an orphan
-  socket after allocation cleanup.
+  socket after allocation cleanup. Removal captures a managed allocation's actual
+  unshared proxy mount and socket generation before deleting it, so runtime renames
+  do not strand the original proxy or let delayed cleanup unlink a replacement.
+  Failed shared-proxy socket removal preserves its owner record for retry; proxy
+  sweep failures and unavailable user inventories appear in CLI/TUI outcomes and
+  persisted diagnostics, and successful retry clears those failures.
   If the QA run-end release is skipped because another reconcile holds the
   reaper lock, it is re-queued in the background (live panes would
   otherwise keep those containers "owned" forever).
   Owner release captures the launch's container ID and restart generation in
   scenario/resume state. It persists that identity atomically before inventory or
   reaper-lock acquisition; later passes retry it even when inventory was unavailable.
+  Owner releases follow runtime-domain/container-ID identity through runtime renames,
+  including targeted release and later retries; pruning does not mistake a renamed
+  allocation for an absent one. Successful creation/reuse and restart record an
+  additional ID-keyed recovery generation. Restarting the renamed allocation invalidates
+  a release captured under its original name; original-name replacement allocations
+  are never authorized by that request. Pre-ID generation records remain readable
+  through the release's original name until an ID epoch supersedes them.
   Replacements/restarts are never adopted by a delayed request. Temporary retention
   or a launch lock defers cleanup without erasing the request or last failure.
   Pane EXIT uses this same identity-bound release rather than raw runtime removal,
@@ -221,8 +233,9 @@ intact to protect concurrent waiters and delayed releases.
   instead of killing it. Explicit retention also blocks recreation of stopped
   or incomplete containers and automatic pressure-recovery restart; safe
   idempotent setup completion is still allowed.
-- Failed/unknown running-state inspection refuses recreation; it is not proof
-  of absence. Required setup commands fail before readiness is written. Fresh
+- Failed/unknown running-state or ID inspection refuses recreation; it is not proof
+  of absence. Only explicit missing-container/object errors establish absence;
+  missing runtime socket paths and empty successful ID output are unknown. Required setup commands fail before readiness is written. Fresh
   creation verifies push-proxy connectivity as well as reuse.
 - Any failure after `run` (sentinel timeout, exec error, cp failure,
   keyring) removes the partial container (and releases the proxy if unused)
@@ -287,7 +300,8 @@ remain inside the lock.
   no longer fire N `podman run`+exec-poll loops at once.
 - `container-max-running` (default 0 = unlimited; supersedes the
   `qa-max-containers` name from 7b6dc7b9): QA clamps its launch batch to the
-  remaining headroom (≥1), the rest queue through the existing
+  remaining headroom (≥1), counting renamed managed allocations as well as legacy
+  names through the shared inventory; the rest queue through the existing
   queued-scenario mechanism. Settled scenarios release their allocations before
   handing slots to queued work (after PASS verification, with the same human,
   retention and viewed-window exceptions). Resume must not recreate already

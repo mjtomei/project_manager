@@ -141,3 +141,90 @@ def test_session_proxy_cleanup_preserves_unknown_or_foreign_domain(monkeypatch, 
     assert push_proxy.stop_session_proxies("review-i12") == 0
     assert socket.exists()
     release.assert_not_called()
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_owner_release_follows_renamed_allocation(monkeypatch, legacy):
+    old, new, cid = "pm-qa-pr-1234-loop-s1", "renamed-worker", "original-id"
+    cm._renew_launch(old, "" if legacy else cid)
+    generation = cm.cleanup_generation(old)
+    info = reaper.ContainerInfo(new, id=cid, running=True, created=0)
+    monkeypatch.setattr(reaper, "list_containers", lambda: [info])
+    monkeypatch.setattr(reaper, "_owner_panes", lambda *a, **k: (["%worker"], False))
+    monkeypatch.setattr(reaper, "reconcile", lambda scope, **kw: reaper.plan(scope))
+    outcome = reaper.release_containers([old], owner_release=True,
+        expected_ids={old: cid}, expected_generations={old: generation})
+    decision, = outcome.decisions
+    assert decision.released
+    assert decision.action == "remove"
+    # A deferred/retained release must not be pruned merely because the old
+    # name disappeared; a later full pass must still find it by ID.
+    reaper._prune_releases(outcome, reaper.Scope(), float("inf"))
+    assert len(reaper._release_records()) == 1
+    assert reaper.plan().decisions[0].released
+    monkeypatch.setattr(cm, "current_container_id", lambda _: cid)
+    remove = Mock()
+    monkeypatch.setattr(cm, "remove_container", remove)
+    assert reaper._remove_checked(decision, reaper.Scope())[0]
+    remove.assert_called_once_with(new)
+    outcome.removed.append(new)
+    reaper._prune_releases(outcome, reaper.Scope(), float("inf"))
+    assert reaper._release_records() == []
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_renamed_restart_invalidates_original_release(monkeypatch, legacy):
+    import subprocess
+    old, new, cid = "pm-qa-pr-1234-loop-s1", "renamed-worker", "original-id"
+    cm._renew_launch(old, "" if legacy else cid)
+    original = cm.cleanup_generation(old)
+    reaper._record_release(old, cid, original, "finished")
+    info = reaper.ContainerInfo(new, id=cid, running=True, created=0)
+    monkeypatch.setattr(reaper, "list_containers", lambda: [info])
+    monkeypatch.setattr(reaper, "_owner_panes", lambda *a, **k: (["%worker"], False))
+    decision, = reaper.plan().decisions
+    assert decision.released
+    monkeypatch.setattr(cm, "current_container_id", lambda _: cid)
+    monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw: subprocess.CompletedProcess(a, 0, "", ""))
+    monkeypatch.setattr(cm, "_wait_for_setup", lambda _: None)
+    monkeypatch.setattr(cm, "_setup_complete", lambda _: True)
+    with cm.launch_lock(new):
+        cm.restart_container(new)
+    remove = Mock()
+    monkeypatch.setattr(cm, "remove_container", remove)
+    assert not reaper._remove_checked(decision, reaper.Scope())[0]
+    remove.assert_not_called()
+    assert not reaper.plan().decisions[0].released
+    reaper._prune_releases(reaper.plan(), reaper.Scope(), float("inf"))
+    assert reaper._release_records() == []
+
+
+def test_renamed_release_does_not_authorize_original_name_replacement(monkeypatch):
+    old, new, cid = "pm-qa-pr-1234-loop-s1", "renamed-worker", "original-id"
+    cm._renew_launch(old, cid)
+    generation = cm.cleanup_generation(old)
+    reaper._record_release(old, cid, generation, "finished")
+    cm._renew_launch(old, "replacement-id")
+    monkeypatch.setattr(reaper, "list_containers", lambda: [
+        reaper.ContainerInfo(old, id="replacement-id", running=True),
+        reaper.ContainerInfo(new, id=cid, running=True)])
+    monkeypatch.setattr(reaper, "_owner_panes", lambda *a, **k: (["%worker"], False))
+    scope = reaper.Scope(names={old}, owner_release=True,
+                         expected_ids={old: cid}, expected_generations={old: generation})
+    replacement, original = reaper.plan(scope).decisions
+    assert replacement.action == "keep"
+    assert original.released
+
+
+def test_identity_generation_isolated_across_runtime_domains(monkeypatch):
+    name, cid = "pm-review-pr-1234", "cloned-id"
+    domain = {"id": "first"}
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: dict(domain))
+    cm._renew_launch(name, cid)
+    first = reaper.allocation_generation(name, cid)
+    domain["id"] = "second"
+    cm._renew_launch(name, cid)
+    second = reaper.allocation_generation(name, cid)
+    assert first != second
+    domain["id"] = "first"
+    assert reaper.allocation_generation("renamed", cid) == first

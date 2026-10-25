@@ -7,50 +7,49 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pm_core import container as container_mod
-from pm_core import pane_registry, pr_cleanup, runtime_state
+from pm_core import pane_registry, pr_cleanup, runtime_state, container_reaper
+
+
+def _inventory(names):
+    return [container_reaper._info_from(n, "id-" + n, True, "running", {})
+            for n in names]
 
 
 @patch("pm_core.container.current_container_id", lambda name: "id-" + name)
 class TestCleanupPrContainers:
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_runtime")
+    @patch("pm_core.container_reaper.list_containers")
     def test_legacy_prefix(self, mock_runtime, mock_remove):
-        mock_runtime.return_value = MagicMock(
-            returncode=0,
-            stdout="pm-qa-pr-001-loop1-s0\npm-qa-pr-001-loop1-s1\n",
-        )
+        mock_runtime.return_value = _inventory([
+            "pm-qa-pr-001-loop1-s0", "pm-qa-pr-001-loop1-s1"])
         removed = container_mod.cleanup_pr_containers("pr-001")
         assert removed == ["pm-qa-pr-001-loop1-s0", "pm-qa-pr-001-loop1-s1"]
         assert mock_remove.call_count == 2
 
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_runtime")
+    @patch("pm_core.container_reaper.list_containers")
     def test_session_tagged_and_legacy_dedup(self, mock_runtime, mock_remove):
-        # Two prefix queries — one for tagged, one for legacy. Same container
-        # appears in both: dedup.
-        mock_runtime.side_effect = [
-            MagicMock(returncode=0, stdout="pm-mysess-qa-pr-001-l1-s0\n"),
-            MagicMock(returncode=0, stdout="pm-mysess-qa-pr-001-l1-s0\npm-qa-pr-001-l2-s0\n"),
-        ]
+        # The shared inventory already deduplicates tagged and legacy queries.
+        mock_runtime.return_value = _inventory([
+            "pm-mysess-qa-pr-001-l1-s0", "pm-qa-pr-001-l2-s0"])
         removed = container_mod.cleanup_pr_containers("pr-001", session_tag="mysess")
         assert removed == ["pm-mysess-qa-pr-001-l1-s0", "pm-qa-pr-001-l2-s0"]
         assert mock_remove.call_count == 2
 
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_runtime")
+    @patch("pm_core.container_reaper.list_containers")
     def test_no_containers(self, mock_runtime, mock_remove):
-        mock_runtime.return_value = MagicMock(returncode=0, stdout="")
+        mock_runtime.return_value = []
         removed = container_mod.cleanup_pr_containers("pr-001")
         assert removed == []
         mock_remove.assert_not_called()
 
-    @patch("pm_core.container._run_runtime")
+    @patch("pm_core.container_reaper.list_containers")
     def test_parallel_removal(self, mock_runtime):
         # Simulate four containers each taking 0.5s to remove. Sequential
         # would be ~2s; parallel must finish closer to 0.5s.
         names = [f"pm-qa-pr-001-l1-s{i}" for i in range(4)]
-        mock_runtime.return_value = MagicMock(
-            returncode=0, stdout="\n".join(names) + "\n")
+        mock_runtime.return_value = _inventory(names)
 
         def slow_remove(name):
             time.sleep(0.5)

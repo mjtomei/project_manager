@@ -267,7 +267,7 @@ def fake_env(monkeypatch):
                         lambda: len(state["containers"]))
     monkeypatch.setattr(cm, "keyring_summary", lambda: "")
     monkeypatch.setattr(cm, "pids_pressure", lambda threshold=0.9: [])
-    monkeypatch.setattr(reaper, "_release_unused_proxies", lambda scope: [])
+    monkeypatch.setattr(reaper, "_release_unused_proxies", lambda scope, failures: [])
     return state
 
 
@@ -1318,7 +1318,7 @@ class TestListNamesPrefixGuard:
             return _cp(out="npm-cache\npm-a-impl-pr-1\nmy-pm-thing\n")
         monkeypatch.setattr(cm, "_run_runtime", _rt)
         assert cm.running_container_count() == 1
-        assert "-a" not in calls[-1]  # running only
+        assert any(f"label={cm.LABEL_MANAGED}=1" in call for call in calls)
         assert cm.containers_for_pr("a", "pr-1") == {"pm-a-impl-pr-1"}
         removed = []
         monkeypatch.setattr(cm, "remove_container", removed.append)

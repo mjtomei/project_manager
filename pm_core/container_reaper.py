@@ -252,6 +252,17 @@ def restart_generation(name: str) -> str | None:
         return None
 
 
+def allocation_generation(name: str, cid: str) -> str | None:
+    """Use the ID epoch after renames; preserve legacy name-only generations."""
+    try:
+        path = container_mod._identity_generation_path(cid)
+        if path.exists():
+            return path.read_text().strip()
+        return restart_generation(name)
+    except OSError:
+        return None
+
+
 def capture_identity(name: str) -> tuple[str, str] | None:
     try:
         cid = container_mod.current_container_id(name)
@@ -319,19 +330,20 @@ def pending_releases() -> dict[str, dict]:
 
 def _prune_releases(out: "Outcome", scope: "Scope", since: float) -> None:
     inventory = {d.info.name: d.info for d in out.decisions}
+    by_id = {d.info.id: d.info for d in out.decisions}
     domain = _runtime_domain()
     for path, rec in _release_records():
         if domain is None or rec.get("runtime_domain") != domain:
             continue
         if rec.get("at", 0) >= since:
             continue
-        info = inventory.get(rec["name"])
+        info = by_id.get(rec["id"]) or inventory.get(rec["name"])
         absent = info is None and (scope == Scope() or
                                   scope.names is not None and rec["name"] in scope.names)
         stale = info is not None and (
             info.id != rec["id"] or
-            restart_generation(info.name) not in (None, rec["generation"]))
-        if absent or stale or rec["name"] in out.removed:
+            allocation_generation(rec["name"], info.id) not in (None, rec["generation"]))
+        if absent or stale or info is not None and info.name in out.removed:
             path.unlink(missing_ok=True)
 
 
@@ -681,7 +693,8 @@ class Scope:
     expected_generations: dict[str, str] = field(default_factory=dict)
 
     def matches(self, info: ContainerInfo) -> bool:
-        if self.names is not None and info.name not in self.names:
+        if (self.names is not None and info.name not in self.names
+                and not (self.owner_release and info.id in self.expected_ids.values())):
             return False
         if self.pr_id and info.pr_id != self.pr_id:
             return False
@@ -718,6 +731,7 @@ class Decision:
     # Released by the run that launched it: its own panes don't keep it.
     released: bool = False
     release_generation: str | None = None
+    release_name: str = ""  # original name for pre-ID generation compatibility
 
 
 @dataclass
@@ -788,12 +802,14 @@ def _decide(info: ContainerInfo, scope: Scope, cache: _PaneCache,
     releases = release_records or []
     matching = [rec for rec in releases if rec["id"] == info.id]
     if matching:
-        generation = restart_generation(info.name)
-        if generation is None:
-            return Decision(info, "keep", "cleanup generation unknown")
-        if any(generation == rec["generation"] for rec in matching):
-            return Decision(info, "remove", "released by its run", released=True,
-                            release_generation=generation)
+        for rec in matching:
+            generation = allocation_generation(rec["name"], info.id)
+            if generation is None:
+                return Decision(info, "keep", "cleanup generation unknown")
+            if generation == rec["generation"]:
+                return Decision(info, "remove", "released by its run", released=True,
+                                release_generation=generation,
+                                release_name=rec["name"])
     if (not releases and _is_pending_release(info, pending_release or {})
             and restart_generation(info.name) == ""):
         # Its run already let it go but the removal failed; the run's panes
@@ -859,7 +875,7 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
             if current and current != info.id:
                 return False, "skipped: replaced by a newer launch"
         if d.release_generation is not None:
-            generation = restart_generation(info.name)
+            generation = allocation_generation(d.release_name or info.name, info.id)
             if generation is None:
                 return False, "error: cleanup generation unknown during removal re-check"
             if generation != d.release_generation:
@@ -934,7 +950,7 @@ def spawn_detached_reap(pr_id: str | None = None,
         _log.warning("could not spawn detached reap for %s", pr_id, exc_info=True)
 
 
-def _release_unused_proxies(scope: Scope) -> list[str]:
+def _release_unused_proxies(scope: Scope, failures: dict[str, str]) -> list[str]:
     from pm_core import push_proxy
     released: list[str] = []
     domain = push_proxy.runtime_domain()
@@ -947,10 +963,15 @@ def _release_unused_proxies(scope: Scope) -> list[str]:
             continue
         if scope.pr_id and prox["pr_id"] != scope.pr_id:
             continue
+        key = f"{prox['session_tag']}/{prox['pr_id']}"
         try:
-            if push_proxy.release_proxy_if_unused(prox["session_tag"], prox["pr_id"]):
-                released.append(f"{prox['session_tag']}/{prox['pr_id']}")
-        except Exception:
+            result = push_proxy.release_proxy_if_unused(prox["session_tag"], prox["pr_id"])
+            if result:
+                released.append(key)
+            elif result is None:
+                failures[f"push proxy {key}"] = "runtime inventory unavailable; proxy preserved"
+        except Exception as exc:
+            failures[f"push proxy {key}"] = str(exc)
             _log.warning("proxy release for %s failed", prox, exc_info=True)
     return released
 
@@ -970,11 +991,11 @@ def plan(scope: Scope | None = None) -> Outcome:
         if isinstance(f, dict) and f.get("owner_release")}
     releases: dict[str, list[dict]] = {}
     for _, rec in _current_release_records():
-        releases.setdefault(rec["name"], []).append(rec)
+        releases.setdefault(rec["id"], []).append(rec)
     for info in infos:
         if scope.matches(info):
             out.decisions.append(_decide(info, scope, cache, prs, now,
-                                         pending_release, releases.get(info.name)))
+                                         pending_release, releases.get(info.id)))
     return out
 
 
@@ -1019,8 +1040,9 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
                 else:
                     d.action, d.reason = "keep", msg
         try:
-            out.proxies_released = _release_unused_proxies(scope)
-        except Exception:
+            out.proxies_released = _release_unused_proxies(scope, out.failures)
+        except Exception as exc:
+            out.failures["push proxy sweep"] = str(exc)
             _log.warning("proxy sweep failed", exc_info=True)
         out.running_after = container_mod.running_container_count()
         out.keyring_after = container_mod.keyring_summary()
@@ -1191,7 +1213,12 @@ def _record(out: Outcome, scope: Scope, reason: str,
     failures = dict(prev.get("failures") or {})
     domain = _runtime_domain()
     if inventory is not None and domain is not None:
-        failures = {k: v for k, v in failures.items() if k in inventory}
+        failures = {k: v for k, v in failures.items()
+                    if k in inventory or k.startswith("push proxy ")}
+    for proxy in out.proxies_released:
+        failures.pop(f"push proxy {proxy}", None)
+    if "push proxy sweep" not in out.failures:
+        failures.pop("push proxy sweep", None)
     for d in out.decisions:
         if domain is None:
             continue  # unknown inventory domain cannot retire legacy failures

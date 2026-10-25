@@ -731,9 +731,16 @@ def start_push_proxy(container_name: str, workdir: str,
     return sock_path
 
 
-def _kill_proxy_socket(sock_path: str) -> None:
-    """Stop a subprocess proxy by removing its socket (triggers exit) and clean up."""
+def _kill_proxy_socket(sock_path: str, expected_identity: tuple[int, int, int] | None = None) -> None:
+    """Stop a subprocess proxy, optionally only the captured socket generation."""
     with _socket_lifecycle_lock(sock_path):
+        if expected_identity is not None:
+            try:
+                stat = os.stat(sock_path)
+            except FileNotFoundError:
+                return
+            if (stat.st_dev, stat.st_ino, stat.st_ctime_ns) != expected_identity:
+                return
         sock_dir = str(Path(sock_path).parent)
         # Resolve the real directory if sock_dir is a symlink
         real_dir = os.path.realpath(sock_dir)
@@ -889,11 +896,14 @@ def release_proxy_if_unused(session_tag: str, pr_id: str,
         sock_dir = _shared_sock_dir_path(session_tag, pr_id)
         sock_path = os.path.join(sock_dir, "push.sock")
         existed = os.path.exists(sock_path) or os.path.isdir(sock_dir)
+        # Keep the ownership record until socket removal succeeds, otherwise
+        # a failed unlink makes this proxy invisible to future scoped sweeps.
+        _kill_proxy_socket(sock_path)
         try:
             os.unlink(os.path.join(os.path.realpath(sock_dir), _OWNER_FILE))
+            os.rmdir(os.path.realpath(sock_dir))
         except OSError:
             pass
-        _kill_proxy_socket(sock_path)
         long_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-{pr_id}"
         if os.path.islink(long_dir):
             try:
@@ -904,6 +914,39 @@ def release_proxy_if_unused(session_tag: str, pr_id: str,
             _log.info("Stopped unused shared push proxy for %s/%s",
                       session_tag, pr_id)
         return existed
+
+
+def capture_unshared_proxy(name: str) -> tuple[str, str, tuple[int, int, int]] | None:
+    """Find a renamed allocation's actual per-container socket before removal.
+
+    Only a managed container's expected proxy mount is authoritative. Capture
+    the socket generation so a new allocation using the original name cannot
+    lose its replacement proxy during delayed cleanup.
+    """
+    from pm_core import container as cm
+    try:
+        result = cm._run_runtime("inspect", name, check=False, timeout=10)
+        if result.returncode != 0:
+            return None
+        rows = json.loads(result.stdout)
+        info = rows[0] if isinstance(rows, list) and rows else {}
+        labels = (info.get("Config") or {}).get("Labels") or {}
+        if labels.get(cm.LABEL_MANAGED) != "1":
+            return None
+        if labels.get(cm.LABEL_SESSION) and labels.get(cm.LABEL_PR):
+            return None  # shared sockets are released through runtime-user checks
+        for mount in info.get("Mounts") or []:
+            source = Path(mount.get("Source", ""))
+            if (mount.get("Destination") != _CONTAINER_SOCKET_DIR
+                    or not source.name.startswith(_SOCKET_DIR_PREFIX + cm.CONTAINER_PREFIX)):
+                continue
+            path = str(source / "push.sock")
+            stat = os.stat(path)
+            original_name = source.name[len(_SOCKET_DIR_PREFIX):]
+            return original_name, path, (stat.st_dev, stat.st_ino, stat.st_ctime_ns)
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError, AttributeError):
+        return None
+    return None
 
 
 def stop_push_proxy(container_name: str) -> None:

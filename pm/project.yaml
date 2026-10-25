@@ -12336,6 +12336,23 @@ prs:
       remain required.'
     created_at: '2026-10-25T22:03:42Z'
     last_edited: '2026-10-25T22:03:42Z'
+  - id: note-bef786b
+    text: 'Review-loop 6427 i13 (main and inherited helper chatgpt/gpt-6-astra-high): fixed
+      generic missing-socket/empty-ID inspection falsely proving absence; owner releases lost
+      after runtime rename (ID/domain recovery epochs and ID-based scope/matching/pruning);
+      renamed unshared proxy cleanup (actual mount plus socket-generation guard); renamed
+      managed allocations missing from PR cleanup/running counts; shared proxy unlink failure
+      erasing owner metadata and sweep errors hidden from CLI/persisted diagnostics. Existing
+      lifecycle architecture retained; spec clarified. Before-fix regressions reproduced:
+      3 proxy failures, 5 inventory failures/2 controls, 5 rename-release failures. Focused
+      integration 201 passed; integrated core 482 passed; final regressions 102 passed. Final
+      sanitized full suite 3734 passed, 2 existing-class AsyncMock warnings. Installed declared
+      markdown dependency. Evidence/per-file review /pm-captures/review-6427-i13/README.md;
+      full suite /pm-captures/review-6427-i13-full-suite-final.log. Existing model/handoff/manual-gate
+      edits preserved outside commit. No new real-container QA claim or waiver; next review,
+      outstanding runtime scenarios and independent sign-off remain required.'
+    created_at: '2026-10-25T22:40:45Z'
+    last_edited: '2026-10-25T22:40:45Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

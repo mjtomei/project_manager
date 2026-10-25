@@ -394,9 +394,15 @@ def current_container_id(name: str) -> str | None:
     result = _run_runtime("inspect", "-f", "{{.Id}}", name,
                           check=False, timeout=10)
     if result.returncode == 0:
-        return result.stdout.strip()
-    err = (result.stderr or "").lower()
-    return "" if "no such" in err else None
+        return result.stdout.strip() or None
+    return "" if _container_absent(result.stderr or "") else None
+
+
+def _container_absent(error: str) -> bool:
+    """Only an explicit missing-object diagnostic proves absence, not socket ENOENT."""
+    low = error.lower()
+    return ("no such container" in low or "no such object" in low
+            or "no container with" in low and "found" in low)
 
 
 def container_is_running(name: str) -> bool:
@@ -408,9 +414,7 @@ def container_is_running(name: str) -> bool:
     if result.returncode == 0 and result.stdout.strip() in ("true", "false"):
         return result.stdout.strip() == "true"
     error = (result.stderr or "").strip()
-    low = error.lower()
-    if ("no such container" in low or "no such object" in low
-            or "no container with" in low and "found" in low):
+    if _container_absent(error):
         return False
     raise launch_error(name, classify_runtime_error(error),
                        error or "runtime returned an unknown running state",
@@ -781,8 +785,9 @@ def keyring_summary() -> str:
 
 def running_container_count() -> int | None:
     """Number of running pm containers (the keyring-key holders); None if unknown."""
-    names = _list_names(CONTAINER_PREFIX, running_only=True)
-    return None if names is None else len(names)
+    from pm_core.container_reaper import list_containers
+    inventory = list_containers()
+    return None if inventory is None else sum(info.running for info in inventory)
 
 
 _REMEDY_REAP = ("Preview leftover containers with 'pm container reap --dry-run' "
@@ -1127,7 +1132,7 @@ def create_container(
                         "container is still owned by a live session or an attaching launch; "
                         "use that session or wait for it to finish",
                         stage="be reused")
-            _renew_launch(name)
+            _renew_launch(name, reused)
             if allocation_identity is not None:
                 allocation_identity.update(id=reused, generation=cleanup_generation(name))
             return reused
@@ -1143,7 +1148,7 @@ def create_container(
                                         loop_id=loop_id, scenario=scenario),
             )
             try:
-                _renew_launch(name)
+                _renew_launch(name, container_id)
                 if allocation_identity is not None:
                     allocation_identity.update(id=container_id, generation=cleanup_generation(name))
             except ContainerError:
@@ -1239,7 +1244,28 @@ def cleanup_generation(name: str) -> str:
         return ""
 
 
-def _renew_launch(name: str) -> None:
+def _identity_generation_path(container_id: str) -> Path:
+    """Rename-stable recovery epoch within one runtime store."""
+    from pm_core.container_reaper import _runtime_domain
+    domain = _runtime_domain()
+    if domain is None:
+        raise OSError("Cannot determine runtime domain for allocation generation")
+    key = hashlib.sha256(json.dumps([domain, container_id], sort_keys=True).encode()).hexdigest()
+    return container_state_dir() / "identity-generations" / f"{key}.generation"
+
+
+def _write_identity_generation(container_id: str, generation: str) -> None:
+    marker = _identity_generation_path(container_id)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    temporary = marker.with_suffix(f".{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(generation)
+        os.replace(temporary, marker)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _renew_launch(name: str, container_id: str = "") -> None:
     """Give an attaching owner a new generation and a bounded attachment lease.
 
     Called under the launch lock after successful create/reuse. Previous EXIT
@@ -1248,7 +1274,10 @@ def _renew_launch(name: str) -> None:
     try:
         marker = _restart_generation_path(name, for_write=True)
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(uuid.uuid4().hex)
+        generation = uuid.uuid4().hex
+        marker.write_text(generation)
+        if container_id:
+            _write_identity_generation(container_id, generation)
     except OSError as exc:
         raise launch_error(name, "runtime", str(exc),
                            stage="record launch ownership") from exc
@@ -1277,7 +1306,12 @@ def restart_container(name: str) -> None:
     try:
         marker = _restart_generation_path(name, for_write=True)
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(uuid.uuid4().hex)
+        generation = uuid.uuid4().hex
+        marker.write_text(generation)
+        container_id = current_container_id(name)
+        if not container_id:
+            raise OSError("container identity unavailable before restart")
+        _write_identity_generation(container_id, generation)
     except OSError as exc:
         raise ContainerError(f"Cannot protect '{name}' from EXIT cleanup during restart: {exc}") from exc
     r = _run_runtime("restart", "-t", "5", name, check=False, timeout=90)
@@ -2171,8 +2205,9 @@ def remove_container(name: str) -> None:
     EXIT trap), this still blocks until the container has fully disappeared so
     that the caller can safely create a fresh container with the same name.
     """
-    from pm_core.push_proxy import stop_push_proxy
+    from pm_core.push_proxy import stop_push_proxy, capture_unshared_proxy, _kill_proxy_socket
     _log.info("remove_container: name=%s", name)
+    proxy = capture_unshared_proxy(name)
     _run_runtime("rm", "-f", name, check=False, timeout=30)
     # Wait for the container to be fully gone.  When another rm is already in
     # flight the daemon returns "removal already in progress" and our rm returns
@@ -2183,9 +2218,7 @@ def remove_container(name: str) -> None:
         result = _run_runtime("inspect", name, check=False, timeout=5)
         if result.returncode != 0:
             error = (result.stderr or "").strip()
-            low = error.lower()
-            if ("no such container" in low or "no such object" in low
-                    or ("no container with" in low and "found" in low)):
+            if _container_absent(error):
                 gone = True
                 break
             raise ContainerError(
@@ -2197,6 +2230,10 @@ def remove_container(name: str) -> None:
         raise ContainerError(f"container {name} still present after 10 s")
     # Release the push proxy only after the container is gone.  Failed
     # removal must leave the surviving container's push access intact.
+    if proxy:
+        _kill_proxy_socket(proxy[1], expected_identity=proxy[2])
+        if proxy[0] == name:
+            return  # never follow a guarded release with an unguarded socket unlink
     stop_push_proxy(name)
 
 
@@ -2481,25 +2518,15 @@ def cleanup_pr_containers(pr_id: str,
     ownership is not consulted; explicitly retained containers are kept
     when *include_retained* is False.  Returns the list of names removed.
     """
-    candidates: list[str] = []
-    seen: set[str] = set()
-    tags = [session_tag, None] if session_tag else [None]
-    for tag in tags:
-        prefix = f"{CONTAINER_PREFIX}{tag}-" if tag else CONTAINER_PREFIX
-        names = _list_names(prefix)
-        for cname in names or []:
-            parsed = parse_container_name(cname)
-            if not parsed or parsed.session_tag != tag:
-                continue
-            if parsed.kind == "qa-debug" or parsed.pr_id({pr_id}) != pr_id:
-                continue
-            if cname not in seen:
-                seen.add(cname)
-                candidates.append(cname)
-
-    if not include_retained:
-        from pm_core import container_reaper
-        candidates = [c for c in candidates if not container_reaper.is_retained(c)]
+    from pm_core import container_reaper
+    inventory = container_reaper.list_containers()
+    if inventory is None:
+        raise ContainerError("Cannot inventory PR containers; cleanup not performed")
+    tags = {session_tag, None}
+    candidates = [info.name for info in inventory
+                  if info.session_tag in tags and info.pr_id == pr_id
+                  and info.kind != "qa-debug"
+                  and (include_retained or not container_reaper.is_retained(info.name, info.id))]
 
     removed, _failures = remove_containers(candidates, workers=8)
     if removed:

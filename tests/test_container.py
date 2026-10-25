@@ -606,6 +606,7 @@ class TestCreateContainer:
         # The mount fixture stubs mkdir below, not lifecycle exclusion itself.
         (container_state_dir() / "locks").mkdir(parents=True, exist_ok=True)
         _restart_generation_path("test", for_write=True).parent.mkdir(parents=True, exist_ok=True)
+        (container_state_dir() / "identity-generations").mkdir(parents=True, exist_ok=True)
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
 
