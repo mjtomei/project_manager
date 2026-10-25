@@ -774,15 +774,18 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
 - **RQ43** (user decision 2026-10-25, review loop c189 i1) Given a
   session in auto permission mode (not `--dangerously-skip-permissions`),
   When Claude classifies a tool call, Then the classifier request runs on
-  the session's account: a session on a router provider whose model has a
-  route prefix requests `<prefix>/claude-sonnet-5` (its launch env carries
+  the session's account: a session on a router provider whose model is a
+  Claude model under a route prefix (`work/claude-…`) requests
+  `<prefix>/claude-sonnet-5` (its launch env carries
   `CLAUDE_CODE_AUTO_MODE_MODEL=work/claude-sonnet-5`, or the provider's
   `alias_models` value), which the work account answers; no classifier
   request names an unprefixed model. A router whose model is not a
   Claude model (`deepseek/…`, `z-ai/…`, `chatgpt/…`; review loop c189 i2)
   gets no classifier pin and drops an inherited one: its launch env has
   no `CLAUDE_CODE_AUTO_MODE_MODEL`, and no classifier request names
-  `<prefix>/claude-sonnet-5`. A main-account (plain or no-model)
+  `<prefix>/claude-sonnet-5`. Its classifier requests Claude's unprefixed
+  default, which the router sends to the main account (not a failure:
+  that session is not on the work account). A main-account (plain or no-model)
   session sets no classifier model and drops an inherited one (`env -u`),
   so it classifies on Claude's default on the main account, also when pm
   runs inside a routed session. `pm provider list` shows the route's
@@ -790,7 +793,10 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
   (S59 method; classifier calls are triggered reliably by a relay-scripted
   Agent call). Review evidence: `/pm-captures/review-c189-i1/live-classifier/`
   (host `claude -p`; QA covers interactive host/container panes and the
-  TUI launch paths).
+  TUI launch paths). The production TUI's routed review container for
+  review loop c189 i3 ran with `CLAUDE_CODE_AUTO_MODE_MODEL=work/claude-sonnet-5`
+  (`/pm-captures/review-c189-i3/session-env-models.txt`, model names only);
+  that is launch env, not classifier traffic.
 
 ## 2. Setup
 

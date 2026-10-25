@@ -210,7 +210,10 @@ account.
   other vendors' namespaces with no `claude-sonnet-5`
   (`/pm-captures/review-c189-i2/router-v1-models.txt`), so f0031965's
   `<prefix>/claude-sonnet-5` named a model no backend serves. Those
-  sessions keep the classifier Claude picks, as before this PR. A router
+  sessions keep the classifier Claude picks, as before f0031965: its
+  unprefixed default goes to the router's default backend with the
+  caller's credentials, the main account, which is the user's decision
+  for every session not on the work account. A router
   session with no pin also drops an inherited value, so `pm` run inside a
   work-routed session does not put another route's classifier on the
   work account. A main-account
@@ -1432,3 +1435,12 @@ with pm's own built command in auto mode: without the new pin the
 classifier requested `claude-sonnet-5` (refused at the relay); with it both
 classifier calls requested `work/claude-sonnet-5` and the work account
 answered 200 (same org hash as the session), with no unprefixed request.
+Review loop c189 i2 limited the pin to routes that serve Claude models
+(5f5a1453, §2). Review loop c189 i3 re-checked ff65f489, 3ee69236,
+79b6ddd7, f0031965 and 5f5a1453 independently: 10 mutations caught, one
+equivalent (`_resolve_provider`'s `if v not in provider_env` filter is
+reachable only through an `alias_models` entry naming
+`ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`; defensive, kept)
+(`/pm-captures/review-c189-i3/mutation-checks.log`). Claude Code 2.1.310
+reads `CLAUDE_CODE_BG_CLASSIFIER_MODEL` nowhere (env allowlists only), so
+`CLAUDE_CODE_AUTO_MODE_MODEL` is the only classifier override.
