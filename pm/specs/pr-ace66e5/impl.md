@@ -1358,8 +1358,11 @@ reasoning still holds); `cli/plan.py`'s plan-file pointers (`pm plan deps`,
 and the verification prompt's "the full scenario transcript on disk" pointer,
 which names no path at all (§11).
 
-Verification: `tests/test_prompt_bounds.py` 111 cases (8 rewritten/new, all
-failing-then-passing) and `tests/test_claude_launcher.py` 37; the related
+Verification: `tests/test_prompt_bounds.py` 112 cases — 8 rewritten/new, all
+failing-then-passing (verified by stashing the source edits), plus 1 guard test
+that pins the coupling the new marker relies on (the sign-off prompt really
+defines `CAP`, so `$CAP/scenarios/<n>/verdict.md` is not a dead end) — and
+`tests/test_claude_launcher.py` 37; the related
 suites (`test_signoff`, `test_plan_review`, `test_bug_fix_flow_prompts`,
 `test_regression_prompts`, `test_spec_gen`, `test_qa_instructions`,
 `test_signoff_integration`) 426 passed together. All 488 real PRs × 4 builders are **byte-identical** before and after

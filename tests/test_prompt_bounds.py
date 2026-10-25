@@ -540,6 +540,19 @@ class TestSignoffPromptBounding:
         assert "(+20 more scenarios" in block
         assert "$CAP/scenarios/<n>/verdict.md" in block
 
+    def test_the_signoff_prompt_defines_the_cap_the_marker_names(
+            self, tmp_path, monkeypatch):
+        """`$CAP/...` is only a working pointer if the prompt defines CAP, and
+        `_signoff_qa_scenarios_block` is only reachable from the sign-off
+        prompt.  Pin the coupling: if a future builder reuses the block
+        without the evidence checklist, or the checklist drops the CAP line,
+        the marker becomes a dead end (the defect this iteration fixed for the
+        absolute-path form)."""
+        self._many_scenarios(tmp_path, monkeypatch)
+        p = prompt_gen.generate_signoff_prompt(_data(_pr()), "pr-x")
+        assert "$CAP/scenarios/<n>/verdict.md" in p
+        assert 'CAP="$(pm qa captures-path pr-x)"' in p
+
     def test_pr_notes_markers_name_the_concrete_pr_id(self):
         """The omission marker is the only recovery path for the abbreviated
         notes; a literal `<pr-id>` placeholder is not runnable, and the same
