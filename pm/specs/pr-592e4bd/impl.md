@@ -163,7 +163,13 @@ runs on the caller's main account. FORCE (Claude Code ≥ 2.1.257; 2.1.310 is
 installed) makes the pin override all of them and removes `model` from the
 Agent tool. A router's explicit `alias_models` entry for
 `CLAUDE_CODE_SUBAGENT_MODEL` replaces the pinned value and is forced too.
-When pm selects no model (CLI default) nothing is set.
+When pm selects no model (CLI default) it sets no pin and removes an
+inherited one (`env -u` in the shell command, dropped from the `claude -p`
+run env; `providers.subagent_unset_vars`), so the children follow the CLI
+default rather than a caller's pin (QA S61, 3ee69236: pm run inside a
+routed session passed its `work/` pin and FORCE to a no-model session on
+the main endpoint, and every child failed `model_not_found`). A pin a user
+sets in Claude's own `settings.json` `env` is not affected.
 
 Repro that prompted this: PR241 Astra review 6427 i4 had
 `CLAUDE_CODE_SUBAGENT_MODEL=chatgpt/gpt-6-astra-high` without FORCE. Two
@@ -174,13 +180,29 @@ account.
 - Effort resolution is independent of provider, so routed types keep `high`.
 - The router (`router.py`) sends any request whose model lacks the `work/`
   prefix to its default backend with the caller's (main) credentials, so
-  `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`
-  and `CLAUDE_CODE_SUBAGENT_MODEL` are pinned to the route model
-  (overridable via `alias_models`), and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`
-  makes the subagent pin binding (R8).
+  `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU,FABLE}_MODEL`,
+  `ANTHROPIC_SMALL_FAST_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL` are pinned
+  to the route model (overridable via `alias_models`), and
+  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` makes the subagent pin binding (R8).
+  FORCE covers subagents only; the alias pins also keep main-loop switches
+  on the route: a skill's or slash command's `model: fable` frontmatter and
+  the `/model` picker's Fable entry resolve through
+  `ANTHROPIC_DEFAULT_FABLE_MODEL` (QA S61, 79b6ddd7; these four are every
+  `ANTHROPIC_DEFAULT_*_MODEL` alias Claude Code 2.1.310 reads). A full id
+  typed into `/model` is outside the launch boundary.
+  Known gap, not fixed here (pr-1071c5a, QA S59/S61): in auto permission
+  mode Claude's permission classifier refuses an Opus-class
+  `ANTHROPIC_DEFAULT_SONNET_MODEL` and requests unprefixed
+  `claude-sonnet-5[1m]`, which the router sends to the main account.
+  `CLAUDE_CODE_AUTO_MODE_MODEL=<route>/claude-sonnet-5` (settable today
+  through `alias_models`) kept it on the work route in S59. Sessions
+  launched with `--dangerously-skip-permissions` never classify.
 - The router does not rewrite the response model, so transcripts record the
   physical name (`claude-opus-5-5`); requested-model checks use claude's
-  `modelUsage` (`work/claude-opus-5-5`).
+  `modelUsage` (`work/claude-opus-5-5`). A `[1m]` suffix on the route model
+  is a Claude Code selector sent as a beta header, so the transcript still
+  records plain `claude-opus-5-5` (`worker_route.model_on_route` drops the
+  suffix; QA S59, ff65f489).
 - Resume (`resume_qa_sync`) re-enters the same poll loop; `container_name` is
   persisted in `qa_resume.json`, so relaunch gating checks the adopted
   container's mount. Adopted live panes keep running untouched.
@@ -204,7 +226,8 @@ account.
   the selected model for plain-model sessions too, not only routes. The
   account is the same either way. This enforces the selected model and stops
   Fable helpers spending the main account's allowance. With no model
-  selected, the user's environment and the CLI decide.
+  selected, the CLI default decides: pm sets no pin and removes one
+  inherited from the caller's environment (R8).
 - *Host launcher.* Optional and not recommended for the work route: the
   host `claude-mixed` falls back to plain Claude against Anthropic when the
   router is down, adds `--settings` and runs `ox-heal-settings`. Plain
@@ -253,7 +276,7 @@ config unchanged, passed on the final implementation 75f0dde6
 (`/pm-captures/host-work-route-smoke-20261022T190834Z/`: slirp4netns
 container; host + container `…190309Z/`). After 81cebf17 it passed on the
 host from an underscore cwd and in a container
-(`…195845Z/result.json`). Live QA S1–S56 is in
+(`…195845Z/result.json`). Live QA S1–S61 is in
 `/pm-captures/scenarios/<N>/` (REPORT.md). S52 (RQ39) never executed
 (run a871abafdd8bbc20, `verdict.md`: no recovery after 10 relaunches;
 kept as the record of that failed attempt). Its Thens first ran live as
@@ -1316,7 +1339,8 @@ types) and the `pm provider test --live` probe build their command there.
 
 Regressions, all in `tests/test_worker_route.py::TestSubagentPin`:
 - host route, container route, `--resume`, explicit model with `[1m]`,
-  plain model, no model selected (nothing set), `alias_models` override,
+  plain model, no model selected (no pin; an inherited one removed),
+  `alias_models` override,
   inherited values overridden, fake-claude env;
 - every session type on a PR with `model: provider:claude-work`;
 - `launch_claude`/`launch_claude_print` run env;
@@ -1355,3 +1379,23 @@ schema.
 Before this change Explore/Plan already stayed on the route, because they
 inherit the main conversation's model, which is `work/`.
 
+Live QA on the real work route (twenty-fourth pass, run da5cdfbc6f5e8370;
+`/pm-captures/scenarios/59`, `/60`, `/61`, REPORT.md each). A recording
+relay in front of the real `claude-work` route forwarded only `work/`
+models. Every child of every launch path above requested the session's
+`work/` model and got 200 from the work account (one org hash). Fixes
+from that run, each with mutation-checked regressions:
+- S59, ff65f489: `pm provider test --live` failed "model mismatch" on a
+  healthy `[1m]` route; `model_on_route` drops a trailing `[..]` suffix
+  (`TestLiveProbe::test_1m_route_model_matches_the_transcript_model`,
+  `test_transcript_model_off_the_route_still_fails`).
+- S61, 3ee69236: a no-model session inherited the caller's pin
+  (`test_no_model_drops_an_inherited_pin`,
+  `test_selected_model_is_not_unset`,
+  `test_print_launcher_without_model_drops_an_inherited_pin`).
+- S61, 79b6ddd7: `ANTHROPIC_DEFAULT_FABLE_MODEL` pinned for routers
+  (`TestRouterProvider::test_fable_alias_is_pinned`).
+- S60: no product change; qa.md clarifications 0e13c5f8.
+Open (§2): the auto-mode classifier probe (pr-1071c5a). Review loop
+c189 i1 re-checked these three fixes (7 mutations caught,
+`/pm-captures/review-c189-i1/mutation-checks.log`).

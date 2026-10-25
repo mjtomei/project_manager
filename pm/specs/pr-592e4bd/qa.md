@@ -711,7 +711,7 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
   the frontmatter and explicit-Fable children requested `claude-fable-5-1`,
   which the router sends to the main account
   (`/pm-captures/subagent-pin-249/`, impl.md R8). When pm selects no model,
-  no pin is set.
+  no pin is set and an inherited one is removed (S61, 3ee69236).
   *QA24 planner clarifications (2026-10-25):*
   - The impl evidence used a controlled endpoint standing in for the
     router (`fake_anthropic.py`). That proves which model each child
@@ -723,6 +723,19 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     one, so a regression is visible and never bills the main account.
     No real credential is copied or logged.
   - S57/S58 ran before ba4e830d and do not test RQ42.
+  - A router's explicit `alias_models` entry for
+    `CLAUDE_CODE_SUBAGENT_MODEL` replaces the pinned value and is forced
+    too (impl.md R8).
+  - Open from code reading; the scenarios decide:
+    - (a) pm sets nothing when it selects no model. A pin already in the
+      environment then passes through: for example, pm driven from inside
+      a routed Claude session, whose env carries FORCE and a `work/` model.
+      A main-account session would then pin its children to `work/`.
+    - (b) FORCE covers subagents only. A skill or slash command whose
+      frontmatter says `model:`, or a `/model` switch, changes the
+      *main-loop* model, which may leave the route.
+    - (c) The real host launcher `claude-mixed` adds `--settings` and
+      exports its own `ANTHROPIC_BASE_URL`. The pin must survive it.
   *S60 clarifications (2026-10-25, live on bd30befc):*
   - "No relay request contains C's id" means no request from a C
     session (a C impl/review/QA parent or child) reaches the relay. It
@@ -743,19 +756,22 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     must answer the permission classifier (`<severity>N</severity>`),
     or Agent calls are denied. Each new session also shows an "auto
     mode ... classifier billing" notice that needs Enter.
-  - A router's explicit `alias_models` entry for
-    `CLAUDE_CODE_SUBAGENT_MODEL` replaces the pinned value and is forced
-    too (impl.md R8).
-  - Open from code reading; the scenarios decide:
-    - (a) pm sets nothing when it selects no model. A pin already in the
-      environment then passes through: for example, pm driven from inside
-      a routed Claude session, whose env carries FORCE and a `work/` model.
-      A main-account session would then pin its children to `work/`.
-    - (b) FORCE covers subagents only. A skill or slash command whose
-      frontmatter says `model:`, or a `/model` switch, changes the
-      *main-loop* model, which may leave the route.
-    - (c) The real host launcher `claude-mixed` adds `--settings` and
-      exports its own `ANTHROPIC_BASE_URL`. The pin must survive it.
+  *Decided by S59–S61 (2026-10-25, run da5cdfbc6f5e8370):*
+  - (a) Confirmed in S61 and fixed (3ee69236): with no model selected pm
+    now removes `CLAUDE_CODE_SUBAGENT_MODEL` and
+    `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` (`env -u`; dropped from the
+    `claude -p` run env), so the children follow the CLI default.
+  - (b) Confirmed in S61 for the `fable` alias and fixed (79b6ddd7):
+    `ANTHROPIC_DEFAULT_FABLE_MODEL` is pinned with the other router
+    aliases, so skill/command `model: fable` and the `/model` Fable entry
+    stay on `work/`. A full model id typed into `/model` is outside the
+    launch boundary and is not a failure. Still open, tracked on
+    pr-1071c5a and not an RQ42 child request: in auto permission mode the
+    permission classifier requests unprefixed `claude-sonnet-5[1m]`
+    (S59 Finding B, S61).
+  - (c) Held in S59 with a `claude-mixed` stand-in launcher.
+  - S59 also found and fixed ff65f489: `pm provider test --live` passes
+    on a healthy `[1m]` route.
 
 ## 2. Setup
 
@@ -1221,6 +1237,9 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     never forwarded. Never read, copy or log a credential or header value.
     Record only booleans and a short hash of a response's organization
     header. Earlier evidence stands. S57/S58 do not cover RQ42.
+    Done: S59 INPUT_REQUIRED (RQ42 held on every path; fix ff65f489;
+    classifier decision on pr-1071c5a), S60 NEEDS_WORK (RQ42 held; spec
+    0e13c5f8 only), S61 NEEDS_WORK (fixes 3ee69236, 79b6ddd7).
 
 ## 3. Edge cases
 

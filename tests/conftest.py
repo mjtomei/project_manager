@@ -2,6 +2,11 @@
 
 import pytest
 
+# Load the CLI package before any test patches a launcher function.  Its
+# modules bind names such as ``claude_launcher.prepare_workspace`` at import
+# time, so a first import under a ``patch`` (e.g. qa_loop's lazy
+# ``pm_core.cli.helpers`` import) keeps the mock for the rest of the run.
+import pm_core.cli  # noqa: F401
 from pm_core.fake_github import FakeGitHubBackend
 
 
