@@ -578,7 +578,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
     )
 
 
-def _qa_scenarios_pointer(pr_id: str) -> str:
+def _qa_scenarios_pointer() -> str:
     """Where a session reads the QA verdicts an abbreviated listing left out.
 
     The live ``qa_status.json`` lives in an ephemeral workdir under the *host*
@@ -586,16 +586,20 @@ def _qa_scenarios_pointer(pr_id: str) -> str:
     sign-off session runs in — the same host-vs-container split
     :func:`pm_core.integration.integration_pointer` handles.  Per-scenario
     verdicts are persisted under the captures dir
-    (``$CAP/scenarios/<n>/verdict.md`` + ``scenario.json``, see
+    (``scenarios/<n>/verdict.md`` + ``scenario.json``, see
     ``qa_loop._persist_scenario_verdicts``), and that dir is bind-mounted at
     ``/pm-captures`` inside a container — so name it, not the workdir file.
+
+    Spelled ``$CAP/...`` rather than an absolute path: this prompt is built by
+    the *host* pm process but read inside the container, where the host
+    ``~/.pm/sessions/<tag>/captures/`` path does not exist.  The sign-off
+    prompt defines ``CAP="$(pm qa captures-path <pr-id>)"`` in its own
+    evidence checklist and already spells the per-scenario dir
+    ``$CAP/scenarios/<n>/`` there, so the marker matches it exactly (and
+    resolving a path here would also create the captures dir as a side
+    effect).
     """
-    from pm_core.paths import captures_dir
-    cap = captures_dir(pr_id)
-    if cap is not None:
-        return f"read `{cap}/scenarios/<n>/verdict.md` for all verdicts"
-    return (f"run `pm qa captures-path {pr_id}` and read "
-            f"`scenarios/<n>/verdict.md` for all verdicts")
+    return "read `$CAP/scenarios/<n>/verdict.md` for all verdicts"
 
 
 def _signoff_qa_scenarios_block(pr_id: str) -> str:
@@ -647,7 +651,7 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
         lines.append(bounded_join(
             valid, _scenario_line, max_items=_QA_SCENARIOS_MAX,
             omitted_note=lambda n: (
-                f"... (+{n} more scenarios; {_qa_scenarios_pointer(pr_id)})"),
+                f"... (+{n} more scenarios; {_qa_scenarios_pointer()})"),
         ))
         if truncated:
             # A title/reason cut per line is not a dropped item, so the

@@ -1256,3 +1256,100 @@ Independent re-verification this iteration (not a re-read of §19-§21):
 Evidence: `/pm-captures/review-2ac8-i5/` (`sweep.py`, `sweep_master.py`,
 `sizes-branch.txt` / `sizes-master.txt`, `pathological.py` + `.txt`,
 `full-suite-branch.txt`, `full-suite-master.txt`).
+
+## 23. Review-loop follow-ups (review loop 2ac8, iteration 6)
+
+Iteration 6 re-ran the i5-i7 method — sweep every reachable builder, then check
+each omission marker *in the environment the session reads it in* — and found
+one marker pair that names a path the session cannot read. Both are the
+host-vs-container class §12/§17/i11 kept hitting, and both were introduced by
+this PR; the fix is in the pointers only (no budget, helper or launcher path
+changed).
+
+- **`integration_pointer` and `_qa_scenarios_pointer` baked a HOST captures
+  path into the prompt.** §12 replaced the QA-scenario marker's host
+  `~/.pm/workdirs/qa/...` reference and §12/§8 replaced the integration
+  marker's host `captures_root()` reference with `paths.captures_dir()`,
+  described as "the container-aware resolver". It is not container-aware *from
+  the builder's side*: `captures_dir` resolves for the process that calls it,
+  and every prompt that inlines these markers is built by the **host** pm
+  process (`signoff.py` calls `generate_signoff_prompt` and only then wraps the
+  command in `podman exec` with `cwd=/workspace`). On the host `captures_dir`
+  returns `~/.pm/sessions/<tag>/captures/<pr>/` — and the container mounts that
+  same directory at `/pm-captures` (`container.create_container`), so the
+  baked path does not exist where the session runs. `pm qa captures-path`'s own
+  docstring states the fact: inside a container it prints `/pm-captures`
+  "because the host-side `~/.pm` location isn't visible from inside the
+  container".
+
+  Reproduced by building the sign-off prompt with a resolvable session tag
+  (fixture in the evidence dir): the markers read
+
+  ```
+  ... (+20 more scenarios; read `/home/matt/.pm/sessions/<tag>/captures/pr-x/scenarios/<n>/verdict.md` for all verdicts)
+  (+5 more; read /home/matt/.pm/sessions/<tag>/captures/pr-x/integration.json)
+  ```
+
+  Reachable: the integration marker fires above `INTEGRATION_MAX_PATHS` (20)
+  paths, and the project.yaml record keeps up to `_YAML_LIST_LIMIT` (40); the
+  scenario marker fires above `QA_SCENARIOS_MAX` (40) scenarios. So the
+  abbreviated verdicts and path lists were unrecoverable in container mode —
+  the silent loss R2/A1 forbids, and the exact defect the five preceding
+  iterations fixed elsewhere.
+
+  Both now name a **runtime-resolved** reader, matching the convention the
+  codebase already uses for the captures dir (`bug_fix_prompts.py`:
+  "The captures directory for this PR is at `$(pm qa captures-path <id>)`"):
+
+  - `integration_pointer` → `` read `$(pm qa captures-path <pr-id>)/integration.json` or run `pm pr show <pr-id>` `` — the file `check_integration` writes into the (mounted) captures dir, plus the `pm pr show` reader R16 added, which prints the record from project.yaml.
+  - `_qa_scenarios_pointer` → `` read `$CAP/scenarios/<n>/verdict.md` for all verdicts `` — the sign-off prompt defines `CAP="$(pm qa captures-path <pr-id>)"` in its own evidence checklist and already spells that directory `$CAP/scenarios/<n>/` there, so the marker now matches the prompt's own step 2 exactly (and matches §20's truncated-scenario note, which uses the same form).
+
+  Side benefit: neither pointer calls `captures_dir` any more, so the
+  filesystem side effect §19 filed (pr-155f3e3 — building a prompt creating
+  `~/.pm/sessions/<tag>/captures/<pr-id>/`) no longer happens on these two
+  paths either.
+
+- **The tests encoded the wrong premise.** `test_integration_marker_resolves_the_container_mount`
+  asserted `integration_pointer("pr-x") == "read /pm-captures/integration.json"`
+  and `test_qa_scenario_marker_resolves_the_container_mount` asserted
+  `/pm-captures/scenarios/` in the block — both by monkeypatching
+  `captures_dir` to *return* `/pm-captures`. They passed only because the test
+  forced the resolver's answer; in production the builder is the host process
+  and gets the host path. Rewritten to assert the real property: the marker
+  names a runtime-resolved reader, and a host captures path is **not** in the
+  prompt. Two new tests pin it directly (`test_integration_pointer_is_runtime_resolved`,
+  `test_integration_pointer_does_not_touch_the_filesystem`,
+  `test_qa_scenario_marker_needs_no_path_resolution`). All 7 fail against the
+  unfixed source for the right reason (baked host path; `captures_dir` called
+  while building a prompt).
+
+Checked and deliberately unchanged: `qa_finalize_prompt._scenarios_pointer`'s
+host `qa_status.json` / `qa_resume.json` reference — the finalize pane is
+launched by `build_claude_shell_cmd(cwd=workdir_path, write_dir=workdir_path)`
+in the pm session, i.e. on the host, so the host path is readable there (§13's
+reasoning still holds); `cli/plan.py`'s plan-file pointers (`pm plan deps`,
+`pm plan fix`) — those builders run through `launch_claude` on the host too;
+and the verification prompt's "the full scenario transcript on disk" pointer,
+which names no path at all (§11).
+
+Verification: `tests/test_prompt_bounds.py` 110 cases (7 rewritten/new, all
+failing-then-passing) and `tests/test_claude_launcher.py` 37; the related
+suites (`test_signoff`, `test_plan_review`, `test_bug_fix_flow_prompts`,
+`test_regression_prompts`, `test_spec_gen`, `test_qa_instructions`) 372 passed
+together. All 488 real PRs × 4 builders are **byte-identical** before and after
+(sha256 per PR × builder; the markers never fire on this repo's data — the two
+integration records have 0 paths and the QA runs are far under 40 scenarios),
+and the maxima are unchanged (impl 75,146 / review 77,616 / sign-off 92,165 /
+planner 80,652 B, max `pr-0b87a97`). The all-collections-maxed pathological
+fixture measures the same sizes as before the fix (sign-off 119,700 B, the
+highest) and its markers now read
+`` (+25 more; read `$(pm qa captures-path pr-x)/integration.json` or run `pm pr show pr-x`) ``
+and `` (+20 more scenarios; read `$CAP/scenarios/<n>/verdict.md` for all verdicts) ``.
+Full-suite failure set identical to the `origin/master` worktree baseline in
+this sandbox (1 failure, the documented environmental
+`test_hook_events::test_installer_writes_standalone_receiver`, pr-4bde874;
+3479 vs 3367 passed, the delta being this PR's new tests).
+Evidence: `/pm-captures/review-2ac8-i6/` (`i6_sweep.py` + `pathological*.txt`,
+`i6_markers.py` + `markers-pathological*.txt`, `i6_container_marker.py`,
+`sweep-head.txt` / `sweep-branch-fixed.txt` + `hashes-*.txt`,
+`full-suite-branch*.txt`, `full-suite-master.txt`).

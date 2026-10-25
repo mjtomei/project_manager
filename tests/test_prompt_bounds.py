@@ -354,8 +354,14 @@ class TestSignoffPromptBounding:
     def test_integration_markers_name_the_full_record(self, monkeypatch):
         """An abbreviated path list must say where the rest can be read —
         `(+N more)` on its own is silent loss."""
-        monkeypatch.setattr("pm_core.paths.captures_dir",
-                            lambda pr_id: Path("/cap") / pr_id)
+        # A *host* captures path.  It must not be baked into the marker: these
+        # prompts are built by the host pm process but read inside a container,
+        # where the host ~/.pm/sessions/<tag>/captures/ path does not exist
+        # (the same directory is bind-mounted at /pm-captures), so the marker
+        # names runtime-resolved readers instead.
+        monkeypatch.setattr(
+            "pm_core.paths.captures_dir",
+            lambda pr_id: Path("/host-home/.pm/sessions/tag") / "captures" / pr_id)
         integ = {"base_branch": "master", "base_sha": "a" * 40,
                  "target_repo": "r", "status": "clean",
                  "overlap": [f"f{i}.py" for i in range(200)],
@@ -363,14 +369,17 @@ class TestSignoffPromptBounding:
         block = prompt_gen._signoff_integration_block(_pr(integration=integ),
                                                       "pr-x")
         assert "(+180 more" in block
-        assert "/cap/pr-x/integration.json" in block
+        assert "pm qa captures-path pr-x" in block
+        assert "pm pr show pr-x" in block
+        assert "/host-home/" not in block
 
         from pm_core.signoff import format_signoff_return
         ret = format_signoff_return(_pr(signoff_return={
             "verdict": "NEEDS_WORK", "hop": "impl", "reason": "conflict",
             "reviewed_head": "b" * 40, "integration": integ}))
         assert "(+180 more" in ret
-        assert "/cap/pr-x/integration.json" in ret
+        assert "pm qa captures-path pr-x" in ret
+        assert "/host-home/" not in ret
 
     def test_integration_path_lists_are_byte_bounded_too(self, monkeypatch):
         """A count cap does not bound a listing whose items are filesystem
@@ -378,10 +387,9 @@ class TestSignoffPromptBounding:
         and that block is *static* text — fit_prompt cannot shrink it, so the
         whole prompt went over PROMPT_ARG_LIMIT and the launcher had to fire
         for a builder this PR exists to bound."""
-        # Resolving the marker's pointer would otherwise create the real
-        # captures dir as a side effect.
-        monkeypatch.setattr("pm_core.paths.captures_dir",
-                            lambda pr_id: Path("/cap") / pr_id)
+        monkeypatch.setattr(
+            "pm_core.paths.captures_dir",
+            lambda pr_id: Path("/host-home/.pm/sessions/tag") / "captures" / pr_id)
         long_paths = [f"{'d' * 4000}/f{i}.py" for i in range(20)]
         pr = _pr(integration={
             "base_branch": "master", "base_sha": "a" * 40,
@@ -389,8 +397,10 @@ class TestSignoffPromptBounding:
             "overlap": long_paths, "conflicts": long_paths})
         p = prompt_gen.generate_signoff_prompt(_data(pr), "pr-x")
         _assert_bounded(p)
-        # The abbreviation must name where the full record lives.
-        assert "more; read /cap/pr-x/integration.json" in p
+        # The abbreviation must name where the full record lives, in a form
+        # that resolves wherever the session runs.
+        assert "more; read `$(pm qa captures-path pr-x)/integration.json`" in p
+        assert "/host-home/" not in p
 
     def test_return_block_bounds_long_integration_paths(self, monkeypatch):
         """Same defect in the block the impl / review / QA-planner prompts
@@ -408,25 +418,47 @@ class TestSignoffPromptBounding:
         assert prompt_bytes(block) < 25_000, prompt_bytes(block)
         assert "more;" in block
 
-    def test_integration_marker_falls_back_to_pr_show(self, monkeypatch):
+    def test_integration_marker_names_pr_show_when_no_captures_dir(
+            self, monkeypatch):
         monkeypatch.setattr("pm_core.paths.captures_dir", lambda pr_id: None)
         block = prompt_gen._signoff_integration_block(
             _pr(integration={"base_branch": "master", "base_sha": "a" * 40,
                              "target_repo": "r", "status": "clean",
                              "conflicts": [f"c{i}.py" for i in range(100)]}),
             "pr-x")
-        assert "(+80 more; run `pm pr show pr-x`)" in block
+        assert "pm pr show pr-x" in block
 
-    def test_integration_marker_resolves_the_container_mount(self, monkeypatch):
-        """impl / review / QA-planner prompts run in containers, where the
-        captures dir is bind-mounted at /pm-captures and the host
-        `~/.pm/sessions/...` path does not exist.  The marker must resolve
-        through the container-aware `captures_dir`, not `captures_root`."""
+    def test_integration_pointer_is_runtime_resolved(self):
+        """The marker must not bake an absolute path.
+
+        `captures_dir` resolves for the process that *calls* it, and these
+        prompts are built by the host pm process while the session that reads
+        them runs inside a container — so whatever `captures_dir` returns here
+        (the host `~/.pm/sessions/<tag>/captures/<pr>/`) is exactly the path
+        the session cannot read.  Naming the resolver command is correct in
+        both environments; naming its host-side output is the defect
+        `pm qa captures-path`'s own docstring warns about."""
         from pm_core import integration
-        monkeypatch.setattr("pm_core.paths.captures_dir",
-                            lambda pr_id: Path("/pm-captures"))
-        assert (integration.integration_pointer("pr-x")
-                == "read /pm-captures/integration.json")
+        ptr = integration.integration_pointer("pr-x")
+        assert "pm qa captures-path pr-x" in ptr
+        assert "pm pr show pr-x" in ptr
+        # No absolute path: the captures dir is resolved at run time, on
+        # whichever side the session lives.
+        assert not ptr.startswith("read /")
+        assert "~/.pm" not in ptr and "/home" not in ptr
+
+    def test_integration_pointer_does_not_touch_the_filesystem(self, monkeypatch):
+        """Resolving the pointer used to call captures_dir(), which *creates*
+        the PR's captures dir as a side effect — so merely building a prompt
+        for a PR with an abbreviated integration record touched the
+        filesystem."""
+        from pm_core import integration
+
+        def _boom(pr_id):
+            raise AssertionError("captures_dir() called while building a prompt")
+
+        monkeypatch.setattr("pm_core.paths.captures_dir", _boom)
+        assert "pm pr show pr-x" in integration.integration_pointer("pr-x")
 
     def test_return_block_does_not_resolve_the_pointer_when_nothing_is_dropped(
             self, monkeypatch):
@@ -448,18 +480,20 @@ class TestSignoffPromptBounding:
                             "conflicts": ["c1.py"], "overlap": ["f1.py"]}}))
         assert "c1.py" in ret and "f1.py" in ret
 
-    def test_return_block_resolves_the_pointer_only_when_a_list_is_dropped(
+    def test_return_block_names_the_pointer_only_when_a_list_is_dropped(
             self, monkeypatch):
         from pm_core.signoff import format_signoff_return
-        monkeypatch.setattr("pm_core.paths.captures_dir",
-                            lambda pr_id: Path("/cap") / pr_id)
+        monkeypatch.setattr(
+            "pm_core.paths.captures_dir",
+            lambda pr_id: Path("/host-home/.pm/sessions/tag") / "captures" / pr_id)
         ret = format_signoff_return(_pr(signoff_return={
             "verdict": "NEEDS_WORK", "hop": "impl", "reason": "conflict",
             "reviewed_head": "b" * 40,
             "integration": {"base_branch": "master", "base_sha": "a" * 40,
                             "target_repo": "r", "status": "conflict",
                             "conflicts": [f"c{i}.py" for i in range(100)]}}))
-        assert "(+80 more; read /cap/pr-x/integration.json)" in ret
+        assert "(+80 more; read `$(pm qa captures-path pr-x)/integration.json`" in ret
+        assert "/host-home/" not in ret
 
     def _many_scenarios(self, tmp_path, monkeypatch, n=60):
         status = tmp_path / "qa_status.json"
@@ -472,28 +506,39 @@ class TestSignoffPromptBounding:
                             lambda pr_id: status)
         return status
 
-    def test_qa_scenario_marker_resolves_the_container_mount(self, tmp_path,
-                                                             monkeypatch):
+    def test_qa_scenario_marker_names_the_captures_verdicts(self, tmp_path,
+                                                            monkeypatch):
         """The sign-off session runs in a container, where the live
         qa_status.json (a host path under ~/.pm/workdirs/qa/) does not exist.
-        The marker must name the per-scenario verdicts under the captures dir,
-        which is bind-mounted at /pm-captures — naming the workdir file is the
-        same host-path defect the integration marker had."""
+        The marker must name the per-scenario verdicts under the captures dir
+        — naming the workdir file is the same host-path defect the integration
+        marker had."""
         status = self._many_scenarios(tmp_path, monkeypatch)
-        monkeypatch.setattr("pm_core.paths.captures_dir",
-                            lambda pr_id: Path("/pm-captures"))
+        # A host captures path: baking it in would be unreadable in the
+        # container (the dir is bind-mounted at /pm-captures there).
+        monkeypatch.setattr(
+            "pm_core.paths.captures_dir",
+            lambda pr_id: Path("/host-home/.pm/sessions/tag") / "captures" / pr_id)
         block = prompt_gen._signoff_qa_scenarios_block("pr-x")
         assert "(+20 more scenarios" in block
-        assert "/pm-captures/scenarios/" in block
+        assert "$CAP/scenarios/<n>/verdict.md" in block
+        assert "/host-home/" not in block
         assert str(status) not in block
 
-    def test_qa_scenario_marker_falls_back_to_the_captures_path_command(
-            self, tmp_path, monkeypatch):
+    def test_qa_scenario_marker_needs_no_path_resolution(self, tmp_path,
+                                                         monkeypatch):
+        """The marker is spelled `$CAP/...` (the sign-off prompt defines CAP in
+        its own evidence checklist), so it neither bakes a host path nor
+        creates the captures dir as a side effect."""
         self._many_scenarios(tmp_path, monkeypatch)
-        monkeypatch.setattr("pm_core.paths.captures_dir", lambda pr_id: None)
+
+        def _boom(pr_id):
+            raise AssertionError("captures_dir() called while building a prompt")
+
+        monkeypatch.setattr("pm_core.paths.captures_dir", _boom)
         block = prompt_gen._signoff_qa_scenarios_block("pr-x")
         assert "(+20 more scenarios" in block
-        assert "pm qa captures-path pr-x" in block
+        assert "$CAP/scenarios/<n>/verdict.md" in block
 
     def test_pr_notes_markers_name_the_concrete_pr_id(self):
         """The omission marker is the only recovery path for the abbreviated

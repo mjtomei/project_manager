@@ -391,21 +391,26 @@ def integration_pointer(pr_id: str) -> str:
     Prompt builders abbreviate the overlap/conflict path lists (they grow with
     the diff), and the marker naming what was dropped has to name a place the
     session can actually read the rest — otherwise the abbreviation is silent
-    loss.  Falls back to ``pm pr show``, which prints the PR's integration
-    record when no captures directory can be resolved.
+    loss.
 
-    Resolved through :func:`pm_core.paths.captures_dir`, not
-    :func:`integration_json_path`: the latter is the *host* root, and these
-    markers reach impl / review / QA-planner prompts, which run inside
-    containers where the captures dir is bind-mounted at
-    ``/pm-captures`` and the host path does not exist.  ``captures_dir`` is
-    the resolver that knows about that mount.
+    Deliberately a *runtime-resolved* reference, never an absolute path:
+    ``captures_dir`` resolves for the process that calls it, and every prompt
+    that inlines this marker (impl / review / sign-off / QA planner) is built
+    by the *host* pm process while the session it is handed to runs inside a
+    container.  There the host ``~/.pm/sessions/<tag>/captures/<pr>/`` path
+    does not exist — the same directory is bind-mounted at ``/pm-captures``
+    (``container.create_container``), which is exactly why
+    ``pm qa captures-path`` prints the mount when it runs in a container (see
+    its docstring) and why the bug-fix prompt block references
+    ``$(pm qa captures-path <pr-id>)`` rather than a resolved path.
+
+    Both readers work wherever the session runs: ``$(pm qa captures-path
+    <pr-id>)/integration.json`` is the record :func:`check_integration`
+    writes into the (mounted) captures dir, and ``pm pr show`` prints the
+    record from project.yaml in full.
     """
-    from pm_core.paths import captures_dir
-    cap = captures_dir(pr_id)
-    if cap is not None:
-        return f"read {cap / 'integration.json'}"
-    return f"run `pm pr show {pr_id}`"
+    return (f"read `$(pm qa captures-path {pr_id})/integration.json` "
+            f"or run `pm pr show {pr_id}`")
 
 
 def check_integration(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
