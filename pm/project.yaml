@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T15:07:11.229727+00:00'
+  updated_at: '2026-10-25T15:09:19.823820+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22960,6 +22960,23 @@ prs:
       pr-4bde874; 3479 vs 3367 passed). Evidence /pm-captures/review-2ac8-i6/.'
     created_at: '2026-10-25T15:07:11Z'
     last_edited: '2026-10-25T15:07:11Z'
+  - id: note-918e9d3
+    text: 'Review-loop 2ac8 i6, second finding (same iteration): `pm plan deps`''
+      list of OMITTED plan files was itself unbounded. §8/i2 bounded the concatenated
+      plan-file text with the aggregate _PLAN_FILES_BUDGET (30,000), but the block
+      appended when files are left out — `"\n".join(f"  - {p}" for p in omitted_plans)`
+      — is a second enumeration that budget does not cover, and its items are filesystem
+      paths (bounded only by PATH_MAX, so a count cap would not bound them either:
+      the cap-times-item-size lesson i3/i7/i8 applied to every other listing). The
+      30 KB budget is exhausted by two 20 KB plans, so a project with a few hundred
+      plans lists nearly all of them; with ~250-byte paths (200-char plan file names)
+      that measured 135,793 B — over PROMPT_ARG_LIMIT. Now bounded with the shared
+      PLAN_LIST_MAX / PLAN_LIST_BUDGET, marker naming `pm plan list`; 135,793 B ->
+      43,162 B. New test test_plan_deps_bounds_the_omitted_plan_file_list (400 plans,
+      200-char names), failing-then-passing (verified by stashing the plan.py edit).
+      Still under the same iteration''s commit range; evidence /pm-captures/review-2ac8-i6/.'
+    created_at: '2026-10-25T15:09:19Z'
+    last_edited: '2026-10-25T15:09:19Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
