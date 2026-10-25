@@ -8,15 +8,18 @@ read the full detail.
 """
 
 import json
+import threading
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
 
 from pm_core import prompt_gen, spec_gen, store
 from pm_core.claude_launcher import (
-    _materialize_oversized_prompt, build_claude_shell_cmd,
+    _materialize_oversized_prompt, build_claude_shell_cmd, launch_claude,
+    launch_claude_print, launch_claude_print_background, load_session,
+    save_session,
 )
 from pm_core.cli import cli
 from pm_core.prompt_bounds import (
@@ -977,6 +980,164 @@ class TestLauncherGuard:
                    side_effect=OSError("no temp")):
             with pytest.raises(PromptTooLargeError):
                 _materialize_oversized_prompt("z" * (PROMPT_ARG_LIMIT + 1))
+
+    # --- the guard as wired into the three launch functions (R15) ----------
+    #
+    # _materialize_oversized_prompt is unit-tested above, but the spec also
+    # requires the *wiring* to be right in each caller: the bootstrap argv,
+    # the file's lifetime (present while claude runs, gone afterwards), and
+    # the resume path staying untouched.
+
+    @staticmethod
+    def _launch_patches():
+        """Patches shared by the launch_claude guard tests."""
+        return (
+            patch("pm_core.claude_launcher.log_shell_command"),
+            patch("pm_core.claude_launcher.prepare_workspace"),
+            patch("pm_core.claude_launcher._fake_claude_config_for_type",
+                  return_value=None),
+            patch("pm_core.claude_launcher._skip_permissions",
+                  return_value=False),
+            patch("pm_core.claude_launcher.find_claude",
+                  return_value="/usr/bin/claude"),
+        )
+
+    def test_launch_claude_resume_writes_no_prompt_file(self, tmp_path):
+        """Resuming sends no prompt, so the guard must not fire or write.
+
+        Spec §4: an oversized prompt on the resume path must be ignored, not
+        materialized — otherwise every resumed session would leave a file
+        behind and pass a bootstrap instead of resuming."""
+        save_session(tmp_path, "key", "existing-session-id")
+        patches = self._launch_patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+                patch("pm_core.claude_launcher.subprocess.run") as run:
+            run.return_value = MagicMock(returncode=0)
+            rc = launch_claude("x" * (PROMPT_ARG_LIMIT + 1), "key", tmp_path,
+                               cwd=str(tmp_path), resume=True)
+        assert rc == 0
+        cmd = run.call_args[0][0]
+        assert "--resume" in cmd and "existing-session-id" in cmd
+        assert load_session(tmp_path, "key") == "existing-session-id"
+        # No oversized argv entry, no bootstrap, no prompt file.
+        assert all(prompt_bytes(a) <= PROMPT_ARG_LIMIT
+                   for a in cmd if isinstance(a, str))
+        assert not any("Read that file" in a for a in cmd if isinstance(a, str))
+        assert not (tmp_path / "pm" / "prompts").exists()
+
+    def test_launch_claude_fresh_over_limit_bootstraps_then_removes_file(
+            self, tmp_path):
+        """A fresh over-limit launch delivers the complete prompt by file and
+        removes it once claude exits."""
+        huge = "x" * (PROMPT_ARG_LIMIT + 1)
+        seen = {}
+
+        def fake_run(cmd, **kwargs):
+            # The file must exist, complete, for the whole run.
+            files = list((tmp_path / "pm" / "prompts").glob("pm_prompt_*.txt"))
+            assert len(files) == 1, files
+            seen["path"] = files[0]
+            assert files[0].read_text() == huge
+            seen["cmd"] = cmd
+            return MagicMock(returncode=0)
+
+        patches = self._launch_patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+                patch("pm_core.claude_launcher.subprocess.run",
+                      side_effect=fake_run):
+            rc = launch_claude(huge, "key", tmp_path, cwd=str(tmp_path),
+                               resume=False)
+        assert rc == 0
+        # argv stays small and points at the file; the prompt itself is not argv
+        assert all(prompt_bytes(a) < 1000 for a in seen["cmd"]
+                   if isinstance(a, str))
+        assert huge not in seen["cmd"]
+        assert any("Read that file" in a for a in seen["cmd"]
+                   if isinstance(a, str))
+        # ... and the file is gone once the process has exited.
+        assert not seen["path"].exists()
+
+    def test_launch_claude_print_over_limit_bootstraps_then_removes_file(
+            self, tmp_path):
+        huge = "x" * (PROMPT_ARG_LIMIT + 1)
+        seen = {}
+
+        def fake_run(cmd, **kwargs):
+            files = list((tmp_path / "pm" / "prompts").glob("pm_prompt_*.txt"))
+            assert len(files) == 1, files
+            seen["path"] = files[0]
+            assert files[0].read_text() == huge
+            seen["cmd"] = cmd
+            return MagicMock(returncode=0, stdout="out")
+
+        patches = self._launch_patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+                patch("pm_core.claude_launcher.subprocess.run",
+                      side_effect=fake_run):
+            out = launch_claude_print(huge, cwd=str(tmp_path),
+                                      message="testing")
+        assert out == "out"
+        assert "-p" in seen["cmd"]
+        assert all(prompt_bytes(a) < 1000 for a in seen["cmd"]
+                   if isinstance(a, str))
+        assert huge not in seen["cmd"]
+        assert not seen["path"].exists()
+
+    def test_launch_claude_print_background_over_limit_bootstraps(
+            self, tmp_path):
+        """Print-mode background launches get the same guard, and the file is
+        removed before the callback reports completion."""
+        huge = "x" * (PROMPT_ARG_LIMIT + 1)
+        seen = {}
+        done = threading.Event()
+
+        def fake_run(cmd, **kwargs):
+            files = list((tmp_path / "pm" / "prompts").glob("pm_prompt_*.txt"))
+            assert len(files) == 1, files
+            seen["path"] = files[0]
+            assert files[0].read_text() == huge
+            seen["cmd"] = cmd
+            return MagicMock(returncode=0, stdout="out", stderr="")
+
+        def cb(stdout, stderr, rc):
+            seen["cb_path_existed"] = seen["path"].exists()
+            seen["cb"] = (stdout, rc)
+            done.set()
+
+        patches = self._launch_patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+                patch("pm_core.claude_launcher.subprocess.run",
+                      side_effect=fake_run):
+            launch_claude_print_background(huge, cwd=str(tmp_path), callback=cb)
+            assert done.wait(10), "callback never fired"
+        assert seen["cb"] == ("out", 0)
+        assert all(prompt_bytes(a) < 1000 for a in seen["cmd"]
+                   if isinstance(a, str))
+        assert huge not in seen["cmd"]
+        # The callback runs inside the try, before the finally's unlink, so the
+        # file is still there when it fires — but gone once the thread is done.
+        for _ in range(100):
+            if not seen["path"].exists():
+                break
+            threading.Event().wait(0.05)
+        assert not seen["path"].exists()
+
+    def test_launch_claude_print_small_prompt_passes_prompt_through(
+            self, tmp_path):
+        """Under the limit nothing changes: the prompt is the argv entry."""
+        seen = {}
+
+        def fake_run(cmd, **kwargs):
+            seen["cmd"] = cmd
+            return MagicMock(returncode=0, stdout="out")
+
+        patches = self._launch_patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+                patch("pm_core.claude_launcher.subprocess.run",
+                      side_effect=fake_run):
+            launch_claude_print("hello", cwd=str(tmp_path), message="testing")
+        assert seen["cmd"][-1] == "hello"
+        assert not (tmp_path / "pm" / "prompts").exists()
 
 
 # ---------------------------------------------------------------------------

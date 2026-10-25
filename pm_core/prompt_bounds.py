@@ -210,6 +210,15 @@ def bounded_text(
     criteria) so the session still sees the load-bearing parts.  The marker
     names *pointer* — a command or file path for the full text — so nothing is
     lost without a way to retrieve it.
+
+    The result fits *max_bytes* unless the marker alone does not: a marker that
+    cannot fit is returned on its own (still naming *pointer*) rather than
+    dropped, because a silently empty block is worse than a block that
+    overshoots by a pointer's length.  So the postcondition is "at most
+    *max_bytes*, or the marker when that is smaller than the budget" — the same
+    overshoot :func:`bounded_join` documents for its own marker.  Callers
+    passing a budget near the marker's ~120-byte length should not assume the
+    result is bounded by it.
     """
     if prompt_bytes(text) <= max_bytes:
         return text
