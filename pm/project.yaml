@@ -31649,7 +31649,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-24T23:51:34.653933+00:00'
+  updated_at: '2026-10-25T00:29:03.609727+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33487,6 +33487,24 @@ prs:
       full suite 3715 passed, rc 0; impl.md 41(m); /pm-captures/review-e0e8-i14.'
     created_at: '2026-10-24T23:51:34Z'
     last_edited: '2026-10-24T23:51:34Z'
+  - id: note-2adaee4
+    text: 'S53 refiner (2026-10-25): code facts for the route-failure stories. (1)
+      `pm pr signoff` refuses in_progress/in_review PRs before any route check (needs
+      qa/sign_off, or in_review with skip_qa), so a router-down sign-off check needs
+      D at sign_off first (`pm pr edit D --status sign_off`). (2) The router-down
+      remedy is only "start the router (e.g. the claude-mixed router listening on
+      H:P); then launch the <type> session again"; the main-account clause is only
+      in the expired sign-in and missing-provider remedies. (3) The TUI has no periodic
+      auto-start pass; a non-re-arm pass comes from a dependency change of an in-scope
+      PR (`pm pr edit T --depends-on ...`). (4) The TUI s/d/i keys show `Error: <last
+      stderr line>` via pr_view.run_command without escape(), so "[work]" in a path
+      is dropped there; only the sign-off driver line escapes it. (5) A failed start
+      queued during the "targets +=" hold drops the deferred "Auto-start: starting
+      D" at flush if pm pr start fails within 3 s. (6) The review-loop ERROR text
+      sits on the 2nd line of a one-row log line, so it is in L, not painted. S50
+      scripts dir is empty; use /pm-captures/scenarios/47/scripts for the host harness.'
+    created_at: '2026-10-25T00:29:03Z'
+    last_edited: '2026-10-25T00:29:03Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
