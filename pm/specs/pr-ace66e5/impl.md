@@ -1522,3 +1522,74 @@ tree on both branch and master. Evidence: `/pm-captures/review-240e-i2/`
 (sweep TSVs, probes, suite logs). `/pm-captures/review-240e-i1/` was absent in
 this container (as i1 recorded for `review-240e-i0`); §24 plus
 `/pm-captures/review-2ac8-i6/` were used for the prior iteration's evidence.
+
+## 26. Review-loop follow-ups (review loop 240e, iteration 3)
+
+Iteration 3 ran natively in the review container (the controller's
+`pr-592e4bd` runtime still launches this review prompt as one argv entry, so
+its first launch failed with E2BIG; the recovery read the complete native
+prompt from a file). It re-ran the §19-§25 method — sweep every reachable
+builder, then check each omission marker against what the session can actually
+do with it — and found three defects, all in code this PR added.
+
+- **`bounded_lines` dropped content without naming a reader when only the
+  line bound fired.** The pointer reached the prompt only through
+  `bounded_text`'s byte marker, so text over `max_lines` but under `max_bytes`
+  lost its middle lines with a bare "[... N lines omitted ...]". Reachable in
+  two production builders: `generate_merge_prompt` (a 100-line / 5 KB git
+  error dropped 40 lines, although R13 requires the marker to tell the session
+  to re-run the failed update) and `_build_verification_prompt` (a 500-line
+  pane capture under 60 KB). The line-omission marker now names the caller's
+  pointer; a caller that passes none keeps the count-only marker, so the loss
+  is still reported and no reader is invented.
+- **The integration omission markers under-counted the record.**
+  `integration.compact` stores 40 paths per list plus `<key>_total`, and the
+  block abbreviates that copy again to 20, so a 200-path record rendered
+  "(+20 more)" instead of "(+180 more)" — the same under-count iteration 2
+  fixed in the `pm pr show` reader, one layer up. New
+  `integration.omitted_path_count` reports the record's remainder (falling
+  back to the list-relative count when the record carries no total, e.g. a
+  legacy/hand-written one); `_signoff_integration_block`,
+  `format_signoff_return` and `build_return_record` (which now carries the
+  totals) all use it, and `pm pr show` prints the return integration's real
+  total too. The existing marker test fed an *uncompacted* record — a shape
+  production never builds — so it passed while the prompt under-reported.
+- **`_note_line` crashed on a note with no id.** `_format_pr_notes`
+  deliberately tolerates notes without an `id` (hand-edited or legacy
+  `project.yaml`), but the shared reader (`pm pr show` and `pm pr note list`)
+  indexed `n['id']` directly: one such note raised `KeyError` and hid every
+  note, making the PR-notes omission marker a dead end. It now prints a `?`
+  placeholder.
+
+Checked and deliberately unchanged: the omitted-plan-files marker still names
+`pm plan list` (the plan-file convention is visible in the kept paths, and no
+command prints plan file paths); the truncated-scenario-steps /
+concretization-instruction / verification-transcript pointers stay as
+recorded in §17/§20 (a concrete path is not threaded into those builders);
+`build_regression_test_prompt` and the watcher lists stay as recorded in
+§10/§14; `PromptTooLargeError` remains uncaught at pane/CLI call sites
+(pr-a42a4f8).
+
+Verification: `tests/test_prompt_bounds.py` 125 cases (5 new tests / 6 cases,
+all failing-then-passing — verified by stashing the source edits) and
+`tests/test_claude_launcher.py` 37; the related suites (`test_prompt_bounds`,
+`test_claude_launcher`, `test_plan_review`, `test_bug_fix_flow_prompts`,
+`test_regression_prompts`, `test_spec_gen`, `test_signoff`,
+`test_qa_instructions`, `test_signoff_integration`) 418 passed, the 22
+`test_signoff_integration` failures being the documented environmental set.
+Real-data sweep over all 488 PRs x 4 builders is byte-identical before/after
+(impl 75,146 / review 77,616 / sign-off 92,165 / planner 80,652 B, max
+`pr-0b87a97`; 1,952 prompts, 0 errors); the all-collections-maxed
+pathological fixture measures the same sizes as §25 (four `fit_prompt`
+builders 119,700 B, sign-off highest) and every marker names a reader. The
+launcher bootstrap and the bridge `--prompt-file` handoff were re-exercised
+end to end with a stub `claude` (150,010-byte prompt delivered intact, file
+removed), and the UTF-8 handoff round-trips under `LC_ALL=C`. Full-suite
+failure set identical to the `origin/master` worktree baseline in this
+sandbox (42 failed / 17 errors: 22 `test_signoff_integration`, 19+17
+`test_merge_publish`, 1 `test_hook_events`; branch 3436 passed vs master 3309,
+the delta being this PR's new tests; the `markdown` dependency was installed
+into a scratch `PYTHONPATH`). Evidence: `/pm-captures/review-240e-i3/`
+(sweep TSV, pathological/marker sweeps, launcher/bridge and C-locale probes,
+suite logs).
+

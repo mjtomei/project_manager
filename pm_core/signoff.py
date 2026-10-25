@@ -855,10 +855,11 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 f"`{(integ.get('base_sha') or '?')[:12]}` from "
                 f"`{integ.get('target_repo')}`")
         lines.append(f"Integration with {base}: **{integ.get('status')}**.")
-        # Resolved lazily: the pointer calls captures_dir(), which creates the
-        # PR's captures directory as a side effect.  Building a prompt must not
-        # touch the filesystem, and the pointer is only needed when a path list
-        # is actually abbreviated.
+        # Built lazily: the marker is only needed when a list is actually
+        # abbreviated.  (The pointer is runtime-resolved — it names
+        # `pm qa captures-path` / `pm pr show` rather than resolving a path —
+        # so this no longer touches the filesystem, but the note is still
+        # only useful when something was dropped.)
         # No leading space in the marker: bounded_join appends it after
         # ``separator`` (", "), so one here would render as a double space.
         # The count is the *record's* remainder: project.yaml stores at most
