@@ -604,14 +604,29 @@ def _start_proxy_subprocess(sock_path: str, workdir: str,
         stderr=subprocess.DEVNULL,
     )
 
-    # Wait briefly for the socket to appear and become connectable
-    for _ in range(30):
-        if os.path.exists(sock_path) and proxy_is_alive(sock_path):
-            break
-        time.sleep(0.1)
-    else:
-        _log.warning("Push proxy subprocess (pid=%d) did not become ready "
-                     "at %s within 3s", proc.pid, sock_path)
+    # A failed launch must not leave a detached child that can publish its
+    # socket after container/proxy cleanup has already finished.
+    try:
+        for _ in range(30):
+            if os.path.exists(sock_path) and proxy_is_alive(sock_path):
+                break
+            time.sleep(0.1)
+        else:
+            from pm_core.container import ContainerError
+            raise ContainerError(
+                f"Push proxy subprocess (pid={proc.pid}) did not become ready "
+                f"at {sock_path} within 3s")
+    except BaseException:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+        else:
+            proc.wait(timeout=1)
+        raise
     _log.info("Push proxy subprocess started: pid=%d socket=%s branch=%s",
               proc.pid, sock_path, allowed_branch)
 

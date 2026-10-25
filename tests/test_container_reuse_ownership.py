@@ -13,6 +13,7 @@ NAME = "pm-tag-qa-pr-aaaa-loop-s1"
 @pytest.fixture
 def reusable(monkeypatch):
     monkeypatch.setattr(cm, "_ensure_reusable", lambda *a, **kw: "cid")
+    monkeypatch.setattr(cm, "current_container_id", lambda *a: "cid")
     monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
     monkeypatch.setattr(cm, "_create_fresh", Mock(side_effect=AssertionError("no recreate")))
     cm._renew_launch(NAME)
@@ -61,6 +62,40 @@ def test_recovery_generation_is_not_a_competing_launch(reusable, monkeypatch):
         return "cid"
     monkeypatch.setattr(cm, "_ensure_reusable", recover)
     assert cm.create_container(NAME, cm.ContainerConfig(), Path("/w")) == "cid"
+
+
+@pytest.mark.parametrize("condition", ["pids", "memory", "incomplete", "stopped"])
+def test_attaching_allocation_is_checked_before_recovery(monkeypatch, condition):
+    monkeypatch.setattr(cm, "current_container_id", lambda *a: "cid")
+    monkeypatch.setattr(cm, "container_is_running", lambda *a: condition != "stopped")
+    monkeypatch.setattr(cm, "_probe_setup", lambda *a: (
+        False, condition if condition in ("pids", "memory") else "", "Cannot fork"))
+    monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
+    monkeypatch.setattr(cm, "_run_runtime", lambda *a, **k: Mock(returncode=1, stderr=""))
+    restart = Mock()
+    remove = Mock()
+    fresh = Mock(return_value="replacement")
+    monkeypatch.setattr(cm, "restart_container", restart)
+    monkeypatch.setattr(cm, "remove_container", remove)
+    monkeypatch.setattr(cm, "_create_fresh", fresh)
+    cm._renew_launch(NAME)
+    generation = cm.cleanup_generation(NAME)
+    with pytest.raises(cm.ContainerError, match="attaching"):
+        cm.create_container(NAME, cm.ContainerConfig(), Path("/w"))
+    restart.assert_not_called()
+    remove.assert_not_called()
+    fresh.assert_not_called()
+    assert cm.cleanup_generation(NAME) == generation
+
+
+def test_qa_recovery_accepts_identity_before_restart(reusable, monkeypatch):
+    def recover(*a, **kw):
+        cm._renew_launch(NAME)
+        return "cid"
+    monkeypatch.setattr(cm, "_ensure_reusable", recover)
+    monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
+    assert cm.create_container(NAME, cm.ContainerConfig(), Path("/w"),
+                               reuse_identity=reusable) == "cid"
 
 
 def test_qa_relaunch_passes_captured_ownership(monkeypatch):

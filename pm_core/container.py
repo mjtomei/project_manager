@@ -1104,13 +1104,21 @@ def create_container(
         # Recovery may restart an unowned allocation and renew its generation;
         # that new lease belongs to this launch, not a concurrent attaching one.
         was_attaching = recent_launch(name, container_reaper.LAUNCH_GRACE)
+        prior_id = current_container_id(name) if was_attaching or reuse_identity else None
+        same_owner = (bool(prior_id) and reuse_identity is not None
+                      and reuse_identity.get("id") == prior_id
+                      and reuse_identity.get("generation") == cleanup_generation(name))
+        # Recovery can restart or remove an incomplete allocation. Protect the
+        # create-to-pane gap before entering it, not just before renewing reuse.
+        # Capture a QA handoff now: recovery itself may advance its generation.
+        if was_attaching and prior_id != "" and not same_owner:
+            raise launch_error(
+                name, "runtime", "container is still owned by an attaching launch; "
+                "use that session or wait for it to finish", stage="be reused")
         reused = _ensure_reusable(name, workdir, allowed_push_branch,
                                   session_tag=session_tag, pr_id=pr_id)
         if reused:
-            generation = cleanup_generation(name)
-            same_owner = (reuse_identity is not None
-                          and reuse_identity.get("id") == reused
-                          and reuse_identity.get("generation") == generation)
+            same_owner = same_owner and prior_id == reused
             if not same_owner:
                 owners = container_reaper.live_owner_panes(name, reused)
                 if owners or was_attaching:
@@ -1211,10 +1219,15 @@ def canonical_container_name(name: str) -> str:
     result = _run_runtime("inspect", "--format", "{{.Name}}", name,
                           check=False, timeout=10)
     canonical = result.stdout.strip().lstrip("/")
-    if result.returncode != 0 or not canonical.startswith(CONTAINER_PREFIX):
+    managed = canonical.startswith(CONTAINER_PREFIX)
+    if result.returncode == 0 and canonical and not managed:
+        labels = _run_runtime("inspect", "--format", '{{index .Config.Labels "pm.managed"}}',
+                              name, check=False, timeout=10)
+        managed = labels.returncode == 0 and labels.stdout.strip() == "1"
+    if result.returncode != 0 or not managed:
         raise ContainerError(
             f"Cannot resolve managed container '{name}': "
-            f"{(result.stderr or '').strip() or 'expected a pm container name'}")
+            f"{(result.stderr or '').strip() or 'expected a pm container name or managed label'}")
     return canonical
 
 

@@ -61,7 +61,10 @@ def _retain_dir() -> Path:
 
 def _retention_path(name: str, container_id: str = "") -> Path:
     if container_id:
-        key = hashlib.sha256(f"{name}\0{container_id}".encode()).hexdigest()
+        # Names may change through the runtime; retention follows this ID in
+        # its runtime store, not a mutable name or an ID cloned into another store.
+        domain = json.dumps(_runtime_domain(), sort_keys=True)
+        key = hashlib.sha256(f"{domain}\0{container_id}".encode()).hexdigest()
         return _retain_dir() / f"{key}.json"
     return _retain_dir() / name
 
@@ -122,7 +125,17 @@ def is_retained(name: str, container_id: str = "") -> bool:
         rec = _retain_record(name)  # pre-identity-key marker
     if rec is None and not container_id:
         return name in retained_names()
+    if rec is None and container_id:
+        # Compatibility with name+ID keyed markers from before rename support.
+        domain = _runtime_domain()
+        return any(r.get("id") == container_id
+                   and (domain is None or r.get("runtime_domain") in (None, domain))
+                   for _, r in _retention_records())
     if rec is None:
+        return False
+    domain = rec.get("runtime_domain")
+    current_domain = _runtime_domain() if domain is not None else None
+    if current_domain is not None and domain != current_domain:
         return False
     rec_id = str(rec.get("id") or "")
     return not rec_id or not container_id or rec_id == container_id
@@ -176,8 +189,12 @@ def _retention_records() -> list[tuple[Path, dict]]:
 def unretain(name: str) -> bool:
     domain = _runtime_domain()
     removed = False
-    for path, rec in _retention_records():
-        if rec.get("name") != name:
+    records = _retention_records()
+    cid = None
+    if not any(rec.get("name") == name for _, rec in records):
+        cid = container_mod.current_container_id(name)
+    for path, rec in records:
+        if rec.get("name") != name and (not cid or rec.get("id") != cid):
             continue
         recorded = rec.get("runtime_domain")
         if recorded is not None and recorded != domain:
@@ -202,11 +219,13 @@ def _prune_retain_markers(inventory: dict[str, str], since: float) -> None:
     domain = _runtime_domain()
     if domain is None:
         return
+    existing_ids = set(inventory.values())
     for path, rec in _retention_records():
         if rec.get("runtime_domain") != domain:
             continue  # another runtime's absence proves nothing about this marker
         name = rec["name"]
-        if name in inventory and (not rec.get("id") or rec["id"] == inventory[name]):
+        if (rec.get("id") in existing_ids
+                or not rec.get("id") and name in inventory):
             continue
         try:
             # "at" has whole-second resolution, so compare against the

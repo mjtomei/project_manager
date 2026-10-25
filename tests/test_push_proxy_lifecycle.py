@@ -78,6 +78,53 @@ def test_daemon_installs_signal_handlers_before_socket_readiness(monkeypatch, tm
     fake_proxy.stop.assert_called_once()
 
 
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_unready_proxy_child_is_terminated_and_reaped(monkeypatch, tmp_path, interrupted):
+    from unittest.mock import Mock
+    from pm_core.container import ContainerError
+
+    proc = Mock()
+    proc.poll.return_value = None
+    proc.wait.side_effect = [subprocess.TimeoutExpired("proxy", 1), 0]
+    monkeypatch.setattr(push_proxy.subprocess, "Popen", Mock(return_value=proc))
+    monkeypatch.setattr(push_proxy, "proxy_is_alive", lambda path: False)
+    monkeypatch.setattr(time, "sleep", Mock(
+        side_effect=KeyboardInterrupt if interrupted else None))
+    with pytest.raises(KeyboardInterrupt if interrupted else ContainerError):
+        push_proxy._start_proxy_subprocess(str(tmp_path / "push.sock"), str(tmp_path), "branch")
+    proc.terminate.assert_called_once()
+    proc.kill.assert_called_once()
+    assert proc.wait.call_count == 2
+
+
+def test_delayed_real_proxy_process_cannot_publish_after_timeout(monkeypatch, tmp_path):
+    from pm_core.container import ContainerError
+
+    real_popen = subprocess.Popen
+    children = []
+    def delayed_start(args, **kwargs):
+        child = real_popen([
+            sys.executable, "-c",
+            "import time, runpy; time.sleep(60); runpy.run_module('pm_core.push_proxy', run_name='__main__')",
+            *args[3:],
+        ], **kwargs)
+        children.append(child)
+        return child
+    monkeypatch.setattr(push_proxy.subprocess, "Popen", delayed_start)
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+    path = tmp_path / "push.sock"
+    try:
+        with pytest.raises(ContainerError, match="did not become ready"):
+            push_proxy._start_proxy_subprocess(str(path), str(tmp_path), "branch")
+        assert children[0].poll() is not None
+        assert not path.exists()
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)
+
+
 def test_old_server_notices_replacement_without_missing_path(tmp_path):
     path = str(tmp_path / "push.sock")
     old = push_proxy.PushProxy(path, str(tmp_path), "branch")

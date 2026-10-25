@@ -12304,6 +12304,22 @@ prs:
       review commit.'
     created_at: '2026-10-25T21:31:06Z'
     last_edited: '2026-10-25T21:33:40Z'
+  - id: note-095973e
+    text: 'Review-loop 6427 i11 (chatgpt/gpt-6-astra-high): fixed recovery running before the
+      attachment-lease guard (restart/recreate could destroy a concurrent attaching allocation),
+      retention lost on runtime rename (now runtime-domain/ID keyed with legacy lookup and ID-aware
+      pruning), and detached proxy children left running after readiness timeout/interruption
+      (terminate/reap before failure). Captured QA recovery handoff remains valid across its
+      own generation change. Before-fix regressions reproduced: 9 ownership/retention failures
+      and 2 proxy-start failures. Focused container/proxy suite 437 passed; final new regressions
+      27 passed, including a real delayed proxy subprocess cancellation; launcher/QA integration
+      143 passed. Final sanitized full suite completed successfully; exact count/warnings in
+      /pm-captures/review-6427-i11/full-suite-final.log. Evidence and per-file review: /pm-captures/review-6427-i11/README.md.
+      Existing lifecycle architecture retained; spec clarified. Existing model/handoff/manual-gate
+      edits preserved outside this review commit. No real-container QA claim or waiver; outstanding
+      runtime scenarios and independent sign-off remain required.'
+    created_at: '2026-10-25T21:47:53Z'
+    last_edited: '2026-10-25T21:48:52Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

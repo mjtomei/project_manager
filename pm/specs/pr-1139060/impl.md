@@ -77,7 +77,9 @@ removed by automatic or scoped cleanup) when any of:
    a new attachment. A different launcher cannot renew ownership while live panes
    or that lease remain; unknown ownership also refuses adoption. QA retry may
    hand off its own allocation by supplying the previously captured ID/generation,
-   which must still match under the lock. Retention inspection and marker writes
+   which must still match under the lock. Check the lease and capture that
+   handoff before recovery can restart or recreate an allocation, since recovery
+   itself may advance its generation. Retention inspection and marker writes
    use this lock too.
 
 Otherwise it is a candidate with a reason: `PR <id> is merged|closed`,
@@ -150,6 +152,9 @@ retryable cleanup rather than permission to delete by name.
   operations share a bounded path-keyed lock, so delayed old shutdown cannot
   remove a newly bound replacement socket. Daemons install shutdown handlers
   before publishing their ready socket, so an immediate stop cannot bypass cleanup.
+  A readiness timeout or interrupted startup terminates and reaps the spawned
+  child before returning failure; a delayed daemon cannot publish an orphan
+  socket after allocation cleanup.
   If the QA run-end release is skipped because another reconcile holds the
   reaper lock, it is re-queued in the background (live panes would
   otherwise keep those containers "owned" forever).
@@ -248,8 +253,10 @@ running-container and keyring counts before → after).  `pm session cleanup
 [--dry-run]` = `reap --session <current tag>` (the command older messages
 referenced).  `pm container retain NAME [--release]` manages retention; a marker is bound
 to the retained container's id (a replacement under the same name is not
-retained). Markers are keyed by container identity so same-name allocations
-in different runtime stores do not overwrite each other's retention. Full
+retained). Markers are keyed by runtime domain and container ID so renaming
+an allocation preserves retention and same-name or cloned-ID allocations in
+other runtime stores do not overwrite each other's retention. Legacy name+ID
+markers remain readable after renames. Full
 reconcile passes prune retention and pending release records only when their
 recorded runtime domain matches the successfully inventoried domain; unknown
 or legacy domains are preserved. Known foreign-domain release records cannot

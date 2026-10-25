@@ -266,6 +266,7 @@ def test_scoped_generation_supersedes_legacy_marker():
 
 
 def test_allocation_identity_captured_before_concurrent_reuse(monkeypatch):
+    monkeypatch.setattr(cm, "current_container_id", lambda *a: "cid")
     monkeypatch.setattr(cm, "_ensure_reusable", lambda *a, **kw: "cid")
     monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
     first, second = {}, {}
@@ -325,8 +326,9 @@ def test_foreign_inventory_does_not_prune_retention_or_release(monkeypatch):
     reaper.retain(NAME, container_id="b-id")
     reaper._prune_retain_markers({}, time.time() + 2)
     reaper._prune_releases(reaper.Outcome(), reaper.Scope(), time.time() + 2)
-    assert reaper.is_retained(NAME, "a-id")
     assert not reaper.is_retained(NAME, "b-id")
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: a)
+    assert reaper.is_retained(NAME, "a-id")
     assert any(rec["id"] == "a-id" for _, rec in reaper._release_records())
 
 
