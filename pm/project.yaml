@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T18:55:57.287012+00:00'
+  updated_at: '2026-10-25T19:38:08.729475+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -23201,6 +23201,63 @@ prs:
       (2026-10-25T18:56:00Z)'
     created_at: '2026-10-25T18:55:57Z'
     last_edited: '2026-10-25T18:55:57Z'
+  - id: note-cc5bf68
+    text: 'Review-loop 240e i6 (native recovery; the controller''s pr-592e4bd runtime
+      still passes this review prompt as one argv entry, so its first launch hit E2BIG
+      — not evidence the source on this branch is broken). Re-ran the §19-§29 method
+      (sweep every reachable builder, then check every omission marker in the environment
+      the session reads it in) plus the delivery paths end to end, and found two defects
+      in code this PR added.
+
+
+      (1) The QA concretization prompt''s >20 KB instruction truncation marker named
+      `the instruction file under pm/qa/instructions/`, but qa_instructions.resolve_instruction_ref
+      resolves a scenario''s INSTRUCTION reference against instructions/, regression/
+      AND artifacts/ — a regression test used as a scenario instruction lives at pm/qa/regression/<name>.md,
+      so the omitted text was unrecoverable (the silent loss R2/A1 forbids). Fixed
+      by threading the library-relative path (instruction_ref, e.g. regression/big-regression.md)
+      from both scenario launch flows (host and container) through _build_concretize_cmd
+      into _build_concretization_prompt; the marker now names the exact file, which
+      resolves in the scenario clone and in the container mount. The no-ref fallback
+      is category-neutral (`the QA library file under pm/qa/ (run pm qa list for every
+      item)`), and an absolute ref (a resumed snapshot''s scratch copy) also falls
+      back rather than building pm/qa/<absolute>.
+
+
+      (2) A hand-edited/legacy note with `created_at: null` (or a non-string value)
+      crashed _format_pr_notes: the dedup comparison and the sort key compared None
+      against str and raised TypeError, aborting the whole prompt builder before any
+      bound ran — the same malformed-note shape i3 (missing id), i4 (missing text)
+      and i5 (present-but-null id/text) made the renderers/readers tolerate. New prompt_gen._note_timestamp
+      coerces the value to a comparable string for both.
+
+
+      Also (no output change): the sign-off QA-scenario block''s per-line truncation
+      note still hard-coded the reader string i5 centralised; the path portion is
+      now _QA_SCENARIOS_PATH, shared by the block''s count marker, its truncation
+      note, and fit_prompt''s block-level marker.
+
+
+      Verification: tests/test_prompt_bounds.py 136 (5 new, all failing-then-passing
+      — verified by `git checkout --` of the two source files; evidence /pm-captures/review-240e-i6/failing-then-passing-i6.txt);
+      test_claude_launcher 37; related suites 624. Real-data sweep over all 489 PRs
+      x 4 builders byte-identical before/after (impl 75,146 / review 77,616 / sign-off
+      92,165 / planner 80,652 B, max pr-0b87a97; 1,956 prompts, 0 errors), and against
+      an origin/master worktree the branch is smaller only on the intended caps (master
+      is over-limit for pr-ace66e5 at 174,662-206,311 B). The all-collections-maxed
+      pathological fixture keeps every reachable builder under PROMPT_ARG_LIMIT (max
+      119,700 B) and now contains no pm/qa/instructions/ claim. Launcher bootstrap
+      + bridge --prompt-file re-exercised end to end (150 KB CJK prompt -> 179-byte
+      max argv entry, complete file on disk then removed; container write_dir/cwd
+      split; no writable location raises PromptTooLargeError). Mutation checks: reverting
+      the i5 QA pointer, the null-note or-forms, the bridge --prompt-file reader,
+      the launcher oversize guard and the bridge guard each fail the tests that cover
+      them. Clean-tree full suite 42 failed / 17 errors / 3447 passed, failure set
+      byte-identical to the origin/master worktree baseline (22 test_signoff_integration,
+      19+17 test_merge_publish, 1 test_hook_events; markdown installed into a scratch
+      PYTHONPATH for both). Evidence /pm-captures/review-240e-i6/. (2026-10-25T19:40:00Z)'
+    created_at: '2026-10-25T19:38:08Z'
+    last_edited: '2026-10-25T19:38:08Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
