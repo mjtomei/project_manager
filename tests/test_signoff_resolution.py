@@ -11,12 +11,10 @@ approved candidate.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
-from unittest import mock
 from unittest.mock import patch
 
 import pytest
@@ -496,10 +494,45 @@ def test_approval_rejects_a_head_tag_too_short_to_identify_the_head(w):
         f'<meta name="pm-signoff-candidate" '
         f'content="{rec["candidate_tree"]}">'
         '<meta name="pm-signoff-checks" content="ran the resolver tests">'
+        '<meta name="pm-signoff-evidence" content="review@deadbee,qa@cafef00">'
         '</head><body/></html>')
     problem = signoff.approval_justification_problem(
         PR, pr_entry(w)["integration"], rec["head"])
     assert problem and "pm-signoff-head" in problem
+    # A tag that cannot identify the revision is not attributed as evidence.
+    assert signoff._report_evidence(PR, rec["head"])["reused"] == []
+
+
+def test_resolved_approval_is_stale_when_head_moves_after_the_apply(w):
+    """A commit after the applied resolution needs a fresh sign-off."""
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+    commit(w.wd, "after.txt", "after\n", "commit after the resolution")
+    moved = git(w.wd, "rev-parse", "HEAD")
+    refusal = signoff.merge_gate_refusal(pr_entry(w), moved, "master")
+    assert refusal and "stale" in refusal
+    result, _, finalized = merge(w)
+    assert result.exit_code != 0 and not finalized
+
+
+def test_compact_resolution_bounds_records_and_is_idempotent():
+    """Re-compacting a compact resolution is a fixed point (digest stable)."""
+    records = {f"prs[pr-{i}].notes": {"added_ours": 1, "added_theirs": 0,
+                                      "changed": 0, "removed": 0}
+               for i in range(60)}
+    resolution = {
+        "resolver": "project-yaml-records/v1",
+        "paths": [{"path": "pm/project.yaml", "records": records}],
+        "unresolved": [{"path": "pm/project.yaml", "conflicts": ["c"]}] * 50,
+    }
+    compact = integration._compact_resolution(resolution)
+    entry = compact["paths"][0]
+    assert len(entry["records"]) == integration._YAML_LIST_LIMIT
+    assert entry["records_total"] == 60
+    assert compact["unresolved_total"] == 50
+    assert integration._compact_resolution(compact) == compact
+    assert integration._resolution_digest(resolution) == \
+        integration._resolution_digest(compact)
 
 
 def test_resolution_preserves_workdir_files_and_evidence(w):

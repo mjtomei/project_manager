@@ -331,14 +331,20 @@ def qa_evidence(pr_id: str) -> dict | None:
 
 
 def _report_evidence(pr_id: str, reviewed_head: str | None) -> dict:
-    """The reuse statement from a report written for *reviewed_head*."""
+    """The reuse statement from a report written for *reviewed_head*.
+
+    A statement is only attributed when the report names a HEAD that
+    identifies this revision (the same 7-character minimum the manual record
+    path enforces); a missing or short tag cannot tie the statement to the
+    reviewed revision, and a report left by an earlier run must not have its
+    words recorded as this decision's.
+    """
     meta = report_meta(pr_id)
     meta_head = (meta.get("head") or "").strip()
-    if meta_head and reviewed_head \
-            and not reviewed_head.startswith(meta_head):
-        # A report left by an earlier run: its statement is not about this
-        # revision and must not be attributed to it.
+    if not reviewed_head or len(meta_head) < 7 \
+            or not reviewed_head.startswith(meta_head):
         meta = {}
+        meta_head = ""
     reused = (meta.get("evidence") or "").strip()
     return {
         "report_head": meta_head or None,
@@ -465,7 +471,8 @@ def effective_verdict(verdict: str | None, integration: dict | None,
             "reconciling it is implementation work")
     if of_head and rec.get("status") == integ.RESOLVED:
         resolution = rec.get("resolution") or {}
-        if resolution.get("unresolved"):
+        if resolution.get("unresolved") \
+                and verdict in (SIGNOFF_MERGE, SIGNOFF_REVIEW, SIGNOFF_REQA):
             reasons = "; ".join(
                 str(u.get("conflicts")) for u in resolution["unresolved"][:3])
             return SIGNOFF_IMPL, (
@@ -1098,7 +1105,7 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
     applied = rec.get("applied") or {}
     if applied.get("merge_sha"):
         lines.append(
-            f"pm merged that base revision into the PR branch (clean) as "
+            f"pm merged the base revision into the PR branch as "
             f"`{applied['merge_sha'][:12]}` — review/verify the integrated "
             "result, not only the PR's own diff.")
         if applied.get("base_sha"):

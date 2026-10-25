@@ -851,14 +851,19 @@ def _write_resolved(target: Path, text: str) -> None:
 
     ``store.save`` leaves project.yaml read-only (0444) so casual manual
     edits are blocked; a resolved file must not silently end up writable.
+    The write is atomic (temp file + rename) like ``store.save``: the apply
+    path writes into the real PR workdir mid-merge, and an interrupted
+    write must not leave a truncated project.yaml behind.
     """
     target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        try:
-            target.chmod(target.stat().st_mode | stat.S_IWUSR)
-        except OSError:
-            pass
-    target.write_text(text, encoding="utf-8")
+    tmp = target.with_name(f".{target.name}.pm-tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, target)
+    finally:
+        # A failed write must not leave a stray temp file in the workdir.
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
     try:
         target.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
     except OSError:
@@ -1045,7 +1050,11 @@ def compute_candidate(workdir: str, head: str, base_sha: str,
     if err:
         out.update(status=ERROR, error=err)
     elif conflicts:
-        if tree:
+        # ``resolved`` is only meaningful with a resolution record that has
+        # no unresolved entries: merge-tree and the worktree merge can
+        # disagree, and a bare tree would be reported as an approved
+        # resolution with no provenance.
+        if tree and resolution and not resolution.get("unresolved"):
             out.update(status=RESOLVED, conflicts=conflicts,
                        candidate_tree=tree, resolution=resolution)
         else:
@@ -1145,7 +1154,16 @@ def _compact_resolution(resolution: dict) -> dict:
             out[key] = resolution[key]
     paths = []
     for entry in resolution.get("paths") or []:
-        paths.append({
+        records = dict(entry.get("records") or {})
+        # Bound the per-record counts too (a large conflict can touch every
+        # record).  A recorded total is carried through re-compaction so the
+        # resolution digest stays stable.
+        records_total = entry.get("records_total")
+        if records_total is None and len(records) > _YAML_LIST_LIMIT:
+            records_total = len(records)
+        if records_total is not None:
+            records = dict(list(records.items())[:_YAML_LIST_LIMIT])
+        item = {
             "path": entry.get("path"),
             "resolver": entry.get("resolver"),
             "blob": entry.get("blob"),
@@ -1153,13 +1171,19 @@ def _compact_resolution(resolution: dict) -> dict:
             "added_theirs": list(entry.get("added_theirs") or [])[:20],
             "merged_fields": list(entry.get("merged_fields") or [])[:20],
             "removed": list(entry.get("removed") or [])[:20],
-            "records": entry.get("records") or {},
-        })
+            "records": records,
+        }
+        if records_total is not None:
+            item["records_total"] = records_total
+        paths.append(item)
     out["paths"] = paths[:_YAML_LIST_LIMIT]
     unresolved = list(resolution.get("unresolved") or [])
+    unresolved_total = resolution.get("unresolved_total")
+    if unresolved_total is None and len(unresolved) > _YAML_LIST_LIMIT:
+        unresolved_total = len(unresolved)
     out["unresolved"] = unresolved[:_YAML_LIST_LIMIT]
-    if len(unresolved) > _YAML_LIST_LIMIT:
-        out["unresolved_total"] = len(unresolved)
+    if unresolved_total is not None:
+        out["unresolved_total"] = unresolved_total
     return out
 
 
@@ -1276,7 +1300,10 @@ def prepare(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
     record = check_integration(root, pr_id, data=data)
     if record.get("status") != RESOLVED:
         return record
-    merged, err = apply_integration(root, pr_id, record)
+    try:
+        merged, err = apply_integration(root, pr_id, record)
+    except Exception as e:  # an apply bug must not crash the sign-off launch
+        merged, err = None, f"applying the resolution raised: {e}"
     if not merged:
         record["apply_error"] = err
         _log.warning("sign-off %s: resolved integration not applied: %s",
