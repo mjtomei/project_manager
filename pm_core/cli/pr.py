@@ -654,10 +654,16 @@ def pr_show(pr_id: str):
             click.echo(f"Apply error: {ret['apply_error']}")
         ret_integ = ret.get("integration") or {}
         if ret_integ:
-            base = (f"`{ret_integ.get('base_branch')}` @ "
-                    f"`{ret_integ.get('base_sha')}` from "
-                    f"`{ret_integ.get('target_repo')}`")
-            click.echo(f"Integration: {ret_integ.get('status')} with {base}")
+            # A return integration can legitimately lack a field: an ERROR
+            # record (e.g. the base fetch failed) carries ``base_sha: null``.
+            # Render the placeholder rather than the literal ``None`` — the
+            # same rule the notes readers follow (a reader must not print a
+            # value the record does not hold).
+            base = (f"`{ret_integ.get('base_branch') or '?'}` @ "
+                    f"`{ret_integ.get('base_sha') or '?'}` from "
+                    f"`{ret_integ.get('target_repo') or '?'}`")
+            click.echo(f"Integration: {ret_integ.get('status') or '?'} "
+                       f"with {base}")
             _path_list_lines(ret_integ)
     integ = pr_entry.get("integration") or {}
     if integ:

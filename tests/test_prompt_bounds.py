@@ -1523,6 +1523,32 @@ class TestLauncherGuard:
         files = list((tmp_path / "pm" / "prompts").glob("pm_prompt_*.txt"))
         assert files and files[0].read_text() == huge
 
+    def test_shell_cmd_container_split_writes_host_names_container(self, tmp_path):
+        """Container mode: the file lands on the host workdir (``write_dir``)
+        while the command names the path claude can open (``cwd``).
+
+        Review, sign-off, QA child and finalize all launch through this split
+        (``cwd`` is the container mount, ``write_dir`` the host workdir), so a
+        regression that named the host path would hand claude an unreadable
+        file — the same defect the ``_materialize_oversized_prompt`` split is
+        tested for.
+        """
+        host = tmp_path / "host"
+        host.mkdir()
+        huge = "x" * (PROMPT_ARG_LIMIT + 1000)
+        with patch("pm_core.claude_launcher.log_shell_command"), \
+             patch("pm_core.paths.skip_permissions_enabled", return_value=False):
+            cmd = build_claude_shell_cmd(prompt=huge, cwd="/workspace",
+                                         write_dir=str(host), session_id="sid")
+        assert "Read that file" in cmd
+        # The command names the container path, never the host path.
+        assert "/workspace/pm/prompts/pm_prompt_sid.txt" in cmd
+        assert str(host) not in cmd
+        files = list((host / "pm" / "prompts").glob("pm_prompt_*.txt"))
+        assert files and files[0].read_text() == huge
+        # Cleanup targets the same (container-visible) file.
+        assert "rm -f /workspace/pm/prompts/pm_prompt_sid.txt" in cmd
+
     def test_shell_cmd_small_prompt_uses_cat(self, tmp_path):
         with patch("pm_core.claude_launcher.log_shell_command"), \
              patch("pm_core.paths.skip_permissions_enabled", return_value=False):
@@ -1694,6 +1720,45 @@ print("ok")
         assert any("Read that file" in a for a in seen["cmd"]
                    if isinstance(a, str))
         # ... and the file is gone once the process has exited.
+        assert not seen["path"].exists()
+
+    def test_launch_claude_no_cwd_over_limit_uses_a_temp_file(self, tmp_path):
+        """Spec §4's ``cwd=None`` edge case: the plan builders (``pm plan
+        review`` / ``deps`` / ``fix``) launch with no workdir, so there is no
+        host dir to write into.
+
+        The complete prompt must still be delivered — via a temp file whose
+        absolute path the bootstrap names — and removed after claude exits.
+        This is the production path for the real 270-521 KB plan prompts, and
+        unlike the ``cwd`` cases above it has no workdir to fall back on.
+        """
+        huge = "x" * (PROMPT_ARG_LIMIT + 1)
+        seen = {}
+
+        def fake_run(cmd, **kwargs):
+            boot = next(a for a in cmd if "Read that file" in a)
+            path = Path(boot.split("the file at ", 1)[1].split(". ", 1)[0])
+            seen["path"] = path
+            seen["existed"] = path.exists()
+            seen["content"] = path.read_text()
+            seen["cmd"] = cmd
+            return MagicMock(returncode=0)
+
+        patches = self._launch_patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+                patch("pm_core.claude_launcher.subprocess.run",
+                      side_effect=fake_run):
+            rc = launch_claude(huge, "key", tmp_path, cwd=None, resume=False)
+        assert rc == 0
+        # The complete prompt was on disk for the whole run...
+        assert seen["existed"] and seen["content"] == huge
+        # ...argv stayed small and carried the bootstrap, not the prompt...
+        assert all(prompt_bytes(a) < 1000 for a in seen["cmd"]
+                   if isinstance(a, str))
+        assert huge not in seen["cmd"]
+        # ...there was no workdir to write into...
+        assert not (tmp_path / "pm" / "prompts").exists()
+        # ...and the temp file is gone once the process has exited.
         assert not seen["path"].exists()
 
     def test_launch_claude_retry_over_limit_bootstraps_then_removes_file(
@@ -2224,6 +2289,30 @@ class TestPrShowCommand:
         assert "Overlap (200):" in result.output
         assert "(+160 more)" in result.output
         assert "Conflicts (1): c.py" in result.output
+
+    def test_prints_return_integration_without_literal_none(self, tmp_path):
+        """A return integration can legitimately carry null fields.
+
+        ``check_integration`` records ``base_sha: None`` when the base fetch
+        fails (status ``error``), and ``build_return_record`` copies the record
+        as-is, so ``pm pr show`` — the reader the return block's integration
+        marker names — must render the placeholder rather than the literal
+        ``None``.
+        """
+        root = _make_state(tmp_path)
+        data = store.load(root)
+        data["prs"][0]["signoff_return"] = {
+            "verdict": "SIGNOFF_IMPL", "hop": "impl", "reason": "r",
+            "integration": {"base_branch": None, "base_sha": None,
+                            "target_repo": None, "status": None,
+                            "overlap": [], "conflicts": []},
+        }
+        store.save(data, root)
+        result = CliRunner().invoke(
+            cli, ["-C", str(root), "pr", "show", "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "Integration: ? with `?` @ `?` from `?`" in result.output
+        assert "None" not in result.output
 
     def test_prints_integration_record(self, tmp_path):
         """`pm pr show` is the fallback pointer for abbreviated integration

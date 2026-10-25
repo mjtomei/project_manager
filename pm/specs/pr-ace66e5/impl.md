@@ -2157,3 +2157,74 @@ worktree baseline in the same sandbox (43 / 17 / 3308: 36 `test_merge_publish`,
 `PM_HOST_HOME` unset — and the dirty-tree `test_git_ops` proxy flake, which
 passes with the tree clean). Evidence: `/pm-captures/review-4029-i2/`.
 
+
+## 34. Review-loop follow-ups (review loop 4029, iteration 3)
+
+Iteration 3 ran natively in the review container (the controller's
+`pr-592e4bd` runtime still passes this review prompt as one argv entry, so the
+first launch failed with E2BIG; the recovery read the complete native prompt
+from a file). It re-ran the §19-§33 method — sweep every reachable builder,
+check every omission marker in the environment the session reads it in, and
+exercise the delivery paths end to end — and found one reader defect in this
+PR's new `pm pr show`, plus two delivery-path test gaps.
+
+- **`pm pr show` printed the literal `None` for a null return-integration
+  field.** `build_return_record` copies the integration record as-is, and an
+  ERROR record legitimately carries `base_sha: null` (the base fetch failed),
+  so the reader's "Integration: <status> with `base` @ `sha` from `repo`"
+  line rendered ``None with `None` @ `None` from `None` `` — the same
+  literal-None shape i4/i5 fixed for notes and their readers, in the reader
+  the return/integration markers name. The three fields and the status now
+  use the `?` placeholder (matching `format_signoff_return`, which already
+  did). Real records are unchanged.
+
+- **The plan builders' over-limit delivery path had no test.** `pm plan
+  review` / `deps` / `fix` launch through `launch_claude` with no `cwd`, so an
+  over-limit prompt takes the `tempfile.mkstemp` branch of
+  `_materialize_oversized_prompt` (spec §4's "cwd=None direct launches") —
+  the real production path for the 270-521 KB plan prompts. Every existing
+  guard test passed a `cwd`, and the plan tests exercise
+  `build_claude_shell_cmd` instead, so a regression in the no-workdir branch
+  (no file, prompt back in argv, file not removed) would not have been
+  caught. Added `test_launch_claude_no_cwd_over_limit_uses_a_temp_file`: the
+  complete prompt is on disk for the whole run, argv carries the bootstrap,
+  nothing is written into the session root, and the temp file is removed.
+
+- **`build_claude_shell_cmd`'s container split was untested for the
+  over-limit case.** Review, sign-off, QA child and finalize run with `cwd`
+  = the container mount and `write_dir` = the host workdir; the bootstrap and
+  the `rm -f` must name the container path while the file lands on the host.
+  The helper's split is tested, but this function has its own copy of the
+  logic (spec §21). Added
+  `test_shell_cmd_container_split_writes_host_names_container`.
+
+Verification: `tests/test_prompt_bounds.py` 141 (was 138; 3 new — the
+`pm pr show` test fails on the pre-fix source with the literal
+`None with ...`, and the two delivery tests fail under the corresponding
+source mutations: naming the host path in the container split, and returning
+the prompt instead of the temp-file bootstrap in the no-cwd branch) and
+`test_claude_launcher` 37. Real-data sweep over all 491 PRs x 4 builders is
+unchanged and deterministic (impl 179,965 / review 182,398 / sign-off
+196,950 / planner 113,196 B — measured with this section and this
+iteration's PR note inlined; only pr-ace66e5 is over the limit and goes out
+by the launcher's file-backed bootstrap). The two earlier iterations were
+re-verified independently rather than re-read: i1's QA-block split is
+byte-identical across all 491 real PRs (pre-i1 tree vs current, sha256 per
+PR), and i2's plan-review fix is confirmed on real data (`pm plan review
+bugs` built 24,866 B with **zero** descriptions before, 270,833 B with all
+146 after). The real plan builders are unchanged (`plan review bugs` 270,833,
+`improvements` 199,085, `plan-regression` 131,396, `deps` 521,551, `plan
+breakdown` 5,721-5,737 B). The all-collections-maxed pathological fixture
+keeps every instruction block whole and every bounded enumeration's marker
+naming a reader. The launcher was exercised end to end with a stub `claude`
+for the no-cwd, shell-command and container-split paths: the complete prompt
+is on disk while claude runs and removed after, under-limit prompts still use
+`$(cat ...)`, and no writable location raises `PromptTooLargeError`.
+Full-suite failure set on the clean committed tree is identical to an
+`origin/master` worktree baseline in this sandbox (42 failed / 17 errors /
+3,452 passed vs master 43 / 17 / 3,308; the extra master failure is
+`test_dedup::TestGetGitRoot::test_defaults_to_cwd`, an artifact of running
+from a git archive without `.git`; every branch failure is the documented
+environmental set — 22 `test_signoff_integration`, 19+17
+`test_merge_publish`, 1 `test_hook_events`, which passes with
+`PM_HOST_HOME` unset). Evidence: `/pm-captures/review-4029-i3/`.

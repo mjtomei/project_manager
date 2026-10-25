@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T22:50:54.118831+00:00'
+  updated_at: '2026-10-25T23:28:56.345904+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -23396,6 +23396,53 @@ prs:
       passes clean). Evidence /pm-captures/review-4029-i2/.'
     created_at: '2026-10-25T22:50:54Z'
     last_edited: '2026-10-25T22:50:54Z'
+  - id: note-8f1c211
+    text: 'Review-loop 4029 i3 (native recovery; the controller pr-592e4bd runtime
+      still passes this review prompt as one argv entry, so the first launch hit E2BIG
+      — not evidence this branch is broken). Re-ran the §19-§33 method (sweep every
+      reachable builder, check every omission marker in the environment the session
+      reads it in, exercise the delivery paths end to end) and found one reader defect
+      in this PR''s new `pm pr show`, plus two delivery-path test gaps.
+
+
+      FIXED — `pm pr show` printed the literal `None` for a null return-integration
+      field. `build_return_record` copies the integration record as-is, and an ERROR
+      record legitimately carries `base_sha: null` (the base fetch failed), so the
+      reader rendered "None with `None` @ `None` from `None`" — the same literal-None
+      shape i4/i5 fixed for notes and their readers, in the reader the return/integration
+      markers name. The three fields and the status now use the `?` placeholder (matching
+      `format_signoff_return`). Real records are unchanged.
+
+
+      TEST GAPS FIXED — (1) The plan builders'' over-limit delivery path had no test:
+      `pm plan review` / `deps` / `fix` launch through `launch_claude` with no cwd,
+      so an over-limit prompt takes the `tempfile.mkstemp` branch of `_materialize_oversized_prompt`
+      (spec §4''s cwd=None case) — the real production path for the 270-521 KB plan
+      prompts. Every existing guard test passed a cwd, and the plan tests exercise
+      `build_claude_shell_cmd` instead. Added `test_launch_claude_no_cwd_over_limit_uses_a_temp_file`
+      (complete prompt on disk during the run, bootstrap in argv, nothing written
+      into the session root, temp file removed). (2) `build_claude_shell_cmd`''s over-limit
+      container split (cwd = container mount, write_dir = host workdir) was untested
+      although review/sign-off/QA child/finalize all use it; added `test_shell_cmd_container_split_writes_host_names_container`
+      (file on the host, bootstrap and `rm -f` name the container path). Both new
+      delivery tests fail under the corresponding source mutations.
+
+
+      Verification: tests/test_prompt_bounds.py 141 (was 138; the `pm pr show` test
+      fails on the pre-fix source with the literal None) and test_claude_launcher
+      37; related suites 500+; real-data sweep over all 491 PRs x 4 builders unchanged
+      and deterministic (impl 177,456 / review 179,889 / sign-off 194,441 / planner
+      113,196 B with §34 inlined; only pr-ace66e5 over the limit, delivered by file);
+      plan builders unchanged (review bugs 270,833, improvements 199,085, plan-regression
+      131,396, deps 521,551, breakdown 5,721-5,737 B); pathological all-collections
+      fixture keeps every instruction block whole and every marker naming a reader;
+      launcher bootstrap re-exercised end to end for the no-cwd, shell-command and
+      container-split paths. Full-suite failure set identical to an origin/master
+      worktree baseline in this sandbox (42 failed / 17 errors; all environmental:
+      22 test_signoff_integration, 19+17 test_merge_publish, 1 test_hook_events —
+      passes with PM_HOST_HOME unset). Evidence /pm-captures/review-4029-i3/.'
+    created_at: '2026-10-25T23:28:56Z'
+    last_edited: '2026-10-25T23:28:56Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
