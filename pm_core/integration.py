@@ -379,6 +379,23 @@ def compact(record: dict) -> dict:
     return out
 
 
+def omitted_path_count(vals: list, total, omitted_from_list: int) -> int:
+    """Paths of the *full* record that an abbreviated listing does not show.
+
+    ``compact`` stores only the first ``_YAML_LIST_LIMIT`` paths and records
+    the real length in ``<key>_total``.  A prompt builder then abbreviates the
+    stored list again (``INTEGRATION_MAX_PATHS``), so counting only what it
+    dropped from that list under-reports the loss — a 200-path record renders
+    as "(+20 more)" instead of "(+180 more)", the same under-count
+    ``pm pr show`` fixed for the reader.  Fall back to the list-relative count
+    when the record carries no total (a legacy or hand-written record).
+    """
+    shown = max(0, len(vals) - omitted_from_list)
+    if isinstance(total, int) and not isinstance(total, bool) and total > shown:
+        return total - shown
+    return omitted_from_list
+
+
 def integration_json_path(pr_id: str) -> Path | None:
     from pm_core.paths import captures_root
     croot = captures_root()

@@ -714,20 +714,29 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
     # fit_prompt cannot shrink.  The pointer names the full record.
     # The marker carries no leading space: bounded_join appends it after
     # ``separator`` (", "), so one here would render as a double space.
+    # The count is the *record's* remainder, not just this list's: project.yaml
+    # keeps at most ``_YAML_LIST_LIMIT`` paths per list and records the real
+    # total separately, so a 200-path record must not read as "(+20 more)".
+    def _list_note(vals: list, total):
+        def note(n: int) -> str:
+            omitted = integ.omitted_path_count(vals, total, n)
+            return f"(+{omitted} more; {integ.integration_pointer(pr_id)})"
+        return note
+
     if rec.get("overlap"):
+        vals = rec["overlap"]
         lines.append("- Files changed on both sides: " + bounded_join(
-            rec["overlap"], lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
+            vals, lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
             max_bytes=_INTEGRATION_LIST_BUDGET,
             separator=", ",
-            omitted_note=lambda n: (
-                f"(+{n} more; {integ.integration_pointer(pr_id)})")))
+            omitted_note=_list_note(vals, rec.get("overlap_total"))))
     if rec.get("conflicts"):
+        vals = rec["conflicts"]
         lines.append("- Conflicting paths: " + bounded_join(
-            rec["conflicts"], lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
+            vals, lambda f: f"`{f}`", max_items=_INTEGRATION_MAX_PATHS,
             max_bytes=_INTEGRATION_LIST_BUDGET,
             separator=", ",
-            omitted_note=lambda n: (
-                f"(+{n} more; {integ.integration_pointer(pr_id)})")))
+            omitted_note=_list_note(vals, rec.get("conflicts_total"))))
     if rec.get("status") == integ.CONFLICT:
         lines.append(f"- A conflicted integration can only route "
                      f"**{SIGNOFF_IMPL}** (pm enforces this).")

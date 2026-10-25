@@ -547,11 +547,15 @@ def _note_line(n: dict) -> str:
     """One note, as ``pm pr note list`` and ``pm pr show`` print it.
 
     Both commands are on-demand readers for the PR-notes block prompt
-    builders abbreviate, so they must render a note identically.
+    builders abbreviate, so they must render a note identically — and they
+    must not crash on a shape the prompt builder accepts: ``_format_pr_notes``
+    deliberately tolerates notes without an ``id`` (hand-edited or legacy
+    ``project.yaml``), so the reader falls back to a placeholder rather than
+    raising ``KeyError`` and hiding every note behind a traceback.
     """
     ts = n.get("created_at", "")
     ts_str = f" ({ts})" if ts else ""
-    return f"  {n['id']}{ts_str}: {n['text']}"
+    return f"  {n.get('id', '?')}{ts_str}: {n['text']}"
 
 
 @pr.command("show")
@@ -596,6 +600,31 @@ def pr_show(pr_id: str):
         click.echo("\n## Notes")
         for n in notes:
             click.echo(_note_line(n))
+    # Prompt builders abbreviate the integration overlap/conflict path lists
+    # and point sessions here for the rest, so print the record (and where its
+    # full form lives) rather than making that pointer a dead end.
+    def _path_list_lines(record: dict) -> None:
+        """Print overlap/conflict paths, naming the record's real total.
+
+        project.yaml keeps at most _YAML_LIST_LIMIT paths per list and records
+        the real total separately.  Report that total (and how many paths are
+        not shown) so the session reading this fallback does not mistake the
+        yaml copy for the whole record — the same rule for the top-level
+        integration record and the sign-off return's copy of it.
+        """
+        for label, key in (("Overlap", "overlap"), ("Conflicts", "conflicts")):
+            vals = record.get(key) or []
+            total = record.get(f"{key}_total")
+            if (not isinstance(total, int) or isinstance(total, bool)
+                    or total < len(vals)):
+                # Missing or malformed (hand-edited yaml) -> the yaml copy is
+                # all this reader can vouch for.
+                total = len(vals)
+            if vals or total:
+                more = (f" (+{total - len(vals)} more)"
+                        if total > len(vals) else "")
+                click.echo(f"{label} ({total}): {', '.join(vals)}{more}")
+
     # The sign-off return is a separate prompt block from the notes (it is a
     # different document), so its omission marker points here rather than at
     # `pm pr note list`, which does not contain it.  Print the whole record.
@@ -624,14 +653,7 @@ def pr_show(pr_id: str):
                     f"`{ret_integ.get('base_sha')}` from "
                     f"`{ret_integ.get('target_repo')}`")
             click.echo(f"Integration: {ret_integ.get('status')} with {base}")
-            for label, key in (("Overlap", "overlap"),
-                               ("Conflicts", "conflicts")):
-                vals = ret_integ.get(key) or []
-                if vals:
-                    click.echo(f"{label} ({len(vals)}): {', '.join(vals)}")
-    # Prompt builders abbreviate the integration overlap/conflict path lists
-    # and point sessions here for the rest, so print the record (and where its
-    # full form lives) rather than making that pointer a dead end.
+            _path_list_lines(ret_integ)
     integ = pr_entry.get("integration") or {}
     if integ:
         click.echo("\n## Integration")
@@ -644,21 +666,7 @@ def pr_show(pr_id: str):
             val = integ.get(key)
             if val:
                 click.echo(f"{label}: {val}")
-        for label, key in (("Overlap", "overlap"), ("Conflicts", "conflicts")):
-            vals = integ.get(key) or []
-            # project.yaml keeps at most _YAML_LIST_LIMIT paths per list and
-            # records the real total separately.  Report that total (and how
-            # many paths are not shown) so the session reading this fallback
-            # does not mistake the yaml copy for the whole record.
-            total = integ.get(f"{key}_total")
-            if not isinstance(total, int) or total < len(vals):
-                # Missing or malformed (hand-edited yaml) -> the yaml copy is
-                # all this reader can vouch for.
-                total = len(vals)
-            if vals or total:
-                more = (f" (+{total - len(vals)} more)"
-                        if total > len(vals) else "")
-                click.echo(f"{label} ({total}): {', '.join(vals)}{more}")
+        _path_list_lines(integ)
         # A runtime-resolved reference, not a host path: sessions following the
         # integration omission marker run inside a container, where the host
         # ~/.pm/sessions/<tag>/captures/ path does not exist (the same

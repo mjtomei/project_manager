@@ -711,6 +711,14 @@ def build_return_record(pr: dict, verdict: str, hop: str, *,
         integ = {k: rec.get(k) for k in (
             "target_repo", "base_branch", "base_sha", "merge_base", "status",
             "conflicts", "overlap", "error")}
+        # ``compact`` caps each list at _YAML_LIST_LIMIT and records the real
+        # length separately; the return block's omission marker reports how
+        # many paths of the record are not shown, so carry the totals too.
+        # Absent on a legacy/hand-written record — the marker then falls back
+        # to its list-relative count.
+        for key in ("conflicts_total", "overlap_total"):
+            if rec.get(key) is not None:
+                integ[key] = rec[key]
     now = datetime.now(timezone.utc).isoformat()
     out = {
         "verdict": verdict, "hop": hop,
@@ -853,25 +861,33 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
         # is actually abbreviated.
         # No leading space in the marker: bounded_join appends it after
         # ``separator`` (", "), so one here would render as a double space.
-        def _integ_note(n: int) -> str:
-            return (f"(+{n} more; "
-                    f"{integration.integration_pointer(pr.get('id', '???'))})")
+        # The count is the *record's* remainder: project.yaml stores at most
+        # _YAML_LIST_LIMIT paths and keeps the real total beside them, so a
+        # 200-path record must not read as "(+20 more)".
+        def _integ_note(vals: list, total):
+            def note(n: int) -> str:
+                omitted = integration.omitted_path_count(vals, total, n)
+                return (f"(+{omitted} more; "
+                        f"{integration.integration_pointer(pr.get('id', '???'))})")
+            return note
 
         # Byte-bounded as well as count-capped: the lines are filesystem
         # paths, so 20 long ones blow the argv budget on their own (this
         # block feeds the impl / review / QA-planner prompts).
         if integ.get("conflicts"):
+            vals = integ["conflicts"]
             lines.append("Conflicting paths: " + bounded_join(
-                integ["conflicts"], lambda c: f"`{c}`",
+                vals, lambda c: f"`{c}`",
                 max_items=INTEGRATION_MAX_PATHS,
                 max_bytes=INTEGRATION_LIST_BUDGET, separator=", ",
-                omitted_note=_integ_note))
+                omitted_note=_integ_note(vals, integ.get("conflicts_total"))))
         if integ.get("overlap"):
+            vals = integ["overlap"]
             lines.append("Changed on both sides: " + bounded_join(
-                integ["overlap"], lambda c: f"`{c}`",
+                vals, lambda c: f"`{c}`",
                 max_items=INTEGRATION_MAX_PATHS,
                 max_bytes=INTEGRATION_LIST_BUDGET, separator=", ",
-                omitted_note=_integ_note))
+                omitted_note=_integ_note(vals, integ.get("overlap_total"))))
     applied = rec.get("applied") or {}
     if applied.get("merge_sha"):
         lines.append(

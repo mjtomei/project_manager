@@ -263,18 +263,29 @@ def bounded_lines(
     Mirrors the verification prompt's existing head/tail behaviour: keep the
     setup at the top and the verdict at the bottom.  When *max_bytes* is set
     the result is passed through :func:`bounded_text` so long lines cannot
-    defeat the line bound; *pointer* names where the full text lives (a
-    generic fallback is used when the caller has none), so the byte bound is
-    never silently dropped.
+    defeat the line bound.
+
+    *pointer* names where the full text lives.  It is used by *both* bounds:
+    the line-omission marker names it whenever lines were dropped (otherwise a
+    caller that supplies a reader would lose it for any text under
+    *max_bytes* — the line bound alone is enough to drop content), and the
+    byte bound's marker names it too.  When the caller has no pointer the byte
+    bound falls back to a generic "the full output on disk"; the line marker
+    then still reports the omitted count, so neither bound is silent about the
+    loss.
     """
     lines = text.splitlines()
     if len(lines) > max_lines:
         head = max(1, int(max_lines * head_ratio))
         tail = max(1, max_lines - head)
         omitted = len(lines) - head - tail
+        note = f"[... {omitted} lines omitted"
+        if pointer:
+            note += f"; read the full text: {pointer}"
+        note += " ...]"
         text = (
             "\n".join(lines[:head])
-            + f"\n\n[... {omitted} lines omitted ...]\n\n"
+            + f"\n\n{note}\n\n"
             + "\n".join(lines[-tail:])
         )
     if max_bytes is not None:

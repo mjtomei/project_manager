@@ -165,6 +165,30 @@ class TestBoundedLines:
         assert prompt_bytes(out) <= 1_000
         assert "truncated" in out
 
+    def test_line_bound_marker_names_the_pointer(self):
+        """The line bound alone also drops content, so it must name the
+        reader the caller supplied.
+
+        The pointer used to reach the prompt only through bounded_text's byte
+        marker: text over ``max_lines`` but under ``max_bytes`` (a 100-line
+        merge error, a 500-line pane capture) had its middle lines dropped
+        with a bare "N lines omitted" and no way to read them — the silent
+        loss the "marker names a working reader" rule forbids.
+        """
+        text = "\n".join(f"line {i}" for i in range(100))
+        out = bounded_lines(text, max_lines=10, max_bytes=20_000,
+                            pointer="`pm pr show pr-x`", label="error output")
+        assert "lines omitted" in out
+        assert "`pm pr show pr-x`" in out
+        # The byte bound did not fire, so this is the line marker's own
+        # pointer — not bounded_text's "truncated" marker.
+        assert "truncated" not in out
+        # A caller with no pointer keeps the count-only marker (no invented
+        # reader), so the omission is still reported.
+        bare = bounded_lines(text, max_lines=10)
+        assert "lines omitted" in bare
+        assert "read the full text" not in bare
+
 
 # ---------------------------------------------------------------------------
 # prompt_gen builders
@@ -383,6 +407,46 @@ class TestSignoffPromptBounding:
         assert "(+180 more" in ret
         assert "pm qa captures-path pr-x" in ret
         assert "/host-home/" not in ret
+
+    def test_integration_marker_counts_the_whole_record_not_the_yaml_copy(
+            self, monkeypatch):
+        """The count must describe the *record*, not the yaml copy.
+
+        ``check_integration`` stores ``integration.compact(record)``: 40 paths
+        per list plus ``<key>_total``.  The block then abbreviates that list to
+        20, so a 200-path record drops 180 paths — not the 20 this list lost.
+        The test above feeds the *uncompacted* record, which production never
+        does, so it passed while the prompt said "(+20 more)".
+        """
+        from pm_core import integration
+        from pm_core.signoff import build_return_record, format_signoff_return
+        monkeypatch.setattr(
+            "pm_core.paths.captures_dir",
+            lambda pr_id: Path("/cap") / pr_id)
+        record = {"head": "a" * 40, "base_branch": "master",
+                  "base_sha": "b" * 40, "target_repo": "r",
+                  "status": "conflict",
+                  "overlap": [f"f{i}.py" for i in range(200)],
+                  "conflicts": [f"c{i}.py" for i in range(200)]}
+        pr = _pr(integration=integration.compact(record))
+        block = prompt_gen._signoff_integration_block(pr, "pr-x")
+        assert "(+180 more" in block
+        assert "(+20 more" not in block
+        # The return record carries the totals so its block can say the same.
+        ret = build_return_record(pr, "NEEDS_WORK", "impl",
+                                  reviewed_head="a" * 40)
+        assert ret["integration"]["overlap_total"] == 200
+        assert ret["integration"]["conflicts_total"] == 200
+        rb = format_signoff_return({"id": "pr-x", "signoff_return": ret})
+        assert "(+180 more" in rb
+        # A legacy record with no totals keeps the list-relative count.
+        block2 = prompt_gen._signoff_integration_block(
+            _pr(integration={"base_branch": "master", "base_sha": "a" * 40,
+                             "target_repo": "r", "status": "clean",
+                             "overlap": [f"f{i}.py" for i in range(40)],
+                             "conflicts": [f"c{i}.py" for i in range(40)]}),
+            "pr-x")
+        assert "(+20 more" in block2
 
     def test_integration_path_lists_are_byte_bounded_too(self, monkeypatch):
         """A count cap does not bound a listing whose items are filesystem
@@ -854,6 +918,21 @@ class TestMergeAndWatcherBounding:
         p = prompt_gen.generate_merge_prompt(
             _data(pr), "pr-x", "E" * 200000)
         _assert_bounded(p, "re-run the failed update")
+
+    def test_merge_line_bound_alone_names_the_pointer(self):
+        """R13: the marker must tell the session to re-run the failed update.
+
+        The error output here is over the 60-line bound but under the 20 KB
+        byte bound, so only the line bound fires.  The pointer used to be
+        attached to the byte marker alone, so these prompts dropped the middle
+        of the error and gave the session no instruction at all.
+        """
+        err = "\n".join(f"error line {i}: " + "e" * 50 for i in range(100))
+        p = prompt_gen.generate_merge_prompt(_data(_pr()), "pr-x", err)
+        assert "lines omitted" in p
+        assert "re-run the failed update" in p
+        # The dropped lines are really gone, so the pointer is load-bearing.
+        assert err not in p
 
     def test_watcher_many_managed_prs(self):
         prs = [_pr(f"pr-{i:03d}",
@@ -1634,6 +1713,23 @@ class TestPrShowCommand:
         assert result.exit_code == 1
         assert "not found" in result.output
 
+    def test_note_without_an_id_does_not_crash_the_readers(self, tmp_path):
+        """Both on-demand note readers must accept the shape the prompt
+        builder accepts.
+
+        ``_format_pr_notes`` deliberately tolerates a note with no ``id``
+        (hand-edited or legacy project.yaml), but both readers indexed
+        ``n['id']`` directly: a single such note made ``pm pr show`` /
+        ``pm pr note list`` raise KeyError and hide every note, so the
+        PR-notes omission marker became a dead end.
+        """
+        root = _make_state(tmp_path, notes=[
+            {"text": "note with no id", "created_at": "2026-01-01T00:00:00Z"}])
+        for argv in (["pr", "show", "pr-001"], ["pr", "note", "list", "pr-001"]):
+            result = CliRunner().invoke(cli, ["-C", str(root)] + argv)
+            assert result.exit_code == 0, (argv, result.output)
+            assert "note with no id" in result.output
+
     def test_prints_signoff_return(self, tmp_path):
         """`pm pr show` is the reader for a cut sign-off return block."""
         root = _make_state(tmp_path)
@@ -1653,6 +1749,31 @@ class TestPrShowCommand:
         assert "SIGNOFF_IMPL" in result.output
         assert "fix the null check" in result.output
         assert "Conflicts (1): pm/project.yaml" in result.output
+
+    def test_prints_return_integration_totals(self, tmp_path):
+        """The return record's integration copy is capped too.
+
+        ``build_return_record`` now carries ``overlap_total`` /
+        ``conflicts_total``; the reader must report them rather than
+        presenting the yaml copy (40 paths) as the whole record.
+        """
+        root = _make_state(tmp_path)
+        data = store.load(root)
+        data["prs"][0]["signoff_return"] = {
+            "verdict": "NEEDS_WORK", "hop": "impl", "reason": "r",
+            "integration": {"base_branch": "master", "base_sha": "a" * 40,
+                            "target_repo": "r", "status": "conflict",
+                            "overlap": [f"o{i}.py" for i in range(40)],
+                            "overlap_total": 200,
+                            "conflicts": ["c.py"], "conflicts_total": 1},
+        }
+        store.save(data, root)
+        result = CliRunner().invoke(
+            cli, ["-C", str(root), "pr", "show", "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "Overlap (200):" in result.output
+        assert "(+160 more)" in result.output
+        assert "Conflicts (1): c.py" in result.output
 
     def test_prints_integration_record(self, tmp_path):
         """`pm pr show` is the fallback pointer for abbreviated integration
