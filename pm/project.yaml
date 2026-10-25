@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T22:53:02.760630+00:00'
+  updated_at: '2026-10-25T23:09:29.280607+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33895,6 +33895,17 @@ prs:
       is project.yaml only.'
     created_at: '2026-10-25T22:53:02Z'
     last_edited: '2026-10-25T22:53:02Z'
+  - id: note-f3df274
+    text: 'Review c189 i5 (9aa3f316, test/spec only, no product change): QA run da5cdfbc6f5e8370
+      deltas ff65f489, 3ee69236, 79b6ddd7, f0031965, 5f5a1453 (and spec 0e13c5f8/cabc2677/19d1fed4)
+      reviewed independently and sound. 9 new mutations; 3 missed and now caught by
+      new TestClassifierRoute assertions: pm provider list names an alias_models classifier
+      entry, a claude-type provider with its own api_base drops an inherited classifier
+      pin, and the --live probe command unsets stray keys and another route classifier
+      pin. Venv lacked markdown (3.10.3 installed). Full suite 3793 passed, rc 0;
+      /pm-captures/review-c189-i5. Master merge-tree: project.yaml conflicts only.'
+    created_at: '2026-10-25T23:09:29Z'
+    last_edited: '2026-10-25T23:09:29Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
