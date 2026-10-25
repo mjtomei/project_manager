@@ -33585,6 +33585,19 @@ prs:
       next QA.'
     created_at: '2026-10-25T14:49:26Z'
     last_edited: '2026-10-25T14:49:26Z'
+  - id: note-1b2fd3f
+    text: 'Review 0f64 i4 (6bd59adf, CODE CHANGE, small, needs normal re-review):
+      S53 66404830, i1 14d72926, i2 ac202207 and i3 1dc3e618 reviewed independently,
+      sound except one wording slip in 1dc3e618: validate_model_config said "launches
+      that use it fail" for every non-string prs[].model, but an empty one ('''',
+      0, [], {}, false) is skipped at launch (falsy PR model) and the project settings
+      apply. It is now reported as "ignored; the project settings apply"; non-empty
+      ones (5, a list) still fail. Regression test_pr_empty_model_flagged_as_ignored
+      (5 cases, mutation caught). Venv lacked markdown (3.10.3 installed). Full suite
+      3735 passed, rc 0; impl.md 42(h); /pm-captures/review-0f64-i4. S52 (RQ39) still
+      has to run in the next QA.'
+    created_at: '2026-10-25T14:58:22Z'
+    last_edited: '2026-10-25T14:58:22Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
