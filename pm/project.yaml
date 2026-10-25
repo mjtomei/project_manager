@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T17:28:00.717231+00:00'
+  updated_at: '2026-10-25T18:12:03.549362+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -23098,6 +23098,51 @@ prs:
       markdown installed into a scratch PYTHONPATH). Evidence /pm-captures/review-240e-i3/.'
     created_at: '2026-10-25T17:28:00Z'
     last_edited: '2026-10-25T17:28:00Z'
+  - id: note-b5d4c22
+    text: 'Review-loop 240e i4 (native recovery; the controller''s pr-592e4bd runtime
+      still passes this review prompt as one argv entry, so its first launch hit E2BIG
+      — not evidence the source on this branch is broken). Re-ran the §19-§26 method
+      and found one marker that named a reader which does not contain the omitted
+      text, plus one incidental robustness bug.
+
+
+      (1) FIXED — the `pm plan deps` omitted-plan-files marker named `pm plan list`,
+      which prints ids/names/status and no file paths, and plan files have no single
+      convention (real data: `bugs -> bugs.md`, `improvements -> improvements.md`,
+      `watchers -> plans/watchers.md`, `tui-ux -> plans/tui-ux.md`, alongside `plan-001
+      -> plans/plan-001.md`). The marker now also names the project.yaml that records
+      each plan''s `file:` (the builder runs on the host, so the absolute path is
+      readable); the test asserts the named reader contains the dropped plans'' paths.
+      Reachable above 40 omitted files or 20 KB of paths; real data (22 plans, 17
+      omitted) never fires it, so real prompts are byte-identical.
+
+
+      (2) INCIDENTAL — a note without `text` (hand-edited/legacy project.yaml) crashed
+      `_pr_note_full_line` (KeyError in `_render_pr_notes`, aborting the whole prompt
+      builder) and `_note_line` (both on-demand readers), hiding every note behind
+      a traceback — the same shape i3 fixed for id-less notes. Both now use `n.get(''text'',
+      '''')`, so the note renders as an empty bullet; two tests added.
+
+
+      (3) TEST GAP — spec §4''s retry path (failed resume -> fresh session with the
+      same prompt) applied the launcher guard but had no test. Added one: the resume
+      launch writes nothing, the retry bootstraps, the complete prompt is on disk
+      during the retry, and the file is removed.
+
+
+      Verification: test_prompt_bounds 128 cases (3 new; the two behaviour tests fail
+      on 1cddfd80 with the new test file — /pm-captures/review-240e-i4/failing-then-passing-i4.txt);
+      test_claude_launcher 37; real-data sweep 488 PRs x 4 builders byte-identical
+      (impl 75,146 / review 77,616 / sign-off 92,165 / planner 80,652 B, max pr-0b87a97;
+      1,952 prompts, 0 errors, deterministic); real plan builders unchanged (deps
+      46,989 / review 24,767 / breakdown 5,693 B); all-collections-maxed pathological
+      fixture same sizes (119,700 B max); launcher bootstrap + bridge --prompt-file
+      re-exercised end to end (150,010-byte CJK prompt delivered intact to the bridge
+      first turn, file removed); clean-tree full suite 42 failed / 17 errors / 3439
+      passed, failure set byte-identical to an origin/master worktree baseline (42
+      / 17 / 3309). Evidence /pm-captures/review-240e-i4/. (2026-10-25T18:20:00Z)'
+    created_at: '2026-10-25T18:12:03Z'
+    last_edited: '2026-10-25T18:12:03Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
