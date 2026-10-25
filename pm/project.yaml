@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T21:28:58.946330+00:00'
+  updated_at: '2026-10-25T21:35:54.973355+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -23322,6 +23322,18 @@ prs:
       on its own.'
     created_at: '2026-10-25T21:28:58Z'
     last_edited: '2026-10-25T21:28:58Z'
+  - id: note-b5aabd8
+    text: 'Constraint from the user (2026-10-25): no `claude -p` anywhere — ''anthropic
+      has gone back and forth with having that use API credits instead of subscription
+      usage''. Dropped the planned stdin-for-`-p` improvement; nothing was written
+      for it. Filed pr-9ade6b8 (depends_on pr-ace66e5) to move the three `-p` call
+      sites to the interactive transport. Note for review/sign-off: this PR''s oversized-prompt
+      guard still has live `-p` branches (claude_launcher launch_claude_print ~819
+      / launch_claude_print_background ~1218, covered by test_prompt_bounds) — they
+      are correct and tested today; pr-9ade6b8 removes them, so do not treat them
+      as dead code here.'
+    created_at: '2026-10-25T21:35:54Z'
+    last_edited: '2026-10-25T21:35:54Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
