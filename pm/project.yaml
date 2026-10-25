@@ -22303,6 +22303,14 @@ prs:
       in session project_manager-c5a1006b.'
     created_at: '2026-10-13T03:40:41Z'
     last_edited: '2026-10-13T03:40:41Z'
+  - id: note-341e718
+    text: User stopped the current review and autostart on 2026-10-25. Preserve current
+      branch and all QA/review evidence. Do not restart the review or merge automatically.
+      A new PR pr-5cee3d5 implements sign-off conflict resolution with selective evidence
+      reuse. The prior sign-off report returned for integration conflict and predates
+      subsequent fixes; no new approval has been asserted.
+    created_at: '2026-10-25T20:35:43Z'
+    last_edited: '2026-10-25T20:35:43Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
@@ -32624,3 +32632,82 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-5cee3d5
+  plan: null
+  title: Resolve integration conflicts at sign-off and reuse unaffected review and
+    QA evidence
+  branch: pm/pr-5cee3d5-resolve-integration-conflicts-at-sign-off-and-reus
+  status: pending
+  depends_on: []
+  description: 'A metadata-only integration conflict currently sends a passed PR through
+    implementation, full review and QA again. PR #250 is the concrete example: both
+    master and the feature branch independently appended records to pm/project.yaml;
+    keeping all four records was sufficient, but sign-off could only return SIGNOFF_IMPL.
+
+
+    Make integration resolution part of the sign-off workflow. Resolve conflicts in
+    an isolated candidate workspace, inspect the resolution delta and relevant interactions
+    with the new base, and let the sign-off agent choose whether implementation, review,
+    QA, or only refreshed sign-off is warranted. When no change would benefit from
+    another review or QA pass, explicitly reuse existing evidence rather than restarting
+    those phases solely because the commit changed. Keep the human merge gate and
+    a fresh sign-off report tied to the exact resolved candidate.
+
+
+    Requirements:
+
+    - Safely combine independent project.yaml additions by stable record ID and validate
+    that neither side lost changes. Do not silently select a side for real field conflicts,
+    deletion/edit conflicts, or ambiguous records. Existing store.merge_3way resolves
+    true conflicts in favor of theirs; that policy is not a sufficient integration
+    resolver.
+
+    - Do not grant every metadata change an exemption: model settings, dependencies,
+    statuses and other behavioral configuration can change what runs. Consider new-base
+    interactions even when Git reports a clean merge.
+
+    - Record the original evidence revisions, base/head/candidate tree, resolution
+    changes, evidence being reused and why, and any targeted checks or required return
+    stage. Expose this in the sign-off report so a person can assess the decision.
+    Ambiguity must remain visible and must not become an invented approval.
+
+    - Merge only a conflict-free approved candidate; revalidate head/base/candidate
+    identity before publication and invalidate/reassess stale approvals. Preserve
+    unrelated dirty files and existing evidence. The merge step must not make new
+    substantive conflict resolutions after sign-off.
+
+    - Keep the agent responsible for the judgment about necessary follow-up; PM supplies
+    reliable candidate/provenance tools and enforces the approved result. Choose the
+    smallest coherent change to the existing integration/sign-off flow, without a
+    general orchestration rewrite.
+
+
+    Regression coverage: reproduce #250 with distinct PR entries appended on both
+    branches and verify all entries survive, review/QA evidence can be reused, and
+    fresh sign-off is still required. Cover conflicting edits to the same record/field,
+    deletion vs edit, meaningful code/config resolution and new-base interaction requiring
+    follow-up, stale candidate identity, and preservation of work/evidence. Exercise
+    the user-visible flow as well as the decision and merge guards.
+
+
+    Related existing work: sign-off integration routing (pr-ac10f03), registry merge
+    preservation (pr-80b04db), and post-merge base-race checking (pr-b530f8b). Coordinate
+    with their current implementation; do not reopen or duplicate whole plans. No
+    dependency is required merely to reproduce #250''s trigger.
+
+
+    Run with provider:deepseek-flash (DeepSeek V4.1 Flash 1017, high), with provider:claude-work
+    sign-off as in the current DeepSeek trial. Autostart must wait for manual merge;
+    spec-review gating is off.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-25T20:35:32.509320+00:00'
+  updated_at: '2026-10-25T20:35:32.509320+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  model: provider:deepseek-flash
+  session_models:
+    signoff: provider:claude-work
