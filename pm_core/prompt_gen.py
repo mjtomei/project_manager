@@ -669,9 +669,15 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
         return "\n_qa_status.json unreadable — read the captures dir directly._\n"
     lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
     if data.get("error"):
+        # Normalise whitespace but keep every character.  The error is
+        # pm-generated (planner/trust/handoff messages), not a collection, and
+        # the block is one of the sign-off builder's ``fit_prompt`` blocks, so
+        # an over-limit prompt is abbreviated there (head+tail, with a marker)
+        # or delivered intact by the launcher's file-backed bootstrap.  A bare
+        # ``…`` cut here would be loss with no reader: the full text lives only
+        # in the QA run's host ``~/.pm/workdirs/qa/<pr>-*/qa_status.json``,
+        # which a containerised sign-off session cannot read.
         err = " ".join(str(data["error"]).split())
-        if len(err) > 500:
-            err = err[:500].rstrip() + "…"
         lines.append(f"QA error: {err}")
     scenarios = data.get("scenarios") or []
     if isinstance(scenarios, dict):

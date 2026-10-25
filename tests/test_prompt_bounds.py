@@ -791,6 +791,32 @@ class TestSignoffPromptBounding:
         assert "abbreviated" not in block
         assert "all steps passed" in block
 
+    def test_long_qa_error_is_not_silently_truncated(self, tmp_path,
+                                                     monkeypatch):
+        """The QA error is a single pm-generated message, not a collection.
+
+        The block is one of the sign-off builder's ``fit_prompt`` blocks, so
+        an oversized prompt is abbreviated there (head+tail, with a marker
+        naming a reader) or delivered intact by the launcher's file-backed
+        bootstrap.  A bare ``…`` cut here is loss with no reader: the full
+        text exists only in the QA run's host
+        ``~/.pm/workdirs/qa/<pr>-*/qa_status.json``, which a containerised
+        sign-off session cannot read.  Reachable: a planner error that lists
+        many scenario indices (``parsed scenarios [...] differ from the plan
+        block's headers [...]``) or a trust-blocked message with a long
+        workdir path exceeds the old 500-character cut.
+        """
+        status = tmp_path / "qa_status.json"
+        long_err = ("planner problem: " + "X" * 1200 + ": end-of-error")
+        status.write_text(json.dumps({"overall": "INPUT_REQUIRED",
+                                      "error": long_err,
+                                      "scenarios": []}))
+        monkeypatch.setattr("pm_core.paths.latest_qa_status_path",
+                            lambda pr_id: status)
+        block = prompt_gen._signoff_qa_scenarios_block("pr-x")
+        assert "X" * 1200 in block, "the QA error was truncated"
+        assert "end-of-error" in block
+
 
 class TestFitPrompt:
     def test_passthrough_when_it_fits(self):

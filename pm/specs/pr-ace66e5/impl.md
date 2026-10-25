@@ -1864,3 +1864,78 @@ into a scratch `PYTHONPATH` for both runs).
 Evidence: `/pm-captures/review-240e-i6/` (pathological/marker sweep, notes
 property fuzz, launcher/bridge e2e, sweep TSVs + master comparison,
 failing-then-passing, suite logs).
+
+## 30. Review-loop follow-ups (review loop 240e, iteration 7)
+
+Iteration 7 ran natively in the review container (the controller's
+`pr-592e4bd` runtime still launches this review prompt as one argv entry, so
+its first launch failed with E2BIG; the recovery read the complete native
+prompt from a file).  It re-ran the §19-§29 method — sweep every reachable
+builder, then check every omission marker in the environment the session reads
+it in — plus the delivery paths end to end, and found one silent truncation in
+code this PR added.
+
+- **The sign-off QA block truncated the QA error with no reader.**  The block
+  capped `qa_status.json`'s `error` field at 500 characters and appended a bare
+  `…`.  That error is the *only* explanation of an INPUT_REQUIRED QA run, and
+  the full text exists only in the QA run's host
+  `~/.pm/workdirs/qa/<pr>-*/qa_status.json` — a directory the sign-off
+  container does not mount (it mounts the workdir, `~/.claude`, `~/.pm/hooks`,
+  the pm source and `$CAP`).  So the cut text was unrecoverable, which is the
+  silent loss R2/A1 forbids; the `…` signalled truncation but named no reader.
+  Reachable with ordinary failures: a planner error that lists many scenario
+  indices (`parsed scenarios [...] differ from the plan block's headers [...]`)
+  or a trust-blocked message with a long workdir path both exceed 500
+  characters.
+
+  Fixed by removing the length cut and keeping the whitespace normalisation
+  (every character is preserved; the error is pm-generated, not a collection).
+  The block is one of the sign-off builder's `fit_prompt` blocks, so an
+  oversized prompt is still abbreviated there (head+tail, marker naming
+  `$CAP/scenarios/<n>/verdict.md`) or delivered intact by the launcher's
+  file-backed bootstrap — the same policy §13/§19 apply to single
+  user-authored documents, and the block never loses its overall verdict or
+  the error's head to the fit pass.  The pathological fixture (a 1.2 KB error
+  plus every collection maxed) still fits at 119,700 B.
+
+Checked and deliberately unchanged: the truncated-scenario-steps /
+concretization-instruction / verification-transcript pointers (§17/§20 — no
+concrete path is threaded into those builders; the transcript is reachable
+and the title/focus are inlined); the QA block's per-line truncation note
+(§20, names `$CAP/scenarios/<n>/verdict.md`, which really contains the full
+titles and reasons); the QA block's `fit_prompt` pointer (§28 — the cut
+content is the middle scenario listing, and the head keeps the overall verdict
+and the error); `qa_finalize_prompt._scenarios_pointer`'s host
+`qa_status.json` / `qa_resume.json` reference (the finalize pane runs on the
+host); `build_regression_test_prompt` and the watcher lists (§10/§14);
+`PromptTooLargeError` remains uncaught at pane/CLI call sites (pr-a42a4f8).
+
+Verification: `tests/test_prompt_bounds.py` 137 cases (1 new,
+failing-then-passing — `assert "X" * 1200 in block` fails on the unfixed source
+with the 500-character cut, and passes after; evidence
+`/pm-captures/review-240e-i7/`).  The related suites (`test_prompt_bounds`,
+`test_claude_launcher`, `test_signoff`, `test_plan_review`,
+`test_bug_fix_flow_prompts`, `test_regression_prompts`, `test_spec_gen`,
+`test_qa_instructions`, `test_notes`, `test_pr_notes`, `test_qa_loop`) 625
+passed.  Real-data sweep over all 489 PRs x 4 builders is byte-identical
+before/after (impl 75,146 / review 77,616 / sign-off 92,165 / planner 80,652 B,
+max `pr-0b87a97`; 1,956 prompts, 0 errors) because no real QA status carries a
+>500-character error.  The all-collections-maxed pathological fixture keeps
+every reachable builder under `PROMPT_ARG_LIMIT` (the four `fit_prompt`
+builders at 119,700 B) and the sign-off prompt now contains the complete
+1.2 KB QA error (it previously contained only its first 500 characters).  The
+launcher bootstrap and the bridge `--prompt-file` handoff were re-exercised end
+to end (a 150 KB CJK prompt becomes a 179-byte max argv entry, the complete
+file is on disk during the run and removed after; the container
+write_dir/cwd split writes on the host and names `/workspace/...`; no writable
+location raises `PromptTooLargeError`).  Full-suite failure set on this
+sandbox is byte-identical to the `origin/master` worktree baseline
+(43 failed / 17 errors each: 22 `test_signoff_integration`, 19+17
+`test_merge_publish`, 1 `test_hook_events`, and the dirty-tree
+`test_git_ops::test_keeps_unpushed_merge` flake, all environmental; branch
+3,447 passed vs master 3,308, the delta being this PR's tests; `markdown`
+installed into the scratch `PYTHONPATH`).
+
+Evidence: `/pm-captures/review-240e-i7/` (`sweep-branch-i7.tsv` /
+`sweep-master-i7.tsv` / `sweep-branch-after-i7.tsv`, `pathological-i7.txt`,
+`full-suite-branch-i7.txt`, `full-suite-master-i7.txt`, failure-set diffs).
