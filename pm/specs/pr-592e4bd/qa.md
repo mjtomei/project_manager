@@ -723,6 +723,26 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     one, so a regression is visible and never bills the main account.
     No real credential is copied or logged.
   - S57/S58 ran before ba4e830d and do not test RQ42.
+  *S60 clarifications (2026-10-25, live on bd30befc):*
+  - "No relay request contains C's id" means no request from a C
+    session (a C impl/review/QA parent or child) reaches the relay. It
+    does not mean the text never appears. A's own real-Claude review,
+    sign-off and Scenario 0 run `pm pr list` and then quote the other
+    PR's id in their later turns: S60 saw 21 such A-session requests,
+    all forwarded `work/`, and no C-session request. Attribute by
+    session (relay `sess` hash plus parent class), not by substring.
+  - With the pin, the Agent tool has no `model` parameter (relay
+    `agent_has_model: false`). Real-Claude parents therefore drop
+    `model: "fable"` from the fourth call. The scenario's typed request
+    puts the key in the tool input anyway; that child still requested
+    `work/claude-opus-5-5`.
+  - The TUI refuses a second action while one is running. `z d` pressed
+    right after `i` logs "Busy: Sign-off <pr>". Press `z d` again once
+    the sign-off launch has returned.
+  - Container sessions on a main stub run Claude in auto mode. The stub
+    must answer the permission classifier (`<severity>N</severity>`),
+    or Agent calls are denied. Each new session also shows an "auto
+    mode ... classifier billing" notice that needs Enter.
   - A router's explicit `alias_models` entry for
     `CLAUDE_CODE_SUBAGENT_MODEL` replaces the pinned value and is forced
     too (impl.md R8).
