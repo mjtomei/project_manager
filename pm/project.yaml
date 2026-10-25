@@ -11950,6 +11950,20 @@ prs:
       load-A and load-B TUI captures. No application fix claimed.'
     created_at: '2026-10-25T16:10:01Z'
     last_edited: '2026-10-25T16:10:01Z'
+  - id: note-62b5f1a
+    text: 'QA scenario 6 (2026-10-25): INPUT_REQUIRED at required fixture qualification,
+      not a lifecycle test failure. Private rootless Podman info works (storage /scratch/s6-launch-20261025/storage;
+      0 containers), but real pm container build-base --tag s6-healthy:latest fails
+      at STEP 5 RUN apt-get with crun sethostname: Operation not permitted (exit 1),
+      so no healthy developer image/public launch; stopped as scenario requires. Initial
+      local bare-origin push was also rejected by inherited /home/pm/.local/bin/git
+      branch-restricted push proxy (only this outer PR branch allowed). Need a nested
+      runtime permitted to build/run the image and fixture-local Git setup reaching
+      its disposable origin before rerun. Evidence: /pm-captures/scenarios/6/qualification/{recording.cast,recording.mp4,transcript.log,manifest.md,final-state.log};
+      all failure/retry/reuse/config/push/keyring/memory/onboarding stories unexecuted.
+      No faults injected, quotas changed, or controller containers inspected/removed.'
+    created_at: '2026-10-25T16:10:54Z'
+    last_edited: '2026-10-25T16:10:54Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
