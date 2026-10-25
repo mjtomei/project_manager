@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T18:40:54.828796+00:00'
+  updated_at: '2026-10-25T19:45:04.869805+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33728,6 +33728,19 @@ prs:
       (rerun passes) and pre-existing test_hook_events installer test.'
     created_at: '2026-10-25T19:21:10Z'
     last_edited: '2026-10-25T19:21:10Z'
+  - id: note-36fc7f4
+    text: 'S59 concretizer (2026-10-25): (1) the production QA loop launched this
+      refiner with CLAUDE_CODE_SUBAGENT_MODEL=work/claude-opus-5-5[1m] but WITHOUT
+      CLAUDE_CODE_SUBAGENT_MODEL_FORCE, and its Agent tool still offers `model`: the
+      host TUI/loop runs pre-ba4e830d code and needs a user restart before RQ42 holds
+      for production workers. (2) Predicted defect: `pm provider test <router> --live`
+      with the production model value work/claude-opus-5-5[1m] should FAIL "model
+      mismatch": the real route writes claude-opus-5-5 to the transcript, and worker_route.model_on_route
+      only accepts cfg.model or a cfg.model ending in "/claude-opus-5-5", so the [1m]
+      suffix is never stripped (checked: model_on_route(cfg, "claude-opus-5-5") is
+      False). Earlier live probes used a model with no [1m].'
+    created_at: '2026-10-25T19:45:04Z'
+    last_edited: '2026-10-25T19:45:04Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
