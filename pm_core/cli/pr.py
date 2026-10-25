@@ -634,7 +634,6 @@ def pr_show(pr_id: str):
     # full form lives) rather than making that pointer a dead end.
     integ = pr_entry.get("integration") or {}
     if integ:
-        from pm_core.integration import integration_json_path
         click.echo("\n## Integration")
         for label, key in (
             ("Target", "target_repo"),
@@ -647,11 +646,28 @@ def pr_show(pr_id: str):
                 click.echo(f"{label}: {val}")
         for label, key in (("Overlap", "overlap"), ("Conflicts", "conflicts")):
             vals = integ.get(key) or []
-            if vals:
-                click.echo(f"{label} ({len(vals)}): {', '.join(vals)}")
-        full = integration_json_path(pr_entry.get("id", pr_id))
-        if full is not None:
-            click.echo(f"Full record: {full}")
+            # project.yaml keeps at most _YAML_LIST_LIMIT paths per list and
+            # records the real total separately.  Report that total (and how
+            # many paths are not shown) so the session reading this fallback
+            # does not mistake the yaml copy for the whole record.
+            total = integ.get(f"{key}_total")
+            if not isinstance(total, int) or total < len(vals):
+                # Missing or malformed (hand-edited yaml) -> the yaml copy is
+                # all this reader can vouch for.
+                total = len(vals)
+            if vals or total:
+                more = (f" (+{total - len(vals)} more)"
+                        if total > len(vals) else "")
+                click.echo(f"{label} ({total}): {', '.join(vals)}{more}")
+        # A runtime-resolved reference, not a host path: sessions following the
+        # integration omission marker run inside a container, where the host
+        # ~/.pm/sessions/<tag>/captures/ path does not exist (the same
+        # host-vs-container split integration_pointer handles).  Resolving it
+        # here would also create that directory as a side effect.
+        click.echo(
+            "Full record: "
+            f"`$(pm qa captures-path {pr_entry.get('id', pr_id)})"
+            "/integration.json`")
 
 
 @pr.command("graph")

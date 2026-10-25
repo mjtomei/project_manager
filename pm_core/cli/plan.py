@@ -543,18 +543,25 @@ def plan_deps():
         click.echo("No PRs. Add PRs first with: pm pr add <title>", err=True)
         raise SystemExit(1)
 
-    desc_truncated = False
+    # Display ids of the PRs whose description this builder abbreviates.  The
+    # note below describes the lines the session actually reads, so it must be
+    # driven by the *kept* lines, not by whether any formatter call truncated:
+    # ``bounded_join`` formats the first item past the byte budget before
+    # breaking, so the only cut description can belong to a PR the listing
+    # dropped, and a plain flag would claim the kept descriptions are previews
+    # when every one of them is complete.
+    truncated_ids: list[str] = []
 
     def _dep_pr_line(p: dict) -> str:
-        nonlocal desc_truncated
         deps = p.get("depends_on") or []
         dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
         desc = " ".join((p.get("description") or "").split())
+        display_id = _pr_display_id(p)
         if len(desc) > _PLAN_DESC_CHARS:
             desc = desc[:_PLAN_DESC_CHARS].rstrip() + "…"
-            desc_truncated = True
+            truncated_ids.append(display_id)
         desc_str = f" — {desc}" if desc else ""
-        return (f"  {_pr_display_id(p)}: {p.get('title', '???')} "
+        return (f"  {display_id}: {p.get('title', '???')} "
                 f"[{p.get('status', '?')}]{dep_str}{desc_str}")
 
     pr_list_str = bounded_join(
@@ -563,7 +570,10 @@ def plan_deps():
         omitted_note=lambda n: (
             f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
     )
-    if desc_truncated:
+    # Every kept line starts with its PR's unique display id, so the kept set
+    # is exactly the ids that prefix a line of the joined listing.
+    kept_ids = {line.split(": ", 1)[0] for line in pr_list_str.split("\n")}
+    if any(f"  {display_id}" in kept_ids for display_id in truncated_ids):
         pr_list_str += (
             "\n  (Descriptions above are abbreviated to fit the prompt size "
             "limit — run `pm pr show <id>` for a PR's full description.)")

@@ -8,6 +8,9 @@ read the full detail.
 """
 
 import json
+import os
+import subprocess
+import sys
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -1153,6 +1156,46 @@ class TestLauncherGuard:
         assert prompt_bytes(argv) < 1000
         Path(tmp).unlink()
 
+    def test_prompt_file_is_utf8_regardless_of_process_locale(self, tmp_path):
+        """The file-backed fallback must not depend on the locale encoding.
+
+        ``prompt_bytes`` measures UTF-8 and prompts are user-authored, so they
+        can contain CJK/emoji.  Under an ASCII locale (LC_ALL=C with Python's
+        locale coercion off) the default ``write_text``/``read_text`` encodings
+        raise UnicodeEncodeError/UnicodeDecodeError — the fallback that exists
+        to deliver an over-limit prompt would crash instead of delivering it.
+        """
+        repo = Path(__file__).resolve().parents[1]
+        source = tmp_path / "source.txt"
+        source.write_text("漢" * (PROMPT_ARG_LIMIT // 3 + 10), encoding="utf-8")
+        script = f"""
+import sys
+sys.path.insert(0, {str(repo)!r})
+from pathlib import Path
+from pm_core.claude_launcher import _materialize_oversized_prompt
+from pm_core.bridge import _resolve_initial_prompt
+
+prompt = Path({str(source)!r}).read_text(encoding="utf-8")
+_argv, path = _materialize_oversized_prompt(prompt, cwd={str(tmp_path)!r})
+raw = Path(path).read_bytes()
+assert raw == prompt.encode("utf-8"), len(raw)
+
+class _Args:
+    prompt = None
+    prompt_file = path
+
+assert _resolve_initial_prompt(_Args()) == prompt
+assert not Path(path).exists()
+print("ok")
+"""
+        env = dict(os.environ, LC_ALL="C", LANG="C",
+                   PYTHONCOERCECLOCALE="0", PYTHONUTF8="0",
+                   PYTHONPATH=str(repo))
+        result = subprocess.run([sys.executable, "-c", script], env=env,
+                                capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        assert "ok" in result.stdout
+
     def test_materialize_writes_to_write_dir_but_names_cwd(self, tmp_path):
         """In container mode the file lands on the host workdir (write_dir)
         while claude reads it through the container path (cwd); the bootstrap
@@ -1518,6 +1561,46 @@ class TestPlanDepsAndFixBounding:
         _assert_bounded(result.output, "Plan files omitted to fit",
                         "run `pm plan list`")
 
+    def test_plan_deps_description_note_describes_the_kept_lines(self, tmp_path):
+        """The "Descriptions above are abbreviated" note must describe the
+        lines the session reads.
+
+        ``bounded_join`` formats the first item past the byte budget before
+        breaking, so a formatting side effect over-reports: here the budget is
+        spent by a long-titled first PR (short description) and the second PR —
+        the only cut description — is the item that does not fit.  The kept
+        line is complete, so the note must not fire.
+        """
+        def _dep_pr(pr_id, title, description):
+            return {"id": pr_id, "title": title, "plan": None,
+                    "status": "pending", "depends_on": [],
+                    "description": description, "branch": None,
+                    "workdir": None, "gh_pr_number": None, "notes": []}
+
+        data = {"project": {"name": "test", "repo": "/tmp/fake",
+                            "base_branch": "master"},
+                "plans": [],
+                "prs": [_dep_pr("pr-001", "A" * 19_800, "short"),
+                        _dep_pr("pr-002", "B", "d" * 400)]}
+        store.save(data, tmp_path)
+        with patch("pm_core.cli.plan.find_claude", return_value=None):
+            result = CliRunner().invoke(
+                cli, ["-C", str(tmp_path), "plan", "deps"])
+        assert result.exit_code == 0, result.output
+        # The long description belongs to the PR the byte budget dropped.
+        assert "  pr-002:" not in result.output
+        assert "... (+1 more" in result.output
+        assert "Descriptions above are abbreviated" not in result.output
+        # Control: a kept line with a cut description does carry the note.
+        data["prs"] = [_dep_pr("pr-001", "A", "e" * 400)]
+        store.save(data, tmp_path)
+        with patch("pm_core.cli.plan.find_claude", return_value=None):
+            result = CliRunner().invoke(
+                cli, ["-C", str(tmp_path), "plan", "deps"])
+        assert result.exit_code == 0, result.output
+        assert "pr-001" in result.output
+        assert "Descriptions above are abbreviated" in result.output
+
     def test_plan_fix_bounds_plan_context(self, tmp_path):
         root = _make_big_plan_state(tmp_path, n_prs=0, n_plans=22,
                                     desc_size=0, plan_size=40_000)
@@ -1571,11 +1654,9 @@ class TestPrShowCommand:
         assert "fix the null check" in result.output
         assert "Conflicts (1): pm/project.yaml" in result.output
 
-    def test_prints_integration_record(self, tmp_path, monkeypatch):
+    def test_prints_integration_record(self, tmp_path):
         """`pm pr show` is the fallback pointer for abbreviated integration
         path lists, so it has to print that record."""
-        monkeypatch.setattr("pm_core.integration.integration_json_path",
-                            lambda pr_id: Path("/cap") / pr_id / "integration.json")
         root = _make_state(tmp_path)
         data = store.load(root)
         data["prs"][0]["integration"] = {
@@ -1588,7 +1669,34 @@ class TestPrShowCommand:
         assert result.exit_code == 0, result.output
         assert "Conflicts (1): c.py" in result.output
         assert "Overlap (2): a.py, b.py" in result.output
-        assert "Full record: /cap/pr-001/integration.json" in result.output
+        # Runtime-resolved, not a host path: the marker's fallback is followed
+        # from inside a container, where ~/.pm/sessions/<tag>/captures/ does
+        # not exist (and resolving it would create the dir as a side effect).
+        assert ("Full record: `$(pm qa captures-path pr-001)"
+                "/integration.json`") in result.output
+
+    def test_prints_truncated_integration_totals(self, tmp_path):
+        """project.yaml keeps 40 paths per list but records the real total.
+
+        The integration marker tells the session to read the full record (or
+        run `pm pr show`); the fallback must say how many paths it is not
+        showing instead of presenting the yaml truncation as the whole list.
+        """
+        root = _make_state(tmp_path)
+        data = store.load(root)
+        data["prs"][0]["integration"] = {
+            "base_branch": "master", "base_sha": "a" * 40,
+            "target_repo": "r", "status": "conflict",
+            "overlap": [f"o{i}.py" for i in range(40)], "overlap_total": 500,
+            "conflicts": ["c.py"], "conflicts_total": 1}
+        store.save(data, root)
+        result = CliRunner().invoke(
+            cli, ["-C", str(root), "pr", "show", "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "Overlap (500):" in result.output
+        assert "(+460 more)" in result.output
+        # The complete list is reported without a spurious "more".
+        assert "Conflicts (1): c.py" in result.output
 
 
 # ---------------------------------------------------------------------------

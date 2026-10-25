@@ -618,7 +618,11 @@ def _materialize_oversized_prompt(
             d.mkdir(parents=True, exist_ok=True)
             fname = f"pm_prompt_{session_id or uuid.uuid4()}.txt"
             f = d / fname
-            f.write_text(prompt)
+            # Explicit UTF-8: prompt_bytes measures UTF-8, and a user-authored
+            # prompt can contain non-ASCII.  The default (locale) encoding
+            # raises UnicodeEncodeError under an ASCII locale, which would
+            # crash the fallback that exists to deliver this prompt.
+            f.write_text(prompt, encoding="utf-8")
             ref = Path(ref_base) / "pm" / "prompts" / fname
             _log.warning(
                 "prompt is %d bytes, over the %d-byte argv limit; using "
@@ -629,7 +633,7 @@ def _materialize_oversized_prompt(
             continue
     try:
         fd, path = tempfile.mkstemp(prefix="pm_prompt_", suffix=".txt")
-        with os.fdopen(fd, "w") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(prompt)
         _log.warning(
             "prompt is %d bytes, over the %d-byte argv limit; using "
@@ -998,7 +1002,11 @@ def build_claude_shell_cmd(
                     _prompts_subdir = _host_dir / "pm" / "prompts"
                     _prompts_subdir.mkdir(parents=True, exist_ok=True)
                     _fname = f"pm_prompt_{session_id or uuid.uuid4()}.txt"
-                    (_prompts_subdir / _fname).write_text(prompt)
+                    # Explicit UTF-8 — see _materialize_oversized_prompt: the
+                    # prompt is measured in UTF-8 bytes and may be non-ASCII,
+                    # so the locale default must not decide its encoding.
+                    (_prompts_subdir / _fname).write_text(prompt,
+                                                          encoding="utf-8")
                     _ref_base = Path(cwd) if cwd else _host_dir
                     _prompt_ref = _ref_base / "pm" / "prompts" / _fname
                     # Delete the temp file after claude reads it.  The

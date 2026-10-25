@@ -167,6 +167,12 @@ def bounded_join(
     exceed ``max_bytes`` by the marker's length.  Callers that need an exact
     ceiling (e.g. accumulating a shared budget) should use
     :func:`bounded_text`, which subtracts the marker's bytes first.
+
+    *formatter* is called for the first item that does not fit (its rendered
+    size is what decides the break), so a formatter must be side-effect free:
+    a call is not evidence the item was kept.  Callers that need to know what
+    the reader actually sees (e.g. a per-line truncation note) must check the
+    returned text.
     """
     seq = list(items)
     if keep == "newest":

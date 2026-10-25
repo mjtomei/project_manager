@@ -274,7 +274,10 @@ def _resolve_initial_prompt(args) -> str | None:
     if not args.prompt_file:
         return args.prompt
     try:
-        text = Path(args.prompt_file).read_text()
+        # The launcher writes the file as UTF-8 (prompt_bytes measures UTF-8
+        # bytes); read it the same way so a non-ASCII prompt does not depend on
+        # the pane's locale encoding.
+        text = Path(args.prompt_file).read_text(encoding="utf-8")
     except OSError as e:
         print(f"[bridge] ERROR: cannot read prompt file "
               f"{args.prompt_file}: {e}", flush=True)
