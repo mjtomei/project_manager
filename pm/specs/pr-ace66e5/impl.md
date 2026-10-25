@@ -1593,3 +1593,89 @@ into a scratch `PYTHONPATH`). Evidence: `/pm-captures/review-240e-i3/`
 (sweep TSV, pathological/marker sweeps, launcher/bridge and C-locale probes,
 suite logs).
 
+## 27. Review-loop follow-ups (review loop 240e, iteration 4)
+
+Iteration 4 ran natively in the review container (the controller's
+`pr-592e4bd` runtime still launches this review prompt as one argv entry, so
+its first launch failed with E2BIG; the recovery read the complete native
+prompt from a file). It re-ran the §19-§26 method — sweep every reachable
+builder, then check every omission marker in the environment the session reads
+it in — and found one marker that named a reader which does not contain the
+omitted text, plus one incidental robustness bug in code this PR refactored.
+
+- **`pm plan deps`' omitted-plan-files marker named a command that cannot
+  yield the omitted paths.** §23/i6 bounded the omitted-file list and pointed
+  its own omission marker at `pm plan list`. That command prints each plan's
+  id, name and status — not its file. The path is not derivable from the id
+  either: this repo's plans are `plan-001 -> plans/plan-001.md` but also
+  `bugs -> bugs.md`, `improvements -> improvements.md`, `watchers ->
+  plans/watchers.md`, `tui-ux -> plans/tui-ux.md`, so no single convention
+  holds (the §26 note that "the plan-file convention is visible in the kept
+  paths" was wrong). The marker now names the `project.yaml` that records
+  each plan's `file:` as well as `pm plan list` for the ids; this builder
+  runs on the host, so the absolute path is readable. Reachable when more
+  than `PLAN_LIST_MAX` (40) plan files are omitted or their paths exceed
+  `PLAN_LIST_BUDGET` (20 KB) — the 400-plan test fixture exercises it. Real
+  data (22 plans, 17 omitted) never fires it, so real prompts are
+  byte-identical. The test now asserts the named reader contains the dropped
+  plans' paths (400 plans, each `file:` present and on disk).
+
+- **A note without `text` crashed the prompt builder and both readers.**
+  Incidental and pre-existing, found while checking the note readers. A
+  hand-edited/legacy note with no `text` made `_pr_note_full_line` (shared by
+  `_render_pr_notes` and `_render_pr_notes_bounded`, extracted in 2ac8 i6)
+  raise KeyError, so `_format_pr_notes` aborted the *whole* prompt builder
+  before any bound ran; `_note_line` (the shared `pm pr show` / `pm pr note
+  list` reader extracted in 2ac8 i5) raised too, hiding every note and making
+  the PR-notes omission marker a dead end — the same shape i3 fixed for a
+  missing `id`. Both now use `n.get('text', '')`, so the note still renders
+  (as an empty bullet) rather than crashing or disappearing.
+
+- **Spec §4's retry path had no test.** `launch_claude`'s failed-resume retry
+  sends the prompt again — the one launch where a resume is followed by an
+  over-limit prompt argv — and the guard was applied there in the PR but
+  never exercised. Added a test: the resume launch passes no prompt and
+  writes no file, the retry passes a short bootstrap, the complete prompt is
+  on disk during the retry, and the file is removed afterwards.
+
+Checked and deliberately unchanged: the `pm plan deps` PR-listing marker
+(`pm pr list` returns the PRs the listing dropped, and `pm pr show <id>` is
+the documented next step for a dropped description); the workdir-notes merge
+in `_format_pr_notes` versus the readers (a session reads the copy in its own
+project root, so main-only notes can lag — the newest notes are kept in full
+first and the i3 readers already tolerate the hand-edited shapes); the
+scenario-steps / concretization-instruction / verification-transcript
+pointers (no concrete path is threaded into those builders, §17/§20); the
+sign-off QA block's `fit_prompt` pointer (`pm qa captures-path`) is
+unreachable: `_signoff_qa_scenarios_block` caps the block at 40 lines x
+(120-char title + 200-char reason) ~ 14 KB, and the builder's static text is
+19,296 B, so with the other five blocks at `fit_prompt`'s 2 KB floor the
+prompt is ~46 KB — far under the limit, so that block can never be one that
+has to give; `build_regression_test_prompt` and the watcher lists (§10/§14);
+`PromptTooLargeError` remains uncaught at pane/CLI call sites (pr-a42a4f8).
+
+Verification: `tests/test_prompt_bounds.py` 128 cases (3 new) and
+`test_claude_launcher` 37. The two behaviour tests fail on the unfixed source
+— verified in an `origin`-less worktree at 1cddfd80 with only the new test
+file copied in (`/pm-captures/review-240e-i4/failing-then-passing-i4.txt`).
+The independent real-data sweep over all 488 PRs x 4 builders is
+byte-identical (impl 75,146 / review 77,616 / sign-off 92,165 / planner
+80,652 B, max `pr-0b87a97`; 1,952 prompts, 0 errors, deterministic); the real
+plan builders are unchanged (`plan deps` 46,989 / `plan review bugs` 24,767 /
+`plan breakdown bugs` 5,693 B); the all-collections-maxed pathological
+fixture measures the same sizes as §26 (four `fit_prompt` builders 119,700 B,
+sign-off highest) with every marker naming a reader. The launcher bootstrap
+and the bridge `--prompt-file` handoff were re-exercised end to end with a
+stub `claude` (150,010-byte CJK prompt delivered intact to the bridge's first
+turn, file removed by the bridge), and the retry path was exercised for the
+first time. Full-suite failure set identical to the `origin/master` worktree
+baseline in this sandbox (42 failed / 17 errors: 22
+`test_signoff_integration`, 19+17 `test_merge_publish`, 1
+`test_hook_events`; branch 3439 passed vs master 3309 on the clean committed
+tree; the dirty-tree `test_git_ops::test_keeps_unpushed_merge` flake passes
+once the tree is clean). Evidence: `/pm-captures/review-240e-i4/`
+(`sweep-real-after-i4.txt`, `pathological-after-i4.txt`,
+`plan-prompts-after-i4.txt`, `plan-id-to-file.txt`,
+`plan-deps-omitted-marker-i4.txt`, `bridge-e2e-i4.txt`,
+`failing-then-passing-i4.txt`, suite logs).
+
