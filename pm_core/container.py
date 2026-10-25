@@ -455,17 +455,17 @@ def _lock_path(key: str) -> Path:
 def _file_lock(key: str, *, timeout: float | None = None):
     """Exclusive cross-process lock (flock) on *key*.
 
-    Yields True when acquired.  ``timeout=0`` is a non-blocking try; on
-    timeout yields False.  If the lock file can't be created the lock
-    degrades to "acquired" — a lifecycle lock must never block a launch.
+    Yields True only when acquired.  ``timeout=0`` is a non-blocking try;
+    timeout or an unavailable lock file yields False.  Lifecycle operations
+    must not proceed without the exclusion that protects launches and owners.
     """
     path = _lock_path(key)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
     except OSError:
-        _log.debug("lock %s unavailable; proceeding unlocked", path, exc_info=True)
-        yield True
+        _log.warning("lock %s unavailable; operation skipped", path, exc_info=True)
+        yield False
         return
     acquired = False
     try:
@@ -1123,6 +1123,11 @@ def _probe_setup(name: str) -> tuple[bool, str, str]:
     return False, kind if kind in ("pids", "memory", "keyring") else "", stderr
 
 
+def _restart_generation_path(name: str) -> Path:
+    """Host-side generation read by pane EXIT traps before releasing resources."""
+    return _lock_path(f"restart-{name}").with_suffix(".generation")
+
+
 def restart_container(name: str) -> None:
     """Restart *name* in place: ends every process inside (clearing PID or
     memory exhaustion) but keeps the container's filesystem, id and mounts.
@@ -1130,6 +1135,15 @@ def restart_container(name: str) -> None:
     Setup state lives in the container filesystem, so a restarted container
     is still fully set up; this re-verifies that before returning.
     """
+    # Restart terminates attached exec clients. Their delayed EXIT traps must
+    # not remove the very filesystem this recovery is meant to preserve.
+    # Keep the new generation after restart: an old trap can arrive much later.
+    marker = _restart_generation_path(name)
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(uuid.uuid4().hex)
+    except OSError as exc:
+        raise ContainerError(f"Cannot protect '{name}' from EXIT cleanup during restart: {exc}") from exc
     r = _run_runtime("restart", "-t", "5", name, check=False, timeout=90)
     if r.returncode != 0:
         stderr = (r.stderr or "").strip()
@@ -1489,7 +1503,10 @@ def _create_fresh(
     shared_proxy = bool(allowed_push_branch and session_tag and pr_id)
     proxy_guard = (proxy_lock(session_tag, pr_id) if shared_proxy
                    else contextlib.nullcontext(True))
-    with proxy_guard:
+    with proxy_guard as proxy_locked:
+        if not proxy_locked:
+            raise launch_error(name, "proxy", "another operation still holds the proxy lock",
+                               stage="acquire its shared proxy lock")
         has_push_proxy = False
         if allowed_push_branch:
             from pm_core.push_proxy import start_push_proxy, _CONTAINER_SOCKET_DIR
@@ -1742,6 +1759,44 @@ def discard_container(name: str) -> None:
         _log.warning("Could not remove container %s", name, exc_info=True)
 
 
+def discard_unowned_container(name: str, *, container_id: str | None = None) -> bool:
+    """Best-effort cleanup after a pane failed to attach (never raises).
+
+    Unlike ``discard_container`` (used inside a locked create), this acquires
+    the name's launch lock and preserves retained, owned or uninspectable
+    containers.  An optional expected id protects the caller's launch attempt;
+    removal always addresses the freshly inspected id, never a reusable name.
+    False leaves the container available for a subsequent cleanup pass.
+    """
+    if not name:
+        return False
+    from pm_core import container_reaper
+    from pm_core.push_proxy import stop_push_proxy
+    try:
+        with launch_lock(name, timeout=0) as locked:
+            if not locked:
+                return False
+            current = current_container_id(name)
+            if current is None:
+                return False
+            if not current:
+                return True  # already gone
+            if container_id and current != container_id:
+                return False
+            if container_reaper.is_retained(name, current):
+                return False
+            if container_reaper.live_owner_panes(name, current):
+                return False
+            remove_container(current)
+            # Removal by id cannot derive the original name's proxy key.
+            # Shared proxy release still checks the runtime for other users.
+            stop_push_proxy(name)
+            return True
+    except Exception:
+        _log.warning("Could not safely discard container %s", name, exc_info=True)
+        return False
+
+
 def _relieve_keyring_pressure() -> None:
     """Reap orphaned containers first when the kernel keyring is nearly full.
 
@@ -1805,7 +1860,16 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
         # Use shlex.quote on the full inner script to avoid quote nesting
         # issues: exec_part already contains single-quoted arguments from
         # shlex.quote(), so wrapping in literal '...' would break parsing.
-        inner = f"trap {shlex.quote('; '.join(cleanup_parts))} EXIT; {exec_part}"
+        marker = shlex.quote(str(_restart_generation_path(name)))
+        read_generation = f"IFS= read -r _pm_generation 2>/dev/null < {marker} || true"
+        cleanup_script = (
+            f"_pm_generation=''; {read_generation}; "
+            f'if [ "$_pm_generation" = "$_pm_start_generation" ]; then '
+            + "; ".join(cleanup_parts) + "; fi"
+        )
+        inner = (f"_pm_generation=''; {read_generation}; "
+                 f'_pm_start_generation="$_pm_generation"; '
+                 f"trap {shlex.quote(cleanup_script)} EXIT; {exec_part}")
         return f"bash -c {shlex.quote(inner)}"
     return exec_part
 
@@ -1828,16 +1892,22 @@ def remove_container(name: str) -> None:
     while time.monotonic() < deadline:
         result = _run_runtime("inspect", name, check=False, timeout=5)
         if result.returncode != 0:
-            gone = True
-            break
+            error = (result.stderr or "").strip()
+            low = error.lower()
+            if ("no such container" in low or "no such object" in low
+                    or ("no container with" in low and "found" in low)):
+                gone = True
+                break
+            raise ContainerError(
+                f"could not confirm removal of container {name}: "
+                f"{error or 'runtime inspect failed without an absence diagnostic'}")
         time.sleep(0.1)
     if not gone:
         _log.warning("remove_container: %s still present after 10 s", name)
-    # Release the push proxy after the container is gone, so a shared
-    # proxy's "is any container still using it?" check doesn't count it.
-    stop_push_proxy(name)
-    if not gone:
         raise ContainerError(f"container {name} still present after 10 s")
+    # Release the push proxy only after the container is gone.  Failed
+    # removal must leave the surviving container's push access intact.
+    stop_push_proxy(name)
 
 
 def containers_for_pr(session_tag: str, pr_id: str) -> set[str] | None:

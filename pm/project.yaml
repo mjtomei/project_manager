@@ -12155,6 +12155,23 @@ prs:
       sign-off remain.'
     created_at: '2026-10-25T17:42:16Z'
     last_edited: '2026-10-25T17:46:18Z'
+  - id: note-ef1c275
+    text: 'Review-loop 6427 i3 (actual model chatgpt/gpt-6-astra-high): fixed cleanup
+      failing open on unknown final identity/unavailable lifecycle locks/proxy-lock
+      timeout; failed rm and unknown inspect no longer release surviving shared proxies
+      or claim success. Added ownership-safe failed-attachment discard. QA missing-pane
+      relaunch and worker-split failures now retain actual errors without agent verdicts;
+      cleanup preserves live/unknown owners. Forced in-place restart now advances
+      a cleanup generation so delayed old EXIT traps cannot delete restarted files/proxies.
+      Spec updated; no architectural redesign. Regression failures reproduced against
+      pre-fix code; final targeted 236 passed, sanitized full suite 3495 passed with
+      3 existing AsyncMock warnings. Corrected two unrealistic runtime/filesystem
+      mocks; superseded full-suite run stopped and labeled interrupted. Installed
+      declared markdown>=3.5 before full validation. Evidence /pm-captures/review-6427-i3/README.md.
+      Existing model/handoff edits preserved outside commit. No real-container QA
+      claim or waiver; outstanding scenarios and independent sign-off remain.'
+    created_at: '2026-10-25T18:09:44Z'
+    last_edited: '2026-10-25T18:09:44Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

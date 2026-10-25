@@ -830,8 +830,7 @@ def stop_push_proxy(container_name: str) -> None:
         parsed = parse_container_name(container_name)
         pid = parsed.pr_id() if parsed else None
         if parsed and parsed.session_tag and pid:
-            release_proxy_if_unused(parsed.session_tag, pid,
-                                    exclude={container_name})
+            release_proxy_if_unused(parsed.session_tag, pid)
         # A per-container proxy (no session tag or PR, e.g. qa-debug or
         # legacy untagged containers) serves only this container.
         import tempfile
@@ -848,7 +847,7 @@ def stop_push_proxy(container_name: str) -> None:
         stag, pid = key.split("\0", 1)
         # Local references cannot prove that another process has no users.
         # Unknown runtime inventory leaves the shared proxy for a later pass.
-        release_proxy_if_unused(stag, pid, exclude={container_name})
+        release_proxy_if_unused(stag, pid)
         return
 
     with _proxy_lock:

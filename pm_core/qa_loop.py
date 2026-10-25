@@ -504,9 +504,12 @@ LAUNCH_FAILED_PREFIX = "launch failed: "
 
 
 def _record_launch_failure(state: QALoopState, scenario: QAScenario,
-                           error: str) -> None:
+                           error: str | Exception) -> None:
     """Record why *scenario* could not be launched (not an agent verdict)."""
-    detail = " ".join(error.split())
+    detail = str(error)
+    if isinstance(error, subprocess.CalledProcessError) and error.stderr:
+        detail += f": {error.stderr}"
+    detail = " ".join(detail.split())
     state.scenario_verdict_reasons[scenario.index] = LAUNCH_FAILED_PREFIX + detail
 
 
@@ -2315,26 +2318,25 @@ def _launch_scenarios_in_containers(
 
         import uuid as _uuid
         scenario.concretize_session_id = str(_uuid.uuid4())
-        concretize_cmd = _build_concretize_cmd(
-            scenario, pr_data, data, cwd=container_workdir,
-            container_name=cname, instruction_content=instruction_content,
-            write_dir=str(clone_path),
-            session_id=scenario.concretize_session_id,
-            session_tag=state.session_tag)
         try:
+            concretize_cmd = _build_concretize_cmd(
+                scenario, pr_data, data, cwd=container_workdir,
+                container_name=cname, instruction_content=instruction_content,
+                write_dir=str(clone_path),
+                session_id=scenario.concretize_session_id,
+                session_tag=state.session_tag)
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
                 cwd=workdir_path, switch=False)
-        except Exception:
-            concretize_pane = None
-        if not concretize_pane:
+            if not concretize_pane:
+                raise RuntimeError(f"no pane returned for '{win_name}'")
+        except Exception as exc:
             _log.warning("Failed to create window for scenario %d",
-                         scenario.index)
-            # No pane will ever exec into the container — release it now.
-            container_mod.discard_container(cname)
-            scenario.container_name = None
-            _record_launch_failure(
-                state, scenario, f"tmux window '{win_name}' could not be created")
+                         scenario.index, exc_info=True)
+            # Discovery may fail after a pane attached. Preserve live/unknown
+            # ownership, and keep the name for the run-end cleanup retry.
+            container_mod.discard_unowned_container(cname)
+            _record_launch_failure(state, scenario, exc)
             return
 
         # Set window_name now so the status dashboard can navigate to
@@ -2397,14 +2399,16 @@ def _launch_scenarios_in_containers(
         if refined_steps:
             scenario.steps = refined_steps
 
-        exec_cmd, pane_cwd = _build_scenario_run_cmd(
-            scenario, state, data, transcript, _qa_resolution,
-            session=None, workdir_path=workdir_path,
-        )
         try:
+            exec_cmd, pane_cwd = _build_scenario_run_cmd(
+                scenario, state, data, transcript, _qa_resolution,
+                session=None, workdir_path=workdir_path,
+            )
             scenario_pane = tmux_mod.split_pane_at(
                 concretize_pane, "v", exec_cmd, background=True,
                 cwd=pane_cwd)
+            if not scenario_pane:
+                raise RuntimeError(f"no worker pane returned for '{win_name}'")
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
             scenario.transcript_path = transcript
@@ -2413,9 +2417,16 @@ def _launch_scenarios_in_containers(
                 scenario.session_id = session_id_from_transcript(transcript)
             except Exception:
                 scenario.session_id = None
-        except Exception:
+        except Exception as exc:
             _log.warning("Failed to split scenario pane for scenario %d",
                          scenario.index, exc_info=True)
+            _record_launch_failure(state, scenario, exc)
+            # Only the concretizer exists, not a worker awaiting input.
+            # End this allocation unless explicitly retained or being viewed.
+            scenario.pane_id = concretize_pane
+            scenario.window_name = None
+            _release_scenario_containers(state, session, scenarios=[scenario])
+            return
 
         if scenario.window_name:
             _log.info("Launched scenario %d (%s) in container %s (window %s)",
@@ -2601,10 +2612,14 @@ def _relaunch_scenario_window(
         )
         pane_id = tmux_mod.new_window_get_pane(session, win_name, run_cmd,
                                                cwd=pane_cwd, switch=False)
+        if not pane_id:
+            raise RuntimeError(f"no worker pane returned for '{win_name}'")
 
         scenario.window_name = win_name
         scenario.pane_id = pane_id
         scenario.transcript_path = transcript
+        if _is_launch_failure(state, scenario.index):
+            state.scenario_verdict_reasons.pop(scenario.index, None)
         try:
             from pm_core.claude_launcher import session_id_from_transcript
             scenario.session_id = session_id_from_transcript(transcript)
@@ -2622,8 +2637,14 @@ def _relaunch_scenario_window(
             _log.debug("Registration/rebalance failed for relaunched scenario %d",
                        scenario.index, exc_info=True)
         return True
-    except Exception:
+    except Exception as exc:
         _log.warning("Failed to relaunch scenario %d", scenario.index, exc_info=True)
+        _record_launch_failure(state, scenario, exc)
+        if use_containers and scenario.container_name:
+            from pm_core import container as container_mod
+            # Pane discovery can fail after tmux actually attached a worker.
+            # Preserve live/unknown owners rather than blindly removing it.
+            container_mod.discard_unowned_container(scenario.container_name)
         return False
 
 
@@ -4305,7 +4326,8 @@ def _viewed_window_ids(session: str) -> set[str]:
     return viewed
 
 
-def _release_scenario_containers(state: QALoopState, session: str) -> bool:
+def _release_scenario_containers(state: QALoopState, session: str, *,
+                                 scenarios: list[QAScenario] | None = None) -> bool:
     """Release this run's scenario containers once it completed or stopped.
 
     Containers hold kernel keyring keys while running, so leaving them for
@@ -4322,8 +4344,14 @@ def _release_scenario_containers(state: QALoopState, session: str) -> bool:
     from pm_core import tmux as tmux_mod
     viewed = _viewed_window_ids(session) if session else set()
     names: list[str] = []
-    for sc in state.scenarios:
+    for sc in state.scenarios if scenarios is None else scenarios:
         if not sc.container_name:
+            continue
+        if _is_launch_failure(state, sc.index) and not sc.pane_id:
+            # A failed pane lookup may hide a live worker. Do not turn the
+            # conservative launch-failure cleanup into an owner release here.
+            from pm_core import container as container_mod
+            container_mod.discard_unowned_container(sc.container_name)
             continue
         if state.scenario_verdicts.get(sc.index) == VERDICT_INPUT_REQUIRED:
             continue

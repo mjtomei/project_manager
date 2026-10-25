@@ -593,6 +593,8 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
                 # Raising here would abort the whole pass and lose the
                 # record of removals already done; fail just this one.
                 return False, f"error: could not re-check container id: {e}"
+            if current is None:
+                return False, "error: container identity unknown during removal re-check"
             if current and current != info.id:
                 return False, "skipped: replaced by a newer launch"
         if not d.released:

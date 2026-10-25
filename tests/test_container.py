@@ -602,6 +602,9 @@ class TestCreateContainer:
         """Host ~/.pm/hooks and ~/.pm/hook_receiver.py are bind-mounted so
         Claude Code hooks running inside the container surface events to
         the host (R-Container-Mounts)."""
+        from pm_core.container import container_state_dir
+        # The mount fixture stubs mkdir below, not lifecycle exclusion itself.
+        (container_state_dir() / "locks").mkdir(parents=True, exist_ok=True)
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
 
@@ -982,6 +985,8 @@ class TestRemoveContainer:
         # After rm, remove_container polls with inspect until the container is gone.
         # Simulate inspect returning non-zero (container gone) on first poll.
         mock_docker.return_value.returncode = 1
+        mock_docker.return_value.stderr = "Error: No such container: test-container"
+        mock_docker.return_value.stdout = ""
         remove_container("test-container")
         # First call is rm -f, second is inspect (wait loop)
         mock_docker.assert_any_call(

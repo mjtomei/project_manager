@@ -437,6 +437,16 @@ class TestReaperOwnership:
         assert out.removed == [other] and not out.error
         assert slow in out.failures and slow in reaper.pending_failures()
 
+    @pytest.mark.parametrize("released", [False, True])
+    def test_unknown_identity_never_removes_by_name(self, fake_env, monkeypatch, released):
+        info = _info("pm-repo-ab12-review-pr-aaaa")
+        fake_env["containers"] = [info]
+        monkeypatch.setattr(cm, "current_container_id", lambda name: None)
+        decision = reaper.Decision(info, "remove", "released", released=released)
+        removed, reason = reaper._remove_checked(decision, Scope())
+        assert not removed and "unknown" in reason
+        assert fake_env["removed"] == []
+
     def test_dry_run_removes_nothing(self, fake_env):
         fake_env["containers"] = [_info("pm-repo-ab12-impl-pr-aaaa")]
         out = reaper.reconcile(dry_run=True, reason="dry-run")
@@ -697,6 +707,20 @@ class TestCreateFailureCleanup:
         monkeypatch.setattr(cm, "remove_container", removed.append)
         return removed
 
+    def test_proxy_lock_timeout_aborts_before_start(self, monkeypatch, no_claude_json):
+        import contextlib
+        from pm_core import push_proxy
+        rt = _Runtime()
+        self._patch(monkeypatch, rt)
+        monkeypatch.setattr(cm, "proxy_lock", lambda *a, **kw: contextlib.nullcontext(False))
+        start = MagicMock(return_value="/unused/push.sock")
+        monkeypatch.setattr(push_proxy, "start_push_proxy", start)
+        with pytest.raises(cm.ContainerLaunchError, match="proxy lock"):
+            cm.create_container("pm-t-impl-pr-1", cm.ContainerConfig(), Path("/w"),
+                                session_tag="t", pr_id="pr-1", allowed_push_branch="branch")
+        start.assert_not_called()
+        assert not rt.ran("run")
+
     def test_run_failure_keeps_runtime_stderr(self, monkeypatch, no_claude_json):
         err = ("Error: unable to start container process: unable to join "
                "session keyring: unable to create session key: disk quota exceeded")
@@ -756,6 +780,20 @@ class TestExecTrapById:
 
 
 class TestFileLock:
+    def test_unwritable_lock_is_not_acquired(self, monkeypatch):
+        monkeypatch.setattr(cm.os, "open", MagicMock(side_effect=PermissionError("read-only state")))
+        with cm._file_lock("unavailable", timeout=0) as acquired:
+            assert acquired is False
+
+    def test_launch_aborts_when_lock_cannot_be_created(self, monkeypatch):
+        monkeypatch.setattr(cm.os, "open", MagicMock(side_effect=PermissionError("read-only state")))
+        create = MagicMock()
+        monkeypatch.setattr(cm, "_ensure_reusable", lambda *a, **kw: None)
+        monkeypatch.setattr(cm, "_create_fresh", create)
+        with pytest.raises(cm.ContainerLaunchError, match="launch lock"):
+            cm.create_container("pm-t-impl-pr-1", cm.ContainerConfig(), Path("/w"))
+        create.assert_not_called()
+
     def test_lock_on_unlinked_inode_is_not_kept(self, monkeypatch):
         """A lock won on a file the reaper just unlinked must be retaken on
         the recreated path, or two launches could both 'hold' it."""
@@ -784,7 +822,113 @@ class TestFileLock:
 # Shared push proxy release
 # ---------------------------------------------------------------------------
 
+class TestSafeDiscard:
+    @pytest.mark.parametrize("case", ["unknown-id", "unknown-owner", "owned", "retained", "busy", "replaced"])
+    def test_keeps_unproven_or_owned_container(self, monkeypatch, case):
+        import contextlib
+        name = "pm-repo-ab12-review-pr-aaaa"
+        monkeypatch.setattr(cm, "launch_lock", lambda *a, **kw: contextlib.nullcontext(case != "busy"))
+        monkeypatch.setattr(cm, "current_container_id", lambda n: None if case == "unknown-id" else "cid")
+        monkeypatch.setattr(reaper, "is_retained", lambda *a: case == "retained")
+        def owners(*args):
+            if case == "unknown-owner":
+                raise cm.ContainerError("ownership unknown")
+            return ["%1"] if case == "owned" else []
+        monkeypatch.setattr(reaper, "live_owner_panes", owners)
+        remove = MagicMock()
+        monkeypatch.setattr(cm, "remove_container", remove)
+        assert not cm.discard_unowned_container(name, container_id="old" if case == "replaced" else "cid")
+        remove.assert_not_called()
+
+    def test_removes_exact_id_under_name_lock(self, monkeypatch):
+        import contextlib
+        from pm_core import push_proxy
+        name = "pm-repo-ab12-review-pr-aaaa"
+        held = []
+        @contextlib.contextmanager
+        def lock(n, **kwargs):
+            assert n == name
+            held.append(n)
+            yield True
+            held.pop()
+        monkeypatch.setattr(cm, "launch_lock", lock)
+        monkeypatch.setattr(cm, "current_container_id", lambda n: "cid")
+        def owners(*args):
+            assert held == [name]
+            return []
+        monkeypatch.setattr(reaper, "live_owner_panes", owners)
+        removed = []
+        def remove(identifier):
+            assert held == [name]
+            removed.append(identifier)
+        monkeypatch.setattr(cm, "remove_container", remove)
+        stopped = MagicMock()
+        monkeypatch.setattr(push_proxy, "stop_push_proxy", stopped)
+        assert cm.discard_unowned_container(name)
+        assert removed == ["cid"]
+        stopped.assert_called_once_with(name)
+
+    def test_remove_failure_is_best_effort_and_keeps_proxy(self, monkeypatch):
+        from pm_core import push_proxy
+        name = "pm-repo-ab12-review-pr-aaaa"
+        monkeypatch.setattr(cm, "current_container_id", lambda n: "cid")
+        monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
+        monkeypatch.setattr(cm, "remove_container", MagicMock(side_effect=cm.ContainerError("still present")))
+        stopped = MagicMock()
+        monkeypatch.setattr(push_proxy, "stop_push_proxy", stopped)
+        assert not cm.discard_unowned_container(name)
+        stopped.assert_not_called()
+
+
 class TestProxyRelease:
+    @pytest.mark.parametrize("local", [False, True])
+    def test_last_live_user_never_excluded_from_inventory(self, monkeypatch, local):
+        from pm_core import push_proxy as pp
+        name, key = "pm-repo-ab12-review-pr-aaaa", "repo-ab12\0pr-aaaa"
+        monkeypatch.setattr(pp, "_container_to_proxy_key", {name: key} if local else {})
+        monkeypatch.setattr(pp, "_proxy_refs", {key: {name}} if local else {})
+        monkeypatch.setattr(pp, "_active_proxies", {})
+        monkeypatch.setattr(cm, "containers_for_pr", lambda *a: {name})
+        kill = MagicMock()
+        monkeypatch.setattr(pp, "_kill_proxy_socket", kill)
+        pp.stop_push_proxy(name)
+        kill.assert_not_called()
+
+    @pytest.mark.parametrize("stderr", ["permission denied", "cannot connect to Podman socket", ""])
+    def test_inspect_error_does_not_claim_removed(self, monkeypatch, stderr):
+        from pm_core import push_proxy
+        monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw: _cp(125, err=stderr))
+        stopped = MagicMock()
+        monkeypatch.setattr(push_proxy, "stop_push_proxy", stopped)
+        with pytest.raises(cm.ContainerError, match="could not confirm removal"):
+            cm.remove_container("pm-repo-ab12-review-pr-aaaa")
+        stopped.assert_not_called()
+
+    @pytest.mark.parametrize("stderr", [
+        "Error: No such container: pm-repo-ab12-review-pr-aaaa",
+        "Error: No such object: pm-repo-ab12-review-pr-aaaa",
+        'Error: no container with name or ID "pm-repo-ab12-review-pr-aaaa" found: no such container',
+    ])
+    def test_confirmed_absence_releases_proxy(self, monkeypatch, stderr):
+        from pm_core import push_proxy
+        monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw: _cp(1, err=stderr))
+        stopped = MagicMock()
+        monkeypatch.setattr(push_proxy, "stop_push_proxy", stopped)
+        name = "pm-repo-ab12-review-pr-aaaa"
+        cm.remove_container(name)
+        stopped.assert_called_once_with(name)
+
+    def test_failed_removal_does_not_release_proxy(self, monkeypatch):
+        from pm_core import push_proxy
+        monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw: _cp())
+        ticks = iter([0, 11])
+        monkeypatch.setattr(cm.time, "monotonic", lambda: next(ticks))
+        stopped = MagicMock()
+        monkeypatch.setattr(push_proxy, "stop_push_proxy", stopped)
+        with pytest.raises(cm.ContainerError, match="still present"):
+            cm.remove_container("pm-repo-ab12-review-pr-aaaa")
+        stopped.assert_not_called()
+
     def test_kept_while_any_container_uses_it(self, monkeypatch):
         from pm_core import push_proxy
         monkeypatch.setattr(cm, "containers_for_pr",

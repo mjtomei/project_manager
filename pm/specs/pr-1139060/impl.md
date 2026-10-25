@@ -79,7 +79,9 @@ removes while holding the lock. An unreachable tmux server at this final
 recheck preserves the container, just as during initial candidate selection.
 `create_container` holds the same lock for
 create/verify/reuse, so a concurrent launch/relaunch and a reap of the same
-name are serialized.
+name are serialized. Failure to acquire or create a lifecycle lock never grants
+permission to proceed unlocked. An unknown identity at final recheck is a failed,
+retryable cleanup rather than permission to delete by name.
 
 ### R3 — Release on finish / supersede / cancel / launch failure
 - **impl / review / sign-off**: the pane EXIT trap removes the container by
@@ -95,7 +97,11 @@ name are serialized.
   attached client.  Those stay until their pane goes away, the PR is
   merged/closed, or a later run supersedes them; then the reconciler takes
   them.  A scenario whose container/window fails to launch releases its
-  partial container immediately.
+  partial container immediately. QA worker-split and relaunch failures (including
+  missing pane IDs) keep the actual tmux error, create no agent verdict, and
+  release the allocation; failed pane discovery preserves live or unknown
+  owners. A failed worker split releases its concretizer-only allocation unless
+  retained or viewed, and is not polled as a worker.
 - **Supersede**: a new QA run no longer removes the previous run's containers
   synchronously; it kicks a background, PR-scoped reconcile (old windows are
   already killed by `_cleanup_stale_scenario_windows`, so they are unowned).
@@ -109,6 +115,9 @@ name are serialized.
   cannot stop a proxy a new container is about to mount.
   If runtime inventory is unavailable, preserve the shared proxy for a later
   reconcile; process-local references cannot prove other processes have no users.
+  A failed removal does not release its proxy or exclude the surviving container
+  from the runtime user inventory. Inspect errors other than explicit absence
+  leave cleanup failed and retryable, not falsely successful.
   A per-container (unshared: qa-debug, untagged) proxy is stopped whenever
   its container is removed, by whichever process removes it.
   If the QA run-end release is skipped because another reconcile holds the
@@ -214,6 +223,10 @@ container cleared it and kept its files.  Running state is not health.
   ownership and refuses while a live pane uses the container unless `--force`.
   Checking after lock acquisition protects a session that attached while the
   command waited for a concurrent launch. Prints PIDs before → after.
+  Before restart, advance a host-side per-name cleanup generation; pane EXIT
+  traps capture that generation before exec and skip container/proxy removal if
+  it changed. This protects the restarted filesystem even when an old EXIT trap
+  arrives after restart returns. Failure to write the generation refuses restart.
 - Retry scheduling of dead QA workers stays with pr-1ab9075.
 
 ## 2. Implicit requirements
