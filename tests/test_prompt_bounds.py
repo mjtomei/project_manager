@@ -1414,15 +1414,18 @@ class TestGuidePromptBounding:
         assert "  (no plans yet)" in p
 
 
-def _make_big_plan_state(tmp_path, n_prs, n_plans, desc_size, plan_size):
+def _make_big_plan_state(tmp_path, n_prs, n_plans, desc_size, plan_size,
+                         file_pad=0):
     """A project with large PR descriptions and many large plan files.
 
     Realistic magnitudes taken from this repo: descriptions reach 11 KB and
     there are 22 plan files totalling ~500 KB.  A per-item cap alone is not
     enough for these builders — the aggregate is what blows the argv limit.
+    *file_pad* lengthens each plan file's name (a real path is bounded only by
+    PATH_MAX), so the omitted-file *listing* can be probed too.
     """
     plans = [{"id": f"pl-{i:03d}", "name": f"Plan {i}",
-              "file": f"plans/pl-{i:03d}.md", "status": "draft"}
+              "file": f"plans/pl-{i:03d}{'f' * file_pad}.md", "status": "draft"}
              for i in range(n_plans)]
     prs = [{"id": f"pr-{i:03d}", "title": f"PR {i}", "plan": None,
             "status": "pending", "depends_on": [],
@@ -1453,6 +1456,20 @@ class TestPlanDepsAndFixBounding:
         assert result.exit_code == 0, result.output
         # Bounded, and both abbreviations name where the full text lives.
         _assert_bounded(result.output, "pm pr show", "omitted to fit the prompt")
+
+    def test_plan_deps_bounds_the_omitted_plan_file_list(self, tmp_path):
+        """The list of *omitted* plan files is itself a listing: it grows with
+        the project, its items are paths (so a count cap alone would not bound
+        it), and the aggregate plan-file budget does not cover it."""
+        root = _make_big_plan_state(tmp_path, n_prs=1, n_plans=400,
+                                    desc_size=0, plan_size=1_000, file_pad=200)
+        with patch("pm_core.cli.plan.find_claude", return_value=None):
+            result = CliRunner().invoke(cli, ["-C", str(root), "plan", "deps"])
+        assert result.exit_code == 0, result.output
+        assert prompt_bytes(result.output) <= PROMPT_ARG_LIMIT + 300
+        # Both halves are bounded, and the omitted-file marker names a reader.
+        _assert_bounded(result.output, "Plan files omitted to fit",
+                        "run `pm plan list`")
 
     def test_plan_fix_bounds_plan_context(self, tmp_path):
         root = _make_big_plan_state(tmp_path, n_prs=0, n_plans=22,

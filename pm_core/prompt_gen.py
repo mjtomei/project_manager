@@ -169,14 +169,24 @@ def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
     return header + _render_pr_notes_bounded(all_notes, budget, pr.get("id")) + "\n"
 
 
+def _pr_note_full_line(n: dict) -> str:
+    """One note rendered in full, as both note renderers must render it.
+
+    ``_render_pr_notes`` (the under-budget renderer) and
+    ``_render_pr_notes_bounded`` (which decides per note whether the kept line
+    is the note's full text) have to agree byte for byte: the bounded renderer
+    picks between the two by size, and counts a kept line as "abbreviated" only
+    when it differs from this.  A divergence here would make both the choice
+    and the marker lie.
+    """
+    ts = n.get("created_at", "")
+    ts_str = f" ({ts})" if ts else ""
+    return f"- {n['text']}{ts_str}"
+
+
 def _render_pr_notes(notes: list[dict]) -> str:
     """Full rendering of every note, one bullet each."""
-    lines = []
-    for n in notes:
-        ts = n.get("created_at", "")
-        ts_str = f" ({ts})" if ts else ""
-        lines.append(f"- {n['text']}{ts_str}")
-    return "\n".join(lines)
+    return "\n".join(_pr_note_full_line(n) for n in notes)
 
 
 def _render_pr_notes_bounded(notes: list[dict], budget: int,
@@ -196,10 +206,7 @@ def _render_pr_notes_bounded(notes: list[dict], budget: int,
     """
     read_cmd = f"pm pr note list {pr_id}" if pr_id else "pm pr note list <pr-id>"
 
-    def full_line(n: dict) -> str:
-        ts = n.get("created_at", "")
-        ts_str = f" ({ts})" if ts else ""
-        return f"- {n['text']}{ts_str}"
+    full_line = _pr_note_full_line
 
     def summary_line(n: dict) -> str:
         text = " ".join((n.get("text") or "").split())

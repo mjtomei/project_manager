@@ -1309,6 +1309,32 @@ changed).
   `~/.pm/sessions/<tag>/captures/<pr-id>/`) no longer happens on these two
   paths either.
 
+- **`pm plan deps`' list of *omitted* plan files was itself unbounded.**
+  §8 bounded the concatenated plan-file text with the aggregate
+  `_PLAN_FILES_BUDGET`, but the block it appends when files are left out —
+  `"\n".join(f"  - {p}" for p in omitted_plans)` — is a second enumeration
+  that the aggregate budget does not cover, and its items are filesystem
+  paths (a count cap alone would not bound them either: the same
+  cap-times-item-size lesson i3/i7/i8 applied to every other listing).  The
+  aggregate budget of 30,000 B is exhausted by two 20 KB plans, so a project
+  with a few hundred plans lists nearly all of them; with ~250-byte paths
+  (200-character file names) that measured **135,793 B** — over
+  `PROMPT_ARG_LIMIT`.  Now bounded with the shared `PLAN_LIST_MAX` /
+  `PLAN_LIST_BUDGET`, the marker naming `pm plan list`.  New test
+  `test_plan_deps_bounds_the_omitted_plan_file_list` (400 plans, 200-char
+  names): 135,793 B → 43,162 B, failing-then-passing.
+
+- **The PR-notes full-line format was written twice.** `_render_pr_notes`
+  (the under-budget renderer) and the `full_line` closure inside
+  `_render_pr_notes_bounded` built the same bullet independently, and they
+  have to agree byte for byte: `_format_pr_notes` picks between the two
+  renderers by size, and the bounded renderer counts a kept line as
+  "abbreviated" only when it differs from `full_line`. A divergence would make
+  both the choice and the marker lie — the same argument i5 used to dedup
+  `cli/pr.py::_note_line` between the two on-demand readers. Extracted as
+  `prompt_gen._pr_note_full_line`; no output change (all real prompts hash
+  identically).
+
 - **The tests encoded the wrong premise.** `test_integration_marker_resolves_the_container_mount`
   asserted `integration_pointer("pr-x") == "read /pm-captures/integration.json"`
   and `test_qa_scenario_marker_resolves_the_container_mount` asserted
@@ -1332,11 +1358,11 @@ reasoning still holds); `cli/plan.py`'s plan-file pointers (`pm plan deps`,
 and the verification prompt's "the full scenario transcript on disk" pointer,
 which names no path at all (§11).
 
-Verification: `tests/test_prompt_bounds.py` 110 cases (7 rewritten/new, all
+Verification: `tests/test_prompt_bounds.py` 111 cases (8 rewritten/new, all
 failing-then-passing) and `tests/test_claude_launcher.py` 37; the related
 suites (`test_signoff`, `test_plan_review`, `test_bug_fix_flow_prompts`,
-`test_regression_prompts`, `test_spec_gen`, `test_qa_instructions`) 372 passed
-together. All 488 real PRs × 4 builders are **byte-identical** before and after
+`test_regression_prompts`, `test_spec_gen`, `test_qa_instructions`,
+`test_signoff_integration`) 426 passed together. All 488 real PRs × 4 builders are **byte-identical** before and after
 (sha256 per PR × builder; the markers never fire on this repo's data — the two
 integration records have 0 paths and the QA runs are far under 40 scenarios),
 and the maxima are unchanged (impl 75,146 / review 77,616 / sign-off 92,165 /
@@ -1347,8 +1373,7 @@ highest) and its markers now read
 and `` (+20 more scenarios; read `$CAP/scenarios/<n>/verdict.md` for all verdicts) ``.
 Full-suite failure set identical to the `origin/master` worktree baseline in
 this sandbox (1 failure, the documented environmental
-`test_hook_events::test_installer_writes_standalone_receiver`, pr-4bde874;
-3479 vs 3367 passed, the delta being this PR's new tests).
+`test_hook_events::test_installer_writes_standalone_receiver`, pr-4bde874).
 Evidence: `/pm-captures/review-2ac8-i6/` (`i6_sweep.py` + `pathological*.txt`,
 `i6_markers.py` + `markers-pathological*.txt`, `i6_container_marker.py`,
 `sweep-head.txt` / `sweep-branch-fixed.txt` + `hashes-*.txt`,

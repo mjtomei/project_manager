@@ -594,10 +594,19 @@ def plan_deps():
         plan_context += header + file_text + "\n"
         remaining -= prompt_bytes(header) + prompt_bytes(file_text) + 1
     if omitted_plans:
+        # The list of omitted files is itself a listing, so it needs its own
+        # bound: a project with hundreds of plans grows it with the project,
+        # and its items are paths (a count cap alone would not bound it).  The
+        # aggregate plan-file budget above does not cover this text.
         plan_context += (
             "\n(Plan files omitted to fit the prompt size limit — read each "
             "in full at its path:\n"
-            + "\n".join(f"  - {p}" for p in omitted_plans) + "\n)\n")
+            + bounded_join(
+                omitted_plans, lambda p: f"  - {p}",
+                max_items=_PLAN_LIST_MAX, max_bytes=_PLAN_LIST_BUDGET,
+                omitted_note=lambda n: (
+                    f"  ... (+{n} more plan files; run `pm plan list`)"))
+            + "\n)\n")
 
     notes_block = notes.notes_section(root)
 
