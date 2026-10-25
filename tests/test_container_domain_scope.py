@@ -139,11 +139,29 @@ def test_create_uses_one_successful_domain_probe(monkeypatch, tmp_path):
 
     _domain_probe(monkeypatch, probe)
     monkeypatch.setattr(cm, "_ensure_reusable", lambda *args, **kwargs: "cid")
+    monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
     identity = {}
     assert cm.create_container("pm-impl-pr-a", cm.ContainerConfig(), tmp_path,
                                allocation_identity=identity) == "cid"
     assert identity["generation"]
     assert len(calls) == 1
+
+
+def test_proxy_owner_checks_reuse_operation_domain(monkeypatch, tmp_path):
+    import json
+    calls = []
+    def probe():
+        calls.append(1)
+        return {"id": "runtime"}
+    _domain_probe(monkeypatch, probe)
+    (tmp_path / "owner.json").write_text(json.dumps({"runtime_domain": {"id": "runtime"}}))
+    with reaper.runtime_domain_scope():
+        assert reaper._runtime_domain() == {"id": "runtime"}
+        assert push_proxy._owner_domain_matches(str(tmp_path))
+        assert push_proxy._owner_domain_matches(str(tmp_path))
+    assert len(calls) == 1
+    assert push_proxy._owner_domain_matches(str(tmp_path))
+    assert len(calls) == 2  # a later operation must re-probe
 
 
 def test_activity_probe_does_not_create_files_or_directories(monkeypatch, tmp_path):

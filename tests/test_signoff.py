@@ -673,7 +673,7 @@ class TestWindowLaunchWorkdir:
     """
 
     def _launch(self, tmp_path, *, transcript=None, existing=None,
-                head="abc", container=False, missing_pane=False):
+                head="abc", container=False, missing_pane=False, launch_error=None):
         from types import SimpleNamespace
         from contextlib import ExitStack
         from unittest.mock import MagicMock
@@ -688,7 +688,8 @@ class TestWindowLaunchWorkdir:
         pr_entry = {"id": "pr-001", "title": "T", "status": "sign_off",
                     "branch": "pm/pr-001", "workdir": str(workdir)}
 
-        new_window = MagicMock(return_value=None if missing_pane else "cl_pane")
+        new_window = MagicMock(return_value=None if missing_pane else "cl_pane",
+                               side_effect=launch_error)
         with ExitStack() as es:
             p = es.enter_context
             p(patch("pm_core.tmux.has_tmux", return_value=True))
@@ -745,6 +746,15 @@ class TestWindowLaunchWorkdir:
             call("pm-x-signoff-pr-001"),
             call("pm-x-signoff-pr-001", container_id="original-id",
                  generation="original-generation")]
+
+    def test_launch_error_preserves_tmux_stderr(self, tmp_path, capsys):
+        import subprocess
+        self._launch(tmp_path, container=True, launch_error=subprocess.CalledProcessError(
+            1, ["tmux", "new-window"], stderr=b"can't find session: pm-x"))
+        assert "can't find session: pm-x" in capsys.readouterr().out
+        self.safe_discard.assert_called_with(
+            "pm-x-signoff-pr-001", container_id="original-id",
+            generation="original-generation")
 
     def test_window_creation_uses_workdir_cwd(self, tmp_path):
         new_window, workdir = self._launch(tmp_path)

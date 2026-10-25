@@ -12283,6 +12283,27 @@ prs:
       QA claim or waiver; outstanding scenarios and independent sign-off remain.'
     created_at: '2026-10-25T20:52:31Z'
     last_edited: '2026-10-25T20:52:31Z'
+  - id: note-8387c74
+    text: 'Review-loop 6427 i10 (main and inherited helper chatgpt/gpt-6-astra-high):
+      fixed live/unknown-owner and attachment-lease reuse stealing cleanup authority;
+      QA retry now presents captured ID/generation for its own handoff. Inventory
+      unions managed labels and legacy names so renamed containers keep shared proxies
+      alive. Runtime-spawn OS errors/cancellation clean up after unlocking proxies.
+      Shared tmux diagnostic helper preserves byte/text stderr across launchers. Proxy
+      owner checks/writes reuse operation-local runtime identity. Integration exposed
+      socket readiness before SIGTERM handlers; reordered handlers and added deterministic
+      regression. Shared-proxy test paths isolated against cross-run contamination.
+      Before-fix regressions reproduced. Final core 487 passed, proxy 121 passed,
+      integration 33 passed; final sanitized full suite completed successfully (exact
+      count/warnings in /pm-captures/review-6427-i10/full-suite-final.log). Earlier
+      full-suite attempt stopped and labeled interrupted before fixture/readiness
+      fixes. Existing lifecycle architecture retained; spec updated; generation tombstones
+      deliberately preserved. Evidence and per-file notes /pm-captures/review-6427-i10/README.md.
+      No real-container QA claim or waiver; outstanding scenarios and independent
+      sign-off remain. Existing model/handoff/manual-gate edits preserved outside
+      review commit.'
+    created_at: '2026-10-25T21:31:06Z'
+    last_edited: '2026-10-25T21:33:40Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

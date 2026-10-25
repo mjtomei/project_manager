@@ -134,6 +134,14 @@ def test_launch_failure_preserves_live_or_unknown_container(fake_tmux, monkeypat
                   generation="original-generation")]
 
 
+@pytest.mark.parametrize("stderr", ["can't find pane: %42", b"can't find pane: %42"])
+def test_review_launch_reports_tmux_stderr(fake_tmux, monkeypatch, capsys, stderr):
+    monkeypatch.setattr(pr_mod.tmux_mod, "split_pane_at", mock.Mock(
+        side_effect=subprocess.CalledProcessError(1, ["tmux", "split-window"], stderr=stderr)))
+    pr_mod._launch_review_window(_make_data(), _make_pr("Review", fake_tmux["workdir"]))
+    assert "can't find pane: %42" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("title", HOSTILE_TITLES)
 def test_diff_cmd_is_shell_safe(fake_tmux, title):
     """diff_cmd must be syntactically valid bash for any PR title."""

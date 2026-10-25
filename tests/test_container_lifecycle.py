@@ -1313,6 +1313,8 @@ class TestListNamesPrefixGuard:
             calls.append(a)
             if a[0] == "inspect":
                 return _cp(out='/pm-a-impl-pr-1\tcid\ttrue\trunning\t{}\n')
+            if f"label={cm.LABEL_MANAGED}=1" in a:
+                return _cp()  # this fixture contains only unlabeled legacy names
             return _cp(out="npm-cache\npm-a-impl-pr-1\nmy-pm-thing\n")
         monkeypatch.setattr(cm, "_run_runtime", _rt)
         assert cm.running_container_count() == 1

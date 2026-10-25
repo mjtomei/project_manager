@@ -74,7 +74,11 @@ removed by automatic or scoped cleanup) when any of:
    no pane has attached yet (launch grace). Successful reuse renews the
    cleanup generation and the same 120 s attachment grace under the launch
    lock, so old release requests and the create-to-pane gap cannot destroy
-   a new attachment. Retention inspection and marker writes use this lock too.
+   a new attachment. A different launcher cannot renew ownership while live panes
+   or that lease remain; unknown ownership also refuses adoption. QA retry may
+   hand off its own allocation by supplying the previously captured ID/generation,
+   which must still match under the lock. Retention inspection and marker writes
+   use this lock too.
 
 Otherwise it is a candidate with a reason: `PR <id> is merged|closed`,
 `tmux session <s> gone`, `superseded QA run`, or `no owning pane`.
@@ -144,7 +148,8 @@ retryable cleanup rather than permission to delete by name.
   track the published socket identity, retire when replaced (not only when
   its pathname disappears), and unlink only their own socket. Bind/unlink
   operations share a bounded path-keyed lock, so delayed old shutdown cannot
-  remove a newly bound replacement socket.
+  remove a newly bound replacement socket. Daemons install shutdown handlers
+  before publishing their ready socket, so an immediate stop cannot bypass cleanup.
   If the QA run-end release is skipped because another reconcile holds the
   reaper lock, it is re-queued in the background (live panes would
   otherwise keep those containers "owned" forever).
@@ -169,7 +174,9 @@ retryable cleanup rather than permission to delete by name.
   Workdirs, captures, transcripts, QA workdirs are never touched.
 
 ### R4 — Reconcile on startup and periodically
-`container_reaper.reconcile(scope)` lists pm containers (`ps -a`, labels),
+`container_reaper.reconcile(scope)` lists pm containers (the deduplicated union
+of `ps -a` managed-label matches and legacy name-prefix matches, so a renamed
+managed container remains visible as an owner/shared-proxy user),
 computes ownership (R2), removes candidates with a bounded thread pool
 (default 4 workers, per-remove timeout), releases unused proxies (socket dirs
 `/tmp/pm-push-proxy-*` whose tag+PR has no container), and records the
@@ -211,7 +218,9 @@ intact to protect concurrent waiters and delayed releases.
   creation verifies push-proxy connectivity as well as reuse.
 - Any failure after `run` (sentinel timeout, exec error, cp failure,
   keyring) removes the partial container (and releases the proxy if unused)
-  before raising.
+  before raising. Runtime-spawn OS errors and cancellation during `run` also
+  discard the partial allocation after releasing the proxy lock, preserving
+  the original cause or cancellation.
 
 ### R6 — Real launch errors
 `ContainerLaunchError(ContainerError)` carries `kind`
@@ -222,7 +231,9 @@ memory ("cannot allocate memory", "out of memory", "oom") vs pids. Keyring
 message includes `/proc/key-users` usage, running pm container count, and
 `pm container reap --dry-run` / `pm container reap`; it notes that raising
 `kernel.keys.maxkeys` only adds headroom.  `wrap_claude_cmd` no longer hides
-`CalledProcessError` stderr.  Every launcher prints/records this message.
+`CalledProcessError` stderr. Every launcher prints/records this message, and
+keeps captured tmux stderr (text or bytes) for attachment failures and companion
+setup warnings through the shared `tmux.launch_error_detail` helper.
 QA records a failed scenario launch as `scenario_verdict_reasons[i] =
 "launch failed: …"` with **no** entry in `scenario_verdicts` (not an agent
 verdict); the overall verdict stays the existing "unverdicted ⇒

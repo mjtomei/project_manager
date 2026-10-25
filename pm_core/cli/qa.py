@@ -611,9 +611,7 @@ End with a summary of which steps work and which don't, then one of:
                 cwd=run_cwd, switch=False,
             )
         except Exception as exc:
-            launch_error = str(exc)
-            if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
-                launch_error += f": {exc.stderr}"
+            launch_error = tmux_mod.launch_error_detail(exc)
             pane = None
         if not pane:
             if use_containers:

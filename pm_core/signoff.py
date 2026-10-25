@@ -582,8 +582,9 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
 
             print(f"Opened sign-off window '{window_name}'")
         except Exception as e:
-            _log.warning("Failed to launch sign-off window: %s", e)
-            print(f"Sign-off window error: {e}")
+            detail = tmux_mod.launch_error_detail(e)
+            _log.warning("Failed to launch sign-off window: %s", detail)
+            print(f"Sign-off window error: {detail}")
             if not claude_pane:
                 discard_unowned_container(
                     _cname, container_id=allocation_identity.get("id"),

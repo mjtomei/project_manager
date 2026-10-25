@@ -508,10 +508,8 @@ LAUNCH_FAILED_PREFIX = "launch failed: "
 def _record_launch_failure(state: QALoopState, scenario: QAScenario,
                            error: str | Exception) -> None:
     """Record why *scenario* could not be launched (not an agent verdict)."""
-    detail = str(error)
-    if isinstance(error, subprocess.CalledProcessError) and error.stderr:
-        detail += f": {error.stderr}"
-    detail = " ".join(detail.split())
+    from pm_core import tmux as tmux_mod
+    detail = " ".join(tmux_mod.launch_error_detail(error).split())
     state.scenario_verdict_reasons[scenario.index] = LAUNCH_FAILED_PREFIX + detail
 
 
@@ -2590,6 +2588,8 @@ def _ensure_scenario_container(scenario: QAScenario, state: QALoopState,
             loop_id=state.loop_id,
             scenario=scenario.index,
             allocation_identity=allocation_identity,
+            reuse_identity={"id": scenario.container_id,
+                            "generation": scenario.container_generation},
         )
     except Exception as exc:
         _log.warning("Scenario %d container could not be re-ensured: %s",

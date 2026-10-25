@@ -740,8 +740,9 @@ class TestCreateContainer:
 class TestContainerReuse:
     @patch("pm_core.container.container_is_running", return_value=True)
     @patch("pm_core.container._run_runtime")
-    def test_reuses_running_container(self, mock_docker, mock_running, _mock_runtime):
-        """An existing running container is reused instead of recreated."""
+    def test_reuses_running_container(self, mock_docker, mock_running, _mock_runtime, monkeypatch):
+        """An existing unowned running container is reused instead of recreated."""
+        monkeypatch.setattr("pm_core.container_reaper.live_owner_panes", lambda *a: [])
         mock_docker.return_value = MagicMock(
             returncode=0, stdout="abc123deadbeef\n")
 
@@ -807,7 +808,7 @@ class TestCreateQAContainer:
             allowed_push_branch=None,
             session_tag=None,
             pr_id=None,
-            kind="qa", loop_id=None, scenario=None, allocation_identity=None,
+            kind="qa", loop_id=None, scenario=None, allocation_identity=None, reuse_identity=None,
         )
 
     @patch("pm_core.container.create_container")
@@ -829,7 +830,7 @@ class TestCreateQAContainer:
             allowed_push_branch="pm/pr-123-feature",
             session_tag=None,
             pr_id=None,
-            kind="qa", loop_id=None, scenario=None, allocation_identity=None,
+            kind="qa", loop_id=None, scenario=None, allocation_identity=None, reuse_identity=None,
         )
 
     @patch("pm_core.container.create_container")
@@ -844,7 +845,7 @@ class TestCreateQAContainer:
             allowed_push_branch="pm/pr-123-feature",
             session_tag="repo-abc",
             pr_id="pr-123",
-            kind="qa", loop_id=None, scenario=None, allocation_identity=None,
+            kind="qa", loop_id=None, scenario=None, allocation_identity=None, reuse_identity=None,
         )
         mock_create.assert_called_once_with(
             name="pm-repo-abc-qa-test-s1",
@@ -854,7 +855,7 @@ class TestCreateQAContainer:
             allowed_push_branch="pm/pr-123-feature",
             session_tag="repo-abc",
             pr_id="pr-123",
-            kind="qa", loop_id=None, scenario=None, allocation_identity=None,
+            kind="qa", loop_id=None, scenario=None, allocation_identity=None, reuse_identity=None,
         )
 
 

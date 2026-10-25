@@ -368,19 +368,30 @@ def _info_from(name: str, cid: str, running: bool, status: str,
 
 def list_containers() -> list[ContainerInfo] | None:
     """All pm containers (any state), or None when the runtime is unavailable."""
-    try:
-        ps = container_mod._run_runtime(
-            "ps", "-a", "--filter", f"name={container_mod.CONTAINER_PREFIX}",
-            "--format", "{{.Names}}", check=False, timeout=30)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if ps.returncode != 0:
-        return None
-    names = [ln.strip() for ln in (ps.stdout or "").splitlines()
-             if ln.strip().startswith(container_mod.CONTAINER_PREFIX)]
+    names: dict[str, None] = {}
+    # A managed allocation may have been renamed. Labels remain authoritative
+    # for its ownership and shared proxy; the name query also includes legacy
+    # unlabeled containers. Never accept a partial inventory from either query.
+    for managed in (False, True):
+        selector = (f"label={container_mod.LABEL_MANAGED}=1" if managed
+                    else f"name={container_mod.CONTAINER_PREFIX}")
+        try:
+            ps = container_mod._run_runtime(
+                "ps", "-a", "--filter", selector,
+                "--format", "{{.Names}}", check=False, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if ps.returncode != 0:
+            return None
+        for line in (ps.stdout or "").splitlines():
+            name = line.strip()
+            if name and (managed or name.startswith(container_mod.CONTAINER_PREFIX)):
+                names[name] = None
     if not names:
         return []
-    return _inspect(names, timeout=60)
+    # _inspect rechecks the managed label/name rather than trusting runtime
+    # substring filters, and rejects missing or malformed rows.
+    return _inspect(list(names), timeout=60)
 
 
 _INSPECT_FMT = ("{{.Name}}\t{{.Id}}\t{{.State.Running}}\t{{.State.Status}}\t"

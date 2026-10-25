@@ -1069,15 +1069,16 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 clear_return_awaiting(root, pr_id, "impl")
                 return
             except Exception as e:
+                detail = tmux_mod.launch_error_detail(e)
                 if window_created:
                     # The Claude pane exists (a later step such as the
                     # companion split failed) — keep its container.
                     click.echo(f"Launched Claude in tmux window '{window_name}' "
-                               f"(setup warning: {e})", err=True)
+                               f"(setup warning: {detail})", err=True)
                     from pm_core.signoff import clear_return_awaiting
                     clear_return_awaiting(root, pr_id, "impl")
                     return
-                click.echo(f"Failed to create tmux window: {e}", err=True)
+                click.echo(f"Failed to create tmux window: {detail}", err=True)
                 # Pane discovery can fail after tmux attached the worker.
                 # Do not remove it or launch a duplicate host worker when
                 # ownership is live/unknown or cleanup could not finish.
@@ -1389,8 +1390,9 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         from pm_core.signoff import clear_return_awaiting
         clear_return_awaiting(state_root(), pr_entry["id"], "review")
     except Exception as e:
-        _log.warning("Failed to launch review window: %s", e)
-        click.echo(f"Review window error: {e}")
+        detail = tmux_mod.launch_error_detail(e)
+        _log.warning("Failed to launch review window: %s", detail)
+        click.echo(f"Review window error: {detail}")
         if not claude_pane:
             discard_unowned_container(
                 _cname, container_id=allocation_identity.get("id"),

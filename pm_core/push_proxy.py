@@ -783,7 +783,8 @@ def _owner_domain_matches(sock_dir: str) -> bool:
     domain = owner.get("runtime_domain") if isinstance(owner, dict) else None
     if domain is None:
         return True
-    return domain == runtime_domain()
+    from pm_core.container_reaper import _runtime_domain
+    return domain == _runtime_domain()
 
 
 def _write_owner_file(sock_dir: str, session_tag: str, pr_id: str,
@@ -793,10 +794,11 @@ def _write_owner_file(sock_dir: str, session_tag: str, pr_id: str,
     Hashed socket dirs can't be mapped back to their tag/PR by name; the
     reaper reads this to decide whether any container still needs the proxy.
     """
+    from pm_core.container_reaper import _runtime_domain
     try:
         Path(sock_dir, _OWNER_FILE).write_text(json.dumps(
             {"session_tag": session_tag, "pr_id": pr_id, "workdir": workdir,
-             "runtime_domain": runtime_domain()}))
+             "runtime_domain": _runtime_domain()}))
     except OSError:
         _log.debug("could not write proxy owner file in %s", sock_dir,
                    exc_info=True)
@@ -1065,13 +1067,16 @@ if __name__ == "__main__":
 
     _sock, _workdir, _branch = _sys.argv[1], _sys.argv[2], _sys.argv[3]
     proxy = PushProxy(_sock, _workdir, _branch)
-    proxy.start()
 
-    # Block until the socket is removed or we get a signal
+    # Install handlers before publishing a usable socket: callers may stop or
+    # replace the daemon as soon as its readiness probe succeeds.
     import signal as _signal
     _stop = threading.Event()
     _signal.signal(_signal.SIGTERM, lambda *_: _stop.set())
     _signal.signal(_signal.SIGINT, lambda *_: _stop.set())
+    proxy.start()
+
+    # Block until the socket is removed or we get a signal
     while not _stop.is_set():
         if not proxy.owns_socket():
             break

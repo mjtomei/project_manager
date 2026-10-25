@@ -59,6 +59,25 @@ def test_daemon_process_exits_without_unlinking_replacement(tmp_path, shutdown):
         replacement.stop()
 
 
+def test_daemon_installs_signal_handlers_before_socket_readiness(monkeypatch, tmp_path):
+    from unittest.mock import Mock
+    handlers = {}
+    monkeypatch.setattr(signal, "signal", lambda sig, handler: handlers.setdefault(sig, handler))
+    monkeypatch.setattr(sys, "argv", ["push_proxy", str(tmp_path / "push.sock"), str(tmp_path), "branch"])
+    def start(self):
+        assert signal.SIGTERM in handlers and signal.SIGINT in handlers
+        handlers[signal.SIGTERM]()  # cancellation at the readiness boundary
+    # Execute the real entrypoint while replacing only its server publication.
+    source = Path(push_proxy.__file__).read_text()
+    _, entrypoint = source.split('if __name__ == "__main__":', 1)
+    namespace = dict(push_proxy.__dict__)
+    fake_proxy = Mock()
+    fake_proxy.start.side_effect = lambda: start(fake_proxy)
+    namespace["PushProxy"] = Mock(return_value=fake_proxy)
+    exec(compile('if True:' + entrypoint, push_proxy.__file__, "exec"), namespace)
+    fake_proxy.stop.assert_called_once()
+
+
 def test_old_server_notices_replacement_without_missing_path(tmp_path):
     path = str(tmp_path / "push.sock")
     old = push_proxy.PushProxy(path, str(tmp_path), "branch")

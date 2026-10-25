@@ -33,6 +33,17 @@ def _run(*args, **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(*args, **kwargs)
 
 
+def launch_error_detail(error: Exception | str) -> str:
+    """Keep captured tmux stderr in launcher diagnostics (including byte output)."""
+    detail = str(error)
+    if isinstance(error, subprocess.CalledProcessError) and error.stderr:
+        stderr = error.stderr
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode(errors="replace")
+        detail += f": {stderr.strip()}"
+    return detail
+
+
 def has_tmux() -> bool:
     """Check if tmux is installed."""
     import shutil

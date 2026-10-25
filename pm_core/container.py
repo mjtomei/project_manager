@@ -1055,6 +1055,7 @@ def create_container(
     loop_id: str | None = None,
     scenario: int | None = None,
     allocation_identity: dict[str, str] | None = None,
+    reuse_identity: dict[str, str | None] | None = None,
 ) -> str:
     """Create a detached container with the workdir and claude mounted.
 
@@ -1088,6 +1089,8 @@ def create_container(
         pr_id: PR identifier — combined with *session_tag* to key shared
             push proxies.
         kind / loop_id / scenario: ownership metadata recorded as labels.
+        reuse_identity: prior ID/generation for a QA retry handing off its own
+            allocation; otherwise live or still-attaching owners forbid reuse.
 
     Returns:
         Container ID.
@@ -1097,9 +1100,25 @@ def create_container(
             raise launch_error(name, "runtime",
                                "another launch of this container is still in progress",
                                stage="acquire its launch lock")
+        from pm_core import container_reaper
+        # Recovery may restart an unowned allocation and renew its generation;
+        # that new lease belongs to this launch, not a concurrent attaching one.
+        was_attaching = recent_launch(name, container_reaper.LAUNCH_GRACE)
         reused = _ensure_reusable(name, workdir, allowed_push_branch,
                                   session_tag=session_tag, pr_id=pr_id)
         if reused:
+            generation = cleanup_generation(name)
+            same_owner = (reuse_identity is not None
+                          and reuse_identity.get("id") == reused
+                          and reuse_identity.get("generation") == generation)
+            if not same_owner:
+                owners = container_reaper.live_owner_panes(name, reused)
+                if owners or was_attaching:
+                    raise launch_error(
+                        name, "runtime",
+                        "container is still owned by a live session or an attaching launch; "
+                        "use that session or wait for it to finish",
+                        stage="be reused")
             _renew_launch(name)
             if allocation_identity is not None:
                 allocation_identity.update(id=reused, generation=cleanup_generation(name))
@@ -1704,7 +1723,7 @@ def _create_fresh(
         setup = "set -e; " + "; ".join(setup_parts[:-1]) + "; set +e; " + setup_parts[-1]
         cmd.extend([config.image, "bash", "-c", setup])
 
-        run_error: ContainerLaunchError | None = None
+        run_error: BaseException | None = None
         try:
             result = _run_runtime(*cmd, timeout=60, check=False)
             if result.returncode != 0:
@@ -1717,6 +1736,13 @@ def _create_fresh(
                 name, "timeout",
                 f"'{runtime} run' did not return within {exc.timeout}s",
                 stage="start")
+        except OSError as exc:
+            run_error = launch_error(name, classify_runtime_error(str(exc)),
+                                     str(exc), stage="start")
+        except BaseException as exc:
+            # Cancellation can arrive after run created the allocation. Defer
+            # cleanup until the shared-proxy lock has been released below.
+            run_error = exc
 
     if run_error is not None:
         # podman may leave a "created" container behind on failure.  Discard
@@ -2280,6 +2306,7 @@ def create_qa_container(
     scenario: int | None = None,
     kind: str = "qa",
     allocation_identity: dict[str, str] | None = None,
+    reuse_identity: dict[str, str | None] | None = None,
 ) -> str:
     """Create a detached container for a QA scenario.
 
@@ -2304,6 +2331,7 @@ def create_qa_container(
         loop_id=loop_id,
         scenario=scenario,
         allocation_identity=allocation_identity,
+        reuse_identity=reuse_identity,
     )
 
 

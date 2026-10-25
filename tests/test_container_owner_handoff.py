@@ -50,6 +50,7 @@ def test_marker_write_waits_for_removal_lock(monkeypatch):
 def test_reuse_invalidates_old_release_and_protects_attach_gap(monkeypatch):
     reaper._record_release(NAME, "cid", "", "old-owner")
     monkeypatch.setattr(cm, "_ensure_reusable", lambda *a, **kw: "cid")
+    monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
     assert cm.create_container(NAME, cm.ContainerConfig(), Path("/w")) == "cid"
     assert cm.cleanup_generation(NAME)
     info = reaper.ContainerInfo(NAME, id="cid", running=True, created=time.time()-3600)
@@ -157,6 +158,7 @@ def test_known_foreign_proxy_domain_is_preserved(monkeypatch, tmp_path, operatio
 @pytest.mark.parametrize("reused", [False, True])
 def test_launch_generation_failure_is_typed_and_only_discards_fresh(monkeypatch, reused):
     monkeypatch.setattr(cm, "_ensure_reusable", lambda *a, **kw: "cid" if reused else None)
+    monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
     monkeypatch.setattr(cm, "_create_fresh", lambda *a, **kw: "cid")
     monkeypatch.setattr(cm, "_renew_launch", MagicMock(side_effect=cm.ContainerError("read-only")))
     discard = MagicMock()
@@ -168,7 +170,7 @@ def test_launch_generation_failure_is_typed_and_only_discards_fresh(monkeypatch,
 
 def test_proxy_owner_records_domain_on_creation(monkeypatch, tmp_path):
     domain = {"runtime":"docker", "daemon_id":"a"}
-    monkeypatch.setattr(pp, "runtime_domain", lambda: domain)
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: domain)
     pp._write_owner_file(str(tmp_path), "tag", "pr-aaaa", "/w")
     assert json.loads((tmp_path / pp._OWNER_FILE).read_text())["runtime_domain"] == domain
 
@@ -265,9 +267,11 @@ def test_scoped_generation_supersedes_legacy_marker():
 
 def test_allocation_identity_captured_before_concurrent_reuse(monkeypatch):
     monkeypatch.setattr(cm, "_ensure_reusable", lambda *a, **kw: "cid")
+    monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
     first, second = {}, {}
     cm.create_container(NAME, cm.ContainerConfig(), Path("/w"), allocation_identity=first)
-    cm.create_container(NAME, cm.ContainerConfig(), Path("/w"), allocation_identity=second)
+    cm.create_container(NAME, cm.ContainerConfig(), Path("/w"), allocation_identity=second,
+                        reuse_identity=first)
     assert first["id"] == second["id"] == "cid"
     assert first["generation"] != second["generation"]
     command = cm.build_exec_cmd(NAME, "true", container_id=first["id"],

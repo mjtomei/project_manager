@@ -352,6 +352,13 @@ class TestPushProxyLifecycle:
 class TestSharedProxy:
     """Tests for (session_tag, pr_id) shared proxy behaviour."""
 
+    @pytest.fixture(autouse=True)
+    def isolated_paths(self, monkeypatch, tmp_path):
+        from pm_core import push_proxy
+        original = push_proxy._shared_sock_dir_path
+        monkeypatch.setattr(push_proxy, "_shared_sock_dir_path",
+                            lambda tag, pr: str(tmp_path / Path(original(tag, pr)).name))
+
     def _mock_start(self):
         """Patch _start_proxy_subprocess to create a dummy socket file."""
         def fake_start(sock_path, workdir, branch):
@@ -382,12 +389,12 @@ class TestSharedProxy:
             stop_push_proxy("c2")
             assert get_proxy_socket_path("c2") is None
 
-    def test_shared_proxy_deterministic_path(self):
+    def test_shared_proxy_deterministic_path(self, tmp_path):
         """Shared proxy socket is at a deterministic path."""
         with self._mock_start():
             sock = start_push_proxy("c1", "/w", "pm/pr-1",
                                     session_tag="repo-abc", pr_id="pr-1")
-            assert sock == "/tmp/pm-push-proxy-repo-abc-pr-1/push.sock"
+            assert sock == str(tmp_path / "pm-push-proxy-repo-abc-pr-1" / "push.sock")
             stop_push_proxy("c1")
 
     def test_stop_session_proxies(self):
