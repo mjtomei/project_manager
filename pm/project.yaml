@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T17:06:53.533667+00:00'
+  updated_at: '2026-10-25T18:05:55.704412+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33671,6 +33671,27 @@ prs:
       (3.10.3 installed). Full suite 3739 passed, rc 0; /pm-captures/review-6915-i1.'
     created_at: '2026-10-25T17:06:53Z'
     last_edited: '2026-10-25T17:06:53Z'
+  - id: note-d9fdca7
+    text: 'QA S58 (2026-10-25, container mode, two PRs A routed/C default, real Claude
+      on router/main stubs; captures /pm-captures/scenarios/58, REPORT.md): NEEDS_WORK.
+      The RQ41 open point reproduced live on a9a3c002: in container mode pm model
+      show printed via=host on every Routes line (project qa_scenario/qa_concretize
+      and A (all types)), while the [qa_loop] Refiner/Worker and TUI "Running 2 scenario(s)"
+      lines said via=container-bridge and impl/review/qa containers had the /run/pm-route
+      mount. CODE CHANGE 0db93125 needs normal re-review: with container mode on,
+      worker_route.CONTAINER_SESSION_TYPES (impl, review, signoff, qa_concretize,
+      qa_scenario) say via=container-bridge and the other types via=host. PR lines
+      are grouped by route and path (a fully routed PR has two lines in container
+      mode, each naming its types and efforts). Host mode is unchanged. 2 real-describe
+      regressions, 4 mutations caught, full suite 3741 passed. Every other Then held:
+      provider test --container OK and no pm-route-test- left; mounts/slirp4netns/no
+      ports; ensure+--effort high only on refiner/worker; host panes with the router
+      env and no exec; mid-run model show x2 identical; bridge and proxies unchanged;
+      review PASS; both QA PASS FINALIZE_DONE; router only work/ with main_key false;
+      0 secrets. Env: Chromium smoke RUN dropped from the base image (as S53/S55).
+      Not exercised: a C review container (not in the When).'
+    created_at: '2026-10-25T18:05:55Z'
+    last_edited: '2026-10-25T18:05:55Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
