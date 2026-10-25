@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T01:04:13.476482+00:00'
+  updated_at: '2026-10-25T01:20:30.438612+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22725,6 +22725,72 @@ prs:
       by the launcher bootstrap, per the i7 decision.'
     created_at: '2026-10-25T01:04:13Z'
     last_edited: '2026-10-25T01:04:13Z'
+  - id: note-6ab7ab0
+    text: 'Review-loop 2ac8 i2 (commit 3e864c7a): one behaviour defect found and fixed,
+      plus a filed follow-up.
+
+
+      (1) FIXED — `_render_pr_notes_bounded`''s overflow path kept NO note in full.
+      The function has two paths: when every note''s one-line summary fits the budget
+      it keeps all of them and upgrades the newest notes to full text while the left-over
+      room allows (the path i7 tightened the marker wording for); when the summaries
+      do NOT fit it dropped the oldest summaries and upgraded nothing, so the newest
+      handoff arrived as a 200-char preview while hundreds of older previews survived.
+      That inverts R2/A2 ("keep the newest notes in full first; reduce older notes
+      to a first-line summary") and the function''s own docstring. Reachable: the
+      branch needs the merged summaries to exceed 34,767 B — ~152 notes at this repo''s
+      average summary size (229 B of ASCII) but only ~56 notes of non-ASCII text (a
+      200-character summary is 629 B of CJK), and this repo already has PRs with 56
+      notes. The overflow path now upgrades the newest note to full text first and
+      drops more oldest summaries to pay for it (skipping the upgrade only when the
+      note exceeds the whole budget, where it stays a summary as before). The marker
+      also names the abbreviated count ("N older note(s) omitted and M abbreviated"),
+      so a session reading previews is not left thinking they are verbatim — the same
+      "marker must describe what the session is reading" rule i7 applied to the other
+      path. The fits path is deliberately unchanged (it keeps every note represented;
+      a very long newest note can still arrive as a summary, and the marker says so).
+
+
+      (2) Real data unchanged: all 487 PRs'' note blocks hash identically before/after
+      (every real block is in the fits path), and the four builders'' maxima are unchanged
+      (impl 75,146 / review 77,616 / sign-off 92,165 / planner 80,652 B, pr-0b87a97).
+
+
+      (3) FILED pr-155f3e3 — building a prompt can still create ~/.pm/sessions/<tag>/captures/<pr-id>/
+      when an omission marker fires, because `_qa_scenarios_pointer` and `integration.integration_pointer`
+      resolve through `paths.captures_dir()`, whose last resort mkdirs (and whose
+      `sessions_dir()` call mkdirs ~/.pm/sessions/). Reproduced on the host with `generate_prompt`
+      alone (no sign-off, no container): a PR whose `signoff_return.integration` carries
+      >20 paths created the dir. Making "building a prompt never touches the filesystem"
+      hold unconditionally needs the resolver split into resolve + create, which is
+      outside this PR''s scope; QA scenario 11 had recorded it as an observation.
+
+
+      (4) Spec §19 records the 2ac8 loop (i1: launcher-guard wiring tests + bounded_text
+      postcondition doc; i2: this fix) and the items checked and deliberately unchanged:
+      single user-authored documents inlined outside fit_prompt (`_build_spec_prompt`''s
+      PR description — real max 11 KB, measured max prompt 38,209 B over all 487 PRs
+      x 2 phases; `build_fix_prompt`''s findings), the watcher managed/target lists
+      (count-capped only; targets are validated PR ids), and the `_X = X` budget aliases
+      (local names, no external importer, no differing value).
+
+
+      Verification: tests/test_prompt_bounds.py 100 cases (2 new, both failing-then-passing
+      — verified by reverting prompt_gen.py: the newest note was not in full, and
+      the marker did not name the abbreviation); related suites (prompt_bounds, bug_fix_flow_prompts,
+      plan_review, claude_launcher, regression_prompts, spec_gen, signoff) 319 passed;
+      full suite 3467 passed / 1 skipped / 1 failed, the failure being the documented
+      environmental test_hook_events::test_installer_writes_standalone_receiver (pr-4bde874,
+      PM_HOST_HOME=/home/matt set in this sandbox). Launcher guard re-exercised end
+      to end with a stub claude on PATH: a 150,000-byte prompt becomes a 172-byte
+      argv, the complete file is on disk while claude runs and is removed after; under-limit
+      prompts keep the `$(cat ...)` form; no writable dir raises PromptTooLargeError;
+      the resume path writes nothing. Markers re-checked against the commands they
+      name (`pm pr note list`, `pm pr show`, `pm pr spec`, `pm pr graph`, `pm pr list
+      --plan`, `pm qa list`, `pm qa mocks list`, `pm qa captures-path`, `pm plan list`,
+      `pm autostart list` — all registered).'
+    created_at: '2026-10-25T01:20:30Z'
+    last_edited: '2026-10-25T01:20:30Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
