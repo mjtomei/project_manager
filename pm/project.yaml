@@ -22350,7 +22350,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T00:27:46.098879+00:00'
+  updated_at: '2026-10-25T00:30:26.888255+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22718,6 +22718,26 @@ prs:
       the pm/sync-* branch), else it exits with "not committed on master yet".'
     created_at: '2026-10-25T00:19:38Z'
     last_edited: '2026-10-25T00:19:38Z'
+  - id: note-9da1246
+    text: 'QA scenario 11 PASS (3 stories: prompt no-side-effect, resume, pm pr show),
+      evidence /pm-captures/scenarios/11/. One extra observation for the next iteration,
+      not a scenario failure: the omission-marker laziness added in i5/i7/i11 only
+      avoids the filesystem touch when the marker does NOT fire. When a block overflows
+      and the marker renders, the pointer still calls paths.captures_dir() (pm_core/paths.py:90,
+      step 3 "Otherwise create and return the host path"), so generating the prompt
+      creates captures/<pr-id>/ after all. Repro: run tests/test_prompt_bounds.py
+      with cwd inside a real pm project and it leaves ~/.pm/sessions/<tag>/captures/pr-x/
+      behind (fixture id pr-x; the firing path is the sign-off QA-scenarios marker,
+      prompt_gen.py:617 via bounded_join omitted_note, reached from generate_signoff_prompt).
+      Not user-visible today: launch_signoff_window calls integration.check_integration
+      before generate_signoff_prompt, and that already creates the same dir; `pm prompt`
+      builds only the impl prompt and its small fixture leaves captures empty (verified
+      count 0 before/after, twice byte-identical 4342 B). Worth a follow-up if "building
+      a prompt never creates state" should hold unconditionally. Separately filed
+      pr-e7ee94d (pm pr note add gives identical text the same note id, so delete
+      removes both).'
+    created_at: '2026-10-25T00:30:26Z'
+    last_edited: '2026-10-25T00:30:26Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
