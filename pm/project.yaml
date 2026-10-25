@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T20:44:01.760101+00:00'
+  updated_at: '2026-10-25T20:58:48.764836+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33764,6 +33764,30 @@ prs:
       from the base image (as S53/S55/S58).'
     created_at: '2026-10-25T20:44:01Z'
     last_edited: '2026-10-25T20:44:01Z'
+  - id: note-a2459d3
+    text: 'QA S61 (2026-10-25, host, real Claude 2.1.310, main stub + recording relay
+      to the real work route; captures /pm-captures/scenarios/61, REPORT.md): two
+      CODE CHANGES need normal re-review. (1) 3ee69236 open point (a): a session pm
+      launched with no model inherited the caller pin (pm run inside a routed session
+      exports work/claude-opus-5-5[1m] + FORCE=1), so all four N children on the main
+      endpoint requested work/claude-opus-5-5 and failed model_not_found 404. Now
+      build_claude_shell_cmd adds env -u CLAUDE_CODE_SUBAGENT_MODEL -u CLAUDE_CODE_SUBAGENT_MODEL_FORCE
+      when no model is selected, and the claude -p run_env drops both (providers.subagent_unset_vars);
+      replay: N children back on CLI default / claude-fable-5-1, 0 404s. (2) 79b6ddd7
+      open point (b): skill/command model: fable and /model -> Fable switched a routed
+      main loop to claude-fable-5-1 (11 refused relay rows; real router = main account).
+      ANTHROPIC_DEFAULT_FABLE_MODEL is now pinned with the other router aliases; replay:
+      skill, command and the picker Custom Fable entry stay on work/. A typed full
+      id (/model claude-fable-5-1) is outside the launch boundary (one refused validation
+      request, model not changed). Held: P plain pin, R pin + alias work/claude-sonnet-5-5
+      child forwarded 2xx, isolation 0/0, refused+forwarded 0, 0 secrets. Regressions
+      mutation-checked; full suite 3757 passed + 12 markdown-dep-only (13 passed on
+      rerun). Harness: Claude starts in auto mode (defaultMode default and allow rules
+      ignored), so the stub could not answer classifier calls; one Shift+Tab -> manual
+      mode per pane. Filed pr-1071c5a: auto-mode classifier requests claude-sonnet-5
+      off the route. Spec slip: pm pr show does not exist (pm pr list --workdirs).'
+    created_at: '2026-10-25T20:58:48Z'
+    last_edited: '2026-10-25T20:58:48Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -34462,6 +34486,37 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-25T18:38:33.741952+00:00'
   updated_at: '2026-10-25T18:38:33.741952+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1071c5a
+  plan: bugs
+  title: 'Bug: routed sessions in Claude auto mode send permission-classifier requests
+    on claude-sonnet-5 (off the work route)'
+  branch: pm/pr-1071c5a-bug-routed-sessions-in-claude-auto-mode-send-permi
+  status: pending
+  depends_on: []
+  description: 'Found in pr-592e4bd QA S61 (/pm-captures/scenarios/61/REPORT.md, story1/attempt1-automode/R-relay-rows.jsonl).
+    Claude Code 2.1.310 starts panes in auto mode by default. Every Agent (and other
+    gated) tool call first runs the auto-mode classifier, which requested model claude-sonnet-5
+    even in a routed session whose ANTHROPIC_DEFAULT_*/SMALL_FAST/SUBAGENT aliases
+    are all pinned to work/claude-opus-5-5[1m] (pm build_claude_shell_cmd for a provider:<router>
+    PR). A recording relay refused it as non-work/; on the real claude-mixed router
+    that request goes to the main account. The CLI knows CLAUDE_CODE_AUTO_MODE_MODEL
+    and CLAUDE_CODE_BG_CLASSIFIER_MODEL, but its own log text says a server-configured
+    classifier model takes priority over CLAUDE_CODE_AUTO_MODE_MODEL, so an env pin
+    may not hold with a real account. Repro: S61 harness (/pm-captures/scenarios/61/scripts),
+    router provider at a refusing relay, start a provider:claude-work PR with s, leave
+    the pane in auto mode, type MAIN-PROBE scenario=default; relay.jsonl shows a refused
+    claude-sonnet-5 row. Needs: pin both env vars for router providers and verify
+    live against the real work route whether the server config still overrides them
+    (if so, consider launching routed sessions outside auto mode).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-25T20:58:32.257836+00:00'
+  updated_at: '2026-10-25T20:58:32.257836+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
