@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T22:00:21.825686+00:00'
+  updated_at: '2026-10-25T22:25:01.999153+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33849,6 +33849,24 @@ prs:
       (live-classifier/README.md). Spec impl.md §2, qa.md RQ43.'
     created_at: '2026-10-25T22:00:21Z'
     last_edited: '2026-10-25T22:00:21Z'
+  - id: note-04d113e
+    text: 'Review c189 i2 (5f5a1453, CODE CHANGE, small, needs normal re-review):
+      f0031965 (classifier pin), d5b7f5dd and the da5cdfbc6f5e8370 fixes ff65f489/3ee69236/79b6ddd7
+      + spec 0e13c5f8 reviewed independently, sound except one gap in f0031965: it
+      pinned CLAUDE_CODE_AUTO_MODE_MODEL=<prefix>/claude-sonnet-5 for any prefixed
+      router model, but the host router lists claude-sonnet-5 only under work/ (and
+      unprefixed); deepseek/, z-ai/ and chatgpt/ (the DeepSeek/GLM/Astra trial routes
+      of pr-ace66e5, pr-7f90572, pr-1139060) are other vendors namespaces, so those
+      sessions asked for a model no backend serves. Now only a claude-* route model
+      is pinned, and a router session without a pin drops an inherited value (pm inside
+      a work-routed session no longer moves another route classifier to work). Not
+      sent to the trial backends live. Also: TestSubagentPin print-launcher test failed
+      inside a routed session (inherited classifier pin), now removed like the other
+      pins. 3 mutations caught; markdown 3.10.3 installed first; full suite 3791 passed,
+      rc 0; /pm-captures/review-c189-i2 (README, router-v1-models.txt). impl.md §2,
+      qa.md RQ43.'
+    created_at: '2026-10-25T22:25:01Z'
+    last_edited: '2026-10-25T22:25:01Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
