@@ -22311,6 +22311,15 @@ prs:
       subsequent fixes; no new approval has been asserted.
     created_at: '2026-10-25T20:35:43Z'
     last_edited: '2026-10-25T20:35:43Z'
+  - id: note-7ab3268
+    text: 'User explicitly resumed #250 on 2026-10-25 after giving implementation
+      feedback and requested a fresh path through sign-off. This supersedes the earlier
+      stop note. Adopt the existing implementation session and wait for its final
+      pushed changes/tests before fresh review; keep manual merge gating. Feedback
+      policy: preserve instruction text via file-backed transport, bound only eligible
+      context/PR notes. Do not reuse prior sign-off as approval of these changes.'
+    created_at: '2026-10-25T21:26:33Z'
+    last_edited: '2026-10-25T21:26:33Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
@@ -32711,3 +32720,63 @@ prs:
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
+- id: pr-22ea6a2
+  plan: null
+  title: Resume autostart after user feedback in an existing implementation session
+  branch: pm/pr-22ea6a2-resume-autostart-after-user-feedback-in-an-existin
+  status: pending
+  depends_on: []
+  description: 'After a PR has reached review, a user may stop the review loop, give
+    feedback in the existing implementation session, then ask autostart to take the
+    changed PR through sign-off again. This should be a supported handoff that preserves
+    the live session and waits for the current work before advancing.
+
+
+    Concrete reproduction: #250 had a stopped review-loop240e i8. The user resumed
+    implementation in its existing pane and requested another sign-off. The registry
+    still said in_review. autostart add only re-adds the target; it neither selects
+    the implementation rework stage nor retires the completed/stopped review state.
+    _auto_start_review_loops and _auto_review_idle_prs both skip a PR if any old review-loop
+    object exists, so even manually restoring in_progress can leave the new implementation
+    completion unable to start fresh review. A simple re-add can also use the wrong
+    stage or stale completion evidence.
+
+
+    Provide an explicit CLI and matching TUI action to resume from implementation
+    after feedback (choose the minimal coherent interface). Adopt the existing active
+    implementation session/attempt and preserve its source, transcript, context and
+    unsent drafts; do not kill it or launch a duplicate. Wait for its new completed
+    handoff, then run fresh review, necessary QA and sign-off using the existing model
+    assignments and merge policy. Clearly show that it is waiting for the current
+    implementation turn, and why, in CLI/TUI status.
+
+
+    Retire or supersede obsolete loop/QA/sign-off state without deleting historical
+    evidence. Old Stop events, prior PASS results, stale aliases or late callbacks
+    must not advance the new attempt. Handle re-adding while implementation is busy,
+    already completed before autostart was enabled, a restarted TUI, and repeated
+    requests idempotently. If later-stage work is still active, make the requested
+    stage transition explicit and safe rather than allowing overlapping edits. Keep
+    manual merge and optional spec-review gates unchanged. Do not infer that arbitrary
+    extra chat means restart work; this is an explicit user/agent-controlled operation
+    and should remain usable during the planned move away from harness hooks.
+
+
+    Acceptance: reproduce #250''s stopped-review plus resumed-implementation case;
+    the existing session finishes and a new review starts exactly once, then the flow
+    reaches sign-off and waits for manual merge. Test stale stopped/PASS loops, busy
+    and already-completed feedback turns, old completion events, restart recovery
+    and repeated resume calls. Preserve unrelated target scheduling and never waive
+    review/QA evidence merely to unblock the flow.
+
+
+    This PR is filed for follow-up, not authorized for autostart by this request.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-25T21:27:23.093198+00:00'
+  updated_at: '2026-10-25T21:27:23.093198+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
