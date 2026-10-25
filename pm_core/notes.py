@@ -46,9 +46,15 @@ def notes_pointer() -> str:
     paths are relative to the project root so they resolve both on the host
     and inside a container, where the workdir is mounted at ``/workspace`` and
     an absolute host path does not exist.
+
+    ``notes.txt`` is git-tracked, so it is present in the container workdir
+    clone.  ``notes-local.txt`` is gitignored (``ensure_notes_file``), so it
+    exists only on the machine that runs pm — the marker says that instead of
+    promising a path a container session cannot read (the local text is still
+    inlined from the host up to the budget).
     """
-    return (f"`pm/{NOTES_FILENAME}` and `pm/{LOCAL_NOTES_FILENAME}` "
-            f"in the project root")
+    return (f"`pm/{NOTES_FILENAME}` in the project root "
+            f"(`pm/{LOCAL_NOTES_FILENAME}` is local to the machine running pm)")
 
 
 # Descriptions shown in the edit template header lines.

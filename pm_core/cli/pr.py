@@ -558,8 +558,9 @@ def _note_line(n: dict) -> str:
     # Tolerate a note with no ``text`` as well as no ``id`` (hand-edited or
     # legacy project.yaml): both readers are the on-demand fallback for an
     # abbreviated PR-notes block, so one malformed note must not raise and hide
-    # every note.
-    return f"  {n.get('id', '?')}{ts_str}: {n.get('text', '')}"
+    # every note.  A present-but-null ``id:``/``text:`` is the same shape, so
+    # use ``or`` — a plain default would render the literal ``None``.
+    return f"  {n.get('id') or '?'}{ts_str}: {n.get('text') or ''}"
 
 
 @pr.command("show")

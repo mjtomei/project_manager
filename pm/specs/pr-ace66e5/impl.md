@@ -1679,3 +1679,95 @@ once the tree is clean). Evidence: `/pm-captures/review-240e-i4/`
 `plan-deps-omitted-marker-i4.txt`, `bridge-e2e-i4.txt`,
 `failing-then-passing-i4.txt`, suite logs).
 
+
+## 28. Review-loop follow-ups (review loop 240e, iteration 5)
+
+Iteration 5 ran natively in the review container (the controller's
+`pr-592e4bd` runtime still launches this review prompt as one argv entry, so
+its first launch failed with E2BIG; the recovery read the complete native
+prompt from a file).  It re-ran the §19-§27 method — sweep every reachable
+builder, then check every omission marker in the environment the session reads
+it in — plus the §21 delivery paths end to end, and found three
+marker-accuracy defects, all in code this PR added.
+
+- **The sign-off QA-scenario block's `fit_prompt` pointer named a directory,
+  not the text it cut.**  The block is a shrinkable `fit_prompt` block whose
+  pointer was `pm qa captures-path <pr-id>` — a command that prints the
+  captures directory.  `fit_prompt` renders its marker as "Read the full
+  text: <pointer>", so a cut scenario listing told the session to read a
+  path-printing command.  The block's *own* count marker already named the
+  real reader (`$CAP/scenarios/<n>/verdict.md`, where
+  `_persist_scenario_verdicts` writes each scenario's title/verdict/reason);
+  the block-level pointer now uses the same string
+  (`_QA_SCENARIOS_READER`, one source of truth), and `$CAP` is defined by the
+  sign-off prompt's own evidence checklist.
+
+  Reachable: the per-line caps are in *characters* (120-char title,
+  200-char reason), so 40 scenarios of multi-byte text build a ~40 KB block,
+  and a PR large in several dimensions at once makes `fit_prompt` shrink it.
+  §27 recorded this pointer as unreachable from an ASCII estimate (~14 KB
+  block); a CJK fixture at the caps disproves that.  (Real data never fires
+  it: this repo's QA runs are far under 40 scenarios.)
+
+- **A note with a present-but-null `text:` (or `id:`) rendered the literal
+  `None`.**  i4 fixed a *missing* `text` key with `n.get('text', '')`, but
+  `project.yaml` can also carry `text: null` / `id: null` (hand-edited):
+  `dict.get` returns the None value, so the prompt and both on-demand readers
+  (`pm pr show`, `pm pr note list`) printed "None".  The bounded renderer also
+  counted that note as "abbreviated" because its full line differed from its
+  summary — a marker that misdescribed the block.  Both renderers now use
+  `n.get(...) or ...` (`or '?'` for the id).  The other `n['text']` sites are
+  `pm pr edit` / `pm pr note delete` display paths, outside this PR's
+  prompt-bounding scope.
+
+- **The session-notes marker promised a file a container session cannot
+  read.**  §17 replaced `pm notes` + a host absolute path with
+  `pm/notes.txt` and `pm/notes-local.txt` "in the project root", on the
+  reasoning that relative paths resolve in the container workdir.
+  `notes-local.txt` is gitignored (`notes.ensure_notes_file`), so it is not
+  in a workdir clone; a container session following the marker gets "No such
+  file" for the local half.  The marker now says `pm/notes.txt` in the
+  project root and that `pm/notes-local.txt` is local to the machine running
+  pm (the local text is still inlined from the host up to the budget; host
+  sessions can read the file).  `pm/notes.txt` is tracked, so the container
+  half is real.
+
+Checked and deliberately unchanged: the truncated-scenario-steps /
+concretization-instruction / verification-transcript pointers (§17/§20 — no
+concrete path is threaded into those builders; the transcript is reachable
+and the title/focus are inlined); `qa_finalize_prompt._scenarios_pointer`'s
+host `qa_status.json` / `qa_resume.json` reference (the finalize pane is
+launched by `build_claude_shell_cmd(cwd=workdir, write_dir=workdir)` on the
+host); `build_regression_test_prompt` and the watcher lists (§10/§14);
+`PromptTooLargeError` remains uncaught at pane/CLI call sites (pr-a42a4f8);
+the `n['text']` display paths in `pm pr edit` / `pm pr note delete`.
+
+Verification: `tests/test_prompt_bounds.py` 131 cases (3 new tests, all
+failing-then-passing — the QA fit marker named `pm qa captures-path pr-x` on
+the unfixed source, the null-text note rendered "None", and the null-id/text
+readers printed "None"; the notes-marker test's new assertions failed on the
+old wording) and `test_claude_launcher` 37; the related suites (prompt_bounds,
+claude_launcher, signoff, plan_review, bug_fix_flow_prompts,
+regression_prompts, spec_gen, qa_instructions, notes) 447 passed.  Real-data
+sweep over all 488 PRs × 4 builders is byte-identical before/after (impl
+75,146 / review 77,616 / sign-off 92,165 / planner 80,652 B, max
+`pr-0b87a97`; 1,952 prompts, 0 errors, deterministic); the
+all-collections-maxed pathological fixture measures the same sizes (four
+`fit_prompt` builders 88,204 / 96,635 / 119,700 / 100,286 B, sign-off
+highest) and every marker names a reader; the CJK sign-off fixture at the
+per-line caps now renders `... Read the full text:
+`$CAP/scenarios/<n>/verdict.md` for all verdicts ...`.  The launcher bootstrap
+was re-exercised end to end with a stub claude (123,007-byte CJK prompt →
+322-byte command, max argv entry 184 B, complete file on disk during the run,
+removed after), and the bridge `--prompt-file` handoff (123,007-byte prompt
+delivered intact to the bridge's first turn, file removed).  Full-suite
+failure set on the clean committed tree is byte-identical to the §27 / i4
+clean-tree baseline: 42 failed / 17 errors / 3442 passed (vs 42 / 17 / 3439;
+the delta is this iteration's 3 new tests), made up of 22
+`test_signoff_integration`, 19+17 `test_merge_publish` and 1 `test_hook_events`
+— all environmental.  The dirty-tree run adds only the documented
+`test_git_ops::test_keeps_unpushed_merge` flake, which passes once the tree is
+committed.
+
+Evidence: `/pm-captures/review-240e-i5/` (sweep TSVs, pathological/marker
+sweeps, the CJK sign-off probe, launcher/bridge e2e, suite logs).

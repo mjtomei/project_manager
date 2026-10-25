@@ -311,6 +311,22 @@ class TestPrNotesBounding:
         # session sees that a note exists rather than losing it silently.
         assert "(2026-01-02T00:00:00Z)" in block
 
+    def test_note_with_null_id_and_text_renders_empty_not_none(self):
+        """A present-but-null ``id:``/``text:`` is the same malformed shape as
+        a missing key (hand-edited project.yaml).  ``n.get(..., default)``
+        returns the None value, so the prompt and the readers rendered the
+        literal string ``None`` — which the marker then counted as a real
+        difference between the summary and full line."""
+        pr = _pr(notes=[
+            {"id": None, "text": None, "created_at": "2026-01-01T00:00:00Z"},
+            {"id": "n2", "text": "kept note",
+             "created_at": "2026-01-02T00:00:00Z"},
+        ])
+        block = prompt_gen._format_pr_notes(pr)
+        assert "kept note" in block
+        assert "None" not in block
+        assert "(2026-01-01T00:00:00Z)" in block
+
 
 class TestReviewPromptBounding:
     def test_many_siblings_and_notes(self):
@@ -638,6 +654,45 @@ class TestSignoffPromptBounding:
         self._many_scenarios(tmp_path, monkeypatch)
         p = prompt_gen.generate_signoff_prompt(_data(_pr()), "pr-x")
         assert "$CAP/scenarios/<n>/verdict.md" in p
+        assert 'CAP="$(pm qa captures-path pr-x)"' in p
+
+    def test_fit_prompt_qa_marker_names_the_verdict_reader(
+            self, _isolated_pm_root, tmp_path, monkeypatch):
+        """fit_prompt's marker says "Read the full text: <pointer>", so a cut
+        QA-scenario block must point at the verdicts — `pm qa captures-path`
+        only prints a directory, not the text it cut.
+
+        Reachable: the per-line caps are in *characters* (120-char title,
+        200-char reason), so 40 scenarios of multi-byte text make the block
+        ~40 KB, and a PR large in several dimensions at once pushes the prompt
+        over PROMPT_ARG_LIMIT.  (This is the block-level marker; the block's
+        own count marker already names the same reader.)
+        """
+        self._qa_status(tmp_path, monkeypatch, [
+            {"index": i, "title": "情" * 120, "verdict": "PASS",
+             "verdict_reason": "由" * 200}
+            for i in range(1, 41)
+        ])
+        spec_dir = _isolated_pm_root / "specs" / "pr-x"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "impl.md").write_text("S" * 200_000)
+        (_isolated_pm_root / "notes.txt").write_text(
+            "## General\n" + "N" * 60_000 + "\n")
+        pr = _pr(description="D" * 40_000,
+                 notes=[_note(i) for i in range(400)],
+                 plan="pl-1",
+                 signoff_return={"verdict": "SIGNOFF_IMPL", "hop": "impl",
+                                 "reason": "R" * 30_000})
+        siblings = [_pr(f"pr-s{i:03d}", plan="pl-1", title="L" * 255)
+                    for i in range(400)]
+        p = prompt_gen.generate_signoff_prompt(_data(pr, siblings), "pr-x")
+        _assert_bounded(p)
+        markers = [line for line in p.splitlines()
+                   if "QA scenario summary truncated" in line]
+        assert markers, "the QA block was not abbreviated"
+        assert "$CAP/scenarios/<n>/verdict.md" in markers[0]
+        assert "pm qa captures-path" not in markers[0]
+        # The reader is only live because this prompt defines CAP.
         assert 'CAP="$(pm qa captures-path pr-x)"' in p
 
     def test_pr_notes_markers_name_the_concrete_pr_id(self):
@@ -1205,6 +1260,10 @@ class TestNotesBounding:
         assert "pm/notes.txt" in block
         assert "`pm notes`" not in block
         assert str(_isolated_pm_root) not in block
+        # notes-local.txt is gitignored, so it is not in a container workdir
+        # clone: the marker must not claim it is in the project root there.
+        assert "pm/notes-local.txt` in the project root" not in block
+        assert "local to the machine running pm" in block
         for prompt in (
             prompt_gen.generate_prompt(_data(_pr()), "pr-x"),
             prompt_gen.generate_review_prompt(_data(_pr()), "pr-x"),
@@ -1824,6 +1883,20 @@ class TestPrShowCommand:
             assert result.exit_code == 0, (argv, result.output)
             assert "has text" in result.output
             assert "n2 (2026-01-02T00:00:00Z): " in result.output
+
+    def test_note_with_null_id_and_text_does_not_print_none(self, tmp_path):
+        """A present-but-null ``id:``/``text:`` must render the same empty
+        placeholders as a missing key; ``n.get(key, default)`` would print the
+        literal ``None`` (the on-demand reader is what the PR-notes marker
+        tells the session to run)."""
+        root = _make_state(tmp_path, notes=[
+            {"id": None, "text": None,
+             "created_at": "2026-01-01T00:00:00Z"}])
+        for argv in (["pr", "show", "pr-001"], ["pr", "note", "list", "pr-001"]):
+            result = CliRunner().invoke(cli, ["-C", str(root)] + argv)
+            assert result.exit_code == 0, (argv, result.output)
+            assert "None" not in result.output, (argv, result.output)
+            assert "? (2026-01-01T00:00:00Z): " in result.output
 
     def test_prints_signoff_return(self, tmp_path):
         """`pm pr show` is the reader for a cut sign-off return block."""

@@ -33611,3 +33611,27 @@ prs:
       (not a per-PR dir) — decide whether this bug should be narrowed to that or closed.'
     created_at: '2026-10-25T15:10:40Z'
     last_edited: '2026-10-25T15:10:40Z'
+- id: pr-bebc2e9
+  plan: bugs
+  title: 'Bug: pm pr edit / pm pr note delete crash on a note with a null id or text'
+  branch: pm/pr-bebc2e9-bug-pm-pr-edit-pm-pr-note-delete-crash-on-a-note-w
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py (pm pr edit note reconciliation ~line
+    197/365/420; pm pr note delete error listing ~line 3287/3342). Repro: hand-edit
+    a PR note in pm/project.yaml to `text: null` (or omit/`id: null`), then run `pm
+    pr edit <pr>` or `pm pr note delete <pr> <note-id>`: the direct `n["text"]` /
+    `n["id"]` indexing raises KeyError and hides every note behind a traceback. Same
+    malformed shape pr-ace66e5 tolerated in the prompt builder and the two readers
+    (`pm pr show`, `pm pr note list`); the edit/delete paths still index directly.
+    Fix: use `n.get("text", "")` / `n.get("id")` (or skip such notes) and add a regression
+    test.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-25T18:51:17.319060+00:00'
+  updated_at: '2026-10-25T18:51:17.319060+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

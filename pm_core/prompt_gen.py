@@ -184,8 +184,10 @@ def _pr_note_full_line(n: dict) -> str:
     # Tolerate a note with no ``text`` (hand-edited or legacy project.yaml),
     # the same shape ``_format_pr_notes`` already tolerates for ``id``: this
     # function renders *every* note (including in ``_render_pr_notes``), so a
-    # direct index would crash the whole prompt builder on one bad note.
-    return f"- {n.get('text', '')}{ts_str}"
+    # direct index would crash the whole prompt builder on one bad note.  A
+    # present-but-null ``text:`` is the same shape, so use ``or ''`` (a plain
+    # default would render the literal ``None``).
+    return f"- {n.get('text') or ''}{ts_str}"
 
 
 def _render_pr_notes(notes: list[dict]) -> str:
@@ -599,6 +601,15 @@ Review the code changes in this PR for quality, correctness, and architectural f
     )
 
 
+# The on-demand reader for the sign-off QA-scenario block.  Spelled `$CAP/...`
+# (defined by the sign-off prompt's own evidence checklist) so it resolves in
+# the container the session runs in.  One source of truth for both the block's
+# count marker and fit_prompt's block-level marker — a block-level marker that
+# named only `pm qa captures-path` (which prints a directory) would not return
+# the verdicts it cut.
+_QA_SCENARIOS_READER = "`$CAP/scenarios/<n>/verdict.md` for all verdicts"
+
+
 def _qa_scenarios_pointer() -> str:
     """Where a session reads the QA verdicts an abbreviated listing left out.
 
@@ -620,7 +631,7 @@ def _qa_scenarios_pointer() -> str:
     resolving a path here would also create the captures dir as a side
     effect).
     """
-    return "read `$CAP/scenarios/<n>/verdict.md` for all verdicts"
+    return f"read {_QA_SCENARIOS_READER}"
 
 
 def _signoff_qa_scenarios_block(pr_id: str) -> str:
@@ -1172,8 +1183,13 @@ IMPORTANT: end your response with exactly one of {SIGNOFF_MERGE}, {SIGNOFF_REQA}
             "signoff_return": (signoff_return_block,
                                f"`pm pr show {pr_id}`", "sign-off return"),
             "plan": (plan_context, plan_pointer, "plan context"),
-            "qa": (qa_block, f"`pm qa captures-path {pr_id}`",
-                   "QA scenario summary"),
+            # fit_prompt's marker says "Read the full text: <pointer>", so the
+            # pointer must return the verdicts this block cut.  `pm qa
+            # captures-path` only prints the captures directory; the per-
+            # scenario verdict files are the actual reader (the same one the
+            # block's own count marker names, and CAP is defined by this
+            # prompt's evidence checklist).
+            "qa": (qa_block, _QA_SCENARIOS_READER, "QA scenario summary"),
         },
     )
 
