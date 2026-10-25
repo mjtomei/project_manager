@@ -32,6 +32,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import shlex
 import stat
 import subprocess
@@ -635,5 +636,9 @@ def live_probe(cfg: ProviderConfig, *, container_name: str | None = None,
 def model_on_route(cfg: ProviderConfig, model: str) -> bool:
     """Whether *model* is the route's model as requested (``work/x``) or
     as the upstream names it after the router strips the prefix (``x``,
-    which is what lands in the transcript)."""
-    return model == cfg.model or cfg.model.endswith("/" + model)
+    which is what lands in the transcript).  A context-window suffix on
+    the route model (``work/x[1m]``) is a Claude Code selector, sent as a
+    beta header and never as part of the model name, so the transcript
+    records plain ``x``."""
+    base = re.sub(r"\[[^\]]*\]$", "", cfg.model)
+    return model in (cfg.model, base) or base.endswith("/" + model)

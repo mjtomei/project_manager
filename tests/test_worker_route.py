@@ -1881,7 +1881,8 @@ if os.environ.get("PROBE_TRANSCRIPT", "1") == "1":
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, sid + ".jsonl"), "w") as f:
         f.write(json.dumps({"type": "assistant", "message": {
-            "model": model.split("/")[-1], "content": "ok"}}) + "\n")
+            "model": re.sub(r"\[[^\]]*\]$", "", model.split("/")[-1]),
+            "content": "ok"}}) + "\n")
 if os.environ.get("PROBE_HOOK", "1") == "1":
     hooks = os.environ["PROBE_HOOKS_DIR"]
     os.makedirs(hooks, exist_ok=True)
@@ -1910,9 +1911,9 @@ class TestLiveProbe:
         monkeypatch.setattr("pm_core.worker_route.time.sleep", lambda s: None)
         return short_dir
 
-    def _probe(self, cwd):
+    def _probe(self, cwd, model=MODEL):
         cfg = ProviderConfig(name=ROUTE, type="router",
-                             api_base="http://127.0.0.1:1", model=MODEL)
+                             api_base="http://127.0.0.1:1", model=model)
         return worker_route.live_probe(cfg, cwd=str(cwd))
 
     def test_underscore_cwd_finds_transcript(self, probe_env):
@@ -1926,6 +1927,25 @@ class TestLiveProbe:
         assert out["transcript"] and "probe-020ea4s-" in out["transcript"]
         assert out["transcript_models"] == ["claude-opus-5-5"]
         assert out["hook_event"] == "Stop"
+
+    def test_1m_route_model_matches_the_transcript_model(self, probe_env):
+        # QA S59: a route model with a context suffix (work/x[1m]) is sent
+        # as work/x plus the 1M beta header, and real Claude records plain
+        # x in the transcript, so a healthy route printed "Live: FAILED -
+        # model mismatch".
+        cwd = probe_env / "probe"
+        cwd.mkdir()
+        out = self._probe(cwd, model=f"{MODEL}[1m]")
+        assert out["transcript_models"] == ["claude-opus-5-5"]
+        assert out["ok"], out
+
+    def test_transcript_model_off_the_route_still_fails(self):
+        cfg = ProviderConfig(name=ROUTE, type="router",
+                             api_base="http://127.0.0.1:1", model=f"{MODEL}[1m]")
+        assert worker_route.model_on_route(cfg, "claude-opus-5-5")
+        assert worker_route.model_on_route(cfg, f"{MODEL}[1m]")
+        assert not worker_route.model_on_route(cfg, "claude-fable-5-1")
+        assert not worker_route.model_on_route(cfg, "opus-5-5")
 
     def test_missing_transcript_is_a_failure(self, probe_env, monkeypatch):
         monkeypatch.setenv("PROBE_TRANSCRIPT", "0")
