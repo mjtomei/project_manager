@@ -556,6 +556,27 @@ class TestValidateModelConfig:
         assert errors == ["prs[pr-a].model: 5 is not a model name or "
                           "'provider:<name>' (launches that use it fail)"]
 
+    @pytest.mark.parametrize("empty", ["", 0, [], {}, False])
+    def test_pr_empty_model_flagged_as_ignored(self, empty, monkeypatch):
+        """Review 0f64 i4: an empty hand-edited PR ``model`` selects
+        nothing at launch (the project settings apply), so it is reported
+        as ignored, not as failing launches."""
+        from pm_core.model_config import (
+            get_pr_model_override, resolve_model_and_provider,
+            validate_model_config)
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        pr = {"id": "pr-a", "model": empty}
+        data = {"project": {"model_config": {
+                    "session_models": {"impl": "claude-sonnet-5-5"}}},
+                "prs": [pr]}
+        res = resolve_model_and_provider(
+            "impl", pr_model=get_pr_model_override(pr, "impl"),
+            project_data=data)
+        assert res.model == "claude-sonnet-5-5"
+        assert validate_model_config(data) == [
+            f"prs[pr-a].model: {empty!r} is not a model name or "
+            "'provider:<name>' (ignored; the project settings apply)"]
+
     def test_project_session_models_bad_values_flagged(self):
         """Blank or non-string project entries are ignored, so say so."""
         from pm_core.model_config import validate_model_config

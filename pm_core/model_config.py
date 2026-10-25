@@ -300,10 +300,15 @@ def validate_model_config(project_data: dict | None) -> list[str]:
             continue
         # A non-string PR ``model`` (hand-edited YAML) is not guessed
         # around: launches that fall back to it fail, so say so here.
-        if pr.get("model") is not None and not _is_model_value(pr["model"]):
-            errors.append(f"prs[{pr.get('id')}].model: {pr['model']!r} is "
-                          "not a model name or 'provider:<name>' (launches "
-                          "that use it fail)")
+        # An empty one ('', 0, [], ...) selects nothing at launch
+        # (``resolve_model_and_provider`` skips a falsy PR model), so the
+        # project settings apply and it is only ignored.
+        model = pr.get("model")
+        if model is not None and not _is_model_value(model):
+            effect = ("launches that use it fail" if model
+                      else "ignored; the project settings apply")
+            errors.append(f"prs[{pr.get('id')}].model: {model!r} is "
+                          f"not a model name or 'provider:<name>' ({effect})")
         if pr.get("session_models") is None:
             continue
         where = f"prs[{pr.get('id')}].session_models"

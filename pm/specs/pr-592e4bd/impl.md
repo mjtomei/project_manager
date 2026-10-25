@@ -1195,3 +1195,13 @@ recorded with item 41.
         `test_pr_non_string_model_flagged`; 2 mutations caught
         (`/pm-captures/review-0f64-i3/mutation-checks.log`).  Full suite:
         `/pm-captures/review-0f64-i3/full-suite.log`.
+    (h) Review loop 0f64 i4: (g)'s problem line said "launches that use
+        it fail" for every non-string PR `model`, but an empty one (`''`,
+        `0`, `[]`, `{}`, `false`) selects nothing at launch
+        (`resolve_model_and_provider` skips a falsy PR model), so the
+        project settings apply.  Such a value is now reported as "ignored;
+        the project settings apply"; a non-empty one (`5`, a list) still
+        fails its launches.  `test_pr_empty_model_flagged_as_ignored[5
+        cases]` (all fail with the old wording;
+        `/pm-captures/review-0f64-i4/mutation-checks.log`).  Full suite:
+        `/pm-captures/review-0f64-i4/full-suite.log`.
