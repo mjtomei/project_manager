@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-25T16:12:50.600842+00:00'
+  updated_at: '2026-10-25T16:47:46.426400+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -11979,6 +11979,42 @@ prs:
       touched.'
     created_at: '2026-10-25T16:12:50Z'
     last_edited: '2026-10-25T16:12:50Z'
+  - id: note-0073490
+    text: 'Scenario 1 concretization: QA debug is pm qa debug <instruction-id> [--branch
+      <branch>], not a saved QA-result launcher; author its fixture with pm qa add-instruction.
+      Debug uses qa_author fake type (no verdict) and random pm-qa-debug-<id>-<8hex>
+      name, with session ownership label; review/signoff use exact session-tagged
+      deterministic names. For launch-error integration tests use a documented one-shot
+      external tmux argv delegator: preserve real socket/options, change only the
+      armed new-window/split-window target to a nonexistent session/pane, and execute
+      real tmux. A review diff window alone is not a worker: failure of its agent
+      split must release the allocation; implementation --companion split failure
+      occurs after the worker exists and must preserve it with no duplicate host fallback.
+      Assert visible errors/inventory, not CLI rc alone (review/signoff may return
+      zero on launch failure). Fake verdicts do not end a TTY session; use bounded
+      hold or close the exact owned pane.'
+    created_at: '2026-10-25T16:02:44Z'
+    last_edited: '2026-10-25T16:02:44Z'
+  - id: note-b68b099
+    text: 'QA S1 2026-10-25 at 38ec06b7 (actual model chatgpt/gpt-6.1-sol-high): real
+      isolated Podman/tmux implementation/review/signoff/debug EXIT IDs removed in
+      0.82-1.45s; fresh exact-tag review/signoff replaced IDs and preserved all retained
+      decoys; 6 genuine external tmux new/split faults verified after real allocation,
+      including preserving sole implementation worker after companion failure >42s;
+      host-only impl/review inventories unchanged. Work/commits/dirty edits/captures
+      and generated transcripts retained by SHA256. Original image build failed Chromium/inotify
+      errno24; recovered per /pm-captures/infrastructure-recovery-20261025.md by omitting
+      ONLY smoke RUN, no runtime mocks. Coverage gap: prescribed fake body is ignored
+      for NONE/single-line verdicts; manual launchers omit native JSONL unless hidden
+      --transcript requested, and debug exposes no transcript option, so debug transcript-preservation
+      Then cannot execute. Filed incidental pr-b28e042; did not fabricate JSONL or
+      claim PASS. Related local-origin signoff integration failure noted on pr-8cdbe60.
+      All captures including 4 validated H264 videos and exact drivers: /pm-captures/scenarios/1/manifest.md.
+      No source fix; no pressure tests/quota changes. Fixture source/evidence preserved;
+      decoys removed only after assertions. Next run needs supported debug fake transcript
+      generation (and visible configured output).'
+    created_at: '2026-10-25T16:47:46Z'
+    last_edited: '2026-10-25T16:47:46Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -28617,7 +28653,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T22:54:04.987012+00:00'
-  updated_at: '2026-10-12T22:56:41.644886+00:00'
+  updated_at: '2026-10-25T16:43:48.536374+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -28631,6 +28667,16 @@ prs:
       --show-toplevel == the container workdir, else exec real git.'
     created_at: '2026-10-12T22:56:41Z'
     last_edited: '2026-10-12T22:56:41Z'
+  - id: note-ac32ab1
+    text: 'Related runtime evidence from pr-1139060 S1 (2026-10-25): disposable local-backend
+      signoff container integration fetch master fails because its origin is the host
+      absolute local project repo path, inaccessible inside the container. Signoff
+      worker still opens with scripted SIGNOFF_BLOCKED; no approval/merge asserted.
+      Logs /pm-captures/scenarios/1/signoff-start/pane.txt and signoff-fresh/pane.txt.
+      Existing source/evidence preserved; launcher cleanup checks succeed. Please
+      include local-origin integration in proxy routing regression coverage.'
+    created_at: '2026-10-25T16:43:48Z'
+    last_edited: '2026-10-25T16:43:48Z'
 - id: pr-22c92ef
   plan: bugs
   title: 'Bug: status bar clips "AUTO ×N" to "AUTO …" when the TUI pane is ~40 cols
@@ -31593,6 +31639,34 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-25T16:12:49.584678+00:00'
   updated_at: '2026-10-25T16:12:49.584678+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b28e042
+  plan: bugs
+  title: 'Bug: manual fake-agent launchers do not create transcripts and ignore configured
+    body text'
+  branch: pm/pr-b28e042-bug-manual-fake-agent-launchers-do-not-create-tran
+  status: pending
+  depends_on: []
+  description: 'QA pr-1139060 scenario 1 on 38ec06b7: configured impl/review/signoff/qa_author
+    body strings through pm fake-claude config set. Actual fake argv contains --body
+    but visible output/JSONL only contains generic preamble (pm_core/fake_claude.py:548-564
+    emits body only for block verdicts). Manual pm pr start/review/signoff omit session
+    IDs unless hidden --transcript is supplied; pm qa debug has no transcript option
+    and its qa_author fake never produces JSONL/hooks (pm_core/cli/qa.py:563,577).
+    Thus the documented lifecycle QA Given that every fake emits transcript/hook events
+    and identifiable configured output cannot be met for debug without changing implementation
+    or substituting a different fixture. Real containers/EXIT/replacement/faults/host-only
+    behavior did run; evidence /pm-captures/scenarios/1/ (impl-start-runtime, debug-started,
+    impl-transcript-evidence). Add supported transcript generation and visible configured
+    text for interactive fake launches; do not fabricate transcripts in QA.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-25T16:43:47.687090+00:00'
+  updated_at: '2026-10-25T16:43:47.687090+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
