@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T14:50:00.087724+00:00'
+  updated_at: '2026-10-25T15:07:11.229727+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -22900,6 +22900,66 @@ prs:
       /pm-captures/review-2ac8-i5/.'
     created_at: '2026-10-25T14:50:00Z'
     last_edited: '2026-10-25T14:50:00Z'
+  - id: note-e199038
+    text: 'Review-loop 2ac8 i6: the integration and QA-scenario omission markers baked
+      a HOST captures path into the prompt. `captures_dir` resolves for the process
+      that calls it, and every prompt that inlines these markers is built by the host
+      pm process (signoff.py calls generate_signoff_prompt, then wraps the command
+      in `podman exec` with cwd=/workspace). On the host it returns `~/.pm/sessions/<tag>/captures/<pr>/`,
+      while the container mounts that same directory at `/pm-captures` — so the baked
+      path does not exist where the session reads it. `pm qa captures-path`''s own
+      docstring states the fact ("the host-side ~/.pm location isn''t visible from
+      inside the container"). Reachable: the integration marker fires above INTEGRATION_MAX_PATHS
+      (20) paths (the yaml record keeps up to 40) and the scenario marker above QA_SCENARIOS_MAX
+      (40) scenarios, so the abbreviated lists/verdicts were unrecoverable in container
+      mode — the silent loss R2/A1 forbids, the same host-vs-container class §12/§17/i11
+      kept fixing, and exactly the fix §12 claimed (the tests passed only because
+      they monkeypatched captures_dir to return /pm-captures).
+
+
+      Repro: build the sign-off prompt for a PR with >40 QA scenarios and an integration
+      record with >20 overlap paths — the markers read `read /home/matt/.pm/sessions/<tag>/captures/pr-x/integration.json`
+      and `read /home/matt/.pm/sessions/<tag>/captures/pr-x/scenarios/<n>/verdict.md`.
+
+
+      Fixed in the pointers only (no budget, helper or launcher path changed): both
+      now name a runtime-resolved reader, matching the convention the codebase already
+      uses for the captures dir (bug_fix_prompts.py: "The captures directory for this
+      PR is at `$(pm qa captures-path <id>)`"):
+
+      - integration_pointer -> "read `$(pm qa captures-path <pr-id>)/integration.json`
+      or run `pm pr show <pr-id>`" (the record check_integration writes into the mounted
+      captures dir, plus the pm pr show reader R16 added).
+
+      - _qa_scenarios_pointer -> "read `$CAP/scenarios/<n>/verdict.md` for all verdicts"
+      — the sign-off prompt defines CAP="$(pm qa captures-path <pr-id>)" in its own
+      evidence checklist and already spells that directory `$CAP/scenarios/<n>/`,
+      and §20''s truncated-scenario note uses the same form. (Signature lost its now-unused
+      pr_id argument.)
+
+      Neither pointer calls captures_dir any more, so §19''s filed filesystem side
+      effect (pr-155f3e3) no longer happens on these two paths either.
+
+
+      Tests: test_prompt_bounds.py 110 (7 rewritten/new, all failing-then-passing
+      — verified by stashing the two source edits; the two old "resolves_the_container_mount"
+      tests encoded the wrong premise and are rewritten to assert the real property:
+      the marker names a runtime-resolved reader and no host captures path appears
+      in the prompt). Related suites (signoff, plan_review, bug_fix_flow_prompts,
+      regression_prompts, spec_gen, qa_instructions, claude_launcher) 372 + 37 passed.
+
+
+      Independent re-verification this iteration: all 488 real PRs x 4 builders are
+      sha256-identical before/after (the markers never fire on this repo''s data —
+      its two integration records have 0 paths) and the maxima are unchanged (impl
+      75,146 / review 77,616 / sign-off 92,165 / planner 80,652 B, max pr-0b87a97);
+      the all-collections-maxed pathological fixture measures the same sizes as before
+      (sign-off 119,700 B highest) with the corrected markers; full-suite failure
+      set identical to an origin/master worktree baseline in this sandbox (1 failure:
+      the documented environmental test_hook_events::test_installer_writes_standalone_receiver,
+      pr-4bde874; 3479 vs 3367 passed). Evidence /pm-captures/review-2ac8-i6/.'
+    created_at: '2026-10-25T15:07:11Z'
+    last_edited: '2026-10-25T15:07:11Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
