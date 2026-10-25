@@ -30007,7 +30007,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T06:17:29.491425+00:00'
-  updated_at: '2026-10-13T17:11:29.200939+00:00'
+  updated_at: '2026-10-25T02:37:46.982539+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30051,6 +30051,16 @@ prs:
       (1)/(2) and close or narrow this PR.'
     created_at: '2026-10-13T17:11:29Z'
     last_edited: '2026-10-13T17:11:29Z'
+  - id: note-b929b08
+    text: 'S53 (pr-592e4bd, 2026-10-25) related repro: with auto-start driving D at
+      sign_off, a driver launch that failed at the route check (expired sign-in) still
+      left signoff-<D>.head and a signoff-<D>.jsonl symlink to a session that never
+      ran in the autostart run dir. The user then pressed i (manual launch, no --transcript),
+      so the driver showed that live window as "running" and never recorded its SIGNOFF_MERGE.
+      Closing the window let the driver relaunch and record it. Evidence /pm-captures/scenarios/53/pre-fix/story3
+      (manifest.md).'
+    created_at: '2026-10-25T02:37:46Z'
+    last_edited: '2026-10-25T02:37:46Z'
 - id: pr-328cfd0
   plan: bugs
   title: 'Bug: zz t on an in_review PR runs QA without moving it to qa; arming auto-start
@@ -31649,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T00:29:03.609727+00:00'
+  updated_at: '2026-10-25T02:38:43.749733+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33505,6 +33515,29 @@ prs:
       scripts dir is empty; use /pm-captures/scenarios/47/scripts for the host harness.'
     created_at: '2026-10-25T00:29:03Z'
     last_edited: '2026-10-25T00:29:03Z'
+  - id: note-da0ea91
+    text: 'QA S53 (2026-10-25, RQ40 route failures on workflow roles; container +
+      host; captures /pm-captures/scenarios/53, REPORT.md): NEEDS_WORK. Route Thens
+      held live on 27258d15. Impl/review/sign-off/review-loop/auto-start fail closed
+      with role-worded remedies (rc 1, one stderr line, no window/container, 0 main
+      requests). The expired sign-in remedy keeps creds[work] in the CLI and driver
+      lines. A missing provider gives one Error: line and "QA stopped ... then start
+      QA again" while M QA kept running on main. Host-mode impl/review/s0 start with
+      the router env and retry on ECONNREFUSED; refiner gates wait, then launch by
+      themselves. 0 secrets. CODE CHANGE 66404830 needs normal re-review, 4 display
+      fixes found live, each replayed post-fix: (a) "Auto-start: starting <pr>" was
+      dropped when pm pr start failed inside the targets hold, now queued with a hold;
+      (b) TUI s/d/i Error lines dropped [work] (pr_view.run_command did not escape),
+      now escaped; (c) "Review loop done ... PASS" never painted before the skip_qa
+      hand-off lines, now held; (d) pm model show had no Routes for PR-override routes.
+      8 mutations caught; full suite 3722 passed. impl.md item 42. Observations: pr-7cf1fe4
+      held as expected. A manual i sign-off window is never consumed by the driver
+      (note on pr-5410ae4). A failed start still moves status (note on pr-6082c0d).
+      Container-mode s0 runs on the host. The pm-dev Chromium smoke step fails in
+      the nested sandbox (image built without it). M first QA run idle_prompt hooks
+      came ~17 min late (Claude-side, unknown).'
+    created_at: '2026-10-25T02:38:43Z'
+    last_edited: '2026-10-25T02:38:43Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -34143,8 +34176,17 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T02:16:05.181654+00:00'
-  updated_at: '2026-10-25T02:16:05.181654+00:00'
+  updated_at: '2026-10-25T02:37:47.899766+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-b811bae
+    text: 'S53 (pr-592e4bd, 2026-10-25): the status move also happens on route/provider
+      launch failures. TUI s / pm pr start on D moved pending -> in_progress before
+      "work route ... unavailable" (story 1), and pm pr start on D at sign_off moved
+      it to in_progress before "provider claude-work is not configured" (story 5).
+      Nothing launched in either case. Evidence /pm-captures/scenarios/53/story1,
+      story5.'
+    created_at: '2026-10-25T02:37:47Z'
+    last_edited: '2026-10-25T02:37:47Z'
