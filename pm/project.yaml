@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T15:55:42.009267+00:00'
+  updated_at: '2026-10-25T16:41:28.355890+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -23000,6 +23000,56 @@ prs:
       plus fresh independent sweeps.'
     created_at: '2026-10-25T15:55:41Z'
     last_edited: '2026-10-25T15:55:41Z'
+  - id: note-4fea976
+    text: 'Review-loop 240e i2 (native recovery; the controller''s pr-592e4bd runtime
+      still passes this prompt as one argv entry, so its first launch hit E2BIG —
+      not evidence the source on this branch is broken). Three defects found and fixed,
+      no budget/helper/builder shape changed.
+
+
+      (1) pm plan deps'' "Descriptions above are abbreviated" note described lines
+      the listing dropped: bounded_join formats the first item past the byte budget
+      before breaking, so the desc_truncated side-effect flag fired for a dropped
+      PR (repro: 19,800-char title + short description first, the only long description
+      on the dropped second PR). The note now fires only when a kept line''s description
+      was cut (unique display-id line prefix); the formatter is side-effect free and
+      bounded_join''s docstring states the invariant.
+
+
+      (2) The file-backed prompt fallback used the locale encoding: _materialize_oversized_prompt
+      and build_claude_shell_cmd wrote, and pm_core.bridge read, the handoff without
+      encoding="utf-8". Under an ASCII locale (LC_ALL=C, PYTHONCOERCECLOCALE=0, PYTHONUTF8=0)
+      a CJK prompt raised UnicodeEncodeError in the write (crashing the fallback that
+      exists to deliver an over-limit prompt) and UnicodeDecodeError in the bridge
+      read (not caught by its OSError handler). All four sites now use UTF-8.
+
+
+      (3) pm pr show — the fallback reader for the integration omission marker — printed
+      len(vals) from the yaml copy (integration.compact caps each list at 40 and records
+      overlap_total/conflicts_total), so a 500-path record read as "Overlap (40)"
+      with no indication more existed, and its "Full record:" line was a host captures
+      path that does not exist in the container where the marker is followed (resolving
+      it also creates the captures dir). It now reports the real total plus (+N more)
+      and names `$(pm qa captures-path <id>)/integration.json`.
+
+
+      Verification: test_prompt_bounds 120 cases (3 new tests / 4 cases, all failing-then-passing
+      by reverting the source edits) and test_claude_launcher 37; related suites 382
+      passed. Real-data sweep over all 488 PRs x 4 builders is byte-identical (impl
+      75,146 / review 77,616 / sign-off 92,165 / planner 80,652 B, max pr-0b87a97;
+      1,952 prompts, 0 errors). Plan builders on real state: plan deps 46,989 B, plan
+      review bugs 24,767 B, plan breakdown bugs 5,693 B. Launcher + bridge paths re-exercised
+      end to end with a stub claude (150,010-byte prompt delivered intact, file removed).
+      Full-suite failure set identical to the origin/master worktree baseline in this
+      sandbox (42 failed / 17 errors: 22 test_signoff_integration, 19+17 test_merge_publish,
+      1 test_hook_events; branch 3431 passed vs master 3309; markdown installed into
+      a scratch PYTHONPATH for both). test_git_ops::test_keeps_unpushed_merge fails
+      only while the worktree is dirty (the sandbox git wrapper forwards git pull
+      to this host workdir) and passes on the clean committed tree. /pm-captures/review-240e-i1/
+      was absent (as i1 recorded for review-240e-i0); §24 + /pm-captures/review-2ac8-i6/
+      were the prior evidence. Evidence: /pm-captures/review-240e-i2/. (2026-10-25T16:50:00Z)'
+    created_at: '2026-10-25T16:41:28Z'
+    last_edited: '2026-10-25T16:41:28Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
