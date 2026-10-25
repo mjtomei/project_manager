@@ -1182,3 +1182,16 @@ recorded with item 41.
         `test_pr_watcher_entry_flagged_as_not_a_pr_session`; 2 mutations
         caught (`/pm-captures/review-0f64-i2/mutation-checks.log`).  Full
         suite: `/pm-captures/review-0f64-i2/full-suite.log`.
+    (g) Review loop 0f64 i3: (d)'s Routes lines resolved every PR
+        override, so a hand-edited non-string PR `model` (`model: 5`, a
+        list or a mapping) made `pm model show` crash with
+        `AttributeError` (it printed before (d), as on master), and
+        `validate_model_config` never reported it.  Such a value selects
+        no route line; it is reported as "prs[<pr>].model: … is not a
+        model name or 'provider:<name>' (launches that use it fail)".
+        Launches still fail on it (pre-existing on master, not guessed
+        around: a note on pr-6082c0d).
+        `test_model_show_survives_a_non_string_pr_model[3 cases]`,
+        `test_pr_non_string_model_flagged`; 2 mutations caught
+        (`/pm-captures/review-0f64-i3/mutation-checks.log`).  Full suite:
+        `/pm-captures/review-0f64-i3/full-suite.log`.

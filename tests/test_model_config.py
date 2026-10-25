@@ -545,6 +545,17 @@ class TestValidateModelConfig:
         assert "None is not a model name" in errors[0]
         assert errors[1].startswith("prs[pr-a].session_models['review']")
 
+    def test_pr_non_string_model_flagged(self):
+        """Review 0f64 i3: a hand-edited non-string PR ``model`` fails the
+        launches that use it, and nothing reported it."""
+        from pm_core.model_config import validate_model_config
+        data = {"prs": [{"id": "pr-a", "model": 5},
+                        {"id": "pr-b", "model": "provider:claude-work"},
+                        {"id": "pr-c", "model": None}]}
+        errors = validate_model_config(data)
+        assert errors == ["prs[pr-a].model: 5 is not a model name or "
+                          "'provider:<name>' (launches that use it fail)"]
+
     def test_project_session_models_bad_values_flagged(self):
         """Blank or non-string project entries are ignored, so say so."""
         from pm_core.model_config import validate_model_config
@@ -770,3 +781,29 @@ def test_model_show_pr_routes_never_count_the_project_watcher(tmp_path,
     others = ", ".join(st for st in PR_SESSION_TYPES if st != "impl")
     assert i == [f"  pr-i ({others}) route=claude-work"], routes
     assert not any("watcher" in r for r in routes), routes
+
+
+@pytest.mark.parametrize("bad", [5, ["provider:claude-work"], {"x": 1}])
+def test_model_show_survives_a_non_string_pr_model(tmp_path, monkeypatch,
+                                                   bad):
+    """Review 0f64 i3: the PR Routes lines (S53 66404830) resolved a
+    hand-edited non-string PR ``model`` and crashed ``pm model show``
+    (AttributeError), the command a model setting problem is meant to be
+    found with.  It now lists no route for it and names the problem."""
+    from click.testing import CliRunner
+    from pm_core import store, worker_route
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    monkeypatch.setattr(worker_route, "describe",
+                        lambda res, **kw: f"route={res.provider}")
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master"},
+                "prs": [{"id": "pr-a", "model": "provider:claude-work"},
+                        {"id": "pr-x", "model": bad}]}, tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    result = CliRunner().invoke(model_cli.model, ["show"])
+    assert result.exit_code == 0, result.output
+    routes = result.output.split("Routes:\n", 1)[1]
+    assert "  pr-a (all types) route=claude-work" in routes
+    assert "pr-x (" not in routes
+    assert "prs[pr-x].model:" in result.output

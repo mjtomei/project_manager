@@ -253,6 +253,7 @@ def validate_model_config(project_data: dict | None) -> list[str]:
       (``SESSION_TYPES``);
     - ``session_models`` values are model names (other values are ignored);
     - ``session_effort`` values are valid effort levels (``EFFORT_LEVELS``);
+    - each PR's ``model`` is a model name;
     - each PR's ``session_models`` is a mapping keyed by the types a PR
       decides (``PR_SESSION_TYPES``), with model-name values (other values
       are ignored).
@@ -295,7 +296,15 @@ def validate_model_config(project_data: dict | None) -> list[str]:
     # A PR's role exceptions are ignored the same way, so a typo would
     # leave that role on the PR-wide model.
     for pr in project_data.get("prs") or []:
-        if not isinstance(pr, dict) or pr.get("session_models") is None:
+        if not isinstance(pr, dict):
+            continue
+        # A non-string PR ``model`` (hand-edited YAML) is not guessed
+        # around: launches that fall back to it fail, so say so here.
+        if pr.get("model") is not None and not _is_model_value(pr["model"]):
+            errors.append(f"prs[{pr.get('id')}].model: {pr['model']!r} is "
+                          "not a model name or 'provider:<name>' (launches "
+                          "that use it fail)")
+        if pr.get("session_models") is None:
             continue
         where = f"prs[{pr.get('id')}].session_models"
         entries = pr["session_models"]

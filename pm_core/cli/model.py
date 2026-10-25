@@ -100,7 +100,9 @@ def model_show():
         routes: dict[str, list[str]] = {}
         for st in PR_SESSION_TYPES:
             pr_model = get_pr_model_override(pr, st)
-            if not pr_model:
+            # A non-string PR model (hand-edited) selects no route; it is
+            # listed under the problems below rather than crashing here.
+            if not pr_model or not isinstance(pr_model, str):
                 continue
             res = resolve_model_and_provider(
                 st, pr_model=pr_model, project_data=data)
