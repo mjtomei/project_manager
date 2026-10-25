@@ -33953,3 +33953,54 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-9ade6b8
+  plan: bugs
+  title: 'Bug: pm still shells out to `claude -p` in three flows — replace with an
+    interactive session whose result is read from the transcript'
+  branch: pm/pr-9ade6b8-bug-pm-still-shells-out-to-claude-p-in-three-flows
+  status: pending
+  depends_on:
+  - pr-ace66e5
+  description: "Requirement (user, 2026-10-25): \"We don't want to use -p anywhere,\
+    \ anthropic has gone back and forth with having that use API credits instead of\
+    \ subscription usage.\"\n\nFootprint. `claude -p` is produced by exactly two functions,\
+    \ both in pm_core/claude_launcher.py:\n  - launch_claude_print            (claude_launcher.py:819)\n\
+    \  - launch_claude_print_background (claude_launcher.py:1218)\nand consumed by\
+    \ three production call sites, each of which needs the model's captured TEXT:\n\
+    \  1. spec_gen.generate_spec (spec_gen.py:304) — generates the impl/QA spec, parses\
+    \ stdout for AMBIGUITY_FLAG, writes the spec file. Synchronous.\n  2. qa_loop\
+    \ mock generation (qa_loop.py:1449) — parses stdout for MOCK_SAVED: (already falls\
+    \ back to checking the mock file exists).\n  3. plans.review.review_step (plans/review.py:170)\
+    \ — the plan-review check; the callback parses the verdict and writes a review\
+    \ file.\nEverything else that looked like `-p` is tmux's own `display -p` / `capture-pane\
+    \ -p`, unrelated.\n\nWhy it is not a flag swap: all three need captured output,\
+    \ which is exactly what print mode provides. There is no other flag that both\
+    \ runs headless and returns text.\n\nProposed replacement: pm already has the\
+    \ pieces for the interactive transport — launch_claude runs `claude --session-id\
+    \ <uuid> '<prompt>'` in a tmux pane, and verdict detection already parses the\
+    \ session JSONL via transcript_path_for(cwd, session_id) / finalize_transcript.\
+    \ Add one helper that runs a session the normal interactive way and harvests the\
+    \ final assistant message from the transcript, then point the three call sites\
+    \ at it. That collapses the two prompt-delivery transports into one (interactive\
+    \ + pane + transcript), which is also what pr-ace66e5's launcher guard assumes.\n\
+    \nOpen question to settle first: claude's own help says non-interactive mode triggers\
+    \ \"via -p, or when stdout is not a TTY, e.g. piped\". A subprocess with captured\
+    \ stdout is not a TTY, so a naive subprocess swap may or may not reproduce the\
+    \ same billing behavior we are trying to avoid. Running in a tmux pane (a real\
+    \ TTY, and what every other pm launch already does) avoids the ambiguity; confirm\
+    \ with a real run before choosing.\n\nTests that pin the current shape and must\
+    \ move with it: tests/test_spec_gen.py (12 patches of launch_claude_print), tests/test_plan_review.py\
+    \ (7 patches of launch_claude_print_background), tests/test_claude_launcher.py,\
+    \ tests/test_fake_claude.py (4), tests/test_prompt_bounds.py (3 — the `-p` branches\
+    \ of the oversized-prompt guard, which become dead once this lands).\n\nFiled\
+    \ rather than done in pr-ace66e5 because that PR is scoped to prompt-size bounds\
+    \ and is mid-review; this is a transport change with its own risk."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-25T21:35:37.962211+00:00'
+  updated_at: '2026-10-25T21:35:37.962211+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
