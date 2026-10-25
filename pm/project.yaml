@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T20:58:48.764836+00:00'
+  updated_at: '2026-10-25T21:17:00.497020+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33788,6 +33788,36 @@ prs:
       off the route. Spec slip: pm pr show does not exist (pm pr list --workdirs).'
     created_at: '2026-10-25T20:58:48Z'
     last_edited: '2026-10-25T20:58:48Z'
+  - id: note-18fdce2
+    text: 'QA S59 (2026-10-25, host-mode pm in the scenario container, real claude-work
+      route behind a recording relay that forwards only work/; captures /pm-captures/scenarios/59,
+      REPORT.md). RQ42 held live on every launch path: TUI impl+review concurrently,
+      sign-off, QA refiner/worker/s0, plain-terminal pm pr start + --resume (pin in
+      env), claude-mixed stand-in launcher. Every subagent child (general-purpose,
+      Explore, Plan, claude-code-guide, project model: fable, user model: haiku, Agent(model=fable))
+      requested work/claude-opus-5-5 with the 1M beta, got 200 from the real route,
+      one org hash, and the Agent schema had no model. Pre-fix ccf0959b control: fable
+      children requested claude-fable-5-1 (8 refused, 0 forwarded). The production
+      QA worker launch carries FORCE. S57 open point: a follow-up typed after the
+      worker PASS Stop gave Stop, then idle_prompt +60 s, and the loop collected PASS
+      1 s later. CODE CHANGE ff65f489 needs normal re-review: pm provider test --live
+      printed "Live: FAILED - model mismatch" for a healthy [1m] route (transcript
+      records claude-opus-5-5); model_on_route now drops the [..] suffix; 2 mutation-checked
+      regressions; full suite 3767 passed. DECISION NEEDED, not fixed: in auto permission
+      mode the first remote auto-mode classifier call of each claude process requests
+      claude-sonnet-5[1m] without work/ (Claude: "ANTHROPIC_DEFAULT_SONNET_MODEL=work/claude-opus-5-5[1m]
+      cannot serve as the classifier; using the Sonnet 5 default"). Seen on the plain-terminal,
+      resume, pre-fix and TUI (claude-mixed) paths. Behind the real router it would
+      reach the main account, and a successful probe keeps every later classifier
+      call (transcript excerpts) there. CLAUDE_CODE_AUTO_MODE_MODEL=<opus route model>
+      is ignored ("safeguards refuse"); CLAUDE_CODE_AUTO_MODE_MODEL=work/claude-sonnet-5
+      (providers.yaml alias_models) kept all classifier calls on the work route (200,
+      same org). Workers launched with --dangerously-skip-permissions do not classify.
+      Options: pm pins a Sonnet-class work model for router providers by default,
+      require/document alias_models, or accept. Same issue as S61 pr-1071c5a; evidence
+      here adds the TUI path and the ignored opus pin.'
+    created_at: '2026-10-25T21:17:00Z'
+    last_edited: '2026-10-25T21:17:00Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
