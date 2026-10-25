@@ -327,6 +327,35 @@ class TestPrNotesBounding:
         assert "None" not in block
         assert "(2026-01-01T00:00:00Z)" in block
 
+    def test_null_created_at_does_not_crash_the_builder(self):
+        """``created_at: null`` is the same malformed-note shape.
+
+        ``_format_pr_notes`` sorts the merged notes by ``created_at`` and
+        compares timestamps to dedup by id; comparing None against a string
+        raised TypeError and aborted the whole prompt builder — before any
+        bound ran — which is the silent failure the id/text tolerance fixes
+        (i3/i4/i5) exist to prevent for hand-edited notes.
+        """
+        pr = _pr(notes=[
+            {"id": "n1", "text": "first note", "created_at": None},
+            {"id": "n2", "text": "second note",
+             "created_at": "2026-01-02T00:00:00Z"},
+        ])
+        block = prompt_gen._format_pr_notes(pr)
+        assert "first note" in block and "second note" in block
+        assert "None" not in block
+
+    def test_null_created_at_on_duplicate_ids_does_not_crash(self):
+        """The dedup comparison has the same shape: one copy of a note with a
+        null ``created_at`` and no ``last_edited`` must not raise."""
+        pr = _pr(notes=[
+            {"id": "n1", "text": "old copy", "created_at": None},
+            {"id": "n1", "text": "new copy",
+             "created_at": "2026-01-02T00:00:00Z"},
+        ])
+        block = prompt_gen._format_pr_notes(pr)
+        assert "new copy" in block
+
 
 class TestReviewPromptBounding:
     def test_many_siblings_and_notes(self):
@@ -1199,6 +1228,59 @@ class TestQaLoopPromptsBounding:
             scenario, "b", "master",
             instruction_content="i" * 200000, pr_id="pr-x")
         _assert_bounded(p, "instruction file")
+
+    def test_concretization_marker_names_the_actual_instruction_file(self):
+        """The marker must name the file it cut.
+
+        ``qa_instructions.resolve_instruction_ref`` resolves a scenario's
+        INSTRUCTION reference against ``instructions/``, ``regression/`` and
+        ``artifacts/``, so a >20 KB regression test lives under
+        ``pm/qa/regression/``.  The old marker claimed
+        ``pm/qa/instructions/`` — a directory that does not contain it, so the
+        omitted text was unrecoverable (the silent loss R2/A1 forbids).
+        """
+        scenario = QAScenario(index=1, title="S", focus="F",
+                              steps="GIVEN x\n" * 20000)
+        p = _build_concretization_prompt(
+            scenario, "b", "master",
+            instruction_content="i" * 200000, pr_id="pr-x",
+            instruction_ref="regression/big-regression.md")
+        marker = [ln for ln in p.splitlines()
+                  if "instruction file truncated" in ln]
+        assert marker, "the instruction was not abbreviated"
+        assert "`pm/qa/regression/big-regression.md`" in marker[0]
+        assert "pm/qa/instructions/" not in p
+
+    def test_concretization_fallback_pointer_is_category_neutral(self):
+        """Older callers pass no relative path; the fallback must not claim
+        ``pm/qa/instructions/`` specifically — the file may be under
+        ``regression/`` or ``artifacts/``."""
+        scenario = QAScenario(index=1, title="S", focus="F",
+                              steps="GIVEN x\n" * 20000)
+        p = _build_concretization_prompt(
+            scenario, "b", "master",
+            instruction_content="i" * 200000, pr_id="pr-x")
+        marker = [ln for ln in p.splitlines()
+                  if "instruction file truncated" in ln]
+        assert marker, "the instruction was not abbreviated"
+        assert "`pm/qa/`" in marker[0]
+        assert "pm qa list" in marker[0]
+        assert "pm/qa/instructions/" not in p
+
+    def test_concretization_absolute_ref_falls_back_to_the_library(self):
+        """A resumed snapshot can carry the absolute scratch copy; the marker
+        must not build a `pm/qa/<absolute>` path that resolves nowhere."""
+        scenario = QAScenario(index=1, title="S", focus="F",
+                              steps="GIVEN x\n" * 20000)
+        p = _build_concretization_prompt(
+            scenario, "b", "master",
+            instruction_content="i" * 200000, pr_id="pr-x",
+            instruction_ref="/scratch/qa-instructions/big.md")
+        marker = [ln for ln in p.splitlines()
+                  if "instruction file truncated" in ln]
+        assert marker, "the instruction was not abbreviated"
+        assert "pm/qa/" in marker[0]
+        assert "/scratch/qa-instructions" not in p
 
     def test_verification_many_artifacts_and_huge_output(self):
         scenario = QAScenario(

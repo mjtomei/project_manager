@@ -119,6 +119,19 @@ def _signoff_return_block(pr: dict, for_signoff: bool = False) -> str:
     return format_signoff_return(pr, for_signoff=for_signoff)
 
 
+def _note_timestamp(n: dict, key: str) -> str:
+    """A note timestamp as a comparable string, tolerating a null value.
+
+    Hand-edited/legacy ``project.yaml`` can carry ``created_at:`` or
+    ``last_edited:`` with a null (or non-string) value.  Comparing that
+    against a string raised TypeError in the merge/sort below and aborted the
+    whole prompt builder — the same malformed-note shape
+    :func:`_pr_note_full_line` and ``cli/pr.py::_note_line`` already tolerate
+    for ``id``/``text``.  Coerce to a string so ordering stays deterministic.
+    """
+    return str(n.get(key) or "")
+
+
 def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
     """Format PR notes as a markdown section, or empty string if none.
 
@@ -153,12 +166,15 @@ def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
         if existing is None:
             merged[nid] = n
         else:
-            new_ts = n.get("last_edited") or n.get("created_at", "")
-            old_ts = existing.get("last_edited") or existing.get("created_at", "")
+            new_ts = (_note_timestamp(n, "last_edited")
+                      or _note_timestamp(n, "created_at"))
+            old_ts = (_note_timestamp(existing, "last_edited")
+                      or _note_timestamp(existing, "created_at"))
             if new_ts > old_ts:
                 merged[nid] = n
 
-    all_notes = sorted(merged.values(), key=lambda n: n.get("created_at", ""))
+    all_notes = sorted(merged.values(),
+                       key=lambda n: _note_timestamp(n, "created_at"))
     if not all_notes:
         return ""
     header = "\n## PR Notes\n"
@@ -603,11 +619,13 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
 # The on-demand reader for the sign-off QA-scenario block.  Spelled `$CAP/...`
 # (defined by the sign-off prompt's own evidence checklist) so it resolves in
-# the container the session runs in.  One source of truth for both the block's
-# count marker and fit_prompt's block-level marker — a block-level marker that
-# named only `pm qa captures-path` (which prints a directory) would not return
-# the verdicts it cut.
-_QA_SCENARIOS_READER = "`$CAP/scenarios/<n>/verdict.md` for all verdicts"
+# the container the session runs in.  One source of truth for the three
+# markers that name it: the block's count marker, its per-line truncation
+# note, and fit_prompt's block-level marker — a block-level marker that named
+# only `pm qa captures-path` (which prints a directory) would not return the
+# verdicts it cut.
+_QA_SCENARIOS_PATH = "`$CAP/scenarios/<n>/verdict.md`"
+_QA_SCENARIOS_READER = f"{_QA_SCENARIOS_PATH} for all verdicts"
 
 
 def _qa_scenarios_pointer() -> str:
@@ -696,7 +714,7 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
             lines.append("")
             lines.append(
                 "_(Scenario titles and reasons above are abbreviated to fit "
-                "the prompt size limit; read `$CAP/scenarios/<n>/verdict.md` "
+                f"the prompt size limit; read {_QA_SCENARIOS_PATH} "
                 "for the full verdicts.)_"
             )
     return "\n" + "\n".join(lines) + "\n"

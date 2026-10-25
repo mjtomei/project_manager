@@ -1510,15 +1510,39 @@ _CONCRETIZE_GRACE = 15
 def _build_concretization_prompt(scenario: QAScenario, pr_branch: str,
                                   base_branch: str,
                                   instruction_content: str | None = None,
-                                  pr_id: str | None = None) -> str:
-    """Build a prompt that verifies and refines scenario steps against code."""
+                                  pr_id: str | None = None,
+                                  instruction_ref: str | None = None) -> str:
+    """Build a prompt that verifies and refines scenario steps against code.
+
+    *instruction_ref* is the instruction's path relative to ``pm/qa/`` (for
+    example ``instructions/tui-manual-test.md`` or
+    ``regression/command-dedup.md``), as stored on the scenario before it is
+    installed into the scenario scratch dir.  The truncation marker names that
+    exact file, so the session can read the text the bound cut.  Without it the
+    marker names the library directory generically — it must not claim
+    ``pm/qa/instructions/``: ``qa_instructions.resolve_instruction_ref``
+    resolves INSTRUCTION references against ``instructions/``, ``regression/``
+    and ``artifacts/``, so a >20 KB regression test lives under
+    ``pm/qa/regression/`` and the old marker pointed at a directory that does
+    not contain it.
+    """
     this_pr = pr_id or "<pr-id>"
     instruction_section = ""
     if instruction_content:
+        # Only a library-relative ref is a usable path; a resumed snapshot may
+        # carry the absolute scratch copy (``_install_instruction_file``
+        # rewrites it before clearing), which would not resolve from the
+        # scenario workdir.
+        relative_ref = bool(instruction_ref) and not Path(
+            instruction_ref).is_absolute()
+        pointer = (
+            f"`pm/qa/{instruction_ref}`" if relative_ref
+            else "the QA library file under `pm/qa/` "
+                 "(run `pm qa list` for every item)")
         bounded_instruction = bounded_text(
             instruction_content,
             max_bytes=CONCRETIZE_INSTRUCTION_BUDGET,
-            pointer="the instruction file under pm/qa/instructions/",
+            pointer=pointer,
             label="instruction file",
         )
         instruction_section = f"""
@@ -1638,6 +1662,7 @@ def _build_concretize_cmd(
     cwd: str,
     container_name: str | None = None,
     instruction_content: str | None = None,
+    instruction_ref: str | None = None,
     write_dir: str | None = None,
     session_id: str | None = None,
     session_tag: str | None = None,
@@ -1650,9 +1675,10 @@ def _build_concretize_cmd(
     base_branch = project_data.get("project", {}).get("base_branch", "master")
     pr_branch = pr_data.get("branch", "")
 
-    prompt = _build_concretization_prompt(scenario, pr_branch, base_branch,
-                                          instruction_content=instruction_content,
-                                          pr_id=pr_data.get("id"))
+    prompt = _build_concretization_prompt(
+        scenario, pr_branch, base_branch,
+        instruction_content=instruction_content,
+        pr_id=pr_data.get("id"), instruction_ref=instruction_ref)
     claude_cmd = build_claude_shell_cmd(
         prompt=prompt,
         model=resolution.model, provider=resolution.provider,
@@ -2038,10 +2064,14 @@ def _launch_scenarios_in_tmux(
         if repo_root:
             _setup_clone_override(clone_path)
 
-        # Read instruction content before installing (sets absolute path on scenario)
+        # Read instruction content before installing (sets absolute path on
+        # scenario).  Keep the library-relative path for the concretizer's
+        # truncation marker — installing rewrites/clears instruction_path.
         instruction_content: str | None = None
+        instruction_ref: str | None = None
         if pm_root and scenario.instruction_path:
-            src = pm_root / "qa" / scenario.instruction_path
+            instruction_ref = scenario.instruction_path
+            src = pm_root / "qa" / instruction_ref
             if src.is_file():
                 try:
                     instruction_content = src.read_text()
@@ -2067,6 +2097,7 @@ def _launch_scenarios_in_tmux(
         concretize_cmd = _build_concretize_cmd(
             scenario, pr_data, data, cwd=scenario_cwd,
             instruction_content=instruction_content,
+            instruction_ref=instruction_ref,
             session_id=scenario.concretize_session_id,
             session_tag=state.session_tag)
         try:
@@ -2261,10 +2292,14 @@ def _launch_scenarios_in_containers(
             return
         scenario.worktree_path = str(clone_path)
 
-        # Read instruction content from source before installing
+        # Read instruction content from source before installing.  Keep the
+        # library-relative path for the concretizer's truncation marker —
+        # installing rewrites/clears instruction_path.
         instruction_content: str | None = None
+        instruction_ref: str | None = None
         if pm_root and scenario.instruction_path:
-            src = pm_root / "qa" / scenario.instruction_path
+            instruction_ref = scenario.instruction_path
+            src = pm_root / "qa" / instruction_ref
             if src.is_file():
                 try:
                     instruction_content = src.read_text()
@@ -2310,6 +2345,7 @@ def _launch_scenarios_in_containers(
         concretize_cmd = _build_concretize_cmd(
             scenario, pr_data, data, cwd=container_workdir,
             container_name=cname, instruction_content=instruction_content,
+            instruction_ref=instruction_ref,
             write_dir=str(clone_path),
             session_id=scenario.concretize_session_id,
             session_tag=state.session_tag)

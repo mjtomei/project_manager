@@ -1771,3 +1771,96 @@ committed.
 
 Evidence: `/pm-captures/review-240e-i5/` (sweep TSVs, pathological/marker
 sweeps, the CJK sign-off probe, launcher/bridge e2e, suite logs).
+
+## 29. Review-loop follow-ups (review loop 240e, iteration 6)
+
+Iteration 6 ran natively in the review container (the controller's
+`pr-592e4bd` runtime still launches this review prompt as one argv entry, so
+its first launch failed with E2BIG; the recovery read the complete native
+prompt from a file).  It re-ran the §19-§28 method — sweep every reachable
+builder, then check every omission marker in the environment the session reads
+it in — plus the §21 delivery paths end to end, and found two defects in code
+this PR added (one marker, one crash).
+
+- **The QA concretization prompt's truncation marker named the wrong
+  directory.**  `_build_concretization_prompt` bounded a >20 KB instruction
+  file with the pointer ``the instruction file under pm/qa/instructions/``.
+  But `qa_instructions.resolve_instruction_ref` resolves a scenario's
+  `INSTRUCTION` reference against `instructions/`, `regression/` **and**
+  `artifacts/`, so a regression test used as a scenario instruction lives at
+  `pm/qa/regression/<name>.md` — not in the directory the marker named, making
+  the omitted text unrecoverable (the silent loss R2/A1 forbids).  Reachable:
+  the library is user-authored, and a >20 KB regression file is ordinary.
+
+  Fixed by threading the library-relative path (`instruction_ref`, e.g.
+  `regression/big-regression.md`) from both scenario launch flows (host and
+  container) through `_build_concretize_cmd` into the builder; the marker now
+  names the exact file (`` `pm/qa/<ref>` ``), which resolves in the scenario
+  clone and in the container mount.  When no ref is available (older callers)
+  the fallback is category-neutral — ``the QA library file under `pm/qa/`
+  (run `pm qa list` for every item)`` — instead of claiming `instructions/`.
+
+- **A null `created_at` crashed the whole PR-notes prompt block.**
+  `_format_pr_notes` sorts merged notes by `created_at` and compares
+  `last_edited`/`created_at` to dedup by id; a hand-edited/legacy note with
+  `created_at: null` (or a non-string value) made those comparisons raise
+  TypeError, aborting the entire prompt builder before any bound ran.  This is
+  the same malformed-note shape i3 (missing id), i4 (missing text) and i5
+  (present-but-null id/text) made the renderers and readers tolerate.  New
+  `prompt_gen._note_timestamp` coerces the value to a comparable string for
+  both the dedup comparison and the sort key.
+
+- **Dedup (no output change).**  The sign-off QA-scenario block's per-line
+  truncation note still hard-coded the reader string that i5 centralised as
+  `_QA_SCENARIOS_READER`; the path portion is now `_QA_SCENARIOS_PATH`, shared
+  by the block's count marker, its truncation note, and fit_prompt's
+  block-level marker, so the three cannot diverge.
+
+Checked and deliberately unchanged: the concretization scenario-steps pointer
+("the QA plan in the QA planner transcript") and the verification prompt's
+inline-output pointer ("the full scenario transcript on disk") — no concrete
+path is threaded into those builders, and the inline verification branch only
+runs when the transcript file is missing (§17/§20); the `_signoff_qa_scenarios_block`
+"No qa_status.json found" note (the sign-off prompt defines `CAP`); the
+`qa_loop._verify_scenario` captures-dir resolution (the verifier needs the
+concrete directory); `build_regression_test_prompt` and the watcher lists
+(§10/§14); `PromptTooLargeError` remains uncaught at pane/CLI call sites
+(pr-a42a4f8); the null-note display paths in `pm pr edit` / `pm pr note
+delete` (pr-bebc2e9).
+
+Verification: `tests/test_prompt_bounds.py` 136 cases (5 new, all
+failing-then-passing — verified by `git checkout --` of the two source files:
+the two null-`created_at` tests raised TypeError and the three
+concretization tests failed on the old `pm/qa/instructions/` marker (or the
+absent `instruction_ref` argument);
+`/pm-captures/review-240e-i6/failing-then-passing-i6.txt`) and
+`test_claude_launcher` 37; the related suites (`test_prompt_bounds`,
+`test_claude_launcher`, `test_plan_review`, `test_bug_fix_flow_prompts`,
+`test_regression_prompts`, `test_spec_gen`, `test_signoff`,
+`test_qa_instructions`, `test_notes`, `test_pr_notes`, `test_qa_loop`) 624 passed.
+Independent real-data sweep over all 489 PRs x 4 builders is byte-identical
+before and after the fixes (impl 75,146 / review 77,616 / sign-off 92,165 /
+planner 80,652 B, max `pr-0b87a97`; 1,956 prompts, 0 errors), and against an
+`origin/master` worktree the branch is the smaller one exactly on the intended
+caps (PR-notes budget, 25-sibling plan context, spec bound; master is
+over-limit for `pr-ace66e5` at 174,662-206,311 B).  The all-collections-maxed
+pathological fixture keeps every reachable builder under `PROMPT_ARG_LIMIT`
+(max 119,700 B; QA child 75,984, verification 92,057, finalize 21,676) and now
+contains no `pm/qa/instructions/` claim.  The launcher bootstrap and the
+bridge `--prompt-file` handoff were re-exercised end to end with a stub claude
+(a 150 KB CJK prompt becomes a 179-byte max argv entry, the complete file is
+on disk during the run and removed after; the container write_dir/cwd split
+writes on the host and names `/workspace/...`; no writable location raises
+`PromptTooLargeError`).  Mutation checks: reverting the i5 QA pointer, the
+null-note `or ''` forms, the bridge `--prompt-file` reader, the launcher's
+oversize guard and the bridge guard each fail the tests that cover them (1, 5,
+3, 6 and 1 failures respectively).  Full-suite failure set on the clean
+committed tree is identical to the `origin/master` worktree baseline in this
+sandbox (42 failed / 17 errors: 22 `test_signoff_integration`, 19+17
+`test_merge_publish`, 1 `test_hook_events`, all environmental; branch 3,447
+passed vs master 3,309, the delta being this PR's tests; `markdown` installed
+into a scratch `PYTHONPATH` for both runs).
+
+Evidence: `/pm-captures/review-240e-i6/` (pathological/marker sweep, notes
+property fuzz, launcher/bridge e2e, sweep TSVs + master comparison,
+failing-then-passing, suite logs).
