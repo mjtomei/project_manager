@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T15:46:14.102402+00:00'
+  updated_at: '2026-10-25T16:52:24.024569+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33636,6 +33636,25 @@ prs:
       switches to it; use --fresh to relaunch.'
     created_at: '2026-10-25T15:46:14Z'
     last_edited: '2026-10-25T15:46:14Z'
+  - id: note-8e71580
+    text: 'QA S55 (2026-10-25, container mode, real Claude on router/main stubs; captures
+      /pm-captures/scenarios/55, REPORT.md): first live run of the S52/RQ39 Thens
+      (S52 run a871abafdd8bbc20 never executed). Three concurrent lifecycles (A routed
+      for every role, B signoff exception, C default), bridge kill (pm restarted it
+      itself, new pid/birth; C workers resumed after API-error turns; A review relaunched
+      mounted), review/sign-off --fresh relaunch (remove before create, new mounted
+      IDs) and the stale unmounted impl container refusal (TUI/L/stderr rc=1, then
+      replacement) all held; 0 secrets. CODE CHANGE 2a6b14d4 needs normal re-review:
+      the preflight Then failed as written, because pm model show split a PR routed
+      for every type into two Routes lines by effort when the project sets session_effort
+      (the production qa_scenario/qa_concretize high), never "(all types)" (the split
+      described in note-077eb96). Now one line per route, with differing efforts named
+      on it; regression mutation-checked; full suite 3738 passed. Deviations: the
+      restart was triggered by B routed sign-off launch, not by C worker idle or A
+      next review; "marked as sign_off/in_review" never reaches the TUI line (last
+      stdout line only, pre-existing).'
+    created_at: '2026-10-25T16:52:23Z'
+    last_edited: '2026-10-25T16:52:23Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
