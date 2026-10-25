@@ -287,8 +287,33 @@ class TestSubagentPin:
         assert "ANTHROPIC_BASE_URL" not in cmd
 
     def test_no_model_selected_sets_nothing(self, pm_home_dir):
-        # The CLI default model: pm has no selection to enforce.
-        assert self._build() == "claude"
+        # The CLI default model: pm has no selection to enforce, and only
+        # removes a pin the caller's environment may carry.
+        assert self._build() == ("env -u CLAUDE_CODE_SUBAGENT_MODEL "
+                                 "-u CLAUDE_CODE_SUBAGENT_MODEL_FORCE claude")
+
+    def test_no_model_drops_an_inherited_pin(self, pm_home_dir, monkeypatch):
+        # S61: pm running inside a routed session (its own pin exported)
+        # launched a no-model PR on the main endpoint; the inherited
+        # work/ pin sent every child to a model main cannot serve (404).
+        import subprocess
+        monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", f"{MODEL}[1m]")
+        monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "1")
+        cmd = self._build()
+        assert self._pin(cmd) == (None, None)
+        assert "--model" not in cmd
+        probe = cmd.rsplit(" claude", 1)[0] + (
+            " sh -c 'echo \"${CLAUDE_CODE_SUBAGENT_MODEL-unset}"
+            " ${CLAUDE_CODE_SUBAGENT_MODEL_FORCE-unset}\"'")
+        out = subprocess.run(["sh", "-c", probe], capture_output=True,
+                             text=True, check=True).stdout
+        assert out.split() == ["unset", "unset"]
+
+    def test_selected_model_is_not_unset(self, pm_home_dir, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", f"{MODEL}[1m]")
+        cmd = self._build(model="claude-opus-5-5")
+        assert "-u CLAUDE_CODE_SUBAGENT_MODEL" not in cmd
+        assert self._pin(cmd) == ("claude-opus-5-5", "1")
 
     def test_alias_override_is_forced(self, pm_home_dir):
         _write_providers(pm_home_dir, alias_models={
@@ -365,6 +390,24 @@ class TestSubagentPin:
                 e2["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"]) == ("claude-opus-5-5", "1")
         assert (e3["CLAUDE_CODE_SUBAGENT_MODEL"],
                 e3["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"]) == (MODEL, "1")
+
+    def test_print_launcher_without_model_drops_an_inherited_pin(
+            self, pm_home_dir, monkeypatch):
+        from pm_core.claude_launcher import _resolve_provider
+        monkeypatch.delenv("PM_MODEL", raising=False)
+        monkeypatch.delenv("PM_PROVIDER", raising=False)
+        monkeypatch.delenv("CLAUDE_CODE_SUBAGENT_MODEL", raising=False)
+        monkeypatch.delenv("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", raising=False)
+        # Nothing to drop: the process environment is used as is.
+        assert _resolve_provider()[2] is None
+        monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", f"{MODEL}[1m]")
+        monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "1")
+        monkeypatch.setenv("S61_KEEP", "kept")
+        _, model_flag, run_env = _resolve_provider()
+        assert model_flag is None
+        assert "CLAUDE_CODE_SUBAGENT_MODEL" not in run_env
+        assert "CLAUDE_CODE_SUBAGENT_MODEL_FORCE" not in run_env
+        assert run_env["S61_KEEP"] == "kept"
 
     def test_live_probe_cmd_is_pinned(self, pm_home_dir):
         _write_providers(pm_home_dir)

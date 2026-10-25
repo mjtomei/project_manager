@@ -287,16 +287,22 @@ def _resolve_provider(provider: str | None = None, model: str | None = None):
     overrides the provider's), and every subagent is pinned to it
     (providers.subagent_pin_env).
     """
-    from pm_core.providers import get_provider, subagent_pin_env
+    from pm_core.providers import (get_provider, subagent_pin_env,
+                                   subagent_unset_vars)
     provider_cfg = get_provider(provider, strict=bool(provider))
     model_flag = model or provider_cfg.model_flag()
     provider_env = {**provider_cfg.env_vars(),
                     **subagent_pin_env(model_flag, provider_cfg)}
-    run_env = {**os.environ, **provider_env} if provider_env else None
-    if run_env is not None:
-        # As build_claude_shell_cmd's ``env -u``: a router authenticates
-        # upstream itself, so a stray key must not reach Claude.
-        for var in provider_cfg.unset_env_vars():
+    # As build_claude_shell_cmd's ``env -u``: a router authenticates
+    # upstream itself, so a stray key must not reach Claude, and a session
+    # pm selected no model for must not inherit a subagent pin.
+    unset = [v for v in (*provider_cfg.unset_env_vars(),
+                         *subagent_unset_vars(model_flag))
+             if v not in provider_env]
+    run_env = None
+    if provider_env or any(v in os.environ for v in unset):
+        run_env = {**os.environ, **provider_env}
+        for var in unset:
             run_env.pop(var, None)
     return provider_env, model_flag, run_env
 
@@ -840,7 +846,8 @@ def build_claude_shell_cmd(
         _log.info("transcript: symlink %s -> %s", transcript_path, target)
 
     # Resolve provider configuration
-    from pm_core.providers import get_provider, subagent_pin_env
+    from pm_core.providers import (get_provider, subagent_pin_env,
+                                   subagent_unset_vars)
     provider_cfg = get_provider(provider, strict=bool(provider))
     # Explicit model param overrides provider's model_flag
     effective_model = model or provider_cfg.model_flag()
@@ -862,11 +869,14 @@ def build_claude_shell_cmd(
     if provider_env:
         parts = [f"{k}={shlex.quote(v)}" for k, v in provider_env.items()]
         env_prefix = " ".join(parts) + " "
-    if provider_cfg.unset_env_vars():
-        # Unset (not empty) so Claude authenticates the way the router
-        # expects rather than with a stray key from the environment.
-        env_prefix = "env " + "".join(
-            f"-u {v} " for v in provider_cfg.unset_env_vars()) + env_prefix
+    # Unset (not empty) so Claude authenticates the way the router expects
+    # rather than with a stray key from the environment, and so a session
+    # pm selected no model for runs its subagents on the CLI default, not
+    # on a pin inherited from the caller (subagent_unset_vars).
+    unset = (*provider_cfg.unset_env_vars(),
+             *subagent_unset_vars(effective_model))
+    if unset:
+        env_prefix = "env " + "".join(f"-u {v} " for v in unset) + env_prefix
 
     from pm_core.paths import skip_permissions_enabled, fake_claude_config_for_type
     fc_config = fake_claude_config_for_type(session_type, session_tag)

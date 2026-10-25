@@ -97,6 +97,16 @@ def subagent_pin_env(model: str | None,
     return {SUBAGENT_MODEL_ENV: pinned, SUBAGENT_FORCE_ENV: "1"}
 
 
+def subagent_unset_vars(model: str | None) -> tuple[str, ...]:
+    """Subagent pin variables to remove when pm selected no model.
+
+    Such a session runs on the CLI default, so a pin inherited from the
+    caller's environment (e.g. pm itself running inside a routed session,
+    whose ``work/`` pin its endpoint cannot serve) must not reach it.
+    """
+    return () if model else (SUBAGENT_MODEL_ENV, SUBAGENT_FORCE_ENV)
+
+
 class ProviderNotFoundError(LookupError):
     """An explicitly named provider is not configured in providers.yaml."""
 

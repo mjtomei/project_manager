@@ -17,7 +17,9 @@ class TestBuildClaudeShellCmdProvider:
         """Default claude provider produces the same command as before."""
         mock_gp.return_value = ProviderConfig(name="claude")
         result = build_claude_shell_cmd(prompt="hello")
-        assert result == "claude 'hello'"
+        # Only the inherited subagent pin is dropped (no model selected).
+        assert result == ("env -u CLAUDE_CODE_SUBAGENT_MODEL "
+                          "-u CLAUDE_CODE_SUBAGENT_MODEL_FORCE claude 'hello'")
 
     @patch("pm_core.claude_launcher.log_shell_command")
     @patch("pm_core.paths.skip_permissions_enabled", return_value=False)
