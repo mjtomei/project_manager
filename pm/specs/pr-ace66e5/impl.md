@@ -1152,3 +1152,107 @@ byte-identical to §19's numbers (impl 75,146 / review 77,616 / sign-off 92,165
 differences (the 25-sibling plan-context cap, the 35 KB PR-notes budget and
 their markers). Full-suite failure set compared against an `origin/master`
 worktree baseline in the same sandbox. Evidence: `/pm-captures/review-2ac8-i4/`.
+
+## 22. Review-loop follow-ups (review loop 2ac8, iteration 5)
+
+Iteration 5 re-ran the i7-i11 method (sweep every reachable builder, then check
+what each omission marker tells the session) and found one marker that
+over-counted its own abbreviations.
+
+- **`_render_pr_notes_bounded`'s overflow marker called verbatim notes
+  "abbreviated".** The marker reads "N older note(s) omitted and M abbreviated"
+  — the wording §19/i2 introduced so a session reading previews knows they are
+  previews — but M was computed as "every kept line but the upgraded newest". A
+  note short enough to survive `summary_line` unchanged
+  (`_PR_NOTE_SUMMARY_CHARS` = 200) renders *identically* as a summary and in
+  full, so those kept lines are the note's complete text, and the marker still
+  counted them as abbreviated. Repro: 400 notes of 100 characters (every
+  summary == its full line) renders `... (143 older note(s) omitted and 256
+  abbreviated to fit the prompt size limit ...)` while all 257 kept lines are
+  verbatim; a mixed block (the newest 100 notes short, the older 300 long)
+  claimed 233 against 134 lines really cut. Reachable exactly when the merged
+  one-line summaries overflow the budget — the ~150-note (~56-note CJK) branch
+  §19/i2 measured for this path, since the notes that trigger it are the short
+  ones with small summaries. M is now the number of kept lines that really
+  differ from their note's full text, and the "and M abbreviated" clause is
+  dropped when that count is zero.
+
+  The *fits* path's fixed wording ("older notes are abbreviated" / "notes are
+  abbreviated", §13/§19) is entailed whenever it fires — entering that path
+  requires the full rendering to exceed the budget while the summaries fit, so
+  at least one kept line is a real preview. A property sweep of both paths
+  (2 scripts × 10 note counts × 11 note sizes × 3 short/long mixes, ASCII and
+  CJK) now finds no marker that misdescribes the block, no claimed count that
+  differs from the real one, no over-budget block, no newest note left as a
+  preview when it had room, and no non-determinism.
+
+- **The new `pm pr show` and the existing `pm pr note list` printed a note with
+  the same three lines of formatting.** Both are on-demand readers for the
+  PR-notes block, so a divergence between them would be a marker that lies. The
+  snippet now lives in `cli/pr.py::_note_line`, used by both (output unchanged;
+  both commands re-run against a throwaway project).
+
+- **`fit_prompt`'s docstring named only one of the two reasons it returns the
+  untouched render** ("the static text alone is over it"). The loop also returns
+  it when the blocks cannot give up enough while staying at `min_bytes` — the
+  behaviour §16/i10 implemented ("the same happened when the blocks *could* be
+  shrunk but not enough"). Docstring only; no behaviour change.
+
+Checked and deliberately unchanged: the `pm pr note list <pr-id>` marker's
+concrete id (§12), the `$CAP`-based truncated-scenario note (§20), and the
+trade-offs recorded in §10, §14, §19, §20 and §21.
+
+Verification: `tests/test_prompt_bounds.py` 109 cases (2 new, both
+failing-then-passing — the verbatim case failed on `assert "abbreviated" not in
+block` with "256 abbreviated" in the text, the mixed case on
+`assert 233 == 134`) and `tests/test_claude_launcher.py` 37 cases; the related
+suites (`test_plan_review`, `test_bug_fix_flow_prompts`,
+`test_regression_prompts`, `test_spec_gen`, `test_signoff`,
+`test_qa_instructions`) 371 passed together.
+
+Independent re-verification this iteration (not a re-read of §19-§21):
+
+1. Real-data sweep over all 488 PRs × 4 builders — no builder over
+   `PROMPT_ARG_LIMIT` (max impl 45,883 / review 47,305 / sign-off 61,576 /
+   planner 50,315 B). The absolute sizes are lower than §19's host numbers
+   because this sandbox has no `~/.pm/workdirs` clones for the builders to merge
+   workdir notes from, so the meaningful comparison is branch vs `origin/master`
+   *in the same sandbox*: 205 PRs byte-identical across all four builders, and
+   the only PRs where the branch is larger are `pr-ace66e5` and `pr-0368986`
+   (this PR's own project.yaml notes); every other difference is an intended
+   cap. A capped PR (`pr-8e693f6`) diffs against master only in the PR-notes
+   block (newest full, older abbreviated, marker naming
+   `pm pr note list pr-8e693f6`) and the 25-sibling plan-context block (marker
+   naming `pm pr list --plan plan-regression`).
+2. Pathological fixture that maxes every collection at once (40 KB description,
+   400 notes, 200 KB impl + QA specs, 400 long-title siblings, 25 plans with
+   100 KB files, 60 KB `notes.txt`, 200 items per QA library category with 3 KB
+   descriptions, 5 mocks with 80 KB bodies, 40 × PATH_MAX worktrees, 500 long
+   lines of pane output, 50 artifacts): every reachable builder is under the
+   limit — the four `fit_prompt` builders land at 117,189 / 119,700 / 119,700 /
+   119,700 B, QA interactive 44,748, QA child 75,773, concretization 49,465,
+   verification 91,506, finalize 21,653, merge 29,574, watcher 17,305,
+   watcher-review 3,691, library 6,239, mocks 12,000, guide 18,820, notes 8,000.
+3. The launcher bridge path (§21) re-exercised end to end with a stub `claude`
+   on `PATH`: a 324-byte launcher command delivered a 150,016-byte prompt
+   intact to the bridge's first turn and removed the file (one-shot handoff).
+4. Every omission marker re-checked against a *registered* command
+   (`pm pr show`, `pm pr note list`, `pm pr spec`, `pm pr graph`,
+   `pm pr list --plan`, `pm qa list`, `pm qa mocks show`, `pm qa captures-path`,
+   `pm plan list`, `pm autostart list`), with the two prompt-side readers
+   smoke-tested in a throwaway project: `pm pr show` prints description, notes
+   and the integration record (so the integration marker's fallback is not a
+   dead end) and `pm pr note list` prints the notes.
+5. Mutation checks: making `pm_core.bridge` ignore `--prompt-file` fails 3 of
+   the bridge tests, and dropping the guard from `launch_bridge_in_tmux` fails
+   its over-limit test — the §21 tests fail for the right reason.
+6. Full-suite failure set identical to an `origin/master` worktree baseline run
+   with the same environment in this sandbox (1 failure — the documented
+   environmental `test_hook_events::test_installer_writes_standalone_receiver`,
+   pr-4bde874; 3478 vs 3367 passed, the delta being this PR's new tests). The
+   `markdown` dependency pyproject declares was installed into a scratch
+   `PYTHONPATH` target for both runs, so `test_markdown_render` passes on both.
+
+Evidence: `/pm-captures/review-2ac8-i5/` (`sweep.py`, `sweep_master.py`,
+`sizes-branch.txt` / `sizes-master.txt`, `pathological.py` + `.txt`,
+`full-suite-branch.txt`, `full-suite-master.txt`).

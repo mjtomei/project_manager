@@ -231,9 +231,17 @@ def _render_pr_notes_bounded(notes: list[dict], budget: int,
         while kept and prompt_bytes(sep.join(kept)) > budget - marker_budget:
             kept.pop(0)
         omitted = len(notes) - len(kept)
-        # Every kept line but the upgraded newest is a summary; say so, or the
-        # session reads abbreviated previews as if they were the full text.
-        abbreviated = len(kept) - (1 if upgraded else 0)
+        # Count the kept lines that really are previews.  A note short enough
+        # to survive ``summary_line`` unchanged renders identically either way,
+        # so "every kept line but the upgraded newest" would report lines as
+        # abbreviated while the session reads them verbatim — the same marker
+        # accuracy rule the wording below follows.  ``kept`` is a suffix of
+        # ``rendered``, which is aligned 1:1 with ``notes``.
+        first_kept = len(notes) - len(kept)
+        abbreviated = sum(
+            1 for i in range(first_kept, len(notes))
+            if kept[i - first_kept] != full_line(notes[i])
+        )
         note = f"{omitted} older note(s) omitted"
         if abbreviated:
             note += f" and {abbreviated} abbreviated"

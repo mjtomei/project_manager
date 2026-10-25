@@ -543,6 +543,17 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
     emit_paged(out)
 
 
+def _note_line(n: dict) -> str:
+    """One note, as ``pm pr note list`` and ``pm pr show`` print it.
+
+    Both commands are on-demand readers for the PR-notes block prompt
+    builders abbreviate, so they must render a note identically.
+    """
+    ts = n.get("created_at", "")
+    ts_str = f" ({ts})" if ts else ""
+    return f"  {n['id']}{ts_str}: {n['text']}"
+
+
 @pr.command("show")
 @click.argument("pr_id")
 def pr_show(pr_id: str):
@@ -583,9 +594,7 @@ def pr_show(pr_id: str):
     if notes:
         click.echo("\n## Notes")
         for n in notes:
-            ts = n.get("created_at", "")
-            ts_str = f" ({ts})" if ts else ""
-            click.echo(f"  {n['id']}{ts_str}: {n['text']}")
+            click.echo(_note_line(n))
     # Prompt builders abbreviate the integration overlap/conflict path lists
     # and point sessions here for the rest, so print the record (and where its
     # full form lives) rather than making that pointer a dead end.
@@ -3248,9 +3257,7 @@ def pr_note_list(pr_id: str):
         click.echo(f"No notes on {_pr_display_id(pr_entry)}.")
         return
     for n in notes:
-        ts = n.get("created_at", "")
-        ts_str = f" ({ts})" if ts else ""
-        click.echo(f"  {n['id']}{ts_str}: {n['text']}")
+        click.echo(_note_line(n))
 
 
 @pr_note.command("delete")

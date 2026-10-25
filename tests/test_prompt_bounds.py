@@ -223,6 +223,36 @@ class TestPrNotesBounding:
         assert "abbreviated" in block
         assert "pm pr note list pr-x" in block
 
+    def test_verbatim_notes_are_not_called_abbreviated(self):
+        """A note shorter than ``_PR_NOTE_SUMMARY_CHARS`` renders identically
+        as a summary and in full, so a kept line is only *abbreviated* when it
+        really is shorter than its note.  With enough short notes the block
+        still overflows (so the oldest previews are dropped) while every kept
+        line is the note's full text — the marker must report the omission
+        only, not claim the session is reading previews it is not."""
+        notes = self._dated_notes(400, size=100)
+        block = prompt_gen._format_pr_notes(_pr(notes=notes))
+        assert prompt_bytes(block) <= prompt_gen._PR_NOTES_BUDGET
+        assert "omitted" in block
+        assert "abbreviated" not in block
+        kept = [ln for ln in block.splitlines() if ln.startswith("- ")]
+        fulls = {f"- {n['text']} ({n['created_at']})" for n in notes}
+        assert kept and all(ln in fulls for ln in kept)
+
+    def test_abbreviated_count_matches_the_lines_actually_cut(self):
+        """Mixed notes (short ones verbatim either way, long ones cut to a
+        200-char preview): the marker's count must equal the lines that were
+        really abbreviated, not every kept line but the upgraded newest."""
+        notes = self._dated_notes(400)
+        for i in range(300, 400):
+            notes[i]["text"] = f"short note {i}"
+        block = prompt_gen._format_pr_notes(_pr(notes=notes))
+        claim = next(ln for ln in block.splitlines() if "abbreviated" in ln)
+        claimed = int(claim.split(" and ")[1].split()[0])
+        kept = [ln for ln in block.splitlines() if ln.startswith("- ")]
+        fulls = {f"- {n['text']} ({n['created_at']})" for n in notes}
+        assert claimed == sum(1 for ln in kept if ln not in fulls) > 0
+
     def test_oversized_newest_note_is_still_marked_abbreviated(self):
         """A newest note larger than the whole budget cannot be kept in full,
         so it stays a summary — and the marker must say the block is
