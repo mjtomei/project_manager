@@ -28962,11 +28962,245 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T09:20:01.185973+00:00'
-  updated_at: '2026-10-13T09:20:01.185973+00:00'
+  updated_at: '2026-10-24T23:40:06.450804+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f9e58cb
+    text: 'Scenario 4 (interactive-fallback interrupt) concretizer notes: (1) run
+      `pm meta` from a pane in a tmux session whose name does NOT start with pm- (e.g.
+      tmux new-session -d -s meta-int-driver), with no pm session for the test cwd
+      running — if the driver session is itself named pm-*, _get_pm_session() resolves
+      to it and pm meta opens a tmux meta window instead of the interactive fallback.
+      (2) Set a fake-claude config {"_all": {}} for the test dir tag first (pm fake-claude
+      config set from the test cwd) — meta is a valid fake session type, and with
+      no verdicts the fake stays open like real claude, giving something to interrupt;
+      also creates ~/.pm/sessions/<tag>/ and reveals the tag. (3) The meta workdir
+      is cloned from the public GitHub repo, whose master is c98fa96e (pre-fix) —
+      that is expected: the trap under test is built by the launching pm (PYTHONPATH=/workspace
+      clone), not by the workdir copy. (4) pm meta exits 1 with "Claude CLI not found"
+      without setting the override if claude is not on PATH in the pane.'
+    created_at: '2026-10-24T20:59:23Z'
+    last_edited: '2026-10-24T20:59:23Z'
+  - id: note-5025c33
+    text: 'QA scenario 4 (interactive-fallback interrupt): trap cleanup itself passed
+      on the first run against 79205aa9/40f27fa9 (override removed, session dir preserved,
+      no hang), but the interrupt was not reflected in the exit status: click 8.5
+      turns the KeyboardInterrupt in the meta.py:207 subprocess.run fallback into
+      Abort — "Aborted!", exit 1, scenario Then expects 130. Fixed in commit 0b3f34b9
+      (qa: catch KeyboardInterrupt, exit 128+2); re-ran the full scenario against
+      the fix and every Then held (pm-meta-exit:130, override removed, debug+fake-claude
+      config preserved, pm which back to /workspace/pm_core). Evidence /pm-captures/scenarios/4/{pre-fix,post-fix}/.'
+    created_at: '2026-10-24T21:05:05Z'
+    last_edited: '2026-10-24T21:05:05Z'
+  - id: note-be26c89
+    text: 'Sign-off (2026-10-24, HEAD 2889b14c) -> SIGNOFF_IMPL. Tmux pane trap path
+      (kill-window/normal exit/foreign guard) is solid and stays verified by S1-S3,S5-S7.
+      Gap in the interactive fallback (meta.py ~207, the try/except added by unreviewed
+      QA commit 0b3f34b9): on SIGINT, subprocess.run waits only 0.25 s for the child,
+      then SIGKILLs the sh that carries the trap, so if the foreground child takes
+      longer than ~0.25 s to exit after SIGINT the override is left stale (the exact
+      bug this PR fixes). Repro: /pm-captures/signoff/orch.py (child sleeps 0/0.1/0.5/2
+      s in its INT handler -> override GONE/GONE/EXISTS/EXISTS). Suggested fix: use
+      Popen and keep waiting on KeyboardInterrupt (do NOT set SIG_IGN before spawn:
+      sh cannot trap a signal ignored on entry), then exit with the shell child returncode;
+      add a unit test with a slow-exiting INT-handling child. Then review must cover
+      the fallback change and QA must re-run S4 (fallback interrupt) incl. a slow-exit
+      child.'
+    created_at: '2026-10-24T22:32:12Z'
+    last_edited: '2026-10-24T22:32:12Z'
+  - id: note-2bc73f1
+    text: 'Additional requirement (QA pr-592e4bd S50, 2026-10-24): the NORMAL-exit
+      path is overbroad too. cli/meta.py:190-191 runs "<claude cmd> ; rm -rf ~/.pm/sessions/<session_tag>"
+      with the pm session own tag, so when a meta Claude exits normally it deletes
+      the whole shared session dir: fake-claude config + scripted cursor, the debug
+      marker, captures/<pr>/ (QA evidence), fake-github state, and any other per-session
+      settings, not just the meta override. Seen live in S50 (scratch HOMEs, both
+      7887d772+ and ca8fa055): a meta session ended at 10:07:26/27 and ~/.pm/sessions/p2-*/
+      was emptied (dir mtime), so the next QA planner ran as real Claude and stopped
+      at the workspace-trust prompt (INPUT_REQUIRED). Evidence /pm-captures/scenarios/50/{post,control}/story4-attempt3-planner-real-claude/NOTE.md.
+      Cleanup (both normal exit and the trap fix above) should remove only the override
+      file meta owns (and only if it still points at this meta workdir), preserving
+      all other session state.'
+    created_at: '2026-10-24T22:32:13Z'
+    last_edited: '2026-10-24T22:32:13Z'
+  - id: note-abc3864
+    text: 'SIGNOFF_IMPL addressed in 2e6f8831 (merged base into branch in 63d5773e,
+      data-level 3-way yaml merge after textual resolution kept corrupting project.yaml).
+      The interactive fallback no longer uses subprocess.run: new _run_interactive()
+      (pm_core/cli/meta.py) waits on the Popen and keeps waiting across repeated KeyboardInterrupts
+      — never SIGKILLs the trap-carrying shell — then exits with the shell child returncode
+      (130 when interrupted); no SIG_IGN set before spawn. New test test_fallback_interrupt_waits_out_slow_int_handler
+      (driver process, process-group SIGINT, 1 s slow-exiting INT-handling child):
+      red on pre-fix code, green post-fix. Post-fix sweep of the sign-off repro (child
+      INT-handler delays 0/0.1/0.5/2 s): override GONE at every delay, debug kept,
+      pm_rc=130 — captures /pm-captures/impl/{pre-fix,post-fix}/ (pre-fix = sign-off
+      orch.py baseline). Spec updated: R4 added to pm/specs/pr-7f90572/impl.md. Full
+      suite 3691 passed + 1 pre-existing env failure (test_installer_writes_standalone_receiver,
+      fails identically with the change stashed). Review must cover the fallback change
+      per sign-off; QA must re-run S4 (fallback interrupt) incl. slow-exit child.'
+    created_at: '2026-10-24T22:32:14Z'
+    last_edited: '2026-10-24T22:32:14Z'
+  - id: note-3638416
+    text: 'Sign-off (2026-10-24, HEAD 7a7e018b, base master@6d70b5fe) -> SIGNOFF_IMPL,
+      for branch scope only; the code is fine. Merge commit 63d5773e merged origin/pm/pr-592e4bd-...
+      (an unrelated in_review PR, NOT the base; base_branch is master) into this branch.
+      As a result git diff origin/master...HEAD is 69 files/+16.6k lines, and merging
+      this PR would publish all of pr-592e4bd to master without its own sign-off.
+      pr-7f90572 has no depends_on on it. Fix: rebuild the branch so it carries only
+      this PR. Reset it to 2e6f8831 (its parent chain is c98fa96e + this PR only),
+      re-apply only the pm/specs/pr-7f90572/{impl,qa}.md content from 7a7e018b and
+      re-add the pr-7f90572 notes, then merge origin/master (6d70b5fe) and force-push
+      (gh_pr is unset). Do NOT git revert -m 1 63d5773e: a reverted merge would make
+      a later pr-592e4bd merge into master silently drop those commits. Acceptance:
+      git diff origin/master...HEAD --name-only lists only pm_core/cli/meta.py, tests/test_meta_override_cleanup.py,
+      pm/specs/pr-7f90572/*, pm/project.yaml, and project.yaml changes only the pr-7f90572
+      entry. Sign-off checked this in a scratch worktree: 2e6f8831 + origin/master
+      merges cleanly (5 files), the 7 tests in test_meta_override_cleanup.py pass,
+      and meta.py and the test file are byte-identical to HEAD. Review 3e95 and QA
+      S8/S9 (and S1-S7 for the tmux path) therefore carry over as long as those two
+      files stay byte-identical. Report: /pm-captures/report.html.'
+    created_at: '2026-10-24T22:32:15Z'
+    last_edited: '2026-10-24T22:32:15Z'
+  - id: note-a2bb684
+    text: 'SIGNOFF_IMPL branch rebuild done (2026-10-24, new tip d967ccfa). Branch
+      reset to 2e6f8831, merged origin/master (6d70b5fe) cleanly (ort, 5 files + project.yaml),
+      re-added the four post-2e6f8831 notes (same ids) and the qa spec from 7a7e018b.
+      Acceptance verified: git diff origin/master...HEAD --name-only = pm_core/cli/meta.py,
+      tests/test_meta_override_cleanup.py, pm/specs/pr-7f90572/{impl,qa}.md, pm/project.yaml;
+      project.yaml diff vs master touches only the pr-7f90572 entry; origin/pm/pr-592e4bd-...
+      is NOT an ancestor; meta.py and the test file byte-identical to 7a7e018b, so
+      review 3e95 and QA S8/S9 (+S1-S7 tmux path) carry over. Force-pushed (7a7e018b
+      -> d967ccfa). Full suite on the rebuilt tree: 3364 passed + 1 pre-existing env
+      failure (test_installer_writes_standalone_receiver, fails identically with the
+      change stashed); the 7 meta-override tests pass. No code changes this session.'
+    created_at: '2026-10-24T22:35:42Z'
+    last_edited: '2026-10-24T22:35:42Z'
+  - id: note-ff2f2f5
+    text: 'QA S10 (rebuilt-branch meta lifecycle gate) PASS on rebuilt HEAD 604ed25d
+      (workdir /workspace): full meta lifecycle driven in a fresh /tmp project session
+      via fake-claude. Launch: override set to ~/.pm/workdirs/meta-<tag>, pm which
+      resolves <workdir>/pm_core. kill-window: override removed (original bug does
+      not reproduce), pm which back to /workspace/pm_core, debug/fake-claude config/captures
+      evidence and the meta workdir all preserved. Relaunch: reuses the workdir and
+      resumes the SAME branch meta/session-20261024-224819 (no re-clone), override
+      re-set to the same path. Normal exit (meta fake hold=60): override removed by
+      the EXIT trap within seconds of the fake exiting, meta window self-closed, only
+      the override removed — S50 overbroad-cleanup fix holds (debug, fake-claude config
+      incl. the new hold entry, and captures evidence all survive), no traceback in
+      the meta pane or driver pane. Note: a pane whose cwd is a different pm project
+      (e.g. /workspace) is unaffected by the override — pm which resolves per-project,
+      which is correct. Evidence: /pm-captures/scenarios/10/{1-launch,2-kill-window,3-relaunch,4-normal-exit}/
+      (cast+mp4+transcripts+manifests).'
+    created_at: '2026-10-24T22:52:14Z'
+    last_edited: '2026-10-24T22:52:14Z'
+  - id: note-28f0874
+    text: 'Sign-off (2026-10-24, HEAD 4a02d59a, base master@6d70b5fe) -> SIGNOFF_IMPL.
+      Branch scope is now correct (5 files; pr-592e4bd not an ancestor; meta.py and
+      the test are byte-identical to 2e6f8831; 7/7 tests pass). New gap: the tmux
+      pane command is not portable. tmux runs new-window commands as `<default-shell>
+      -c <cmd>`, and default-shell defaults to $SHELL, not sh, so the spec premise
+      "tmux runs the pane command ... as sh -c" is wrong. _build_meta_pane_cmd defines
+      a POSIX function `pm_meta_clear_override() { ...; }`, which fish rejects at
+      parse time ("command substitutions not allowed in command position", rc 127).
+      For a fish user, pm meta writes the override and opens a window that dies at
+      once without starting Claude, and the override stays stale: the exact bug this
+      PR fixes, and a regression, since the pre-PR `cmd ; rm -rf ...` runs under fish
+      3.4+. Repro and matrix: /pm-captures/signoff/fish-default-shell/ (README.md,
+      repro.py, matrix.txt). Shipped cmd under fish: Claude never started, override
+      stays. The same string wrapped in `sh -c <shlex.quote(cmd)>`: started, and kill-window
+      removes the override under fish, bash and dash. Fix: in the tmux branch of meta_cmd,
+      pass `sh -c {shlex.quote(cmd)}` to new_window. This matches pm_core/cli/session.py
+      and container.py, which pin trap-carrying pane commands to an explicit `bash
+      -c`. Leave the interactive fallback as is: Popen(shell=True) is already /bin/sh,
+      and an extra outer shell there could die on SIGINT before the inner trap finishes
+      and break the 130 return. Add a unit test that the tmux command is the `sh -c`
+      wrapper, plus a behavior test that the wrapped command still clears the override
+      on HUP and on a normal exit; optionally a skip-if-no-fish test. Update spec
+      R1 and its implicit requirements (premise correction). Harness caveat for repros:
+      on kill-window the kernel SIGHUPs only the pty session leader. A trapped shell
+      survives it, so the child must be tty-reading (claude, fake-claude, or cat)
+      for the deferred trap to fire. A sleep stand-in falsely shows a stale override.
+      Afterwards, review must re-pass meta.py, and QA must re-run the tmux lifecycle
+      (kill-window, normal exit, relaunch, foreign guard) on the new HEAD, because
+      the pane process tree changes.'
+    created_at: '2026-10-24T23:04:54Z'
+    last_edited: '2026-10-24T23:04:54Z'
+  - id: note-eab6c19
+    text: 'review-loop f5ea i1 (2026-10-25, commit 6f6fee32): fixed the fish default-shell
+      SIGNOFF_IMPL gap — meta_cmd tmux branch now passes sh -c {shlex.quote(cmd)}
+      to new_window (interactive fallback deliberately unwrapped, Popen(shell=True)
+      is already /bin/sh and an extra outer shell could break the 130 exit status).
+      New tests: wrapper unit test, wrapped-command normal-exit + process-group-HUP
+      behavior tests under the default shell (fish when available, dash otherwise),
+      skip-if-no-fish test proving fish rejects the unwrapped cmd (rc != 0, override
+      left) but accepts the wrapper. Spec R1 premise corrected. Suite on new HEAD:
+      3367 passed + 1 skipped (fish absent here) + 1 pre-existing env failure (test_installer_writes_standalone_receiver,
+      fails identically stashed). QA per sign-off: re-run the tmux lifecycle (kill-window,
+      normal exit, relaunch, foreign guard) and S4 fallback interrupt incl. slow-exit
+      child on this HEAD — the pane process tree changed.'
+    created_at: '2026-10-24T23:20:33Z'
+    last_edited: '2026-10-24T23:20:33Z'
+  - id: note-26d081c
+    text: 'impl follow-up (2026-10-25): end-to-end post-fix fish verification of the
+      sh -c wrapper captured at /pm-captures/impl/post-fix/fish-shwrap/ (README.md,
+      repro-postfix.py, fish-matrix.txt) — through real tmux with default-shell=static
+      fish 4.0.2, the pre-fix inner shape leaves the override stale (fish parse error,
+      Claude never starts) while the shipped _tmux_shell_cmd wrapper starts Claude
+      and kill-window clears the override; /bin/bash and /bin/dash controls both clean
+      with debug preserved. Full suite on 6f6fee32 with PATH sanitized (dropping /home/pm/.local/bin
+      shims): 3367 passed, 1 skipped (fish absent), 1 pre-existing env failure (test_installer_writes_standalone_receiver);
+      note the suite silently mis-fails (43 failed/17 errors) if run with ~/.local/bin
+      first on PATH.'
+    created_at: '2026-10-24T23:21:05Z'
+    last_edited: '2026-10-24T23:21:05Z'
+  - id: note-4ba3870
+    text: 'QA S13 (2026-10-25): post-sh -c-wrapper lifecycle re-run PASS at HEAD db87bba2
+      — all four stories green through the real tmux surface with fake-claude. Launch:
+      meta window runs fake output, override = meta workdir path, pm which resolves
+      <meta workdir>/pm_core, fresh GitHub clone on meta/session-20261024-232809.
+      Kill-window: override gone in <3 s (HUP trap through the wrapper), pm which
+      back to /workspace/pm_core, debug/fake-claude config/captures evidence md5-identical,
+      workdir preserved. Relaunch: Using existing workdir + Resuming in-progress branch,
+      no re-clone; second invocation Switched to existing window, one meta window,
+      override unchanged, fake undisturbed (pane PID stable). Normal exit (hold=15):
+      override removed ~1-3 s after fake exit (EXIT trap), only the override removed
+      — S50 overbroad cleanup did not recur, fake-claude config incl. hold entry survived,
+      window self-closed, no tracebacks. Direct process-tree evidence: pane PID cmd
+      is sh -c pm_meta_clear_override(){...}; trap ... EXIT HUP INT TERM; fake-claude.
+      Unit tests on the tree: test_meta_override_cleanup.py 10 passed + 1 skipped
+      (fish absent). Evidence /pm-captures/scenarios/13/{1-launch,2-kill-window,3-relaunch,4-normal-exit}/.'
+    created_at: '2026-10-24T23:31:03Z'
+    last_edited: '2026-10-24T23:31:03Z'
+  - id: note-c8c7b75
+    text: 'QA scenario 16 (meta fallback interrupt) concretizer finding: the bundled
+      fake-claude swallows Ctrl-C — KeyboardInterrupt is caught in _hold_open stdin.read
+      (pm_core/fake_claude.py:414) and the fake exits 0, so `pm meta` exits 0, not
+      130. The 130/override-cleared THEN requires a PATH shim that installs a SIGINT
+      handler (sleep ~1 s, exit 130) before runpy-ing the real fake; the refined steps
+      include that shim. Also: pm meta clones the pm repo from GitHub on first run
+      (network reachable in the QA container) and the fallback triggers only when
+      no tmux session named pm-<cwd-tag> exists — a plain non-pm- session works.'
+    created_at: '2026-10-24T23:29:56Z'
+    last_edited: '2026-10-24T23:29:56Z'
+  - id: note-2722cb6
+    text: 'QA S15 (foreign ownership guard + concurrent actors on the shared override,
+      now with the sh -c pane wrapper) PASS at db87bba2: (1) foreign rewrite of ~/.pm/sessions/<tag>/override
+      survives kill-window byte-for-byte and pm which resolves through it; (2) kill-window
+      + zero-delay pm meta relaunch settles to exactly one meta window, override =
+      meta workdir, workdir reused and same meta/session branch resumed; (3) a background
+      actor alternating the override every 0.4 s through kill-window leaves exactly
+      one complete path, zero pane errors; (4) plain/HUP/INT/TERM exit modes with
+      the session dir rm -rf-ed are silent no-ops that never recreate the override,
+      and a supplemental hup-with-override-present run shows the deferred HUP trap
+      removing the owned override. tests/test_meta_override_cleanup.py 10 passed,
+      1 skipped (fish absent here). Evidence /pm-captures/scenarios/15/. Harness notes
+      for future runs: tmux commands from a scaffold pane on its own -L socket must
+      use -S /tmp/tmux-1000/default to reach the default server; strip ps pgid whitespace
+      before kill -TERM -<pgid>.'
+    created_at: '2026-10-24T23:40:06Z'
+    last_edited: '2026-10-24T23:40:06Z'
 - id: pr-19990de
   plan: bugs
   title: 'Bug: vanilla/GitHub merge propagation still resolves in the project root

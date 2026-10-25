@@ -4,6 +4,7 @@ Registers the ``meta`` command for working on pm itself.
 """
 
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -187,14 +188,13 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     claude_cmd = build_claude_shell_cmd(prompt=prompt, session_tag=session_tag,
                                         cwd=str(work_path),
                                         session_type="meta")
-    clear_cmd = f"rm -rf ~/.pm/sessions/{session_tag}"
-    cmd = f"{claude_cmd} ; {clear_cmd}"
+    cmd = _build_meta_pane_cmd(claude_cmd, session_tag, work_path)
 
     # Try to launch in tmux (reuse pm_session from above)
     if pm_session:
         if tmux_mod.session_exists(pm_session):
             try:
-                tmux_mod.new_window(pm_session, window_name, cmd, str(work_path))
+                tmux_mod.new_window(pm_session, window_name, _tmux_shell_cmd(cmd), str(work_path))
                 win = tmux_mod.find_window_by_name(pm_session, window_name)
                 if win:
                     tmux_mod.set_shared_window_size(pm_session, win["id"])
@@ -205,9 +205,74 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
 
     # Fallback: launch interactively
     click.echo("Launching Claude...")
-    result = subprocess.run(f"cd {shell_quote(str(work_path))} && {cmd}", shell=True)
-    # The clear_cmd in the shell command handles cleanup
-    raise SystemExit(result.returncode)
+    rc = _run_interactive(f"cd {shell_quote(str(work_path))} && {cmd}")
+    # The EXIT/INT/TERM trap in the shell command handles cleanup
+    raise SystemExit(rc)
+
+
+def _run_interactive(cmd: str) -> int:
+    """Run *cmd* through the shell, waiting it out across Ctrl-C.
+
+    ``subprocess.run`` only gives the child ~0.25 s after a KeyboardInterrupt
+    before SIGKILLing it — often before the trap-carrying shell gets to run
+    its deferred INT/EXIT handler, which is what clears the session override
+    (a handler that takes longer than that, e.g. Claude flushing state before
+    exiting, would leave the stale override this module exists to prevent).
+    Waiting on the Popen directly instead lets the shell finish its trap and
+    exit on its own; a second Ctrl-C just re-interrupts the wait, it never
+    escalates to a kill.  Returns the shell child's returncode (130 when it
+    was interrupted).
+    """
+    proc = subprocess.Popen(cmd, shell=True)
+    try:
+        return proc.wait()
+    except KeyboardInterrupt:
+        # The SIGINT reached the shell child too; its trap runs once the
+        # foreground command dies.  Keep waiting for it to exit.
+        while True:
+            try:
+                return proc.wait()
+            except KeyboardInterrupt:
+                continue
+
+
+def _tmux_shell_cmd(cmd: str) -> str:
+    """Pin a tmux pane command to an explicit POSIX shell.
+
+    tmux runs ``new-window`` commands as ``<default-shell> -c <cmd>``, and
+    ``default-shell`` defaults to ``$SHELL`` — often fish, which rejects
+    the POSIX function/trap syntax of the meta pane command at parse time
+    (rc 127: "command substitutions not allowed in command position"), so
+    the window dies without starting Claude and the override stays stale.
+    Explicitly handing the command to ``sh`` matches how pm pins its other
+    trap-carrying pane commands (pm_core/cli/session.py ``bash -c``,
+    pm_core/container.py ``bash -c {shlex.quote(...)}``).  The interactive
+    fallback must NOT get this extra outer shell: ``Popen(shell=True)`` is
+    already /bin/sh, and an extra layer there could die on SIGINT before
+    the inner trap finishes and break the 130 exit status.
+    """
+    return f"sh -c {shlex.quote(cmd)}"
+
+
+def _build_meta_pane_cmd(claude_cmd: str, session_tag: str, work_path: Path) -> str:
+    """Wrap *claude_cmd* with an override cleanup that survives pane death.
+
+    The override file this meta window owns (~/.pm/sessions/<tag>/override)
+    is removed by a trap on EXIT/HUP/INT/TERM, so both a normal Claude exit
+    and a tmux kill-window (SIGHUP to the pane shell) clean up — the old
+    trailing ``; rm -rf ~/.pm/sessions/<tag>`` only ran on normal exit, and
+    wiped the whole shared session dir (debug flags, fake-claude config,
+    captures) when it did.  Only the override is removed, and only while it
+    still points at this meta workdir, so an override another component owns
+    (e.g. qa_loop._setup_clone_override) is left alone.
+    """
+    override_file = Path.home() / ".pm" / "sessions" / session_tag / "override"
+    of = shell_quote(str(override_file))
+    wd = shell_quote(str(work_path))
+    clear = f'[ "$(cat {of} 2>/dev/null)" = {wd} ] && rm -f {of} || true'
+    return (f"pm_meta_clear_override() {{ {clear} ; }} ; "
+            f"trap pm_meta_clear_override EXIT HUP INT TERM ; "
+            f"{claude_cmd}")
 
 
 def _meta_workdir() -> Path:
