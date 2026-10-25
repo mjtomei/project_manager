@@ -1450,3 +1450,11 @@ all caught (`/pm-captures/review-c189-i4/mutation-checks.log`). Latest full
 suite: 3791 passed, rc 0, on 0b02e164 (env -u PM_HOST_HOME, /usr/bin
 first, PYTHONPATH=/workspace, markdown 3.10.3 installed first;
 `/pm-captures/review-c189-i4/full-suite.log`; also 3791 in c189 i2 and i3).
+Review loop c189 i5 re-checked them with 9 more mutations; three were missed
+and are now caught by new assertions in `TestClassifierRoute`: `pm provider
+list` names an `alias_models` classifier entry, a `claude`-type provider
+with its own `api_base` also drops an inherited classifier pin, and the
+`--live` probe command unsets what launches unset (stray keys, another
+route's classifier pin) (`/pm-captures/review-c189-i5/mutation-checks.log`).
+Latest full suite: 3793 passed, rc 0, on the i5 tree (same env;
+`/pm-captures/review-c189-i5/full-suite.log`).

@@ -288,6 +288,20 @@ class TestClassifierRoute:
         cmd = worker_route._probe_shell_cmd(cfg, "sid", container=False)
         assert _cmd_env(cmd)["CLAUDE_CODE_AUTO_MODE_MODEL"] == self.CLASSIFIER
 
+    def test_live_probe_cmd_unsets_what_launches_unset(self, pm_home_dir,
+                                                       monkeypatch):
+        # The probe checks the route the way sessions use it: no stray key,
+        # and an unpinned route drops another route's classifier pin.
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-stray")
+        monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-stray")
+        monkeypatch.setenv("CLAUDE_CODE_AUTO_MODE_MODEL", self.CLASSIFIER)
+        _write_providers(pm_home_dir, model="z-ai/glm-5.3-flash")
+        cfg = get_provider(ROUTE, strict=True)
+        cmd = worker_route._probe_shell_cmd(cfg, "sid", container=False)
+        for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+                    "CLAUDE_CODE_AUTO_MODE_MODEL"):
+            assert self._shell_env(cmd, var) == "unset", var
+
     def test_alias_models_entry_wins(self):
         p = ProviderConfig(name=ROUTE, type="router", api_base="http://x:1",
                            model=MODEL, alias_models={
@@ -339,6 +353,18 @@ class TestClassifierRoute:
         assert "CLAUDE_CODE_AUTO_MODE_MODEL=" not in cmd
         assert self._shell_env(cmd) == "unset"
 
+    def test_claude_provider_with_its_own_endpoint_drops_it_too(
+            self, pm_home_dir, monkeypatch):
+        # Every claude-type session is a main-account one, whatever its URL.
+        import yaml
+        (pm_home_dir / "providers.yaml").write_text(yaml.safe_dump(
+            {"providers": {"proxy": {"type": "claude",
+                                     "api_base": "http://127.0.0.1:1",
+                                     "model": "claude-opus-5-5"}}}))
+        monkeypatch.setenv("CLAUDE_CODE_AUTO_MODE_MODEL", self.CLASSIFIER)
+        cmd = self._build(provider="proxy")
+        assert self._shell_env(cmd) == "unset"
+
     def test_print_launchers_drop_it_for_main_and_set_it_for_routes(
             self, pm_home_dir, monkeypatch):
         from pm_core.claude_launcher import _resolve_provider
@@ -369,6 +395,11 @@ class TestClassifierRoute:
         lines = _router_detail_lines(get_provider(ROUTE, strict=True))
         assert any(line.startswith("auto-mode classifier: not pinned")
                    for line in lines)
+        # It names what launches set, so an alias_models entry wins here too.
+        _write_providers(pm_home_dir, alias_models={
+            "CLAUDE_CODE_AUTO_MODE_MODEL": "work/other"})
+        lines = _router_detail_lines(get_provider(ROUTE, strict=True))
+        assert "auto-mode classifier: work/other" in lines
 
 
 class TestSubagentPin:
