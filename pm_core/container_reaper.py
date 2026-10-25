@@ -244,11 +244,20 @@ def _release_records() -> list[tuple[Path, dict]]:
     return records
 
 
-def pending_releases() -> dict[str, dict]:
+def _current_release_records() -> list[tuple[Path, dict]]:
+    """Only this runtime's releases may override live ownership.
+
+    Preserve legacy unscoped records, but an unknown current domain must
+    never authorize a release explicitly attributed to another runtime.
+    """
     domain = _runtime_domain()
+    return [(path, rec) for path, rec in _release_records()
+            if rec.get("runtime_domain") in (None, domain)]
+
+
+def pending_releases() -> dict[str, dict]:
     return {rec["name"]: rec for _, rec in sorted(
-        _release_records(), key=lambda item: item[1].get("at", 0))
-        if rec.get("runtime_domain") in (None, domain)}
+        _current_release_records(), key=lambda item: item[1].get("at", 0))}
 
 
 def _prune_releases(out: "Outcome", scope: "Scope", since: float) -> None:
@@ -891,7 +900,7 @@ def plan(scope: Scope | None = None) -> Outcome:
         n: str(f.get("id") or "") for n, f in pending_failures().items()
         if isinstance(f, dict) and f.get("owner_release")}
     releases: dict[str, list[dict]] = {}
-    for _, rec in _release_records():
+    for _, rec in _current_release_records():
         releases.setdefault(rec["name"], []).append(rec)
     for info in infos:
         if scope.matches(info):

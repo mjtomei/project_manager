@@ -12230,6 +12230,22 @@ prs:
       review commit.'
     created_at: '2026-10-25T19:48:41Z'
     last_edited: '2026-10-25T19:50:01Z'
+  - id: note-e6a29b7
+    text: 'Review-loop 6427 i7 (main and inherited helper chatgpt/gpt-6-astra-high):
+      fixed foreign-runtime durable releases overriding live ownership; required ~/.pm
+      chown failures falsely stamping setup complete; stale commands executing into
+      same-name replacements (exec now pins captured ID and checks generation; QA
+      concretizer/worker carry identity); stale final QA queued_indices replaying
+      completed/failed work after restart; and polling/status/resume-write exceptions
+      skipping allocation release. Existing lifecycle architecture retained; spec
+      updated. Before-fix regressions: core 8 failed/3 controls passed, QA 5 failed/1
+      control passed. Focused core 290 passed, QA/integration 296 passed. Final sanitized
+      full suite 3625 passed, 5 warnings (3 existing AsyncMock, 2 Click deprecations).
+      Evidence and per-file notes /pm-captures/review-6427-i7/README.md. No real-container
+      QA claim or waiver; outstanding scenarios and independent sign-off remain. Existing
+      model/handoff/manual-gate edits preserved outside review commit.'
+    created_at: '2026-10-25T20:06:53Z'
+    last_edited: '2026-10-25T20:06:53Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

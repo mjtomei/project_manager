@@ -93,7 +93,10 @@ retryable cleanup rather than permission to delete by name.
   **id and recovery generation**, rechecked under the name's launch lock, so a
   late trap cannot kill a replacement or restarted container. Creation returns
   the ID/generation together under the launch lock; callers use that captured
-  pair for EXIT and failed-attachment cleanup, never a later generation lookup;
+  pair for EXIT and failed-attachment cleanup, never a later generation lookup.
+  The exec itself targets that captured ID and checks its generation before
+  attachment, including QA concretizer and worker commands; stale commands
+  cannot enter a replacement or a recovered allocation;
   review/sign-off pre-launch removal uses the session-tagged name
   (`_make_container_name(label, session_tag)`), fixing the stale-reuse bug;
   if tmux window creation fails after the container was created, the
@@ -145,6 +148,8 @@ retryable cleanup rather than permission to delete by name.
   or a launch lock defers cleanup without erasing the request or last failure.
   Pane EXIT uses this same identity-bound release rather than raw runtime removal,
   so explicit retention and concurrent restart are respected.
+  QA polling, status-write and resume-write errors still run allocation release
+  in a finally path, preserving the same human/retention/ownership exceptions.
   Workdirs, captures, transcripts, QA workdirs are never touched.
 
 ### R4 — Reconcile on startup and periodically
@@ -165,8 +170,9 @@ Single-flight across processes via an fcntl lock (a concurrent caller skips).
 ### R5 — Verified reuse and clean setup failure
 - Setup splits into the in-container bash phase (writes `/tmp/.pm-ready`)
   and the host post-setup phase (chown `~/.pm`, copy `.claude.json` —
-  **required** when the host file exists, failure is a launch failure).  After
-  post-setup the host writes `/tmp/.pm-setup-complete`.
+  **required** when the host file exists, failure is a launch failure). The
+  `~/.pm` ownership repair is also required; a failed or timed-out chown must
+  not stamp completed setup. After post-setup the host writes `/tmp/.pm-setup-complete`.
 - Reuse requires: running **and** `/tmp/.pm-setup-complete` **and**
   `/home/pm/.claude.json` present (when the host has one) **and**, when a push
   branch is set, the proxy socket alive.  If incomplete: if `/tmp/.pm-ready`
@@ -213,7 +219,9 @@ retained). Markers are keyed by container identity so same-name allocations
 in different runtime stores do not overwrite each other's retention. Full
 reconcile passes prune retention and pending release records only when their
 recorded runtime domain matches the successfully inventoried domain; unknown
-or legacy domains are preserved. Failure state is runtime-domain scoped too.
+or legacy domains are preserved. Known foreign-domain release records cannot
+authorize removal even when a cloned runtime store has identical container IDs.
+Failure state is runtime-domain scoped too.
 `pm container status` shows running pm containers, keyring usage, and last
 reaper failures.  Existing `pm container cleanup` (remove all / by PR) is kept.
 
@@ -227,8 +235,9 @@ reaper failures.  Existing `pm container cleanup` (remove all / by PR) is kept.
   queued-scenario mechanism. Settled scenarios release their allocations before
   handing slots to queued work (after PASS verification, with the same human,
   retention and viewed-window exceptions). Resume must not recreate already
-  settled workers. Failed queued launches leave no worker/verdict and must not
-  strand the remaining queue.
+  settled workers. Final resume snapshots contain only unattempted queued
+  scenarios; older stale queue entries cannot relaunch settled or failed work.
+  Failed queued launches leave no worker/verdict and must not strand the remaining queue.
 - Before a create, if keyring usage ≥ 90 % a scoped synchronous reconcile
   (bounded) runs first; the launch then proceeds and, if it still fails,
   surfaces R6's explicit error.

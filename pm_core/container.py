@@ -1784,10 +1784,18 @@ def _post_setup(name: str, workdir: Path, is_podman: bool) -> None:
             name, "chown", f"{host_uid}:{host_gid}",
             f"{_CONTAINER_HOME}/.pm",
         ])
-        _run_runtime(*exec_args, timeout=5, check=False)
-    except Exception:
-        _log.debug("chown %s/.pm failed in container %s",
-                   _CONTAINER_HOME, name, exc_info=True)
+        ownership = _run_runtime(*exec_args, timeout=5, check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise launch_error(name, "timeout", "chown of ~/.pm timed out",
+                           stage="repair ~/.pm ownership") from exc
+    except OSError as exc:
+        raise launch_error(name, "runtime", str(exc),
+                           stage="repair ~/.pm ownership") from exc
+    if ownership.returncode != 0:
+        stderr = (ownership.stderr or "").strip()
+        raise launch_error(name, classify_runtime_error(stderr),
+                           stderr or "chown of ~/.pm failed",
+                           stage="repair ~/.pm ownership")
 
     # Copy .claude.json into the container (not bind-mounted — see note above)
     _claude_json_src = _host_claude_json()
@@ -1944,24 +1952,34 @@ def activity_owner(name: str) -> bool:
 
 
 def run_interactive_exec(name: str, cid: str, generation: str,
-                         state_dir: str, command: str, runtime: str) -> int:
-    """Hold an activity lock for a terminal exec not represented by a tmux pane."""
+                         state_dir: str, command: str, runtime: str,
+                         hold_activity: str = "1") -> int:
+    """Validate allocation before exec; optionally hold foreground ownership.
+
+    Tmux callers already have a pane owner and pass ``hold_activity="0"``.
+    They still need the same stale-allocation check before attaching.
+    """
     os.environ["PM_CONTAINER_STATE_DIR"] = state_dir
     global _get_runtime
     _get_runtime = lambda: runtime
     # Serialize attachment with cleanup; an old shell must not attach to a
     # replacement. The child inherits the lock so killing this helper alone
     # cannot make a still-running exec appear abandoned.
-    path = _lock_path(f"active-{name}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as activity:
+    activity_context = contextlib.nullcontext(None)
+    if hold_activity != "0":
+        path = _lock_path(f"active-{name}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        activity_context = path.open("a")
+    with activity_context as activity:
         with launch_lock(name) as locked:
             if not locked or not cid or current_container_id(name) != cid:
                 raise ContainerError(f"Container '{name}' changed before interactive attachment")
             if cleanup_generation(name) != generation:
                 raise ContainerError(f"Container '{name}' was recovered before interactive attachment")
-            fcntl.flock(activity, fcntl.LOCK_SH)
-        return subprocess.call(["bash", "-c", command], pass_fds=(activity.fileno(),))
+            if activity is not None:
+                fcntl.flock(activity, fcntl.LOCK_SH)
+        inherited = (activity.fileno(),) if activity is not None else ()
+        return subprocess.call(["bash", "-c", command], pass_fds=inherited)
 
 
 def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
@@ -1992,11 +2010,12 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     # host user (correct UID).  The "pm" username doesn't exist in
     # /etc/passwd, so -u pm would fail.  Under Docker, -u pm switches
     # from root to the pm user created during setup.
+    target = shlex.quote(container_id or name)
     if "podman" in runtime:
-        exec_part = f"{runtime} exec -it {shlex.quote(name)} bash -c {escaped}"
+        exec_part = f"{runtime} exec -it {target} bash -c {escaped}"
     else:
-        exec_part = f"{runtime} exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
-    if interactive_owner:
+        exec_part = f"{runtime} exec -it -u {_CONTAINER_USER} {target} bash -c {escaped}"
+    if interactive_owner or container_id:
         import sys
         script = (
             f"import sys; sys.path.insert(0, {str(Path(__file__).resolve().parent.parent)!r}); "
@@ -2004,7 +2023,8 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
             "sys.exit(run_interactive_exec(*sys.argv[1:]))")
         exec_part = shlex.join([
             sys.executable, "-c", script, name, container_id or "",
-            generation, str(container_state_dir()), exec_part, runtime])
+            generation, str(container_state_dir()), exec_part, runtime,
+            "1" if interactive_owner else "0"])
     if cleanup:
         import sys
         # Pin this checkout/interpreter, not whichever pm happens to be on the

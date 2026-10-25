@@ -1680,7 +1680,9 @@ def _build_concretize_cmd(
     if container_name:
         from pm_core import container as container_mod
         return container_mod.build_exec_cmd(
-            container_name, claude_cmd, cleanup=False)
+            container_name, claude_cmd, cleanup=False,
+            container_id=scenario.container_id,
+            generation=scenario.container_generation)
     return claude_cmd
 
 
@@ -2554,7 +2556,9 @@ def _build_scenario_run_cmd(
 
     if use_containers:
         run_cmd = container_mod.build_exec_cmd(
-            scenario.container_name, claude_cmd, cleanup=False)
+            scenario.container_name, claude_cmd, cleanup=False,
+            container_id=scenario.container_id,
+            generation=scenario.container_generation)
     else:
         run_cmd = claude_cmd
 
@@ -2714,7 +2718,11 @@ def _poll_tmux_verdicts(
         _log.info("PASS verdict verification is disabled (qa-verify-pass)")
 
     # Queue of scenarios waiting to be launched
-    _launch_queue: list[QAScenario] = list(queued_scenarios or [])
+    _launch_queue: list[QAScenario] = [
+        s for s in queued_scenarios or []
+        if not s.window_name and s.index not in state.scenario_verdicts
+        and not _is_launch_failure(state, s.index)
+    ]
     _queued_indices: set[int] = {s.index for s in _launch_queue}
 
     # Completed allocations may already have been released before a queued
@@ -2749,7 +2757,8 @@ def _poll_tmux_verdicts(
     # (but skip queued scenarios — they don't have windows yet by design)
     has_failed_creation = False
     for scenario in state.scenarios:
-        if not scenario.window_name and scenario.index not in _queued_indices:
+        if (not scenario.window_name and scenario.index not in _queued_indices
+                and scenario.index not in state.scenario_verdicts):
             if _is_launch_failure(state, scenario.index):
                 # Reason already recorded; no verdict (nothing judged it).
                 has_failed_creation = True
@@ -4253,6 +4262,37 @@ def _execute_and_finalize(
     queued_scenarios: list[QAScenario],
     notify: Callable[[], None],
 ) -> QALoopState:
+    """Finalize a run and release its allocations even if polling/persistence fails."""
+    try:
+        return _finalize_scenarios(
+            state, pm_root, pr_data, data, session, window_name, workdir_path,
+            status_path, repo_root, use_containers, concurrency_cap,
+            queued_scenarios, notify)
+    finally:
+        if use_containers:
+            try:
+                if _release_scenario_containers(state, session):
+                    notify()
+            except Exception:
+                # Do not replace a polling/persistence error with cleanup's error.
+                _log.exception("QA container release failed for %s", state.pr_id)
+
+
+def _finalize_scenarios(
+    state: QALoopState,
+    pm_root: Path,
+    pr_data: dict,
+    data: dict,
+    session: str,
+    window_name: str,
+    workdir_path: str,
+    status_path: Path,
+    repo_root: Path | None,
+    use_containers: bool,
+    concurrency_cap: int,
+    queued_scenarios: list[QAScenario],
+    notify: Callable[[], None],
+) -> QALoopState:
     """Poll scenarios for verdicts, aggregate, persist, and finalize.
 
     This is the shared tail of :func:`run_qa_sync` and
@@ -4334,6 +4374,13 @@ def _execute_and_finalize(
         except Exception:
             _log.exception("Failed to run QA finalize pane")
 
+    # Polling consumes the original queue. Persist only work never attempted,
+    # not settled or failed launches that a restart must not launch again.
+    queued_indices = {
+        s.index for s in queued_scenarios
+        if not s.window_name and s.index not in state.scenario_verdicts
+        and not _is_launch_failure(state, s.index)
+    }
     # Refresh the snapshot with the overall + finalize verdict so a
     # restart between completion and TUI processing still carries them.
     _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
@@ -4350,10 +4397,6 @@ def _execute_and_finalize(
     _log.info("QA complete for %s: %s (finalize=%s)",
               state.pr_id, state.latest_verdict, state.finalize_verdict)
     notify()
-    # After notify: the verdict is out; the next run must not pay for this
-    # run's cleanup.
-    if use_containers and _release_scenario_containers(state, session):
-        notify()
     return state
 
 

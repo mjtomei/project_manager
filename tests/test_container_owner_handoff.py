@@ -286,3 +286,90 @@ def test_dead_foreign_proxy_is_not_reassigned(monkeypatch, tmp_path):
     with pytest.raises(cm.ContainerError, match="runtime"):
         pp.start_push_proxy(NAME, "/w", "branch", session_tag="tag", pr_id="pr-aaaa")
     start.assert_not_called()
+
+
+@pytest.mark.parametrize("current,recorded,release_allowed", [
+    ({"runtime": "docker", "daemon_id": "a"}, {"runtime": "docker", "daemon_id": "a"}, True),
+    ({"runtime": "docker", "daemon_id": "b"}, {"runtime": "docker", "daemon_id": "a"}, False),
+    (None, {"runtime": "docker", "daemon_id": "a"}, False),
+    ({"runtime": "docker", "daemon_id": "a"}, None, True),
+    (None, None, True),
+])
+def test_plan_release_records_respect_runtime_domain(monkeypatch, current, recorded, release_allowed):
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: recorded)
+    reaper._record_release(NAME, "cid", "", "old-exit")
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: current)
+    monkeypatch.setattr(reaper, "pending_failures", lambda: {})
+    monkeypatch.setattr(reaper, "list_containers", lambda: [
+        reaper.ContainerInfo(NAME, id="cid", running=True, created=0)])
+    monkeypatch.setattr(reaper, "_owner_panes", lambda *a, **k: (["%live"], False))
+    decision, = reaper.plan().decisions
+    assert decision.released is release_allowed
+    assert decision.action == ("remove" if release_allowed else "keep")
+
+
+@pytest.mark.parametrize("failure", ["exit", "timeout"])
+def test_post_setup_requires_pm_home_ownership(monkeypatch, tmp_path, failure):
+    monkeypatch.setattr(cm, "_host_claude_json", lambda: tmp_path / "absent-config")
+    calls = []
+    def runtime(*args, **kwargs):
+        calls.append(args)
+        if "chown" in args:
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(args, 5)
+            return subprocess.CompletedProcess(args, 1, "", "chown: Operation not permitted")
+        return subprocess.CompletedProcess(args, 0, "", "")
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    with pytest.raises(cm.ContainerLaunchError, match="ownership|chown"):
+        cm._post_setup(NAME, tmp_path, True)
+    assert not any(cm.SETUP_COMPLETE_SENTINEL in args for args in calls)
+
+
+@pytest.mark.parametrize("runtime", ["podman", "docker"])
+def test_tmux_exec_uses_captured_identity_and_attachment_guard(monkeypatch, runtime):
+    import shlex
+    monkeypatch.setattr(cm, "_get_runtime", lambda: runtime)
+    command = cm.build_exec_cmd(NAME, "worker", cleanup=False,
+                                container_id="original-id", generation="original-generation")
+    argv = shlex.split(command)
+    assert "run_interactive_exec" in argv[2]
+    assert argv[3:6] == [NAME, "original-id", "original-generation"]
+    assert argv[-1] == "0"
+    exec_argv = shlex.split(argv[-3])
+    assert "original-id" in exec_argv
+    assert NAME not in exec_argv
+
+
+@pytest.mark.parametrize("current_id,current_generation", [
+    ("replacement-id", "original-generation"),
+    ("original-id", "replacement-generation"),
+])
+def test_tmux_generated_guard_refuses_stale_attachment(monkeypatch, current_id, current_generation):
+    import shlex
+    monkeypatch.setattr(cm, "_get_runtime", lambda: "podman")
+    command = cm.build_exec_cmd(NAME, "worker", cleanup=False,
+                                container_id="original-id", generation="original-generation")
+    argv = shlex.split(command)
+    assert "run_interactive_exec" in argv[2]
+    monkeypatch.setattr(cm, "current_container_id", lambda _: current_id)
+    monkeypatch.setattr(cm, "cleanup_generation", lambda _: current_generation)
+    execute = MagicMock()
+    monkeypatch.setattr(cm.subprocess, "call", execute)
+    with pytest.raises(cm.ContainerError):
+        cm.run_interactive_exec(*argv[3:])
+    execute.assert_not_called()
+
+
+def test_tmux_guard_does_not_create_foreground_owner(monkeypatch):
+    import shlex
+    monkeypatch.setattr(cm, "_get_runtime", lambda: "podman")
+    command = cm.build_exec_cmd(NAME, "worker", cleanup=False,
+                                container_id="cid", generation="g")
+    monkeypatch.setattr(cm, "current_container_id", lambda _: "cid")
+    monkeypatch.setattr(cm, "cleanup_generation", lambda _: "g")
+    def execute(argv, **kwargs):
+        assert not cm.activity_owner(NAME)
+        assert kwargs["pass_fds"] == ()
+        return 7
+    monkeypatch.setattr(cm.subprocess, "call", execute)
+    assert cm.run_interactive_exec(*shlex.split(command)[3:]) == 7
