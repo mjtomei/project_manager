@@ -222,11 +222,17 @@ config unchanged, passed on the final implementation 75f0dde6
 (`/pm-captures/host-work-route-smoke-20261022T190834Z/`: slirp4netns
 container; host + container `…190309Z/`). After 81cebf17 it passed on the
 host from an underscore cwd and in a container
-(`…195845Z/result.json`). Live QA S1–S54 is in
-`/pm-captures/scenarios/<N>/` (REPORT.md), except S52 (RQ39), whose
-worker never executed (`verdict.md`: no recovery after 10 relaunches):
-its coverage is still owed to the next QA run. The latest full suite is
-recorded with item 42.
+(`…195845Z/result.json`). Live QA S1–S56 is in
+`/pm-captures/scenarios/<N>/` (REPORT.md). S52 (RQ39) never executed
+(run a871abafdd8bbc20, `verdict.md`: no recovery after 10 relaunches;
+kept as the record of that failed attempt). Its Thens first ran live as
+S55 (run a31ac0ae57566deb: all story Thens held, the preflight Routes
+Then failed and was fixed in 2a6b14d4, item 42(k)). S56 (same run, PASS)
+ran on 3a0c32e6, before 2a6b14d4: its story-1 W/X Routes lines show the
+old split by effort, which 2a6b14d4 replaced with one line per route
+(rechecked live in S55 post-fix and by
+`test_model_show_pr_route_lines_with_the_real_route_description`). The
+latest full suite is recorded with item 42.
 
 **Rules fixed during validation (index).** Commits in parentheses.
 - Live smokes 1–4. The bridge stream has no timeout after connect
@@ -1237,3 +1243,12 @@ recorded with item 42.
         `/pm-captures/scenarios/55/post-fix/tests/mutations.log`).  Full
         suite 3738 passed, rc 0
         (`/pm-captures/scenarios/55/post-fix/tests/full-suite.log`).
+        Review loop 6915 i1 (test only): that test stubs `describe`, as
+        the older Routes tests do, which is how the split stayed
+        invisible to them.
+        `test_model_show_pr_route_lines_with_the_real_route_description`
+        runs a configured router provider through the real
+        `describe` (the production line and S56's W shape: a plain-model
+        impl exception with mixed efforts); it fails with the old grouping
+        and without the effort summary
+        (`/pm-captures/review-6915-i1/mutation-checks.log`).

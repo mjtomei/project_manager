@@ -1040,14 +1040,22 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
       already applied: router stub on 127.0.0.1, main stub on 10.0.2.100,
       `cidr=10.1.2.0/24`). Build the base image without the Chromium
       smoke step if `pm container build-base` fails there (S53 setup).
-      Since 66404830/14d72926, `pm model show` Routes has one line per PR
-      override ("<pr> (all types) route=…", "<pr> (signoff) route=…").
+      Since 66404830/14d72926, `pm model show` Routes has one line per
+      route a PR override selects ("<pr> (all types) route=…", "<pr>
+      (signoff) route=…"); "(all types)" with a project session_effort
+      only since 2a6b14d4 (S55).
     - S56 is the delta for review loop 0f64 i1–i6 (14d72926, ac202207,
       1dc3e618, 6bd59adf, 690a9fe1, 3a0c32e6), none run live: PR Routes
       only for the types an override decides, never the watcher; a
       non-string or empty PR `model`; PR Routes deferring to `PM_MODEL`;
       the TUI command bar and review-loop ERROR text keeping brackets.
       Host mode, S54 harness (`/pm-captures/scenarios/54/scripts`).
+      Done (run a31ac0ae57566deb): S55 NEEDS_WORK, the first live run of
+      S52's Thens (every story Then held; the preflight Routes Then
+      failed, fixed in 2a6b14d4 and rechecked live post-fix). S56 PASS on
+      3a0c32e6, before 2a6b14d4, so its W/X two-line Routes Thens record
+      the superseded grouping (REPORT.md in `/pm-captures/scenarios/55`,
+      `56`).
 
 ## 3. Edge cases
 

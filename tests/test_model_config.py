@@ -836,6 +836,52 @@ def test_model_show_pr_route_line_is_not_split_by_project_effort(
         "  pr-b (signoff) route=claude-work effort=(default)"], routes
 
 
+def test_model_show_pr_route_lines_with_the_real_route_description(
+        tmp_path, monkeypatch):
+    """Review 6915 i1: the PR Routes tests above stub ``describe``, which
+    is how S55's effort split stayed invisible to them.  Here a configured
+    router provider goes through the real ``worker_route.describe``: the
+    production line (every type routed, qa_scenario/qa_concretize high)
+    and S56's W shape (a plain-model impl exception, mixed efforts) are
+    one line each, the effort summary in the effort field before via=."""
+    import yaml
+    from click.testing import CliRunner
+    from pm_core import model_config, providers, store, worker_route
+    from pm_core.cli import model as model_cli
+    for var in ("PM_MODEL", "PM_EFFORT", "PM_PROVIDER"):
+        monkeypatch.delenv(var, raising=False)
+    home = tmp_path / "pmhome"
+    home.mkdir()
+    for mod in (providers, worker_route):
+        monkeypatch.setattr(mod, "pm_home", lambda: home)
+    monkeypatch.setattr(model_config, "get_global_setting_value",
+                        lambda name: None)
+    (home / "providers.yaml").write_text(yaml.safe_dump({"providers": {
+        "claude-work": {"type": "router", "api_base": "http://127.0.0.1:1",
+                        "model": "work/claude-opus-5-5"}}}))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    store.save({"project": {"name": "t", "repo": str(proj),
+                            "base_branch": "master",
+                            "model_config": {"session_effort": {
+                                "qa_scenario": "high",
+                                "qa_concretize": "high"}}},
+                "prs": [{"id": "pr-a", "model": "provider:claude-work"},
+                        {"id": "pr-w", "model": "provider:claude-work",
+                         "session_models": {"impl": "opus"}}]}, proj)
+    monkeypatch.setattr(model_cli, "state_root", lambda: proj)
+    out = CliRunner().invoke(model_cli.model, ["show"]).output
+    routes = out.split("Routes:\n", 1)[1].splitlines()
+    tail = ("route=claude-work model=work/claude-opus-5-5 effort=high "
+            "(qa_scenario, qa_concretize), (default) otherwise via=host")
+    assert [r for r in routes if r.startswith("  pr-a ")] == [
+        f"  pr-a (all types) {tail}"], routes
+    others = ", ".join(st for st in model_config.PR_SESSION_TYPES
+                       if st != "impl")
+    assert [r for r in routes if r.startswith("  pr-w ")] == [
+        f"  pr-w ({others}) {tail}"], routes
+
+
 def test_model_show_pr_routes_defer_to_pm_model(tmp_path, monkeypatch):
     """Review 0f64 i6: with PM_MODEL set (it beats every PR override), the
     PR Routes lines still credited each PR override with PM_MODEL's route,
