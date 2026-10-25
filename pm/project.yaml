@@ -28947,7 +28947,7 @@ prs:
   title: 'Bug: closing the pm meta window (kill-window) leaves the session override
     active, so pm silently keeps using the meta clone'
   branch: pm/pr-7f90572-bug-closing-the-pm-meta-window-kill-window-leaves-
-  status: pending
+  status: merged
   depends_on: []
   description: 'Found in QA pr-b53bfe2 scenario 2 (2026-10-13, captures pr-b53bfe2/scenarios/2/tui/attempts/t16-attempt1-killwindow-override-left).
     cli/meta.py launches the window as "<claude cmd> ; rm -rf ~/.pm/sessions/<tag>",
@@ -28958,14 +28958,14 @@ prs:
     it is removed by hand. Fix: run the cleanup from a trap on EXIT/HUP in the pane
     command, or have pm _pane-closed / the wrapper drop an override whose meta window
     is gone.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/251
+  gh_pr_number: 251
   created_at: '2026-10-13T09:20:01.185973+00:00'
-  updated_at: '2026-10-24T23:40:06.450804+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
+  updated_at: '2026-10-25T00:07:29.209534+00:00'
+  started_at: '2026-10-24T12:08:03.878803+00:00'
+  reviewed_at: '2026-10-24T23:16:12.525853+00:00'
+  merged_at: '2026-10-25T00:07:29.209534+00:00'
   notes:
   - id: note-f9e58cb
     text: 'Scenario 4 (interactive-fallback interrupt) concretizer notes: (1) run
@@ -29201,6 +29201,114 @@ prs:
       before kill -TERM -<pgid>.'
     created_at: '2026-10-24T23:40:06Z'
     last_edited: '2026-10-24T23:40:06Z'
+  - id: note-6e1db0
+    text: 'User authorized an all-role GLM 5.3 Flash trial on 2026-10-24. Use provider:glm-flash
+      for implementation, review, QA, and sign-off; preserve manual merge gating.
+      Include both abnormal-exit stale override and the previously filed normal-exit
+      overbroad cleanup: rm -rf ~/.pm/sessions/<tag> deletes captures and session
+      config. Cleanup should remove only the owned override and preserve unrelated
+      session state; see existing note-2bc73f1 and #249 scenario50 evidence. Track
+      completion, defects, retries, cost and required interventions for the model
+      trial.'
+    created_at: '2026-10-24T12:07:39.999422+00:00'
+  - id: note-c598406
+    text: 'QA NEEDS_WORK: Closing the meta window clears the session override (original
+      bug repro): PASS; A normal meta exit removes only the override and preserves
+      all other session state (S50 overbroad-cleanup repro): PASS; Cleanup respects
+      foreign ownership of the shared override file: PASS; Interactive fallback cleans
+      up on interrupt (no tmux session): NEEDS_WORK; Concurrent actors on the shared
+      override — relaunch race and clone override written mid-flight: PASS (workdir:
+      /home/matt/.pm/workdirs/qa/pr-7f90572-dcd03571964e6918)'
+    created_at: '2026-10-24T21:10:59Z'
+    last_edited: '2026-10-24T21:10:59Z'
+  - id: note-4b610f5
+    text: 'QA PASS: Meta window relaunch lifecycle — close, relaunch, and re-select:
+      PASS; Abnormal teardown edges — kill-session, launch without claude, and cleanup
+      with nothing to clean: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-7f90572-fe42c244dca39bb4)'
+    created_at: '2026-10-24T21:35:38Z'
+    last_edited: '2026-10-24T21:35:38Z'
+  - id: note-c6feb31
+    text: 'QA PASS: Interactive fallback interrupt — slow-exiting foreground child,
+      double Ctrl-C, and exit status: PASS; Post-merge meta lifecycle sweep — launch,
+      override active, kill-window, relaunch, normal exit, second invocation: PASS
+      (workdir: /home/matt/.pm/workdirs/qa/pr-7f90572-8fccf0804e7851da)'
+    created_at: '2026-10-24T22:26:26Z'
+    last_edited: '2026-10-24T22:26:26Z'
+  - id: note-96f9cff
+    text: 'QA PASS: Rebuilt-branch meta lifecycle gate — kill-window, relaunch with
+      workdir reuse, normal exit: PASS; Teardown idempotency — stacked signals and
+      nothing-to-clean under any exit signal: PASS; Concurrent actors on the shared
+      override — mid-flight rewrite and relaunch race: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-7f90572-df970ed647f63de2)'
+    created_at: '2026-10-24T22:57:22Z'
+    last_edited: '2026-10-24T22:57:22Z'
+  - id: note-6d09c60
+    text: 'QA PASS: tmux meta lifecycle gate on the sh -c pane wrapper — launch, kill-window,
+      relaunch, re-select, normal exit: PASS; non-POSIX tmux default-shell (fish)
+      — the sh -c wrapper must start Claude and still clean up, with a POSIX control:
+      PASS; foreign ownership guard and concurrent actors on the shared override at
+      final HEAD: PASS; interactive fallback sanity at final HEAD — interrupt clears
+      the override and exits 130: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-7f90572-bb01b209c327ab14)'
+    created_at: '2026-10-24T23:45:19Z'
+    last_edited: '2026-10-24T23:45:19Z'
+  model: provider:glm-flash
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-7f90572-bug-closing-the-pm-meta-window-kill--bf21931b
+  session_models:
+    signoff: provider:claude-work
+  signed_off_at: '2026-10-24T23:45:20.290060+00:00'
+  integration:
+    checked_at: '2026-10-24T23:45:21.589810+00:00'
+    target_repo: https://github.com/mjtomei/project_manager.git
+    base_branch: master
+    head: 8dfbc18871c4ef626d6a6820a6a7a1b4b637b4e9
+    base_sha: 8807689be39a0aade476b702a2018c24c50b7f04
+    conflicts: []
+    overlap: []
+    candidate_tree: 91750cee9ac285114f92938ec79cf9b22cba671c
+    merge_base: 8807689be39a0aade476b702a2018c24c50b7f04
+    status: up_to_date
+    base_files_count: 0
+  signoff_return:
+    verdict: SIGNOFF_IMPL
+    hop: impl
+    reason: 'Unchanged since the last sign-off: the tmux meta pane command defines
+      a POSIX shell function that a non-POSIX tmux default-shell (fish, the default
+      when $SHELL is fish) rejects at parse time, so pm meta writes the override,
+      Claude never starts and the override stays stale (the bug this PR fixes, and
+      a regression vs the pre-PR command). Re-reproduced on ebfbe438 (/pm-captures/signoff/fish-default-shell/recheck-ebfbe438/).
+      Fix: in the tmux branch pass `sh -c {shlex.quote(cmd)}` to new_window (leave
+      the interactive fallback as is), add a wrapper unit test plus HUP/normal-exit
+      behaviour tests of the wrapped command, update spec R1 premise; then review
+      meta.py and re-run the tmux lifecycle QA.'
+    reviewed_head: ebfbe438e0854039c3ff00455ed4d6962cc55caa
+    integration:
+      target_repo: https://github.com/mjtomei/project_manager.git
+      base_branch: master
+      base_sha: 8807689be39a0aade476b702a2018c24c50b7f04
+      merge_base: 6d70b5feee65e9d89c904002526f349e9a88075a
+      status: clean
+      conflicts: []
+      overlap:
+      - pm/project.yaml
+      error: null
+    applied:
+      from_head: ebfbe438e0854039c3ff00455ed4d6962cc55caa
+      merge_sha: d50211f741e41844d8860659f2918b698e75db52
+      base_sha: 8807689be39a0aade476b702a2018c24c50b7f04
+    awaiting: null
+    ts: '2026-10-24T23:09:09.847642+00:00'
+    resolved_at: '2026-10-24T23:50:34.914919+00:00'
+  signoff:
+    verdict: SIGNOFF_MERGE
+    sha: 8dfbc18871c4ef626d6a6820a6a7a1b4b637b4e9
+    ts: '2026-10-24T23:50:34.914919+00:00'
+    origin: auto-sequence
+    integration:
+      target_repo: https://github.com/mjtomei/project_manager.git
+      base_branch: master
+      base_sha: 8807689be39a0aade476b702a2018c24c50b7f04
+      candidate_tree: 91750cee9ac285114f92938ec79cf9b22cba671c
+      status: up_to_date
+      head: 8dfbc18871c4ef626d6a6820a6a7a1b4b637b4e9
 - id: pr-19990de
   plan: bugs
   title: 'Bug: vanilla/GitHub merge propagation still resolves in the project root
@@ -32443,6 +32551,75 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-24T22:07:19.975334+00:00'
   updated_at: '2026-10-24T22:07:19.975334+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a591cbf
+  plan: bugs
+  title: 'Bug: meta cleanup can delete a concurrently replaced override'
+  branch: pm/pr-a591cbf-bug-meta-cleanup-can-delete-a-concurrently-replace
+  status: pending
+  depends_on:
+  - pr-7f90572
+  description: "Follow-up to #251 / pr-7f90572, accepted by the user as a separate\
+    \ bug when authorizing #251 merge on 2026-10-24. Independently reproduced twice\
+    \ on signed-off HEAD 8dfbc18871c4ef626d6a6820a6a7a1b4b637b4e9.\n\npm_core/cli/meta.py::_build_meta_pane_cmd\
+    \ checks the override with cat and then removes the pathname in a separate command.\
+    \ If another actor writes its own override after the read but before unlink, the\
+    \ trap compares the old value and deletes the new actor's override. The ownership\
+    \ check is not atomic. Expected: the foreign override survives; actual: it is\
+    \ deleted. Other session state survives.\n\nThe existing concurrent-actor QA checks\
+    \ final state while a writer continues afterward, which can mask this interleaving.\
+    \ Add deterministic coverage that pauses the actual handler after reading the\
+    \ owned value, replaces the override with a foreign path, then resumes cleanup.\
+    \ Address the ownership lifecycle and relevant writers together; do not prescribe\
+    \ a particular locking mechanism before implementation. Retain normal/abnormal-exit\
+    \ cleanup, shell compatibility, and preservation of unrelated session state. Consider\
+    \ relaunch ownership as well as foreign-path replacement.\n\nReproduction below\
+    \ uses the real PR251 handler, a temporary home and a synchronized cat shim; it\
+    \ never touches real session overrides. Run from a checkout containing #251 with\
+    \ PM dependencies installed. Observed JSON: foreign_override_survived=false, debug_survived=true,\
+    \ exit=0. Original evidence: /home/matt/.local/state/pm-pr-shepherd/251-independent-report-review-20261025T000152Z/{repro.py,result.json}.\
+    \ A durable copy will be stored under pm/bug-repros/ alongside this registry entry.\n\
+    \n```python\n\"\"\"Reproduce the override check/unlink race using the real PR251\
+    \ handler.\n\nRun from the PR251 checkout with its dependencies available. Only\
+    \ temporary\nfiles are modified. The cat shim pauses after reading the old value,\
+    \ making\na possible reader/writer scheduling order deterministic.\n\"\"\"\nimport\
+    \ json\nimport os\nfrom pathlib import Path\nimport shlex\nimport subprocess\n\
+    import sys\nimport tempfile\nimport time\nfrom unittest.mock import patch\n\n\
+    sys.path.insert(0, str(Path.cwd()))\nfrom pm_core.cli.meta import _build_meta_pane_cmd\n\
+    \nwith tempfile.TemporaryDirectory(prefix=\"pm251-guard-race-\") as temporary:\n\
+    \    root = Path(temporary)\n    session_dir = root / \".pm/sessions/isolated-test\"\
+    \n    session_dir.mkdir(parents=True)\n    override = session_dir / \"override\"\
+    \n    old_owner = root / \"meta-root\"\n    new_owner = root / \"foreign-root\"\
+    \n    override.write_text(str(old_owner) + \"\\n\")\n    (session_dir / \"debug\"\
+    ).write_text(\"keep\\n\")\n    with patch(\"pathlib.Path.home\", return_value=root):\n\
+    \        command = _build_meta_pane_cmd(\"true\", \"isolated-test\", old_owner)\n\
+    \n    binaries = root / \"bin\"\n    binaries.mkdir()\n    ready = root / \"cat-read\"\
+    \n    release = root / \"writer-done\"\n    cat = binaries / \"cat\"\n    cat.write_text(\n\
+    \        '#!/bin/sh\\n/bin/cat \"$@\"\\n'\n        + \"/usr/bin/touch \" + shlex.quote(str(ready))\
+    \ + \"\\n\"\n        + \"while [ ! -f \" + shlex.quote(str(release))\n       \
+    \ + \" ]; do /bin/sleep 0.01; done\\n\"\n    )\n    cat.chmod(0o755)\n    environment\
+    \ = dict(os.environ)\n    environment[\"PATH\"] = str(binaries) + \":/usr/bin:/bin\"\
+    \n    process = subprocess.Popen(\n        [\"/bin/sh\", \"-c\", command], env=environment,\n\
+    \        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,\n    )\n \
+    \   try:\n        deadline = time.monotonic() + 8\n        while not ready.exists()\
+    \ and time.monotonic() < deadline:\n            if process.poll() is not None:\n\
+    \                break\n            time.sleep(0.01)\n        if not ready.exists():\n\
+    \            raise RuntimeError(\"Reader synchronization failed\")\n        override.write_text(str(new_owner)\
+    \ + \"\\n\")\n        release.touch()\n        stdout, stderr = process.communicate(timeout=5)\n\
+    \        print(json.dumps({\n            \"foreign_override_survived\": override.exists(),\n\
+    \            \"debug_survived\": (session_dir / \"debug\").exists(),\n       \
+    \     \"exit\": process.returncode,\n            \"stdout\": stdout,\n       \
+    \     \"stderr\": stderr,\n        }, indent=2))\n    finally:\n        release.touch()\n\
+    \        if process.poll() is None:\n            process.kill()\n            process.wait()\n\
+    \n```\n"
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-25T00:07:20.058339+00:00'
+  updated_at: '2026-10-25T00:07:20.058339+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
