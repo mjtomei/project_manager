@@ -602,9 +602,10 @@ class TestCreateContainer:
         """Host ~/.pm/hooks and ~/.pm/hook_receiver.py are bind-mounted so
         Claude Code hooks running inside the container surface events to
         the host (R-Container-Mounts)."""
-        from pm_core.container import container_state_dir
+        from pm_core.container import container_state_dir, _restart_generation_path
         # The mount fixture stubs mkdir below, not lifecycle exclusion itself.
         (container_state_dir() / "locks").mkdir(parents=True, exist_ok=True)
+        _restart_generation_path("test", for_write=True).parent.mkdir(parents=True, exist_ok=True)
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
 
@@ -991,6 +992,7 @@ class TestRemoveContainer:
             "inspect", "test-container", check=False, timeout=5)
 
 
+@patch("pm_core.container.current_container_id", lambda name: "id-" + name)
 class TestCleanupContainers:
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")

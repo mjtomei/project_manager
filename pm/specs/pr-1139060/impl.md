@@ -148,8 +148,12 @@ retryable cleanup rather than permission to delete by name.
   or a launch lock defers cleanup without erasing the request or last failure.
   Pane EXIT uses this same identity-bound release rather than raw runtime removal,
   so explicit retention and concurrent restart are respected.
-  QA polling, status-write and resume-write errors still run allocation release
-  in a finally path, preserving the same human/retention/ownership exceptions.
+  Initial QA launch as well as polling, status-write and resume-write errors
+  still run allocation release in a finally path, preserving the same
+  human/retention/ownership exceptions. Temporary launch-batch slicing must
+  restore the full scenario list even when launch/status persistence raises.
+  PR resource orchestration must not stop a removed container's proxy a second
+  time after cleanup returns: a concurrent launch may already own its replacement.
   Workdirs, captures, transcripts, QA workdirs are never touched.
 
 ### R4 — Reconcile on startup and periodically
@@ -221,9 +225,19 @@ reconcile passes prune retention and pending release records only when their
 recorded runtime domain matches the successfully inventoried domain; unknown
 or legacy domains are preserved. Known foreign-domain release records cannot
 authorize removal even when a cloned runtime store has identical container IDs.
-Failure state is runtime-domain scoped too.
+Failure state and cleanup generations are runtime-domain scoped too. Launching
+an identically named container in another runtime store must not invalidate an
+existing allocation's attachment or EXIT release. Legacy generations remain
+readable until that domain writes a scoped generation; unknown runtime identity
+cannot write generations or fall back to legacy state once scoped state exists.
 `pm container status` shows running pm containers, keyring usage, and last
-reaper failures.  Existing `pm container cleanup` (remove all / by PR) is kept.
+reaper failures; available persisted diagnostics are shown even when the runtime
+executable is unavailable. Reap prints its outcome/count summary even when no
+containers remain in scope. Existing `pm container cleanup` (remove all / by PR)
+is kept as explicit force cleanup, but bulk removal captures each allocation's
+ID/generation before dispatch and rechecks it under the launch lock. A concurrent
+replacement or reused allocation is skipped, and removal plus proxy release
+remain inside the lock.
 
 ### R8 — Bounded launch concurrency / backpressure
 - A process-wide semaphore bounds concurrent container creates

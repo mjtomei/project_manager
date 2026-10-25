@@ -1,7 +1,7 @@
 """Tear down all live resources for a PR across implementation, review, and QA."""
 
 from pm_core import container as container_mod
-from pm_core import pane_registry, push_proxy
+from pm_core import pane_registry
 from pm_core import runtime_state
 from pm_core import tmux as tmux_mod
 from pm_core.cli.helpers import _pr_display_id, kill_pr_windows
@@ -73,15 +73,9 @@ def cleanup_pr_resources(session: str | None, pr: dict, *,
         except Exception as e:  # pragma: no cover
             _log.warning("cleanup_pr_containers failed: %s", e)
 
-    # Best-effort socket cleanup for any container we found (remove_container
-    # already calls stop_push_proxy, but cover the case where a socket lingers
-    # without its container).
-    for cname in summary["containers"]:
-        try:
-            push_proxy.stop_push_proxy(cname)
-            summary["sockets"].append(cname)
-        except Exception:
-            pass
+    # remove_container already released these proxies. Never stop them again
+    # here: a concurrent launch may have installed a replacement by now.
+    summary["sockets"].extend(summary["containers"])
 
     if session:
         try:

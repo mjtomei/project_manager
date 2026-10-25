@@ -4199,22 +4199,34 @@ def run_qa_sync(
     # Only launch the initial batch — queued scenarios are launched later
     # as running scenarios complete (handled by _poll_tmux_verdicts).
     all_scenarios = state.scenarios
-    state.scenarios = launch_scenarios
-    if use_containers:
-        _launch_scenarios_in_containers(
-            state, data, pr_data, session, repo_root, workdir_path,
-            pm_root=pm_root,
-        )
-    else:
-        _launch_scenarios_in_tmux(
-            state, data, pr_data, session, repo_root, workdir_path,
-            pm_root=pm_root,
-        )
-    state.scenarios = all_scenarios
+    try:
+        state.scenarios = launch_scenarios
+        try:
+            if use_containers:
+                _launch_scenarios_in_containers(
+                    state, data, pr_data, session, repo_root, workdir_path,
+                    pm_root=pm_root,
+                )
+            else:
+                _launch_scenarios_in_tmux(
+                    state, data, pr_data, session, repo_root, workdir_path,
+                    pm_root=pm_root,
+                )
+        finally:
+            state.scenarios = all_scenarios
 
-    if state.scenarios:
-        state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
-    _notify()
+        if state.scenarios:
+            state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
+        _notify()
+    except BaseException:
+        # Initial launch/status notification precedes _execute_and_finalize's
+        # release guard, but may already own containers and concretizer panes.
+        if use_containers:
+            try:
+                _release_scenario_containers(state, session)
+            except Exception:
+                _log.exception("QA initial allocation release failed for %s", state.pr_id)
+        raise
 
     # --- Poll for verdicts, aggregate, and finalize ---
     # Shared with resume_qa_sync so a TUI restart can re-enter this phase.

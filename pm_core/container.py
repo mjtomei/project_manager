@@ -1149,9 +1149,27 @@ def _probe_setup(name: str) -> tuple[bool, str, str]:
     return False, "", ""
 
 
-def _restart_generation_path(name: str) -> Path:
-    """Host-side generation read by pane EXIT traps before releasing resources."""
-    return _lock_path(f"restart-{name}").with_suffix(".generation")
+def _restart_generation_path(name: str, *, for_write: bool = False) -> Path:
+    """Generation belongs to a runtime domain, not merely a reusable name.
+
+    Read pre-domain markers for compatibility until this domain has its own
+    marker. Unknown runtime identity cannot write state or fall back to a
+    legacy generation after scoped state exists.
+    """
+    from pm_core.container_reaper import _runtime_domain
+    domain = _runtime_domain()
+    legacy = _lock_path(f"restart-{name}").with_suffix(".generation")
+    name_key = hashlib.sha256(name.encode()).hexdigest()
+    directory = container_state_dir() / "generations" / name_key
+    if domain is None:
+        if for_write or any(directory.glob("*.generation")):
+            raise OSError(f"Cannot determine runtime domain for container '{name}' generation")
+        return legacy
+    domain_key = hashlib.sha256(json.dumps(domain, sort_keys=True).encode()).hexdigest()
+    scoped = directory / f"{domain_key}.generation"
+    if not for_write and not scoped.exists():
+        return legacy
+    return scoped
 
 
 def canonical_container_name(name: str) -> str:
@@ -1182,10 +1200,9 @@ def _renew_launch(name: str) -> None:
     Called under the launch lock after successful create/reuse. Previous EXIT
     releases must not authorize deletion of this new ownership epoch.
     """
-    marker = _restart_generation_path(name)
     try:
-        if not marker.parent.exists():
-            marker.parent.mkdir(parents=True, exist_ok=True)
+        marker = _restart_generation_path(name, for_write=True)
+        marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(uuid.uuid4().hex)
     except OSError as exc:
         raise launch_error(name, "runtime", str(exc),
@@ -1211,8 +1228,8 @@ def restart_container(name: str) -> None:
     # Restart terminates attached exec clients. Their delayed EXIT traps must
     # not remove the very filesystem this recovery is meant to preserve.
     # Keep the new generation after restart: an old trap can arrive much later.
-    marker = _restart_generation_path(name)
     try:
+        marker = _restart_generation_path(name, for_write=True)
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(uuid.uuid4().hex)
     except OSError as exc:
@@ -2280,17 +2297,51 @@ def _list_names(prefix: str, *, running_only: bool = False) -> list[str] | None:
             if ln.strip().startswith(prefix)]
 
 
-def remove_containers(names: list[str], *, workers: int = 4) -> tuple[list[str], dict[str, str]]:
-    """Remove *names* with bounded parallelism.
+def _remove_captured_container(name: str, cid: str, generation: str) -> None:
+    """Force-remove the captured allocation, never a concurrent replacement."""
+    with launch_lock(name) as locked:
+        if not locked:
+            raise ContainerError(f"Container '{name}' lifecycle lock unavailable")
+        current = current_container_id(name)
+        if current is None:
+            raise ContainerError(f"Container '{name}' identity unknown during cleanup")
+        if not current:
+            return  # Already gone; do not touch a subsequently recreated proxy.
+        if current != cid or cleanup_generation(name) != generation:
+            raise ContainerError(f"Container '{name}' changed during cleanup; retry explicitly")
+        # Keep removal and proxy cleanup in one launch exclusion. This explicit
+        # operation still bypasses pane ownership and retention deliberately.
+        remove_container(name)
 
-    Returns ``(removed, failures)`` where failures maps name → error text.
+
+def remove_containers(names: list[str], *, workers: int = 4) -> tuple[list[str], dict[str, str]]:
+    """Force-remove captured allocations with bounded parallelism.
+
+    Capture every identity before queueing deletions, then recheck under its
+    launch lock. Returns ``(removed, failures)`` where failures maps name to
+    an error (including a changed allocation that needs an explicit retry).
     """
     removed: list[str] = []
     failures: dict[str, str] = {}
-    if not names:
+    allocations: list[tuple[str, str, str]] = []
+    for name in dict.fromkeys(names):
+        try:
+            with launch_lock(name) as locked:
+                if not locked:
+                    raise ContainerError(f"Container '{name}' lifecycle lock unavailable")
+                cid = current_container_id(name)
+                if cid is None:
+                    raise ContainerError(f"Container '{name}' identity unknown during cleanup")
+                if not cid:
+                    continue
+                allocations.append((name, cid, cleanup_generation(name)))
+        except Exception as exc:
+            failures[name] = str(exc)
+    if not allocations:
         return removed, failures
-    with ThreadPoolExecutor(max_workers=max(1, min(len(names), workers))) as ex:
-        futures = [(c, ex.submit(remove_container, c)) for c in names]
+    with ThreadPoolExecutor(max_workers=max(1, min(len(allocations), workers))) as ex:
+        futures = [(c, ex.submit(_remove_captured_container, c, cid, generation))
+                   for c, cid, generation in allocations]
         for cname, fut in futures:
             try:
                 fut.result()

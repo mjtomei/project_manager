@@ -49,7 +49,9 @@ def container_status():
         for name, pids, limit in pids_pressure(0.8):
             click.echo(f"PID pressure:    {name} at {pids}/{limit} — "
                        f"'pm container restart {name}' clears it")
-        _echo_reaper_state()
+    # Persisted failures and pending releases remain useful even when the
+    # runtime executable is unavailable. They must not disappear with metrics.
+    _echo_reaper_state()
 
     if enabled and not runtime_ok:
         click.echo(
@@ -373,8 +375,8 @@ def run_reap(scope, dry_run: bool) -> None:
         raise SystemExit(1)
     if not outcome.decisions and not outcome.proxies_released:
         click.echo(f"No pm containers in scope ({outcome.scope}).")
-        return
-    click.echo(f"Scope: {outcome.scope}")
+    else:
+        click.echo(f"Scope: {outcome.scope}")
     echo_reap_outcome(outcome)
     if outcome.failures:
         raise SystemExit(1)

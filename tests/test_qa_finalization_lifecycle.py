@@ -113,3 +113,62 @@ def test_finalization_errors_still_release_allocations(finalize_context, monkeyp
     with pytest.raises(OSError, match="disk unavailable"):
         run()
     release.assert_called_once_with(state, "pm-t")
+
+
+@pytest.mark.parametrize("stage", ["launch-status", "notify", "interrupt"])
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_initial_launch_errors_restore_scenarios_and_release(
+        tmp_path, monkeypatch, stage, cleanup_fails):
+    from pm_core import store, tmux
+
+    state = qa_loop.QALoopState(pr_id="pr-aaaa", planning_phase=False)
+    state.qa_workdir = str(tmp_path)
+    scenarios = [qa_loop.QAScenario(index=i, title=f"s{i}", focus="") for i in (1, 2)]
+    state.scenarios = scenarios
+    pr = {"id": state.pr_id, "workdir": str(tmp_path)}
+    monkeypatch.setattr(store, "load", lambda *a, **k: {"prs": [pr]})
+    monkeypatch.setattr(qa_loop, "_resolve_qa_model", lambda *a, **k: MagicMock())
+    monkeypatch.setattr(qa_loop, "_get_qa_spec", lambda *a: "qa.md")
+    monkeypatch.setattr(qa_loop, "get_pm_session", lambda: "pm-t")
+    monkeypatch.setattr(container, "is_container_mode_enabled", lambda: True)
+    monkeypatch.setattr(container, "_runtime_available", lambda: True)
+    monkeypatch.setattr(qa_loop, "_clamp_to_container_headroom", lambda cap: cap)
+    monkeypatch.setattr(tmux, "find_window_by_name", lambda *a: {"index": 0})
+    monkeypatch.setattr(tmux, "get_pane_indices", lambda *a: [])
+    status = MagicMock(side_effect=[None, OSError("disk unavailable")])
+    monkeypatch.setattr(qa_loop, "_write_status_file", status)
+    error = KeyboardInterrupt("interrupted launch") if stage == "interrupt" else OSError("disk unavailable")
+
+    def launch(*args, **kwargs):
+        assert state.scenarios == [scenarios[0]]
+        scenarios[0].container_name = "pm-t-qa-pr-aaaa-L-s1"
+        scenarios[0].container_id = "allocated-id"
+        scenarios[0].container_generation = "allocated-generation"
+        if stage == "launch-status":
+            # The real launcher writes status after preparation creates panes.
+            qa_loop._write_status_file(tmp_path / "status.json")
+        elif stage == "interrupt":
+            raise error
+
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers", launch)
+    released = []
+
+    def release(st, session):
+        released.append(list(st.scenarios))
+        if cleanup_fails:
+            raise RuntimeError("cleanup unavailable")
+        return False
+
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers", release)
+    finalize = MagicMock()
+    monkeypatch.setattr(qa_loop, "_execute_and_finalize", finalize)
+
+    def notify(st):
+        if stage == "notify":
+            raise error
+
+    with pytest.raises(type(error), match=str(error)):
+        qa_loop.run_qa_sync(state, tmp_path, pr, notify, max_scenarios=1)
+    assert state.scenarios is scenarios
+    assert released == [scenarios]
+    finalize.assert_not_called()

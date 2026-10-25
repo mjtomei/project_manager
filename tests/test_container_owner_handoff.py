@@ -173,6 +173,96 @@ def test_proxy_owner_records_domain_on_creation(monkeypatch, tmp_path):
     assert json.loads((tmp_path / pp._OWNER_FILE).read_text())["runtime_domain"] == domain
 
 
+@pytest.mark.parametrize("change", ["id", "generation", "unknown", "unchanged"])
+def test_bulk_cleanup_rechecks_queued_allocations(monkeypatch, change):
+    current = {"id": "original-id", "generation": "original-generation"}
+    acquisitions = 0
+    held = False
+
+    @contextlib.contextmanager
+    def lock(*args, **kwargs):
+        nonlocal acquisitions, held
+        acquisitions += 1
+        # Allocation capture is the first acquisition; deletion is the second.
+        if acquisitions == 2:
+            if change == "id":
+                current["id"] = "replacement-id"
+            elif change == "generation":
+                current["generation"] = "replacement-generation"
+            elif change == "unknown":
+                current["id"] = None
+        held = True
+        try:
+            yield True
+        finally:
+            held = False
+
+    monkeypatch.setattr(cm, "launch_lock", lock)
+    monkeypatch.setattr(cm, "current_container_id", lambda n: current["id"])
+    monkeypatch.setattr(cm, "cleanup_generation", lambda n: current["generation"])
+    removed_under_lock = []
+    monkeypatch.setattr(cm, "remove_container", lambda n: removed_under_lock.append(held))
+    # Explicit removal still ignores retention/live ownership for the original.
+    monkeypatch.setattr(reaper, "is_retained", lambda *a: True)
+    monkeypatch.setattr(reaper, "live_owner_panes", lambda *a, **k: ["%live"])
+    removed, failures = cm.remove_containers([NAME])
+    if change == "unchanged":
+        assert removed == [NAME]
+        assert not failures
+        assert removed_under_lock == [True]
+    else:
+        assert not removed
+        assert NAME in failures
+        assert not removed_under_lock
+
+
+def test_bulk_cleanup_refuses_unavailable_lifecycle_lock(monkeypatch):
+    @contextlib.contextmanager
+    def lock(*args, **kwargs):
+        yield False
+    monkeypatch.setattr(cm, "launch_lock", lock)
+    remove = MagicMock()
+    monkeypatch.setattr(cm, "remove_container", remove)
+    removed, failures = cm.remove_containers([NAME])
+    assert not removed
+    assert NAME in failures
+    remove.assert_not_called()
+
+
+def test_generation_isolated_between_runtime_domains(monkeypatch):
+    domain = {"runtime": "docker", "daemon_id": "a"}
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: domain)
+    cm._renew_launch(NAME)
+    first = cm.cleanup_generation(NAME)
+    domain = {"runtime": "docker", "daemon_id": "b"}
+    cm._renew_launch(NAME)
+    second = cm.cleanup_generation(NAME)
+    assert first != second
+    domain = {"runtime": "docker", "daemon_id": "a"}
+    assert cm.cleanup_generation(NAME) == first
+
+
+def test_generation_unknown_runtime_fails_closed(monkeypatch):
+    cm._renew_launch(NAME)
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: None)
+    with pytest.raises(OSError, match="runtime"):
+        cm.cleanup_generation(NAME)
+    with pytest.raises(cm.ContainerError, match="runtime"):
+        cm._renew_launch(NAME)
+
+
+def test_scoped_generation_supersedes_legacy_marker():
+    legacy = cm._lock_path(f"restart-{NAME}").with_suffix(".generation")
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text("legacy-generation")
+    assert cm.cleanup_generation(NAME) == "legacy-generation"
+    cm._renew_launch(NAME)
+    current = cm.cleanup_generation(NAME)
+    legacy.write_text("late-legacy-write")
+    assert current != "legacy-generation"
+    assert cm.cleanup_generation(NAME) == current
+
+
 def test_allocation_identity_captured_before_concurrent_reuse(monkeypatch):
     monkeypatch.setattr(cm, "_ensure_reusable", lambda *a, **kw: "cid")
     first, second = {}, {}

@@ -16,8 +16,17 @@ def test_delayed_exit_trap_preserves_restarted_container(tmp_path, monkeypatch, 
     runtime = tmp_path / "podman"
     entered, release, removed = (tmp_path / n for n in ("entered", "release", "removed"))
     name = "pm-t-review-pr-aaaa"
+    from pm_core import container_reaper
+    monkeypatch.setattr(container_reaper, "_runtime_domain", lambda: {
+        "runtime": "podman", "graph_root": "test-graph", "run_root": "test-run",
+        "hostname": "test-host", "endpoint": "", "connection": ""})
+    monkeypatch.delenv("CONTAINER_HOST", raising=False)
+    monkeypatch.delenv("CONTAINER_CONNECTION", raising=False)
     runtime.write_text(
         "#!/bin/sh\n"
+        "if [ \"$1\" = info ]; then printf '%s\\n' "
+        "'{\"store\":{\"graphRoot\":\"test-graph\",\"runRoot\":\"test-run\"},"
+        "\"host\":{\"hostname\":\"test-host\"}}'; fi\n"
         f'if [ "$1" = exec ]; then touch {shlex.quote(str(entered))}; '
         f'while [ ! -f {shlex.quote(str(release))} ]; do sleep 0.01; done; fi\n'
         f'if [ "$1" = rm ]; then printf "%s\\n" "$3" >> {shlex.quote(str(removed))}; fi\n'

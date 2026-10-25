@@ -12246,6 +12246,24 @@ prs:
       model/handoff/manual-gate edits preserved outside review commit.'
     created_at: '2026-10-25T20:06:53Z'
     last_edited: '2026-10-25T20:06:53Z'
+  - id: note-f38d7cf
+    text: 'Review-loop 6427 i8 (main and inherited helper chatgpt/gpt-6-astra-high):
+      fixed initial QA launch/status/notification exceptions bypassing allocation
+      release and scenario-list restoration; runtime-domain cleanup generations; explicit
+      bulk-cleanup ID/generation rechecks and removal/proxy locking; redundant post-cleanup
+      proxy stop; and CLI diagnostic/count visibility. Existing lifecycle architecture
+      and force-cleanup semantics retained; spec updated. Same-assertion pre-fix regressions:
+      QA 6, generation 3, bulk cleanup 5, duplicate proxy stop 1, CLI 2 failures.
+      Focused core/QA 371 passed before bulk patch, bulk/final focused 296 passed,
+      peripheral 17 passed. Final sanitized full suite passed 3642 tests, 5 existing
+      warnings (3 AsyncMock, 2 Click deprecations); log: /pm-captures/review-6427-i8/full-suite-final.log;
+      evidence and per-file notes in README.md there. Installed declared test dependencies;
+      intermediate fixture-mock failures retained and corrected. Existing model/handoff/manual-gate
+      edits preserved outside this review commit. No real-container QA coverage or
+      waiver claimed; outstanding runtime scenarios and independent sign-off remain
+      required.'
+    created_at: '2026-10-25T20:29:32Z'
+    last_edited: '2026-10-25T20:31:11Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

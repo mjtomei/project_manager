@@ -10,6 +10,7 @@ from pm_core import container as container_mod
 from pm_core import pane_registry, pr_cleanup, runtime_state
 
 
+@patch("pm_core.container.current_container_id", lambda name: "id-" + name)
 class TestCleanupPrContainers:
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")
@@ -100,6 +101,28 @@ class TestCleanupPrResources:
         # Session tag should strip the pm- prefix
         mock_container.cleanup_pr_containers.assert_called_once_with(
             "pr-001", session_tag="mysess")
+
+    def test_does_not_stop_replacement_proxy_after_container_cleanup(self):
+        name = "pm-qa-pr-001-l1-s0"
+        replacement = {"live": False}
+
+        def remove_then_relaunch(*args, **kwargs):
+            # Container cleanup already released the old proxy. A concurrent
+            # launcher may now have installed the same name's replacement.
+            replacement["live"] = True
+            return [name]
+
+        def stop_proxy(_name):
+            replacement["live"] = False
+
+        with patch.object(container_mod, "cleanup_pr_containers",
+                          side_effect=remove_then_relaunch), \
+             patch("pm_core.push_proxy.stop_push_proxy", side_effect=stop_proxy) as stop:
+            summary = pr_cleanup.cleanup_pr_resources(None, {"id": "pr-001"})
+
+        assert summary["containers"] == [name]
+        assert replacement["live"]
+        stop.assert_not_called()
 
     def test_clears_runtime_state_file(self, tmp_path, monkeypatch):
         # Reproducer for the stale-state bug: after cleanup, a fresh
