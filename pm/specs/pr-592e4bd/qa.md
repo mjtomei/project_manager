@@ -664,6 +664,27 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     error. They never silently fall back.
   - `pm model show` lists PR overrides (`model`, `session_models`) and a
     Routes section for every type that resolves to a route.
+  - PR Routes lines (2a6b14d4, S55; review loop 6915 i1/i2): one line per
+    distinct route a PR override selects, never one per effort. The label
+    is "(all types)" when every PR session type follows that route, else
+    the types it covers. The watcher is never listed. When the covered
+    types resolve to different efforts (the project `session_effort`, or
+    the global setting, since a PR has no effort of its own), the line names
+    each non-majority effort with its types and ends "<majority>
+    otherwise". Every type's effort on the line equals what that type's
+    launch passes as `--effort`. With `PM_EFFORT` set every effort is the
+    same and the line has a single `effort=`. With `PM_MODEL` set no PR
+    line is printed (3a0c32e6).
+  - *Open from code reading (QA23 planner, 2026-10-25), decided by S58:*
+    `pm model show` builds every Routes line without container mode
+    (`worker_route.describe(res)` with no `container=`), so it prints
+    `via=host` even when container mode is on. Impl, review, sign-off and
+    QA refiner/worker sessions then reach the router through the
+    container bridge, and their QA launch lines say `via=container-bridge`.
+    Planner, s0, verifier, finalizer and merge run on the host. The S55
+    REPORT shows a `via=host` "(all types)" line in container mode. R7 makes
+    route selection visible, so `pm model show` must not name a path a
+    type does not use.
 
 ## 2. Setup
 
@@ -1056,6 +1077,36 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
       3a0c32e6, before 2a6b14d4, so its W/X two-line Routes Thens record
       the superseded grouping (REPORT.md in `/pm-captures/scenarios/55`,
       `56`).
+  - Twenty-third pass (S57+), delta-only, QA23 planner 2026-10-25,
+    recovered native planner after an E2BIG launch failure (pr-ace66e5).
+    The only product change since run a31ac0ae57566deb is 2a6b14d4 (PR
+    Routes grouped by route, differing efforts named on the line). S55
+    rechecked it live only for "(all types)" lines in container mode
+    (`story2/model-show-after-edit.txt`). Review loop 6915 i1 (test/spec)
+    and i2 (PASS, no change, 3739 tests on 86b4e94d) added only tests and
+    spec. Not yet live on 2a6b14d4: S56's W/X shapes (every type but one,
+    mixed efforts), more than two efforts on one route, two routes on
+    one PR, an unconfigured route next to a configured one, `PM_EFFORT`
+    and `PM_MODEL`, and whether each named effort is what the launch
+    really uses. All earlier evidence stands. S55 is the RQ39 record and
+    S52 stays the record of its own failed attempt.
+    Master is 26 commits ahead (review 6915 i2 trial merge). The only
+    code there is `pm_core/cli/meta.py` (pr-7f90572), with no routing
+    surface, so no merge smoke is planned.
+    - S57: host mode, S56 harness (`/pm-captures/scenarios/56/scripts`,
+      with its review class in stub.py). The S56 shapes are replayed with
+      three project efforts in play. A second router provider runs on its
+      own stub port so its traffic can be told apart. Launches of two PRs
+      run at the same time, `pm model show` runs while they do, and a `pm
+      edit` changes an override while sessions run.
+    - S58: container mode, S55 harness (`/pm-captures/scenarios/55/
+      scripts`, S52 network pattern, base image without the Chromium smoke
+      step if needed). It decides the `via=` open point in RQ41: compare
+      `pm model show` with the QA launch lines and with where each role
+      really runs.
+    Same scratch-only limits as the fourteenth pass. Render with this
+    branch's `/workspace/pm/qa/artifacts` `render_cast`, never
+    `/scratch/qa-artifacts`. Never copy real credentials.
 
 ## 3. Edge cases
 
