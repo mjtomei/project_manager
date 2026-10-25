@@ -372,7 +372,9 @@ within this spec's intent (no requirement changed):
   run-directory glob when no run exists yet.
 - **R7 pointer.** The mocks marker pointed at `pm qa list`, which lists
   instructions / regression tests / artifact recipes but **not** mocks; it now
-  names `pm qa mocks list`.
+  names `pm qa mocks list`. (§20 corrects this a second time: `pm qa mocks
+  list` prints ids/titles/descriptions only, so it cannot be the reader the
+  marker's "Read the full text:" sentence promises.)
 - **§5 signoff.py.** `format_signoff_return` still joined the integration
   `conflicts` / `overlap` path lists unbounded — the same class of bug R6
   fixes in `_signoff_integration_block`, and it feeds impl / review / QA
@@ -653,7 +655,7 @@ the per-block budgets or the launcher guard changed.
 - **`mocks_for_prompt` passed an `omitted_note` to `bounded_join` with no
   `max_items`/`max_bytes`,** so the note could never fire (dead code that read
   as if a per-mock marker existed). Removed; the aggregate `bounded_text` owns
-  the degradation and its marker already names `pm qa mocks list`.
+  the degradation and its marker names the mock reader (§20).
 
 Verification: `tests/test_prompt_bounds.py` 80 cases (4 new, all
 failing-then-passing: the container-mount and `captures-path`-fallback markers,
@@ -1023,3 +1025,56 @@ omission marker *fires*, because the two pointer helpers resolve through
 never touches the filesystem" hold unconditionally needs the resolver split
 into a non-creating resolution plus a separate create step — see the filed bug
 PR.
+
+## 20. Review-loop follow-ups (review loop 2ac8, iteration 3)
+
+Iteration 3 re-ran the i5/i6/i7 method — check every omission marker against
+what the session can actually do with it — over the *per-line* truncations the
+audit introduced, not just the whole-block ones. Two markers described the
+block they abbreviated inaccurately; both fixes are marker-text only, and no
+budget, helper or launcher path changed.
+
+- **The mocks marker named a command that does not return the text it
+  promises.** `mocks_for_prompt`'s aggregate `bounded_text` marker read
+  "Read the full text: `pm qa mocks list` (mock definitions under
+  `pm/qa/mocks/`)". §7 changed that pointer from `pm qa list` (which does not
+  list mocks) to `pm qa mocks list`, but `pm qa mocks list`
+  (`pm_core/cli/qa.py::qa_mocks_list`) prints **ids, titles and descriptions
+  only** — the bodies this bound cut are reachable through `pm qa mocks show
+  <mock-id>` (`qa_mocks_show` prints the body) or the `pm/qa/mocks/` files the
+  marker's parenthetical also names. QA scenario 7 recorded this as an
+  observation ("worth a follow-up if the marker should name `pm qa mocks
+  show`"); it is the same "name a *working* reader for the full detail"
+  requirement (R7/A1) §7 enforced for the other three markers. The pointer is
+  now `` `pm qa mocks show <mock-id>` (all definitions: `pm/qa/mocks/`) ``.
+  The other three markers (`pm qa list`, `pm pr note list <id>`, `pm pr spec
+  <id> qa`) already print the full text their builders omitted.
+- **Truncated QA-scenario lines said nothing.** `_signoff_qa_scenarios_block`
+  caps each scenario's title at 120 characters and its `verdict_reason` at
+  `QA_SCENARIO_REASON_CHARS` (200) *per line*, but only the count cap had a
+  marker: a QA run with fewer than `QA_SCENARIOS_MAX` (40) scenarios but long
+  reasons showed 200-character previews with no note, so the sign-off session
+  read abbreviated verdicts as if they were verbatim. That is the same
+  "the marker must describe what the session is reading" rule §13 (the notes
+  marker) and §19 (the overflow path's abbreviated count) apply, and the
+  plan-deps description cap already carries such a note
+  (`pm plan deps`: "Descriptions above are abbreviated ... run `pm pr show
+  <id>`"). The block now appends, only when a line was really cut:
+  "_(Scenario titles and reasons above are abbreviated to fit the prompt size
+  limit; read `$CAP/scenarios/<n>/verdict.md` for the full verdicts.)_". It
+  names `$CAP` — which this prompt's own evidence checklist defines — rather
+  than resolving a path through `captures_dir`, because that resolver creates
+  the captures directory as a side effect (§19's filed bug) and this note
+  fires on a much weaker condition than the >40-scenario marker.
+
+Verification: `tests/test_prompt_bounds.py` 102 cases (2 new, both
+failing-then-passing — verified by stashing the source edits: the mocks marker
+did not name a body-printing reader, and the truncated-scenario note was
+absent; a third test guards the unchanged path, that short lines get no note).
+Related suites (`test_prompt_bounds`, `test_bug_fix_flow_prompts`,
+`test_plan_review`, `test_claude_launcher`, `test_regression_prompts`,
+`test_spec_gen`, `test_signoff`, `test_qa_instructions`) 362 passed. Real-data
+sweep over all 488 real PRs x 4 builders is byte-identical to §19's numbers
+(impl 75,146 / review 77,616 / sign-off 92,165 / planner 80,652 B, max
+`pr-0b87a97`): neither marker fires on this repo's data, and both only fire
+when content was really abbreviated. Evidence: `/pm-captures/review-2ac8-i3/`.

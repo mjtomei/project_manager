@@ -617,16 +617,20 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
     valid = [s for s in scenarios if isinstance(s, dict)]
     if valid:
         lines.append("")
+        truncated = False
 
         def _scenario_line(s: dict) -> str:
+            nonlocal truncated
             idx = s.get("index", "?")
             title = " ".join(str(s.get("title", "")).split())
             if len(title) > 120:
                 title = title[:120].rstrip() + "…"
+                truncated = True
             verdict = s.get("verdict", "?")
             reason = " ".join((s.get("verdict_reason") or "").split())
             if len(reason) > _QA_SCENARIO_REASON_CHARS:
                 reason = reason[:_QA_SCENARIO_REASON_CHARS].rstrip() + "…"
+                truncated = True
             line = f"- Scenario {idx} — {title}: **{verdict}**"
             if reason:
                 line += f" — {reason}"
@@ -637,6 +641,20 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
             omitted_note=lambda n: (
                 f"... (+{n} more scenarios; {_qa_scenarios_pointer(pr_id)})"),
         ))
+        if truncated:
+            # A title/reason cut per line is not a dropped item, so the
+            # listing's own omission marker does not cover it — without this
+            # note the session reads abbreviated previews as if they were the
+            # full verdicts (the same "the marker must describe what the
+            # session is reading" rule the PR-notes and plan-deps markers
+            # follow).  `$CAP` is defined in this prompt's own evidence
+            # checklist, so the note needs no path resolution.
+            lines.append("")
+            lines.append(
+                "_(Scenario titles and reasons above are abbreviated to fit "
+                "the prompt size limit; read `$CAP/scenarios/<n>/verdict.md` "
+                "for the full verdicts.)_"
+            )
     return "\n" + "\n".join(lines) + "\n"
 
 

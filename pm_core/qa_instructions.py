@@ -360,13 +360,19 @@ def mocks_for_prompt(pm_root: Path) -> str:
 
     # No per-mock bound here: bounded_join only omits when given max_items /
     # max_bytes, and the aggregate bound below owns the degradation (it drops
-    # the middle of the listing and names `pm qa mocks list`).  An
-    # omitted_note passed without a bound would never fire.
+    # the middle of the listing).  An omitted_note passed without a bound
+    # would never fire.
     body = bounded_join(mocks, _mock_block, separator="\n")
     text = header + body + "\n"
     return bounded_text(
         text,
         max_bytes=_MOCKS_BUDGET,
-        pointer="`pm qa mocks list` (mock definitions under pm/qa/mocks/)",
+        # The marker's sentence is "Read the full text: <pointer>", so the
+        # pointer must return the *bodies* this bound cut.  `pm qa mocks list`
+        # prints ids/titles/descriptions only, so it cannot be that pointer —
+        # `pm qa mocks show` prints a mock's body, and the directory holds all
+        # of them.
+        pointer=("`pm qa mocks show <mock-id>` (all definitions: "
+                 "`pm/qa/mocks/`)"),
         label="mock definitions",
     )

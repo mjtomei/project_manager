@@ -495,6 +495,43 @@ class TestSignoffPromptBounding:
         assert "older notes are abbreviated" in block
         assert "newest handoff" in block
 
+    @staticmethod
+    def _qa_status(tmp_path, monkeypatch, scenarios):
+        status = tmp_path / "qa_status.json"
+        status.write_text(json.dumps({"overall": "PASS",
+                                      "scenarios": scenarios}))
+        monkeypatch.setattr("pm_core.paths.latest_qa_status_path",
+                            lambda pr_id: status)
+        return status
+
+    def test_truncated_scenario_lines_say_so(self, tmp_path, monkeypatch):
+        """A per-line title/reason cut is not a dropped item, so the listing's
+        omission marker does not cover it.  Without a note the session reads
+        abbreviated verdicts as if they were verbatim — the same rule the
+        PR-notes and plan-deps markers follow."""
+        self._qa_status(tmp_path, monkeypatch, [
+            {"index": 1, "title": "T" * 400, "verdict": "PASS",
+             "verdict_reason": "r" * 900},
+        ])
+        block = prompt_gen._signoff_qa_scenarios_block("pr-x")
+        assert "abbreviated" in block
+        # The note must name where the full verdicts are; `$CAP` is defined in
+        # the sign-off prompt's own evidence checklist, so resolving a host
+        # path here would be both wrong in a container and a filesystem touch.
+        assert "$CAP/scenarios/" in block
+
+    def test_short_scenario_lines_get_no_abbreviation_note(self, tmp_path,
+                                                           monkeypatch):
+        """The note appears only when something really was cut, so ordinary QA
+        runs render exactly as before."""
+        self._qa_status(tmp_path, monkeypatch, [
+            {"index": 1, "title": "short title", "verdict": "PASS",
+             "verdict_reason": "all steps passed"},
+        ])
+        block = prompt_gen._signoff_qa_scenarios_block("pr-x")
+        assert "abbreviated" not in block
+        assert "all steps passed" in block
+
 
 class TestFitPrompt:
     def test_passthrough_when_it_fits(self):
@@ -835,10 +872,15 @@ class TestQaInstructionsBounding:
                           body="m" * 3000)
         out = qa_instructions.mocks_for_prompt(_isolated_pm_root)
         assert prompt_bytes(out) <= 12_000 + 400
-        # The aggregate bound owns the degradation and names the command that
-        # lists every mock (a per-mock omission note could never fire, since
-        # the listing passes no max_items/max_bytes).
-        assert "pm qa mocks list" in out
+        # The aggregate bound owns the degradation (a per-mock omission note
+        # could never fire, since the listing passes no max_items/max_bytes),
+        # and its marker's "Read the full text:" sentence must name a reader
+        # that returns the *bodies* it cut.  `pm qa mocks list` prints
+        # ids/titles/descriptions only, so it is not that reader; `pm qa mocks
+        # show` prints the body, and the directory holds every definition.
+        assert "pm qa mocks show" in out
+        assert "pm/qa/mocks/" in out
+        assert "Read the full text: `pm qa mocks list`" not in out
 
 
 class TestQaFinalizeBounding:

@@ -111,8 +111,9 @@ and `TestPlanPromptBounding` / `TestPlanDepsAndFixBounding`.
   multi-KB, When the QA planner prompt is built, Then it stays under the
   limit and its marker names `pm qa list`, which lists the whole library.
 - **R11 — Mocks.** Given large mock definitions, When the mocks block is
-  injected, Then it is bounded and its marker names `pm qa mocks list` (which
-  lists mocks — `pm qa list` does not).
+  injected, Then it is bounded and its marker names a reader that returns the
+  full bodies — `pm qa mocks show <mock-id>` (and the `pm/qa/mocks/` directory);
+  `pm qa mocks list` prints titles only and `pm qa list` does not list mocks.
 - **R12 — Planner pane starts.** Given that project, When the user starts the
   QA loop for a PR, Then the planner pane launches and its session receives
   the complete planner instructions (task, scenario format, QA_PLAN markers)
