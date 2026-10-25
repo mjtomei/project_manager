@@ -846,7 +846,7 @@ def test_model_show_pr_route_lines_with_the_real_route_description(
     one line each, the effort summary in the effort field before via=."""
     import yaml
     from click.testing import CliRunner
-    from pm_core import model_config, providers, store, worker_route
+    from pm_core import container, model_config, providers, store, worker_route
     from pm_core.cli import model as model_cli
     for var in ("PM_MODEL", "PM_EFFORT", "PM_PROVIDER"):
         monkeypatch.delenv(var, raising=False)
@@ -856,6 +856,7 @@ def test_model_show_pr_route_lines_with_the_real_route_description(
         monkeypatch.setattr(mod, "pm_home", lambda: home)
     monkeypatch.setattr(model_config, "get_global_setting_value",
                         lambda name: None)
+    monkeypatch.setattr(container, "is_container_mode_enabled", lambda: False)
     (home / "providers.yaml").write_text(yaml.safe_dump({"providers": {
         "claude-work": {"type": "router", "api_base": "http://127.0.0.1:1",
                         "model": "work/claude-opus-5-5"}}}))
@@ -880,6 +881,87 @@ def test_model_show_pr_route_lines_with_the_real_route_description(
                        if st != "impl")
     assert [r for r in routes if r.startswith("  pr-w ")] == [
         f"  pr-w ({others}) {tail}"], routes
+
+
+def _real_route_project(tmp_path, monkeypatch, *, containers):
+    """The production route setup (S58) behind the real describe: router
+    provider claude-work, project qa_scenario/qa_concretize on it at high
+    effort, pr-a routed for every type, pr-c on the project default."""
+    import yaml
+    from pm_core import container, model_config, providers, store, worker_route
+    from pm_core.cli import model as model_cli
+    for var in ("PM_MODEL", "PM_EFFORT", "PM_PROVIDER"):
+        monkeypatch.delenv(var, raising=False)
+    home = tmp_path / "pmhome"
+    home.mkdir()
+    for mod in (providers, worker_route):
+        monkeypatch.setattr(mod, "pm_home", lambda: home)
+    monkeypatch.setattr(model_config, "get_global_setting_value",
+                        lambda name: None)
+    monkeypatch.setattr(container, "is_container_mode_enabled",
+                        lambda: containers)
+    (home / "providers.yaml").write_text(yaml.safe_dump({"providers": {
+        "claude-work": {"type": "router", "api_base": "http://127.0.0.1:1",
+                        "model": "work/claude-opus-5-5"}}}))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    store.save({"project": {"name": "t", "repo": str(proj),
+                            "base_branch": "master",
+                            "model_config": {
+                                "session_models": {
+                                    "qa_concretize": "provider:claude-work",
+                                    "qa_scenario": "provider:claude-work"},
+                                "session_effort": {
+                                    "qa_concretize": "high",
+                                    "qa_scenario": "high"}}},
+                "prs": [{"id": "pr-a", "model": "provider:claude-work"},
+                        {"id": "pr-c", "title": "no override"}]}, proj)
+    monkeypatch.setattr(model_cli, "state_root", lambda: proj)
+    from click.testing import CliRunner
+    result = CliRunner().invoke(model_cli.model, ["show"])
+    assert result.exit_code == 0, result.output
+    return result.output.split("Routes:\n", 1)[1].splitlines()
+
+
+def test_model_show_routes_name_the_container_bridge_in_container_mode(
+        tmp_path, monkeypatch):
+    """S58: Routes were built without container mode, so in container mode
+    every line said via=host, while impl, review, sign-off and the QA
+    refiner/worker reach the route through the container bridge (their QA
+    launch lines say via=container-bridge).  Container-run types now say
+    container-bridge and host-run types host; a PR routed for every type
+    gets one line per path, each type exactly once."""
+    from pm_core.model_config import PR_SESSION_TYPES
+    from pm_core.worker_route import CONTAINER_SESSION_TYPES
+    routes = _real_route_project(tmp_path, monkeypatch, containers=True)
+    route = "route=claude-work model=work/claude-opus-5-5"
+    assert f"  qa_scenario    {route} effort=high via=container-bridge" \
+        in routes, routes
+    assert f"  qa_concretize  {route} effort=high via=container-bridge" \
+        in routes, routes
+    bridge = [st for st in PR_SESSION_TYPES if st in CONTAINER_SESSION_TYPES]
+    host = [st for st in PR_SESSION_TYPES if st not in CONTAINER_SESSION_TYPES]
+    assert bridge == ["impl", "review", "qa_scenario", "qa_concretize",
+                      "signoff"]
+    assert [r for r in routes if r.startswith("  pr-a ")] == [
+        f"  pr-a ({', '.join(bridge)}) {route} effort=high (qa_scenario, "
+        "qa_concretize), (default) otherwise via=container-bridge",
+        f"  pr-a ({', '.join(host)}) {route} effort=(default) via=host",
+    ], routes
+    assert not any("pr-c" in r or "watcher" in r for r in routes), routes
+
+
+def test_model_show_routes_stay_on_host_outside_container_mode(
+        tmp_path, monkeypatch):
+    """S58: host mode keeps via=host everywhere and one (all types) line."""
+    routes = _real_route_project(tmp_path, monkeypatch, containers=False)
+    route = "route=claude-work model=work/claude-opus-5-5"
+    assert routes == [
+        f"  qa_scenario    {route} effort=high via=host",
+        f"  qa_concretize  {route} effort=high via=host",
+        f"  pr-a (all types) {route} effort=high (qa_scenario, "
+        "qa_concretize), (default) otherwise via=host",
+    ], routes
 
 
 def test_model_show_pr_routes_defer_to_pm_model(tmp_path, monkeypatch):

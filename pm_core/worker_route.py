@@ -50,6 +50,12 @@ _log = configure_logger("pm.worker_route")
 
 # Session types whose QA launches are gated on their route (refiner, worker).
 ROUTED_SESSION_TYPES = ("qa_concretize", "qa_scenario")
+# Session types that run inside a pm container in container mode, so a
+# route reaches them through the container bridge: impl, review and
+# sign-off (wrap_claude_cmd) and the QA refiner/worker (scenario
+# containers).  Every other type (planner, s0, verifier, finalizer, merge)
+# runs on the host.
+CONTAINER_SESSION_TYPES = ("impl", "review", "signoff") + ROUTED_SESSION_TYPES
 # A PR's own override wins over the project setting, so a remedy that
 # moves a session off the route names it first.
 _PR_OVERRIDE_REMEDY = ("remove the PR's 'session_models' entry or 'model' "

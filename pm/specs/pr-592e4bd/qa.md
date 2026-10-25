@@ -685,6 +685,11 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     REPORT shows a `via=host` "(all types)" line in container mode. R7 makes
     route selection visible, so `pm model show` must not name a path a
     type does not use.
+    *Decided by S58 (2026-10-25):* confirmed live and fixed (impl.md
+    item 42(l)). In container mode, container-run types say
+    `via=container-bridge` and host-run types say `via=host`. A PR routed
+    for every type then has two lines, one per path. Host mode keeps one
+    "(all types)" line.
 
 ## 2. Setup
 

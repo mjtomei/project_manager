@@ -86,12 +86,22 @@ def model_show():
 
     # Router providers (worker routes): where those sessions actually go.
     from pm_core import worker_route
+    from pm_core.container import is_container_mode_enabled
     from pm_core.model_config import PR_SESSION_TYPES, get_pr_model_override
+    # In container mode only some types run in a container (and reach the
+    # route through its bridge); the rest stay on the host (S58).
+    in_containers = is_container_mode_enabled()
+
+    def describe(st, res):
+        return worker_route.describe(
+            res, container=(in_containers
+                            and st in worker_route.CONTAINER_SESSION_TYPES))
+
     route_lines = []
     for st in SESSION_TYPES if resolvable else ():
         res = resolve_model_and_provider(st, project_data=data)
         if res.provider:
-            route_lines.append(f"  {st:14s} {worker_route.describe(res)}")
+            route_lines.append(f"  {st:14s} {describe(st, res)}")
     # A PR override that selects a route sends that PR's sessions there
     # too; resolved per type as its launches do (one line per distinct
     # route, naming the types it covers).  Only the types the override
@@ -104,7 +114,9 @@ def model_show():
             continue
         # Grouped by route without the effort: a project session_effort
         # (e.g. qa_scenario high) must not split one route into several
-        # lines, none of them "all types" (S55).
+        # lines, none of them "all types" (S55).  The path (via=) does
+        # split it: in container mode impl/review/sign-off/refiner/worker
+        # take the bridge, the other types the host.
         routes: dict[str, list[tuple[str, object]]] = {}
         for st in PR_SESSION_TYPES:
             pr_model = get_pr_model_override(pr, st)
@@ -115,7 +127,7 @@ def model_show():
             res = resolve_model_and_provider(
                 st, pr_model=pr_model, project_data=data)
             if res.provider:
-                key = worker_route.describe(dataclasses.replace(res, effort=None))
+                key = describe(st, dataclasses.replace(res, effort=None))
                 routes.setdefault(key, []).append((st, res))
         for items in routes.values():
             types = [st for st, _ in items]
@@ -133,7 +145,7 @@ def model_show():
                 res = dataclasses.replace(
                     res, effort=f"{summary}, {common} otherwise")
             route_lines.append(
-                f"  {pr.get('id')} ({label}) {worker_route.describe(res)}")
+                f"  {pr.get('id')} ({label}) {describe(items[0][0], res)}")
     if route_lines:
         click.echo()
         click.echo("Routes:")

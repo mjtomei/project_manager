@@ -1252,3 +1252,22 @@ latest full suite is recorded with item 42.
         impl exception with mixed efforts); it fails with the old grouping
         and without the effort summary
         (`/pm-captures/review-6915-i1/mutation-checks.log`).
+    (l) QA S58 (live, container mode): `pm model show` built every Routes
+        line without container mode, so in container mode it printed
+        `via=host` for the project qa_scenario/qa_concretize lines and for
+        A's "(all types)" line. Meanwhile the refiner/worker launch lines
+        said `via=container-bridge`, and impl/review ran in mounted
+        containers (`/pm-captures/scenarios/58/pre-fix`, `story2`). With
+        container mode on, the container-run types
+        (`worker_route.CONTAINER_SESSION_TYPES`: impl, review, signoff,
+        qa_concretize, qa_scenario) now say `via=container-bridge`. The
+        other types (qa, planner, s0, verifier, finalizer, merge) say
+        `via=host`. A PR's route lines are grouped by route and path, so a
+        PR routed for every type shows two lines in container mode. Each
+        line names its types and efforts. Host mode is unchanged: one
+        "(all types)" line, `via=host`.
+        `test_model_show_routes_name_the_container_bridge_in_container_mode`
+        and `test_model_show_routes_stay_on_host_outside_container_mode`
+        (real describe; 4 mutations caught,
+        `/pm-captures/scenarios/58/post-fix/tests/mutations.log`). The
+        6915 i1 real-describe test now pins host mode.
