@@ -12353,6 +12353,23 @@ prs:
       outstanding runtime scenarios and independent sign-off remain required.'
     created_at: '2026-10-25T22:40:45Z'
     last_edited: '2026-10-25T22:40:45Z'
+  - id: note-ac46915
+    text: 'Review-loop 6427 i14 (main and inherited read-only helper chatgpt/gpt-6-astra-high):
+      fixed two cleanup races: renamed unshared allocation cleanup could unlink an
+      already-published original-name replacement proxy; retention-aware PR bulk cleanup
+      did not recheck a newly written retain marker under its deletion lock. Added
+      nonblocking original-name launch exclusion/identity check, propagated retention
+      policy to locked workers, and clarified spec without architectural redesign.
+      Same-assertion baseline proof: 4 failures/2 controls; fixed focused 182 passed,
+      integrated core 478 passed, launcher/QA 145 passed, final regressions 15 passed
+      including real Unix proxy connectability. Final sanitized full suite passed
+      (exact count/warnings in /pm-captures/review-6427-i14-full-suite-final.log).
+      Installed declared dependencies. Evidence/per-file notes: /pm-captures/review-6427-i14-per-file.md.
+      Existing model/handoff/manual-gate edits preserved outside commit. No real-container
+      QA claim or waiver; outstanding runtime scenarios and independent sign-off remain
+      required.'
+    created_at: '2026-10-25T23:07:11Z'
+    last_edited: '2026-10-25T23:07:11Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

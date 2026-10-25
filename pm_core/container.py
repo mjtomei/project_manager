@@ -2205,7 +2205,9 @@ def remove_container(name: str) -> None:
     EXIT trap), this still blocks until the container has fully disappeared so
     that the caller can safely create a fresh container with the same name.
     """
-    from pm_core.push_proxy import stop_push_proxy, capture_unshared_proxy, _kill_proxy_socket
+    from pm_core.push_proxy import (
+        stop_push_proxy, capture_unshared_proxy, release_captured_unshared_proxy,
+    )
     _log.info("remove_container: name=%s", name)
     proxy = capture_unshared_proxy(name)
     _run_runtime("rm", "-f", name, check=False, timeout=30)
@@ -2231,7 +2233,7 @@ def remove_container(name: str) -> None:
     # Release the push proxy only after the container is gone.  Failed
     # removal must leave the surviving container's push access intact.
     if proxy:
-        _kill_proxy_socket(proxy[1], expected_identity=proxy[2])
+        release_captured_unshared_proxy(proxy)
         if proxy[0] == name:
             return  # never follow a guarded release with an unguarded socket unlink
     stop_push_proxy(name)
@@ -2422,7 +2424,8 @@ def _list_names(prefix: str, *, running_only: bool = False) -> list[str] | None:
             if ln.strip().startswith(prefix)]
 
 
-def _remove_captured_container(name: str, cid: str, generation: str) -> None:
+def _remove_captured_container(name: str, cid: str, generation: str,
+                               include_retained: bool = True) -> bool:
     """Force-remove the captured allocation, never a concurrent replacement."""
     with launch_lock(name) as locked:
         if not locked:
@@ -2431,16 +2434,22 @@ def _remove_captured_container(name: str, cid: str, generation: str) -> None:
         if current is None:
             raise ContainerError(f"Container '{name}' identity unknown during cleanup")
         if not current:
-            return  # Already gone; do not touch a subsequently recreated proxy.
+            return True  # Already gone; do not touch a subsequently recreated proxy.
         if current != cid or cleanup_generation(name) != generation:
             raise ContainerError(f"Container '{name}' changed during cleanup; retry explicitly")
-        # Keep removal and proxy cleanup in one launch exclusion. This explicit
-        # operation still bypasses pane ownership and retention deliberately.
+        if not include_retained:
+            from pm_core import container_reaper
+            if container_reaper.is_retained(name, current):
+                return False
+        # Keep removal and proxy cleanup in one launch exclusion. Explicit
+        # force cleanup bypasses pane ownership and, by default, retention.
         remove_container(name)
+        return True
 
 
 @_runtime_domain_operation
-def remove_containers(names: list[str], *, workers: int = 4) -> tuple[list[str], dict[str, str]]:
+def remove_containers(names: list[str], *, workers: int = 4,
+                      include_retained: bool = True) -> tuple[list[str], dict[str, str]]:
     """Force-remove captured allocations with bounded parallelism.
 
     Capture every identity before queueing deletions, then recheck under its
@@ -2467,12 +2476,13 @@ def remove_containers(names: list[str], *, workers: int = 4) -> tuple[list[str],
         return removed, failures
     with ThreadPoolExecutor(max_workers=max(1, min(len(allocations), workers))) as ex:
         futures = [(c, ex.submit(contextvars.copy_context().run,
-                                _remove_captured_container, c, cid, generation))
+                                _remove_captured_container, c, cid, generation,
+                                include_retained))
                    for c, cid, generation in allocations]
         for cname, fut in futures:
             try:
-                fut.result()
-                removed.append(cname)
+                if fut.result():
+                    removed.append(cname)
             except Exception as e:
                 _log.warning("remove_container(%s) failed: %s", cname, e)
                 failures[cname] = str(e)
@@ -2528,7 +2538,8 @@ def cleanup_pr_containers(pr_id: str,
                   and info.kind != "qa-debug"
                   and (include_retained or not container_reaper.is_retained(info.name, info.id))]
 
-    removed, _failures = remove_containers(candidates, workers=8)
+    removed, _failures = remove_containers(
+        candidates, workers=8, include_retained=include_retained)
     if removed:
         _log.info("Cleaned up %d container(s) for %s", len(removed), pr_id)
     return removed

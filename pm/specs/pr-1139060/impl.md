@@ -158,6 +158,9 @@ retryable cleanup rather than permission to delete by name.
   socket after allocation cleanup. Removal captures a managed allocation's actual
   unshared proxy mount and socket generation before deleting it, so runtime renames
   do not strand the original proxy or let delayed cleanup unlink a replacement.
+  For renamed allocations, cleanup also takes the original name's launch lock
+  non-blockingly and checks for a surviving replacement before unlinking that
+  mount's socket; capturing the current socket inode alone is not ownership.
   Failed shared-proxy socket removal preserves its owner record for retry; proxy
   sweep failures and unavailable user inventories appear in CLI/TUI outcomes and
   persisted diagnostics, and successful retry clears those failures.
@@ -292,7 +295,9 @@ containers remain in scope. Existing `pm container cleanup` (remove all / by PR)
 is kept as explicit force cleanup, but bulk removal captures each allocation's
 ID/generation before dispatch and rechecks it under the launch lock. A concurrent
 replacement or reused allocation is skipped, and removal plus proxy release
-remain inside the lock.
+remain inside the lock. Retention-aware bulk callers carry their retention policy
+into the removal worker and recheck it under that lock, so a retention marker
+written after inventory still protects the allocation.
 
 ### R8 — Bounded launch concurrency / backpressure
 - A process-wide semaphore bounds concurrent container creates

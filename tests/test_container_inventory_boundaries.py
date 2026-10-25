@@ -31,7 +31,7 @@ def test_renamed_managed_inventory_counts_and_scopes_cleanup(monkeypatch):
     monkeypatch.setattr(cm, "remove_containers", remove)
     assert cm.running_container_count() == 2
     assert cm.cleanup_pr_containers("pr-aaaa", "tag") == ["renamed", "stopped"]
-    remove.assert_called_once_with(["renamed", "stopped"], workers=8)
+    remove.assert_called_once_with(["renamed", "stopped"], workers=8, include_retained=True)
 
 
 @pytest.mark.parametrize("renamed", [False, True])

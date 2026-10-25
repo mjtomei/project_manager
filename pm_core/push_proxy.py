@@ -916,7 +916,7 @@ def release_proxy_if_unused(session_tag: str, pr_id: str,
         return existed
 
 
-def capture_unshared_proxy(name: str) -> tuple[str, str, tuple[int, int, int]] | None:
+def capture_unshared_proxy(name: str) -> tuple[str, str, tuple[int, int, int], str] | None:
     """Find a renamed allocation's actual per-container socket before removal.
 
     Only a managed container's expected proxy mount is authoritative. Capture
@@ -943,10 +943,35 @@ def capture_unshared_proxy(name: str) -> tuple[str, str, tuple[int, int, int]] |
             path = str(source / "push.sock")
             stat = os.stat(path)
             original_name = source.name[len(_SOCKET_DIR_PREFIX):]
-            return original_name, path, (stat.st_dev, stat.st_ino, stat.st_ctime_ns)
+            current_name = (info.get("Name") or name).lstrip("/")
+            return original_name, path, (stat.st_dev, stat.st_ino, stat.st_ctime_ns), current_name
     except (OSError, subprocess.TimeoutExpired, ValueError, TypeError, AttributeError):
         return None
     return None
+
+
+def release_captured_unshared_proxy(
+        proxy: tuple[str, str, tuple[int, int, int], str]) -> None:
+    """Release a captured mount without stealing its original name's proxy."""
+    from pm_core import container as cm
+    original_name, path, identity, current_name = proxy
+    if original_name == current_name:
+        # The caller already holds this allocation's launch lock.
+        _kill_proxy_socket(path, expected_identity=identity)
+        return
+    # Rename gives the old pathname a second potential owner. Serialize with
+    # launch of the original name, and do not trust a socket captured after a
+    # replacement has already published it. Never wait while holding the other
+    # allocation's lock (two renamed allocations could otherwise deadlock).
+    with cm.launch_lock(original_name, timeout=0) as locked:
+        if not locked:
+            return
+        current = cm.current_container_id(original_name)
+        if current is None:
+            raise cm.ContainerError(f"Cannot verify proxy owner '{original_name}' after removal")
+        if current:
+            return
+        _kill_proxy_socket(path, expected_identity=identity)
 
 
 def stop_push_proxy(container_name: str) -> None:

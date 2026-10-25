@@ -11,6 +11,27 @@ import pytest
 from pm_core import push_proxy
 
 
+def test_renamed_cleanup_preserves_already_published_proxy(monkeypatch, tmp_path):
+    from pm_core import container as cm
+
+    path = str(tmp_path / "push.sock")
+    replacement = push_proxy.PushProxy(path, str(tmp_path), "branch")
+    replacement.start()
+    try:
+        stat = Path(path).stat()
+        captured = ("pm-qa-debug-original", path,
+                    (stat.st_dev, stat.st_ino, stat.st_ctime_ns), "renamed")
+        monkeypatch.setattr(cm, "current_container_id", lambda name: "replacement-id")
+        push_proxy.release_captured_unshared_proxy(captured)
+        assert push_proxy.proxy_is_alive(path)
+        # Once the last allocation is gone, the same cleanup releases it.
+        monkeypatch.setattr(cm, "current_container_id", lambda name: "")
+        push_proxy.release_captured_unshared_proxy(captured)
+        assert not Path(path).exists()
+    finally:
+        replacement.stop()
+
+
 def test_old_proxy_stop_preserves_replacement_socket(tmp_path):
     path = str(tmp_path / "push.sock")
     old = push_proxy.PushProxy(path, str(tmp_path), "branch")
