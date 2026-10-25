@@ -1939,3 +1939,72 @@ installed into the scratch `PYTHONPATH`).
 Evidence: `/pm-captures/review-240e-i7/` (`sweep-branch-i7.tsv` /
 `sweep-master-i7.tsv` / `sweep-branch-after-i7.tsv`, `pathological-i7.txt`,
 `full-suite-branch-i7.txt`, `full-suite-master-i7.txt`, failure-set diffs).
+
+## 31. Policy change: truncation is for accumulation, not for instructions
+
+The user reviewed the audit and rejected truncating instruction text, even
+though the alternative is a prompt too large for one argv entry:
+
+> "The notes change I like, but I don't like potentially truncating
+> instructions or scenario guidelines. I would rather have to come back with
+> another bug pr later than have unnecessary truncations."
+
+So §1's requirements are amended. Only two kinds of content are ever
+shortened now:
+
+* **PR notes** (R2) — an append-only handoff log whose newest entries
+  supersede the older ones, so summarizing the tail is information-preserving.
+  Unchanged.
+* **Pure enumerations** — sibling-PR and dependency listings (R4), the QA
+  scenario *verdict* block (R5), the integration overlap/conflict path lists
+  (R6), the QA finalize worktree listing (R9), the QA child artifact paths
+  (R10), the verification artifact bullets and pane output (R11), the plan
+  builders' PR listings (R12), merge error output (R13) and the watcher
+  managed/target lists (R14). All are pointers by nature — the omission marker
+  names a command or path that returns the full list.
+
+Everything instruction-shaped is inlined **whole and never truncated**:
+the implementation/QA spec (R3), session notes (R3b), the QA instruction
+library and mock bodies (R7), the concretization instruction file (R8),
+QA scenario steps (R10), PR descriptions, sign-off return blocks, and plan
+files (R12).
+
+**What carries the overflow.** R15's launcher guard is now the primary
+mechanism rather than defence in depth: a prompt over `PROMPT_ARG_LIMIT` is
+written to a file complete and delivered with a short bootstrap argv. Where
+no writable location exists the launch raises `PromptTooLargeError` — an
+explicit failure, which the user accepted, rather than a silent cut.
+
+**What changed in code**: `SPEC_BUDGET`, `SESSION_NOTES_BUDGET`,
+`QA_CHILD_STEPS_BUDGET`, `CONCRETIZE_INSTRUCTION_BUDGET`, `MOCKS_BUDGET`,
+`LIBRARY_ITEMS_MAX`, `LIBRARY_LIST_BUDGET` and `LIBRARY_TOTAL_BUDGET` are
+gone; the four `fit_prompt` builders keep only their note and enumeration
+blocks; `notes_pointer()` (added in §17 for the session-notes marker) is gone
+with its last caller. Net -155 lines in `pm_core/`.
+
+**Measured effect on this repo** (489 PRs / 665 notes). Real prompts are now
+smaller where the bounds used to bite on nothing, and larger — correctly —
+where they used to cut instructions:
+
+```
+                      before §31   after §31
+impl (max)               75,146 B    164,723 B   (pr-ace66e5)
+review (max)             77,616 B    167,156 B   (pr-ace66e5)
+sign-off (max)           92,165 B    181,708 B   (pr-ace66e5)
+qa_planner (max)         80,652 B    113,196 B   (pr-b53bfe2)
+```
+
+Three of the four now exceed `PROMPT_ARG_LIMIT` for **this PR**, because
+`pm/specs/pr-ace66e5/impl.md` has itself grown past 120 KB across 31 sections
+— and because this document is inlined into those prompts, *appending this
+section grew each of them by this section's length*. The numbers above
+include §31; the self-reference is the point rather than an artifact. The
+policy working as intended is a prompt delivered by file, not a spec trimmed
+to fit. Verified end to end — the impl prompt produces a 284-character
+command whose named file is byte-identical to the prompt. The four builders'
+PR-notes bound still holds (400 notes → 34,697 B, newest kept full, older
+summarized, marker present).
+
+This is the trade the user chose: a prompt that is too large to pass as one
+argument is a delivery problem, and delivery already has a correct answer;
+a truncated instruction is a correctness problem with no correct answer.
