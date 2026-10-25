@@ -33571,6 +33571,20 @@ prs:
       S52 (RQ39) still has to run in the next QA.'
     created_at: '2026-10-25T14:39:14Z'
     last_edited: '2026-10-25T14:39:14Z'
+  - id: note-72eabbc
+    text: 'Review 0f64 i3 (1dc3e618, CODE CHANGE, small, needs normal re-review):
+      S53 66404830, i1 14d72926 and i2 ac202207 reviewed independently and sound,
+      except one regression from 66404830 (d): the PR Routes loop resolved every PR
+      override, so a hand-edited non-string prs[].model (5, a list, a mapping) crashed
+      pm model show with AttributeError rc 1 (rc 0 before 66404830 and on master),
+      and validate_model_config never reported it. Now no Routes line for it plus
+      the problem "prs[<pr>].model: ... is not a model name or provider:<name> (launches
+      that use it fail)". Launches still fail on it (pre-existing, noted on pr-6082c0d).
+      2 mutations caught. Venv lacked markdown (3.10.3 installed). Full suite 3730
+      passed, rc 0; /pm-captures/review-0f64-i3. S52 (RQ39) still has to run in the
+      next QA.'
+    created_at: '2026-10-25T14:49:26Z'
+    last_edited: '2026-10-25T14:49:26Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -34223,3 +34237,12 @@ prs:
       story5.'
     created_at: '2026-10-25T02:37:47Z'
     last_edited: '2026-10-25T02:37:47Z'
+  - id: note-f654742
+    text: 'Review 0f64 i3 (pr-592e4bd, 2026-10-25): same class, pre-existing on master.
+      A hand-edited non-string PR model (prs[].model: 5, a list or a mapping) makes
+      every launch that uses it (pm pr start/review/signoff, QA roles) raise a raw
+      AttributeError from model_config._resolve_value (.startswith). pm model show
+      now reports it as a problem (1dc3e618). The friendlier Error: line belongs with
+      this PR fix.'
+    created_at: '2026-10-25T14:49:27Z'
+    last_edited: '2026-10-25T14:49:27Z'
