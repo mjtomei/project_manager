@@ -315,7 +315,8 @@ ran on 3a0c32e6, before 2a6b14d4: its story-1 W/X Routes lines show the
 old split by effort, which 2a6b14d4 replaced with one line per route
 (rechecked live in S55 post-fix and by
 `test_model_show_pr_route_lines_with_the_real_route_description`). The
-latest full suite is recorded with item 42.
+latest full suite is recorded at the end of "Subagent model enforcement"
+below (item 42 records the suites up to 3738).
 
 **Rules fixed during validation (index).** Commits in parentheses.
 - Live smokes 1–4. The bridge stream has no timeout after connect
@@ -1444,3 +1445,8 @@ reachable only through an `alias_models` entry naming
 (`/pm-captures/review-c189-i3/mutation-checks.log`). Claude Code 2.1.310
 reads `CLAUDE_CODE_BG_CLASSIFIER_MODEL` nowhere (env allowlists only), so
 `CLAUDE_CODE_AUTO_MODE_MODEL` is the only classifier override.
+Review loop c189 i4 re-checked the same five fixes with 13 new mutations,
+all caught (`/pm-captures/review-c189-i4/mutation-checks.log`). Latest full
+suite: 3791 passed, rc 0, on 0b02e164 (env -u PM_HOST_HOME, /usr/bin
+first, PYTHONPATH=/workspace, markdown 3.10.3 installed first;
+`/pm-captures/review-c189-i4/full-suite.log`; also 3791 in c189 i2 and i3).
