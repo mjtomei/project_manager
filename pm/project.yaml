@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T22:41:51.182208+00:00'
+  updated_at: '2026-10-25T22:53:02.760630+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33883,6 +33883,18 @@ prs:
       rc 0 (markdown 3.10.3 installed first); /pm-captures/review-c189-i3.'
     created_at: '2026-10-25T22:41:51Z'
     last_edited: '2026-10-25T22:41:51Z'
+  - id: note-7c546a3
+    text: 'Review c189 i4 (19d1fed4, spec-only, no product change): latest QA run
+      da5cdfbc6f5e8370 deltas ff65f489, 3ee69236, 79b6ddd7, f0031965, 5f5a1453, conftest
+      d5b7f5dd and QA-spec 0e13c5f8/cabc2677 reviewed independently, all sound; 0e13c5f8
+      claims match the code (pr_view busy guard). 13 new mutations all caught. Only
+      fix: impl.md section 5 said the latest full suite is recorded with item 42 (3738);
+      it now points at the subagent section, which records 3791. Full suite 3791 passed,
+      rc 0 (markdown 3.10.3 installed first); production review container env carries
+      the work/ classifier and fable pins; /pm-captures/review-c189-i4. Master conflict
+      is project.yaml only.'
+    created_at: '2026-10-25T22:53:02Z'
+    last_edited: '2026-10-25T22:53:02Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
