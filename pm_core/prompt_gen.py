@@ -186,7 +186,9 @@ def _render_pr_notes_bounded(notes: list[dict], budget: int,
     Every note stays represented while the budget allows; a closing marker
     names the count omitted (if any) and the command to read the full text.
     Newer notes supersede older ones for handoff purposes, so they get the
-    full text first.
+    full text first — and when the budget is too small even for every note's
+    one-line summary, the newest note is still kept in full and older
+    summaries are dropped to pay for it.
 
     *pr_id* is interpolated into the marker so the command is directly
     runnable — the same block carries the concrete id from ``fit_prompt``'s
@@ -212,13 +214,32 @@ def _render_pr_notes_bounded(notes: list[dict], budget: int,
     summaries = [summary_line(n) for n in notes]
     total = prompt_bytes(sep.join(summaries))
     if total > budget - marker_budget:
-        kept = list(summaries)
+        # Not even every note's one-line summary fits, so notes have to be
+        # dropped.  Keep the *newest* note in full — it is the operative
+        # handoff — and pay for it by dropping more of the oldest summaries;
+        # leaving it as a 200-char preview while older previews survive would
+        # invert the recency ordering the upgrade path below uses.  The
+        # upgrade is skipped when the note cannot fit at all, in which case it
+        # stays a summary (the same degradation the path below applies to a
+        # single oversized note).
+        rendered = list(summaries)
+        newest_full = full_line(notes[-1])
+        upgraded = prompt_bytes(newest_full) <= budget - marker_budget
+        if upgraded:
+            rendered[-1] = newest_full
+        kept = list(rendered)
         while kept and prompt_bytes(sep.join(kept)) > budget - marker_budget:
             kept.pop(0)
         omitted = len(notes) - len(kept)
+        # Every kept line but the upgraded newest is a summary; say so, or the
+        # session reads abbreviated previews as if they were the full text.
+        abbreviated = len(kept) - (1 if upgraded else 0)
+        note = f"{omitted} older note(s) omitted"
+        if abbreviated:
+            note += f" and {abbreviated} abbreviated"
         marker = (
-            f"... ({omitted} older note(s) omitted to fit the prompt size "
-            f"limit — run `{read_cmd}` to read all notes.)"
+            f"... ({note} to fit the prompt size limit — "
+            f"run `{read_cmd}` to read all notes.)"
         )
         return sep.join(kept + [marker])
 

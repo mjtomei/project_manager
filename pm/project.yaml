@@ -33134,3 +33134,47 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-155f3e3
+  plan: bugs
+  title: 'Bug: generating a prompt can create the PR captures directory as a side
+    effect'
+  branch: pm/pr-155f3e3-bug-generating-a-prompt-can-create-the-pr-captures
+  status: pending
+  depends_on: []
+  description: "Location: pm_core/prompt_gen.py::_qa_scenarios_pointer (~line 560)\
+    \ and pm_core/integration.py::integration_pointer (~line 388) resolve their pointer\
+    \ through pm_core.paths.captures_dir(), whose last resort (paths.py step 3, \"\
+    Otherwise create and return the host path\") mkdirs ~/.pm/sessions/<tag>/captures/<pr-id>/,\
+    \ and whose sessions_dir() call mkdirs ~/.pm/sessions/. Both helpers are called\
+    \ from the omission-marker lambdas that prompt builders pass to bounded_join,\
+    \ so the touch happens whenever a marker actually fires.\n\nRepro (host, no container,\
+    \ no sign-off involved): take a PR whose signoff_return.integration carries more\
+    \ than INTEGRATION_MAX_PATHS (20) conflict/overlap paths, then build its impl\
+    \ prompt from a git cwd so a session tag resolves:\n  cd <pm project>; python\
+    \ -c \"from pm_core import store, prompt_gen; d=store.load(...); prompt_gen.generate_prompt(d,\
+    \ \\\"pr-x\\\", None)\"\nBefore: ~/.pm/sessions/<tag>/captures/pr-x/ does not\
+    \ exist. After: it exists (observed /home/pm/.pm/sessions/project_manager-eab0d61a/captures/pr-x\
+    \ created by generate_prompt alone). The same happens for review/QA-planner prompts\
+    \ via signoff.format_signoff_return.\n\nWhy it matters: the PR that introduced\
+    \ these pointers (pr-ace66e5, review-loop 4e41 i7) made the pointer resolution\
+    \ lazy precisely so that \"building a prompt must not touch the filesystem\" (its\
+    \ test_return_block_does_not_resolve_the_pointer_when_nothing_is_dropped asserts\
+    \ it), and QA scenario 11 recorded this residual on pr-ace66e5 as an observation\
+    \ for a follow-up. Today it is mostly masked - launch_signoff_window calls integration.check_integration\
+    \ (which mkdirs the same dir) before generate_signoff_prompt - but `pm prompt\
+    \ <pr-id>` and the review path have no such precursor.\n\nFix sketch: captures_dir()\
+    \ needs its resolution split from its creation (e.g. a create=False mode, or a\
+    \ separate captures_dir_if_exists()), so a marker that only needs to *name* a\
+    \ path does not create one. Note sessions_dir()/pm_home() mkdir unconditionally,\
+    \ so a local workaround in the two helpers cannot achieve it. Filed rather than\
+    \ fixed in pr-ace66e5 because it changes a widely-used resolver, outside that\
+    \ PR's prompt-bounding scope."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-25T01:15:37.606229+00:00'
+  updated_at: '2026-10-25T01:15:37.606229+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

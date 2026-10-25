@@ -195,6 +195,45 @@ class TestPrNotesBounding:
         assert "abbreviated" in block
         assert "pm pr note list" in block
 
+    @staticmethod
+    def _dated_notes(n, size=2000):
+        """*n* notes with strictly increasing ``created_at``.
+
+        The last element is the newest, so it is the one the builder must keep
+        in full.  (``_note`` derives the date from ``i % 28``, which is not
+        monotonic — fine for the size tests, wrong for ordering ones.)
+        """
+        return [{"id": f"n{i:04d}", "text": f"note {i} " + "x" * size,
+                 "created_at": f"2026-01-01T{i // 60:02d}:{i % 60:02d}:00Z"}
+                for i in range(n)]
+
+    def test_newest_note_stays_full_when_no_summaries_fit(self):
+        """With enough notes, even every one-line summary exceeds the budget,
+        so notes have to be dropped.  The *newest* note is the operative
+        handoff: it stays in full and older summaries are dropped to pay for
+        it.  Keeping hundreds of older previews while reducing the newest
+        handoff to a 200-char preview inverts the recency ordering this
+        builder documents."""
+        newest = "NEWEST-HANDOFF " + "y" * 3000
+        notes = self._dated_notes(400)
+        notes[-1]["text"] = newest
+        block = prompt_gen._format_pr_notes(_pr(notes=notes))
+        assert newest in block
+        assert "omitted" in block
+        assert "abbreviated" in block
+        assert "pm pr note list pr-x" in block
+
+    def test_oversized_newest_note_is_still_marked_abbreviated(self):
+        """A newest note larger than the whole budget cannot be kept in full,
+        so it stays a summary — and the marker must say the block is
+        abbreviated rather than presenting previews as the full text."""
+        notes = self._dated_notes(400)
+        notes[-1]["text"] = "z" * (prompt_gen._PR_NOTES_BUDGET + 5_000)
+        block = prompt_gen._format_pr_notes(_pr(notes=notes))
+        assert prompt_bytes(block) <= prompt_gen._PR_NOTES_BUDGET
+        assert "abbreviated" in block
+        assert notes[-1]["text"] not in block
+
 
 class TestReviewPromptBounding:
     def test_many_siblings_and_notes(self):

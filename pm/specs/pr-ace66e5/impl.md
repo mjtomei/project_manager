@@ -954,3 +954,72 @@ failure set is byte-identical to an `origin/master` worktree baseline in this
 sandbox (59 failures/errors — all `test_signoff_integration` /
 `test_merge_publish` / `test_hook_events`, all environmental, none
 prompt-related).
+
+## 19. Review-loop follow-ups (review loop 2ac8)
+
+The PR was re-reviewed on the integrated branch (loop `2ac8`). Iteration 1
+changed no production behaviour: it added the launcher-guard tests R15/§6 asks
+for *as wired into* `launch_claude` / `launch_claude_print` /
+`launch_claude_print_background` (the bootstrap argv, the prompt file's
+lifetime, and the resume path writing nothing), and documented in
+`bounded_text` the marker-overshoot postcondition `bounded_join` already
+documented.
+
+Iteration 2 found one behaviour defect, in `_render_pr_notes_bounded` (R2):
+
+- **The newest note was not kept in full when the notes overflowed.** The
+  function has two paths. When *every* note's one-line summary fits the budget
+  it keeps all summaries and upgrades the newest notes to full text while the
+  left-over room allows (the path §13 tightened the marker wording for). When
+  the summaries do *not* fit it dropped the oldest summaries — and upgraded
+  **nothing**, so the newest handoff arrived as a 200-char preview while
+  hundreds of older previews survived. That inverts the ordering R2/A2
+  prescribe ("keep the newest notes in full first; reduce older notes to a
+  first-line summary") and the function's own docstring. Reachable: the branch
+  needs the merged notes' one-line summaries to exceed 34,767 B (the 35,000 B
+  budget minus the 13-byte header and the 220-byte marker reserve). A summary
+  is 200 characters of *text* plus a timestamp, so its size depends on the
+  script: 229 B for ASCII (flips at 152 notes) but 629 B for CJK (flips at 56
+  notes) — and this repo already has PRs with 56 notes. (`pr-0b87a97`'s block
+  measures 34,612 B, but that is the *fits* path inlining the newest notes'
+  full text; its summaries total only 12,848 B, so it is not near the flip.)
+  Fixed: the overflow path now upgrades the newest note to full text first and
+  drops more of the oldest summaries to pay for it (skipping the upgrade only
+  when the note is larger than the whole budget, in which case it stays a
+  summary as before). The marker now also names the abbreviated count
+  ("N older note(s) omitted and M abbreviated"), so a session reading previews
+  is not left thinking they are verbatim — the same "marker must describe what
+  the session is reading" rule §13 applied to the other path.
+  Real prompts are unchanged: all 487 PRs' note blocks hash identically before
+  and after (every real block is in the fits path).
+
+  The other path is left as designed: when every note's summary *does* fit, it
+  keeps all of them (its docstring's "every note stays represented") and spends
+  whatever room is left on full text for the newest notes. A very long newest
+  note can therefore still arrive as a summary — the marker says so (§13) and
+  names the reader. Every real PR in this repo keeps its newest note in full
+  (checked across all 487).
+
+Checked and deliberately unchanged in this loop:
+
+- **Single user-authored documents inlined outside `fit_prompt`.**
+  `spec_gen._build_spec_prompt` inlines the PR description (real maximum 11 KB;
+  measured max prompt over all 487 PRs × 2 phases is 38,209 B) and
+  `plans.review.build_fix_prompt` inlines the review findings. Both are single
+  documents, not collections, and both are delivered intact by the launcher's
+  file-backed bootstrap if they ever exceed the limit.
+- **`generate_watcher_prompt`'s managed/target lists** stay count-capped only
+  (`WATCHER_MANAGED_MAX`). Auto-start targets are validated PR ids
+  (`cli/autostart.py::_validate`), so 40 of them cannot approach the limit.
+- **`prompt_gen`'s `_X = X` budget aliases** (and `cli/plan.py`'s
+  `_PLAN_LIST_MAX`) remain: they are local names for the shared constants, no
+  external caller imports them, and no value differs.
+
+Filed rather than fixed (out of a prompt-bounding PR's scope): building a
+prompt can still create `~/.pm/sessions/<tag>/captures/<pr-id>/` when an
+omission marker *fires*, because the two pointer helpers resolve through
+`paths.captures_dir()`, whose last resort creates the directory (and whose
+`sessions_dir()` call creates `~/.pm/sessions/`). Making "building a prompt
+never touches the filesystem" hold unconditionally needs the resolver split
+into a non-creating resolution plus a separate create step — see the filed bug
+PR.
