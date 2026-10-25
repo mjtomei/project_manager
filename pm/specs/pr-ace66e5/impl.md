@@ -1382,3 +1382,70 @@ Evidence: `/pm-captures/review-2ac8-i6/` (`i6_sweep.py` + `pathological*.txt`,
 `i6_markers.py` + `markers-pathological*.txt`, `i6_container_marker.py`,
 `sweep-head.txt` / `sweep-branch-fixed.txt` + `hashes-*.txt`,
 `full-suite-branch*.txt`, `full-suite-master.txt`).
+
+## 24. Review-loop follow-ups (review loop 240e, iteration 1)
+
+Iteration 1 ran natively in the review container (the launcher's over-limit
+prompt made the first launch fail with E2BIG; the recovery read the complete
+native prompt from a file). It re-ran the §19-§23 method — sweep every
+reachable builder, then check each omission marker against what the session can
+actually do with it — and found one marker-accuracy defect of the same class
+the earlier loops fixed.
+
+- **The sign-off return block was shrunk together with the PR notes, so its
+  omission marker named a reader that does not contain it.** All four
+  `fit_prompt` builders (`generate_prompt`, `generate_review_prompt`,
+  `generate_signoff_prompt`, `generate_qa_planner_prompt`) did
+  `pr_notes_block = _format_pr_notes(...); pr_notes_block +=
+  _signoff_return_block(...)` and passed the concatenation as the single
+  `notes` block. When the whole prompt exceeds `PROMPT_ARG_LIMIT`,
+  `fit_prompt` abbreviates the largest block with `bounded_text`, whose marker
+  reads "Read the full text: `pm pr note list <pr-id>`". The return block is
+  not in the notes list (and `pm pr show` did not print it), so a cut return
+  reason — the operative handoff that says what the returned step must fix —
+  was unrecoverable: the silent loss R2/A1 forbids, and the same
+  "marker must name a reader that returns the omitted text" rule §7, §12, §20
+  and §23 apply.
+
+  Reachable exactly like the §19/i4 budget-coordination cases: a PR large in
+  several dimensions at once plus a large sign-off reason. The reason is
+  agent-authored (the sign-off report's `pm-signoff-reason` meta tag), so its
+  size is not bounded by pm. Measured on a fresh fixture — 400 notes, a 200 KB
+  spec, 400 siblings, 400 deps, an 11 KB description and a 30 KB reason — the
+  combined notes block was cut to 12,569 of the reason's 30,000 bytes and the
+  only explanation in the prompt was the `pm pr note list` marker.
+
+  Fixed by keeping the return block a **separate** `fit_prompt` block in all
+  four builders, placed exactly where the concatenation put it, so every
+  prompt that fits is byte-identical:
+
+  ```python
+  "signoff_return": (signoff_return_block, f"`pm pr show {pr_id}`",
+                     "sign-off return"),
+  ```
+
+  Its own marker now names `pm pr show <pr-id>`, and `pm pr show` prints the
+  return record — verdict, hop, reviewed head, reason, original verdict,
+  coerced reason, applied merge, apply error, and the return's integration
+  record — so that reader is not a dead end. The return block also no longer
+  competes with the notes for one budget: when both are large, `fit_prompt`
+  shrinks the larger one first instead of cutting head and tail across both
+  documents.
+
+Verification: `tests/test_prompt_bounds.py` 117 cases (2 new tests / 5 cases:
+the builder test is parametrized over the four `fit_prompt` builders, plus
+the `pm pr show` reader test; all failing-then-passing — verified by stashing
+the `prompt_gen.py` / `pr.py` edits: the builder test found no "sign-off
+return truncated" marker naming `pm pr show`, and `pm pr show` printed no
+return record). The independent
+sweep over every reachable builder, with every collection maxed at once,
+measures the same sizes as §23 (the four `fit_prompt` builders 119,700 B;
+sign-off highest) and the return markers now read
+`` [... sign-off return truncated to fit the prompt size limit. Read the full text: `pm pr show pr-x` ...] ``.
+Small prompts are byte-identical before and after (4 builders x a fixture with
+a return: same sha256), and all 488 real PRs x 4 builders are byte-identical
+before and after (1952 prompts, 0 errors). Full-suite failure set identical to
+the `origin/master` worktree baseline in this sandbox (1 failure, the
+documented environmental
+`test_hook_events::test_installer_writes_standalone_receiver`, pr-4bde874;
+3486 vs 3367 passed, the delta being this PR's new tests).

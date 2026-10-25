@@ -705,7 +705,7 @@ class TestBudgetCoordination:
     """
 
     def _pathological(self, _isolated_pm_root, monkeypatch,
-                      desc_bytes=40_000):
+                      desc_bytes=40_000, return_reason=None):
         status = _isolated_pm_root / "qa_status.json"
         status.write_text(json.dumps({
             "overall": "PASS",
@@ -726,6 +726,11 @@ class TestBudgetCoordination:
                          "overlap": [f"f{i}.py" for i in range(500)],
                          "conflicts": [f"c{i}.py" for i in range(500)]},
         )
+        if return_reason is not None:
+            pr["signoff_return"] = {
+                "verdict": "SIGNOFF_IMPL", "hop": "impl",
+                "reviewed_head": "a" * 40, "reason": return_reason,
+            }
         siblings = [_pr(f"pr-s{i:03d}", plan="pl-1",
                         title="LONGTITLE " * 600) for i in range(200)]
         return pr, _data(pr, siblings)
@@ -768,6 +773,35 @@ class TestBudgetCoordination:
         p = prompt_gen.generate_signoff_prompt(data, "pr-x")
         assert "truncated to fit the prompt size limit" not in p
         assert prompt_bytes(p) < 40_000
+
+    @pytest.mark.parametrize("builder", [
+        prompt_gen.generate_prompt,
+        prompt_gen.generate_review_prompt,
+        prompt_gen.generate_signoff_prompt,
+        prompt_gen.generate_qa_planner_prompt,
+    ])
+    def test_signoff_return_is_its_own_bounded_block(
+            self, _isolated_pm_root, monkeypatch, builder):
+        """A cut sign-off return must name a reader that contains it.
+
+        The return block used to be appended to the PR-notes block, so
+        fit_prompt's marker for a cut return reason said `pm pr note list`
+        — which does not contain the reason.  It is a separate block now,
+        whose marker names `pm pr show`, which prints the record.
+        """
+        pr, data = self._pathological(
+            _isolated_pm_root, monkeypatch,
+            return_reason="REASONTOKEN " + "R" * 90_000)
+        p = builder(data, "pr-x")
+        _assert_bounded(p, "`pm pr show pr-x`")
+        markers = [line for line in p.splitlines()
+                   if "sign-off return truncated" in line]
+        assert markers, "the return block was not bounded separately"
+        assert "`pm pr show pr-x`" in markers[0]
+        # The head of the reason survives, and the notes block still names
+        # the notes reader for its own text.
+        assert "REASONTOKEN" in p
+        assert "pm pr note list pr-x" in p
 
 
 class TestQaPromptsBounding:
@@ -1516,6 +1550,26 @@ class TestPrShowCommand:
             cli, ["-C", str(root), "pr", "show", "nope"])
         assert result.exit_code == 1
         assert "not found" in result.output
+
+    def test_prints_signoff_return(self, tmp_path):
+        """`pm pr show` is the reader for a cut sign-off return block."""
+        root = _make_state(tmp_path)
+        data = store.load(root)
+        data["prs"][0]["signoff_return"] = {
+            "verdict": "SIGNOFF_IMPL", "hop": "impl",
+            "reviewed_head": "a" * 40, "reason": "fix the null check",
+            "integration": {"status": "conflict", "base_branch": "master",
+                            "base_sha": "b" * 40, "target_repo": "r",
+                            "conflicts": ["pm/project.yaml"], "overlap": []},
+        }
+        store.save(data, root)
+        result = CliRunner().invoke(
+            cli, ["-C", str(root), "pr", "show", "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "## Sign-off return" in result.output
+        assert "SIGNOFF_IMPL" in result.output
+        assert "fix the null check" in result.output
+        assert "Conflicts (1): pm/project.yaml" in result.output
 
     def test_prints_integration_record(self, tmp_path, monkeypatch):
         """`pm pr show` is the fallback pointer for abbreviated integration

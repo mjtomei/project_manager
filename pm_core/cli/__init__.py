@@ -606,7 +606,7 @@ COMMANDS
   pm pr select <pr-id>          Set the active PR
   pm pr cd <pr-id>              Open a shell in a PR's workdir
   pm pr list                    List PRs with status (* = active)
-  pm pr show <pr-id>            Show a PR's full detail (description, tests, files, notes)
+  pm pr show <pr-id>            Show a PR's full detail (description, tests, files, notes, sign-off return)
   pm pr graph                   Show dependency tree
   pm pr ready                   Show PRs ready to start
   pm pr start [pr-id]           Clone, branch, launch Claude (tmux window or blocking)

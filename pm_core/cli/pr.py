@@ -557,7 +557,8 @@ def _note_line(n: dict) -> str:
 @pr.command("show")
 @click.argument("pr_id")
 def pr_show(pr_id: str):
-    """Show a PR's full detail: description, tests, files, deps, notes.
+    """Show a PR's full detail: description, tests, files, deps, notes,
+    sign-off return, and integration.
 
     The on-demand companion to the abbreviated listings prompt builders
     emit when a collection is too large to inline: sessions told to "run
@@ -595,6 +596,39 @@ def pr_show(pr_id: str):
         click.echo("\n## Notes")
         for n in notes:
             click.echo(_note_line(n))
+    # The sign-off return is a separate prompt block from the notes (it is a
+    # different document), so its omission marker points here rather than at
+    # `pm pr note list`, which does not contain it.  Print the whole record.
+    ret = pr_entry.get("signoff_return") or {}
+    if ret:
+        click.echo("\n## Sign-off return")
+        for label, key in (
+            ("Verdict", "verdict"),
+            ("Hop", "hop"),
+            ("Reviewed head", "reviewed_head"),
+            ("Reason", "reason"),
+            ("Original verdict", "original_verdict"),
+            ("Coerced reason", "coerced_reason"),
+        ):
+            val = ret.get(key)
+            if val:
+                click.echo(f"{label}: {val}")
+        applied = ret.get("applied") or {}
+        if applied.get("merge_sha"):
+            click.echo(f"Applied merge: {applied['merge_sha']}")
+        if ret.get("apply_error"):
+            click.echo(f"Apply error: {ret['apply_error']}")
+        ret_integ = ret.get("integration") or {}
+        if ret_integ:
+            base = (f"`{ret_integ.get('base_branch')}` @ "
+                    f"`{ret_integ.get('base_sha')}` from "
+                    f"`{ret_integ.get('target_repo')}`")
+            click.echo(f"Integration: {ret_integ.get('status')} with {base}")
+            for label, key in (("Overlap", "overlap"),
+                               ("Conflicts", "conflicts")):
+                vals = ret_integ.get(key) or []
+                if vals:
+                    click.echo(f"{label} ({len(vals)}): {', '.join(vals)}")
     # Prompt builders abbreviate the integration overlap/conflict path lists
     # and point sessions here for the rest, so print the record (and where its
     # full form lives) rather than making that pointer a dead end.

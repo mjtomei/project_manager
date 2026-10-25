@@ -348,9 +348,12 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
 
     tui_block = tui_section(session_name) if session_name else ""
 
-    # Include PR notes (addendums added after work began)
+    # Include PR notes (addendums added after work began) and the sign-off
+    # return block as *separate* fit_prompt blocks: they are different
+    # documents, so a cut return reason must not be explained by the notes
+    # reader (`pm pr note list` does not contain it).
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
-    pr_notes_block += _signoff_return_block(pr)
+    signoff_return_block = _signoff_return_block(pr)
 
     beginner_block = _beginner_addendum()
     cleanup_block = _auto_cleanup_addendum()
@@ -367,6 +370,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
         description = parts["description"]
         deps_section = parts["deps"]
         pr_notes_block = parts["notes"]
+        signoff_return_block = parts["signoff_return"]
         impl_spec_block = parts["spec"]
         general_notes_block = parts["session_notes"]
         prompt = f"""You're working on PR {pr_id}: "{title}"
@@ -379,7 +383,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Task
 {description}
-{pr_notes_block}{impl_spec_block}{impl_spec_preamble}{bug_fix_block}{pr_notes_handoff_block}
+{pr_notes_block}{signoff_return_block}{impl_spec_block}{impl_spec_preamble}{bug_fix_block}{pr_notes_handoff_block}
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there. The directory may contain uncommitted implementation work from a previous session.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
@@ -402,6 +406,8 @@ This session is managed by `pm`. Run `pm help` to see available commands.
                             "PR description"),
             "deps": (deps_section, "`pm pr graph`", "dependency list"),
             "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
+            "signoff_return": (signoff_return_block,
+                               f"`pm pr show {pr_id}`", "sign-off return"),
             "spec": (impl_spec_block, f"`pm pr spec {pr_id} impl`",
                      "implementation spec"),
             "session_notes": (general_notes_block, notes.notes_pointer(),
@@ -477,9 +483,10 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     except FileNotFoundError:
         pass
 
-    # Include PR notes (addendums)
+    # Include PR notes (addendums) and the sign-off return block as separate
+    # fit_prompt blocks — see generate_prompt.
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
-    pr_notes_block += _signoff_return_block(pr)
+    signoff_return_block = _signoff_return_block(pr)
 
     # Backend-appropriate diff and sync commands
     backend_name = data.get("project", {}).get("backend", "vanilla")
@@ -531,6 +538,7 @@ with spec generation enabled.
     def _assemble(parts: dict[str, str]) -> str:
         description = parts["description"]
         pr_notes_block = parts["notes"]
+        signoff_return_block = parts["signoff_return"]
         impl_spec_block = parts["spec"]
         plan_context = parts["plan"]
         general_notes_block = parts["session_notes"]
@@ -541,7 +549,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
 ## Description
 {description}
-{pr_notes_block}{impl_spec_block}{plan_context}{tui_block}{general_notes_block}
+{pr_notes_block}{signoff_return_block}{impl_spec_block}{plan_context}{tui_block}{general_notes_block}
 ## Steps
 {pull_step}{n}. Run `{diff_cmd}` to see all changes
 {n+1}. **Generic checks** — things any codebase should get right:
@@ -576,6 +584,8 @@ Review the code changes in this PR for quality, correctness, and architectural f
             "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
             "spec": (impl_spec_block, f"`pm pr spec {pr_id} impl`",
                      "implementation spec"),
+            "signoff_return": (signoff_return_block,
+                               f"`pm pr show {pr_id}`", "sign-off return"),
             "plan": (plan_context,
                      f"`pm pr list --plan {plan_ref}`" if plan_ref
                      else "`pm pr list`", "plan context"),
@@ -777,7 +787,7 @@ def generate_signoff_prompt(data: dict, pr_id: str,
 
     tui_block = tui_section(session_name) if session_name else ""
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
-    pr_notes_block += _signoff_return_block(pr, for_signoff=True)
+    signoff_return_block = _signoff_return_block(pr, for_signoff=True)
     impl_spec_block = format_spec_for_prompt(pr, "impl") or ""
     qa_block = _signoff_qa_scenarios_block(pr_id)
     integration_block = _signoff_integration_block(pr, pr_id)
@@ -810,6 +820,7 @@ def generate_signoff_prompt(data: dict, pr_id: str,
     def _assemble(parts: dict[str, str]) -> str:
         description = parts["description"]
         pr_notes_block = parts["notes"]
+        signoff_return_block = parts["signoff_return"]
         impl_spec_block = parts["spec"]
         plan_context = parts["plan"]
         qa_block = parts["qa"]
@@ -820,7 +831,7 @@ PR-level *comprehensive* review and a routing decision.
 
 ## Description
 {description}
-{pr_notes_block}{impl_spec_block}{plan_context}{tui_block}
+{pr_notes_block}{signoff_return_block}{impl_spec_block}{plan_context}{tui_block}
 ## QA scenarios (from the QA run)
 {qa_block}
 ## Integration with the latest base
@@ -1145,6 +1156,8 @@ IMPORTANT: end your response with exactly one of {SIGNOFF_MERGE}, {SIGNOFF_REQA}
             "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
             "spec": (impl_spec_block, f"`pm pr spec {pr_id} impl`",
                      "implementation spec"),
+            "signoff_return": (signoff_return_block,
+                               f"`pm pr show {pr_id}`", "sign-off return"),
             "plan": (plan_context, plan_pointer, "plan context"),
             "qa": (qa_block, f"`pm qa captures-path {pr_id}`",
                    "QA scenario summary"),
@@ -2117,7 +2130,7 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
 
     # Include PR notes (prior QA results, addendums)
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
-    pr_notes_block += _signoff_return_block(pr)
+    signoff_return_block = _signoff_return_block(pr)
     pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
     # Include QA spec if already generated, or preamble to generate one
@@ -2170,6 +2183,7 @@ worker's prompt names the exact path)."""
         description = parts["description"]
         library_summary = parts["library"]
         pr_notes_block = parts["notes"]
+        signoff_return_block = parts["signoff_return"]
         qa_spec_block = parts["spec"]
         general_notes_block = parts["session_notes"]
         qa_specific_block = parts["qa_notes"]
@@ -2220,7 +2234,7 @@ to see what changed.  Read source files as needed to understand the context.
 Make sure to not get bogged down too much in the details and method names. Try
 to abstract out user stories that exercise the changes.
 
-{pr_notes_block}{qa_spec_block}{qa_spec_preamble}
+{pr_notes_block}{signoff_return_block}{qa_spec_block}{qa_spec_preamble}
 ## QA Instruction Library
 
 These are available QA instructions.  Reference any that are relevant to
@@ -2328,6 +2342,8 @@ not accomplishing this goal.
                             "PR description"),
             "library": (library_summary, "`pm qa list`", "QA library summary"),
             "notes": (pr_notes_block, f"`pm pr note list {pr_id}`", "PR notes"),
+            "signoff_return": (signoff_return_block,
+                               f"`pm pr show {pr_id}`", "sign-off return"),
             "spec": (qa_spec_block, f"`pm pr spec {pr_id} qa`", "QA spec"),
             "session_notes": (general_notes_block, notes.notes_pointer(),
                               "session notes"),
