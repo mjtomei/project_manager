@@ -403,7 +403,16 @@ def container_is_running(name: str) -> bool:
         "inspect", "-f", "{{.State.Running}}", name,
         check=False, timeout=10,
     )
-    return result.returncode == 0 and result.stdout.strip() == "true"
+    if result.returncode == 0 and result.stdout.strip() in ("true", "false"):
+        return result.stdout.strip() == "true"
+    error = (result.stderr or "").strip()
+    low = error.lower()
+    if ("no such container" in low or "no such object" in low
+            or "no container with" in low and "found" in low):
+        return False
+    raise launch_error(name, classify_runtime_error(error),
+                       error or "runtime returned an unknown running state",
+                       stage="inspect existing container")
 
 
 # ---------------------------------------------------------------------------
@@ -1128,6 +1137,28 @@ def _restart_generation_path(name: str) -> Path:
     return _lock_path(f"restart-{name}").with_suffix(".generation")
 
 
+def canonical_container_name(name: str) -> str:
+    """Resolve runtime ID/slash aliases before using name-keyed lifecycle locks."""
+    if name.startswith(CONTAINER_PREFIX):
+        return name
+    result = _run_runtime("inspect", "--format", "{{.Name}}", name,
+                          check=False, timeout=10)
+    canonical = result.stdout.strip().lstrip("/")
+    if result.returncode != 0 or not canonical.startswith(CONTAINER_PREFIX):
+        raise ContainerError(
+            f"Cannot resolve managed container '{name}': "
+            f"{(result.stderr or '').strip() or 'expected a pm container name'}")
+    return canonical
+
+
+def cleanup_generation(name: str) -> str:
+    """Read the recovery generation; unreadable state must not authorize cleanup."""
+    try:
+        return _restart_generation_path(name).read_text().strip()
+    except FileNotFoundError:
+        return ""
+
+
 def restart_container(name: str) -> None:
     """Restart *name* in place: ends every process inside (clearing PID or
     memory exhaustion) but keeps the container's filesystem, id and mounts.
@@ -1135,6 +1166,7 @@ def restart_container(name: str) -> None:
     Setup state lives in the container filesystem, so a restarted container
     is still fully set up; this re-verifies that before returning.
     """
+    # Callers hold the canonical name's launch lock (CLI resolves ID aliases).
     # Restart terminates attached exec clients. Their delayed EXIT traps must
     # not remove the very filesystem this recovery is meant to preserve.
     # Keep the new generation after restart: an old trap can arrive much later.
@@ -1223,7 +1255,10 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
     """
     if not container_is_running(name):
         return None
-    container_id = current_container_id(name) or ""
+    container_id = current_container_id(name)
+    if not container_id:
+        raise launch_error(name, "runtime", "existing container identity unavailable",
+                           stage="be reused")
 
     complete, wedged, probe_err = _probe_setup(name)
     if wedged in ("pids", "memory"):
@@ -1574,7 +1609,9 @@ def _create_fresh(
         # pile up against the PID limit until exec fails "Cannot fork".
         # bash's SIGCHLD handling reaps any child while it sits in ``wait``.
         setup_parts.append(_PID1_REAPER)
-        setup = "; ".join(setup_parts)
+        # Required setup must stop before readiness on any failure. Do not
+        # carry errexit into PID 1: an interrupted wait is normal on restart.
+        setup = "set -e; " + "; ".join(setup_parts[:-1]) + "; set +e; " + setup_parts[-1]
         cmd.extend([config.image, "bash", "-c", setup])
 
         run_error: ContainerLaunchError | None = None
@@ -1602,6 +1639,12 @@ def _create_fresh(
     try:
         _wait_for_setup(name)
         _post_setup(name, workdir, _is_podman)
+        if allowed_push_branch:
+            from pm_core.push_proxy import proxy_is_alive
+            if not proxy_is_alive(sock_path):
+                raise launch_error(name, "proxy",
+                                   f"push proxy at {sock_path} is not accepting connections",
+                                   stage="finish setup")
     except BaseException:
         _log.error("Container %s setup failed — removing the partial container",
                    name, exc_info=True)
@@ -1822,18 +1865,18 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
                    container_id: str | None = None) -> str:
     """Build a ``<runtime> exec -it`` command string for use in a tmux window.
 
-    When the exec'd process exits, the container is removed (unless
-    *cleanup* is False).  The tmux pane stays open so the user can
-    inspect output.
+    When the exec'd process exits, its allocation is released unless
+    *cleanup* is False or it was explicitly retained. Failed release stays
+    durable for the next reconcile; replacements and restarts are preserved.
 
     If *container_id* is given the cleanup removes that exact container,
     not whatever currently holds *name*: a trap that fires late (after the
     window was killed and the session relaunched under the same name) must
     not delete the replacement.
 
-    If *proxy_socket_path* is provided, the cleanup also removes the
-    push proxy socket file and its parent directory.  This triggers the
-    proxy daemon thread to self-terminate (it checks for socket existence).
+    *proxy_socket_path* remains accepted for compatibility; proxy release
+    uses the original container name and the shared runtime-user inventory,
+    never unconditional socket deletion.
     """
     runtime = _get_runtime()
     escaped = shlex.quote(shell_cmd)
@@ -1846,32 +1889,38 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     else:
         exec_part = f"{runtime} exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
     if cleanup:
-        cleanup_parts = []
-        if proxy_socket_path:
-            cleanup_parts.append(f"rm -f {shlex.quote(proxy_socket_path)}")
-        cleanup_parts.append(
-            f"{runtime} rm -f {shlex.quote(container_id or name)} >/dev/null 2>&1")
-        if proxy_socket_path:
-            sock_dir = str(Path(proxy_socket_path).parent)
-            cleanup_parts.append(f"rmdir {shlex.quote(sock_dir)} 2>/dev/null")
-        # Wrap in a bash trap so cleanup runs even when the pane is killed
-        # via tmux kill-pane/kill-window (SIGHUP to the outer shell causes
-        # ';'-chained commands to be skipped, but EXIT traps always fire).
-        # Use shlex.quote on the full inner script to avoid quote nesting
-        # issues: exec_part already contains single-quoted arguments from
-        # shlex.quote(), so wrapping in literal '...' would break parsing.
-        marker = shlex.quote(str(_restart_generation_path(name)))
-        read_generation = f"IFS= read -r _pm_generation 2>/dev/null < {marker} || true"
-        cleanup_script = (
-            f"_pm_generation=''; {read_generation}; "
-            f'if [ "$_pm_generation" = "$_pm_start_generation" ]; then '
-            + "; ".join(cleanup_parts) + "; fi"
-        )
-        inner = (f"_pm_generation=''; {read_generation}; "
-                 f'_pm_start_generation="$_pm_generation"; '
-                 f"trap {shlex.quote(cleanup_script)} EXIT; {exec_part}")
+        import sys
+        # Pin this checkout/interpreter, not whichever pm happens to be on the
+        # pane's PATH. The release persists its exact identity before inventory,
+        # then uses the same retention/launch-lock checks as manual cleanup.
+        script = (
+            f"import sys; sys.path.insert(0, {str(Path(__file__).resolve().parent.parent)!r}); "
+            "from pm_core.container import release_on_exit; "
+            "release_on_exit(*sys.argv[1:])")
+        generation = cleanup_generation(name)
+        cleanup_cmd = shlex.join([
+            sys.executable, "-c", script, name, container_id or "", generation,
+            runtime, str(container_state_dir()), proxy_socket_path or ""])
+        inner = f"trap {shlex.quote(cleanup_cmd)} EXIT; {exec_part}"
         return f"bash -c {shlex.quote(inner)}"
     return exec_part
+
+
+def release_on_exit(name: str, cid: str, generation: str, runtime: str,
+                    state_dir: str, proxy_socket_path: str = "") -> None:
+    """Release only the pane's original allocation, preserving retained work."""
+    from pm_core import container_reaper
+    os.environ["PM_CONTAINER_STATE_DIR"] = state_dir
+    # This helper runs in its own short-lived interpreter; keep the runtime
+    # selected by the launcher even if global settings changed meanwhile.
+    global _get_runtime
+    _get_runtime = lambda: runtime
+    outcome = container_reaper.release_containers(
+        [name], owner_release=True, expected_ids={name: cid},
+        expected_generations={name: generation}, reason="pane-exit")
+    if outcome.error or outcome.failures or outcome.release_refused:
+        _log.warning("Pane cleanup deferred for %s: %s %s", name,
+                     outcome.summary(), outcome.release_refused)
 
 
 def remove_container(name: str) -> None:

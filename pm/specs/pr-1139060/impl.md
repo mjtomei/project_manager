@@ -1,6 +1,6 @@
 # pr-1139060 — Container lifecycle: release, reconcile, verified reuse, real launch errors
 
-## Background (grounded in current code)
+## Background (pre-fix baseline; superseded by the requirements below)
 
 - `pm_core/container.py::create_container` reuses any *running* container
   with the requested name (`container_is_running`) — no check that setup
@@ -84,9 +84,10 @@ permission to proceed unlocked. An unknown identity at final recheck is a failed
 retryable cleanup rather than permission to delete by name.
 
 ### R3 — Release on finish / supersede / cancel / launch failure
-- **impl / review / sign-off**: the pane EXIT trap removes the container by
-  **id** (not name) so a late trap cannot kill a newer container of the same
-  name; review/sign-off pre-launch removal uses the session-tagged name
+- **impl / review / sign-off**: the pane EXIT trap releases the captured container
+  **id and recovery generation**, rechecked under the name's launch lock, so a
+  late trap cannot kill a replacement or restarted container;
+  review/sign-off pre-launch removal uses the session-tagged name
   (`_make_container_name(label, session_tag)`), fixing the stale-reuse bug;
   if tmux window creation fails after the container was created, the
   launcher releases it.
@@ -123,6 +124,13 @@ retryable cleanup rather than permission to delete by name.
   If the QA run-end release is skipped because another reconcile holds the
   reaper lock, it is re-queued in the background (live panes would
   otherwise keep those containers "owned" forever).
+  Owner release captures the launch's container ID and restart generation in
+  scenario/resume state. It persists that identity atomically before inventory or
+  reaper-lock acquisition; later passes retry it even when inventory was unavailable.
+  Replacements/restarts are never adopted by a delayed request. Temporary retention
+  or a launch lock defers cleanup without erasing the request or last failure.
+  Pane EXIT uses this same identity-bound release rather than raw runtime removal,
+  so explicit retention and concurrent restart are respected.
   Workdirs, captures, transcripts, QA workdirs are never touched.
 
 ### R4 — Reconcile on startup and periodically
@@ -151,6 +159,9 @@ Single-flight across processes via an fcntl lock (a concurrent caller skips).
   exists, finish post-setup in place (idempotent) and re-verify; otherwise (or
   if finishing fails) remove and recreate — but if the incomplete container
   has a live owning pane and cannot be finished, raise instead of killing it.
+- Failed/unknown running-state inspection refuses recreation; it is not proof
+  of absence. Required setup commands fail before readiness is written. Fresh
+  creation verifies push-proxy connectivity as well as reuse.
 - Any failure after `run` (sentinel timeout, exec error, cp failure,
   keyring) removes the partial container (and releases the proxy if unused)
   before raising.
@@ -223,8 +234,9 @@ container cleared it and kept its files.  Running state is not health.
   ownership and refuses while a live pane uses the container unless `--force`.
   Checking after lock acquisition protects a session that attached while the
   command waited for a concurrent launch. Prints PIDs before → after.
-  Before restart, advance a host-side per-name cleanup generation; pane EXIT
-  traps capture that generation before exec and skip container/proxy removal if
+  Runtime ID/short-ID/slash-name aliases resolve to the canonical name before
+  taking the launch lock. Before restart, advance a host-side per-name cleanup
+  generation; pane EXIT traps capture that generation before exec and skip container/proxy removal if
   it changed. This protects the restarted filesystem even when an old EXIT trap
   arrives after restart returns. Failure to write the generation refuses restart.
 - Retry scheduling of dead QA workers stays with pr-1ab9075.
@@ -270,8 +282,8 @@ container cleared it and kept its files.  Running state is not health.
 
 - E1 Same scenario number on different PRs/runs: ownership is exact name
   match in pane commands; names embed PR and loop id.
-- E2 Late EXIT trap from a killed review window after relaunch: removes by
-  container id, so the new container survives.
+- E2 Late EXIT trap from a killed review window after relaunch: releases only
+  the captured container ID/generation, so the new container survives.
 - E3 Concurrent `reconcile` + QA launch of the same container: per-name lock
   + 120 s launch grace.
 - E4 Concurrent impl/QA on the same PR sharing a proxy: release checks the

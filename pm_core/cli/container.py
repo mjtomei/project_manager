@@ -445,6 +445,11 @@ def container_restart(name: str, force: bool):
     """
     from pm_core import container as container_mod
     from pm_core import container_reaper
+    try:
+        name = container_mod.canonical_container_name(name)
+    except (container_mod.ContainerError, OSError, subprocess.TimeoutExpired) as exc:
+        click.echo(str(exc), err=True)
+        raise SystemExit(1)
     before = (container_mod.pids_usage() or {}).get(name)
     with container_mod.launch_lock(name, timeout=60) as locked:
         if not locked:

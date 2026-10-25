@@ -610,7 +610,7 @@ class ProjectManagerApp(App):
             return
 
         def _report(outcome) -> None:
-            if outcome.failures:
+            if outcome.failures or outcome.error:
                 msg = (f"Container cleanup: {outcome.summary()} — retry with "
                        f"'pm container reap'")
             elif outcome.pid_pressure:

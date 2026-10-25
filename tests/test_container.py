@@ -870,7 +870,7 @@ class TestBuildExecCmd:
     @patch("pm_core.container._get_runtime", return_value="docker")
     def test_includes_cleanup_by_default(self, mock_runtime):
         cmd = build_exec_cmd("my-container", "claude 'hi'")
-        assert "docker rm -f" in cmd
+        assert "release_on_exit" in cmd
         # Cleanup is wrapped in a bash trap for robustness against kill-pane
         assert cmd.startswith("bash -c ")
         assert "trap " in cmd
@@ -880,14 +880,10 @@ class TestBuildExecCmd:
     def test_cleanup_removes_proxy_socket(self, mock_runtime):
         cmd = build_exec_cmd("my-container", "claude 'hi'",
                              proxy_socket_path="/tmp/pm-push-proxy-x/push.sock")
-        assert "rm -f" in cmd
+        assert "release_on_exit" in cmd
         assert "/tmp/pm-push-proxy-x/push.sock" in cmd
-        assert "rmdir" in cmd
-        assert "/tmp/pm-push-proxy-x" in cmd
-        # Socket removal should come before container rm
-        rm_pos = cmd.index("rm -f")
-        runtime_rm_pos = cmd.index("docker rm")
-        assert rm_pos < runtime_rm_pos
+        # The shared lifecycle release stops proxies only after confirmed removal.
+        assert "rm -f" not in cmd
 
     @patch("pm_core.container._get_runtime", return_value="docker")
     def test_no_cleanup_when_disabled(self, mock_runtime):
@@ -911,7 +907,7 @@ class TestBuildExecCmd:
     def test_uses_configured_runtime(self, mock_runtime):
         cmd = build_exec_cmd("my-container", "claude 'hi'")
         assert "podman exec -it" in cmd
-        assert "podman rm -f" in cmd
+        assert "release_on_exit" in cmd
         # Podman should NOT use -u pm (user is already mapped via --userns=keep-id)
         assert f"-u {_CONTAINER_USER}" not in cmd
 
@@ -1169,7 +1165,8 @@ class TestCreateContainerPushProxy:
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
 
-        with patch.object(Path, "is_dir", return_value=False):
+        with patch.object(Path, "is_dir", return_value=False), \
+             patch("pm_core.push_proxy.proxy_is_alive", return_value=True):
             create_container(name="test", config=config, workdir=Path("/w"),
                              allowed_push_branch="pm/pr-123")
 
@@ -1209,7 +1206,8 @@ class TestCreateContainerPushProxy:
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
 
-        with patch.object(Path, "is_dir", return_value=False):
+        with patch.object(Path, "is_dir", return_value=False), \
+             patch("pm_core.push_proxy.proxy_is_alive", return_value=True):
             create_container(name="test", config=config, workdir=Path("/w"),
                              allowed_push_branch="pm/pr-123")
 

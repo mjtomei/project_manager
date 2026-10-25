@@ -12172,6 +12172,26 @@ prs:
       claim or waiver; outstanding scenarios and independent sign-off remain.'
     created_at: '2026-10-25T18:09:44Z'
     last_edited: '2026-10-25T18:09:44Z'
+  - id: note-377873d
+    text: 'Review-loop 6427 i4 (actual main model chatgpt/gpt-6-astra-high): fixed
+      identity-bound durable owner release across inventory failures/busy locks/retention,
+      preserved cleanup failures on deferred keep, and replaced unconditional EXIT
+      removal with the shared retention/restart-safe reaper. QA persists captured
+      ID/generation in resume state. Fixed unknown running inspection triggering recreation,
+      required setup commands continuing past failure, fresh dead proxy acceptance,
+      restart ID aliases using wrong lock/generation, inaccessible tmux socket paths
+      treated as absent, and cleanup/debug error visibility. Three same-assertion
+      release reproductions fail on 2141cce7 and pass fixed; setup/trap before-fix
+      regressions preserved. Focused suite 356 passed; full sanitized suite completed
+      successfully (exact count in /pm-captures/review-6427-i4/full-suite-final.log).
+      Two helpers were incorrectly routed explicitly to Fable and hit weekly HTTP429
+      limits; not resumed, both worktrees/partial test file/failure evidence preserved,
+      unfinished work completed in this Astra session. See /pm-captures/review-6427-i4/README.md
+      and helper-recovery.txt. No real-container QA claim or waiver; all blocked runtime
+      coverage and independent sign-off remain. Unrelated project.yaml model/handoff
+      edits and manual merge gate preserved.'
+    created_at: '2026-10-25T18:56:49Z'
+    last_edited: '2026-10-25T18:56:49Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

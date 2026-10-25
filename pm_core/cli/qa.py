@@ -587,17 +587,21 @@ End with a summary of which steps work and which don't, then one of:
         os.chdir(run_cwd)
         os.execvp("bash", ["bash", "-c", shell_cmd])
     else:
+        launch_error = "no pane returned"
         try:
             pane = tmux_mod.new_window_get_pane(
                 session, window_name, shell_cmd,
                 cwd=run_cwd, switch=False,
             )
-        except Exception:
+        except Exception as exc:
+            launch_error = str(exc)
+            if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
+                launch_error += f": {exc.stderr}"
             pane = None
         if not pane:
             if use_containers:
-                container_mod.discard_container(cname)
-            click.echo(f"Failed to create debug window '{window_name}'.", err=True)
+                container_mod.discard_unowned_container(cname, container_id=container_id)
+            click.echo(f"Failed to create debug window '{window_name}': {launch_error}", err=True)
             raise SystemExit(1)
         click.echo(f"Launched debug session")
         click.echo(f"  Instruction: {item['title']}")

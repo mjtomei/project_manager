@@ -156,6 +156,8 @@ class QAScenario:
     pane_id: str | None = None
     worktree_path: str | None = None
     container_name: str | None = None
+    container_id: str | None = None
+    container_generation: str | None = None
     transcript_path: str | None = None
     session_id: str | None = None
     concretize_session_id: str | None = None
@@ -840,6 +842,8 @@ def _scenario_to_resume_dict(s: QAScenario) -> dict:
         "pane_id": s.pane_id,
         "worktree_path": s.worktree_path,
         "container_name": s.container_name,
+        "container_id": s.container_id,
+        "container_generation": s.container_generation,
         "transcript_path": s.transcript_path,
         "session_id": s.session_id,
         "concretize_session_id": s.concretize_session_id,
@@ -864,6 +868,8 @@ def _scenario_from_resume_dict(d: dict) -> QAScenario:
         pane_id=d.get("pane_id"),
         worktree_path=d.get("worktree_path"),
         container_name=d.get("container_name"),
+        container_id=d.get("container_id"),
+        container_generation=d.get("container_generation"),
         transcript_path=d.get("transcript_path"),
         session_id=d.get("session_id"),
         concretize_session_id=d.get("concretize_session_id"),
@@ -2296,7 +2302,7 @@ def _launch_scenarios_in_containers(
             session_tag=_session_tag,
         )
         try:
-            container_mod.create_qa_container(
+            scenario.container_id = container_mod.create_qa_container(
                 name=cname,
                 config=config,
                 workdir=clone_path,
@@ -2308,6 +2314,7 @@ def _launch_scenarios_in_containers(
                 scenario=scenario.index,
             )
             scenario.container_name = cname
+            scenario.container_generation = container_mod.cleanup_generation(cname)
         except Exception as exc:
             _log.error("Failed to create container for scenario %d — aborting scenario",
                        scenario.index, exc_info=True)
@@ -2551,7 +2558,7 @@ def _ensure_scenario_container(scenario: QAScenario, state: QALoopState,
         return False
     clone_path = Path(scenario.worktree_path)
     try:
-        container_mod.create_qa_container(
+        scenario.container_id = container_mod.create_qa_container(
             name=scenario.container_name,
             config=container_mod.load_container_config(),
             workdir=clone_path,
@@ -2567,6 +2574,8 @@ def _ensure_scenario_container(scenario: QAScenario, state: QALoopState,
                      scenario.index, exc)
         _record_launch_failure(state, scenario, str(exc))
         return False
+    from pm_core import container_reaper
+    scenario.container_generation = container_reaper.restart_generation(scenario.container_name)
     if _is_launch_failure(state, scenario.index):
         state.scenario_verdict_reasons.pop(scenario.index, None)  # recovered
     return True
@@ -4364,8 +4373,13 @@ def _release_scenario_containers(state: QALoopState, session: str, *,
         names.append(sc.container_name)
     if not names:
         return False
+    released = state.scenarios if scenarios is None else scenarios
+    identities = {s.container_name: s.container_id for s in released if s.container_id}
+    generations = {s.container_name: s.container_generation for s in released
+                   if s.container_generation is not None}
     outcome = container_reaper.release_containers(
-        names, reason="qa-run-end", owner_release=True)
+        names, reason="qa-run-end", owner_release=True,
+        expected_ids=identities, expected_generations=generations)
     _log.info("QA %s/%s released containers: %s", state.pr_id,
               state.loop_id, outcome.summary())
     if outcome.skipped:
@@ -4373,7 +4387,12 @@ def _release_scenario_containers(state: QALoopState, session: str, *,
         # panes would keep them "owned" from the reconciler's point of view,
         # so retry the owner release in the background rather than leak.
         container_reaper.release_containers(
-            names, reason="qa-run-end", owner_release=True, wait=False)
+            names, reason="qa-run-end", owner_release=True, wait=False,
+            expected_ids=identities, expected_generations=generations)
+    if outcome.error or outcome.release_refused:
+        detail = outcome.error or str(outcome.release_refused)
+        state.latest_output += f" [container cleanup deferred: {detail} — retry with 'pm container reap']"
+        return True
     if outcome.failures:
         state.latest_output += (
             f" [container cleanup failed for {len(outcome.failures)}"

@@ -210,7 +210,7 @@ class TestReaperInventory:
         assert not out.error
         assert out.removed == [orphan]
         assert reaper.is_retained(kept, "id-" + kept)
-        assert not reaper.pending_failures()
+        assert kept in reaper.pending_failures()  # retention defers the failed cleanup
 
 
 def _info(name, **kw):
@@ -471,7 +471,9 @@ class TestReaperOwnership:
         fake_env["containers"] = [_info(a, created=time.time()), _info(b)]
         fake_env["panes"] = _Panes([f"podman exec -it {a} x", f"podman exec -it {b} x"])
         reaper.retain(b)
-        out = reaper.release_containers([a, b], owner_release=True)
+        out = reaper.release_containers([a, b], owner_release=True,
+                                        expected_ids={n: "id-" + n for n in (a, b)},
+                                        expected_generations={a: "", b: ""})
         assert out.removed == [a]
 
     def test_failed_owner_release_is_retried_despite_live_pane(self, fake_env):
@@ -483,7 +485,9 @@ class TestReaperOwnership:
         fake_env["panes"] = _Panes([f"podman exec -it {name} x",
                                     f"podman exec -it {other} x"])
         fake_env["fail"] = {name}
-        out = reaper.release_containers([name], owner_release=True)
+        out = reaper.release_containers([name], owner_release=True,
+                                  expected_ids={name: "id-" + name},
+                                  expected_generations={name: ""})
         assert name in out.failures
         assert reaper.pending_failures()[name]["owner_release"] is True
 
@@ -499,7 +503,9 @@ class TestReaperOwnership:
         fake_env["containers"] = [_info(name)]
         fake_env["panes"] = _Panes([f"podman exec -it {name} x"])
         fake_env["fail"] = {name}
-        reaper.release_containers([name], owner_release=True)
+        reaper.release_containers([name], owner_release=True,
+                                  expected_ids={name: "id-" + name},
+                                  expected_generations={name: ""})
         assert reaper.pending_failures()[name]["id"] == "id-" + name
 
         fake_env["fail"] = set()
@@ -775,7 +781,7 @@ class TestExecTrapById:
     def test_trap_removes_by_id(self, monkeypatch):
         monkeypatch.setattr(cm, "_get_runtime", lambda: "podman")
         cmd = cm.build_exec_cmd("pm-t-review-pr-1", "claude", container_id="abc123")
-        assert "rm -f abc123" in cmd
+        assert "release_on_exit" in cmd and "abc123" in cmd
         assert "rm -f pm-t-review-pr-1" not in cmd
 
 

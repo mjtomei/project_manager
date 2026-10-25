@@ -27,10 +27,12 @@ periodic, QA run start, pre-launch keyring relief) and the manual
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -118,6 +120,85 @@ def _prune_retain_markers(inventory: dict[str, str], since: float) -> None:
         except (TypeError, ValueError):
             pass
         unretain(name)
+
+
+# ---------------------------------------------------------------------------
+# Durable, identity-bound owner releases
+# ---------------------------------------------------------------------------
+
+def _release_dir() -> Path:
+    return container_mod.container_state_dir() / "release"
+
+
+def restart_generation(name: str) -> str | None:
+    try:
+        return container_mod.cleanup_generation(name)
+    except OSError:
+        return None
+
+
+def capture_identity(name: str) -> tuple[str, str] | None:
+    try:
+        cid = container_mod.current_container_id(name)
+        generation = restart_generation(name)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return (cid, generation) if cid and generation is not None else None
+
+
+def _record_release(name: str, cid: str, generation: str, reason: str) -> None:
+    directory = _release_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    # Runtime names/IDs are normally safe; hash unusual input instead of
+    # letting an alias or malformed state escape the release directory.
+    key = f"{name}@{cid}"
+    if generation:
+        key += "-" + hashlib.sha256(generation.encode()).hexdigest()[:16]
+    if len(key) > 220 or not re.fullmatch(r"[A-Za-z0-9_.@-]+", key):
+        key = hashlib.sha256(key.encode()).hexdigest()
+    fd, temp = tempfile.mkstemp(dir=directory, prefix=".release-")
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump({"name": name, "id": cid, "generation": generation,
+                       "at": time.time(), "reason": reason}, stream)
+        os.replace(temp, directory / f"{key}.json")
+    finally:
+        Path(temp).unlink(missing_ok=True)
+
+
+def _release_records() -> list[tuple[Path, dict]]:
+    records = []
+    for path in _release_dir().glob("*.json"):
+        try:
+            rec = json.loads(path.read_text())
+            if (isinstance(rec, dict) and isinstance(rec.get("name"), str)
+                    and rec["name"] and isinstance(rec.get("id"), str) and rec["id"]
+                    and isinstance(rec.get("generation"), str)
+                    and isinstance(rec.get("at"), (int, float))):
+                records.append((path, rec))
+        except (OSError, ValueError):
+            pass
+    return records
+
+
+def pending_releases() -> dict[str, dict]:
+    return {rec["name"]: rec for _, rec in sorted(
+        _release_records(), key=lambda item: item[1].get("at", 0))}
+
+
+def _prune_releases(out: "Outcome", scope: "Scope", since: float) -> None:
+    inventory = {d.info.name: d.info for d in out.decisions}
+    for path, rec in _release_records():
+        if rec.get("at", 0) >= since:
+            continue
+        info = inventory.get(rec["name"])
+        absent = info is None and (scope == Scope() or
+                                  scope.names is not None and rec["name"] in scope.names)
+        stale = info is not None and (
+            info.id != rec["id"] or
+            restart_generation(info.name) not in (None, rec["generation"]))
+        if absent or stale or rec["name"] in out.removed:
+            path.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -299,8 +380,13 @@ class _PaneCache:
 
 
 def _query_server(server: _Server) -> _PaneSnapshot:
-    if server.socket_file and not os.path.exists(server.socket_file):
-        return _PaneSnapshot(panes=[])  # no server → no panes
+    if server.socket_file:
+        try:
+            os.stat(server.socket_file)
+        except FileNotFoundError:
+            return _PaneSnapshot(panes=[])  # no server → no panes
+        except OSError:
+            return _PaneSnapshot(panes=None)  # inaccessible is not absent
     env = {k: v for k, v in os.environ.items() if k != "TMUX"}
     try:
         r = subprocess.run(
@@ -439,6 +525,8 @@ class Scope:
     # don't count as owners and the launch grace doesn't apply (retention
     # and in-flight launches still do).
     owner_release: bool = False
+    expected_ids: dict[str, str] = field(default_factory=dict)
+    expected_generations: dict[str, str] = field(default_factory=dict)
 
     def matches(self, info: ContainerInfo) -> bool:
         if self.names is not None and info.name not in self.names:
@@ -477,6 +565,7 @@ class Decision:
     reason: str
     # Released by the run that launched it: its own panes don't keep it.
     released: bool = False
+    release_generation: str | None = None
 
 
 @dataclass
@@ -485,6 +574,7 @@ class Outcome:
     decisions: list[Decision] = field(default_factory=list)
     removed: list[str] = field(default_factory=list)
     failures: dict[str, str] = field(default_factory=dict)
+    release_refused: dict[str, str] = field(default_factory=dict)
     # Failed removals of containers their run released (retried as released).
     released_failures: set[str] = field(default_factory=set)
     proxies_released: list[str] = field(default_factory=list)
@@ -531,14 +621,29 @@ class Outcome:
 
 def _decide(info: ContainerInfo, scope: Scope, cache: _PaneCache,
             prs: _PrStatus, now: float,
-            pending_release: dict[str, str] | None = None) -> Decision:
+            pending_release: dict[str, str] | None = None,
+            release_records: list[dict] | None = None) -> Decision:
+    if scope.owner_release and info.name in scope.expected_ids:
+        if info.id != scope.expected_ids[info.name]:
+            return Decision(info, "keep", "replaced since owner release")
+        generation = restart_generation(info.name)
+        if generation != scope.expected_generations.get(info.name):
+            return Decision(info, "keep", "restarted or generation unknown since owner release")
     if is_retained(info.name, info.id) and not scope.include_retained:
         return Decision(info, "keep", "explicitly retained (pm container retain)")
     if container_mod.launch_in_progress(info.name):
         return Decision(info, "keep", "launch in progress")
-    if scope.owner_release:
-        return Decision(info, "remove", "released by its run", released=True)
-    if _is_pending_release(info, pending_release or {}):
+    releases = release_records or []
+    matching = [rec for rec in releases if rec["id"] == info.id]
+    if matching:
+        generation = restart_generation(info.name)
+        if generation is None:
+            return Decision(info, "keep", "cleanup generation unknown")
+        if any(generation == rec["generation"] for rec in matching):
+            return Decision(info, "remove", "released by its run", released=True,
+                            release_generation=generation)
+    if (not releases and _is_pending_release(info, pending_release or {})
+            and restart_generation(info.name) == ""):
         # Its run already let it go but the removal failed; the run's panes
         # are still exec'd into it and would otherwise "own" it forever.
         return Decision(info, "remove", "released by its run (retrying failed removal)",
@@ -572,7 +677,7 @@ def _is_pending_release(info: ContainerInfo, pending: dict[str, str]) -> bool:
     if info.name not in pending:
         return False
     rec_id = pending[info.name]
-    return not rec_id or not info.id or rec_id == info.id
+    return bool(rec_id and info.id and rec_id == info.id)
 
 
 def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
@@ -597,6 +702,12 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
                 return False, "error: container identity unknown during removal re-check"
             if current and current != info.id:
                 return False, "skipped: replaced by a newer launch"
+        if d.release_generation is not None:
+            generation = restart_generation(info.name)
+            if generation is None:
+                return False, "error: cleanup generation unknown during removal re-check"
+            if generation != d.release_generation:
+                return False, "skipped: container restarted since owner release"
         if not d.released:
             owners, indeterminate = _owner_panes(info, _PaneCache(), fresh=True)
             if owners:
@@ -690,10 +801,13 @@ def plan(scope: Scope | None = None) -> Outcome:
     pending_release = {
         n: str(f.get("id") or "") for n, f in pending_failures().items()
         if isinstance(f, dict) and f.get("owner_release")}
+    releases: dict[str, list[dict]] = {}
+    for _, rec in _release_records():
+        releases.setdefault(rec["name"], []).append(rec)
     for info in infos:
         if scope.matches(info):
             out.decisions.append(_decide(info, scope, cache, prs, now,
-                                         pending_release))
+                                         pending_release, releases.get(info.name)))
     return out
 
 
@@ -742,6 +856,7 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
             _note_pid_pressure(out)
         full_pass = scope == Scope()
         inventory = {d.info.name for d in out.decisions}
+        _prune_releases(out, scope, listed_at)
         _record(out, scope, reason, inventory=inventory if full_pass else None)
         if full_pass:
             _prune_lock_files(inventory)
@@ -836,18 +951,42 @@ def _drain_bg_queue() -> None:
 
 def release_containers(names: list[str], *, reason: str = "release",
                        wait: bool = True,
-                       owner_release: bool = False) -> Outcome | None:
+                       owner_release: bool = False,
+                       expected_ids: dict[str, str] | None = None,
+                       expected_generations: dict[str, str] | None = None) -> Outcome | None:
     """Release specific containers a run no longer needs.
 
     By default goes through the full ownership checks, so a container a
     human is still using (live pane) is kept.  ``owner_release=True`` is for
-    the run that launched them: its own panes are being ended on purpose,
-    so only retention and an in-flight relaunch keep a container.
+    the run that launched them: its own panes are being ended on purpose.
+    It must supply the captured container IDs and recovery generations; these
+    are persisted before inventory/locking so a later pass can retry safely.
+    Missing identity falls back to ordinary ownership checks, never name-only
+    force removal. Retention and an in-flight launch defer the request.
     """
     if not names:
         return Outcome(scope="no containers")
-    return reconcile(Scope(names=set(names), owner_release=owner_release),
-                     wait=wait, reason=reason)
+    refused = {}
+    if owner_release:
+        for name in names:
+            cid = (expected_ids or {}).get(name)
+            generation = (expected_generations or {}).get(name)
+            if not cid or generation is None:
+                refused[name] = "owner release requires captured id and generation"
+                continue
+            try:
+                _record_release(name, cid, generation, reason)
+            except OSError as exc:
+                refused[name] = f"could not persist owner release: {exc}"
+        if refused:
+            _log.warning("Owner release refused: %s", refused)
+    out = reconcile(Scope(names=set(names), owner_release=owner_release,
+                          expected_ids=dict(expected_ids or {}),
+                          expected_generations=dict(expected_generations or {})),
+                    wait=wait, reason=reason)
+    if out is not None:
+        out.release_refused.update(refused)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -874,7 +1013,12 @@ def _record(out: Outcome, scope: Scope, reason: str,
     if inventory is not None:
         failures = {k: v for k, v in failures.items() if k in inventory}
     for d in out.decisions:
-        failures.pop(d.info.name, None)
+        previous = failures.get(d.info.name, {})
+        if (d.info.name in out.removed or
+                previous.get("id") and previous["id"] != d.info.id or
+                previous.get("owner_release") and
+                restart_generation(d.info.name) not in (None, previous.get("generation", ""))):
+            failures.pop(d.info.name, None)
     ids = {d.info.name: d.info.id for d in out.decisions}
     for name, err in out.failures.items():
         failures[name] = {"error": err, "at": int(time.time()), "reason": reason}
@@ -882,6 +1026,9 @@ def _record(out: Outcome, scope: Scope, reason: str,
             failures[name]["owner_release"] = True
             if ids.get(name):
                 failures[name]["id"] = ids[name]
+            decision = next((d for d in out.decisions if d.info.name == name), None)
+            if decision and decision.release_generation is not None:
+                failures[name]["generation"] = decision.release_generation
     state = {
         "last_run": int(time.time()),
         "last_reason": reason,
@@ -901,4 +1048,8 @@ def _record(out: Outcome, scope: Scope, reason: str,
 
 
 def pending_failures() -> dict[str, dict]:
-    return dict(last_state().get("failures") or {})
+    failures = dict(last_state().get("failures") or {})
+    for name, rec in pending_releases().items():
+        failures.setdefault(name, {**rec, "owner_release": True,
+                                   "error": "owner release pending; retry with pm container reap"})
+    return failures
