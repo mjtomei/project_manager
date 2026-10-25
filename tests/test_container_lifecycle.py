@@ -1311,6 +1311,8 @@ class TestListNamesPrefixGuard:
 
         def _rt(*a, **k):
             calls.append(a)
+            if a[0] == "inspect":
+                return _cp(out='/pm-a-impl-pr-1\tcid\ttrue\trunning\t{}\n')
             return _cp(out="npm-cache\npm-a-impl-pr-1\nmy-pm-thing\n")
         monkeypatch.setattr(cm, "_run_runtime", _rt)
         assert cm.running_container_count() == 1

@@ -39,6 +39,8 @@ Requirements:
 """
 
 import contextlib
+import contextvars
+import functools
 import fcntl
 import hashlib
 import json
@@ -1028,6 +1030,17 @@ def qa_container_name(pr_id: str, loop_id: str, scenario_index: int,
 # Core container lifecycle
 # ---------------------------------------------------------------------------
 
+def _runtime_domain_operation(func):
+    """Bound runtime identity reuse to one synchronous lifecycle operation."""
+    @functools.wraps(func)
+    def wrapped(*args, **kwargs):
+        from pm_core.container_reaper import runtime_domain_scope
+        with runtime_domain_scope():
+            return func(*args, **kwargs)
+    return wrapped
+
+
+@_runtime_domain_operation
 def create_container(
     name: str,
     config: ContainerConfig,
@@ -1217,6 +1230,7 @@ def recent_launch(name: str, grace: float) -> bool:
         return False
 
 
+@_runtime_domain_operation
 def restart_container(name: str) -> None:
     """Restart *name* in place: ends every process inside (clearing PID or
     memory exhaustion) but keeps the container's filesystem, id and mounts.
@@ -1886,6 +1900,7 @@ def discard_container(name: str) -> None:
         _log.warning("Could not remove container %s", name, exc_info=True)
 
 
+@_runtime_domain_operation
 def discard_unowned_container(name: str, *, container_id: str | None = None,
                                generation: str | None = None,
                                allowed_owner_panes: set[str] | None = None) -> bool:
@@ -1913,6 +1928,12 @@ def discard_unowned_container(name: str, *, container_id: str | None = None,
             if container_id and current != container_id:
                 return False
             if generation is not None and cleanup_generation(name) != generation:
+                return False
+            # Review/sign-off preflight has no allocation to release. Another
+            # launcher may have just returned from create before attaching its
+            # pane; only the captured owner may discard during that lease.
+            if (not container_id or generation is None) and recent_launch(
+                    name, container_reaper.LAUNCH_GRACE):
                 return False
             if container_reaper.is_retained(name, current):
                 return False
@@ -1956,8 +1977,15 @@ def activity_owner(name: str) -> bool:
     """Whether an interactive (non-tmux) exec holds this allocation alive."""
     try:
         path = _lock_path(f"active-{name}")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a") as lock:
+        # Only interactive attachment creates this file. An absent file is
+        # unowned; the final removal recheck is serialized with attachment by
+        # the launch lock. Never unlink existing activity files: a waiter may
+        # already hold their inode open.
+        try:
+            lock = path.open("r")
+        except FileNotFoundError:
+            return False
+        with lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
@@ -1968,6 +1996,7 @@ def activity_owner(name: str) -> bool:
         raise ContainerError(f"Cannot check interactive owner of '{name}': {exc}") from exc
 
 
+@_runtime_domain_operation
 def run_interactive_exec(name: str, cid: str, generation: str,
                          state_dir: str, command: str, runtime: str,
                          hold_activity: str = "1") -> int:
@@ -2118,16 +2147,14 @@ def containers_for_pr(session_tag: str, pr_id: str) -> set[str] | None:
     Used to decide whether a shared push proxy is still needed.  Returns
     None when the runtime can't be queried (caller must assume "in use").
     """
-    names = _list_names(CONTAINER_PREFIX)
-    if names is None:
+    from pm_core.container_reaper import list_containers
+    inventory = list_containers()
+    if inventory is None:
         return None
-    users: set[str] = set()
-    for cname in names:
-        parsed = parse_container_name(cname)
-        if (parsed and parsed.session_tag == session_tag
-                and parsed.pr_id() == pr_id):
-            users.add(cname)
-    return users
+    # Use the same label-first identity as the reaper. A renamed managed
+    # container can still mount the shared proxy even without a parsed name.
+    return {info.name for info in inventory
+            if info.session_tag == session_tag and info.pr_id == pr_id}
 
 
 # ---------------------------------------------------------------------------
@@ -2314,6 +2341,7 @@ def _remove_captured_container(name: str, cid: str, generation: str) -> None:
         remove_container(name)
 
 
+@_runtime_domain_operation
 def remove_containers(names: list[str], *, workers: int = 4) -> tuple[list[str], dict[str, str]]:
     """Force-remove captured allocations with bounded parallelism.
 
@@ -2340,7 +2368,8 @@ def remove_containers(names: list[str], *, workers: int = 4) -> tuple[list[str],
     if not allocations:
         return removed, failures
     with ThreadPoolExecutor(max_workers=max(1, min(len(allocations), workers))) as ex:
-        futures = [(c, ex.submit(_remove_captured_container, c, cid, generation))
+        futures = [(c, ex.submit(contextvars.copy_context().run,
+                                _remove_captured_container, c, cid, generation))
                    for c, cid, generation in allocations]
         for cname, fut in futures:
             try:

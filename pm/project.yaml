@@ -12264,6 +12264,25 @@ prs:
       required.'
     created_at: '2026-10-25T20:29:32Z'
     last_edited: '2026-10-25T20:31:11Z'
+  - id: note-b8f1f98
+    text: 'Review-loop 6427 i9 (main and inherited helpers chatgpt/gpt-6-astra-high):
+      fixed identity-less preflight deleting another launch during its attachment
+      lease; label-aware shared-proxy user inventory; old proxy daemons leaking or
+      unlinking replacement sockets; QA viewed-concretizer preservation after early
+      status-write failure; and debug post-allocation command/foreground-exec cleanup
+      plus --branch tmux stderr masking. Reduced repeated runtime-domain lookups with
+      operation-local/thread-safe scopes, and stopped read-only activity probes creating
+      lock files. Retained generation tombstones and existing lock inodes deliberately
+      for stale-release safety. Existing lifecycle architecture retained; spec clarified.
+      Pre-fix failures reproduced, including actual proxy subprocess replacement/late-SIGTERM
+      controls. Focused: 871 initial integration tests, 357 final container tests,
+      237 isolated proxy/container tests, 43 QA integration tests, 18 integrated core
+      tests. Final sanitized full suite: 3668 passed, 4 warnings (2 existing AsyncMock,
+      2 Click deprecations); full-suite-final.log. Evidence/per-file notes: /pm-captures/review-6427-i9/README.md.
+      Existing model/handoff/manual-gate edits preserved outside commit. No real-container
+      QA claim or waiver; outstanding scenarios and independent sign-off remain.'
+    created_at: '2026-10-25T20:52:31Z'
+    last_edited: '2026-10-25T20:52:31Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

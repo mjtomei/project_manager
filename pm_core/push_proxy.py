@@ -27,6 +27,8 @@ Legacy requests without ``cmd`` are treated as push (backward compat).
 ``"workdir"`` is optional; omitting it falls back to ``self.workdir``.
 """
 
+import contextlib
+import hashlib
 import json
 import os
 import socket
@@ -109,6 +111,17 @@ def resolve_real_origin(repo_path: str, remote: str = "origin") -> str | None:
     return None
 
 
+@contextlib.contextmanager
+def _socket_lifecycle_lock(socket_path: str):
+    """Serialize bind/unlink, including late shutdown in an old daemon."""
+    from pm_core.container import ContainerError, _file_lock
+    key = hashlib.sha256(os.path.realpath(socket_path).encode()).hexdigest()
+    with _file_lock(f"proxy-socket-{key}", timeout=10) as locked:
+        if not locked:
+            raise ContainerError(f"Push proxy socket lifecycle lock unavailable: {socket_path}")
+        yield
+
+
 class PushProxy:
     """A single-client push proxy daemon for one container.
 
@@ -126,23 +139,33 @@ class PushProxy:
         self._server_socket: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._socket_identity: tuple[int, int, int] | None = None
+
+    def owns_socket(self) -> bool:
+        """Whether the published pathname still addresses this daemon's socket."""
+        try:
+            current = os.stat(self.socket_path)
+        except OSError:
+            return False
+        return self._socket_identity == (current.st_dev, current.st_ino, current.st_ctime_ns)
 
     def start(self) -> None:
         """Start the proxy in a background daemon thread."""
-        # Ensure parent directory exists
-        Path(self.socket_path).parent.mkdir(parents=True, exist_ok=True)
-        # Clean up stale socket
-        try:
-            os.unlink(self.socket_path)
-        except FileNotFoundError:
-            pass
+        with _socket_lifecycle_lock(self.socket_path):
+            Path(self.socket_path).parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.unlink(self.socket_path)
+            except FileNotFoundError:
+                pass
 
-        self._server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._server_socket.bind(self.socket_path)
-        # Make socket world-writable so the container user can connect
-        os.chmod(self.socket_path, 0o777)
-        self._server_socket.listen(1)
-        self._server_socket.settimeout(2.0)
+            self._server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self._server_socket.bind(self.socket_path)
+            # Make socket world-writable so the container user can connect
+            os.chmod(self.socket_path, 0o777)
+            identity = os.stat(self.socket_path)
+            self._socket_identity = (identity.st_dev, identity.st_ino, identity.st_ctime_ns)
+            self._server_socket.listen(1)
+            self._server_socket.settimeout(2.0)
 
         self._thread = threading.Thread(
             target=self._serve_loop, daemon=True,
@@ -162,19 +185,21 @@ class PushProxy:
                 pass
         if self._thread:
             self._thread.join(timeout=5)
-        try:
-            os.unlink(self.socket_path)
-        except FileNotFoundError:
-            pass
+        with _socket_lifecycle_lock(self.socket_path):
+            if self.owns_socket():
+                try:
+                    os.unlink(self.socket_path)
+                except FileNotFoundError:
+                    pass
         _log.info("Push proxy stopped: %s", self.socket_path)
 
     def _serve_loop(self) -> None:
         """Accept connections and handle push requests."""
         while not self._stop.is_set():
-            # If the socket file was removed externally (e.g. container
-            # cleanup in tmux), exit the loop so the thread terminates.
-            if not os.path.exists(self.socket_path):
-                _log.info("Push proxy socket removed, exiting: %s",
+            # A replacement can bind between polls without a missing-path
+            # observation. Retire this daemon on identity change as well.
+            if not self.owns_socket():
+                _log.info("Push proxy socket removed or replaced, exiting: %s",
                           self.socket_path)
                 break
             try:
@@ -645,13 +670,14 @@ def start_push_proxy(container_name: str, workdir: str,
         # Remove stale socket before spawning.  Docker creates a
         # *directory* when bind-mounting a non-existent socket path, so
         # handle both files and directories left over from old runs.
-        try:
-            os.unlink(sock_path)
-        except IsADirectoryError:
-            import shutil
-            shutil.rmtree(sock_path, ignore_errors=True)
-        except FileNotFoundError:
-            pass
+        with _socket_lifecycle_lock(sock_path):
+            try:
+                os.unlink(sock_path)
+            except IsADirectoryError:
+                import shutil
+                shutil.rmtree(sock_path, ignore_errors=True)
+            except FileNotFoundError:
+                pass
 
         _start_proxy_subprocess(sock_path, workdir, allowed_branch)
         _write_owner_file(sock_dir, session_tag, pr_id, workdir)
@@ -672,13 +698,14 @@ def start_push_proxy(container_name: str, workdir: str,
     sock_path = os.path.join(sock_dir, "push.sock")
     # Remove stale socket before spawning (see above for why we handle
     # IsADirectoryError).
-    try:
-        os.unlink(sock_path)
-    except IsADirectoryError:
-        import shutil
-        shutil.rmtree(sock_path, ignore_errors=True)
-    except FileNotFoundError:
-        pass
+    with _socket_lifecycle_lock(sock_path):
+        try:
+            os.unlink(sock_path)
+        except IsADirectoryError:
+            import shutil
+            shutil.rmtree(sock_path, ignore_errors=True)
+        except FileNotFoundError:
+            pass
 
     _start_proxy_subprocess(sock_path, workdir, allowed_branch)
 
@@ -691,24 +718,25 @@ def start_push_proxy(container_name: str, workdir: str,
 
 def _kill_proxy_socket(sock_path: str) -> None:
     """Stop a subprocess proxy by removing its socket (triggers exit) and clean up."""
-    sock_dir = str(Path(sock_path).parent)
-    # Resolve the real directory if sock_dir is a symlink
-    real_dir = os.path.realpath(sock_dir)
-    try:
-        os.unlink(sock_path)
-    except FileNotFoundError:
-        pass
-    # Clean up the symlink if sock_dir is one
-    if os.path.islink(sock_dir):
+    with _socket_lifecycle_lock(sock_path):
+        sock_dir = str(Path(sock_path).parent)
+        # Resolve the real directory if sock_dir is a symlink
+        real_dir = os.path.realpath(sock_dir)
         try:
-            os.unlink(sock_dir)
+            os.unlink(sock_path)
+        except FileNotFoundError:
+            pass
+        # Clean up the symlink if sock_dir is one
+        if os.path.islink(sock_dir):
+            try:
+                os.unlink(sock_dir)
+            except OSError:
+                pass
+        # Clean up the real directory
+        try:
+            os.rmdir(real_dir)
         except OSError:
             pass
-    # Clean up the real directory
-    try:
-        os.rmdir(real_dir)
-    except OSError:
-        pass
 
 
 _OWNER_FILE = "owner.json"
@@ -1045,7 +1073,7 @@ if __name__ == "__main__":
     _signal.signal(_signal.SIGTERM, lambda *_: _stop.set())
     _signal.signal(_signal.SIGINT, lambda *_: _stop.set())
     while not _stop.is_set():
-        if not os.path.exists(_sock):
+        if not proxy.owns_socket():
             break
         _stop.wait(2.0)
     proxy.stop()

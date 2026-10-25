@@ -78,6 +78,35 @@ def test_successful_retry_clears_launch_failure(scenario_state, monkeypatch):
     discard.assert_not_called()
 
 
+@pytest.mark.parametrize("viewed", [{"@5"}, {"@other"}, set()])
+def test_pre_worker_status_failure_preserves_viewed_concretizer(
+        scenario_state, monkeypatch, viewed):
+    from pm_core import container_reaper
+
+    state, scenario = scenario_state
+    clone = Path(scenario.worktree_path)
+    monkeypatch.setattr(qa_loop, "create_scenario_workdir",
+                        lambda *a, **k: (clone, clone.parent / "scratch"))
+    monkeypatch.setattr(qa_loop, "_build_concretize_cmd", lambda *a, **k: "concretizer")
+    monkeypatch.setattr(tmux, "new_window_get_pane", lambda *a, **k: "%5")
+    monkeypatch.setattr(qa_loop, "_write_status_file",
+                        MagicMock(side_effect=OSError("status disk full")))
+    monkeypatch.setattr(qa_loop, "_viewed_window_ids", lambda *a: viewed)
+    monkeypatch.setattr(tmux, "pane_window_id", lambda *a: "@5")
+    release = MagicMock(return_value=container_reaper.Outcome())
+    monkeypatch.setattr(container_reaper, "release_containers", release)
+
+    with pytest.raises(OSError, match="status disk full"):
+        qa_loop._launch_scenarios_in_containers(
+            state, {}, {"id": state.pr_id}, "pm-t", None, str(clone))
+    qa_loop._release_scenario_containers(state, "pm-t")
+    if "@5" in viewed:
+        release.assert_not_called()
+    else:
+        release.assert_called_once()
+    assert scenario.pane_id == "%5"
+
+
 @pytest.mark.parametrize("failure", [None, "exception", "build"])
 @pytest.mark.parametrize("viewed", [set(), {"@5"}, None])
 def test_worker_split_failure_keeps_real_launch_error(scenario_state, monkeypatch, failure, viewed):

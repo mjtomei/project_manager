@@ -476,7 +476,6 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     # Default to the current branch of the workdir (what the TUI session
     # is operating on), not the project base branch.
     if not branch:
-        import subprocess
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True, text=True, cwd=str(repo_root),
@@ -562,20 +561,26 @@ End with a summary of which steps work and which don't, then one of:
             click.echo(str(e), err=True)
             raise SystemExit(1)
 
-        claude_cmd = build_claude_shell_cmd(
-            prompt=prompt,
-            cwd=container_mod._CONTAINER_WORKDIR,
-            write_dir=str(clone_path),
-            session_type="qa_author",
-        )
-        # The debug container has its own (unshared, no PR) push proxy, so
-        # the exit trap stops it along with the container.
-        from pm_core.push_proxy import get_proxy_socket_path
-        shell_cmd = container_mod.build_exec_cmd(
-            cname, claude_cmd, cleanup=True, container_id=container_id,
-            generation=allocation_identity.get("generation"),
-            proxy_socket_path=get_proxy_socket_path(cname),
-            interactive_owner=foreground)
+        try:
+            claude_cmd = build_claude_shell_cmd(
+                prompt=prompt,
+                cwd=container_mod._CONTAINER_WORKDIR,
+                write_dir=str(clone_path),
+                session_type="qa_author",
+            )
+            # Debug has its own proxy; its EXIT release stops it too.
+            from pm_core.push_proxy import get_proxy_socket_path
+            shell_cmd = container_mod.build_exec_cmd(
+                cname, claude_cmd, cleanup=True, container_id=container_id,
+                generation=allocation_identity.get("generation"),
+                proxy_socket_path=get_proxy_socket_path(cname),
+                interactive_owner=foreground)
+        except Exception as exc:
+            container_mod.discard_unowned_container(
+                cname, container_id=container_id,
+                generation=allocation_identity.get("generation"))
+            click.echo(f"Failed to prepare debug session: {exc}", err=True)
+            raise SystemExit(1)
         run_cwd = str(qa_workdir)
     else:
         shell_cmd = build_claude_shell_cmd(
@@ -588,8 +593,16 @@ End with a summary of which steps work and which don't, then one of:
     if foreground:
         click.echo(f"Debug: {item['title']}")
         click.echo(f"  Workdir: {qa_workdir}")
-        os.chdir(run_cwd)
-        os.execvp("bash", ["bash", "-c", shell_cmd])
+        try:
+            os.chdir(run_cwd)
+            os.execvp("bash", ["bash", "-c", shell_cmd])
+        except OSError as exc:
+            if use_containers:
+                container_mod.discard_unowned_container(
+                    cname, container_id=container_id,
+                    generation=allocation_identity.get("generation"))
+            click.echo(f"Failed to launch debug session: {exc}", err=True)
+            raise SystemExit(1)
     else:
         launch_error = "no pane returned"
         try:

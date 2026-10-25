@@ -2352,9 +2352,10 @@ def _launch_scenarios_in_containers(
             _record_launch_failure(state, scenario, exc)
             return
 
-        # Set window_name now so the status dashboard can navigate to
-        # the concretizer window during the concretization phase.
+        # Record the concretizer pane too: if status persistence fails before
+        # worker launch, run-end cleanup must still protect a viewed window.
         scenario.window_name = win_name
+        scenario.pane_id = concretize_pane
         with pending_lock:
             pending.append((scenario, concretize_pane, win_name, cname, transcript,
                             clone_path, instruction_content))

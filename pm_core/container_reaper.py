@@ -27,6 +27,8 @@ periodic, QA run start, pre-launch keyring relief) and the manual
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import json
 import os
@@ -64,9 +66,41 @@ def _retention_path(name: str, container_id: str = "") -> Path:
     return _retain_dir() / name
 
 
+# An immutable ContextVar value keeps nested calls in one lifecycle operation
+# cheap without sharing mutable caches across threads or retaining stale daemon
+# identities between operations. Unknown identities are deliberately not cached.
+_domain_cache = contextvars.ContextVar("container_runtime_domain", default=None)
+
+
+@contextlib.contextmanager
+def runtime_domain_scope():
+    """Reuse successful runtime identity probes only within this operation."""
+    if _domain_cache.get() is not None:
+        yield
+        return
+    token = _domain_cache.set((None, None))
+    try:
+        yield
+    finally:
+        _domain_cache.reset(token)
+
+
 def _runtime_domain() -> dict | None:
     from pm_core.push_proxy import runtime_domain
-    return runtime_domain()
+    cached = _domain_cache.get()
+    if cached is None:
+        return runtime_domain()
+    # Runtime selection and config/connection environment may change even in
+    # a nested operation. Do not reuse another store's identity in that case.
+    key = (container_mod._get_runtime(), os.getcwd(), tuple(sorted(os.environ.items())))
+    if cached[0] == key:
+        return dict(cached[1])
+    domain = runtime_domain()
+    if domain is not None:
+        _domain_cache.set((key, dict(domain)))
+    else:
+        _domain_cache.set((None, None))
+    return domain
 
 
 def _retain_record(name: str, container_id: str = "") -> dict | None:
@@ -887,6 +921,7 @@ def _release_unused_proxies(scope: Scope) -> list[str]:
     return released
 
 
+@runtime_domain_scope()
 def plan(scope: Scope | None = None) -> Outcome:
     """Classify containers in *scope* without changing anything."""
     scope = scope or Scope()
@@ -914,6 +949,7 @@ def plan(scope: Scope | None = None) -> Outcome:
 _SKIP_IF_BUSY = frozenset({"auto", "startup", "periodic", "keyring-pressure"})
 
 
+@runtime_domain_scope()
 def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
     timeout = 0 if reason in _SKIP_IF_BUSY else 120
     with container_mod._file_lock("reaper", timeout=timeout) as got:
@@ -934,7 +970,11 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
         if targets:
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=min(REMOVE_WORKERS, len(targets))) as ex:
-                results = list(ex.map(lambda d: (d, _remove_checked(d, scope)), targets))
+                # Each worker inherits the successful inventory-time probe,
+                # but gets its own context so nested changes cannot race peers.
+                futures = [(d, ex.submit(contextvars.copy_context().run,
+                                         _remove_checked, d, scope)) for d in targets]
+                results = [(d, future.result()) for d, future in futures]
             for d, (ok, msg) in results:
                 if ok:
                     out.removed.append(d.info.name)
@@ -1047,6 +1087,7 @@ def _drain_bg_queue() -> None:
                   on_done=on_done)
 
 
+@runtime_domain_scope()
 def release_containers(names: list[str], *, reason: str = "release",
                        wait: bool = True,
                        owner_release: bool = False,

@@ -98,7 +98,9 @@ retryable cleanup rather than permission to delete by name.
   attachment, including QA concretizer and worker commands; stale commands
   cannot enter a replacement or a recovered allocation;
   review/sign-off pre-launch removal uses the session-tagged name
-  (`_make_container_name(label, session_tag)`), fixing the stale-reuse bug;
+  (`_make_container_name(label, session_tag)`), fixing the stale-reuse bug,
+  and respects a recent attachment lease when it has no captured allocation;
+  only an identity-bound failed-attachment discard may bypass that lease;
   if tmux window creation fails after the container was created, the
   launcher releases it only after checking live/unknown ownership under the
   launch lock. Pane discovery failure is not proof that attachment failed;
@@ -126,7 +128,8 @@ retryable cleanup rather than permission to delete by name.
   PR-scoped reap after killing windows (the merge is not blocked).
 - **Push proxies**: a shared `(session_tag, pr_id)` proxy is stopped only
   when the runtime reports **no container** (any state) labeled/named for
-  that tag+PR, checked under a per-proxy fcntl lock; `create_container` holds
+  that tag+PR (using the reaper's label-first inventory, with legacy name
+  fallback), checked under a per-proxy fcntl lock; `create_container` holds
   that lock from proxy start until `run` returns so a concurrent release
   cannot stop a proxy a new container is about to mount. Reuse holds the same
   proxy lock while validating its runtime domain or repairing a dead socket;
@@ -137,7 +140,11 @@ retryable cleanup rather than permission to delete by name.
   from the runtime user inventory. Inspect errors other than explicit absence
   leave cleanup failed and retryable, not falsely successful.
   A per-container (unshared: qa-debug, untagged) proxy is stopped whenever
-  its container is removed, by whichever process removes it.
+  its container is removed, by whichever process removes it. Proxy daemons
+  track the published socket identity, retire when replaced (not only when
+  its pathname disappears), and unlink only their own socket. Bind/unlink
+  operations share a bounded path-keyed lock, so delayed old shutdown cannot
+  remove a newly bound replacement socket.
   If the QA run-end release is skipped because another reconcile holds the
   reaper lock, it is re-queued in the background (live panes would
   otherwise keep those containers "owned" forever).
@@ -150,7 +157,12 @@ retryable cleanup rather than permission to delete by name.
   so explicit retention and concurrent restart are respected.
   Initial QA launch as well as polling, status-write and resume-write errors
   still run allocation release in a finally path, preserving the same
-  human/retention/ownership exceptions. Temporary launch-batch slicing must
+  human/retention/ownership exceptions. Record the concretizer pane as soon as
+  its window opens so an early status-write failure can still identify and keep
+  a viewed window before the worker pane exists. QA debug also releases its
+  captured allocation if command preparation or foreground shell exec fails;
+  tmux failure reporting must retain stderr even with an explicit `--branch`.
+  Temporary launch-batch slicing must
   restore the full scenario list even when launch/status persistence raises.
   PR resource orchestration must not stop a removed container's proxy a second
   time after cleanup returns: a concurrent launch may already own its replacement.
@@ -163,6 +175,12 @@ computes ownership (R2), removes candidates with a bounded thread pool
 `/tmp/pm-push-proxy-*` whose tag+PR has no container), and records the
 outcome in `~/.pm/containers/reaper.json` (last run, removed, failures).
 Single-flight across processes via an fcntl lock (a concurrent caller skips).
+Successful runtime-domain lookups are reused only within one synchronous
+lifecycle operation (including its bounded removal workers), not cached across
+operations or runtime/connection environment changes. Unknown domains are retried.
+Read-only activity-owner checks must not create lock files for tmux-only
+allocations; existing activity-lock inodes and generation tombstones remain
+intact to protect concurrent waiters and delayed releases.
 - TUI: run in a background thread after `_deferred_startup` and every 10 min
   (`set_interval`, worker thread — never on the event loop).  Failures are
   logged to the TUI log line with the retry command; they are retried on the
