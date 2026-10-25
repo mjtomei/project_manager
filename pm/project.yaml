@@ -3966,8 +3966,7 @@ prs:
       pr-271cb3a was reviewed in its workdir clone (setting started_at/reviewed_at/workdir)
       while the main repo concurrently added a note via pm pr note. The merge-propagation
       path (git stash + pop, used by pr-83b98d5 to merge notes across clones) bypassed
-      the file lock from pr-f38005f and left literal <<<<<<< Updated upstream / =======
-      / >>>>>>> Stashed changes markers in project.yaml, breaking yaml parsing for
+      the file lock from pr-f38005f and left literal <<<<<<< Updated upstream /       / >>>>>>> Stashed changes markers in project.yaml, breaking yaml parsing for
       all pm commands until manually resolved. Resolution: keep timestamps + workdir
       from the workdir side, keep the new note from the main side. Likely shares root
       cause with this bug.'
@@ -11858,7 +11857,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-25T16:47:46.426400+00:00'
+  updated_at: '2026-10-25T16:49:32.077215+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -12015,6 +12014,50 @@ prs:
       generation (and visible configured output).'
     created_at: '2026-10-25T16:47:46Z'
     last_edited: '2026-10-25T16:47:46Z'
+  - id: note-d68eb9f
+    text: 'QA S3 found real Podman 3.4.4 inventory bug: inspect template tabs expand
+      to spaces; reaper silently reported no in-scope containers. Fixed whitespace
+      parsing with labels JSON preserved + tab/space regression; 193 focused tests
+      passed. Pre/post runtime evidence /pm-captures/scenarios/3/pre-fix/preview and
+      post-fix/preview. Container fixtures use isolated VFS storage; exact developer
+      image with only failing Chromium smoke RUN omitted per controller handoff (original
+      failure recorded); fake workers only, actual QA model chatgpt/gpt-6.1-sol-high.
+      Remaining story execution continues.'
+    created_at: '2026-10-25T16:39:06Z'
+    last_edited: '2026-10-25T16:39:06Z'
+  - id: note-9ebd867
+    text: 'QA S3 completed real isolated Podman stories after fixing two tabwriter
+      parsers (reaper inspect + legacy Names/Status). Runtime coverage: scoped dry-run
+      with live INPUT_REQUIRED pane and retained discussion; actual grouped-session
+      cleanup (only A orphan removed, B orphan survives); release then reap; independent
+      unreleased old-ID retention marker does not protect replacement; include-retained
+      preserves live owner; dedicated reachable-socket permission fault keeps unknown
+      owner while other orphan removed, then healthy retry; inventory failure exits1
+      without deletion, then retry; A rm timeout fails after30s while healthy A removed,
+      B waits32s and succeeds without erasing A failure, retry clears it; separate
+      legacy runtime partial timeout count1/exit1 then healthy retry count1 with non-PM
+      exact IDs unchanged. Runtime/evidence cross-checks succeeded, 194 focused tests
+      pass. Original full suite 3438 pass/1 failure test_installer_writes_standalone_receiver
+      due inherited PM_HOST_HOME=/home/matt; that test passes with PM_HOST_HOME unset;
+      sanitized full suite running. Original failed and post-fix captures all have
+      casts+mp4+manifests under /pm-captures/scenarios/3. Bug record pr-ed9fc64 tracks
+      both fixes. Initial grace-masked/overlapping identity/unknown attempts explicitly
+      invalidated and rebuilt; only final independent age-qualified evidence counted.
+      Both runtime inventories empty after scenario-only teardown; no controller runtime
+      queried.'
+    created_at: '2026-10-25T16:46:36Z'
+    last_edited: '2026-10-25T16:46:36Z'
+  - id: note-584f448
+    text: 'S3 final validation: sanitized full suite (env -u PM_HOST_HOME PATH=/usr/bin:/bin
+      PYTHONPATH=/workspace venv/python -m pytest -q) passed 3439 tests; 194 focused
+      tests passed. First full-suite controller-home contamination failure and successful
+      isolated retest retained. All 19 casts have validated H.264 MP4 siblings; accepted
+      runtime story assertions cross-check exact before/after IDs and host hashes.
+      Scenario-only teardown left both isolated runtimes empty and scenario push-proxy
+      processes gone. Final evidence index /pm-captures/scenarios/3/manifest.md. Fixes
+      will be committed with qa prefix; separate tracking bug pr-ed9fc64.'
+    created_at: '2026-10-25T16:49:32Z'
+    last_edited: '2026-10-25T16:49:32Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -31671,3 +31714,34 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-ed9fc64
+  plan: bugs
+  title: 'Bug: Podman tabwriter makes container reaper silently ignore real inventory'
+  branch: pm/pr-ed9fc64-bug-podman-tabwriter-makes-container-reaper-silent
+  status: pending
+  depends_on: []
+  description: 'Found and fixed during pr-1139060 QA scenario 3: Podman 3.4.4 inspect
+    --format expands template tabs into spaces, but pm_core/container_reaper.py _inspect
+    split only on tabs. Real pm container reap --dry-run --pr pr-7dde697 --session
+    A-6ffafec0 returned No pm containers in scope while matching managed containers
+    existed. Fix accepts whitespace field separators with labels JSON preserved; regression
+    covers tab and Podman-space output. Evidence /pm-captures/scenarios/3/pre-fix/preview
+    and post-fix/preview. Fix is carried by pr-1139060.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-25T16:39:05.632960+00:00'
+  updated_at: '2026-10-25T16:41:35.793394+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-9dff7f4
+    text: 'Second real S3 repro on legacy pm container cleanup: its separate tab-only
+      Names/Status parser supplied padded full rows as container names, claimed Removed
+      2 with exit 0, and left both exact IDs present. Fixed whitespace split there
+      too and parameterized existing partial-failure test for Podman spaces; evidence
+      scenarios/3/pre-fix/legacy versus post-fix/legacy. This bug record tracks both
+      same-root-cause fixes carried by pr-1139060.'
+    created_at: '2026-10-25T16:41:35Z'
+    last_edited: '2026-10-25T16:41:35Z'

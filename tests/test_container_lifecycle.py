@@ -105,8 +105,26 @@ class TestLaunchError:
 
 
 # ---------------------------------------------------------------------------
-# Reaper decisions
+# Reaper inventory / decisions
 # ---------------------------------------------------------------------------
+
+class TestReaperInventory:
+    @pytest.mark.parametrize("separator", ["\t", "  "])
+    def test_inspect_accepts_podman_tabwriter_output(self, monkeypatch, separator):
+        name = "pm-repo-ab12-impl-pr-1a2b3c"
+        labels = ('{"pm.managed":"1","pm.session_tag":"repo-ab12",'
+                  '"pm.pr_id":"pr-1a2b3c","pm.project_root":"/path with spaces"}')
+        row = separator.join([name, "a" * 64, "true", "running", labels])
+        monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw: _cp(out=row + "\n"))
+        infos = reaper._inspect([name], timeout=60)
+        assert len(infos) == 1
+        assert infos[0].name == name
+        assert infos[0].id == "a" * 64
+        assert infos[0].running
+        assert infos[0].session_tag == "repo-ab12"
+        assert infos[0].pr_id == "pr-1a2b3c"
+        assert infos[0].project_root == "/path with spaces"
+
 
 def _info(name, **kw):
     p = cm.parse_container_name(name)
@@ -924,13 +942,14 @@ class TestReapCLI:
         assert "session repo-ab12" in r.output
         assert fake_env["removed"] == ["pm-repo-ab12-impl-pr-aaaa"]
 
-    def test_cleanup_continues_past_failure(self, monkeypatch):
+    @pytest.mark.parametrize("separator", ["\t", "  "])
+    def test_cleanup_continues_past_failure(self, monkeypatch, separator):
         """`pm container cleanup` reports a stuck container instead of
         aborting the rest (remove_container now raises when it can't)."""
         from click.testing import CliRunner
         from pm_core.cli import cli
         monkeypatch.setattr(cm, "_run_runtime", lambda *a, **k: _cp(
-            out="pm-a-impl-pr-1\tUp\npm-a-review-pr-1\tUp\n"))
+            out=f"pm-a-impl-pr-1{separator}Up\npm-a-review-pr-1{separator}Up\n"))
         removed = []
 
         def _rm(name):

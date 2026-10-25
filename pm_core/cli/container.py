@@ -323,7 +323,7 @@ def container_cleanup(pr_id: str | None):
 
     names = []
     for line in lines:
-        parts = line.split("\t", 1)
+        parts = line.split(None, 1)
         name = parts[0].strip()
         status = parts[1].strip() if len(parts) > 1 else ""
         # The name filter matches substrings — never touch e.g. "npm-cache".

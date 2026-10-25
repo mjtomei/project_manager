@@ -208,7 +208,9 @@ def _inspect(names: list[str], timeout: int) -> list[ContainerInfo] | None:
     # A container that vanished between ps and inspect makes inspect exit
     # non-zero but still print the others — parse whatever came back.
     for line in (insp.stdout or "").splitlines():
-        parts = line.split("\t", 4)
+        # Podman 3.x renders template tabs through a tabwriter as spaces.
+        # Only the labels JSON may contain whitespace within a field.
+        parts = line.split(None, 4)
         if len(parts) < 5:
             continue
         name = parts[0].lstrip("/").strip()
