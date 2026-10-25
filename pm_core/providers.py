@@ -59,11 +59,14 @@ BUILTIN_CLAUDE = "claude"
 PROVIDER_TYPES = ("local", "openai", "claude", "router")
 
 # Claude Code env vars that pick the model for aliases, background calls and
-# subagents.  A router provider pins them all to its model by default.
+# subagents.  A router provider pins them all to its model by default.  The
+# fable alias is what a skill's or slash command's ``model: fable``
+# frontmatter and the /model picker's Fable entry switch the main loop to.
 ROUTER_ALIAS_ENV_VARS = (
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
     "ANTHROPIC_DEFAULT_SONNET_MODEL",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL",
     "ANTHROPIC_SMALL_FAST_MODEL",
     "CLAUDE_CODE_SUBAGENT_MODEL",
 )

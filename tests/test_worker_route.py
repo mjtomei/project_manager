@@ -111,6 +111,15 @@ class TestRouterProvider:
         assert p.unset_env_vars() == ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
         assert p.model_flag() == MODEL
 
+    def test_fable_alias_is_pinned(self, pm_home_dir):
+        # S61: a skill or slash command with `model: fable`, or /model ->
+        # Fable, switched a routed session's main loop to claude-fable-5-1,
+        # which the router sends to the main account.  Claude Code resolves
+        # the fable alias through ANTHROPIC_DEFAULT_FABLE_MODEL.
+        _write_providers(pm_home_dir)
+        cmd = TestBuildShellCmd()._build(provider=ROUTE)
+        assert _cmd_env(cmd)["ANTHROPIC_DEFAULT_FABLE_MODEL"] == MODEL
+
     def test_alias_override(self):
         p = ProviderConfig(name=ROUTE, type="router", api_base="http://x:1",
                            model=MODEL,
