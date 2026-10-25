@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T16:52:24.024569+00:00'
+  updated_at: '2026-10-25T17:06:53.533667+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33655,6 +33655,22 @@ prs:
       stdout line only, pre-existing).'
     created_at: '2026-10-25T16:52:23Z'
     last_edited: '2026-10-25T16:52:23Z'
+  - id: note-64ac347
+    text: 'Review 6915 i1 (eba19cb9, test/spec only, no product change): S55 2a6b14d4
+      (PR Routes grouped by route, differing efforts named on the line) reviewed independently
+      and sound; real describe output checked for mixed-effort subset lines and an
+      unconfigured route. 2a6b14d4 mutations (old grouping, no summary, min common)
+      and the 0f64 i1/i2/i3/i6 guards re-mutated on the restructured loop, all caught.
+      Gap fixed: every PR Routes test stubbed describe (why the S55 split was invisible);
+      added test_model_show_pr_route_lines_with_the_real_route_description (real router
+      provider; production line + S56 W shape), fails with the old grouping and without
+      the summary. Spec: impl.md section 5 still said S52 coverage was owed (S1-S54);
+      now S1-S56: S52 never executed, S55 its first live run (a31ac0ae57566deb), S56
+      PASS ran on 3a0c32e6 before 2a6b14d4, so its W/X two-line Routes Thens record
+      the superseded grouping; qa.md twenty-second pass Done line. Venv lacked markdown
+      (3.10.3 installed). Full suite 3739 passed, rc 0; /pm-captures/review-6915-i1.'
+    created_at: '2026-10-25T17:06:53Z'
+    last_edited: '2026-10-25T17:06:53Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
