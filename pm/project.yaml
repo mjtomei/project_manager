@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T22:25:01.999153+00:00'
+  updated_at: '2026-10-25T22:41:51.182208+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33867,6 +33867,22 @@ prs:
       qa.md RQ43.'
     created_at: '2026-10-25T22:25:01Z'
     last_edited: '2026-10-25T22:25:01Z'
+  - id: note-de79739
+    text: 'Review c189 i3 (cabc2677, spec-only, no product change): ff65f489, 3ee69236,
+      79b6ddd7 (QA run da5cdfbc6f5e8370 fixes), spec 0e13c5f8, d5b7f5dd, f0031965
+      and i2 5f5a1453 (classifier pin only for prefixed claude-* route models; unpinned
+      routes and main sessions drop an inherited value) reviewed independently and
+      sound. 10 mutations caught, 1 equivalent (defensive alias_models filter in _resolve_provider).
+      Claude 2.1.310 never reads CLAUDE_CODE_BG_CLASSIFIER_MODEL, so AUTO_MODE_MODEL
+      is the only override. S60 C-id clarification checked: 21 relay rows quote C,
+      all from A review/sign-off/s0 sessions. Spec: RQ43 first clause now limited
+      to prefixed Claude route models; impl.md says an unpinned route classifier goes
+      unprefixed to the main account (user decision). Live: this TUI-launched routed
+      review container ran with CLAUDE_CODE_AUTO_MODE_MODEL=work/claude-sonnet-5.
+      Native QA has not yet run f0031965/5f5a1453 (RQ43). Full suite 3791 passed,
+      rc 0 (markdown 3.10.3 installed first); /pm-captures/review-c189-i3.'
+    created_at: '2026-10-25T22:41:51Z'
+    last_edited: '2026-10-25T22:41:51Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
