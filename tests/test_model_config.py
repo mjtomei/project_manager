@@ -698,3 +698,34 @@ def test_model_show_lists_routes_that_pr_overrides_select(tmp_path,
     b = [r for r in routes if r.startswith("  pr-b ")]
     assert b == ["  pr-b (signoff) route=claude-work"], routes
     assert not any("pr-c" in r for r in routes)
+
+
+def test_model_show_routes_name_only_the_types_a_pr_override_decides(
+        tmp_path, monkeypatch):
+    """Review 0f64 i1: a PR's Routes line also listed types its override
+    leaves to the project, so a PR whose own exception is a plain model
+    (S54's R: qa_scenario -> haiku) read "pr-r (qa_concretize)
+    route=claude-work", as if its override selected the project's route."""
+    from click.testing import CliRunner
+    from pm_core import store, worker_route
+    from pm_core.cli import model as model_cli
+    monkeypatch.delenv("PM_MODEL", raising=False)
+    monkeypatch.setattr(worker_route, "describe",
+                        lambda res, **kw: f"route={res.provider}")
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master",
+                            "model_config": {"session_models": {
+                                "qa_concretize": "provider:claude-work"}}},
+                "prs": [{"id": "pr-r", "session_models": {
+                            "qa_scenario": "claude-haiku-5-5"}},
+                        {"id": "pr-q", "session_models": {
+                            "qa_scenario": "provider:claude-work"}}]},
+               tmp_path)
+    monkeypatch.setattr(model_cli, "state_root", lambda: tmp_path)
+    out = CliRunner().invoke(model_cli.model, ["show"]).output
+    routes = out.split("Routes:\n", 1)[1].splitlines()
+    assert any(r.split() == ["qa_concretize", "route=claude-work"]
+               for r in routes), routes
+    assert not any("pr-r" in r for r in routes), routes
+    assert [r for r in routes if "pr-q" in r] == [
+        "  pr-q (qa_scenario) route=claude-work"], routes

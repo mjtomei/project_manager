@@ -91,14 +91,18 @@ def model_show():
             route_lines.append(f"  {st:14s} {worker_route.describe(res)}")
     # A PR override that selects a route sends that PR's sessions there
     # too; resolved per type as its launches do (one line per distinct
-    # route, naming the types it covers).
+    # route, naming the types it covers).  Only the types the override
+    # decides: the others follow the project lines above.
     for pr in (data.get("prs") or []) if resolvable else ():
         if not (pr.get("model") or isinstance(pr.get("session_models"), dict)):
             continue
         routes: dict[str, list[str]] = {}
         for st in SESSION_TYPES:
+            pr_model = get_pr_model_override(pr, st)
+            if not pr_model:
+                continue
             res = resolve_model_and_provider(
-                st, pr_model=get_pr_model_override(pr, st), project_data=data)
+                st, pr_model=pr_model, project_data=data)
             if res.provider:
                 routes.setdefault(worker_route.describe(res), []).append(st)
         for desc, types in routes.items():

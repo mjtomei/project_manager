@@ -477,7 +477,9 @@ def _announce_loop_done(app, state) -> None:
     )
     if state.latest_verdict == "ERROR" and state.latest_output:
         # Truncate for display but show enough to be useful
-        err_text = state.latest_output[:300]
+        # Text, not markup: a route remedy naming ".../creds[work]/..."
+        # lost "[work]", and a "[/...]" would refuse the whole line.
+        err_text = escape(state.latest_output[:300])
         msg += f"\n  Error: {err_text}"
         from pm_core.paths import command_log_file
         msg += f"\n  See log: {command_log_file()}"

@@ -1156,3 +1156,15 @@ recorded with item 41.
         (`test_model_show_lists_routes_that_pr_overrides_select`).
     8 mutations caught (`/pm-captures/scenarios/53/post-fix/tests/mutations.log`).
     Full suite 3722 passed (`/pm-captures/scenarios/53/post-fix/tests/full-suite.log`).
+    (e) Review loop 0f64 i1: (d) also listed types that a PR override
+        leaves to the project, so a PR whose own exception is a plain model
+        (S54's R: `qa_scenario` -> haiku) read "pr-r (qa_concretize)
+        route=…", as if it selected the project's route.  A PR line now
+        names only the types its override decides.  The review loop's
+        ERROR line put the launch's stderr (RQ40: the route remedy) into
+        markup unescaped, like (b): `creds[work]` lost `[work]` on the line
+        and in `L`, and a `[/…]` refused the line.  It is escaped now.
+        `test_model_show_routes_name_only_the_types_a_pr_override_decides`,
+        `test_error_line_shows_the_remedy_as_text_not_markup`; 2 mutations
+        caught (`/pm-captures/review-0f64-i1/mutation-checks.log`).  Full
+        suite: `/pm-captures/review-0f64-i1/full-suite.log`.
