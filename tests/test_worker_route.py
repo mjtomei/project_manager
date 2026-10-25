@@ -206,9 +206,12 @@ class TestBuildShellCmd:
         with pytest.raises(ProviderNotFoundError):
             self._build(provider="missing-route")
 
-    def test_plain_model_unchanged(self, pm_home_dir):
+    def test_plain_model_stays_on_claude(self, pm_home_dir):
         cmd = self._build(model="claude-opus-5-5", effort="high")
-        assert cmd == "claude --model claude-opus-5-5 --effort high"
+        # No route, no key handling; only the subagent pin (TestSubagentPin).
+        assert cmd == ("CLAUDE_CODE_SUBAGENT_MODEL=claude-opus-5-5 "
+                       "CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1 "
+                       "claude --model claude-opus-5-5 --effort high")
 
     def test_fake_claude_has_no_ensure_step(self, pm_home_dir):
         from pm_core.claude_launcher import build_claude_shell_cmd
@@ -220,6 +223,154 @@ class TestBuildShellCmd:
                                          session_type="qa_scenario")
         assert "fake-claude" in cmd
         assert "route_bridge" not in cmd
+
+
+def _cmd_env(cmd: str) -> dict[str, str]:
+    """The ``NAME=value`` assignments a built command sets for claude."""
+    import re
+    import shlex
+    return dict(w.split("=", 1) for w in shlex.split(cmd)
+                if re.match(r"[A-Z_][A-Z0-9_]*=", w))
+
+
+class TestSubagentPin:
+    """Every subagent runs on the session's effective model.
+
+    CLAUDE_CODE_SUBAGENT_MODEL alone is a default that an Agent call's
+    ``model``, an agent definition's frontmatter and the built-in
+    Explore/Plan agents all bypass; on a router, a bypassing child asking
+    for an unprefixed model lands on the router's default (main) account.
+    """
+
+    _build = TestBuildShellCmd._build
+
+    @staticmethod
+    def _pin(cmd):
+        env = _cmd_env(cmd)
+        return (env.get("CLAUDE_CODE_SUBAGENT_MODEL"),
+                env.get("CLAUDE_CODE_SUBAGENT_MODEL_FORCE"))
+
+    def test_router_env_forces_its_model(self):
+        p = ProviderConfig(name=ROUTE, type="router", api_base="http://x:1",
+                           model=MODEL)
+        env = p.env_vars()
+        assert env["CLAUDE_CODE_SUBAGENT_MODEL"] == MODEL
+        assert env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"] == "1"
+
+    def test_host_route(self, pm_home_dir):
+        _write_providers(pm_home_dir)
+        assert self._pin(self._build(provider=ROUTE)) == (MODEL, "1")
+
+    def test_container_route(self, pm_home_dir):
+        _write_providers(pm_home_dir)
+        cmd = self._build(provider=ROUTE, container=True)
+        assert cmd.split(" && ")[0].startswith("python3 -I ")
+        assert self._pin(cmd) == (MODEL, "1")
+
+    def test_resume_keeps_pin(self, pm_home_dir):
+        _write_providers(pm_home_dir)
+        cmd = self._build(provider=ROUTE, session_id="abc", resume=True)
+        assert "--resume abc" in cmd
+        assert self._pin(cmd) == (MODEL, "1")
+
+    def test_effective_model_kept_verbatim(self, pm_home_dir):
+        # An explicit model beats the provider's; the pin follows it with
+        # its route prefix and context suffix intact.
+        _write_providers(pm_home_dir)
+        cmd = self._build(provider=ROUTE, model=f"{MODEL}[1m]")
+        assert f"--model '{MODEL}[1m]'" in cmd
+        assert self._pin(cmd) == (f"{MODEL}[1m]", "1")
+
+    def test_plain_model(self, pm_home_dir):
+        cmd = self._build(model="claude-opus-5-5[1m]")
+        assert self._pin(cmd) == ("claude-opus-5-5[1m]", "1")
+        assert "ANTHROPIC_BASE_URL" not in cmd
+
+    def test_no_model_selected_sets_nothing(self, pm_home_dir):
+        # The CLI default model: pm has no selection to enforce.
+        assert self._build() == "claude"
+
+    def test_alias_override_is_forced(self, pm_home_dir):
+        _write_providers(pm_home_dir, alias_models={
+            "CLAUDE_CODE_SUBAGENT_MODEL": "work/claude-sonnet-5-5"})
+        cmd = self._build(provider=ROUTE)
+        assert self._pin(cmd) == ("work/claude-sonnet-5-5", "1")
+
+    def test_pin_beats_inherited_values(self, pm_home_dir, monkeypatch):
+        # A pane inheriting another session's pin (or a bare default)
+        # still gets this session's model: assignments are command-scoped.
+        monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "claude-fable-5-1")
+        monkeypatch.delenv("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", raising=False)
+        _write_providers(pm_home_dir)
+        cmd = self._build(provider=ROUTE)
+        assert self._pin(cmd) == (MODEL, "1")
+
+    def test_fake_claude_gets_the_same_env(self, pm_home_dir):
+        from pm_core.claude_launcher import build_claude_shell_cmd
+        _write_providers(pm_home_dir)
+        with patch("pm_core.paths.fake_claude_config_for_type",
+                   return_value={"verdicts": {"PASS": 1}}), \
+             patch("pm_core.claude_launcher.log_shell_command"):
+            cmd = build_claude_shell_cmd(provider=ROUTE,
+                                         session_type="qa_scenario")
+        assert "fake-claude" in cmd
+        assert self._pin(cmd) == (MODEL, "1")
+
+    @pytest.mark.parametrize("session_type", [
+        "impl", "review", "qa", "qa_planning", "qa_scenario", "qa_concretize",
+        "qa_verification", "qa_finalize", "qa_interactive", "signoff",
+        "watcher", "merge"])
+    def test_every_role_on_a_routed_pr(self, pm_home_dir, session_type):
+        # pr-592e4bd itself: prs[].model = provider:claude-work for all roles.
+        _write_providers(pm_home_dir)
+        res = resolve_model_and_provider(session_type, pr_model=f"provider:{ROUTE}",
+                                         project_data=PROJECT)
+        cmd = self._build(model=res.model, provider=res.provider,
+                          effort=res.effort, session_type=session_type)
+        assert f"--model {MODEL}" in cmd
+        assert self._pin(cmd) == (MODEL, "1")
+
+    def test_print_launchers_pin_run_env(self, pm_home_dir, monkeypatch):
+        from pm_core import claude_launcher
+        monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "claude-fable-5-1")
+        _write_providers(pm_home_dir)
+        runs = []
+
+        class _R:
+            returncode, stdout = 0, ""
+
+        def _run(cmd, **kw):
+            runs.append((cmd, kw.get("env")))
+            return _R()
+
+        with patch("pm_core.claude_launcher.find_claude", return_value="claude"), \
+             patch("pm_core.claude_launcher._fake_claude_config_for_type",
+                   return_value=None), \
+             patch("pm_core.claude_launcher._skip_permissions", return_value=False), \
+             patch("pm_core.claude_launcher.log_shell_command"), \
+             patch("pm_core.claude_launcher.prepare_workspace"), \
+             patch("pm_core.claude_launcher.save_session"), \
+             patch("pm_core.claude_launcher.load_session", return_value=None), \
+             patch("subprocess.run", side_effect=_run):
+            claude_launcher.launch_claude_print("p", provider=ROUTE,
+                                                model=f"{MODEL}[1m]")
+            claude_launcher.launch_claude_print("p", model="claude-opus-5-5")
+            claude_launcher.launch_claude("p", "k", Path("/tmp"), provider=ROUTE)
+        (c1, e1), (c2, e2), (c3, e3) = runs
+        assert c1[c1.index("--model") + 1] == f"{MODEL}[1m]"
+        assert (e1["CLAUDE_CODE_SUBAGENT_MODEL"],
+                e1["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"]) == (f"{MODEL}[1m]", "1")
+        assert "ANTHROPIC_API_KEY" not in e1
+        assert (e2["CLAUDE_CODE_SUBAGENT_MODEL"],
+                e2["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"]) == ("claude-opus-5-5", "1")
+        assert (e3["CLAUDE_CODE_SUBAGENT_MODEL"],
+                e3["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"]) == (MODEL, "1")
+
+    def test_live_probe_cmd_is_pinned(self, pm_home_dir):
+        _write_providers(pm_home_dir)
+        cfg = get_provider(ROUTE, strict=True)
+        cmd = worker_route._probe_shell_cmd(cfg, "sid", container=False)
+        assert self._pin(cmd) == (MODEL, "1")
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +424,8 @@ class TestRoleIsolation:
         cmd = nw.call_args[0][2]
         assert " claude" in cmd and "--model claude-opus-5-5" in cmd
         assert "ANTHROPIC_BASE_URL" not in cmd and "work/" not in cmd
+        assert ("CLAUDE_CODE_SUBAGENT_MODEL=claude-opus-5-5 "
+                "CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1 ") in cmd
 
     def test_refiner_and_worker_commands_routed(self, pm_home_dir, tmp_path):
         from pm_core import qa_loop
@@ -293,6 +446,8 @@ class TestRoleIsolation:
         for cmd in (ref, run):
             assert f"--model {MODEL}" in cmd and "--effort high" in cmd
             assert "ANTHROPIC_BASE_URL=http://127.0.0.1:1" in cmd
+            assert (f"CLAUDE_CODE_SUBAGENT_MODEL={MODEL} " in cmd
+                    and "CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1 " in cmd)
         assert ver.provider is None
 
     def test_container_worker_cmd_uses_bridge(self, pm_home_dir, tmp_path):

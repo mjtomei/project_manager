@@ -278,16 +278,20 @@ def peek_fake_verdicts(session_tag: str | None = None) -> dict:
     return out
 
 
-def _resolve_provider(provider: str | None = None):
+def _resolve_provider(provider: str | None = None, model: str | None = None):
     """Resolve provider config and return (env_vars, model_flag, run_env).
 
     Shared helper for launch_claude, launch_claude_print, and
     launch_claude_print_background to avoid repeating the same pattern.
+    ``model_flag`` is the effective ``--model`` value (an explicit *model*
+    overrides the provider's), and every subagent is pinned to it
+    (providers.subagent_pin_env).
     """
-    from pm_core.providers import get_provider
+    from pm_core.providers import get_provider, subagent_pin_env
     provider_cfg = get_provider(provider, strict=bool(provider))
-    provider_env = provider_cfg.env_vars()
-    model_flag = provider_cfg.model_flag()
+    model_flag = model or provider_cfg.model_flag()
+    provider_env = {**provider_cfg.env_vars(),
+                    **subagent_pin_env(model_flag, provider_cfg)}
     run_env = {**os.environ, **provider_env} if provider_env else None
     if run_env is not None:
         # As build_claude_shell_cmd's ``env -u``: a router authenticates
@@ -594,10 +598,8 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
     if not claude and fc_config is None:
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
-    # Resolve provider for env vars and model flag
-    _, provider_model_flag, run_env = _resolve_provider(provider)
-    # Explicit model param overrides provider's model_flag
-    model_flag = model or provider_model_flag
+    # Resolve provider for env vars and model flag (explicit model wins)
+    _, model_flag, run_env = _resolve_provider(provider, model)
 
     # Try to resume existing session, or generate new session ID
     session_id = None
@@ -699,8 +701,8 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
     if not claude and fc_config is None:
         raise FileNotFoundError("claude CLI not found. Install it first.")
 
-    # Resolve provider
-    _, model_flag, run_env = _resolve_provider(provider)
+    # Resolve provider (explicit model wins over the provider's)
+    _, effective_model, run_env = _resolve_provider(provider, model)
     if fc_config is not None:
         cmd = [_FAKE_CLAUDE_BIN]
         cmd.extend(_fake_claude_args(fc_config, session_type=session_type))
@@ -708,8 +710,6 @@ def launch_claude_print(prompt: str, cwd: str | None = None,
         cmd = [claude]
         if _skip_permissions():
             cmd.append("--dangerously-skip-permissions")
-        # Explicit model takes precedence over provider model_flag
-        effective_model = model or model_flag
         if effective_model:
             cmd.extend(["--model", effective_model])
         if effort:
@@ -840,9 +840,10 @@ def build_claude_shell_cmd(
         _log.info("transcript: symlink %s -> %s", transcript_path, target)
 
     # Resolve provider configuration
-    from pm_core.providers import get_provider
+    from pm_core.providers import get_provider, subagent_pin_env
     provider_cfg = get_provider(provider, strict=bool(provider))
-    model_flag = provider_cfg.model_flag()
+    # Explicit model param overrides provider's model_flag
+    effective_model = model or provider_cfg.model_flag()
 
     # Router providers (pm_core.worker_route): command-scoped, never global.
     if provider_cfg.type == "router":
@@ -851,6 +852,10 @@ def build_claude_shell_cmd(
             provider_cfg, container=container)
     else:
         route_prefix, provider_env, exe = "", provider_cfg.env_vars(), "claude"
+    # Children run where the session runs: an Agent call or agent
+    # definition naming another model must not leave the route.
+    provider_env = {**provider_env,
+                    **subagent_pin_env(effective_model, provider_cfg)}
 
     # Build env prefix for non-claude providers
     env_prefix = ""
@@ -895,8 +900,6 @@ def build_claude_shell_cmd(
         skip = " --dangerously-skip-permissions" if skip_permissions_enabled(session_tag) else ""
         cmd = f"{cd_prefix}{route_prefix}{env_prefix}{exe}{skip}"
 
-    # Explicit model param overrides provider's model_flag
-    effective_model = model or model_flag
     if effective_model:
         cmd += f" --model {shlex.quote(effective_model)}"
 

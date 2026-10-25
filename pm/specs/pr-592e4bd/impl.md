@@ -145,13 +145,39 @@ prints URL, model, launcher, credentials *path* and expiry (never contents).
 a tools-disabled `claude -p` through the route, reporting requested models
 (must all equal the route model), transcript path + models, and hook event.
 
+R8. **Subagents stay on the session's model** (note-6153fe1, 2026-10-25).
+Every launch on which pm selects a model sets
+`CLAUDE_CODE_SUBAGENT_MODEL=<effective --model value>` and
+`CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` (`providers.subagent_pin_env`). The
+"effective" value is an explicit model if there is one, otherwise the
+provider's model, kept verbatim with any route prefix (`work/`) or context
+suffix (`[1m]`). This applies to router and plain-model sessions, every role,
+host and container, new and `--resume` launches, the fake-claude path and
+the `claude -p` helpers.
+
+Since Claude Code 2.1.251 `CLAUDE_CODE_SUBAGENT_MODEL` alone is only a
+default: an Agent call's `model`, an agent definition's `model` frontmatter
+and the built-in Explore/Plan agents all bypass it. On the router a bypassing
+child that asks for an unprefixed model (e.g. `fable` → `claude-fable-5-1`)
+runs on the caller's main account. FORCE (Claude Code ≥ 2.1.257; 2.1.310 is
+installed) makes the pin override all of them and removes `model` from the
+Agent tool. A router's explicit `alias_models` entry for
+`CLAUDE_CODE_SUBAGENT_MODEL` replaces the pinned value and is forced too.
+When pm selects no model (CLI default) nothing is set.
+
+Repro that prompted this: PR241 Astra review 6427 i4 had
+`CLAUDE_CODE_SUBAGENT_MODEL=chatgpt/gpt-6-astra-high` without FORCE. Two
+explicit Fable helpers ran `claude-fable-5-1` and exhausted the main
+account.
+
 ## 2. Implicit requirements
 - Effort resolution is independent of provider, so routed types keep `high`.
 - The router (`router.py`) sends any request whose model lacks the `work/`
   prefix to its default backend with the caller's (main) credentials, so
   `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`
   and `CLAUDE_CODE_SUBAGENT_MODEL` are pinned to the route model
-  (overridable via `alias_models`).
+  (overridable via `alias_models`), and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`
+  makes the subagent pin binding (R8).
 - The router does not rewrite the response model, so transcripts record the
   physical name (`claude-opus-5-5`); requested-model checks use claude's
   `modelUsage` (`work/claude-opus-5-5`).
@@ -174,6 +200,11 @@ a tools-disabled `claude -p` through the route, reporting requested models
   continue automatically once fixed (no verdict), not INPUT_REQUIRED.
 - *s0 legacy fallback.* `qa_interactive` → `qa`; if neither is configured and
   `qa_scenario` is a plain model (not a provider), s0 keeps using it.
+- *Subagent pin for plain-model sessions (R8).* pm forces subagents onto
+  the selected model for plain-model sessions too, not only routes. The
+  account is the same either way. This enforces the selected model and stops
+  Fable helpers spending the main account's allowance. With no model
+  selected, the user's environment and the CLI decide.
 - *Host launcher.* Optional and not recommended for the work route: the
   host `claude-mixed` falls back to plain Claude against Anthropic when the
   router is down, adds `--settings` and runs `ox-heal-settings`. Plain
@@ -1271,3 +1302,56 @@ latest full suite is recorded with item 42.
         (real describe; 4 mutations caught,
         `/pm-captures/scenarios/58/post-fix/tests/mutations.log`). The
         6915 i1 real-describe test now pins host mode.
+
+### Subagent model enforcement (note-6153fe1, R8)
+
+Fix: `providers.subagent_pin_env(model, provider)`. The router `env_vars()`
+adds `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`. `build_claude_shell_cmd` and
+`_resolve_provider`, which serve `launch_claude`, `launch_claude_print` and
+`launch_claude_print_background`, compute the effective model first and add
+the pin to the command-scoped env. An inherited pin from the pane's
+environment is therefore overridden, and the fake-claude command gets the
+same env. Every role launcher (impl, review, merge, sign-off, watcher, all QA
+types) and the `pm provider test --live` probe build their command there.
+
+Regressions, all in `tests/test_worker_route.py::TestSubagentPin`:
+- host route, container route, `--resume`, explicit model with `[1m]`,
+  plain model, no model selected (nothing set), `alias_models` override,
+  inherited values overridden, fake-claude env;
+- every session type on a PR with `model: provider:claude-work`;
+- `launch_claude`/`launch_claude_print` run env;
+- the live-probe command.
+
+Mutations caught: no FORCE, 25 failures; pinning the provider model instead
+of the effective one, 4; no pin in `_resolve_provider`, 1.
+
+Real Claude Code 2.1.310 child-request evidence:
+- Location: `/pm-captures/subagent-pin-249/`, with `README.md`,
+  `summary.txt` and the per-run `requests` slices.
+- Endpoint: a controlled Anthropic-compatible endpoint standing in for the
+  router. It logs each request's model and the account the real router
+  picks for it (`work/` → work, else MAIN).
+- Commands: built by pm itself, from `git archive HEAD` (ccf0959b, pre-fix)
+  and from the working tree (post-fix).
+- Environment: `env -i`, so the recovery process's own temporary FORCE never
+  reaches a probe, and a dummy `apiKeyHelper` key, so no real credential is
+  used.
+- Paths: host, a slirp4netns container through pm's real bridge (the
+  container cannot reach the endpoint directly), and `--resume`.
+
+| child | pre-fix | post-fix |
+|---|---|---|
+| default general-purpose | work | work |
+| Explore / Plan | work | work |
+| custom agent `model: fable` | `claude-fable-5-1` → MAIN | work |
+| `Agent(model="fable")` | `claude-fable-5-1` → MAIN | work |
+| `Agent(model="fable")`, session `--model work/…[1m]` | `claude-fable-5-1` → MAIN | `work/claude-opus-5-5` + 1M beta |
+| `Agent(model="fable")` after `--resume` | `claude-fable-5-1` → MAIN | work |
+
+The container rows match the host rows; the pre-fix container resume was
+not run. Post-fix, Claude Code also leaves `model` out of the Agent tool
+schema.
+
+Before this change Explore/Plan already stayed on the route, because they
+inherit the main conversation's model, which is `work/`.
+

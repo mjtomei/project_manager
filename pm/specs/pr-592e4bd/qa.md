@@ -691,6 +691,28 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     for every type then has two lines, one per path. Host mode keeps one
     "(all types)" line.
 
+### Subagent model enforcement (note-6153fe1, 2026-10-25)
+- **RQ42** Given a session launched with a pm-selected model, Then it is
+  pinned to that effective model (its `--model` value, `work/` prefix and
+  `[1m]` suffix kept) via `CLAUDE_CODE_SUBAGENT_MODEL` plus
+  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`. That session may be routed or
+  plain, any role, host or container, new or `--resume`.
+  When the session's Claude starts any of these subagents:
+  - the default general-purpose agent;
+  - built-in Explore or Plan;
+  - a project agent whose frontmatter says `model: fable`;
+  - an `Agent` call that passes `model: "fable"`;
+
+  Then every child request carries the session's model: on a routed
+  session a `work/` model, which the router sends to the work account. No
+  child request names another model (e.g. `claude-fable-5-1`), and the
+  Agent tool offers no `model` parameter. Check the requested model IDs in
+  the stub router's request log, not only the env strings. Before the fix
+  the frontmatter and explicit-Fable children requested `claude-fable-5-1`,
+  which the router sends to the main account
+  (`/pm-captures/subagent-pin-249/`, impl.md R8). When pm selects no model,
+  no pin is set.
+
 ## 2. Setup
 
 - Install pm from this PR's clone (`./install.sh --local` or venv per
@@ -1166,7 +1188,7 @@ setting selects the route. For that PR the router may then see every
 role, while another PR's unrouted roles must still reach only main.
 
 Fail: any routed request reaching the main endpoint or a non-`work/`
-model, any unrouted role hitting the router, a verdict recorded because of
+model (subagent requests included, RQ42), any unrouted role hitting the router, a verdict recorded because of
 a route outage, the verdict loop stalling for other scenarios while one
 waits, a queue that never drains after recovery, a leaked throwaway
 container, a token value in output/logs, or hooks/transcripts missing for

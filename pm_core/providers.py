@@ -69,6 +69,34 @@ ROUTER_ALIAS_ENV_VARS = (
 )
 
 
+# Pin every subagent to one model.  CLAUDE_CODE_SUBAGENT_MODEL alone is only
+# a default (Claude Code >= 2.1.251): an Agent call's ``model`` parameter or
+# an agent definition's ``model`` frontmatter still wins, and the built-in
+# Explore/Plan agents ignore it.  FORCE (>= 2.1.257) makes it override all
+# of those -- without it a child asking for e.g. ``fable`` leaves the
+# session's route and runs on the caller's own account.
+SUBAGENT_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
+SUBAGENT_FORCE_ENV = "CLAUDE_CODE_SUBAGENT_MODEL_FORCE"
+
+
+def subagent_pin_env(model: str | None,
+                     provider: "ProviderConfig | None" = None) -> dict[str, str]:
+    """Env that runs every subagent of a session on *model*.
+
+    *model* is the session's effective ``--model`` value, kept verbatim
+    (route prefix such as ``work/`` and context suffix such as ``[1m]``
+    included).  A router provider's explicit ``alias_models`` entry for
+    CLAUDE_CODE_SUBAGENT_MODEL takes its place.  Empty when pm selected no
+    model: the session then runs on the CLI default and pm has nothing to
+    enforce.
+    """
+    if not model:
+        return {}
+    pinned = ((provider.alias_models.get(SUBAGENT_MODEL_ENV)
+               if provider is not None else None) or model)
+    return {SUBAGENT_MODEL_ENV: pinned, SUBAGENT_FORCE_ENV: "1"}
+
+
 class ProviderNotFoundError(LookupError):
     """An explicitly named provider is not configured in providers.yaml."""
 
@@ -129,6 +157,8 @@ class ProviderConfig:
                     env[var] = self.model
             for var, value in self.alias_models.items():
                 env[var] = value
+            if self.model:
+                env[SUBAGENT_FORCE_ENV] = "1"
             return env
 
         if self.type in ("claude", "local"):
