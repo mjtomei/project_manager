@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T17:44:43.539883+00:00'
+  updated_at: '2026-10-26T18:13:16.644535+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33171,6 +33171,30 @@ prs:
       do not take this branch block wholesale. (2026-10-26T17:40:00Z)'
     created_at: '2026-10-26T17:44:43Z'
     last_edited: '2026-10-26T17:44:43Z'
+  - id: note-232f2b5
+    text: 'review-loop aa73 i3: closed two residual gaps. (1) A clean base merged
+      by a bounce (only a resolved candidate re-recorded the applied record) put the
+      base inside HEAD with no resolution to carry, so the next check had an empty
+      base diff: the sign-off prompt stopped showing the behaviour-relevant base changes,
+      the base file count and the overlap, and the merge gate stopped requiring the
+      explicit reuse/checks statement (the same R3 hole the applied-resolution carry
+      closes). New `integration._carry_base_interaction` carries `base_files`/`base_files_count`,
+      `overlap`, `base_behavior_changes` and `base_behavior_error` when the old record
+      assessed the same base revision and the branch now contains it (a newer base
+      with its own diff keeps its own summary), and records the pre-merge merge base
+      as `base_range_from` so the prompt still names the base-changes range. (2) `stamp_signoff_launch`
+      can receive the stored record `prepare` returns when a concurrent apply won;
+      a hand-edited non-string `base_sha` made the stamp write raise TypeError out
+      of the sign-off launch before the window opened. Non-string revisions now stamp
+      nothing. Tests: 3 new in test_signoff_resolution.py (134 focused); full suite
+      3487 passed, 1 skipped (test_hook_events excluded: known pre-existing installer
+      env failure). Spec R3/R9 synced. MERGE RISK unchanged: branch behind origin/master
+      (211a6128); `_signoff_integration_block` changed on both sides - keep both the
+      PR resolution/candidate/applied rendering AND master bounded lists (`bounded_join`
+      + `omitted_path_count` + `integration_pointer`); do not take this branch block
+      wholesale.'
+    created_at: '2026-10-26T18:13:16Z'
+    last_edited: '2026-10-26T18:13:16Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
