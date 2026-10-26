@@ -106,6 +106,23 @@ def test_popup_cmd_runs_session_code(tmp_path, monkeypatch, capfd):
     assert f"selected_root={session_root} chosen_via=pm_root" in _wrapper_log(home)
 
 
+def test_popup_config_uses_base_session_not_workdir(tmp_path, monkeypatch, capfd):
+    import json
+
+    home, _ = _setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("TMUX", "isolated-test-server,1,0")
+    config = {"_all": {}, "impl": {"display_bullet": "SESSION-IMPL "}}
+    (home / ".pm" / "sessions" / TAG / "fake-claude").write_text(json.dumps(config))
+
+    for session in (SESSION, f"{SESSION}~s19b"):
+        result = CliRunner().invoke(popup_cmd_cmd, [session],
+                                    input="fake-claude config show\n")
+        assert result.exit_code == 0, result.output
+        out = capfd.readouterr()
+        assert '"display_bullet": "SESSION-IMPL "' in out.out
+        assert "No fake-claude config" not in out.out
+
+
 def test_direct_shell_invocation_still_cwd_walks(tmp_path, monkeypatch):
     """Control: plain wrapper.main from the workdir keeps cwd_walk."""
     home, _ = _setup(tmp_path, monkeypatch)
