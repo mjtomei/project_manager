@@ -328,9 +328,11 @@ intact to protect concurrent waiters and delayed releases.
   idempotent setup completion is still allowed.
 - Failed/unknown running-state or ID inspection refuses recreation; it is not proof
   of absence. Only explicit missing-container/object errors establish absence;
-  missing runtime socket paths and empty successful ID output are unknown. A
-  setup-verification probe the runtime does not answer in time is a retryable
-  `timeout` launch error, not evidence that setup is incomplete. Required setup commands fail before readiness is written. Fresh
+  missing runtime socket paths and empty successful ID output are unknown. Any
+  unanswered lifecycle probe — running-state, setup verification, readiness, or
+  the completion-sentinel write — is a retryable `timeout` launch error naming
+  the container, not evidence that setup is incomplete or that the allocation is
+  stopped. Required setup commands fail before readiness is written. Fresh
   creation verifies push-proxy connectivity as well as reuse.
 - Any failure after `run` (sentinel timeout, exec error, cp failure,
   keyring) removes the partial container (and releases the proxy if unused)

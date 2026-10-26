@@ -1519,7 +1519,21 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
                            stage="be reused")
     if not container_id:
         return None
-    if not container_is_running(container_id):
+    try:
+        running = container_is_running(container_id)
+    except subprocess.TimeoutExpired as exc:
+        # An unanswered running-state probe is unknown, not "stopped": refuse
+        # recreation (which would discard its files) and let the caller retry.
+        raise launch_error(
+            name, "timeout",
+            f"running-state probe did not return within {exc.timeout}s; "
+            f"retry when the runtime is responsive",
+            stage="inspect existing container") from exc
+    except ContainerLaunchError as exc:
+        # The probe addresses the immutable id; the error must name the container.
+        raise launch_error(name, exc.kind, exc.stderr,
+                           stage="inspect existing container") from exc
+    if not running:
         if container_reaper.is_retained(name, container_id):
             raise launch_error(name, "incomplete", "container is explicitly retained; release it before recreation",
                                stage="be reused")
@@ -1532,7 +1546,13 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
         remove_container(name, container_id=container_id)
         return None
 
-    complete, wedged, probe_err = _probe_setup(container_id)
+    try:
+        complete, wedged, probe_err = _probe_setup(container_id)
+    except ContainerLaunchError as exc:
+        # Probes address the captured immutable id, but a launch error must
+        # name the container a user can act on ('pm container restart <name>').
+        raise launch_error(name, exc.kind, exc.stderr,
+                           stage="verify existing setup") from exc
     retained = container_reaper.is_retained(name, container_id)
     if retained and wedged in ("pids", "memory"):
         raise launch_error(name, wedged, f"{probe_err}\nContainer is explicitly retained; restart it explicitly.",
@@ -1567,11 +1587,24 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
     if not complete:
         _log.warning("Container %s is running but its setup never completed", name)
         finished = False
-        base = _run_runtime("exec", container_id, "test", "-f", _READY_SENTINEL,
-                            check=False, timeout=10)
+        try:
+            base = _run_runtime("exec", container_id, "test", "-f", _READY_SENTINEL,
+                                check=False, timeout=10)
+        except subprocess.TimeoutExpired as exc:
+            # Like _probe_setup: an unanswered readiness probe is unknown, not
+            # proof that the in-container setup never ran. Preserve the files.
+            raise launch_error(
+                name, "timeout",
+                f"readiness probe did not return within {exc.timeout}s; "
+                f"retry when the runtime is responsive",
+                stage="verify existing setup") from exc
         if base.returncode == 0:
             _post_setup(container_id, workdir, "podman" in _get_runtime())
-            finished = _setup_complete(container_id)
+            try:
+                finished = _setup_complete(container_id)
+            except ContainerLaunchError as exc:
+                raise launch_error(name, exc.kind, exc.stderr,
+                                   stage="verify completed setup") from exc
             if not finished:
                 # Finishing setup is non-destructive. A failed verification
                 # afterwards is not permission to discard the existing files.
@@ -2118,8 +2151,14 @@ def _post_setup(name: str, workdir: Path, is_podman: bool) -> None:
             if _seeded_tmp is not None:
                 _seeded_tmp.unlink(missing_ok=True)
 
-    done = _run_runtime("exec", name, "touch", SETUP_COMPLETE_SENTINEL,
-                        check=False, timeout=10)
+    try:
+        done = _run_runtime("exec", name, "touch", SETUP_COMPLETE_SENTINEL,
+                            check=False, timeout=10)
+    except subprocess.TimeoutExpired as exc:
+        raise launch_error(name, "timeout",
+                           f"recording completed setup did not return within "
+                           f"{exc.timeout}s; retry when the runtime is responsive",
+                           stage="record completed setup") from exc
     if done.returncode != 0:
         stderr = (done.stderr or "").strip()
         raise launch_error(name, classify_runtime_error(stderr), stderr,

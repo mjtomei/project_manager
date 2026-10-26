@@ -116,3 +116,105 @@ def test_incomplete_readiness_probe_preserves_runtime_cause(
 def test_completion_probe_without_runtime_error_remains_boolean(monkeypatch, complete):
     monkeypatch.setattr(cm, "_probe_setup", lambda target: (complete, "", ""))
     assert cm._setup_complete("existing-allocation") is complete
+
+
+def test_running_state_probe_timeout_is_a_retryable_launch_error(monkeypatch, tmp_path):
+    """An unanswered running-state probe must not be read as "stopped"."""
+    name, cid = "pm-tag-review-pr-aaaa", "existing-allocation"
+    monkeypatch.setattr(cm, "current_container_id", lambda target: cid)
+
+    def running(target):
+        raise subprocess.TimeoutExpired(["podman", "inspect"], 10)
+
+    monkeypatch.setattr(cm, "container_is_running", running)
+    monkeypatch.setattr(reaper, "is_retained", lambda *a: False)
+    remove = Mock()
+    monkeypatch.setattr(cm, "remove_container", remove)
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm._ensure_reusable(name, tmp_path, None, session_tag=None, pr_id=None)
+    assert error.value.kind == "timeout"
+    assert name in str(error.value)
+    assert "running-state probe" in str(error.value)
+    remove.assert_not_called()
+
+
+def test_running_state_error_names_the_container_not_its_id(monkeypatch, tmp_path):
+    """A classified running-state failure must name the container to act on."""
+    name, cid = "pm-tag-review-pr-aaaa", "e3b0c44298fc1c149afbf4c8996fb924"
+    monkeypatch.setattr(cm, "current_container_id", lambda target: cid)
+
+    def running(target):
+        raise cm.launch_error(target, "runtime", "runtime returned an unknown running state",
+                              stage="inspect existing container")
+
+    monkeypatch.setattr(cm, "container_is_running", running)
+    remove = Mock()
+    monkeypatch.setattr(cm, "remove_container", remove)
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm._ensure_reusable(name, tmp_path, None, session_tag=None, pr_id=None)
+    message = str(error.value)
+    assert name in message
+    assert cid not in message
+    assert error.value.kind == "runtime"
+    remove.assert_not_called()
+
+
+def test_readiness_probe_timeout_is_a_retryable_launch_error(monkeypatch, tmp_path):
+    """An unanswered readiness probe is unknown, not proof setup never ran."""
+    name, cid = "pm-tag-review-pr-aaaa", "existing-allocation"
+    monkeypatch.setattr(cm, "current_container_id", lambda target: cid)
+    monkeypatch.setattr(cm, "container_is_running", lambda target: True)
+    monkeypatch.setattr(cm, "_probe_setup", lambda target: (False, "", ""))
+    monkeypatch.setattr(reaper, "is_retained", lambda *a: False)
+
+    def runtime(*args, **kwargs):
+        raise subprocess.TimeoutExpired(["podman", *args], kwargs.get("timeout"))
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    remove, post = Mock(), Mock()
+    monkeypatch.setattr(cm, "remove_container", remove)
+    monkeypatch.setattr(cm, "_post_setup", post)
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm._ensure_reusable(name, tmp_path, None, session_tag=None, pr_id=None)
+    assert error.value.kind == "timeout"
+    assert name in str(error.value)
+    assert "readiness probe" in str(error.value)
+    remove.assert_not_called()
+    post.assert_not_called()
+
+
+def test_reuse_probe_timeout_names_the_container_not_its_id(monkeypatch, tmp_path):
+    """The i1 probe-timeout error must name the container a user can act on."""
+    name, cid = "pm-tag-review-pr-aaaa", "e3b0c44298fc1c149afbf4c8996fb924"
+    monkeypatch.setattr(cm, "current_container_id", lambda target: cid)
+    monkeypatch.setattr(cm, "container_is_running", lambda target: True)
+    monkeypatch.setattr(reaper, "is_retained", lambda *a: False)
+
+    def probe(target):
+        raise cm.launch_error(target, "timeout", "probe did not return",
+                              stage="verify existing setup")
+
+    monkeypatch.setattr(cm, "_probe_setup", probe)
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm._ensure_reusable(name, tmp_path, None, session_tag=None, pr_id=None)
+    message = str(error.value)
+    assert name in message
+    assert cid not in message
+    assert error.value.kind == "timeout"
+
+
+def test_completion_sentinel_timeout_is_a_retryable_launch_error(monkeypatch, tmp_path):
+    """A slow `touch` of the completion sentinel is a classified launch error."""
+    name, cid = "pm-tag-review-pr-aaaa", "existing-allocation"
+    monkeypatch.setattr(cm, "_host_claude_json", lambda: tmp_path / "absent-config")
+
+    def runtime(*args, **kwargs):
+        if args[0] == "exec" and args[-1] == cm.SETUP_COMPLETE_SENTINEL:
+            raise subprocess.TimeoutExpired(["podman", *args], kwargs.get("timeout"))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm._post_setup(cid, tmp_path, True)
+    assert error.value.kind == "timeout"
+    assert "record completed setup" in str(error.value)
