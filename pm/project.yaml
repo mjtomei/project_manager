@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T09:51:10.271123+00:00'
+  updated_at: '2026-10-26T10:26:11.182763+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34277,6 +34277,27 @@ prs:
       s, so 6-8 ticks at 10 s end before the stop; tick until the second warning.'
     created_at: '2026-10-26T09:51:10Z'
     last_edited: '2026-10-26T09:51:10Z'
+  - id: note-cbd37a6
+    text: 'QA S73 (2026-10-26, host, stubs, HEAD 251763f8 vs controls 4648d501/914a4c3c
+      side by side; captures /pm-captures/scenarios/73/REPORT.md): no product change.
+      A TUI auto-start target ticked by pm pr auto-sequence does get a TUI QA loop
+      and a qa-run-bg driver at once on HEAD, in three ways, all identical on both
+      controls (pre-existing, 109bca54 not involved; filed pr-bddda0f): (1) TUI SIGNOFF_REQA
+      hop: a tick fired when the TUI clears awaiting (cleared) or kills the judged
+      qa window (gone) prints running: qa (launched); the driver replaces the TUI
+      windows, both runs log the same Planner pane, and in 6/9 doubled rounds the
+      TUI loop then waits on it (60 min planner timeout) with B stuck in qa over a
+      driver PASS until z t; (2) tick-hop rounds: the re-qa driver kills the TUI run
+      finalizer (finalize=None), the TUI then processes that stale PASS, moves B qa->sign_off
+      a second time, launches its own router and starts a TUI loop beside the driver;
+      (3) pm autostart add while a driver re-run is in flight: Auto-start: QA for
+      <pr> starts a TUI loop whose planner replaces the driver qa window. Story 2
+      (kill -9 TUI, respawn as awaiting clears) held on HEAD x2 and 4648d501 except
+      the driver finalizer, killed by the next fast REQA hop (pr-f1d825b). Tracebacks:
+      HEAD 0; controls 1 each in a z t recovery (filed pr-f779829). 0 secrets; router
+      only work/.'
+    created_at: '2026-10-26T10:26:11Z'
+    last_edited: '2026-10-26T10:26:11Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -35275,6 +35296,73 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-26T06:54:56.080841+00:00'
   updated_at: '2026-10-26T06:54:56.080841+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-bddda0f
+  plan: bugs
+  title: 'Bug: TUI auto-start QA and pm pr auto-sequence ticks both drive a PR after
+    a sign-off REQA: the TUI takes no launch claim, so a tick starts a second QA run
+    (TUI loop + qa-run-bg) and the TUI loop can wait 60 min on the replaced planner'
+  branch: pm/pr-bddda0f-bug-tui-auto-start-qa-and-pm-pr-auto-sequence-tick
+  status: pending
+  depends_on: []
+  description: 'Pre-existing (reproduced on HEAD 251763f8 and controls 4648d501, 914a4c3c;
+    QA S73 of pr-592e4bd, captures /pm-captures/scenarios/73/REPORT.md). Location:
+    pm_core/tui/signoff_ui.py step() hop==qa -> qa_loop_ui.start_qa (clear_return_awaiting,
+    no claim_return_launch); pm_core/tui/auto_start.py _auto_start_qa_loops (checks
+    no launch claim, no existing qa-<pr> window / detached driver); pm_core/cli/pr.py
+    pr_auto_sequence qa branch (only awaiting/claim/qa window guard); pm_core/tui/qa_loop_ui
+    completion handler (start_signoff qa->sign_off for a run that predates a newer
+    return). Repro (host, PR an auto-start target, ticks via pm pr auto-sequence from
+    a pm pane): (1) TUI hop: when the TUI routes SIGNOFF_REQA it clears awaiting and
+    its run kills the judged qa-<pr> window; a tick fired the moment awaiting clears
+    or the judged window disappears prints "running: qa (launched)" and starts qa-run-bg
+    next to the TUI loop (HEAD 2/6 round types, ctl 4648d501 4/8, ctl 914a4c3c 2/8).
+    The driver kills the TUI windows, both runs log "Planner pane: %N" for the same
+    pane, and in 6 of 9 doubled rounds the TUI loop then waits on that pane (60 min
+    _PLANNER_TIMEOUT): B stays in qa with a driver PASS until z t. (2) Tick hop: the
+    tick re-qa driver kills the TUI run finalizer (finalize=None); the TUI then processes
+    that stale PASS, moves the PR qa->sign_off a second time, launches its own router,
+    hops again on its REQA and starts a TUI loop beside the driver (one TUI hop +
+    one tick re-qa, 2 sign-off moves per round on all three builds). (3) pm autostart
+    add <pr> while a detached driver re-run is in flight: "Auto-start: QA for <pr>"
+    starts a TUI loop whose planner replaces the driver qa window (all three builds).
+    Expected: one QA run per return; the TUI should claim the qa re-run (claim_return_launch)
+    and honour a live claim/driver/qa window, and a TUI completion older than the
+    open return should not move the PR.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T10:23:52.016273+00:00'
+  updated_at: '2026-10-26T10:23:52.016273+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f779829
+  plan: bugs
+  title: 'Bug: z t over a QA loop stuck in planning logs an ERROR Traceback "Failed
+    to create status pane" (TmuxCommandError from split-window) from the stopped loop'
+  branch: pm/pr-f779829-bug-z-t-over-a-qa-loop-stuck-in-planning-logs-an-e
+  status: pending
+  depends_on: []
+  description: 'Seen in QA S73 of pr-592e4bd (captures /pm-captures/scenarios/73/final/pm-ctl1.log
+    ~09:28:37 and pm-ctl2.log ~09:28:32), on controls 4648d501 and 914a4c3c; 2 of
+    8 z t recoveries overall, 0 of 2 on HEAD (race, code path unchanged). Repro: a
+    TUI QA loop waiting on its planner (here: a pane taken over by a concurrent qa-run-bg,
+    see pr-bddda0f); press z t. The superseded loop logs "Planner produced no parseable
+    scenarios", opens a qa-<pr> window (new_window_get_pane) and qa_loop._add_status_pane
+    -> tmux.split_pane_at raises TmuxCommandError (pane gone while the new run kills
+    stale windows), logged as ERROR with a full Traceback before QA complete: INPUT_REQUIRED.
+    Expected: a stopped/superseded loop opens no windows; a vanished target pane is
+    a plain warning, no Traceback.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T10:24:10.081071+00:00'
+  updated_at: '2026-10-26T10:24:10.081071+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
