@@ -67,6 +67,29 @@ def test_qa_confirmation_visible_over_sticky_review(verdict, expected):
 
     assert expected in shown[-1]
     assert app._log_hold_until > time.monotonic()
+    app._log_hold_until = 0.0  # the three-second confirmation hold expires
+    app._flush_held_log_message()
+    assert shown[-1] == " Starting follow-up"
+
+
+def test_qa_loop_start_visible_during_autostart_confirmation():
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    app._qa_loops = {}
+    app._self_driving_qa = {}
+    _log(app, "Auto-start: already off", force=True, hold=3)
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr", return_value={"id": "pr-001"}), \
+         patch.object(qa_loop_ui, "_enter_qa_status", return_value=True), \
+         patch.object(qa_loop_ui, "_ensure_poll_timer"), \
+         patch.object(qa_loop_ui, "_get_qa_pass_count", return_value=3), \
+         patch.object(qa_loop_ui, "start_qa_background"):
+        qa_loop_ui.start_or_stop_qa_loop(app, "pr-001")
+    assert "3 passes required" in shown[-1]
+    _log(app, "Planning QA scenarios...")
+    assert "3 passes required" in shown[-1]
 
 
 def test_plain_message_dropped_while_sticky():

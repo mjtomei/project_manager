@@ -29479,7 +29479,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-26T14:59:16.726002+00:00'
+  updated_at: '2026-10-26T15:37:29.440965+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29648,6 +29648,74 @@ prs:
       No code change.'
     created_at: '2026-10-26T14:59:16Z'
     last_edited: '2026-10-26T14:59:16Z'
+  - id: note-09e74e8
+    text: 'QA S16 re-evaluation: exact early-L rerun confirmed planner absent from
+      immediate pane registry while planning; prior PASS overclaimed this assertion
+      and late-stage repeat did not repair it. Fix registers qa-planner before polling
+      and avoids duplicate status-pane registration. Pre-fix runtime and two failing
+      regression tests preserved; post-fix exact early-L run and per-client transcripts
+      under /pm-captures/scenarios/16/{pre-fix,post-fix}. Original lifecycle/focus
+      evidence remains valid for 7ff754fd; no standalone follow-up created.'
+    created_at: '2026-10-26T15:03:50Z'
+    last_edited: '2026-10-26T15:03:50Z'
+  - id: note-d4b76f0
+    text: 'S16 re-evaluation runtime post-fix: exact L before any planned scenario
+      window now snapshots qa-planner %9 in QA @8 and log %10 in main @0; same planner
+      subsequently launched scenario 2; second L reused log, three clients stayed
+      on main, all three have pipe-pane transcripts + casts/videos. 89 focused tests
+      pass. Full suite: 43 failed/3475 passed/1 skipped/17 errors with shim-first
+      PATH; failing modules under real-Git-first PATH: 137 passed, one hook receiver
+      installer failure, also reproduced on untouched 7ff754fd baseline. No standalone
+      follow-up authorized; evidence /pm-captures/scenarios/16/{pre-fix,post-fix}.'
+    created_at: '2026-10-26T15:08:36Z'
+    last_edited: '2026-10-26T15:08:36Z'
+  - id: note-4f734a9
+    text: 'S19 verification correction: the original PASS incorrectly accepted 18.743/18.776-second
+      first restart confirmations as a minimum hold; the scenario requires approximately
+      3 seconds. Strict 2.7–3.5-second audits now fail the original recordings. Root
+      cause: forced held QA confirmation left the prior helper review sticky deadline
+      active, suppressing deferred progress at hold expiry. Fix clears obsolete sticky
+      protection only when a forced hold is actually displayed; regression tests now
+      exercise expiry (failed before, 76 focused tests pass after). Fresh complete
+      retained/cleanup replays are running; evidence cross-linked under /pm-captures/scenarios/19/pre-fix
+      and post-fix. No standalone follow-up created.'
+    created_at: '2026-10-26T15:00:14Z'
+    last_edited: '2026-10-26T15:00:14Z'
+  - id: note-6c5cd34
+    text: 'S19 timing-fix validation so far: first automatic PASS confirmation now
+      3.000/3.003 s in real three-client casts, versus 18.743/18.776 s pre-fix. Full
+      suite under inherited wrapper env: 3473 passed, 43 failed, 17 errors, 1 skipped;
+      all 60 failed/error cases pass with real Git PATH and PM_HOST_HOME unset. One
+      retained replay missed second helper overlap and is not counted for that precondition;
+      fresh retained retry has valid ~4 s overlaps. Cleanup replay reached 3/3 with
+      all intermediate holds ~3 s. Evidence and strict audits retained under post-fix;
+      final lifecycle observation still running.'
+    created_at: '2026-10-26T15:13:03Z'
+    last_edited: '2026-10-26T15:13:03Z'
+  - id: note-08d4898
+    text: 'S19 additional real-surface finding during fresh retained retry: issuing
+      zz t while setup Auto-start: already off held the log line hid the initial three-pass
+      requirement. Fixed the user-start QA-loop message with force=True while keeping
+      sticky=3; new behavioral regression failed before. Strict timing now passes;
+      cleanup replay passed all 22 checks with 65 s quiet, retained retry passed timing/overlap/focus
+      but exposed this startup failure. A final fresh retained replay and corrected-env
+      full suite are running. No coverage waived; all failed/intermediate evidence
+      retained.'
+    created_at: '2026-10-26T15:22:19Z'
+    last_edited: '2026-10-26T15:22:19Z'
+  - id: note-1c43a92
+    text: 'S19 re-evaluation complete: fixed stale sticky deadline surviving forced
+      hold, and initial zz t confirmation hidden by an active setup hold. Final retained
+      replay passed all 22 strict checks: first PASS 3.029 s, NEEDS_WORK 2.999 s,
+      post-bounce 1/3 2.999 s and 2/3 3.013 s; both helper overlaps valid. Independent
+      cleanup replay passed all 22 checks, first PASS 3.003 s, no QA windows for 117.19
+      s before fresh creation. Both reached 3/3 and remained quiet for 65 s with correct
+      focus. Corrected-env final full suite: 3534 passed, 1 skipped. Original PASS
+      withdrawn; outcome NEEDS_WORK because bugs were found and fixed. Pre/post recordings
+      and failed intermediate replays retained under /pm-captures/scenarios/19; no
+      standalone follow-up.'
+    created_at: '2026-10-26T15:37:29Z'
+    last_edited: '2026-10-26T15:37:29Z'
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge

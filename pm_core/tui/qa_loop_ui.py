@@ -298,7 +298,7 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     passes_label = f" ({required} pass{'es' if required > 1 else ''} required)" if required > 1 else ""
     app.log_message(
         f"[bold]QA loop started[/] for {pr_id}{passes_label} — z t to stop",
-        sticky=3,
+        sticky=3, force=True,
     )
     _log.info("qa_loop_ui: starting QA loop for %s (passes=%d)", pr_id, required)
 
