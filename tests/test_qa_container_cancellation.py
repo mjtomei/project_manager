@@ -9,7 +9,8 @@ from pm_core import container, container_reaper, qa_loop, tmux
 
 @pytest.mark.parametrize("stage", ["clone", "create", "concretize", "reject"])
 @pytest.mark.parametrize("containers", [True, False])
-def test_cancelled_preparation_does_not_launch_or_record_verdict(tmp_path, monkeypatch, stage, containers):
+@pytest.mark.parametrize("queued", [False, True])
+def test_cancelled_preparation_does_not_launch_or_record_verdict(tmp_path, monkeypatch, stage, containers, queued):
     if stage == "create" and not containers:
         pytest.skip("host workers have no container allocation")
     state = qa_loop.QALoopState(pr_id="pr-aaaa", session_tag="t", loop_id="L")
@@ -54,11 +55,13 @@ def test_cancelled_preparation_does_not_launch_or_record_verdict(tmp_path, monke
 
     launch = (qa_loop._launch_scenarios_in_containers if containers
               else qa_loop._launch_scenarios_in_tmux)
-    launch(state, {}, {"id": state.pr_id}, "pm-t", None, str(clone))
+    if not queued:
+        launch(state, {}, {"id": state.pr_id}, "pm-t", None, str(clone))
     monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
     qa_loop._poll_tmux_verdicts(
         state, {}, {"id": state.pr_id}, "pm-t", str(clone),
-        tmp_path / "status.json", lambda: None, use_containers=True)
+        tmp_path / "status.json", lambda: None, use_containers=containers,
+        queued_scenarios=[scenario] if queued else [], concurrency_cap=1)
     qa_loop._release_scenario_containers(state, "pm-t")
 
     split.assert_not_called()

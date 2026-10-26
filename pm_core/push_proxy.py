@@ -694,8 +694,8 @@ def start_push_proxy(container_name: str, workdir: str,
             except FileNotFoundError:
                 pass
 
-        _start_proxy_subprocess(sock_path, workdir, allowed_branch)
         _write_owner_file(sock_dir, session_tag, pr_id, workdir)
+        _start_proxy_subprocess(sock_path, workdir, allowed_branch)
 
         with _proxy_lock:
             _proxy_refs[key] = {container_name}
@@ -729,8 +729,8 @@ def start_push_proxy(container_name: str, workdir: str,
         except FileNotFoundError:
             pass
 
-    _start_proxy_subprocess(sock_path, workdir, allowed_branch)
     _write_owner_file(sock_dir, "", "", workdir)
+    _start_proxy_subprocess(sock_path, workdir, allowed_branch)
 
     with _proxy_lock:
         _active_proxies[container_name] = sock_path
@@ -816,9 +816,13 @@ def _owner_domain_matches(sock_dir: str) -> bool:
     """Known foreign domains cannot share or release one another's sockets."""
     try:
         owner = json.loads(Path(sock_dir, _OWNER_FILE).read_text())
-    except (OSError, ValueError):
+    except FileNotFoundError:
         return True  # legacy direct lifecycle behavior
-    domain = owner.get("runtime_domain") if isinstance(owner, dict) else None
+    except (OSError, ValueError):
+        return False  # unreadable existing metadata is not proof of legacy ownership
+    if not isinstance(owner, dict):
+        return False
+    domain = owner.get("runtime_domain")
     if domain is None:
         return True
     from pm_core.container_reaper import _runtime_domain
@@ -833,14 +837,21 @@ def _write_owner_file(sock_dir: str, session_tag: str, pr_id: str,
     reaper reads this to decide whether any container still needs the proxy.
     Unshared proxies use empty session/PR fields and are not globally swept.
     """
+    import tempfile
+    from pm_core.container import ContainerError
     from pm_core.container_reaper import _runtime_domain
+    temporary = None
     try:
-        Path(sock_dir, _OWNER_FILE).write_text(json.dumps(
-            {"session_tag": session_tag, "pr_id": pr_id, "workdir": workdir,
-             "runtime_domain": _runtime_domain()}))
-    except OSError:
-        _log.debug("could not write proxy owner file in %s", sock_dir,
-                   exc_info=True)
+        fd, temporary = tempfile.mkstemp(dir=sock_dir, prefix=".owner-")
+        with os.fdopen(fd, "w") as stream:
+            json.dump({"session_tag": session_tag, "pr_id": pr_id,
+                       "workdir": workdir, "runtime_domain": _runtime_domain()}, stream)
+        os.replace(temporary, Path(sock_dir, _OWNER_FILE))
+    except OSError as exc:
+        raise ContainerError(f"Cannot record push proxy owner in {sock_dir}: {exc}") from exc
+    finally:
+        if temporary is not None:
+            Path(temporary).unlink(missing_ok=True)
 
 
 def list_shared_proxies() -> list[dict]:
@@ -1002,8 +1013,8 @@ def repair_unshared_proxy(name: str, workdir: str, allowed_branch: str) -> str:
         if not proxy_is_alive(path):
             if original != current and cm.current_container_id(original) != "":
                 raise cm.ContainerError(f"Cannot repair another allocation's proxy '{original}'")
-            _start_proxy_subprocess(path, workdir, allowed_branch)
             _write_owner_file(str(Path(path).parent), "", "", workdir)
+            _start_proxy_subprocess(path, workdir, allowed_branch)
         return path
 
 

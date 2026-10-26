@@ -60,3 +60,11 @@ def test_release_retention_by_renamed_allocation(monkeypatch):
     monkeypatch.setattr(container, "current_container_id", lambda name: "retained-id")
     assert reaper.unretain("archive")
     assert not reaper.is_retained("archive", "retained-id")
+
+
+def test_release_renamed_retention_ignores_stale_same_name(monkeypatch):
+    reaper.retain("pm-original", container_id="retained-id")
+    reaper.retain("pm-archive", container_id="deleted-id")
+    monkeypatch.setattr(container, "current_container_id", lambda name: "retained-id")
+    assert reaper.unretain("pm-archive")
+    assert not reaper.is_retained("pm-archive", "retained-id")

@@ -2877,6 +2877,11 @@ def _poll_tmux_verdicts(
                 )
         finally:
             state.scenarios = orig
+        if state.stop_requested:
+            # Preparation can observe cancellation after dequeue. It created no
+            # worker verdict; finalization must release any captured allocation
+            # rather than keep it as a synthetic human-waiting session.
+            return
         if scenario.window_name:
             pending.add(scenario.index)
         elif _is_launch_failure(state, scenario.index):

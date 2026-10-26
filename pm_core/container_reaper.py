@@ -190,9 +190,9 @@ def unretain(name: str) -> bool:
     domain = _runtime_domain()
     removed = False
     records = _retention_records()
-    cid = None
-    if not any(rec.get("name") == name for _, rec in records):
-        cid = container_mod.current_container_id(name)
+    # A stale same-name marker may belong to a removed allocation while the
+    # current container was retained under its old name before a rename.
+    cid = container_mod.current_container_id(name)
     for path, rec in records:
         if rec.get("name") != name and (not cid or rec.get("id") != cid):
             continue

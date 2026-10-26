@@ -176,6 +176,9 @@ and the renamed allocation's lock; do not report removal or prune its release.
   remains retryable after the container disappears without touching a replacement.
   Unshared proxy directories carry runtime-domain ownership too; another runtime
   cannot start, repair, or unlink their sockets based on its own empty inventory.
+  Existing unreadable or malformed proxy owner records fail closed rather than
+  acting as missing legacy records. Owner metadata is published atomically before
+  starting a proxy; publication failure aborts startup without spawning a daemon.
   Unknown runtime identity defers removal before deleting an allocation whose
   mounted proxy needs a durable release. Recognized legacy unlabeled containers
   still resolve their actual unshared mounts for repair and release. Removal drops
@@ -213,7 +216,9 @@ and the renamed allocation's lock; do not report removal or prune its release.
   Cancellation is checked after workdir/container preparation and after concretization;
   concretizer polling receives the run's stop callback. A cancelled run cannot
   launch a subsequent worker or convert an unlaunched scenario into human-wait
-  retention. Allocations already created retain their captured identity for the
+  retention. The dequeue caller also checks cancellation after preparation returns,
+  before assigning a fallback verdict; this applies to host and container workers.
+  Allocations already created retain their captured identity for the
   normal final release, with existing human/viewed/retained exceptions preserved.
   Temporary launch-batch slicing must
   restore the full scenario list even when launch/status persistence raises.
@@ -302,7 +307,9 @@ to the retained container's id (a replacement under the same name is not
 retained). Markers are keyed by runtime domain and container ID so renaming
 an allocation preserves retention and same-name or cloned-ID allocations in
 other runtime stores do not overwrite each other's retention. Legacy name+ID
-markers remain readable after renames. Full
+markers remain readable after renames. Explicit retention release resolves the
+current ID even when a stale marker has the same name, so renamed allocations
+can actually be released. Full
 reconcile passes prune retention and pending release records only when their
 recorded runtime domain matches the successfully inventoried domain; unknown
 or legacy domains are preserved. Known foreign-domain release records cannot
