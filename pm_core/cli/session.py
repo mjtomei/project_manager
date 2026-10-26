@@ -2025,7 +2025,7 @@ def popup_picker_cmd(session: str, window_name: str):
         Keeps the previous state if the reload fails, returning False so
         dispatch can refuse to act on that stale snapshot.
         """
-        nonlocal prs, nav_pr_ids, pr_by_disp, home_pr
+        nonlocal prs, nav_pr_ids, pr_by_disp, home_pr, window_pr_id
         nonlocal open_windows, name_to_wid, caller_wid, other_wids
         try:
             fresh_prs = store.load(root).get("prs") or []
@@ -2047,6 +2047,10 @@ def popup_picker_cmd(session: str, window_name: str):
         name_to_wid = fresh_name_to_wid
         caller_wid, other_wids = fresh_caller, fresh_others
         nav_pr_ids, pr_by_disp, home_pr = fresh_nav, fresh_by_disp, fresh_home
+        # An initially unresolved home can acquire an identity after repair.
+        # Pin it only after the complete refresh succeeds, just as on startup.
+        if home_pr in pr_by_disp:
+            window_pr_id = pr_by_disp[home_pr]["id"]
         return True
 
     def _canonical_id(pr_disp: str, previous_ids: dict[str, str]) -> str:

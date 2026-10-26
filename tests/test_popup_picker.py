@@ -1114,6 +1114,28 @@ class TestPopupPickerIdentity:
         assert _shown(fzf.calls[1]) == "PR Actions — pr-a  (1/2)"
         run_cmd.assert_called_once_with("pr review pr-a", "pm-x")
 
+    @pytest.mark.parametrize("reassign", [False, True])
+    @pytest.mark.parametrize("repair_key", ["0", "h", "l"])
+    def test_repaired_home_keeps_local_identity(
+            self, tmp_path, monkeypatch, reassign, repair_key):
+        prs = [_pr("pr-a"), _pr("pr-b")]
+
+        def on_launch(n):
+            if n == 1:
+                prs[0]["gh_pr_number"] = 12
+            elif n == 2:
+                prs[0].pop("gh_pr_number")
+                if reassign:
+                    prs[1]["gh_pr_number"] = 12
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["#12", "pr-a", "pr-b"], "#12",
+            [(0, f"{repair_key}\n"), (0, "0\n"), (0, "d\n"), (130, "")],
+            on_launch=on_launch)
+        assert "Could not load actions for #12." in fzf.calls[0]["input"]
+        assert _shown(fzf.calls[2]) == "PR Actions — pr-a  (1/2)"
+        run_cmd.assert_called_once_with("pr review pr-a", "pm-x")
+
     @pytest.mark.parametrize("direction", ["h", "l"])
     def test_navigation_steps_from_local_identity_after_number_reassignment(
             self, tmp_path, monkeypatch, direction):

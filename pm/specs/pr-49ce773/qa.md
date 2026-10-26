@@ -27,7 +27,9 @@ Changed behavior (pm_core/cli/session.py `popup_picker_cmd` and helpers):
 2. Throwaway project per `pm/qa/instructions/tui-manual-test.md`: `pm init
    --backend local --no-import`, add ≥4 PRs. Bootstrap statuses in project.yaml:
    two live PRs (e.g. A=in_review, B=qa), one merged PR M, optionally one closed C.
-   Give some PRs `gh_pr_number` so display ids are `#N`.
+   Give some PRs `gh_pr_number` so display ids are `#N`. For R9's missing-number
+   case, remove the number explicitly in this throwaway project while retaining
+   its `#N` window; the real historical #193 entry now has its number restored.
 3. Start `pm session` (attach failure is fine). Create tmux windows named after the
    PRs' display ids to simulate open PR windows: A (`#240`, `review-#240`), B
    (`qa-#242-s1` to exercise qa-scenario suffix), M (`#238`, `review-#238` — the
@@ -176,6 +178,11 @@ Also remove/reassign A's number while its popup is open, then press `0`:
 home must remain A under its current local/display ID, not become B or an
 unresolvable old-number entry. From a non-PR window, next/prev must step from
 A's identity in both directions, not from the new owner of its former number.
+Repeat starting from an unresolved `#12` home: repair it to resolve to A, reload
+with `0`, next or prev, then remove A's number (with and without assigning it to
+B). `0` must still return to A under its local ID, and an action there must target
+A, not B. A home first resolved during refresh needs the same identity retention
+as one resolved when the popup opened.
 
 ## Concurrent use / shared resources
 

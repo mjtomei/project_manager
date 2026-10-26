@@ -102,6 +102,9 @@
    neighbours when stepping. Number removal/reassignment must not make `0`
    return to a different PR or make next/prev step from the new number owner.
    An initially unresolved home window id remains eligible for later repair.
+   Pin its local identity on the first successful refresh that resolves it, even
+   when that refresh navigates away from home, so later number removal or
+   reassignment cannot create a ghost home or redirect `0` to another PR.
    Refresh the caller/other-session active-window indicators in the same
    transaction as the window-name map so navigation redraws current dots.
    Query all attached session/window pairs in one tmux `list-sessions` call
@@ -123,10 +126,15 @@ time (`pr.py` — `window_name = _pr_display_id(pr_entry)`), so if
 (window `#N`, display `pr-xxx`), `home_pr` from `_current_window_pr_id`
 matches no PR.  `home_pr not in seen` then inserts the unmatched id at
 position 0, `_build_picker_lines` hits `if not pr: return []`, and the
-popup claims "merged or closed".  This is observed in git history:
-pr-f5b7eef had `gh_pr_number: 193` at 37a927cd (status in_review) and the
-field is absent in the current project.yaml.  `int` vs `str`
-gh_pr_number doesn't matter (`f"#{gh}"` gives the same string).
+popup claims "merged or closed". The original audit reported a snapshot
+without pr-f5b7eef's number; the preserved history confirms
+`gh_pr_number: 193` at 37a927cd (status in_review), and both 8016b42f and
+the current post-integration project.yaml have that number with status merged.
+Thus the missing-number path explains the lookup-failure symptom, but those
+commits do not independently establish the exact original #193 snapshot.
+QA must create the missing-number state explicitly rather than rely on that
+historical entry still being broken. `int` vs `str` gh_pr_number doesn't
+matter (`f"#{gh}"` gives the same string).
 
 Fix: resolve a window id to a PR by display id, else via the existing
 `helpers._resolve_pr_id` (local `pr["id"]`, or `#N` against an int
