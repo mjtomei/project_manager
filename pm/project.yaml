@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T08:05:49.614062+00:00'
+  updated_at: '2026-10-26T09:51:10.271123+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34261,6 +34261,22 @@ prs:
       now 109bca54. Evidence /pm-captures/review-e932-i1/README.md.'
     created_at: '2026-10-26T08:20:37Z'
     last_edited: '2026-10-26T08:20:37Z'
+  - id: note-af6a204
+    text: 'QA S72 (2026-10-26, host, stubs; captures /pm-captures/scenarios/72, REPORT.md):
+      PASS on 251763f8, no code change. 75708c0b held live. G (verify on): driver
+      logged s2 passed once, then stopped with qa_resume verified [1,2]; TUI adoption
+      stopped with one identical warning, no re-verify/FLAGGED/re-evaluate/router
+      traffic, 0 Traceback, file cleared. Control 4d79012a reproduced S69 in order
+      (dead-pane follow-up Traceback, FLAGGED, re-evaluating + new worker/aux requests,
+      new verifier, second stop). G recovery: one driver, s3/s4 VERIFIED, one advanced:
+      sign_off, FINALIZE_DONE, respawned TUI silent. H (TUI t + three kill -9 restarts):
+      s1/s2 verified once each, one stop, later TUIs adopt nothing; z t gave one PASS
+      run, one finalizer pane, one QA PASS note. E/E2 (verify off): 2 panes per scenario,
+      no verifier, two identical stops; E2 rerun captured the driver snapshot (both
+      PASS) after my watcher gap on E. Harness: the routed s2 worker turn takes ~60
+      s, so 6-8 ticks at 10 s end before the stop; tick until the second warning.'
+    created_at: '2026-10-26T09:51:10Z'
+    last_edited: '2026-10-26T09:51:10Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
