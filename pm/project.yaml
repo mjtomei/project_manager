@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T00:14:22.931000+00:00'
+  updated_at: '2026-10-26T00:25:47.329210+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33951,6 +33951,19 @@ prs:
       now go in that provider alias_models or Claude settings.json env. Evidence /pm-captures/review-c189-i6.'
     created_at: '2026-10-26T00:14:22Z'
     last_edited: '2026-10-26T00:14:22Z'
+  - id: note-012d59d
+    text: 'Review c189 i7 (3d6c1b4d, test/spec only, no product change): c7b52962
+      R9 launch_env reviewed independently and sound. The latest QA run da5cdfbc6f5e8370
+      fixes (ff65f489, 3ee69236, 79b6ddd7) and spec 0e13c5f8 still hold. 10 new mutations:
+      6 missed, now caught by tests: openai alias_models; marker only for routers;
+      a claude/local URL is not a route; marker-only route with a trailing slash (a
+      container pm has no providers.yaml); malformed router api_base; the environ
+      param. Live: this review container was launched with PM_ROUTE_BASE_URL (production
+      runs R9); a pm no-model build dropped every routing variable. Full suite 3812
+      passed, rc 0; /pm-captures/review-c189-i7. S62 (qa.md twenty-fifth pass) still
+      owed; it now includes a nested launch inside a container.'
+    created_at: '2026-10-26T00:25:47Z'
+    last_edited: '2026-10-26T00:25:47Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
