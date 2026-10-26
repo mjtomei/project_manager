@@ -319,8 +319,9 @@ intact to protect concurrent waiters and delayed releases.
   exec of `test` returning 1 without runtime errors. Failed exec/post-setup
   preserves the existing filesystem and reports its cause for retry. This includes
   verification after in-place completion: missing completion/config markers do not
-  authorize recreation, and PID/memory/keyring probe errors retain their real cause
-  both after completion and after restart. If the incomplete container has a live
+  authorize recreation, and PID/memory/keyring probe errors retain their classified
+  cause and recovery guidance during the readiness check, after completion, and
+  after restart. If the incomplete container has a live
   owning pane and cannot be finished, raise
   instead of killing it. Explicit retention also blocks recreation of stopped
   or incomplete containers and automatic pressure-recovery restart; safe

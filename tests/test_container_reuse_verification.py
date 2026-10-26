@@ -75,6 +75,43 @@ def test_restart_completion_probe_preserves_runtime_cause(monkeypatch, kind, std
     assert not any(args[0] == "rm" for args in calls)
 
 
+@pytest.mark.parametrize("kind,stderr", [
+    ("pids", "cannot fork"),
+    ("memory", "cannot allocate memory"),
+    ("keyring", "unable to join session keyring: disk quota exceeded"),
+    ("runtime", "runtime connection lost"),
+])
+def test_incomplete_readiness_probe_preserves_runtime_cause(
+        monkeypatch, tmp_path, kind, stderr):
+    name, cid = "pm-tag-review-pr-aaaa", "existing-allocation"
+    monkeypatch.setattr(cm, "current_container_id", lambda target: cid)
+    monkeypatch.setattr(cm, "container_is_running", lambda target: True)
+    monkeypatch.setattr(cm, "_probe_setup", lambda target: (False, "", ""))
+    monkeypatch.setattr(cm, "running_container_count", lambda: 1)
+    monkeypatch.setattr(reaper, "is_retained", lambda *a: False)
+    remove, restart, post = Mock(), Mock(), Mock()
+    monkeypatch.setattr(cm, "remove_container", remove)
+    monkeypatch.setattr(cm, "restart_container", restart)
+    monkeypatch.setattr(cm, "_post_setup", post)
+
+    def runtime(*args, **kwargs):
+        assert args == ("exec", cid, "test", "-f", cm._READY_SENTINEL)
+        return subprocess.CompletedProcess(args, 125, "", stderr)
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm._ensure_reusable(name, tmp_path, None, session_tag=None, pr_id=None)
+    assert error.value.kind == kind
+    assert stderr in str(error.value)
+    if kind == "pids":
+        assert "pm container restart" in str(error.value)
+    elif kind in ("memory", "keyring"):
+        assert "pm container reap" in str(error.value)
+    remove.assert_not_called()
+    restart.assert_not_called()
+    post.assert_not_called()
+
+
 @pytest.mark.parametrize("complete", [False, True])
 def test_completion_probe_without_runtime_error_remains_boolean(monkeypatch, complete):
     monkeypatch.setattr(cm, "_probe_setup", lambda target: (complete, "", ""))

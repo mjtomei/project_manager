@@ -13154,6 +13154,23 @@ prs:
       required.'
     created_at: '2026-10-26T14:04:13Z'
     last_edited: '2026-10-26T14:04:13Z'
+  - id: note-5459c64
+    text: 'Review-loop 0b6f i9 (main chatgpt/gpt-6-astra-high; inherited read-only
+      reviewer, no overrides): fixed intermediate readiness probe misclassifying PID/memory/keyring
+      exhaustion as generic runtime errors during incomplete reuse. Reused existing
+      classifier to retain specific recovery guidance; existing allocation remains
+      untouched. R5 clarified, A7 and lifecycle architecture unchanged. Baseline regressions:
+      3 failures/10 controls passed; post-fix readiness/setup/restart/lifecycle 210
+      passed. Core723 passed and launcher/QA224 passed/2 skipped before fix. Final
+      sanitized full suite4060 passed/2 skipped/2 existing-class AsyncMock warnings,192.38s.
+      Independent ownership/release review found no additional actionable defect.
+      Evidence/all per-file notes /pm-captures/review-0b6f-i9-per-file.txt; full log
+      /pm-captures/review-0b6f-i9-full-suite-final.log. Declared markdown dependency
+      installed. Pre-existing project routing/handoff/manual-gate and qa.md edits
+      preserved outside source commit. No real-container QA or independent sign-off
+      claim; outstanding coverage remains required.'
+    created_at: '2026-10-26T14:30:49Z'
+    last_edited: '2026-10-26T14:30:49Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

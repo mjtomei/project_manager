@@ -1515,8 +1515,9 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
                                    "preserving existing container",
                                    stage="be reused")
         elif base.returncode != 1 or (base.stderr or "").strip():
-            raise launch_error(name, "runtime", (base.stderr or "").strip()
-                               or f"readiness probe exited {base.returncode}",
+            stderr = (base.stderr or "").strip()
+            raise launch_error(name, classify_runtime_error(stderr),
+                               stderr or f"readiness probe exited {base.returncode}",
                                stage="verify existing setup")
         if not finished:
             if retained:
