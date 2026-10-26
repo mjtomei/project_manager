@@ -118,6 +118,13 @@ Recorded (bounded) in the integration record and shown in the sign-off prompt
 so the agent must weigh them even when Git reports a clean merge. PM does not
 auto-approve or auto-reject on them — the agent decides and must say so.
 
+The summary is best-effort so it never fails the check (`base_behavior_error`
+is recorded instead of raising). A failed summary is **not** an exemption: the
+merge gate and the prompt treat `base_behavior_error` like a behavioural
+change, so a MERGE still has to state the evidence reused or the targeted
+checks run. Otherwise an unexpected raise would silently drop the requirement
+that makes the agent weigh the new base.
+
 ### R4. Apply the resolved merge to the PR branch before sign-off runs
 For the GitHub backend `gh pr merge` cannot merge a conflicted branch, and
 sign-off's report/verdict must bind to a candidate that can actually be
@@ -251,12 +258,21 @@ base is inside HEAD with no recorded pre-apply range.
   bound approval: it is authoritative and publication revalidates it against
   a fresh fetch, so absence alone is not a refusal (the same reading the
   existing merge-gate tests encode);
+- an `in_base` record is exempt from the candidate-tree requirement: the
+  approved head is already published, and the merge step's recovery path
+  finalizes that merge. The exemption applies to resolved approvals too —
+  `approval_justification_problem` returns no problem for an `in_base` record
+  (there is no candidate left to name), so a resolved candidate whose head
+  landed in the base is recovered rather than sent to a sign-off that can
+  only block an `in_base` head;
 - for a bound `resolution_digest`: the current record carries the same digest,
   `resolution.applied_merge_sha` is set, `resolution.unresolved` is empty, and
   the report justification of R6 is present. The digest is also recomputed
   from the current record's resolution and must agree with the stored value,
   so a resolution edited without its digest cannot ride an old approval;
-- for `base_behavior_changes`: the report justification of R6 is present.
+- for `base_behavior_changes`: the report justification of R6 is present;
+- for `base_behavior_error` (the summary failed): the same justification, so
+  a check pm could not summarise cannot pass as behaviour-neutral.
 `BINDING_KEYS` gains `resolution_digest`.
 `_publish_candidate` recomputes the candidate with `resolve=False` and
 refuses when the tree differs (now covering the resolved/applied head), so
@@ -328,7 +344,9 @@ tests):
     check keeps the bound resolution; a config-file base change (e.g.
     `pyproject.toml`) requires the same justification as `project.yaml`; the
     full `integration.json` record carries the digest of the resolution it
-    describes.
+    describes; a failed behaviour summary still requires the justification
+    (and the prompt says the summary failed); a resolved approval whose head
+    is already in the base is recovered, not refused for a missing candidate.
 
 ## Implicit requirements
 

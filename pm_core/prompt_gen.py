@@ -538,6 +538,15 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
             lines.append(f"- {change}")
         if rec.get("base_behavior_count", len(behavior)) > 20:
             lines.append(f"- … {rec['base_behavior_count'] - 20} more")
+    elif rec.get("base_behavior_error"):
+        # The summary failed, so the absence of listed changes is not evidence
+        # that the base is behaviour-neutral.  Say so: a MERGE still requires
+        # the reuse/checks statement (pm enforces it at record and merge time).
+        lines.append("")
+        lines.append("**pm could not summarise the base's behaviour-relevant "
+                     f"changes** ({rec['base_behavior_error']}). Assess the "
+                     "base diff yourself; a MERGE must still state the evidence "
+                     "you are reusing or the targeted checks you ran.")
     evidence = _evidence_revision_lines(pr_id)
     if evidence:
         lines.append("")

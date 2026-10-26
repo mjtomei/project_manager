@@ -1439,6 +1439,76 @@ def test_merge_gate_allows_recovery_when_the_head_is_already_in_the_base(w):
         pr_entry(w), signoff.head_sha(str(w.wd)), "master") is None
 
 
+def test_merge_gate_allows_recovery_for_a_resolved_approval_already_in_base(w):
+    """The same ``in_base`` recovery holds for a resolved (applied) approval.
+
+    A resolved candidate is applied to the branch, so its head can be in the
+    base after a partially completed publication just like a clean one.  The
+    approval then has a resolution digest but the ``in_base`` record carries
+    no candidate tree; requiring the candidate tag there would refuse a merge
+    that already happened and send the PR to a sign-off that can only block an
+    ``in_base`` head.
+    """
+    rec = _metadata_conflict(w)
+    assert rec["status"] == integration.UP_TO_DATE
+    assert rec["resolution"]["applied_merge_sha"]
+    record_merge(w, rec)
+    assert signoff.merge_gate_refusal(pr_entry(w), rec["head"], "master") is None
+
+    def _in_base(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["status"] = integration.IN_BASE
+        integ.pop("candidate_tree", None)
+    store.locked_update(w.pm_dir, _in_base)
+    assert signoff.merge_gate_refusal(
+        pr_entry(w), signoff.head_sha(str(w.wd)), "master") is None
+
+
+def test_an_unsummarisable_base_change_still_requires_the_evidence_statement(
+        w, monkeypatch):
+    """A failed behaviour summary must not become an implicit exemption.
+
+    ``compute_candidate`` swallows a summary failure so the check still runs;
+    that must not read as "the base changes nothing".  A MERGE then requires
+    the same explicit reuse/checks statement as a listed behavioural change,
+    and the prompt says the summary failed instead of showing no changes.
+    """
+    data = store.load(w.base_pm)
+    data["project"]["model_config"] = {"session_models": {"impl": "model-new"}}
+    store.save(data, w.base_pm)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base changes model")
+
+    def boom(*a, **k):
+        raise RuntimeError("summary exploded")
+
+    monkeypatch.setattr(integration, "base_behavior_changes", boom)
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    assert not rec["base_behavior_changes"]
+    assert "summary exploded" in rec["base_behavior_error"]
+
+    # Recording a MERGE without the statement is refused.
+    write_report(w, rec, candidate=False, evidence=False, reason=False)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr, ["signoff", "record", PR])
+    assert r.exit_code != 0 and "pm-signoff-evidence" in r.output
+
+    # The prompt tells the agent the summary failed rather than listing none.
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(store.load(w.pm_dir), PR)
+    assert "could not summarise the base's behaviour-relevant changes" in text
+
+    write_report(w, rec, candidate=False)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr, ["signoff", "record", PR])
+    assert r.exit_code == 0, r.output
+    assert signoff.merge_gate_refusal(pr_entry(w), rec["head"], "master") is None
+
+
 def test_a_failed_resolution_is_not_reported_as_resolved(w):
     """The retained attempt is visible, but never claimed as a resolution.
 
@@ -2109,6 +2179,38 @@ def test_a_failed_recheck_keeps_the_behavioural_changes(w, monkeypatch):
     assert again["base_behavior_changes"] == rec["base_behavior_changes"]
 
     write_report(w, again, evidence=False)
+    refusal = signoff.merge_gate_refusal(pr_entry(w), again["head"], "master")
+    assert refusal and "behavioural changes" in refusal
+
+
+def test_a_failed_recheck_keeps_a_failed_summary(w, monkeypatch):
+    """A summary failure survives a transient re-check failure too.
+
+    The failure is what makes the approval state its evidence; dropping it on
+    a fetch error would let the next approval read as behaviour-neutral.
+    """
+    data = store.load(w.base_pm)
+    data["project"]["model_config"] = {"session_models": {"impl": "model-new"}}
+    store.save(data, w.base_pm)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base changes model")
+
+    def boom(*a, **k):
+        raise RuntimeError("summary exploded")
+
+    monkeypatch.setattr(integration, "base_behavior_changes", boom)
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["base_behavior_error"]
+    record_merge(w, rec)
+
+    monkeypatch.setattr(integration, "fetch_base",
+                        lambda *a, **k: (None, "network down"))
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.ERROR
+    assert again["head"] == rec["head"]
+    assert again["base_behavior_error"] == rec["base_behavior_error"]
+
+    write_report(w, again, candidate=False, evidence=False, reason=False)
     refusal = signoff.merge_gate_refusal(pr_entry(w), again["head"], "master")
     assert refusal and "behavioural changes" in refusal
 

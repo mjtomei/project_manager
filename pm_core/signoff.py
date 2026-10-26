@@ -438,16 +438,29 @@ def approval_justification_problem(pr_id: str, integration: dict | None,
                                    head: str | None) -> str | None:
     """Why a MERGE lacks the explicit evidence statement it requires, or None.
 
-    Applies only when the candidate carries a resolution or a base change
-    that can alter behaviour: the report must name the candidate (resolved
-    candidates) and state which existing evidence is reused and why, or which
-    targeted checks were run.  This is the "explicit reuse" requirement; an
-    unstated assumption never becomes an approval.
+    Applies only when the candidate carries a resolution, a base change that
+    can alter behaviour, or a base summary pm could not compute: the report
+    must name the candidate (resolved candidates) and state which existing
+    evidence is reused and why, or which targeted checks were run.  This is
+    the "explicit reuse" requirement; an unstated assumption never becomes an
+    approval.
+
+    An ``in_base`` record is exempt: the approved head is already published,
+    so there is no candidate to name and the merge step only finalizes that
+    merge (the same exemption :func:`merge_gate_refusal` applies to the
+    candidate-tree check).
     """
+    from pm_core import integration as integ
     rec = integration or {}
+    if rec.get("status") == integ.IN_BASE:
+        return None
     resolution = rec.get("resolution") or {}
     behavior = rec.get("base_behavior_changes") or []
-    if not resolution and not behavior:
+    # A summary that failed (``base_behavior_error``) is not evidence that the
+    # base is behaviour-neutral: requiring the statement keeps the failure from
+    # silently granting the metadata exemption.
+    error = rec.get("base_behavior_error")
+    if not resolution and not behavior and not error:
         return None
     meta = report_meta(pr_id)
     meta_head = (meta.get("head") or "").strip()
@@ -486,6 +499,12 @@ def approval_justification_problem(pr_id: str, integration: dict | None,
     reason = (meta.get("evidence-reason") or "").strip()
     checks = (meta.get("checks") or "").strip()
     if not checks and not (reused and reason):
+        if error:
+            return ("pm could not summarise the base's behaviour-relevant "
+                    f"changes ({error}); report.html must state which existing "
+                    "evidence is reused and why (pm-signoff-evidence + "
+                    "pm-signoff-evidence-reason) or which targeted checks were "
+                    "run (pm-signoff-checks)")
         return ("report.html must state which existing evidence is reused "
                 "and why (pm-signoff-evidence + pm-signoff-evidence-reason) "
                 "or which targeted checks were run (pm-signoff-checks)")
@@ -647,6 +666,16 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
                     f"report does not state the evidence/checks relied on — "
                     f"{problem}. Fix report.html and run `pm pr signoff "
                     f"record {pr_id}`, or re-run sign-off.")
+    elif current.get("base_behavior_error"):
+        # A summary pm could not compute is not an exemption: the base may
+        # still change behaviour, so the same statement is required.
+        problem = approval_justification_problem(pr_id, current, current_sha)
+        if problem:
+            return (f"PR {pr_id}: pm could not summarise the base's "
+                    f"behavioural changes and the report does not state the "
+                    f"evidence/checks relied on — {problem}. Fix report.html "
+                    f"and run `pm pr signoff record {pr_id}`, or re-run "
+                    f"sign-off.")
     if current and not current.get("candidate_tree") \
             and current.get("status") != integ.IN_BASE:
         # The approval names a candidate tree; a re-check that can no longer

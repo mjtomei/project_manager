@@ -1370,12 +1370,19 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
                                         or [])))
     elif record.get("status") == ERROR \
             and not record.get("base_behavior_changes") \
-            and old.get("base_behavior_changes") \
+            and not record.get("base_behavior_error") \
+            and (old.get("base_behavior_changes")
+                 or old.get("base_behavior_error")) \
             and record.get("head") and record.get("head") == old.get("head"):
-        # A transient failure (e.g. the base fetch) must not drop the
-        # behavioural changes the approval was required to assess: the
-        # merge gate would then no longer ask for the evidence statement.
-        record["base_behavior_changes"] = list(old["base_behavior_changes"])
+        # A transient failure (e.g. the base fetch) must not drop what the
+        # approval was required to assess — the listed behavioural changes, or
+        # a summary pm could not compute (which also requires the evidence
+        # statement): the merge gate would then no longer ask for it.
+        if old.get("base_behavior_changes"):
+            record["base_behavior_changes"] = list(
+                old["base_behavior_changes"])
+        if old.get("base_behavior_error"):
+            record["base_behavior_error"] = old["base_behavior_error"]
     return record
 
 
