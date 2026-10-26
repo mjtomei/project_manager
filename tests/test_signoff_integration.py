@@ -786,6 +786,24 @@ def test_claim_return_launch_has_one_winner_until_cleared(tmp_path):
     assert signoff.claim_return_launch(tmp_path, PR, "review") is False
 
 
+def test_qa_launch_claim_outlives_awaiting(tmp_path):
+    """QA S68: the qa driver clears ``awaiting`` before it replaces the
+    judged run's qa window, so its claim must still say a run is starting
+    (a tick in that gap launched a second driver)."""
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "backend": "local"},
+                "prs": [_returned("qa", "qa")]}, tmp_path)
+    assert signoff.claim_return_launch(tmp_path, PR, "qa") is True
+    signoff.clear_return_awaiting(tmp_path, PR, "qa")
+    p = store.get_pr(store.load(tmp_path), PR)
+    assert p["signoff_return"]["awaiting"] is None
+    assert signoff.return_launch_claimed(p, "qa") is True
+    assert signoff.return_launch_claimed(p, "review") is False
+    assert signoff.claim_return_launch(tmp_path, PR, "qa") is False
+    p["signoff_return"]["launch_claim"]["at"] = "2000-01-01T00:00:00+00:00"
+    assert signoff.return_launch_claimed(p, "qa") is False
+
+
 def test_claim_return_launch_expires(tmp_path):
     p = _returned("in_review", "review",
                   launch_claim={"hop": "review",

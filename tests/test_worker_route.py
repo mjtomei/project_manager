@@ -3177,6 +3177,33 @@ def test_reqa_hop_claims_its_launch(pm_home_dir, tmp_path):
     popen.assert_not_called()
 
 
+def test_reqa_rerun_starting_driver_is_not_doubled(pm_home_dir, tmp_path):
+    """QA S68: the hop tick's driver clears ``awaiting`` as it starts, then
+    kills the judged run's qa window before its own exists.  A tick in that
+    gap (no window, no status for the re-run) launched a second driver."""
+    pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+          "branch": "pm/pr-001"}
+    data = {"project": {}, "prs": [pr]}
+    old = _judged_run(tmp_path)
+    result, popen = _reqa_tick(tmp_path, data, status_path=old)
+    assert "sign_off: re-qa" in result.output
+    popen.assert_called_once()
+    from pm_core import signoff
+    with patch.object(signoff.store, "load", return_value=data), \
+            patch.object(signoff.store, "locked_update",
+                         side_effect=lambda root, fn, **kw: fn(data)):
+        signoff.clear_return_awaiting(tmp_path, "pr-001", "qa")
+    assert pr["signoff_return"]["awaiting"] is None
+    result, popen = _reqa_tick(tmp_path, data, status_path=old, window=False)
+    assert result.output.strip() == "running: qa"
+    popen.assert_not_called()
+    # A driver that died in the gap is relaunched once its claim expires.
+    pr["signoff_return"]["launch_claim"]["at"] = "2000-01-01T00:00:00+00:00"
+    result, popen = _reqa_tick(tmp_path, data, status_path=old, window=False)
+    assert result.output.strip() == "running: qa (launched)"
+    popen.assert_called_once()
+
+
 # QA S66 (RQ46 open points a, b; provider broken mid-run; TUI t replay).
 # (a) The review-PASS tick moved the PR to qa before the provider check, so
 # after a refused launch the next qa tick read the earlier run's

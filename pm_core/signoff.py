@@ -787,13 +787,7 @@ def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
         rec = (pr or {}).get("signoff_return")
         if not isinstance(rec, dict) or rec.get("awaiting") != hop:
             return
-        claim = rec.get("launch_claim") or {}
-        try:
-            age = (now - parse_ts(claim.get("at"))).total_seconds()
-        except (TypeError, ValueError):
-            age = None
-        if claim.get("hop") == hop and age is not None \
-                and 0 <= age < RETURN_LAUNCH_CLAIM_SECONDS:
+        if _claim_fresh(rec, hop, now):
             return
         rec["launch_claim"] = {"hop": hop, "at": now.isoformat()}
         won["ok"] = True
@@ -804,6 +798,29 @@ def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
         _log.warning("claim sign-off return launch for %s: %s", pr_id, e)
         return False
     return won["ok"]
+
+
+def _claim_fresh(rec: dict, hop: str, now) -> bool:
+    """*rec* holds a *hop* launch claim younger than the expiry."""
+    claim = rec.get("launch_claim") or {}
+    try:
+        age = (now - parse_ts(claim.get("at"))).total_seconds()
+    except (TypeError, ValueError):
+        return False
+    return claim.get("hop") == hop and 0 <= age < RETURN_LAUNCH_CLAIM_SECONDS
+
+
+def return_launch_claimed(pr: dict | None, hop: str) -> bool:
+    """A driver claimed the *hop* re-run less than the expiry ago.
+
+    The QA driver clears ``awaiting`` as it starts, then replaces the judged
+    run's qa window; until its own window and status exist, only the claim
+    (kept for the qa hop, see :func:`clear_return_awaiting`) says it runs.
+    """
+    from datetime import datetime, timezone
+    rec = (pr or {}).get("signoff_return")
+    return isinstance(rec, dict) and _claim_fresh(
+        rec, hop, datetime.now(timezone.utc))
 
 
 def clear_return_awaiting(root: Path, pr_id: str, hop: str,
@@ -818,7 +835,10 @@ def clear_return_awaiting(root: Path, pr_id: str, hop: str,
         rec = (pr or {}).get("signoff_return")
         if isinstance(rec, dict) and rec.get("awaiting") == hop:
             rec["awaiting"] = None
-            rec.pop("launch_claim", None)
+            if hop != "qa":
+                # A qa claim outlives ``awaiting``: the new run has no qa
+                # window yet (return_launch_claimed).  It expires by itself.
+                rec.pop("launch_claim", None)
 
     try:
         data = store.load(root)

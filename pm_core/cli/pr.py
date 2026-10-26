@@ -3673,6 +3673,13 @@ def pr_auto_sequence(pr_id: str):
             elif qa_win:
                 click.echo("running: qa")
                 return
+            else:
+                # The re-run's driver cleared ``awaiting`` and is replacing
+                # the judged run's window: its claim still stands.
+                from pm_core.signoff import return_launch_claimed
+                if return_launch_claimed(pr_entry, "qa"):
+                    click.echo("running: qa")
+                    return
             _launch_qa_detached(root, pr_id)
             click.echo("running: qa (launched)")
             return
