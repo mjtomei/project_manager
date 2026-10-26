@@ -164,7 +164,13 @@ with no PR entry left there is no display id — and `d` is not in its expect
 set. While such a malformed snapshot is on disk the TUI's background sync
 must not log a traceback (a PR entry with a status but no `id` used to raise
 `KeyError: 'id'` in `pm_core/tui/sync.py`); the popup's own log lines and the
-captures must stay traceback-free. Failed dispatch refreshes must
+captures must stay traceback-free. Cover the shapes that reach
+`pr_sync.sync_prs`/`sync_from_github` too, with a workdir present so the
+sync is not skipped: an id-less entry whose status is `merged`, and one with
+a non-empty `depends_on`, each used to raise `KeyError: 'id'` through
+`graph.ready_prs` after the `do_normal_sync` guards. The sync log must stay
+traceback-free for both backends, and such entries must not appear in the
+"ready" set. Failed dispatch refreshes must
 show an explicit "Could not refresh PR actions; no action was run" notice in
 both fzf and the numbered fallback (reopen the latter after repair). The notice
 is two non-actionable rows (the second is "Repair project.yaml and retry.")

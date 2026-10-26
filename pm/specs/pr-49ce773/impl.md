@@ -203,6 +203,17 @@ for the removed number resolves to whichever PR now owns that number.
   entries are skipped when snapshotting statuses, applying merges and
   detecting merges, so a partial/externally written project.yaml produces no
   traceback while the popup picker is rejecting the same snapshot.
+  The same holds for the blocking halves the sync loop awaits —
+  `pr_sync.sync_prs` and `pr_sync.sync_from_github` — which index PRs by id
+  directly and through `graph.ready_prs`; an entry with a `merged` status or
+  a non-empty `depends_on` raised `KeyError: 'id'` there even after the
+  `do_normal_sync` guards. Filter the snapshot through the shared
+  `pm_core.pr_utils.usable_prs` helper (non-empty string `id` only) before
+  any id indexing, and in every `apply`/`apply_merged`/`apply_github`
+  closure that walks freshly loaded data. `usable_prs` is the single rule
+  for "entry we can key by id"; `tui/tech_tree.py` uses it too instead of a
+  private copy. Entries it drops are never launchable, so they are also
+  excluded from `SyncResult.ready_prs`.
 
 ## Ambiguities (resolved)
 
