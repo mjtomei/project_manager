@@ -22283,7 +22283,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-17T20:17:14.811858+00:00'
-  updated_at: '2026-10-25T23:28:56.345904+00:00'
+  updated_at: '2026-10-26T00:41:35.330743+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -23443,6 +23443,32 @@ prs:
       passes with PM_HOST_HOME unset). Evidence /pm-captures/review-4029-i3/.'
     created_at: '2026-10-25T23:28:56Z'
     last_edited: '2026-10-25T23:28:56Z'
+  - id: note-dbde5d3
+    text: 'Scenario 13 refinement note: the fix story writes its review file directly
+      at pm/reviews/ in the documented Step/Status/## Review Findings/## Fix Command
+      format. The post-step review that `pm plan deps` / `pm plan review` launches
+      (review_step -> launch_claude_print_background) runs in a daemon thread that
+      does not outlive the one-shot CLI in testing, so those commands did not leave
+      a reviews/*.txt. Do not gate the fix prerequisite on that producer.'
+    created_at: '2026-10-26T00:23:36Z'
+    last_edited: '2026-10-26T00:23:36Z'
+  - id: note-10bffa9
+    text: 'QA scenario 13 PASS on head 8d0548d5 (evidence /pm-captures/scenarios/13/).
+      Harness trap for future runs, not a product defect: the scenario Givens start
+      the pane host with `pm session` under the restricted no-claude PATH (`PATH=/usr/bin:/bin`).
+      pm creates the tmux session with pane command `pm _tui`, which is unresolvable
+      on that PATH, so the session dies and pm prints "Failed to detect TUI pane after
+      session creation" (pm_core/cli/session.py:475). Start the session with /tmp/pm-venv/bin
+      on PATH (it then works), or drive the one-shot plan commands in a plain tmux
+      pane as this run did. All five Thens held: deps prompt 886,083 B with 22/22
+      plan files whole, 40 kept PR lines + "(+5 more)", 300-char description excerpt
+      + working `pm pr show`; stand-in got a 262-byte bootstrap and the delivered
+      file was sha256-identical to the printed prompt; the negative project correctly
+      omitted the "Descriptions above are abbreviated" note for a dropped line; plan
+      fix delivered 22/22 plan files + the finding whole with no truncation marker;
+      plan breakdown delivered a 4,048-byte prompt inline with no bootstrap file.'
+    created_at: '2026-10-26T00:41:35Z'
+    last_edited: '2026-10-26T00:41:35Z'
 - id: pr-93b9aa9
   plan: bugs
   title: Stop telling out-of-container sessions not to run pm commands
