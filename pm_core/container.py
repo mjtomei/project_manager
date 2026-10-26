@@ -2107,7 +2107,10 @@ def discard_unowned_container(name: str, *, container_id: str | None = None,
             if current is None:
                 return False
             if not current:
-                return True  # already gone
+                # Runtime renames do not take this name's launch lock. Only
+                # confirmed absence of the captured allocation permits a host
+                # fallback; a surviving/unknown ID needs a fresh-name retry.
+                return not container_id or current_container_id(container_id) == ""
             if container_id and current != container_id:
                 return False
             if generation is not None and cleanup_generation(name) != generation:

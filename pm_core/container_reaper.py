@@ -1348,6 +1348,30 @@ def last_state() -> dict:
         return {}
 
 
+def unavailable_runtime_diagnostics() -> list[tuple[str, str, str]]:
+    """Display-only records from scoped stores when runtime identity is unknown.
+
+    Do not use these for planning or state merges: they may belong to different
+    runtimes. Keep each source distinct even when container names are identical.
+    """
+    if _runtime_domain() is not None:
+        return []
+    rows = []
+    for path in sorted(container_mod.container_state_dir().glob("reaper-*.json")):
+        try:
+            state = json.loads(path.read_text())
+            for name, failure in state.get("failures", {}).items():
+                rows.append((path.name, name, str(failure.get("error", ""))))
+        except (OSError, ValueError, AttributeError, TypeError):
+            continue
+    for _, rec in _release_records():
+        if rec.get("runtime_domain") is not None:
+            source = json.dumps(rec["runtime_domain"], sort_keys=True)
+            rows.append((source, rec["name"],
+                         f"owner release pending for allocation {rec['id']}"))
+    return rows
+
+
 def _record(out: Outcome, scope: Scope, reason: str,
             inventory: set[str] | None = None, *, observed_at: float | None = None) -> None:
     """Persist the outcome; *inventory* (full-scope passes) prunes failures

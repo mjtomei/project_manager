@@ -74,6 +74,13 @@ def _echo_reaper_state() -> None:
         click.echo(f"Cleanup failures ({len(failures)}) — retry with 'pm container reap':")
         for name, info in sorted(failures.items()):
             click.echo(f"  {name}: {info.get('error', '')}")
+    diagnostics = container_reaper.unavailable_runtime_diagnostics()
+    if diagnostics:
+        click.echo("Saved cleanup diagnostics (runtime identity unavailable; "
+                   "records may belong to other runtimes). Restore the runtime, "
+                   "then retry with 'pm container reap':")
+        for source, name, error in diagnostics:
+            click.echo(f"  [{source}] {name}: {error}")
     retained = container_reaper.retained_names()
     if retained:
         click.echo(f"Retained:        {', '.join(retained)}")

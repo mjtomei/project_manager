@@ -11,8 +11,8 @@ from pm_core import container, model_config, signoff
 from pm_core.cli import pr as pr_mod
 
 
-@pytest.mark.parametrize("companion", [False, True])
-def test_impl_launch_reports_stderr(monkeypatch, tmp_path, companion):
+@pytest.mark.parametrize("companion,renamed", [(False, False), (True, False), (False, True)])
+def test_impl_launch_reports_stderr(monkeypatch, tmp_path, companion, renamed):
     entry = {"id": "pr-001", "title": "Test", "status": "in_progress",
              "branch": "topic", "workdir": str(tmp_path)}
     data = {"project": {"repo": str(tmp_path), "backend": "local"}, "prs": [entry]}
@@ -37,8 +37,13 @@ def test_impl_launch_reports_stderr(monkeypatch, tmp_path, companion):
         allocation_identity.update(id="cid", generation="gen")
         return "EXEC", "pm-test-impl-pr-001"
     monkeypatch.setattr(container, "wrap_claude_cmd", wrap)
-    discard = Mock(return_value=False)
+    discard = Mock(wraps=container.discard_unowned_container) if renamed else Mock(return_value=False)
     monkeypatch.setattr(container, "discard_unowned_container", discard)
+    if renamed:
+        monkeypatch.setattr(container, "current_container_id",
+                            lambda name: "" if name == "pm-test-impl-pr-001" else "cid")
+    launch = Mock()
+    monkeypatch.setattr(pr_mod, "launch_claude", launch)
     error = subprocess.CalledProcessError(1, ["tmux"], stderr=b"can't find session: pm-test")
     monkeypatch.setattr(pr_mod.tmux_mod, "new_window", Mock(side_effect=error))
     monkeypatch.setattr(pr_mod.tmux_mod, "new_window_get_pane", lambda *a, **k: "%worker")
@@ -52,6 +57,7 @@ def test_impl_launch_reports_stderr(monkeypatch, tmp_path, companion):
                                 else ["start", "pr-001"])
     assert "can't find session: pm-test" in result.output
     assert "Launching Claude in current terminal" not in result.output
+    launch.assert_not_called()
     if companion:
         assert result.exit_code == 0, result.output
         discard.assert_not_called()

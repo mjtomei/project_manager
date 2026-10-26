@@ -133,6 +133,10 @@ operations do not take PM's launch lock.
   launcher releases it only after checking live/unknown ownership under the
   launch lock. Pane discovery failure is not proof that attachment failed;
   implementation launch must not fall back to a duplicate host worker then.
+  If the allocation's old name disappears during failed-attachment cleanup,
+  confirm absence by its captured immutable ID before reporting disposal or
+  allowing host fallback. A surviving renamed allocation or unknown ID check
+  defers cleanup to a fresh-name retry without touching its proxy.
 - **QA**: at the end of `_execute_and_finalize` (completed *or* stopped),
   scenario containers of **this loop** are released in bounded parallel,
   except scenarios whose verdict is `INPUT_REQUIRED` (awaiting a human), that
@@ -398,7 +402,11 @@ readable until that domain writes a scoped generation; unknown runtime identity
 cannot write generations or fall back to legacy state once scoped state exists.
 `pm container status` shows running pm containers, keyring usage, and last
 reaper failures; available persisted diagnostics are shown even when the runtime
-executable is unavailable. Reap prints its outcome/count summary even when no
+executable is unavailable. If its domain cannot be determined, status displays
+saved scoped failures and pending owner releases with distinct source/domain
+labels, explicitly as diagnostics only; those records never bypass the normal
+runtime-domain checks for cleanup authorization or outcome writes.
+Reap prints its outcome/count summary even when no
 containers remain in scope. Existing `pm container cleanup` (remove all / by PR)
 is kept as explicit force cleanup, but bulk removal captures each allocation's
 ID/generation before dispatch and rechecks it under the launch lock. A concurrent

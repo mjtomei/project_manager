@@ -37,6 +37,43 @@ def allocation(monkeypatch):
     return state
 
 
+@pytest.mark.parametrize("remaining", ["cid", None, "", "timeout", "os-error"])
+def test_missing_name_discard_checks_captured_allocation(monkeypatch, remaining):
+    import subprocess
+
+    inspected = []
+
+    def identity(name):
+        inspected.append(name)
+        if name == NAME:
+            return ""
+        assert name == "cid"
+        if remaining == "timeout":
+            raise subprocess.TimeoutExpired(["podman", "inspect", name], 10)
+        if remaining == "os-error":
+            raise OSError("runtime unavailable")
+        return remaining
+
+    monkeypatch.setattr(cm, "current_container_id", identity)
+    remove = MagicMock()
+    stop_proxy = MagicMock()
+    monkeypatch.setattr(cm, "remove_container", remove)
+    monkeypatch.setattr(push_proxy, "stop_push_proxy", stop_proxy)
+
+    assert cm.discard_unowned_container(
+        NAME, container_id="cid", generation="captured") is (remaining == "")
+    assert inspected == [NAME, "cid"]
+    remove.assert_not_called()
+    stop_proxy.assert_not_called()
+
+
+def test_missing_name_preflight_needs_no_allocation_probe(monkeypatch):
+    identity = MagicMock(return_value="")
+    monkeypatch.setattr(cm, "current_container_id", identity)
+    assert cm.discard_unowned_container(NAME)
+    identity.assert_called_once_with(NAME)
+
+
 def discard():
     return cm.discard_unowned_container(
         NAME, container_id="cid", generation="", allowed_owner_panes={"%5"})
