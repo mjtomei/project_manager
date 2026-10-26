@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T10:47:17.324098+00:00'
+  updated_at: '2026-10-26T10:49:22.121056+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32925,6 +32925,25 @@ prs:
       inference needs planner_code_changes empty. Captures: /pm-captures/scenarios/11/.'
     created_at: '2026-10-26T10:47:17Z'
     last_edited: '2026-10-26T10:47:17Z'
+  - id: note-4653ccf
+    text: 'QA scenario 12 (TUI guard-and-bounce, head 20b6123c): all four triples
+      held end-to-end — dirty-workdir BLOCKED + `g` refusal, SIGNOFF_REVIEW bounce
+      (log line, ↩ icon, retired sign-off window, review window at the applied merge
+      sha, `## Returned from sign-off` block), merge refused after base movement with
+      `signoff.invalidated`, and a clean merge preserving both sides records, unrelated
+      untracked files and captures. Captures: /pm-captures/scenarios/12/tui-guard-bounce-merge.
+      Harness notes for the next run: (1) with the fake agent `build_claude_shell_cmd`
+      short-circuits to fake-claude and never writes `pm/prompts/pm_prompt_*.txt`,
+      so the spec prompt-file Thens need substitutes — `pm prompt <pr>` renders the
+      identical `_signoff_return_block` (prompt_gen.py:199/293), and the sign-off
+      prompt can be captured by temporarily moving `~/.pm/sessions/<tag>/fake-claude`
+      aside and putting a stub `claude` ahead of `/usr/local/bin`; (2) that stub launch
+      MUST keep /usr/bin (real git) ahead of `~/.local/bin`, else the launch integration
+      fetch goes through the push shim, fails, and rewrites `captures/<pr>/integration.json`
+      to `status: error` (the prompt then honestly says `Result: **error**`, which
+      is i10 behaving correctly).'
+    created_at: '2026-10-26T10:49:22Z'
+    last_edited: '2026-10-26T10:49:22Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
