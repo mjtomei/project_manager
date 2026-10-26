@@ -1589,7 +1589,8 @@ def pr_signoff_record(pr_id: str):
     # a legacy (HEAD-only) report.
     from pm_core import integration
     meta = signoff_mod.report_meta(pr_id)
-    irec = pr_entry.get("integration") or {}
+    irec = pr_entry.get("integration")
+    irec = irec if isinstance(irec, dict) else {}
     bound = integration.binding(irec) if irec.get("head") == sha else None
     if verdict == signoff_mod.SIGNOFF_MERGE:
         problem = None
@@ -1603,10 +1604,12 @@ def pr_signoff_record(pr_id: str):
             problem = ("there is no conflict-free integration check of the "
                        f"current HEAD ({integration.summary(irec) if irec else 'none'})")
         elif len(meta["base"]) < 7 \
-                or not (irec.get("base_sha") or "").startswith(meta["base"]):
+                or not (integration.revision_of(irec.get("base_sha")) or ""
+                        ).startswith(meta["base"]):
+            check_base = integration.revision_of(irec.get("base_sha")) or "?"
             problem = (f"report.html assessed base {meta['base'][:12]}, but "
                        f"the latest integration check is against "
-                       f"{(irec.get('base_sha') or '?')[:12]}")
+                       f"{check_base[:12]}")
         if problem:
             click.echo(f"PR {pr_id}: cannot record {verdict}: {problem}. "
                        f"Regenerate with `pm pr signoff --fresh {pr_id}`.",
@@ -1636,8 +1639,9 @@ def pr_signoff_record(pr_id: str):
     verdict = recorded
     base_note = ""
     if bound:
+        bound_base = integration.revision_of(bound.get("base_sha")) or "?"
         base_note = (f", base {bound.get('base_branch')}@"
-                     f"{(bound.get('base_sha') or '?')[:12]}")
+                     f"{bound_base[:12]}")
     click.echo(
         f"Recorded sign-off verdict {verdict} for {pr_id} "
         f"(origin=manual, report approved at sha {sha[:12]}{base_note}).")
@@ -1709,7 +1713,7 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
     for label, key in (("conflicts", "conflicts"), ("changed on both sides", "overlap")):
         if rec.get(key):
             click.echo(f"  {label}: {', '.join(rec[key])}")
-    resolution = rec.get("resolution") or {}
+    resolution = integration.resolution_of(rec)
     # A failed attempt keeps its per-path details on the record; never label a
     # path it could not reconcile as "resolved" (the unresolved line below is
     # the authoritative one).
@@ -1718,6 +1722,10 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
     # conflict the record now reports is elsewhere (``_carry_forward``).
     carried = integration.carried_applied_resolution(rec)
     for entry in resolution.get("paths") or []:
+        if not isinstance(entry, dict):
+            # Hand-edited state: a malformed entry reads as absent instead of
+            # raising out of the CLI (the prompt does the same).
+            continue
         path = entry.get("path")
         if path in unresolved:
             click.echo(f"  attempted: {path} (by record id — NOT resolved)")
@@ -1734,15 +1742,17 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
             if values:
                 click.echo(f"    {label}: {', '.join(map(str, values[:10]))}")
     for entry in resolution.get("unresolved") or []:
+        if not isinstance(entry, dict):
+            continue
         click.echo(f"  unresolved: {entry.get('path')}: "
                    f"{entry.get('conflicts')}", err=True)
     if applied_clean:
         click.echo(f"Merged {rec.get('base_branch')}@"
                    f"{(rec.get('base_sha') or '')[:12]} into the PR branch as "
                    f"{applied_clean[:12]}.")
-    if resolution.get("applied_merge_sha"):
-        click.echo(f"  applied to the PR branch as "
-                   f"{resolution['applied_merge_sha'][:12]}")
+    applied_merge = integration.revision_of(resolution.get("applied_merge_sha"))
+    if applied_merge:
+        click.echo(f"  applied to the PR branch as {applied_merge[:12]}")
     if rec.get("apply_error"):
         click.echo(f"  not applied: {rec['apply_error']}", err=True)
         if apply_:
@@ -1752,7 +1762,8 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
             raise SystemExit(1)
     if resolution.get("diff_path"):
         click.echo(f"  resolution delta: {resolution['diff_path']}")
-    for change in (rec.get("base_behavior_changes") or [])[:10]:
+    behavior = rec.get("base_behavior_changes")
+    for change in (behavior if isinstance(behavior, list) else [])[:10]:
         click.echo(f"  base behaviour: {change}")
     if record or apply_:
         trigger_tui_refresh()
@@ -2052,9 +2063,11 @@ def _publish_approved(data: dict, root: Path, pr_entry: dict,
     from pm_core import integration
 
     pr_id = pr_entry["id"]
-    approved = pr_entry["signoff"]
-    bound = approved["integration"]
-    head = approved["sha"]
+    approved = pr_entry.get("signoff")
+    approved = approved if isinstance(approved, dict) else {}
+    bound = approved.get("integration")
+    bound = bound if isinstance(bound, dict) else {}
+    head = approved.get("sha")
     target_repo, _ = integration.target_for(data, pr_entry, root)
     if bound.get("target_repo") and not integration.same_target(
             target_repo, bound["target_repo"]):
@@ -2507,8 +2520,10 @@ def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
         # signed-off candidate like one pm made: a different head or base is
         # recorded on merge_integrity, not accepted silently.
         from pm_core import signoff as signoff_mod
-        approved = pr_entry.get("signoff") or {}
-        bound = approved.get("integration") or {}
+        approved = pr_entry.get("signoff")
+        approved = approved if isinstance(approved, dict) else {}
+        bound = approved.get("integration")
+        bound = bound if isinstance(bound, dict) else {}
         if (approved.get("verdict") == signoff_mod.SIGNOFF_MERGE
                 and approved.get("sha") and bound.get("base_sha")):
             target_repo, _ = integration.target_for(data, pr_entry, root)
@@ -2694,9 +2709,10 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     # is otherwise valid, say the workdir is missing rather than "stale".
     current_sha = head_sha(workdir) if workdir else None
     refusal = merge_gate_refusal(pr_entry, current_sha, base_branch)
+    approved = pr_entry.get("signoff")
+    approved = approved if isinstance(approved, dict) else {}
     if current_sha is None and refusal and merge_gate_refusal(
-            pr_entry, (pr_entry.get("signoff") or {}).get("sha"),
-            base_branch) is None:
+            pr_entry, approved.get("sha"), base_branch) is None:
         refusal = (f"PR {pr_id} workdir not found; the approved HEAD and "
                    f"candidate live there, so nothing can be published. "
                    f"Restore the workdir, then re-run sign-off.")

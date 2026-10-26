@@ -433,30 +433,43 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
     """The integration check sign-off reviews (see pm_core.integration)."""
     from pm_core import integration as integ
     from pm_core.signoff import SIGNOFF_IMPL, SIGNOFF_MERGE
-    rec = pr.get("integration") or {}
+    # project.yaml is hand-editable state: a malformed record reads as absent
+    # instead of raising out of prompt generation (the sign-off window could
+    # not launch), the same contract `contained_base` follows.
+    rec = pr.get("integration")
+    rec = rec if isinstance(rec, dict) else {}
     if not rec:
         return ("\n_No integration check recorded — run `pm pr signoff "
                 f"integrate {pr_id}` before routing; {SIGNOFF_MERGE} is "
                 "impossible without one._\n")
-    base_sha = rec.get("base_sha") or ""
-    resolution = rec.get("resolution") or {}
+
+    def _short(value, default="?"):
+        """The 12-character form of a revision/tree, or *default*."""
+        return value[:12] if isinstance(value, str) and value else default
+
+    raw_base = rec.get("base_sha")
+    base_sha = raw_base if isinstance(raw_base, str) else ""
+    resolution = integ.resolution_of(rec)
     lines = [
         f"- Target: `{rec.get('base_branch')}` of `{rec.get('target_repo')}`",
         f"- Fetched base revision: `{base_sha or '?'}`",
         f"- PR HEAD checked: `{rec.get('head') or '?'}`",
-        f"- Candidate tree: `{(rec.get('candidate_tree') or '?')[:12]}`",
+        f"- Candidate tree: `{_short(rec.get('candidate_tree'))}`",
         f"- Result: **{rec.get('status')}** — {integ.summary(rec)}",
     ]
-    if rec.get("merge_base") and base_sha:
+    if isinstance(rec.get("merge_base"), str) and rec["merge_base"] \
+            and base_sha:
         # An applied resolution (and a clean base merged by a bounce) puts the
         # base inside HEAD, so the recorded merge base equals the base and the
         # range would be empty — say nothing rather than "0 file(s)".  For an
         # applied resolution show the pre-apply range: that is what the base
         # brought (the resolution block names the same revisions).
         range_base = rec["merge_base"]
-        pre = resolution.get("resolved_from") or {}
-        if resolution.get("applied_merge_sha") and pre.get("merge_base") \
-                and range_base == base_sha:
+        pre = resolution.get("resolved_from")
+        pre = pre if isinstance(pre, dict) else {}
+        if resolution.get("applied_merge_sha") \
+                and isinstance(pre.get("merge_base"), str) \
+                and pre["merge_base"] and range_base == base_sha:
             # Only when the base is the one already inside HEAD.  If the base
             # has moved on since the apply, the recorded merge base is the
             # current one and the range below is already correct — using the
@@ -471,12 +484,14 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
                 f"{range_base[:12]}..{base_sha[:12]}` / `git diff "
                 f"{range_base[:12]} {base_sha[:12]}`"
                 + (f" ({count} file(s))" if count else ""))
-    if rec.get("overlap"):
+    overlap = rec.get("overlap")
+    if isinstance(overlap, list) and overlap:
         lines.append("- Files changed on both sides: "
-                     + ", ".join(f"`{f}`" for f in rec["overlap"]))
-    if rec.get("conflicts"):
+                     + ", ".join(f"`{f}`" for f in overlap))
+    conflicts = rec.get("conflicts")
+    if isinstance(conflicts, list) and conflicts:
         lines.append("- Conflicting paths: "
-                     + ", ".join(f"`{f}`" for f in rec["conflicts"]))
+                     + ", ".join(f"`{f}`" for f in conflicts))
     if resolution:
         lines.append("")
         if resolution.get("unresolved"):
@@ -497,38 +512,44 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         else:
             lines.append("**Metadata conflict resolution (pm, by record id):**")
         for entry in resolution.get("paths") or []:
+            if not isinstance(entry, dict):
+                continue
             bits = [f"`{entry.get('path')}`"]
             for key, label in (("added_ours", "added from the PR"),
                                ("added_theirs", "added from the base"),
                                ("merged_fields", "merged records"),
                                ("removed", "removed")):
-                values = entry.get(key) or []
+                values = entry.get(key)
+                values = values if isinstance(values, list) else []
                 if values:
                     bits.append(f"{label}: "
                                 + ", ".join(f"`{v}`" for v in values[:10]))
             lines.append("- " + "; ".join(bits))
-        resolved_from = resolution.get("resolved_from") or {}
-        if resolved_from.get("head"):
+        resolved_from = resolution.get("resolved_from")
+        resolved_from = resolved_from if isinstance(resolved_from, dict) else {}
+        pre_head = _short(resolved_from.get("head"), None)
+        if pre_head:
             lines.append(
-                f"- Resolved from PR HEAD `{resolved_from['head'][:12]}` "
+                f"- Resolved from PR HEAD `{pre_head}` "
                 f"against base "
-                f"`{(resolved_from.get('base_sha') or '?')[:12]}` (merge-base "
-                f"`{(resolved_from.get('merge_base') or '?')[:12]}`).")
-        if resolution.get("applied_merge_sha"):
+                f"`{_short(resolved_from.get('base_sha'))}` (merge-base "
+                f"`{_short(resolved_from.get('merge_base'))}`).")
+        applied_sha = resolution.get("applied_merge_sha")
+        if isinstance(applied_sha, str) and applied_sha:
             # The branch may also contain a *newer* base merged by a bounce
             # after this resolution; the PR's own changes are relative to the
             # newest base the branch carries (an older one would list that
             # newer base's commits as PR changes).
             applied_base = _diff_base(pr) or base_sha
-            shown_base = applied_base[:12] if applied_base else "<base>"
+            shown_base = _short(applied_base, "<base>")
             lines.append(
                 f"- Applied to the PR branch as "
-                f"`{resolution['applied_merge_sha'][:12]}`: the branch now "
+                f"`{_short(applied_sha)}`: the branch now "
                 "includes the base merge, so review/verify the integrated "
                 "result. The PR's own changes remain "
                 f"`git diff {shown_base}...HEAD`; "
                 f"`git diff "
-                f"{(resolved_from.get('head') or '<old head>')[:12]} "
+                f"{pre_head or '<old head>'} "
                 "HEAD` shows the whole base merge as applied to this branch "
                 "(the resolution is only its project.yaml part; the delta "
                 "file below lists just the resolution changes).")
@@ -544,12 +565,15 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
                          "applied to the branch (clean the workdir and re-run "
                          "sign-off, which applies it).")
         for entry in resolution.get("unresolved") or []:
+            if not isinstance(entry, dict):
+                continue
             lines.append(f"- **Unresolved** `{entry.get('path')}`: "
                          f"{entry.get('conflicts')}")
         diff_path = resolution.get("diff_path")
-        if diff_path:
+        if isinstance(diff_path, str) and diff_path:
             lines.append(f"- Resolution delta: `$CAP/{Path(diff_path).name}`")
-    behavior = rec.get("base_behavior_changes") or []
+    behavior = rec.get("base_behavior_changes")
+    behavior = behavior if isinstance(behavior, list) else []
     if behavior:
         lines.append("")
         lines.append("**Base changes that can change behaviour** (assess "
@@ -560,8 +584,13 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         # ``base_behavior_count`` is only recorded when ``compact`` truncated
         # the list (> _BEHAVIOR_LIMIT); 21-30 changes are stored in full with
         # no count, so the total must fall back to the stored list's length
-        # (indexing the absent key would crash the prompt).
-        behavior_total = rec.get("base_behavior_count") or len(behavior)
+        # (indexing the absent key would crash the prompt).  A hand-edited
+        # non-integer count is not a total either.
+        stored_total = rec.get("base_behavior_count")
+        behavior_total = (stored_total
+                          if isinstance(stored_total, int)
+                          and not isinstance(stored_total, bool)
+                          else len(behavior))
         if behavior_total > 20:
             lines.append(f"- … {behavior_total - 20} more")
     elif rec.get("base_behavior_error"):

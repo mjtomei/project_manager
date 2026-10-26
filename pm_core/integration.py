@@ -701,6 +701,46 @@ def _shape_problems(data) -> list[str]:
     return problems
 
 
+def _mapping(value) -> dict:
+    """*value* when it is a mapping, else ``{}``.
+
+    ``project.yaml`` is hand-editable state: a malformed ``integration`` /
+    ``resolution`` / ``signoff_return`` value must read as absent, never raise
+    out of a prompt, a CLI surface or the merge gate (the same contract
+    :func:`contained_base` and :func:`pm_core.signoff.qa_evidence` follow).
+    """
+    return value if isinstance(value, dict) else {}
+
+
+def revision_of(value) -> str | None:
+    """*value* when it is a non-empty revision string, else ``None``."""
+    return value if isinstance(value, str) and value else None
+
+
+def _as_int(value, default: int = 0) -> int:
+    """*value* as an int, or *default* when it is not one (hand-edited state)."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_list(value) -> list:
+    """*value* when it is a list, else ``[]`` (hand-edited state).
+
+    ``list("garbage")`` would silently turn a malformed scalar into a list of
+    characters, so the carry-forward paths must not use ``list(... or [])`` on
+    a record member.
+    """
+    return value if isinstance(value, list) else []
+
+
+def resolution_of(record) -> dict:
+    """The record's resolution mapping, or ``{}`` when absent/malformed."""
+    resolution = record.get("resolution") if isinstance(record, dict) else None
+    return resolution if isinstance(resolution, dict) else {}
+
+
 def _resolution_digest(resolution: dict | None) -> str | None:
     """Canonical digest of a resolution's identity-bearing fields.
 
@@ -711,7 +751,7 @@ def _resolution_digest(resolution: dict | None) -> str | None:
     resolution and invalidate the approval.  The artifact path is excluded
     because it is host-specific, not part of the resolution's identity.
     """
-    if not resolution:
+    if not isinstance(resolution, dict) or not resolution:
         return None
     payload = _compact_resolution(resolution)
     payload.pop("diff_path", None)
@@ -1232,7 +1272,8 @@ def compact(record: dict) -> dict:
     out = {k: v for k, v in record.items()
            if k not in ("base_files", "pr_files", "resolution")}
     for k in ("conflicts", "overlap"):
-        vals = list(record.get(k) or [])
+        raw = record.get(k)
+        vals = list(raw) if isinstance(raw, list) else []
         out[k] = vals[:_YAML_LIST_LIMIT]
         if len(vals) > _YAML_LIST_LIMIT:
             out[f"{k}_total"] = len(vals)
@@ -1240,14 +1281,16 @@ def compact(record: dict) -> dict:
     # the applied candidate, see signoff._record_applied_integration): the
     # full ``base_files`` list is gone there, so keep the recorded count
     # instead of resetting it to 0.
-    if record.get("base_files") is not None:
-        out["base_files_count"] = len(record["base_files"])
+    base_files = record.get("base_files")
+    if isinstance(base_files, list):
+        out["base_files_count"] = len(base_files)
     else:
-        out["base_files_count"] = int(record.get("base_files_count") or 0)
-    resolution = record.get("resolution")
+        out["base_files_count"] = _as_int(record.get("base_files_count"))
+    resolution = resolution_of(record)
     if resolution:
         out["resolution"] = _compact_resolution(resolution)
-    behavior = list(record.get("base_behavior_changes") or [])
+    raw_behavior = record.get("base_behavior_changes")
+    behavior = list(raw_behavior) if isinstance(raw_behavior, list) else []
     out["base_behavior_changes"] = behavior[:_BEHAVIOR_LIMIT]
     if len(behavior) > _BEHAVIOR_LIMIT:
         out["base_behavior_count"] = len(behavior)
@@ -1259,11 +1302,25 @@ def _compact_resolution(resolution: dict) -> dict:
     out: dict = {}
     for key in ("resolver", "base_tree", "head_tree", "candidate_tree",
                 "applied_merge_sha", "resolved_from", "diff_path", "error"):
-        if resolution.get(key) is not None:
-            out[key] = resolution[key]
+        value = resolution.get(key)
+        if value is None:
+            continue
+        if key == "resolved_from":
+            if isinstance(value, dict):
+                out[key] = value
+        elif isinstance(value, str):
+            # Hand-edited state: a non-string identity value (a revision, a
+            # path) reads as absent instead of being carried into the compact
+            # record and the digest as if it were one.
+            out[key] = value
     paths = []
     for entry in resolution.get("paths") or []:
-        records = dict(entry.get("records") or {})
+        if not isinstance(entry, dict):
+            # Hand-edited state: a malformed entry reads as absent instead of
+            # raising out of the prompt/merge-gate callers.
+            continue
+        records = entry.get("records")
+        records = dict(records) if isinstance(records, dict) else {}
         # Bound the per-record counts too (a large conflict can touch every
         # record).  A recorded total is carried through re-compaction so the
         # resolution digest stays stable.
@@ -1286,7 +1343,8 @@ def _compact_resolution(resolution: dict) -> dict:
             item["records_total"] = records_total
         paths.append(item)
     out["paths"] = paths[:_YAML_LIST_LIMIT]
-    unresolved = list(resolution.get("unresolved") or [])
+    unresolved = [u for u in (resolution.get("unresolved") or [])
+                  if isinstance(u, dict)]
     unresolved_total = resolution.get("unresolved_total")
     if unresolved_total is None and len(unresolved) > _YAML_LIST_LIMIT:
         unresolved_total = len(unresolved)
@@ -1316,7 +1374,7 @@ def write_resolution_delta(pr_id: str, record: dict) -> str | None:
     read-only ``pm pr signoff integrate`` surface: the check records nothing
     on the PR, but the delta its output names must be inspectable on disk.
     """
-    resolution = record.get("resolution") or {}
+    resolution = resolution_of(record)
     diff = resolution.get("diff")
     diff_path = resolution_diff_path(pr_id)
     if diff_path is not None and (diff or resolution.get("diff_path")):
@@ -1344,6 +1402,52 @@ def _write_artifacts(pr_id: str, record: dict) -> None:
             _log.warning("integration.json for %s: %s", pr_id, e)
 
 
+def _carry_behavior_total(record: dict, old: dict, values: list) -> None:
+    """Keep the real ``base_behavior_count`` when *values* is a bounded list.
+
+    ``compact`` stores only the first ``_BEHAVIOR_LIMIT`` changes and records
+    the full length separately.  A carried-forward list is already bounded, so
+    without the recorded total the prompt would read "(+20 more)" for a
+    35-change base, under-reporting what the agent must weigh.
+    """
+    total = old.get("base_behavior_count")
+    if isinstance(total, int) and not isinstance(total, bool) \
+            and total > len(values):
+        record["base_behavior_count"] = total
+
+
+def _carry_base_files(record: dict, old: dict) -> None:
+    """Keep an earlier check's base-file list and overlap on *record*.
+
+    A re-check that runs after pm applied a resolved candidate sees the base
+    inside HEAD, so ``compute_candidate`` reports an empty base diff: the
+    overlap ("files changed on both sides") and the file count the sign-off
+    prompt shows for the base-changes range would silently vanish.  The base
+    the applied resolution merged is the newest one the branch contains, so
+    that check's values still describe it.
+
+    ``old`` may be the compact record (which carries only ``base_files_count``
+    and the bounded ``overlap``); in that case the count is carried as the
+    recorded count, which ``compact`` keeps while ``base_files`` is absent.
+    """
+    old_files = old.get("base_files")
+    if isinstance(old_files, list) and old_files:
+        record["base_files"] = list(old_files)
+    elif _as_int(old.get("base_files_count")):
+        record.pop("base_files", None)
+        record["base_files_count"] = _as_int(old["base_files_count"])
+    old_overlap = old.get("overlap")
+    if isinstance(old_overlap, list) and old_overlap:
+        record["overlap"] = list(old_overlap)
+        # ``compact`` stores only the first ``_YAML_LIST_LIMIT`` paths and
+        # records the real total separately; the carried list is already
+        # bounded, so a re-compaction would otherwise under-report it.
+        total = old.get("overlap_total")
+        if isinstance(total, int) and not isinstance(total, bool) \
+                and total > len(record["overlap"]):
+            record["overlap_total"] = total
+
+
 def _carry_forward(record: dict, pr_entry: dict) -> dict:
     """Carry provenance from *pr_entry*'s stored record onto *record*.
 
@@ -1352,21 +1456,22 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
     (and bound), so it is carried when the applied merge is an ancestor of
     the new HEAD.
     """
-    old = pr_entry.get("integration") or {}
-    if not record.get("resolution") and old.get("resolution"):
-        applied = (old.get("resolution") or {}).get("applied_merge_sha")
+    old = _mapping(pr_entry.get("integration"))
+    old_resolution = resolution_of(old)
+    if not record.get("resolution") and old_resolution:
+        applied = revision_of(old_resolution.get("applied_merge_sha"))
         workdir = pr_entry.get("workdir")
-        if not workdir or not Path(workdir).is_dir():
+        if not isinstance(workdir, str) or not Path(workdir).is_dir():
             # ``run_check`` may have computed this check from the current
             # checkout when the recorded workdir is not visible (e.g. inside
             # a container); resolve the ancestry from that same checkout so
             # the applied resolution is not silently dropped.
             workdir = _cwd_checkout_of(pr_entry)
-        new_head = record.get("head")
+        new_head = revision_of(record.get("head"))
         if applied and workdir and new_head and Path(workdir).is_dir() \
                 and (applied == new_head
                      or is_ancestor(workdir, applied, new_head)):
-            carried = dict(old["resolution"])
+            carried = dict(old_resolution)
             carried.pop("diff", None)      # compact state never holds it
             diff_path = carried.get("diff_path")
             if diff_path:
@@ -1378,11 +1483,16 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
             record["resolution"] = carried
             record["resolution_digest"] = _resolution_digest(carried)
             record["resolved_from"] = carried.get("resolved_from")
-            old_behavior = list(old.get("base_behavior_changes") or [])
+            old_behavior = _as_list(old.get("base_behavior_changes"))
+            own_behavior = _as_list(record.get("base_behavior_changes"))
             if old_behavior:
                 record["base_behavior_changes"] = list(dict.fromkeys(
-                    old_behavior + list(record.get("base_behavior_changes")
-                                        or [])))
+                    old_behavior + own_behavior))
+                if not own_behavior:
+                    # The stored list is already bounded; keep the real total
+                    # ``compact`` recorded so the prompt does not under-report
+                    # "… N more" after the carry-forward.
+                    _carry_behavior_total(record, old, old_behavior)
             if old.get("base_behavior_error") \
                     and not record.get("base_behavior_changes") \
                     and not record.get("base_behavior_error"):
@@ -1391,6 +1501,15 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
                 # for it).  The post-apply re-check sees no base diff, so
                 # without carrying it the requirement would silently vanish.
                 record["base_behavior_error"] = old["base_behavior_error"]
+            if not record.get("base_files"):
+                # The re-check sees the base inside HEAD, so its own base diff
+                # is empty.  The base the applied resolution merged is still
+                # the newest one the branch contains: keep what that check
+                # found — the overlap the agent must weigh and the file count
+                # the prompt reports for the base-changes range.  ``compact``
+                # derives the count from ``base_files`` when present, so a
+                # re-compaction carries the recorded count instead.
+                _carry_base_files(record, old)
     elif record.get("status") == ERROR \
             and not record.get("base_behavior_changes") \
             and not record.get("base_behavior_error") \
@@ -1402,8 +1521,10 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
         # a summary pm could not compute (which also requires the evidence
         # statement): the merge gate would then no longer ask for it.
         if old.get("base_behavior_changes"):
-            record["base_behavior_changes"] = list(
-                old["base_behavior_changes"])
+            carried_behavior = _as_list(old.get("base_behavior_changes"))
+            if carried_behavior:
+                record["base_behavior_changes"] = list(carried_behavior)
+                _carry_behavior_total(record, old, carried_behavior)
         if old.get("base_behavior_error"):
             record["base_behavior_error"] = old["base_behavior_error"]
     return record
@@ -1417,9 +1538,9 @@ def _check_is_stale(record: dict, pr_entry: dict) -> bool:
     the branch no longer has, so it must not overwrite the record that
     describes the revision the branch is on now.
     """
-    old = pr_entry.get("integration") or {}
+    old = _mapping(pr_entry.get("integration"))
     workdir = pr_entry.get("workdir")
-    if not workdir or not Path(workdir).is_dir():
+    if not isinstance(workdir, str) or not Path(workdir).is_dir():
         return False
     now = _out(_git("rev-parse", "HEAD", cwd=workdir))
     head = record.get("head")
@@ -1452,7 +1573,7 @@ def _record_check(root: Path, pr_id: str, record: dict) -> dict:
     # carries (the full diff itself never goes into project.yaml); the digest
     # ignores that host-specific path.
     record["resolution_digest"] = _resolution_digest(record.get("resolution"))
-    resolution = record.get("resolution")
+    resolution = resolution_of(record)
     if resolution and not resolution.get("diff_path") \
             and resolution.get("diff"):
         # Set it before compaction so the compact record carries the pointer;
@@ -1574,7 +1695,7 @@ def prepare(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
     if pr_now is None:
         raise ValueError(f"PR {pr_id} not found")
     record = run_check(fresh, pr_now, root, base_sha=previous.get("base_sha"))
-    resolution = dict(previous.get("resolution") or {})
+    resolution = dict(resolution_of(previous))
     resolution["applied_merge_sha"] = merged
     resolution["resolved_from"] = {
         "head": previous.get("head"),
@@ -1586,8 +1707,11 @@ def prepare(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
     record["resolved_from"] = resolution["resolved_from"]
     # The post-apply check sees no base diff (the base is in the branch now),
     # but the base interactions the agent must assess are still relevant.
-    record["base_behavior_changes"] = list(
-        previous.get("base_behavior_changes") or [])
+    record["base_behavior_changes"] = _as_list(
+        previous.get("base_behavior_changes"))
+    _carry_behavior_total(record, previous,
+                          record["base_behavior_changes"])
+    _carry_base_files(record, previous)
     if previous.get("base_behavior_error") \
             and not record.get("base_behavior_changes"):
         # A summary pm could not compute is not an exemption: the merge gate
@@ -1614,7 +1738,7 @@ def valid_for(record: dict | None, head: str | None) -> bool:
             and record.get("base_sha") and record.get("candidate_tree")):
         return False
     if record.get("status") == RESOLVED:
-        resolution = record.get("resolution") or {}
+        resolution = resolution_of(record)
         if not resolution or resolution.get("unresolved"):
             return False
     return True
@@ -1636,14 +1760,14 @@ def unresolved_paths(record: dict | None) -> set[str]:
     "attempted — NOT resolved" would contradict the summary and send the agent
     to hand-merge a file that is not conflicted.
     """
-    record = record or {}
-    resolution = record.get("resolution") or {}
+    record = _mapping(record)
+    resolution = resolution_of(record)
     paths = {e.get("path") for e in resolution.get("unresolved") or []
-             if e.get("path")}
+             if isinstance(e, dict) and e.get("path")}
     if record.get("status") == CONFLICT \
-            and not resolution.get("applied_merge_sha"):
+            and not revision_of(resolution.get("applied_merge_sha")):
         paths |= {p.get("path") for p in resolution.get("paths") or []
-                  if p.get("path")}
+                  if isinstance(p, dict) and p.get("path")}
     return paths
 
 
@@ -1658,9 +1782,9 @@ def carried_applied_resolution(record: dict | None) -> bool:
     launch, the return text and the prompt) must say so instead of presenting
     them as this check's outcome.
     """
-    rec = record or {}
-    resolution = rec.get("resolution") or {}
-    return bool(resolution.get("applied_merge_sha")) \
+    rec = _mapping(record)
+    resolution = resolution_of(rec)
+    return bool(revision_of(resolution.get("applied_merge_sha"))) \
         and rec.get("status") in (CONFLICT, ERROR)
 
 
@@ -1702,19 +1826,13 @@ def contained_base(pr: dict) -> str | None:
     # absent instead of crashing a prompt or a review-window launch (the same
     # contract the resolver and ``signoff.qa_evidence`` follow).  A non-string
     # revision is not a revision — passing it to git would raise.
-    def _mapping(value) -> dict:
-        return value if isinstance(value, dict) else {}
-
-    def _sha(value) -> str | None:
-        return value if isinstance(value, str) and value else None
-
     record = _mapping(pr.get("integration"))
     applied = _mapping(_mapping(pr.get("signoff_return")).get("applied"))
     resolution = _mapping(record.get("resolution"))
     candidates: list[str] = []
-    if record.get("status") == UP_TO_DATE and _sha(record.get("base_sha")):
+    if record.get("status") == UP_TO_DATE and revision_of(record.get("base_sha")):
         candidates.append(record["base_sha"])
-    if applied.get("merge_sha") and _sha(applied.get("base_sha")):
+    if applied.get("merge_sha") and revision_of(applied.get("base_sha")):
         candidates.append(applied["base_sha"])
     workdir = pr.get("workdir")
     workdir = workdir if isinstance(workdir, str) else None
@@ -1728,18 +1846,18 @@ def contained_base(pr: dict) -> str | None:
     # merge — so when the workdir is visible, ask git instead: a base the
     # branch merged sits on a merge commit's non-first parent side and is
     # absent from HEAD's first-parent chain, while the branch point is on it.
-    carries_base = bool(resolution.get("applied_merge_sha")) \
+    carries_base = bool(revision_of(resolution.get("applied_merge_sha"))) \
         or bool(applied.get("merge_sha"))
-    merge_base = _sha(record.get("merge_base"))
+    merge_base = revision_of(record.get("merge_base"))
     if merge_base and (
             carries_base
             or (have_workdir and is_ancestor(workdir, merge_base, "HEAD")
                 and not _on_first_parent_chain(workdir, merge_base))):
         candidates.append(merge_base)
-    if resolution.get("applied_merge_sha"):
+    if revision_of(resolution.get("applied_merge_sha")):
         resolved_from = _mapping(resolution.get("resolved_from"))
-        base = _sha(resolved_from.get("base_sha")) \
-            or _sha(record.get("base_sha"))
+        base = revision_of(resolved_from.get("base_sha")) \
+            or revision_of(record.get("base_sha"))
         if base:
             candidates.append(base)
     candidates = list(dict.fromkeys(
@@ -1771,36 +1889,46 @@ def _added_count(entry: dict, key: str) -> int:
     flat id lists only name top-level records, so a notes-only resolution
     would otherwise read "0 added".
     """
-    records = entry.get("records") or {}
+    records = entry.get("records")
+    records = records if isinstance(records, dict) else {}
     if records:
-        return sum(int(c.get(key) or 0) for c in records.values()
+        return sum(_as_int(c.get(key)) for c in records.values()
                    if isinstance(c, dict))
-    return len(entry.get(key) or [])
+    values = entry.get(key)
+    return len(values) if isinstance(values, list) else 0
 
 
 def summary(record: dict) -> str:
     """One-line human summary of an integration record."""
+    record = _mapping(record)
     status = record.get("status")
-    base = f"{record.get('base_branch')}@{(record.get('base_sha') or '?')[:8]}"
+    base_rev = revision_of(record.get("base_sha"))
+    base = f"{record.get('base_branch')}@{(base_rev or '?')[:8]}"
     if status == UP_TO_DATE:
         return f"up to date with {base}"
     if status == CLEAN:
-        n = len(record.get("overlap") or [])
+        overlap = record.get("overlap")
+        n = len(overlap) if isinstance(overlap, list) else 0
         return (f"merges cleanly with {base}"
                 + (f" ({n} file(s) changed on both sides)" if n else ""))
     if status == RESOLVED:
-        entries = (record.get("resolution") or {}).get("paths") or []
-        paths = [p.get("path") for p in entries if p.get("path")]
+        entries = [p for p in resolution_of(record).get("paths") or []
+                   if isinstance(p, dict)]
+        paths = [p.get("path") for p in entries
+                 if isinstance(p.get("path"), str) and p.get("path")]
         ours = sum(_added_count(p, "added_ours") for p in entries)
         theirs = sum(_added_count(p, "added_theirs") for p in entries)
         return (f"conflicts with {base} resolved by record "
                 f"({', '.join(paths) or 'project.yaml'}; "
                 f"{ours} added from PR, {theirs} from base)")
     if status == CONFLICT:
-        files = record.get("conflicts") or []
-        text = (f"CONFLICTS with {base}: {', '.join(files[:5])}"
+        files = record.get("conflicts")
+        files = files if isinstance(files, list) else []
+        text = (f"CONFLICTS with {base}: "
+                + ", ".join(str(f) for f in files[:5])
                 + (" ..." if len(files) > 5 else ""))
-        unresolved = (record.get("resolution") or {}).get("unresolved") or []
+        unresolved = [u for u in resolution_of(record).get("unresolved") or []
+                      if isinstance(u, dict)]
         if unresolved:
             text += " (metadata resolution not possible)"
         return text
@@ -1830,12 +1958,12 @@ def apply_integration(root: Path, pr_id: str, record: dict | None = None,
         data = store.load(root)
     pr = store.get_pr(data, pr_id) or {}
     if record is None:
-        record = pr.get("integration") or {}
+        record = _mapping(pr.get("integration"))
     status = record.get("status")
     if status not in (CLEAN, RESOLVED):
         return None, f"integration is {status}, not clean/resolved"
     workdir = pr.get("workdir")
-    if not workdir or not Path(workdir).is_dir():
+    if not isinstance(workdir, str) or not Path(workdir).is_dir():
         return None, "no PR workdir"
     head = _out(_git("rev-parse", "HEAD", cwd=workdir))
     if head != record.get("head"):
@@ -1849,7 +1977,7 @@ def apply_integration(root: Path, pr_id: str, record: dict | None = None,
         return None, "a merge is already in progress in the workdir"
     if _out(_git("status", "--porcelain", "--untracked-files=no", cwd=workdir)):
         return None, "workdir has uncommitted changes"
-    base_sha = record.get("base_sha")
+    base_sha = revision_of(record.get("base_sha"))
     if not base_sha:
         # A partial or hand-edited record cannot name the revision to merge;
         # refuse instead of crashing (this runs unattended at sign-off launch
@@ -1877,8 +2005,9 @@ def _apply_resolution(record: dict, workdir: str, head: str, base_sha: str,
     """Merge *base_sha* and re-apply the recorded project.yaml resolution."""
     no_hooks = ("-c", "core.hooksPath=/dev/null")
     expected = record.get("candidate_tree")
-    resolution = record.get("resolution") or {}
-    recorded = {p.get("path"): p for p in resolution.get("paths") or []}
+    resolution = resolution_of(record)
+    recorded = {p.get("path"): p for p in resolution.get("paths") or []
+                if isinstance(p, dict) and p.get("path")}
     if _out(_git("rev-parse", "HEAD", cwd=workdir)) != head:
         # Re-check right before touching the worktree: the caller verified
         # HEAD, but another process may have moved it since.

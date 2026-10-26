@@ -1477,6 +1477,41 @@ def test_prompt_base_range_after_the_base_moves_past_an_applied_resolution(w):
     assert "(1 file(s))" in text
 
 
+def test_the_post_apply_record_keeps_the_base_overlap_and_file_count(w):
+    """The re-check after the apply sees no base diff — the prompt still shows
+    which files both sides changed and how many the base touched.
+
+    ``prepare`` applies the resolved candidate, then re-checks the integrated
+    head, whose merge base is the base itself: its own ``base_files`` and
+    ``overlap`` are empty.  Losing them would drop the base interaction the
+    agent must weigh (the same file changed on both sides) from the sign-off
+    prompt, and the base-changes range would lose its file count.
+    """
+    rec = _metadata_conflict(w)
+    assert rec["status"] == integration.UP_TO_DATE
+    assert rec["base_files"] == ["pm/project.yaml"], rec
+    assert "pm/project.yaml" in rec["overlap"], rec
+
+    stored = pr_entry(w)["integration"]
+    assert stored["base_files_count"] == 1
+    assert "pm/project.yaml" in stored["overlap"]
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "Files changed on both sides: `pm/project.yaml`" in text
+    assert "(1 file(s))" in text
+
+    # A later sign-off launch re-checks the integrated head and carries the
+    # compact record forward: the count and the overlap must survive it.
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    kept = pr_entry(w)["integration"]
+    assert kept["base_files_count"] == 1, kept
+    assert "pm/project.yaml" in kept["overlap"], kept
+
+
 def test_review_and_qa_prompts_diff_against_the_applied_base(w):
     """Review/QA prompts must not list the merged base commits as PR changes.
 
@@ -1547,6 +1582,224 @@ def test_contained_base_reads_malformed_state_as_absent(w):
         {"id": PR, "workdir": str(w.wd),
          "integration": {"status": "up_to_date", "base_sha": "a" * 40}}) \
         == "a" * 40
+
+
+def test_malformed_resolution_state_reads_as_absent(w):
+    """A hand-edited ``resolution`` must not crash the prompt or the gate.
+
+    ``integration``/``resolution`` live in the git-tracked, hand-editable
+    project.yaml.  A value that is not a mapping (or a mapping with malformed
+    members) reads as absent — no resolution to show, no digest, no path list
+    — instead of raising out of prompt generation (the sign-off window could
+    not launch) or ``pm pr merge``.
+    """
+    bad_values = [
+        "garbage", ["not", "a", "mapping"], 42,
+        {"paths": "garbage", "unresolved": "garbage",
+         "resolved_from": "garbage", "applied_merge_sha": 5},
+        {"paths": ["garbage", 7], "unresolved": ["garbage", 7]},
+    ]
+    for bad in bad_values:
+        rec = {"head": "a" * 40, "base_sha": "b" * 40, "status": "resolved",
+               "candidate_tree": "c" * 40, "merge_base": "b" * 40,
+               "resolution": bad}
+        expected = bad if isinstance(bad, dict) else {}
+        assert integration.resolution_of(rec) == expected
+        assert integration.unresolved_paths(rec) == set()
+        assert integration.carried_applied_resolution(rec) is False
+        assert isinstance(integration.summary(rec), str)
+        # The compact state never carries a malformed member through: a
+        # non-mapping resolution is dropped, a malformed member sanitized.
+        compacted = integration.compact(rec)
+        if isinstance(bad, dict):
+            assert compacted["resolution"]["paths"] == []
+            assert compacted["resolution"]["unresolved"] == []
+            assert "applied_merge_sha" not in compacted["resolution"]
+        else:
+            assert "resolution" not in compacted
+        integration.valid_for(rec, "a" * 40)
+        integration._resolution_digest(rec["resolution"])
+        signoff.approval_justification_problem(PR, rec, "a" * 40)
+        signoff.effective_verdict(SIGNOFF_MERGE, rec, "a" * 40)
+        signoff.merge_gate_refusal(
+            {"id": PR, "integration": rec,
+             "signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                         "integration": integration.binding(rec)}},
+            "a" * 40, "master")
+        assert integration.contained_base(
+            {"id": PR, "integration": rec, "workdir": None}) is None
+
+    # The prompt path (which crashed on a non-mapping resolution before) reads
+    # the record from the store like a real launch does.
+    rec = _metadata_conflict(w)
+
+    def _blank(d):
+        store.get_pr(d, PR)["integration"]["resolution"] = "garbage"
+    store.locked_update(w.pm_dir, _blank)
+    data = store.load(w.pm_dir)
+    pr = store.get_pr(data, PR)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+        review = prompt_gen.generate_review_prompt(data, PR)
+    assert "Result:" in text and review.strip()
+    # The malformed resolution is not presented as a resolution.
+    assert "Metadata conflict resolution" not in text
+    signoff.format_signoff_return(pr)
+    signoff.merge_gate_refusal(pr, rec["head"], "master")
+
+
+def test_malformed_return_state_does_not_crash_the_prompts(w):
+    """A hand-edited ``signoff_return`` must not crash a prompt or the driver.
+
+    The return record is read on every prompt build and on every
+    auto-sequence tick (``return_awaiting``); a value that is not a mapping —
+    or a mapping with malformed members — reads as absent.
+    """
+    _metadata_conflict(w)
+    for bad in ("garbage", ["not", "a", "mapping"], 42,
+                {"applied": "garbage"},
+                {"applied": {"merge_sha": 5, "base_sha": 7}},
+                {"verdict": SIGNOFF_REVIEW, "integration": "garbage"}):
+        def _blank(d, bad=bad):
+            store.get_pr(d, PR)["signoff_return"] = bad
+        store.locked_update(w.pm_dir, _blank)
+        data = store.load(w.pm_dir)
+        pr = store.get_pr(data, PR)
+        with patch("pm_core.prompt_gen.store.find_project_root",
+                   side_effect=FileNotFoundError):
+            assert prompt_gen.generate_signoff_prompt(data, PR)
+            assert prompt_gen.generate_review_prompt(data, PR)
+        signoff.format_signoff_return(pr)
+        assert signoff.return_awaiting(pr) is None
+        if not isinstance(bad, dict):
+            assert signoff.open_return(pr) is None
+        else:
+            # A mapping with a verdict is a (malformed) open return: it is
+            # returned, not raised on.
+            signoff.open_return(pr)
+
+
+def test_a_malformed_reviewed_head_does_not_crash_the_return_text():
+    """A hand-edited non-string ``reviewed_head`` is not a revision.
+
+    ``format_signoff_return`` slices it into every prompt that carries the
+    return block; slicing an int raised ``TypeError`` out of prompt
+    generation.  It must read as an unknown revision instead.
+    """
+    pr = {"id": PR, "signoff_return": {
+        "verdict": SIGNOFF_REVIEW, "hop": "review", "reviewed_head": 123}}
+    text = signoff.format_signoff_return(pr)
+    assert "after reviewing HEAD `?`" in text
+    assert signoff.format_signoff_return(pr, for_signoff=True)
+
+
+def test_a_malformed_signoff_record_does_not_crash_the_merge_gate(w):
+    """``pm pr merge`` must refuse a malformed approval, never raise.
+
+    ``pr["signoff"]`` is hand-editable state; a value that is not a mapping
+    (or a mapping whose integration binding carries non-string revisions)
+    must read as absent so the gate returns a refusal.
+    """
+    for bad in ("garbage", ["not", "a", "mapping"], 42):
+        pr = {"id": PR, "signoff": bad, "integration": {}}
+        assert isinstance(signoff.merge_gate_refusal(pr, "a" * 40, "master"),
+                          str)
+        assert signoff.fresh_recorded_verdict(pr, "a" * 40) is None
+        assert signoff.latest_signoff_verdict(pr) is None
+        assert signoff.is_legacy_approval(bad) is False
+    # A binding with a non-string revision/tree cannot name the approved
+    # candidate: refused like an absent one, and the differing-value messages
+    # (which slice it) are never reached with a non-string.
+    for bad_bound in ({"status": "clean", "base_sha": 123,
+                       "candidate_tree": "c" * 40},
+                      {"status": "clean", "base_sha": "b" * 40,
+                       "candidate_tree": 123}):
+        pr = {"id": PR,
+              "integration": dict(bad_bound, head="a" * 40),
+              "signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                          "integration": bad_bound}}
+        refusal = signoff.merge_gate_refusal(pr, "a" * 40, "master")
+        assert "not bound to a conflict-free integration" in refusal, refusal
+    # A malformed *current* record whose head/tree differ from the bound one
+    # is compared without slicing the non-string member.
+    bound = {"status": "clean", "head": "a" * 40, "base_sha": "b" * 40,
+             "candidate_tree": "c" * 40, "base_branch": "master"}
+    for bad_current in (dict(bound, head=123),
+                        dict(bound, candidate_tree=123)):
+        pr = {"id": PR, "integration": bad_current,
+              "signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                          "integration": bound}}
+        assert isinstance(signoff.merge_gate_refusal(pr, "a" * 40, "master"),
+                          str)
+
+
+def test_a_malformed_conflict_record_does_not_crash_the_router():
+    """``effective_verdict`` reads the hand-editable integration record."""
+    rec = {"status": integration.CONFLICT, "head": "a" * 40, "base_sha": 123,
+           "base_branch": "master", "conflicts": [1, "pm/project.yaml"]}
+    verdict, reason = signoff.effective_verdict(SIGNOFF_MERGE, rec, "a" * 40)
+    assert verdict == SIGNOFF_IMPL
+    assert "conflicts" in reason
+
+
+def test_a_carried_record_keeps_the_bounded_totals():
+    """A carried-forward bounded list must keep the real total.
+
+    ``compact`` stores only the first N entries and records the true length
+    separately.  The carry-forward paths copy the (already bounded) list, so
+    without the recorded total the prompt under-reports "(+N more)".
+    """
+    rec: dict = {}
+    integration._carry_base_files(
+        rec, {"base_files_count": 7, "overlap": ["a", "b"],
+              "overlap_total": 9})
+    assert rec == {"base_files_count": 7, "overlap": ["a", "b"],
+                   "overlap_total": 9}
+    integration._carry_behavior_total(
+        rec, {"base_behavior_count": 35}, ["x"] * 30)
+    assert rec["base_behavior_count"] == 35
+    # A total that does not exceed the carried list is not a truncation.
+    rec2: dict = {}
+    integration._carry_behavior_total(
+        rec2, {"base_behavior_count": 3}, ["x"] * 30)
+    assert "base_behavior_count" not in rec2
+    # Hand-edited values read as absent rather than being carried.
+    rec3: dict = {}
+    integration._carry_behavior_total(
+        rec3, {"base_behavior_count": "35"}, ["x"])
+    integration._carry_base_files(rec3, {"overlap": ["a"],
+                                         "overlap_total": "9"})
+    assert "base_behavior_count" not in rec3
+    assert "overlap_total" not in rec3
+
+
+def test_a_recheck_carries_the_bounded_totals_forward(w):
+    """A later benign re-check keeps the truncated lists' real totals.
+
+    ``compact`` stores 30 of a 35-change list and 40 of a longer overlap list,
+    recording the real length separately.  The post-apply re-check sees no
+    base diff, so it carries those lists forward — and must carry their
+    totals too, or the sign-off prompt under-reports how much it is asking
+    the agent to weigh.
+    """
+    _metadata_conflict(w)
+
+    def _bound(d):
+        rec = store.get_pr(d, PR)["integration"]
+        rec["base_behavior_changes"] = [f"change {i}" for i in range(30)]
+        rec["base_behavior_count"] = 35
+        rec["overlap"] = ["pm/project.yaml"]
+        rec["overlap_total"] = 3
+
+    store.locked_update(w.pm_dir, _bound)
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    kept = pr_entry(w)["integration"]
+    assert kept["base_behavior_count"] == 35, kept
+    assert len(kept["base_behavior_changes"]) == 30, kept
+    assert kept["overlap_total"] == 3, kept
+    assert kept["overlap"] == ["pm/project.yaml"], kept
 
 
 def test_review_prompt_diffs_against_the_base_a_clean_bounce_merged(w):

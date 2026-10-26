@@ -132,6 +132,15 @@ diff (the base is inside HEAD now), so `prepare` copies the pre-apply
 carries it forward with the resolution (only when that check produced neither
 changes nor a summary of its own).
 
+The post-apply re-check also sees an empty base diff of its own, so its
+`base_files`/`overlap` would be empty and the sign-off prompt would stop
+showing which files the base changed and which changed on both sides — the
+interaction the agent must weigh (R3). `prepare` therefore carries the
+pre-apply base file list (its count is what the prompt reports for the
+base-changes range) and the overlap onto the applied record, and a later
+re-check carries them forward with the resolution (the compact record keeps
+the count when only `base_files_count` survives).
+
 ### R4. Apply the resolved merge to the PR branch before sign-off runs
 For the GitHub backend `gh pr merge` cannot merge a conflicted branch, and
 sign-off's report/verdict must bind to a candidate that can actually be
@@ -381,7 +390,10 @@ tests):
 8. Bounce to REVIEW applies the resolution and the branch tree equals the
    candidate.
 9. Prompt/CLI surfaces: sign-off prompt names the resolution, candidate,
-   evidence instructions; `integrate` prints the resolution.
+   evidence instructions; `integrate` prints the resolution; after an applied
+   resolution the prompt still lists the files changed on both sides and the
+   base-changes file count (carried through the post-apply re-check and a
+   later one).
 10. Notes appended to the same PR record on both sides (the merge base has no
     `notes` key) resolve, both notes survive, and the nested ids are named in
     the summary/prompt; the same id with different content is still ambiguous.
@@ -433,7 +445,20 @@ tests):
     base commits never read as the PR's own changes; when the branch carries
     two bases (a resolution applied at sign-off, then a newer base merged by
     a later bounce), the review prompt, the sign-off prompt's "PR's own
-    changes" line and the return text all name the *newest* one.
+    changes" line and the return text all name the *newest* one; a malformed
+    `resolution` / `integration` / `signoff_return` / `signoff` value in the
+    hand-editable project.yaml reads as absent across every surface
+    (`resolution_of`, `revision_of`, `_mapping`, `_as_list`): the sign-off and
+    review prompts still render (no `AttributeError` out of prompt
+    generation), a non-string `reviewed_head` in the return record is not
+    sliced, `pm pr merge` refuses instead of raising (a non-mapping `signoff`
+    record and a binding whose `base_sha`/`candidate_tree` is not a string are
+    refusals, not `TypeError`s, and the router/driver reads the same
+    mapping), `compact`/`_compact_resolution` drop non-mapping and non-string
+    members, and `return_awaiting`/`open_return` still answer. A carry-forward
+    of an already-bounded list also keeps its recorded total
+    (`overlap_total`, `base_behavior_count`), so the prompt does not
+    under-report "… N more" after the re-check.
 
 ## Implicit requirements
 
