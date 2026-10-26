@@ -84,6 +84,18 @@ def _echo_reaper_state() -> None:
                    "'pm container retain --release' drops the retention):")
         for name in deferred:
             click.echo(f"  {name}")
+    # A release recorded while the runtime identity was unavailable can never
+    # authorize cleanup (and full passes deliberately preserve it), so a reap
+    # retry cannot clear it either. Show it as what it is — a diagnostic.
+    unverifiable = {name: info for name, info in failures.items()
+                    if info.get("unverifiable_release")}
+    for name in unverifiable:
+        failures.pop(name)
+    if unverifiable:
+        click.echo("Unverifiable release records (recorded without a runtime "
+                   "identity; diagnostic only, not retried by 'pm container reap'):")
+        for name, info in sorted(unverifiable.items()):
+            click.echo(f"  {name}: allocation {info.get('id') or 'unknown'}")
     if failures:
         click.echo(f"Cleanup failures ({len(failures)}) — retry with 'pm container reap':")
         for name, info in sorted(failures.items()):
@@ -439,13 +451,20 @@ def container_reap(dry_run: bool, pr_id: str | None, session_tag: str | None,
 def container_retain(name: str, release: bool, note: str):
     """Keep container NAME out of automatic cleanup (e.g. for a discussion)."""
     from pm_core import container_reaper
+    from pm_core import container as container_mod
     if release:
-        if container_reaper.unretain(name):
+        # Resolving the current id inspects the runtime; an outage must not
+        # crash the command or silently claim the marker was absent.
+        try:
+            removed = container_reaper.unretain(name)
+        except (container_mod.ContainerError, OSError, subprocess.TimeoutExpired) as exc:
+            click.echo(f"Cannot release retention for {name}: {exc}", err=True)
+            raise SystemExit(1)
+        if removed:
             click.echo(f"Released {name}; cleanup may remove it once unowned.")
         else:
             click.echo(f"{name} was not retained.")
         return
-    from pm_core import container as container_mod
     try:
         name = container_reaper.retain_current(name, note)
     except (container_mod.ContainerError, OSError, subprocess.TimeoutExpired) as exc:

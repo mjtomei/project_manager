@@ -58,6 +58,17 @@ def test_status_keeps_scoped_failures_visible_during_runtime_outage(monkeypatch)
     assert {path: path.read_bytes() for path in files} == files
 
 
+def test_retain_release_reports_runtime_outage(monkeypatch):
+    def unavailable(name):
+        raise OSError("podman: No such file or directory")
+
+    monkeypatch.setattr(container_reaper, "unretain", unavailable)
+    result = CliRunner().invoke(cli, ["container", "retain", "pm-x", "--release"])
+    assert result.exit_code == 1
+    assert "Cannot release retention for pm-x" in result.output
+    assert "No such file" in result.output
+
+
 def test_empty_reap_still_reports_recovery_counts():
     outcome = container_reaper.Outcome(
         scope="all pm containers", running_before=0, running_after=0,

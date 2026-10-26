@@ -70,6 +70,19 @@ class TestUnknownImagePresence:
         assert any(c.args[0] == "run" for c in mock_runtime.call_args_list)
 
 
+def test_setup_probe_timeout_is_a_retryable_launch_error(monkeypatch):
+    """A slow setup-verification exec is not proof that setup is incomplete."""
+
+    def runtime(*args, **kwargs):
+        raise subprocess.TimeoutExpired(["podman", *args], kwargs.get("timeout"))
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm._probe_setup("captured-id")
+    assert error.value.kind == "timeout"
+    assert "did not return within 15s" in str(error.value)
+
+
 def test_identity_check_timeout_is_unknown_not_absent(monkeypatch):
     def runtime(*args, **kwargs):
         raise subprocess.TimeoutExpired(["podman", *args], kwargs.get("timeout"))

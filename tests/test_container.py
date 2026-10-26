@@ -965,6 +965,22 @@ class TestWrapClaudeCmd:
         assert cname == f"{CONTAINER_PREFIX}impl"
         mock_create.assert_called_once()
         mock_exec.assert_called_once()
+        # No allocation_identity supplied: let build_exec_cmd read the
+        # generation this launch wrote instead of pinning it to "".
+        assert mock_exec.call_args[1]["generation"] is None
+
+    @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
+    @patch("pm_core.container.create_container", return_value="cid123")
+    @patch("pm_core.container.load_container_config",
+           return_value=ContainerConfig())
+    @patch("pm_core.container.is_container_mode_enabled", return_value=True)
+    def test_forwards_captured_generation(self, mock_enabled, mock_config,
+                                          mock_create, mock_exec):
+        wrap_claude_cmd("claude 'hi'", "/workdir", label="impl",
+                        allocation_identity={"id": "cid123",
+                                             "generation": "gen-1"})
+        assert mock_exec.call_args[1]["container_id"] == "cid123"
+        assert mock_exec.call_args[1]["generation"] == "gen-1"
 
     @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
     @patch("pm_core.container.create_container", return_value="cid123")

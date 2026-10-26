@@ -1452,6 +1452,11 @@ def pending_failures() -> dict[str, dict]:
                                    "error": "owner release pending; retry with pm container reap"})
     for _, rec in _release_records():
         if rec.get("domain_required") and rec.get("runtime_domain") is None:
+            # Inert by design: it never authorizes removal in any runtime, and
+            # pruning preserves it because its domain can't be matched. It is a
+            # diagnostic, not a failure a retry can clear.
             failures.setdefault(rec["name"], {**rec, "owner_release": False,
-                "error": "release runtime domain unknown; inspect ownership before retrying cleanup"})
+                "unverifiable_release": True,
+                "error": "owner release was recorded without a runtime identity; "
+                         "kept as a diagnostic only"})
     return failures

@@ -1202,7 +1202,16 @@ def _probe_setup(name: str) -> tuple[bool, str, str]:
     check = f"test -f {SETUP_COMPLETE_SENTINEL}"
     if _host_claude_json().exists():
         check += f" && test -s {_CONTAINER_HOME}/.claude.json"
-    r = _run_runtime("exec", name, "sh", "-c", check, check=False, timeout=15)
+    try:
+        r = _run_runtime("exec", name, "sh", "-c", check, check=False, timeout=15)
+    except subprocess.TimeoutExpired as exc:
+        # An unanswered probe is not proof that setup is incomplete, and
+        # guessing either way is unsafe: fail with a retryable cause instead.
+        raise launch_error(
+            name, "timeout",
+            f"setup verification probe did not return within {exc.timeout}s; "
+            f"retry when the runtime is responsive",
+            stage="verify existing setup") from exc
     if r.returncode == 0:
         return True, "", ""
     stderr = (r.stderr or "").strip()
@@ -2581,7 +2590,9 @@ def wrap_claude_cmd(
         cname, claude_cmd,
         proxy_socket_path=None if shared_proxy else proxy_sock,
         container_id=container_id if isinstance(container_id, str) and container_id else None,
-        generation=identity.get("generation", ""),
+        # None (not "") makes build_exec_cmd read the generation written by
+        # this launch; callers that omit allocation_identity must still attach.
+        generation=identity.get("generation") or None,
     )
     _log.info("Wrapped claude command in container %s", cname)
     return exec_cmd, cname

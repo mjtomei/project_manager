@@ -328,7 +328,9 @@ intact to protect concurrent waiters and delayed releases.
   idempotent setup completion is still allowed.
 - Failed/unknown running-state or ID inspection refuses recreation; it is not proof
   of absence. Only explicit missing-container/object errors establish absence;
-  missing runtime socket paths and empty successful ID output are unknown. Required setup commands fail before readiness is written. Fresh
+  missing runtime socket paths and empty successful ID output are unknown. A
+  setup-verification probe the runtime does not answer in time is a retryable
+  `timeout` launch error, not evidence that setup is incomplete. Required setup commands fail before readiness is written. Fresh
   creation verifies push-proxy connectivity as well as reuse.
 - Any failure after `run` (sentinel timeout, exec error, cp failure,
   keyring) removes the partial container (and releases the proxy if unused)
@@ -409,7 +411,10 @@ reaper failures; available persisted diagnostics are shown even when the runtime
 executable is unavailable. If its domain cannot be determined, status displays
 saved scoped failures and pending owner releases with distinct source/domain
 labels, explicitly as diagnostics only; those records never bypass the normal
-runtime-domain checks for cleanup authorization or outcome writes.
+runtime-domain checks for cleanup authorization or outcome writes. A release
+record written without a runtime identity is preserved by full passes and can
+never authorize removal, so status lists it as a diagnostic, not as a
+retryable cleanup failure that `pm container reap` could clear.
 Reap prints its outcome/count summary even when no
 containers remain in scope. Existing `pm container cleanup` (remove all / by PR)
 is kept as explicit force cleanup, but bulk removal captures each allocation's

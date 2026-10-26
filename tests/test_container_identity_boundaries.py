@@ -60,7 +60,8 @@ def test_unknown_domain_release_never_authorizes_other_store(monkeypatch):
     assert len(reaper._release_records()) == 1  # keep diagnostic evidence
     failure = reaper.pending_failures()["pm-review-pr-1234"]
     assert not failure["owner_release"]
-    assert "domain unknown" in failure["error"]
+    assert failure["unverifiable_release"] is True
+    assert "diagnostic" in failure["error"]
     monkeypatch.setattr(reaper, "list_containers", lambda: [reaper.ContainerInfo(
         name="pm-review-pr-1234", id="cloned-id", running=True, created=0)])
     monkeypatch.setattr(cm, "cleanup_generation", lambda _: "cloned-generation")
