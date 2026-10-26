@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T02:24:12.998654+00:00'
+  updated_at: '2026-10-26T03:05:16.116961+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32733,6 +32733,19 @@ prs:
       1 hook receiver fails on master too).'
     created_at: '2026-10-26T02:24:12Z'
     last_edited: '2026-10-26T02:24:12Z'
+  - id: note-f8d1add
+    text: 'review-loop 9028 i10: a failed metadata resolution is now reported honestly
+      — the sign-off return and prompt say pm could not reconcile it and list the
+      unresolved conflicts (previously they claimed "pm resolved the metadata conflict"
+      even for a CONFLICT record whose retained attempt was never applied). integration.json
+      now also carries resolution.diff_path (the delta is written before the artifact).
+      Added tests for the failed-resolution wording, the null resolved_from.head prompt
+      guard, and the artifact pointer, and shared the same-field-conflict test setup.
+      Tests: 78 in test_signoff_resolution.py; full suite 3432 passed (1 pre-existing
+      env failure: hook receiver fails on master too; markdown-module failures excluded).
+      Evidence: /pm-captures/review-9028-i10/.'
+    created_at: '2026-10-26T03:05:16Z'
+    last_edited: '2026-10-26T03:05:16Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work

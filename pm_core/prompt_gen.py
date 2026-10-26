@@ -434,7 +434,11 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
     resolution = rec.get("resolution") or {}
     if resolution:
         lines.append("")
-        lines.append("**Metadata conflict resolution (pm, by record id):**")
+        if resolution.get("unresolved"):
+            lines.append("**Metadata conflict resolution attempted (pm, by "
+                         "record id) — NOT resolved:**")
+        else:
+            lines.append("**Metadata conflict resolution (pm, by record id):**")
         for entry in resolution.get("paths") or []:
             bits = [f"`{entry.get('path')}`"]
             for key, label in (("added_ours", "added from the PR"),

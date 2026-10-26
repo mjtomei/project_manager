@@ -1254,13 +1254,8 @@ def resolution_diff_path(pr_id: str) -> Path | None:
 
 def _write_artifacts(pr_id: str, record: dict) -> None:
     """Write the full record + the human-readable resolution delta."""
-    path = integration_json_path(pr_id)
-    if path is not None:
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(record, indent=2) + "\n")
-        except OSError as e:
-            _log.warning("integration.json for %s: %s", pr_id, e)
+    # The delta first: the full record written below must carry the pointer
+    # to it (the compact state in project.yaml carries the same pointer).
     resolution = record.get("resolution") or {}
     diff = resolution.get("diff")
     diff_path = resolution_diff_path(pr_id)
@@ -1272,6 +1267,13 @@ def _write_artifacts(pr_id: str, record: dict) -> None:
             resolution["diff_path"] = str(diff_path)
         except OSError as e:
             _log.warning("integration resolution diff for %s: %s", pr_id, e)
+    path = integration_json_path(pr_id)
+    if path is not None:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(record, indent=2) + "\n")
+        except OSError as e:
+            _log.warning("integration.json for %s: %s", pr_id, e)
 
 
 def _record_check(root: Path, pr_id: str, record: dict) -> dict:
@@ -1329,9 +1331,9 @@ def _record_check(root: Path, pr_id: str, record: dict) -> dict:
     # Compute the digest before writing the artifact: integration.json is the
     # full record a person assesses, and it must carry the digest of the
     # resolution it describes (a later re-check/binding compares it).
-    # ``_write_artifacts`` then sets the diff path the compact record carries
-    # (the full diff itself never goes into project.yaml); the digest ignores
-    # that host-specific path.
+    # ``_write_artifacts`` also records the diff path the compact state
+    # carries (the full diff itself never goes into project.yaml); the digest
+    # ignores that host-specific path.
     record["resolution_digest"] = _resolution_digest(record.get("resolution"))
     _write_artifacts(pr_id, record)
 

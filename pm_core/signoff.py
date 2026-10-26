@@ -1123,11 +1123,25 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
         if resolution:
             paths = [p.get("path") for p in resolution.get("paths") or []
                      if p.get("path")]
-            lines.append(
-                "pm resolved the metadata conflict by record id in "
-                + ", ".join(f"`{p}`" for p in paths or ["project.yaml"])
-                + " (both sides' independent records are kept; real field, "
-                "deletion and ambiguity conflicts are never auto-resolved).")
+            paths_text = ", ".join(f"`{p}`" for p in paths or ["project.yaml"])
+            unresolved = resolution.get("unresolved") or []
+            if unresolved:
+                # A failed attempt is retained on the record (never applied).
+                # Say so: claiming a resolution here would mislead the step
+                # that has to reconcile the conflict by hand.
+                lines.append(
+                    "pm could not resolve the metadata conflict by record id "
+                    f"in {paths_text} — real field, deletion and ambiguity "
+                    "conflicts are never auto-resolved:")
+                for entry in unresolved[:5]:
+                    lines.append(f"- `{entry.get('path')}`: "
+                                 f"{entry.get('conflicts')}")
+            else:
+                lines.append(
+                    "pm resolved the metadata conflict by record id in "
+                    f"{paths_text} (both sides' independent records are kept; "
+                    "real field, deletion and ambiguity conflicts are never "
+                    "auto-resolved).")
             resolved_from = resolution.get("resolved_from") or {}
             if resolved_from.get("head"):
                 lines.append(

@@ -318,6 +318,22 @@ def test_resolved_text_uses_pm_writer_and_reparses():
 
 # --- #250 end-to-end -------------------------------------------------------
 
+def _status_conflict(w) -> dict:
+    """Make the PR branch and the base change the same field differently."""
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    data = store.load(w.wd / "pm")
+    store.get_pr(data, PR)["status"] = "qa"
+    store.save(data, w.wd / "pm")
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature edits status")
+    data = store.load(w.base_pm)
+    store.get_pr(data, PR)["status"] = "merged"
+    store.save(data, w.base_pm)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base edits status")
+    return integration.check_integration(w.pm_dir, PR)
+
+
 def _metadata_conflict(w, *, branch_ids=("pr-300", "pr-301"),
                        base_ids=("pr-250", "pr-251")) -> dict:
     append_records(w.wd / "pm", w.repo, list(branch_ids))
@@ -354,10 +370,12 @@ def test_250_metadata_conflict_resolves_and_all_records_survive(w):
     diff_path = Path(resolution["diff_path"])
     assert diff_path.is_file()
     assert "resolved" in diff_path.read_text()
-    # The full artifact must carry the digest of the resolution it records.
+    # The full artifact must carry the digest of the resolution it records,
+    # and the pointer to the delta it describes.
     artifact = json.loads((w.croot / PR / "integration.json").read_text())
     assert artifact.get("resolution_digest") == rec["resolution_digest"], (
         artifact.get("resolution_digest"), rec["resolution_digest"])
+    assert artifact["resolution"]["diff_path"] == str(diff_path)
 
     # QA evidence revision is captured from the QA run's resume snapshot.
     qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
@@ -487,21 +505,8 @@ def test_notes_added_through_the_real_note_path_still_merge(w):
 
 
 def test_same_field_conflict_routes_to_impl_and_changes_nothing(w):
-    append_records(w.wd / "pm", w.repo, ["pr-300"])
-    data = store.load(w.wd / "pm")
-    store.get_pr(data, PR)["status"] = "qa"
-    store.save(data, w.wd / "pm")
-    git(w.wd, "add", ".")
-    git(w.wd, "commit", "-q", "-m", "feature edits status")
+    rec = _status_conflict(w)
     head = git(w.wd, "rev-parse", "HEAD")
-
-    data = store.load(w.base_pm)
-    store.get_pr(data, PR)["status"] = "merged"
-    store.save(data, w.base_pm)
-    git(w.repo, "add", ".")
-    git(w.repo, "commit", "-q", "-m", "base edits status")
-
-    rec = integration.check_integration(w.pm_dir, PR)
     assert rec["status"] == integration.CONFLICT
     assert rec["resolution"]["unresolved"]
     assert any("status" in c for c in rec["resolution"]["unresolved"][0]["conflicts"])
@@ -1127,6 +1132,58 @@ def test_signoff_prompt_shows_the_resolution_and_evidence_contract(w):
     # The evidence revisions the reuse statement must name are surfaced.
     assert f"qa@{original_head[:12]}" in text
     assert f"review@{original_head[:12]}" in text
+
+
+def test_a_failed_resolution_is_not_reported_as_resolved(w):
+    """The retained attempt is visible, but never claimed as a resolution.
+
+    A same-field conflict keeps a partial resolution record on the check; the
+    sign-off return and the prompt must say pm could *not* reconcile it, or
+    the next step would assume the metadata was already handled.
+    """
+    rec = _status_conflict(w)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["resolution"]["unresolved"]
+    head = rec["head"]
+    pr = dict(pr_entry(w))
+    ret = signoff.build_return_record(pr, SIGNOFF_IMPL, "impl",
+                                      reviewed_head=head)
+    pr["signoff_return"] = ret
+    text = signoff.format_signoff_return(pr)
+    assert "pm could not resolve the metadata conflict" in text
+    assert "pm resolved the metadata conflict" not in text
+    assert "changed differently on both sides" in text
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        prompt = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "NOT resolved" in prompt
+    assert "changed differently on both sides" in prompt
+    assert "Metadata conflict resolution (pm, by record id)" not in prompt
+
+
+def test_signoff_prompt_survives_a_null_resolved_from_head(w):
+    """A record without the resolved-from revision must not crash the prompt."""
+    rec = _metadata_conflict(w)
+
+    def _blank(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"])
+        resolution["resolved_from"] = {
+            "head": None, "base_sha": rec["base_sha"],
+            "merge_base": rec.get("merge_base")}
+        integ["resolution"] = resolution
+        integ["resolved_from"] = resolution["resolved_from"]
+        integ["resolution_digest"] = integration._resolution_digest(resolution)
+    store.locked_update(w.pm_dir, _blank)
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "Applied to the PR branch" in text
+    assert "<old head>" in text
 
 
 def test_integrate_cli_prints_the_resolution(w):
