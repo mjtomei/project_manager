@@ -824,6 +824,54 @@ class TestPopupPickerEmptyProject:
         assert "review-#12" not in collapsed["input"]
         assert run_cmd.call_count == 0
 
+    def test_action_refused_after_collapse_names_home_window(
+            self, tmp_path, monkeypatch):
+        """Pressing an action key when `prs: []` lands on disk must refuse the
+        action and name the collapsed home the same way the header does.
+
+        The dispatch-refusal branch used to pass the retained local id to
+        ``_no_actions_notice``, so the header read ``#12`` while the notice
+        read ``pr-a`` (and the log line read ``#12``).
+        """
+        prs = [_pr("pr-a", status="in_review", gh_pr_number=12)]
+
+        def on_launch(n):
+            if n == 1:
+                prs.clear()
+
+        with patch("pm_core.cli.session._log") as log:
+            fzf, run_cmd = _run_picker(
+                tmp_path, monkeypatch, prs, ["#12"], "#12",
+                [(0, "s\n"), (130, "")], on_launch=on_launch)
+        refused = fzf.calls[1]
+        assert _header(refused).splitlines() == ["PR Actions — #12", "q/Esc: quit"]
+        assert "Could not load actions for #12." in refused["input"]
+        assert "Could not load actions for pr-a." not in refused["input"]
+        run_cmd.assert_not_called()
+        # The diagnostics log agrees with what is on screen.
+        warnings = [c.args[0] % tuple(c.args[1:])
+                    for c in log.warning.call_args_list]
+        assert any("no actions for '#12'" in w for w in warnings)
+        assert not any("no actions for 'pr-a'" in w for w in warnings)
+
+    def test_action_refused_after_collapse_names_home_window_no_fzf(
+            self, tmp_path, monkeypatch, capsys):
+        """Same refusal through the numbered fallback, which prints `lines`."""
+        prs = [_pr("pr-a", status="in_review", gh_pr_number=12)]
+
+        def choose(prompt):
+            prs.clear()
+            return "s"
+
+        with patch("builtins.input", side_effect=choose):
+            _, run_cmd = _run_picker(tmp_path, monkeypatch, prs, ["#12"],
+                                     "#12", [], has_fzf=False)
+        out = capsys.readouterr().out
+        assert "Could not load actions for #12." in out
+        assert "Could not load actions for pr-a." not in out
+        run_cmd.assert_not_called()
+
+
 class TestPopupPickerMergedNavigation:
     """note-40057f4: moving to/from retained merged entries must never
     exit the picker, and live PRs stay reachable in both directions."""

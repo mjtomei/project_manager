@@ -161,7 +161,10 @@ that snapshot. Repeat with a missing `prs` field and `prs: null`, `false`,
 An explicit `prs: []` is a valid empty project: the list collapses to the
 pinned home, whose header and notice name the invoking window id (`#12`) —
 with no PR entry left there is no display id — and `d` is not in its expect
-set. While such a malformed snapshot is on disk the TUI's background sync
+set. The same naming holds for the notice shown when an action key pressed
+after the collapse is refused (fzf and the numbered fallback): header,
+notice and the `no actions for` log line all read `#12`, never the retained
+local id. While such a malformed snapshot is on disk the TUI's background sync
 must not log a traceback (a PR entry with a status but no `id` used to raise
 `KeyError: 'id'` in `pm_core/tui/sync.py`); the popup's own log lines and the
 captures must stay traceback-free. Cover the shapes that reach
@@ -206,6 +209,12 @@ Known limitation (review 8d08 i1, non-blocking): a tmux `list-windows` error is
 indistinguishable from an empty window list, so a transient tmux error can
 briefly show fewer nav entries; it self-heals on the next key. Do not file it
 as a regression unless it persists or loses project.yaml state.
+Known limitation (pre-existing, outside this PR's scope): `usable_prs` filters
+the picker and the sync loops, but auto-start (`pm_core/tui/auto_start.py`) and
+the remaining `graph.ready_prs` callers in `cli/pr.py`/`guide.py` still index PR
+ids directly. With auto-start enabled, an id-less PR entry can therefore still
+log a sync traceback from `check_and_start`; that reproduces on master, so note
+it rather than filing it as a regression of this PR.
 E7. **Given** the home PR's windows are all closed while the popup is open,
 **When** user presses home, **Then** home PR still shown.
 E8. **Given** a live PR is shown, **When** the user moves to an action row and

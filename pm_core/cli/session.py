@@ -2210,11 +2210,15 @@ def popup_picker_cmd(session: str, window_name: str):
         nav_index = _sync_index(current_pr, nav_index)
         if selected is None:
             _picked_pr, _label_to_cmd = None, {}
-            lines = [(f"  {_no_actions_notice(current_pr, None)}", "", current_pr)]
+            # Name the PR the same way the header does: with an explicit
+            # `prs: []` the identity is the invoking window id (#12), and the
+            # notice must not disagree with the header naming the local id.
+            pr_disp = _display_id(current_pr)
+            lines = [(f"  {_no_actions_notice(pr_disp, None)}", "", pr_disp)]
             # The selected PR vanished between selection and dispatch: log the
             # same lookup-failure diagnostics as a rendered notice so a window
             # that drifted out of range is diagnosable from the pm log too.
-            _log_no_actions(_display_id(current_pr), None)
+            _log_no_actions(pr_disp, None)
             _log.warning("popup-picker: selected PR %r disappeared before dispatch", selected_id)
         else:
             lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)

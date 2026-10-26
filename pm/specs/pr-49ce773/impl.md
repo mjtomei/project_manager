@@ -34,8 +34,13 @@
    PR's own window, home_pr is still in the nav list at its index, shown with
    `No actions — PR is merged.`, and nav keys reach the other PRs.
 6. **Lookup-divergence removed** — extract the nav-list construction into a
-   pure helper `_build_nav_entries(prs, home_window_id, open_windows)` that
-   returns `(nav_pr_ids, pr_by_disp, home_pr)` in display form. The popup
+   pure helper
+   `_build_nav_entries(prs, window_pr_id, open_windows, *, home_local_id=None)`
+   that returns `(nav_pr_ids, pr_by_disp, home_pr)` in display form. Once the
+   home PR has been resolved, callers pass its local ID as `home_local_id` so
+   a deleted home is looked up by exact local ID and can never fall through
+   to another PR's GitHub number; the raw window ID is used only while the
+   home is still unresolved. The popup
    converts these entries to stable local-identity navigation keys and indexes
    all PRs by local ID; `_resolve_for` uses that index, never a display-number
    re-lookup. Display numbers are derived only when rendering. This keeps a
@@ -200,8 +205,11 @@ for the removed number resolves to whichever PR now owns that number.
 - An explicit `prs: []` is a valid empty project: the list collapses to the
   pinned home. With no PR entries left nothing can supply a display id, so
   the collapsed home names the invoking window id (`#12`) rather than the
-  retained local id. While other PRs remain, a deleted home keeps its local
-  id — the window name may since belong to a different PR.
+  retained local id. That naming is used everywhere the home is presented,
+  including the notice shown when an action key is refused after the
+  collapse (`_still_has_action`), so the header, the notice and the
+  diagnostics log never disagree. While other PRs remain, a deleted home
+  keeps its local id — the window name may since belong to a different PR.
 - The TUI's background sync (`pm_core/tui/sync.py do_normal_sync`) must not
   raise out of the sync loop on a PR entry with no usable string id: such
   entries are skipped when snapshotting statuses, applying merges and
@@ -218,6 +226,10 @@ for the removed number resolves to whichever PR now owns that number.
   for "entry we can key by id"; `tui/tech_tree.py` uses it too instead of a
   private copy. Entries it drops are never launchable, so they are also
   excluded from `SyncResult.ready_prs`.
+  Out of scope (pre-existing): auto-start (`pm_core/tui/auto_start.py`) and
+  the remaining `graph.ready_prs` callers in `cli/pr.py`/`guide.py` still
+  index ids directly, so an id-less entry can still raise there when
+  auto-start is enabled.  They need the same filter in a separate change.
 
 ## Ambiguities (resolved)
 
