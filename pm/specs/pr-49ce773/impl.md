@@ -14,7 +14,9 @@
    - PR found, status in `_TERMINAL_STATUSES` → `No actions — PR is {status}.`
    - PR not found (lookup failure) → `Could not load actions for {pr_disp}.`
      plus `_log.warning(...)` with the id, the project root, and the
-     display/local ids known, so the drift can be diagnosed.
+     known local/display-id pairs, so the drift can be diagnosed. Bound the
+     sample to 20 PRs and include the loaded total and omitted count to avoid
+     dumping the whole project on each navigation reload.
    - PR found, non-terminal, but `_build_picker_lines` still empty
      (shouldn't happen) → same "Could not load" copy + warning.
 3. **Merged/closed PRs never actionable** (user want #1) — already true via
@@ -63,7 +65,9 @@
      `z`/`zz` chord key, or a no-fzf numbered/shortcut selection) via
      `_still_has_action(label)`: if the shown PR
      no longer has that action (merged/closed meanwhile), don't run
-     anything — re-render it with its notice.
+     anything — re-render it with its notice. If refresh fails, refuse the
+     action rather than dispatch from the stale snapshot; navigation may still
+     use the last-good snapshot and a later key can retry after repair.
    After each reload the shown id is canonicalized (`_canonical_id`, via
    `_find_pr_for_window_id`) so a PR whose display id changed while open
    (`gh_pr_number` assigned: `pr-abc` → `#12`) is not listed twice.
@@ -136,6 +140,8 @@ number must show the lookup-failure notice, not another PR's actions.
   showing the current PR's notice; q/Esc quits — never an implicit exit.
 - `z s` chord started before the PR merged: re-checked at the second key,
   no fresh-start command is built for the merged PR.
+- A null or numeric title loaded from YAML must not crash rendering: coerce
+  presentation titles to text (null renders blank) before truncation.
 - QA scenario-only windows (`qa-#N-s1`) count as open windows for the nav
   list, matching `_build_picker_lines`' `[open]` matching.
 

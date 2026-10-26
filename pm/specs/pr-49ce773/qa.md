@@ -89,7 +89,9 @@ PR and shows its actions under `#12`, with no duplicate nav entry.
 **Given** a window named `#193` whose PR has since lost `gh_pr_number` and no
 other PR has that number, **When** the picker opens there, **Then** the id is
 unresolvable: the row reads `Could not load actions for #193.` (never
-"merged"), a warning appears in the pm log, and nav keys reach other PRs.
+"merged"), a warning appears in the pm log with the failed id, project root,
+loaded PR count and a bounded sample of local/display-id pairs (plus omitted
+count), and nav keys reach other PRs.
 
 R10. **Given** the nav list holds only one PR and it is merged (home), **When**
 the user presses Enter or action keys, **Then** popup stays open; q/Esc closes.
@@ -128,7 +130,11 @@ E6. **Given** project.yaml is momentarily unparsable while the popup is open,
 snapshot (warning in log), does not crash, and navigation still works within
 that snapshot. Repeat with syntactically valid YAML containing a PR mapping
 with `status` but no `id`; after repairing the file, the next nav key reloads
-normally.
+normally. While refresh is failing, shortcut, Enter-on-action, fresh/loop chord
+and no-fzf selections must not dispatch cached actions. Repair the file with
+the selected PR merged/closed; the next fzf action attempt shows its notice
+without dispatch. Also try `title: null` and a numeric title on a live PR:
+navigation remains usable and titles render as blank/text rather than crashing.
 E7. **Given** the home PR's windows are all closed while the popup is open,
 **When** user presses home, **Then** home PR still shown.
 E8. **Given** a live PR is shown, **When** the user moves to an action row and

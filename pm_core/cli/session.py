@@ -1266,7 +1266,7 @@ def _build_picker_lines(
         return []
 
     lines: list[tuple[str, str, str]] = []
-    title = pr.get("title", "")
+    title = str(pr.get("title") or "")
     max_title = 40
     short_title = (title[:max_title - 1] + "…") if len(title) > max_title else title
 
@@ -1969,23 +1969,31 @@ def popup_picker_cmd(session: str, window_name: str):
                 name_to_wid=name_to_wid)
         if not pr_lines:
             if picked is None or picked.get("status") not in _TERMINAL_STATUSES:
+                from pm_core.cli.helpers import _pr_display_id
+
+                # Pair the two ids to diagnose window-name drift without
+                # dumping a large project's entire PR list on every reload.
+                known_ids = [(p.get("id"), _pr_display_id(p)) for p in prs[:20]]
                 _log.warning(
                     "popup-picker: no actions for %r (window=%r, root=%s, "
-                    "found=%s, status=%r, prs_loaded=%d)",
+                    "found=%s, status=%r, prs_loaded=%d, "
+                    "known_ids(local,display)=%r, ids_omitted=%d)",
                     pr_disp, window_name, root, picked is not None,
-                    (picked or {}).get("status"), len(prs))
+                    (picked or {}).get("status"), len(prs), known_ids,
+                    max(0, len(prs) - len(known_ids)))
             label_to_cmd = {}
             pr_lines = [(f"  {_no_actions_notice(pr_disp, picked)}",
                          "", pr_disp)]
         return pr_lines, picked, label_to_cmd
 
-    def _refresh_state() -> None:
+    def _refresh_state() -> bool:
         """Reload project.yaml and the window list, rebuild the nav list.
 
         Called on every navigation key and before dispatching an action so
         a PR merged/closed while the popup is open drops out of navigation
         and loses its actions instead of leaving stale entries behind.
-        Keeps the previous state if the reload fails.
+        Keeps the previous state if the reload fails, returning False so
+        dispatch can refuse to act on that stale snapshot.
         """
         nonlocal prs, nav_pr_ids, pr_by_disp, home_pr
         nonlocal open_windows, name_to_wid
@@ -1998,13 +2006,14 @@ def popup_picker_cmd(session: str, window_name: str):
                 fresh_prs, window_pr_id, fresh_open)
         except Exception as e:
             _log.warning("popup-picker: refresh failed, keeping state: %s", e)
-            return
+            return False
         # Publish only a complete snapshot; malformed entries must not
         # replace part of the last-good state before nav construction fails.
         prs = fresh_prs
         open_windows = fresh_open
         name_to_wid = fresh_name_to_wid
         nav_pr_ids, pr_by_disp, home_pr = fresh_nav, fresh_by_disp, fresh_home
+        return True
 
     def _canonical_id(pr_disp: str) -> str:
         """Map a shown PR id to the PR's current display id.
@@ -2064,7 +2073,8 @@ def popup_picker_cmd(session: str, window_name: str):
         """Refresh before either interface dispatches a selected action."""
         nonlocal current_pr, nav_index, lines, _picked_pr, _label_to_cmd
         nonlocal fzf_input_lines
-        _refresh_state()
+        if not _refresh_state():
+            return False
         current_pr = _canonical_id(current_pr)
         nav_index = _sync_index(current_pr, nav_index)
         lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)

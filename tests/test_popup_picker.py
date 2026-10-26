@@ -637,7 +637,7 @@ class TestPopupPickerNoActions:
         run_cmd.assert_called_once()
         assert "pr-r" in run_cmd.call_args.args[0]
 
-    def test_unresolvable_window_reports_lookup_failure(self, tmp_path, monkeypatch, caplog):
+    def test_unresolvable_window_reports_lookup_failure(self, tmp_path, monkeypatch):
         """Window #193 whose PR has no gh_pr_number in project.yaml: don't
         claim it's merged, log a warning, and let the user navigate away."""
         prs = [{"id": "pr-f5b7eef", "status": "in_review", "title": "x"},
@@ -650,8 +650,29 @@ class TestPopupPickerNoActions:
         first, second = fzf.calls
         assert "Could not load actions for #193." in first["input"]
         assert "merged" not in first["input"]
-        assert log.warning.called
+        log.warning.assert_called_once()
+        fmt, *args = log.warning.call_args.args
+        warning = fmt % tuple(args)
+        assert "no actions for '#193'" in warning
+        assert f"root={tmp_path}" in warning
+        assert "('pr-f5b7eef', 'pr-f5b7eef')" in warning
+        assert "('pr-r', '#240')" in warning
+        assert "ids_omitted=0" in warning
         assert _header(second).startswith("PR Actions — #240")
+        run_cmd.assert_not_called()
+
+    def test_lookup_warning_bounds_known_id_sample(self, tmp_path, monkeypatch):
+        prs = [_pr(f"pr-{i}", gh_pr_number=i + 1) for i in range(25)]
+        with patch("pm_core.cli.session._log") as log:
+            _, run_cmd = _run_picker(
+                tmp_path, monkeypatch, prs, ["#193"], "#193", [(130, "")])
+        log.warning.assert_called_once()
+        fmt, *args = log.warning.call_args.args
+        warning = fmt % tuple(args)
+        assert "prs_loaded=25" in warning
+        assert "('pr-19', '#20')" in warning
+        assert "('pr-20', '#21')" not in warning
+        assert "ids_omitted=5" in warning
         run_cmd.assert_not_called()
 
     def test_single_actionless_pr_does_not_exit_on_keypress(self, tmp_path, monkeypatch):
@@ -872,6 +893,65 @@ class TestPopupPickerMergedNavigation:
 
 
 class TestPopupPickerRefreshFailures:
+    @pytest.mark.parametrize("title", [None, 123])
+    def test_non_string_title_does_not_crash_navigation(self, tmp_path, monkeypatch, title):
+        prs = [_pr("pr-a"), _pr("pr-b")]
+
+        def on_launch(n):
+            if n == 1:
+                prs[1]["title"] = title
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["pr-a", "pr-b"], "tui",
+            [(0, "l\n"), (0, "h\n"), (130, "")], on_launch=on_launch)
+        assert [_shown(c) for c in fzf.calls] == [
+            "PR Actions — pr-a  (1/2)",
+            "PR Actions — pr-b  (2/2)",
+            "PR Actions — pr-a  (1/2)",
+        ]
+        run_cmd.assert_not_called()
+
+    @pytest.mark.parametrize("mode", ["shortcut", "enter", "fresh", "loop"])
+    def test_failed_refresh_blocks_action_until_repaired(self, tmp_path, monkeypatch, mode):
+        from pm_core.cli import session as sess
+
+        prs = [_pr("pr-a")]
+        prefix = [(0, "z\n")] * {"fresh": 1, "loop": 2}.get(mode, 0)
+        if mode == "enter":
+            rows = sess._build_picker_lines(prs, "pr-a", {"pr-a"})
+            row = next(d for d, c, _ in rows if c == "pr start pr-a")
+            selection = f"\n{row}\n"
+        else:
+            selection = "d\n"
+
+        def on_launch(n):
+            if n == len(prefix) + 1:
+                prs[0]["status"] = "merged"
+                prs.append({"status": "in_review"})
+            elif n == len(prefix) + 2:
+                prs.pop()
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["pr-a"], "pr-a",
+            prefix + [(0, selection), (0, "s\n"), (130, "")], on_launch=on_launch)
+        assert len(fzf.calls) == len(prefix) + 3
+        assert "No actions — PR is merged." in fzf.calls[-1]["input"]
+        run_cmd.assert_not_called()
+
+    @pytest.mark.parametrize("choice", ["1", "s"])
+    def test_failed_refresh_blocks_fallback_action(self, tmp_path, monkeypatch, choice):
+        prs = [_pr("pr-a")]
+
+        def choose(prompt):
+            prs[0]["status"] = "merged"
+            prs.append({"status": "in_review"})
+            return choice
+
+        with patch("builtins.input", side_effect=choose):
+            _, run_cmd = _run_picker(
+                tmp_path, monkeypatch, prs, ["pr-a"], "pr-a", [], has_fzf=False)
+        run_cmd.assert_not_called()
+
     def test_malformed_reload_keeps_complete_previous_state(self, tmp_path, monkeypatch):
         prs = [_pr("pr-a"), _pr("pr-b")]
 

@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T13:36:49.253815+00:00'
+  updated_at: '2026-10-26T13:52:58.941106+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16173,6 +16173,34 @@ prs:
       and named Astra transfer stash retained; no new live QA PASS claimed.'
     created_at: '2026-10-26T13:36:49Z'
     last_edited: '2026-10-26T13:36:49Z'
+  - id: note-2db9d49
+    text: 'Review 1eaf i2: found and fixed two further refresh bugs: null/numeric
+      YAML titles crashed _build_picker_lines after refresh, and failed refresh left
+      stale actions dispatchable. Titles are normalized for presentation; _refresh_state
+      returns success and shared _still_has_action now refuses dispatch on failure
+      while navigation retains last-good state. Added coverage for shortcut, Enter,
+      fresh/loop chords, fallback number/shortcut, and repair-to-merged recovery.
+      Also fulfilled R2 diagnostics with a bounded 20-entry local/display-id sample
+      plus omitted count; implementation/QA specs updated. Targeted popup/session
+      suite: 289 passed. Repro evidence: /pm-captures/review-1eaf-i2-repro.txt; fixed
+      tests: /pm-captures/review-1eaf-i2-targeted.txt. Full validation pending. No
+      standalone follow-ups created; untracked verify-s15-followup.md and Astra transfer
+      stash preserved. Fresh live QA must cover updated E6; no live QA PASS claimed.'
+    created_at: '2026-10-26T13:49:19Z'
+    last_edited: '2026-10-26T13:49:19Z'
+  - id: note-52cfab6
+    text: 'Review 1eaf i2 final validation: 3568 passed, 1 failed, 1 skipped in the
+      full suite after final code edits. Sole failure test_hook_events.py::test_installer_writes_standalone_receiver
+      also fails on clean origin/master 211a6128 (control groups: 137 passed, 1 failed);
+      exact failure-id sets match. Cause verified: container PM_HOST_HOME=/home/matt
+      skips receiver install for the temporary test HOME; rerun with PM_HOST_HOME
+      unset passes (1 passed). Final popup/session subset: 289 passed. Evidence: /pm-captures/review-1eaf-i2-full-final.txt,
+      review-1eaf-i2-base-control.txt, review-1eaf-i2-hook-env-control.txt, review-1eaf-i2-targeted.txt,
+      review-1eaf-i2-summary.txt. The earlier full-before-diagnostic-guard log is
+      superseded. Verdict NEEDS_WORK because fixes were applied; fresh review/live
+      QA/sign-off remain required. No architectural blocker or new standalone follow-up.'
+    created_at: '2026-10-26T13:52:58Z'
+    last_edited: '2026-10-26T13:52:58Z'
   model: provider:chatgpt-astra
   session_models:
     impl: provider:chatgpt-astra
