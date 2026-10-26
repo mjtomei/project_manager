@@ -2561,6 +2561,13 @@ def _remove_captured_container(name: str, cid: str, generation: str,
         if current is None:
             raise ContainerError(f"Container '{name}' identity unknown during cleanup")
         if not current:
+            # A runtime rename does not take our launch lock. Only absence by
+            # immutable ID proves removal; otherwise retry under the new name.
+            remaining = current_container_id(cid)
+            if remaining is None:
+                raise ContainerError(f"Container '{name}' allocation identity unknown after name disappeared")
+            if remaining:
+                raise ContainerError(f"Container '{name}' renamed during cleanup; retry explicitly")
             return True  # Already gone; do not touch a subsequently recreated proxy.
         if current != cid or cleanup_generation(name) != generation:
             raise ContainerError(f"Container '{name}' changed during cleanup; retry explicitly")

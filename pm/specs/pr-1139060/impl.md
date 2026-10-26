@@ -378,7 +378,11 @@ containers remain in scope. Existing `pm container cleanup` (remove all / by PR)
 is kept as explicit force cleanup, but bulk removal captures each allocation's
 ID/generation before dispatch and rechecks it under the launch lock. A concurrent
 replacement or reused allocation is skipped, and removal plus proxy release
-remain inside the lock. Retention-aware bulk callers carry their retention policy
+remain inside the lock. If the captured name disappears, bulk cleanup verifies
+absence by immutable ID before reporting removal; a surviving renamed allocation
+or an unknown ID check is a visible, persisted failure for a fresh scoped retry,
+not successful cleanup under the obsolete name's lock.
+Retention-aware bulk callers carry their retention policy
 into the removal worker and recheck it under that lock, so a retention marker
 written after inventory still protects the allocation. Explicit bulk cleanup
 persists partial failures and reports them through PR/session cleanup summaries
