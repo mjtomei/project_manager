@@ -830,8 +830,8 @@ def launch_error(name: str, kind: str, stderr: str = "", *,
         msg = (f"Container '{name}' could not {stage}: image not available. "
                f"Run 'pm container build'.{cause}")
     elif kind == "timeout":
-        msg = (f"Container '{name}' setup did not finish ({stage}). The partial "
-               f"container was removed. {_REMEDY_REAP}{cause}")
+        msg = (f"Container '{name}' setup did not finish ({stage}). "
+               f"{_REMEDY_REAP}{cause}")
     else:
         msg = f"Container '{name}' could not {stage}.{cause}"
     return ContainerLaunchError(msg, kind=kind, stderr=stderr or "", name=name)
@@ -1935,14 +1935,11 @@ def _post_setup(name: str, workdir: Path, is_podman: bool) -> None:
     # /home/pm/.pm as root-owned (uid 0 in the container's user namespace).
     # That blocks the pm user from creating siblings under ~/.pm (debug
     # logs, session registry, etc.) which crashes any ``pm`` invocation
-    # inside the container on first logger setup.  Chown as root — under
-    # podman with --userns=keep-id the container command runs as the pm
-    # user and cannot chown a root-owned path, so we need an explicit
-    # --user 0 exec; under docker the default exec user is already root.
+    # inside the container on first logger setup. Both Podman's keep-id
+    # mapping and Docker images declaring USER pm can default exec to an
+    # unprivileged user, so ownership repair explicitly runs as root.
+    exec_args = ["exec", "--user", "0"]
     try:
-        exec_args = ["exec"]
-        if is_podman:
-            exec_args.extend(["--user", "0"])
         # The hooks bind mount is optional; without it the runtime may not
         # have created this parent directory at all.
         ownership = _run_runtime(
@@ -1996,12 +1993,11 @@ def _post_setup(name: str, workdir: Path, is_podman: bool) -> None:
             _run_runtime("cp", str(_cfg_copy_src),
                          f"{name}:{_CONTAINER_HOME}/.claude.json",
                          timeout=10)
-            # Under Docker (root), fix ownership so the pm user can read it.
-            # Under Podman (--userns=keep-id), the file already has the
-            # correct ownership via namespace mapping, and chown would fail
-            # because the process is not root.
+            # Docker cp creates a root-owned file; repair it as root even
+            # when the image defaults to USER pm. Podman's keep-id mapping
+            # already gives the copied file the host user's ownership.
             if not is_podman:
-                _run_runtime("exec", name, "chown",
+                _run_runtime(*exec_args, name, "chown",
                              f"{host_uid}:{host_gid}",
                              f"{_CONTAINER_HOME}/.claude.json",
                              timeout=5)

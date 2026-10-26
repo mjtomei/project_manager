@@ -306,7 +306,9 @@ intact to protect concurrent waiters and delayed releases.
   setup cleanup target that immutable ID, never a same-name replacement. Ownership
   publication refuses a changed or unknown name-to-ID mapping. Optional hook mounts
   are not prerequisites for ownership repair: create the in-container ~/.pm directory
-  before its required chown, and propagate either command's failure.
+  before its required chown, and propagate either command's failure. Ownership
+  repair explicitly execs as root on both Podman and Docker, since the image may
+  declare `USER pm`; Docker's copied config ownership repair does the same.
 
 ### R6 — Real launch errors
 `ContainerLaunchError(ContainerError)` carries `kind`
@@ -324,7 +326,9 @@ QA records a failed scenario launch as `scenario_verdict_reasons[i] =
 "launch failed: …"` with **no** entry in `scenario_verdicts` (not an agent
 verdict); the overall verdict stays the existing "unverdicted ⇒
 INPUT_REQUIRED" aggregation and `state._error` names the launch failure.
-Deeper verdict presentation stays with pr-7ab0a99.
+Deeper verdict presentation stays with pr-7ab0a99. Timeout diagnostics must not
+claim successful removal: reuse/restart preserves existing files, and fresh
+allocation cleanup can fail or defer. The recovery command remains available.
 
 ### R7 — Scoped manual cleanup with preview + summary
 `pm container reap [--dry-run] [--pr ID] [--session TAG] [--include-retained]`

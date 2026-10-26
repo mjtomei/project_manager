@@ -192,3 +192,60 @@ def test_post_setup_creates_pm_home_without_optional_hook_mount(monkeypatch, tmp
     monkeypatch.setattr(cm, "_run_runtime", runtime)
     cm._post_setup(CID, tmp_path, True)
     assert created and stamped
+
+
+@pytest.mark.parametrize("is_podman", [False, True])
+@pytest.mark.parametrize("has_config", [False, True])
+def test_post_setup_repairs_ownership_as_root(monkeypatch, tmp_path, is_podman, has_config):
+    config = tmp_path / ".claude.json"
+    if has_config:
+        config.write_text("{}")
+    monkeypatch.setattr(cm, "_host_claude_json", lambda: config)
+    from pm_core import workspace_trust
+    monkeypatch.setattr(workspace_trust, "approved_path", lambda p: False)
+    calls = []
+
+    def runtime(*args, **kwargs):
+        calls.append(args)
+        # Both supported runtimes may default to USER pm. A runtime-created
+        # hooks parent (and Docker cp's config) belongs to root, not that user.
+        if args[0] == "exec" and "chown" in args and args[1:3] != ("--user", "0"):
+            error = "chown: Operation not permitted"
+            if kwargs.get("check", True):
+                raise subprocess.CalledProcessError(1, args, stderr=error)
+            return subprocess.CompletedProcess(args, 1, "", error)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    cm._post_setup(CID, tmp_path, is_podman)
+    ownership_calls = [args for args in calls if "mkdir" in args or "chown" in args]
+    assert ownership_calls
+    assert all(args[:4] == ("exec", "--user", "0", CID) for args in ownership_calls)
+    if has_config and not is_podman:
+        assert any(args[-1] == "/home/pm/.claude.json" for args in ownership_calls)
+    assert any(cm.SETUP_COMPLETE_SENTINEL in args for args in calls)
+
+
+def test_reused_setup_timeout_does_not_claim_container_removed(monkeypatch, tmp_path):
+    monkeypatch.setattr(cm, "container_is_running", lambda n: True)
+    monkeypatch.setattr(cm, "current_container_id", lambda n: CID)
+    monkeypatch.setattr(reaper, "is_retained", lambda *a: False)
+    monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
+    monkeypatch.setattr(cm, "_probe_setup", lambda n: (False, "", ""))
+    monkeypatch.setattr(cm, "_host_claude_json", lambda: tmp_path / "absent-config")
+
+    def runtime(*args, **kwargs):
+        if "mkdir" in args:
+            raise subprocess.TimeoutExpired(args, 5)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    remove = Mock()
+    monkeypatch.setattr(cm, "remove_container", remove)
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm._ensure_reusable(NAME, tmp_path, None, session_tag=None, pr_id=None)
+    assert error.value.kind == "timeout"
+    assert "ownership timed out" in str(error.value)
+    assert "was removed" not in str(error.value)
+    assert "pm container reap --dry-run" in str(error.value)
+    remove.assert_not_called()
