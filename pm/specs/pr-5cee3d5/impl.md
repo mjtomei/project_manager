@@ -153,7 +153,14 @@ own has a newer summary and keeps it). It also records the pre-merge merge
 base as `base_range_from` (the recorded `merge_base` is the base itself now,
 which would print as an empty range), so the sign-off prompt still names the
 range the base brought; the prompt falls back to it only when the recorded
-merge base equals the fetched base.
+merge base equals the fetched base. The same carry applies when the stored
+record's resolution attempt was **never applied** (a failed attempt, or a
+resolved candidate a dirty workdir kept pm from applying) and the branch now
+contains the same base: the sign-off return tells implementation to reconcile
+the conflict by hand, so no check ever saw that base outside HEAD, and the
+record still assessed it — `_carry_forward` falls back to
+`_carry_base_interaction` when it could not carry an applied resolution. A
+new attempt on the current check replaces it, as above.
 
 ### R4. Apply the resolved merge to the PR branch before sign-off runs
 For the GitHub backend `gh pr merge` cannot merge a conflicted branch, and
@@ -414,7 +421,13 @@ tests):
    the next sign-off keeps the base's behaviour changes, the file count and
    the pre-merge base range (`base_range_from`), and the merge gate still
    requires the evidence statement; a newer base's own summary replaces the
-   carried one.
+   carried one. It must also hold when the stored attempt was never applied
+   (a failed resolution, or a resolved candidate a dirty workdir kept pm from
+   applying) and implementation reconciles the conflict by hand, so the next
+   check sees the same base inside HEAD with no applied resolution: the file
+   count, the overlap, the behaviour changes and the prompt's base range
+   survive (and the gate still requires the statement when the base changed
+   behaviour-relevant configuration).
 10. Notes appended to the same PR record on both sides (the merge base has no
     `notes` key) resolve, both notes survive, and the nested ids are named in
     the summary/prompt; the same id with different content is still ambiguous.

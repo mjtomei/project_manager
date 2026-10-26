@@ -1526,8 +1526,10 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
     A re-check after pm applied a resolved candidate sees a clean/up-to-date
     merge; the resolution that produced the applied head must stay visible
     (and bound), so it is carried when the applied merge is an ancestor of
-    the new HEAD.  A clean base merged by a bounce carries no resolution, so
-    its base-interaction summary is carried separately (see
+    the new HEAD.  A clean base merged by a bounce carries no resolution, and
+    an attempt that was never applied (a failed resolution, or one a dirty
+    workdir kept pm from applying) leaves the branch to be reconciled by
+    hand, so their base-interaction summary is carried separately (see
     :func:`_carry_base_interaction`).
     """
     old = _mapping(pr_entry.get("integration"))
@@ -1589,6 +1591,18 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
                 # derives the count from ``base_files`` when present, so a
                 # re-compaction carries the recorded count instead.
                 _carry_base_files(record, old)
+        else:
+            # The stored attempt was never applied (a failed resolution, or a
+            # resolved candidate a dirty workdir kept pm from applying), or
+            # the branch no longer contains the merge it made.  The
+            # implementation step is told to reconcile the conflict by hand
+            # ("git fetch the base and git merge ..."), so the branch can now
+            # contain the same base with no applied merge to carry the
+            # provenance from.  Keep the base interaction that check
+            # assessed: without it the prompt hides the files/behaviour the
+            # base changed and the merge gate stops requiring the evidence
+            # statement — the same hole the clean-bounce carry closes.
+            _carry_base_interaction(record, old)
     elif record.get("status") == ERROR \
             and not record.get("base_behavior_changes") \
             and not record.get("base_behavior_error") \

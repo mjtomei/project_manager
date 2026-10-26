@@ -3459,3 +3459,97 @@ def test_stamp_signoff_launch_ignores_a_non_string_revision(w):
     signoff.stamp_signoff_launch(transcript, sha, 5)
     assert signoff.signoff_launched_sha(w.tdir, PR) == sha
     assert signoff.signoff_launched_base(w.tdir, PR) is None
+
+
+def test_a_manual_merge_after_a_failed_attempt_keeps_the_base_summary(w):
+    """Implementation reconciles a conflict by hand; the summary must survive.
+
+    The sign-off return tells implementation to fetch the base and merge it,
+    and pm's own metadata attempt can fail on a real field conflict.  The next
+    check then sees the base inside HEAD (its own base diff is empty), while
+    the stored record is the *failed attempt* — never applied.  It still
+    assessed that same base, so the files it changed, the overlap and the
+    behaviour-relevant changes must be carried: losing them would hide the
+    base interaction from the sign-off prompt and stop the merge gate
+    requiring the explicit evidence statement.
+    """
+    rec = _status_conflict(w)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["resolution"]["unresolved"]
+    assert rec["base_files"] == ["pm/project.yaml"], rec
+    assert any("status" in c for c in rec["base_behavior_changes"]), rec
+
+    # The implementation step reconciles the conflict by hand, as the return
+    # text instructs ("git fetch the base and git merge ...").
+    git(w.wd, "fetch", "-q", "origin")
+    merged = subprocess.run(["/usr/bin/git", "merge", "--no-commit",
+                             "origin/master"], cwd=w.wd, capture_output=True,
+                            text=True)
+    assert merged.returncode != 0
+    ours = subprocess.run(["/usr/bin/git", "show", ":2:pm/project.yaml"],
+                          cwd=w.wd, capture_output=True, text=True, check=True)
+    (w.wd / "pm" / "project.yaml").write_text(ours.stdout)
+    data = store.load(w.wd / "pm")
+    store.get_pr(data, PR)["status"] = "in_review"
+    store.save(data, w.wd / "pm")
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "merge base, reconcile status")
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert again["base_files_count"] == 1, again
+    assert any("status" in c for c in again["base_behavior_changes"]), again
+    stored = pr_entry(w)["integration"]
+    # The merge gate must still require the explicit reuse/checks statement.
+    assert signoff.approval_justification_problem(PR, stored, again["head"])
+
+
+def test_a_resolved_candidate_never_applied_keeps_the_base_summary(w):
+    """A recorded-only resolution leaves the branch unmerged; a hand merge
+    afterwards must still show the base interaction.
+
+    ``--record`` (or a sign-off launch that could not touch a dirty workdir)
+    leaves a ``resolved`` check the branch never took.  Implementation can
+    then merge the base itself, so the next check sees the base inside HEAD
+    with no applied resolution to carry the provenance from.  The files the
+    base changed and the overlap must survive all the same.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    rec = integration.check_integration(w.pm_dir, PR)   # record only, no apply
+    assert rec["status"] == integration.RESOLVED, rec
+    assert not rec["resolution"].get("applied_merge_sha")
+
+    # The implementation step merges the base by hand, keeping both sides.
+    git(w.wd, "fetch", "-q", "origin")
+    merged = subprocess.run(["/usr/bin/git", "merge", "--no-commit",
+                             "origin/master"], cwd=w.wd, capture_output=True,
+                            text=True)
+    assert merged.returncode != 0
+
+    def stage(n: int) -> str:
+        return subprocess.run(
+            ["/usr/bin/git", "show", f":{n}:pm/project.yaml"], cwd=w.wd,
+            capture_output=True, text=True, check=True).stdout
+    text, detail = integration.resolve_project_yaml(
+        stage(1), stage(2), stage(3))
+    assert text, detail
+    (w.wd / "pm" / "project.yaml").write_text(text)
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "merge base, keep both records")
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert again["base_files_count"] == 1, again
+    assert again["overlap"] == ["pm/project.yaml"], again
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        prompt = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "Files changed on both sides: `pm/project.yaml`" in prompt
+    assert "(1 file(s))" in prompt
