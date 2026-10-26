@@ -32806,6 +32806,21 @@ prs:
       env failure (hook receiver fails on master too), 1 skipped. Spec R6/R7 updated.'
     created_at: '2026-10-26T05:03:09Z'
     last_edited: '2026-10-26T05:03:09Z'
+  - id: note-ff9d685
+    text: 'QA scenario 1 (integration resolution) refined against the code — verified
+      traps: (1) `pm pr signoff integrate` WITHOUT `--record` writes no captures and
+      prints no `resolution delta:` path; use `--record` to assert `$CAP/<pr>/integration.json`
+      + `integration-resolution.diff` (it still does not touch the PR workdir). (2)
+      After `--apply`, a plain follow-up check prints only `up to date`; use `--record`
+      to carry/show `resolved_from` + `applied_merge_sha`. (3) A fixture built with
+      `pm pr add` on both sides leaves `project.active_pr` different, so the resolver
+      reports `project.active_pr: changed differently on both sides` and the check
+      is `conflict`; run `pm pr select <target-pr>` on each side before committing.
+      (4) Local-backend checks need real `/usr/bin/git` ahead of the QA wrapper (`export
+      PATH=/usr/bin:/usr/local/bin:/bin:/usr/sbin:/sbin`), else fetch fails with "does
+      not appear to be a git repository" and records `base_sha: null`.'
+    created_at: '2026-10-26T05:54:58Z'
+    last_edited: '2026-10-26T05:54:58Z'
   - id: note-762ef12
     text: 'QA scenario 6 (concurrent actors): found and fixed a lost update — two
       simultaneous `pm pr signoff integrate <id> --apply` runs let the loser stale
