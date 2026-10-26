@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-26T05:00:50.712128+00:00'
+  updated_at: '2026-10-26T05:36:45.279731+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -13018,6 +13018,37 @@ prs:
       runtime pass claimed by refinement.'
     created_at: '2026-10-26T04:04:55Z'
     last_edited: '2026-10-26T04:04:55Z'
+  - id: note-270c990
+    text: 'Review-loop 0b6f i1 (main and inherited helper chatgpt/gpt-6-astra-high):
+      fixes S13 live runtime exec hidden below existing shell/script via bounded current
+      pane-process tree ownership, refreshed at locked removal check and fail-closed
+      on unavailable inspection. Also fixes deferred unshared proxy cleanup blocked
+      by distinct-mount same-name replacement, enables foreground QA debug outside
+      tmux with derived project ownership, refuses unavailable container-mode debug
+      rather than host fallback, and retains rm diagnostics when verification inspect
+      times out or raises OS error. Existing locks/identity/domain/reaper architecture
+      preserved; impl spec aligned. Baseline regressions 9 owner failures/2 controls,
+      7 helper failures/28 controls and 4 diagnostic failures/11 controls; fixed core555
+      and helper109 passed. Final full suite pending; earlier accidental interruption
+      labeled and retained. Evidence and every changed-file note: /pm-captures/review-0b6f-i1-per-file.md.
+      Cross-PR notes added to pr-b6c9f6a, pr-b1f2ee3 and pr-103aca4. Existing project
+      routing/handoff and qa.md edits preserved outside review commit. No real-container
+      QA or coverage waiver claimed; outstanding scenarios and independent sign-off
+      remain required.'
+    created_at: '2026-10-26T05:34:27Z'
+    last_edited: '2026-10-26T05:34:27Z'
+  - id: note-e46d349
+    text: 'Review-loop 0b6f i1 final validation: sanitized full suite 3985 passed,
+      2 skipped, 4 warnings (two Click deprecations and two existing-class unawaited
+      AsyncMock warnings), 197.35s; log /pm-captures/review-0b6f-i1-full-suite-final.log.
+      Earlier accidental interruption explicitly retained as full-suite-interrupted.log,
+      not validation. Final patch includes five fixes described in note-270c990; every
+      per-file review note in /pm-captures/review-0b6f-i1-per-file.md. Original project
+      data verified semantically unchanged except new notes/timestamps; selective
+      index staging excludes pre-existing routing/handoff and qa.md edits. No runtime
+      QA waiver or independent sign-off claim.'
+    created_at: '2026-10-26T05:36:45Z'
+    last_edited: '2026-10-26T05:36:45Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -32769,11 +32800,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-26T04:30:50.538365+00:00'
-  updated_at: '2026-10-26T04:30:50.538365+00:00'
+  updated_at: '2026-10-26T05:31:37.755599+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-a59d595
+    text: 'Review-loop 0b6f i1 implements the S13 shell/script ownership fix in pr-1139060:
+      bounded wide ps snapshot maps current descendants to live tmux pane PIDs, with
+      fresh locked deletion recheck and fail-closed unavailable/malformed process
+      inspection. Nine pre-fix ownership assertions failed, controls passed; fixed
+      core suite 555 passed including real host shell/child traversal. No real-container
+      post-fix QA claimed; rerun S13 acknowledged inventory-before-attachment story
+      and outstanding controls. Evidence /pm-captures/review-0b6f-i1-owner-before.log
+      and core-focused.log.'
+    created_at: '2026-10-26T05:31:37Z'
+    last_edited: '2026-10-26T05:31:37Z'
 - id: pr-103aca4
   plan: bugs
   title: Container removal failure drops the runtime refusal diagnostic
@@ -32791,7 +32833,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-26T04:44:07.307725+00:00'
-  updated_at: '2026-10-26T04:44:27.347450+00:00'
+  updated_at: '2026-10-26T05:31:39.524723+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32803,6 +32845,14 @@ prs:
       regression validation and source commit will be recorded on pr-1139060.'
     created_at: '2026-10-26T04:44:27Z'
     last_edited: '2026-10-26T04:44:27Z'
+  - id: note-06d36e7
+    text: Review-loop 0b6f i1 preserves captured rm return code/stderr even when post-removal
+      inspect raises TimeoutExpired or OSError; wraps both causes in ContainerError
+      and preserves proxy on uncertain removal. Four before-fix failures reproduced,
+      fixed integrated helper suite 109 passed. Evidence /pm-captures/review-0b6f-i1-helper-removal-before.log
+      and helper-final-with-removal.log. No runtime QA claim.
+    created_at: '2026-10-26T05:31:39Z'
+    last_edited: '2026-10-26T05:31:39Z'
 - id: pr-b1f2ee3
   plan: bugs
   title: 'Bug: original-name replacement with distinct mount strands retired debug
@@ -32825,7 +32875,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-26T04:48:40.412682+00:00'
-  updated_at: '2026-10-26T04:53:48.115463+00:00'
+  updated_at: '2026-10-26T05:31:38.641399+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32843,3 +32893,12 @@ prs:
       coverage/PID1 blockers, not whole-story PASS.
     created_at: '2026-10-26T04:53:48Z'
     last_edited: '2026-10-26T04:53:48Z'
+  - id: note-70dc2f5
+    text: 'Review-loop 0b6f i1 extends S14 actual-mount fix to durable unshared-proxy
+      retries: a different allocation occupying the captured current name no longer
+      blocks retirement when its mount is distinct. Same-mount users, unknown identity,
+      runtime domain and socket-generation guards remain; matching controls and baseline
+      failures verified. Evidence /pm-captures/review-0b6f-i1-helper-before-corrected.log
+      and helper-final-with-removal.log. No new runtime QA claim.'
+    created_at: '2026-10-26T05:31:38Z'
+    last_edited: '2026-10-26T05:31:38Z'

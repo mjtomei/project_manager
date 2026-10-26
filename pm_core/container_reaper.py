@@ -7,8 +7,8 @@ decides which containers are still owned and removes the rest.
 
 A container is **owned** — never removed here — when any of:
 
-1. a live tmux pane was started with its exact name (or id) in
-   ``#{pane_start_command}``, on the tmux server recorded in its
+1. a live tmux pane has its exact name (or id) in its start command
+   or current process tree, on the tmux server recorded in its
    ``pm.tmux_socket`` label, the default server, the current server, or the
    shared-session socket for its tag;
 2. it is explicitly retained (``pm container retain``);
@@ -550,7 +550,7 @@ def _query_server(server: _Server) -> _PaneSnapshot:
     try:
         r = subprocess.run(
             ["tmux", *server.args, "list-panes", "-a", "-F",
-             "#{pane_dead}\t#{pane_id}\t#{session_name}\t#{pane_start_command}"],
+             "#{pane_dead}\t#{pane_id}\t#{session_name}\t#{pane_pid}\t#{pane_start_command}"],
             capture_output=True, text=True, timeout=5, env=env)
     except (OSError, subprocess.TimeoutExpired):
         return _PaneSnapshot(panes=None)
@@ -562,11 +562,64 @@ def _query_server(server: _Server) -> _PaneSnapshot:
         return _PaneSnapshot(panes=None)
     panes = []
     for line in r.stdout.splitlines():
-        parts = line.split("\t", 3)
-        if len(parts) < 4 or parts[0] == "1":
+        parts = line.split("\t", 4)
+        if len(parts) != 5 or parts[0] not in {"0", "1"}:
+            return _PaneSnapshot(panes=None)
+        if parts[0] == "1":
             continue
-        panes.append((parts[1], parts[2], parts[3]))
-    return _PaneSnapshot(panes=panes)
+        if not parts[3].isdigit() or int(parts[3]) <= 0:
+            return _PaneSnapshot(panes=None)
+        panes.append((parts[1], parts[2], int(parts[3]), parts[4]))
+    if not panes:
+        return _PaneSnapshot(panes=[])
+    # The pane may start a script or an ordinary shell and only later exec
+    # into a container. Inspect its current descendants too, once per server
+    # snapshot (and again at the locked removal recheck). Never infer absence
+    # from a failed/truncated process query or a vanished pane root.
+    processes = _pane_process_commands([pid for _p, _s, pid, _c in panes])
+    if processes is None:
+        return _PaneSnapshot(panes=None)
+    return _PaneSnapshot(panes=[
+        (pane, session, "\n".join([command, *processes[pid]]))
+        for pane, session, pid, command in panes
+    ])
+
+
+def _pane_process_commands(pids: list[int]) -> dict[int, list[str]] | None:
+    try:
+        result = subprocess.run(
+            ["ps", "-ax", "-ww", "-o", "pid=,ppid=,stat=,args="],
+            capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    commands: dict[int, str] = {}
+    children: dict[int, list[int]] = {}
+    for line in result.stdout.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) != 4 or not parts[0].isdigit() or not parts[1].isdigit():
+            return None
+        pid, parent = int(parts[0]), int(parts[1])
+        if parts[2].startswith("Z"):
+            continue
+        commands[pid] = parts[3]
+        children.setdefault(parent, []).append(pid)
+    if any(pid not in commands for pid in pids):
+        return None
+    by_pane: dict[int, list[str]] = {}
+    for root in pids:
+        pending = [root]
+        seen: set[int] = set()
+        by_pane[root] = []
+        while pending:
+            pid = pending.pop()
+            if pid in seen:
+                continue
+            seen.add(pid)
+            by_pane[root].append(commands[pid])
+            pending.extend(children.get(pid, []))
+    return by_pane
 
 
 def _token_re(token: str) -> re.Pattern:
@@ -620,7 +673,7 @@ def live_owner_panes(name: str, container_id: str = "", *, strict: bool = False)
     owners, indeterminate = _owner_panes(info, _PaneCache(), fresh=True)
     if indeterminate and (strict or not owners):
         raise container_mod.ContainerError(
-            f"Container '{name}' ownership unknown: tmux server unreachable")
+            f"Container '{name}' ownership unknown: tmux server unreachable or pane process inspection unavailable")
     return owners
 
 
@@ -832,7 +885,7 @@ def _decide(info: ContainerInfo, scope: Scope, cache: _PaneCache,
     if indeterminate:
         # Unknown beats merged: a pane we can't see may still be in use.
         # The next pass retries.
-        return Decision(info, "keep", "tmux server unreachable — ownership unknown")
+        return Decision(info, "keep", "tmux server unreachable or pane process inspection unavailable — ownership unknown")
     status = prs.status(info)
     if status in _TERMINAL_PR_STATES:
         return Decision(info, "remove", f"PR {info.pr_id} is {status}, no owning pane")
@@ -907,7 +960,7 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
             if owners:
                 return False, f"skipped: pane {', '.join(owners)} attached concurrently"
             if indeterminate:
-                return False, "skipped: tmux server unreachable — ownership unknown"
+                return False, "skipped: tmux server unreachable or pane process inspection unavailable — ownership unknown"
         try:
             if not info.id:
                 return False, "error: missing captured container id"

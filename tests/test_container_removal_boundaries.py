@@ -97,6 +97,33 @@ def test_nonzero_removal_preserves_cause_unless_absence_verified(monkeypatch, ve
     assert calls == [("rm", "-f", CID), ("inspect", CID)]
 
 
+@pytest.mark.parametrize("inspect_error", [
+    subprocess.TimeoutExpired(["podman", "inspect", CID], 5),
+    OSError("runtime executable unavailable during verification"),
+])
+@pytest.mark.parametrize("removal_rc", [0, 73])
+def test_verification_exception_preserves_removal_cause(monkeypatch, inspect_error, removal_rc):
+    monkeypatch.setattr(push_proxy, "capture_unshared_proxy", lambda target: None)
+    stop = MagicMock()
+    monkeypatch.setattr(push_proxy, "stop_push_proxy", stop)
+
+    def runtime(*args, **kwargs):
+        if args[0] == "rm":
+            return subprocess.CompletedProcess(args, removal_rc, "", "exact-ID removal refused")
+        assert args == ("inspect", CID)
+        raise inspect_error
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    with pytest.raises(cm.ContainerError) as exc:
+        cm.remove_container(NAME, container_id=CID)
+    message = str(exc.value)
+    assert "could not confirm removal" in message
+    assert str(inspect_error) in message
+    assert ("rm failed (rc=73): exact-ID removal refused" in message) == bool(removal_rc)
+    assert exc.value.__cause__ is inspect_error
+    stop.assert_not_called()
+
+
 @pytest.mark.parametrize("replacement", [False, True])
 def test_named_pass_preserves_release_for_renamed_allocation(monkeypatch, replacement):
     reaper._record_release(NAME, CID, "", "pane-exit")

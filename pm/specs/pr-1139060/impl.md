@@ -63,8 +63,12 @@ New module `pm_core/container_reaper.py`.  A container is **owned** (never
 removed by automatic or scoped cleanup) when any of:
 1. a live (not `pane_dead`) tmux pane on its tmux server(s) — the labeled
    socket, the default server, and the shared-session socket for its tag —
-   has a `#{pane_start_command}` that contains the exact container name
-   (token-boundary match, so `…-s1` ≠ `…-s10`) or its full id;
+   has a `#{pane_start_command}` or current pane-root/descendant process command
+   containing the exact container name (token-boundary match, so `…-s1` ≠ `…-s10`)
+   or its full id. Query the current process tree with a bounded, non-truncated
+   process listing and refresh it at the locked deletion check; failed/malformed
+   listings or missing live pane roots mean unknown ownership, never absence.
+   This covers runtime execs started later from an existing shell or script (S13);
    foreground QA debug instead holds host activity locks for the lifetime
    of its interactive exec, including when it runs outside tmux. An additional
    runtime-domain/container-ID lock preserves ownership after a runtime rename;
@@ -175,8 +179,11 @@ operations do not take PM's launch lock.
   unshared proxy mount and socket generation before deleting it, so runtime renames
   do not strand the original proxy or let delayed cleanup unlink a replacement.
   For renamed allocations, cleanup also takes the original name's launch lock
-  non-blockingly and checks for a surviving replacement before unlinking that
-  mount's socket; capturing the current socket inode alone is not ownership.
+  non-blockingly and checks actual surviving mount users before unlinking that
+  mount's socket; a same-name replacement with a distinct mount does not block
+  retirement, including deferred retries under the captured current name's lock.
+  Unknown identities and inventories still defer cleanup; capturing the current
+  socket inode alone is not ownership.
   Reuse repairs an unshared proxy at its actual mounted directory, not the
   renamed container's derived path. That mount is also authoritative on removal:
   no additional name-based stop may unlink another allocation's proxy. Cleanup
@@ -227,6 +234,12 @@ operations do not take PM's launch lock.
   a viewed window before the worker pane exists. QA debug also releases its
   captured allocation if command preparation or foreground shell exec fails;
   tmux failure reporting must retain stderr even with an explicit `--branch`.
+  Foreground debug outside tmux derives the project's normal session tag and
+  uses activity locks; ordinary window debug still requires a current PM session.
+  Enabled-but-unavailable container mode fails before preparation rather than
+  silently running debug on the host. Removal verification timeouts/OS errors
+  preserve any earlier runtime removal refusal together with the verification
+  cause, and do not release a proxy while removal remains uncertain.
   Cancellation is checked after workdir/container preparation and after concretization;
   concretizer polling receives the run's stop callback. A cancelled run cannot
   launch a subsequent worker or convert an unlaunched scenario into human-wait

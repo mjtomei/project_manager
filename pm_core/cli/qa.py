@@ -458,8 +458,19 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
 
     data = store.load(root)
     session = get_pm_session()
+    if not session and foreground:
+        # Foreground debug owns its exec through activity locks, not a tmux
+        # pane. Derive the project's normal tag for scoped lifecycle cleanup.
+        from pm_core.cli.helpers import _get_session_name_for_cwd
+        session = _get_session_name_for_cwd()
     if not session:
         click.echo("No pm session found. Run inside a pm tmux session.", err=True)
+        raise SystemExit(1)
+
+    use_containers = is_container_mode_enabled()
+    if use_containers and not _runtime_available():
+        click.echo("Container runtime is unavailable; refusing to launch debug on the host. "
+                   "Restore the configured runtime and retry.", err=True)
         raise SystemExit(1)
 
     # Create a workdir keyed to session + instruction (not PR)
@@ -496,8 +507,6 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     dest_dir.mkdir(parents=True, exist_ok=True)
     import shutil
     shutil.copy2(item["path"], dest_dir / filename)
-
-    use_containers = is_container_mode_enabled() and _runtime_available()
 
     if use_containers:
         from pm_core import container as container_mod

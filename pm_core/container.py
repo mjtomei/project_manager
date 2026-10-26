@@ -2346,7 +2346,12 @@ def remove_container(name: str, *, container_id: str | None = None) -> bool:
     gone = False
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        result = _run_runtime("inspect", target, check=False, timeout=5)
+        try:
+            result = _run_runtime("inspect", target, check=False, timeout=5)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ContainerError(
+                f"could not confirm removal of container {name}: {exc}"
+                f"{removal_error}") from exc
         if result.returncode != 0:
             error = (result.stderr or "").strip()
             if _container_absent(error):

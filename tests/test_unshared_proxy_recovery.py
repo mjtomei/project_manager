@@ -220,4 +220,53 @@ def test_original_name_replacement_uses_actual_proxy_mount(monkeypatch, tmp_path
     assert socket.exists() == mounted
 
 
+@pytest.mark.parametrize("mounted", [False, True])
+@pytest.mark.parametrize("renamed", [False, True])
+def test_retry_current_name_replacement_uses_actual_mount(monkeypatch, tmp_path, mounted, renamed):
+    original = "pm-qa-debug-original"
+    current = "renamed-debug" if renamed else original
+    directory = tmp_path / ("pm-push-proxy-" + original)
+    directory.mkdir()
+    socket = directory / "push.sock"
+    socket.touch()
+    stat = socket.stat()
+    captured = (original, str(socket),
+                (stat.st_dev, stat.st_ino, stat.st_ctime_ns), current)
+    record = push_proxy.defer_unshared_release(captured)
+    monkeypatch.setattr(cm, "current_container_id",
+                        lambda name: "replacement-id" if name == current else "")
+    monkeypatch.setattr(push_proxy, "unshared_proxy_in_use", _real_mount_inventory)
+
+    def runtime(*args, **kwargs):
+        if args[0] == "ps":
+            return subprocess.CompletedProcess(args, 0, "replacement-id\n", "")
+        mounts = [{"Source": str(directory if mounted else tmp_path / "distinct-proxy"),
+                   "Destination": push_proxy._CONTAINER_SOCKET_DIR}]
+        return subprocess.CompletedProcess(args, 0, json.dumps(mounts), "")
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    failures = {}
+    released = push_proxy.retry_unshared_releases(reaper.Scope(), failures)
+    assert socket.exists() == mounted
+    assert record.exists() == mounted
+    assert bool(failures) == mounted
+    assert bool(released) == (not mounted)
+
+
+def test_retry_current_name_unknown_preserves_release(monkeypatch, tmp_path):
+    socket = tmp_path / "push.sock"
+    socket.touch()
+    stat = socket.stat()
+    captured = ("pm-original", str(socket),
+                (stat.st_dev, stat.st_ino, stat.st_ctime_ns), "pm-current")
+    record = push_proxy.defer_unshared_release(captured)
+    monkeypatch.setattr(cm, "current_container_id", lambda name: None)
+    inventory = Mock()
+    monkeypatch.setattr(push_proxy, "unshared_proxy_in_use", inventory)
+    failures = {}
+    assert not push_proxy.retry_unshared_releases(reaper.Scope(), failures)
+    assert failures and record.exists() and socket.exists()
+    inventory.assert_not_called()
+
+
 _real_mount_inventory = push_proxy.unshared_proxy_in_use

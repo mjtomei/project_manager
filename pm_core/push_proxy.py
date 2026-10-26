@@ -1128,8 +1128,9 @@ def retry_unshared_releases(scope, failures: dict[str, str]) -> list[str]:
                     owner = cm.current_container_id(current)
                     if owner is None:
                         raise cm.ContainerError("unshared proxy cleanup deferred: owner identity unknown")
-                    if owner:
-                        continue
+                    # Reusing the captured name does not imply using this
+                    # socket: a renamed replacement may mount a distinct proxy.
+                    # The locked release helper checks actual mounted users.
                     if not release_captured_unshared_proxy((original, path, tuple(identity), current)):
                         failures[f"push proxy {key}"] = "unshared proxy cleanup deferred: another owner or launch remains"
                         continue

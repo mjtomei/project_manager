@@ -442,7 +442,8 @@ class TestQueryServer:
         sock = tmp_path / "default"
         sock.touch()
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(
-            a[0], 0, stdout=f"0\t%1\tpm-x\tpodman exec -it {NAME} x\n", stderr=""))
+            a[0], 0, stdout=f"0\t%1\tpm-x\t123\tpodman exec -it {NAME} x\n", stderr=""))
+        monkeypatch.setattr(reaper, "_pane_process_commands", lambda pids: {123: []})
         snap = reaper._query_server(reaper._server_for_socket(str(sock)))
         assert snap.panes == [("%1", "pm-x", f"podman exec -it {NAME} x")]
 
