@@ -119,8 +119,11 @@ Then no client moves at any point and every `qa-<pr>` window exists.
 **E2: A user start racing a background start.**
 Given auto-start is about to launch QA for PR A,
 When the user presses `t` on a different PR B at about the same time,
-Then only the user's own client moves, to `qa-B`. No client is taken to
-`qa-A`, and the other attached clients stay put.
+Then the user's session moves to `qa-B`. No client is taken to `qa-A`, and
+clients attached to other grouped sessions stay put. Clients attached to the
+same session as the user also move to `qa-B`: tmux's current window belongs
+to the session, not to an individual client. Use separate grouped sessions
+when asserting independent focus.
 
 **E3: A popup suppress flag pending while a background start happens.**
 Given the user asked to keep focus for a QA start (popup dismissed) and a
@@ -139,6 +142,15 @@ Then no client moves.
 **E5: A merged or closed PR in `qa-run-bg`.**
 The driver exits before creating a window (unchanged). No window is created
 and no client moves.
+
+**E6: A user start whose status move to qa fails.**
+Given an in_review PR with no QA window and another process holding the
+project.yaml lock (or project.yaml temporarily unparseable),
+When the user presses `t` or `zz t` on it,
+Then the TUI shows the lock/parse error, no QA worker or `qa-<pr>` window is
+started, no self-driving state is registered, and the PR stays in_review.
+Once the lock is released, the same key starts QA normally and focuses it
+(review b1c0 i1; `TestZZTStart::test_status_update_failure_does_not_launch`).
 
 ## Incidental fixes carried on this branch (from QA rounds 1-3)
 
@@ -167,7 +179,10 @@ appears if another PR's sticky review-completion message is already showing.
 
 **R13: Pane-launch confirmations show over a sticky message (af42a1d9).**
 `L` pressed while "Review loop done ✓ PASS" (or another sticky message) holds
-the status line still paints "Launched/Focused existing log pane".
+the status line still paints "Launched/Focused existing log pane". The same
+forced confirmation applies to a pane launched in a new per-plan window;
+include opening a plan from the TUI and reusing its existing pane as adjacent
+coverage.
 
 **R14: The NEEDS_WORK bounce line can be seen (456c0830).** "QA NEEDS_WORK
 for <pr> — returning to review" is held for about 3 s (CONFIRM_HOLD_SECONDS)
@@ -206,8 +221,19 @@ when no `qa-<pr>*` window exists. pr-2428766 overlaps R13.
   QA for <pr>" hits the debug log, then press `q` on "starting: qa". If you
   don't, qa-<pr>-s0 matches first (a spinner prefix match) and the popup
   closes on window_open.
-* Working scripts from round 3 are in /pm-captures/scenarios/{9,11,12}/scripts
-  (S11's drive.sh runs the self-driving triples unattended).
+* Working scripts from round 3 were saved in
+  /pm-captures/scenarios/{9,11,12}/scripts (S11's drive.sh runs the
+  self-driving triples unattended). They may not be mounted in a new
+  scenario container; every scenario must be independently reproducible
+  from the instruction library rather than depend on those scripts.
+* Stage the no-workdir startup edge through plain `t` or initial `zz t`:
+  ordinary auto-start intentionally skips QA PRs without workdirs. Commit
+  the QA spec into the throwaway project before creating its PR workdir.
+  Delaying a fake planner alone does not reproduce slow initialization
+  before the worker enters its run. Supplement the real user flow with
+  `TestZZTStart::test_poll_timer_survives_slow_worker_start` and
+  `TestZZTStart::test_worker_start_failure_clears_running` from
+  `tests/test_qa_self_driving.py` for deterministic startup-race evidence.
 
 ## Pass/fail criteria
 
@@ -215,11 +241,15 @@ when no `qa-<pr>*` window exists. pr-2428766 overlaps R13.
   list, the TUI capture, and the debug log. The reproduction test
   `tests/test_qa_background_focus.py` and `tests/test_qa_self_driving.py`
   pass.
-* **Fail:** Any background-started QA moves any attached client (base or
-  grouped) to a `qa-*` window. Or the log pane lands in a QA window, or gets
-  registered as `qa-planner`. Or a user-initiated `t`, `z t`, or `zz t` no
-  longer switches to a newly created QA window. Or popup dismissal no longer
-  keeps focus.
+* **Fail:** Any background-started QA moves an attached client (base or
+  grouped) off its unrelated window to a `qa-*` window. A client already
+  viewing the replaced QA window following its replacement is expected,
+  not a failure. Or the log pane lands in a QA window, or gets registered as
+  `qa-planner`. Or a user-initiated `t`, `z t`, or `zz t` no longer switches
+  to a newly created QA window. Or popup dismissal no longer keeps focus.
+  R10–R14 failures also fail QA: stale status/selection, stalled completion
+  processing, or confirmations absent from the rendered TUI are not waived
+  by passing the original focus check.
 
 ## Ambiguities (resolved)
 
@@ -230,6 +260,9 @@ when no `qa-<pr>*` window exists. pr-2428766 overlaps R13.
   client that wasn't viewing the old one. Not a regression.
 * **Background starts and the suppress flag:** a background start leaves the
   flag for the user start it was set for.
+* **`pm qa run` from a shell:** its execution-only path always created its
+  window with `switch=False`, before and after this PR, so it never selects.
+  Only its pane registration (R3) is in scope.
 * **`pm pr qa` from a shell:** that CLI path tells the user to use the TUI.
   The command bar `/pr qa` is the user-initiated surface that goes through
   `focus_or_start_qa`.

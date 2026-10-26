@@ -29582,6 +29582,17 @@ prs:
       (drive.sh runs all triples unattended).'
     created_at: '2026-10-22T18:41:25Z'
     last_edited: '2026-10-22T18:41:25Z'
+  - id: note-astra-transfer-20261026
+    text: 'User-authorized transfer 2026-10-26: bring #242 and #243 from the main
+      session into pm-project_manager-5b29c418 and run with provider:chatgpt-astra
+      (chatgpt/gpt-6-astra-high) for ALL roles including helpers and sign-off. Preserve
+      existing branch/workdir/source/dirty files, drafts and QA evidence. Old main-session
+      autostart is off. Fresh Astra review is required at transfer, then native review/QA/sign-off
+      with wait_for_merge and spec review OFF. Existing QA findings remain required;
+      no invented verdicts or waived coverage. Existing main-session captures were
+      copied intact to this session before launch. No standalone follow-ups are authorized.'
+    created_at: '2026-10-26T13:21:44.912441+00:00'
+    last_edited: '2026-10-26T13:21:44.912441+00:00'
   - id: note-7b1e0ce
     text: 'Review 8e01 i1 on merged e05a50cf (master 211a6128): reproduced and fixed
       two QA-round regressions: NEEDS_WORK repaint now flushes pending navigation
@@ -29832,6 +29843,40 @@ prs:
       /pm-captures/scenarios/25/ (pre-fix vs post-fix cross-linked in story1 manifests).'
     created_at: '2026-10-26T17:54:44Z'
     last_edited: '2026-10-26T17:54:44Z'
+  - id: note-account-switch-20261026
+    text: Account transition / controller reload handoff 2026-10-26T16:24:40.272624+00:00.
+      User authorized October29 reset and bug PRs241/242/243 -> provider:claude-work/work
+      Opus/high ALL roles/helpers/signoff; do not restore historical Astra settings.
+      Work Opus (all roles). Previous reviewer completed/pushed f50d2bc8 and emitted
+      its own NEEDS_WORK; preserve its source fixes and current work-Opus overrides.
+      Controller restart recovered current QA snapshots but native autostart attempted
+      fresh review launches; those failed during container removal, so original review
+      windows are now gone. Original source/workdir/dirty files, stashes and mounted
+      captures/transcript remain. Read /pm-captures/account-transition-20261026/prior-review-a5906f49-88b0-451b-8476-0fb92d9ca85d.jsonl
+      in chunks for exact progress; do not invent completion or waive any pending
+      QA. Original ephemeral review-container processes cannot be assumed live after
+      native cleanup. Reproduce any missing unfinished tests honestly. The new review
+      is recovery of authorized existing work, not a new PR. Manual merge/spec-review-OFF
+      gates remain unchanged. No standalone followup/autostart or master merge is
+      newly authorized.
+    created_at: '2026-10-26T16:24:40.272624+00:00'
+    last_edited: '2026-10-26T16:24:40.272624+00:00'
+  - id: note-c5f4d6f
+    text: 'S22 refine: the "accepted but no window" gap is only the pre-window setup
+      in run_qa_sync (~<1 s from "log: Starting QA for X" to the qa-X-s0 then qa-X
+      new_window lines; S12 logs). A fake planner delay runs after window creation
+      and does not widen it. The select happens after a 2 s registration sleep, so
+      a t that lands after the window exists logs "Focused QA window" instead of "QA
+      already running"; that attempt counts as a miss, so retry with a fresh PR. The
+      popup spinner sets cbreak with TCSAFLUSH, so a q sent before "── starting: qa
+      for X ──" paints gets discarded. The spinner also closes on its own when qa-X-s0
+      appears (prefix match), and then no suppress flag is set. Auto-start QA needs
+      status qa + a workdir field (pm pr start, then pm pr edit --status qa) and fires
+      on the next sync pass. The prefix+P picker from main lists only PRs that have
+      open windows, so use prefix+M "pr qa <id>". Default qa-pass-count=1 prints no
+      "(N passes required)".'
+    created_at: '2026-10-26T16:45:17Z'
+    last_edited: '2026-10-26T16:45:17Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
