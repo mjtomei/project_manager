@@ -203,7 +203,10 @@ def test_bulk_cleanup_rechecks_queued_allocations(monkeypatch, change):
     monkeypatch.setattr(cm, "current_container_id", lambda n: current["id"])
     monkeypatch.setattr(cm, "cleanup_generation", lambda n: current["generation"])
     removed_under_lock = []
-    monkeypatch.setattr(cm, "remove_container", lambda n: removed_under_lock.append(held))
+    def remove(name, *, container_id):
+        assert container_id == "original-id"
+        removed_under_lock.append(held)
+    monkeypatch.setattr(cm, "remove_container", remove)
     # Explicit removal still ignores retention/live ownership for the original.
     monkeypatch.setattr(reaper, "is_retained", lambda *a: True)
     monkeypatch.setattr(reaper, "live_owner_panes", lambda *a, **k: ["%live"])

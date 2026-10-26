@@ -57,7 +57,9 @@ def fake_env(monkeypatch):
     monkeypatch.setattr(reaper._PrStatus, "status",
                         lambda self, info: state["statuses"].get(info.pr_id))
 
-    def _remove(name):
+    def _remove(name, *, container_id=None):
+        if container_id:
+            assert any(c.id == container_id and c.name == name for c in state["containers"])
         if name in state["fail"]:
             raise cm.ContainerError(f"container {name} still present after 10 s")
         state["removed"].append(name)

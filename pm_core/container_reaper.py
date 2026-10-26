@@ -329,8 +329,9 @@ def pending_releases() -> dict[str, dict]:
 
 
 def _prune_releases(out: "Outcome", scope: "Scope", since: float) -> None:
-    inventory = {d.info.name: d.info for d in out.decisions}
-    by_id = {d.info.id: d.info for d in out.decisions}
+    infos = out.inventory if out.inventory is not None else [d.info for d in out.decisions]
+    inventory = {info.name: info for info in infos}
+    by_id = {info.id: info for info in infos}
     domain = _runtime_domain()
     for path, rec in _release_records():
         if domain is None or rec.get("runtime_domain") != domain:
@@ -338,8 +339,9 @@ def _prune_releases(out: "Outcome", scope: "Scope", since: float) -> None:
         if rec.get("at", 0) >= since:
             continue
         info = by_id.get(rec["id"]) or inventory.get(rec["name"])
-        absent = info is None and (scope == Scope() or
-                                  scope.names is not None and rec["name"] in scope.names)
+        # A filtered decision list cannot establish absence: the allocation
+        # may have been renamed outside this scope. Use the unfiltered snapshot.
+        absent = info is None and (out.inventory is not None or scope == Scope())
         stale = info is not None and (
             info.id != rec["id"] or
             allocation_generation(rec["name"], info.id) not in (None, rec["generation"]))
@@ -753,6 +755,9 @@ class Outcome:
     error: str = ""
     skipped: bool = False
     dry_run: bool = False
+    # Unfiltered successful inventory, used to prove absence when pruning
+    # releases even if decisions are scoped to a name that was reused.
+    inventory: list[ContainerInfo] | None = field(default=None, repr=False)
 
     @property
     def to_remove(self) -> list[Decision]:
@@ -863,7 +868,8 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
         if info.id:
             # A relaunch between plan() and now replaced the container under
             # the same name; its pane may not exist yet, so the pane re-check
-            # below can't protect it.  Removal is by name, so compare ids.
+            # below can't protect it. Check the name before deleting the ID;
+            # the runtime may rename/replace it without taking PM's lock.
             try:
                 current = container_mod.current_container_id(info.name)
             except (OSError, subprocess.TimeoutExpired) as e:
@@ -904,7 +910,9 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
             if indeterminate:
                 return False, "skipped: tmux server unreachable — ownership unknown"
         try:
-            container_mod.remove_container(info.name)
+            if not info.id:
+                return False, "error: missing captured container id"
+            container_mod.remove_container(info.name, container_id=info.id)
         except Exception as e:
             return False, f"error: {e}"
     return True, ""
@@ -997,6 +1005,7 @@ def plan(scope: Scope | None = None) -> Outcome:
     if infos is None:
         out.error = f"{container_mod._get_runtime()} is not available"
         return out
+    out.inventory = infos
     cache, prs, now = _PaneCache(), _PrStatus(), time.time()
     pending_release = {
         n: str(f.get("id") or "") for n, f in pending_failures().items()

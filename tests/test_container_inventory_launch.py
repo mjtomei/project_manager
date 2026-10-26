@@ -69,8 +69,9 @@ def test_label_inventory_failure_is_not_absence(monkeypatch, failure):
     inspect.assert_not_called()
 
 
-@pytest.mark.parametrize("failure", ["oserror", "interrupt"])
-def test_run_spawn_failure_discards_after_proxy_unlock(monkeypatch, tmp_path, failure):
+@pytest.mark.parametrize("failure", ["oserror", "interrupt", "prepare-interrupt"])
+@pytest.mark.parametrize("shared", [True, False])
+def test_run_spawn_failure_discards_after_proxy_unlock(monkeypatch, tmp_path, failure, shared):
     name = "pm-tag-review-pr-aaaa"
     held = False
     events = []
@@ -86,12 +87,12 @@ def test_run_spawn_failure_discards_after_proxy_unlock(monkeypatch, tmp_path, fa
             events.append("unlock")
 
     def start(*args, **kwargs):
-        assert held
+        assert held == shared
         events.append("start-proxy")
         return str(tmp_path / "push.sock")
 
     def runtime(*args, **kwargs):
-        assert held and args[0] == "run"
+        assert held == shared and args[0] == "run"
         events.append("run")
         if failure == "oserror":
             raise OSError(errno.EAGAIN, "Resource temporarily unavailable")
@@ -114,13 +115,38 @@ def test_run_spawn_failure_discards_after_proxy_unlock(monkeypatch, tmp_path, fa
     monkeypatch.setattr(cm, "_run_runtime", runtime)
     monkeypatch.setattr(cm.subprocess, "run", lambda *args, **kwargs: _result())
     monkeypatch.setattr(push_proxy, "start_push_proxy", start)
+    if failure == "prepare-interrupt":
+        monkeypatch.setattr(cm, "_build_git_setup_script", Mock(side_effect=KeyboardInterrupt()))
     expected = cm.ContainerLaunchError if failure == "oserror" else KeyboardInterrupt
     with pytest.raises(expected) as exc:
         cm._create_fresh(
             name, cm.ContainerConfig(), tmp_path,
             extra_ro_mounts=None, extra_rw_mounts=None, allowed_push_branch="topic",
-            session_tag="tag", pr_id="pr-aaaa", labels={})
+            session_tag="tag" if shared else None,
+            pr_id="pr-aaaa" if shared else None, labels={})
     if failure == "oserror":
         assert "Resource temporarily unavailable" in str(exc.value)
         assert "Errno 11" in str(exc.value)
-    assert events == ["start-proxy", "run", "unlock", "discard"]
+    expected_events = ["start-proxy"]
+    if failure != "prepare-interrupt":
+        expected_events.append("run")
+    if shared:
+        expected_events.append("unlock")
+    assert events == expected_events + ["discard"]
+
+
+def test_pid_usage_includes_renamed_managed_containers(monkeypatch):
+    name = "retained-debug"
+    monkeypatch.setattr(reaper, "list_containers", lambda: [
+        reaper.ContainerInfo(name, id="cid", running=True)])
+
+    def runtime(command, *args, **kwargs):
+        if command == "stats":
+            return _result(f"{name} 2041\nunrelated 2041\n")
+        assert command == "inspect"
+        assert name in args and "unrelated" not in args
+        return _result(f"/{name} 2048\n")
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    assert cm.pids_usage() == {name: (2041, 2048)}
+    assert cm.pids_pressure() == [(name, 2041, 2048)]

@@ -98,6 +98,9 @@ permission to proceed unlocked. An unknown identity at final recheck is a failed
 retryable cleanup rather than permission to delete by name. If the old name
 has disappeared but its captured ID still exists, defer to a fresh inventory
 and the renamed allocation's lock; do not report removal or prune its release.
+The final runtime mount inspection, removal, and disappearance checks target the
+captured immutable ID, not the reusable name: external runtime rename/replacement
+operations do not take PM's launch lock.
 
 ### R3 — Release on finish / supersede / cancel / launch failure
 - **impl / review / sign-off**: the pane EXIT trap releases the captured container
@@ -220,6 +223,9 @@ and the renamed allocation's lock; do not report removal or prune its release.
   launch a subsequent worker or convert an unlaunched scenario into human-wait
   retention. The dequeue caller also checks cancellation after preparation returns,
   before assigning a fallback verdict; this applies to host and container workers.
+  Initial concretizer/worker launches also recheck cancellation after command
+  preparation, immediately before opening a pane. Host launch failures retain
+  command/tmux diagnostics and no agent verdict, matching container launch failures.
   Dead-worker retries also check cancellation before re-ensure, after allocation
   returns, and before opening the replacement pane; a blocking retry must not
   attach a new worker after the run was stopped.
@@ -286,7 +292,9 @@ intact to protect concurrent waiters and delayed releases.
   keyring) removes the partial container (and releases the proxy if unused)
   before raising. Runtime-spawn OS errors and cancellation during `run` also
   discard the partial allocation after releasing the proxy lock, preserving
-  the original cause or cancellation.
+  the original cause or cancellation. The same cleanup covers failures during
+  proxy startup and pre-run setup-script preparation, so an already-started
+  unshared proxy is not stranded before a container exists.
 
 ### R6 — Real launch errors
 `ContainerLaunchError(ContainerError)` carries `kind`
@@ -322,7 +330,9 @@ current ID even when a stale marker has the same name, so renamed allocations
 can actually be released. Full
 reconcile passes prune retention and pending release records only when their
 recorded runtime domain matches the successfully inventoried domain; unknown
-or legacy domains are preserved. Known foreign-domain release records cannot
+or legacy domains are preserved. Even scoped passes use the complete inventory
+for release pruning: a renamed ID omitted from scoped decisions is not absent,
+and a replacement under its old name does not make its release stale. Known foreign-domain release records cannot
 authorize removal even when a cloned runtime store has identical container IDs.
 New releases recorded with an unknown domain remain non-authoritative, not legacy
 unscoped authorization. Release filenames include the domain so an unknown or
@@ -383,7 +393,8 @@ container cleared it and kept its files.  Running state is not health.
   restart. Explicit `restart --force` remains the user's override.
 - `pids_usage()` reads cgroup stats (`stats --no-stream`, works when exec
   can't) + `HostConfig.PidsLimit`, accepting both tabs and Podman's expanded
-  whitespace separators. Non-targeted reconcile passes report
+  whitespace separators. PID stats are filtered through label-first managed
+  inventory so runtime-renamed containers remain visible. Non-targeted reconcile passes report
   kept containers ≥ 90 % of their limit (`Outcome.pid_pressure`; TUI log
   line, `pm container reap` WARNING rows); `pm container status` lists
   ≥ 80 %.  Unowned ones are simply reaped like any leftover.

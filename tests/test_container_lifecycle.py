@@ -90,6 +90,7 @@ class TestPidsUsage:
     ])
     def test_runtime_whitespace(self, monkeypatch, stats_sep, inspect_sep):
         name = "pm-repo-ab12-review-pr-aaaa"
+        monkeypatch.setattr(reaper, "list_containers", lambda: [_info(name)])
         def runtime(command, *args, **kwargs):
             if command == "stats":
                 return _cp(out=f"{name}{stats_sep}2041\n")
@@ -255,7 +256,9 @@ def fake_env(monkeypatch):
         return state["statuses"].get(info.pr_id)
     monkeypatch.setattr(reaper._PrStatus, "status", _status)
 
-    def _remove(name):
+    def _remove(name, *, container_id=None):
+        if container_id:
+            assert any(c.id == container_id and c.name == name for c in state["containers"])
         if name in state["fail"]:
             raise cm.ContainerError(f"container {name} still present after 10 s")
         state["removed"].append(name)
@@ -588,7 +591,7 @@ class TestEnsureReusable:
         monkeypatch.setattr(cm, "_get_runtime", lambda: "podman")
         monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: list(owners))
         removed = []
-        monkeypatch.setattr(cm, "remove_container", removed.append)
+        monkeypatch.setattr(cm, "remove_container", lambda name, **kw: removed.append(name))
         return removed
 
     def test_complete_is_reused(self, monkeypatch, no_claude_json):
@@ -710,7 +713,7 @@ class TestCreateFailureCleanup:
         monkeypatch.setattr(cm, "_SETUP_TIMEOUT", 0.3)
         monkeypatch.setattr(cm, "_SETUP_POLL_INTERVAL", 0.05)
         removed = []
-        monkeypatch.setattr(cm, "remove_container", removed.append)
+        monkeypatch.setattr(cm, "remove_container", lambda name, **kw: removed.append(name))
         return removed
 
     def test_proxy_lock_timeout_aborts_before_start(self, monkeypatch, no_claude_json):
@@ -1281,7 +1284,7 @@ class TestReapCLI:
             out=f"pm-a-impl-pr-1{separator}Up\npm-a-review-pr-1{separator}Up\n"))
         removed = []
 
-        def _rm(name):
+        def _rm(name, *, container_id):
             if "review" in name:
                 raise cm.ContainerError("still present after 10 s")
             removed.append(name)
@@ -1299,7 +1302,7 @@ class TestReapCLI:
         monkeypatch.setattr(cm, "_run_runtime", lambda *a, **k: _cp(
             out="npm-cache\tUp\npm-a-impl-pr-1\tUp\n"))
         removed = []
-        monkeypatch.setattr(cm, "remove_container", removed.append)
+        monkeypatch.setattr(cm, "remove_container", lambda name, **kw: removed.append(name))
         r = CliRunner().invoke(cli, ["container", "cleanup"])
         assert r.exit_code == 0, r.output
         assert removed == ["pm-a-impl-pr-1"]
@@ -1321,7 +1324,7 @@ class TestListNamesPrefixGuard:
         assert any(f"label={cm.LABEL_MANAGED}=1" in call for call in calls)
         assert cm.containers_for_pr("a", "pr-1") == {"pm-a-impl-pr-1"}
         removed = []
-        monkeypatch.setattr(cm, "remove_container", removed.append)
+        monkeypatch.setattr(cm, "remove_container", lambda name, **kw: removed.append(name))
         assert cm.cleanup_all_containers() == 1
         assert removed == ["pm-a-impl-pr-1"]
 

@@ -7,7 +7,9 @@ import pytest
 from pm_core import container, container_reaper, qa_loop, tmux
 
 
-@pytest.mark.parametrize("stage", ["clone", "create", "concretize", "reject"])
+@pytest.mark.parametrize("stage", [
+    "clone", "create", "concretizer-command", "concretize", "reject", "worker-command",
+])
 @pytest.mark.parametrize("containers", [True, False])
 @pytest.mark.parametrize("queued", [False, True])
 def test_cancelled_preparation_does_not_launch_or_record_verdict(tmp_path, monkeypatch, stage, containers, queued):
@@ -32,17 +34,28 @@ def test_cancelled_preparation_does_not_launch_or_record_verdict(tmp_path, monke
         return "cid"
 
     def concretize(*args, **kwargs):
-        state.stop_requested = True
+        if stage in {"concretize", "reject"}:
+            state.stop_requested = True
         return None, "needs a human" if stage == "reject" else None
+
+    def concretizer_command(*args, **kwargs):
+        if stage == "concretizer-command":
+            state.stop_requested = True
+        return "concretizer"
+
+    def worker_command(*args, **kwargs):
+        if stage == "worker-command":
+            state.stop_requested = True
+        return "worker", str(clone)
 
     monkeypatch.setattr(qa_loop, "create_scenario_workdir", clone_workdir)
     monkeypatch.setattr(qa_loop, "_resolve_qa_model", MagicMock())
     monkeypatch.setattr(container, "load_container_config", MagicMock())
     allocation = MagicMock(side_effect=create)
     monkeypatch.setattr(container, "create_qa_container", allocation)
-    monkeypatch.setattr(qa_loop, "_build_concretize_cmd", lambda *a, **k: "concretizer")
+    monkeypatch.setattr(qa_loop, "_build_concretize_cmd", concretizer_command)
     monkeypatch.setattr(qa_loop, "_concretize_scenario", concretize)
-    monkeypatch.setattr(qa_loop, "_build_scenario_run_cmd", lambda *a, **k: ("worker", str(clone)))
+    monkeypatch.setattr(qa_loop, "_build_scenario_run_cmd", worker_command)
     monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
     window = MagicMock(return_value="%5")
     split = MagicMock(return_value="%6")
@@ -74,7 +87,7 @@ def test_cancelled_preparation_does_not_launch_or_record_verdict(tmp_path, monke
             [scenario.container_name], reason="qa-run-end", owner_release=True,
             expected_ids={scenario.container_name: "cid"},
             expected_generations={scenario.container_name: "epoch"})
-    if stage in {"clone", "create"}:
+    if stage in {"clone", "create", "concretizer-command"}:
         window.assert_not_called()
 
 

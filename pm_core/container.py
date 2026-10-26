@@ -1362,10 +1362,15 @@ def pids_usage() -> dict[str, tuple[int, int]] | None:
         return None
     if st.returncode != 0:
         return None
+    from pm_core.container_reaper import list_containers
+    inventory = list_containers()
+    if inventory is None:
+        return None
+    managed = {info.name for info in inventory}
     current: dict[str, int] = {}
     for line in (st.stdout or "").splitlines():
         parts = line.split()
-        if len(parts) == 2 and parts[0].startswith(CONTAINER_PREFIX):
+        if len(parts) == 2 and parts[0] in managed:
             try:
                 current[parts[0]] = int(parts[1])
             except ValueError:
@@ -1712,7 +1717,7 @@ def _create_fresh(
     shared_proxy = bool(allowed_push_branch and session_tag and pr_id)
     proxy_guard = (proxy_lock(session_tag, pr_id) if shared_proxy
                    else contextlib.nullcontext(True))
-    with proxy_guard as proxy_locked:
+    with _discard_on_failure(name), proxy_guard as proxy_locked:
         if not proxy_locked:
             raise launch_error(name, "proxy", "another operation still holds the proxy lock",
                                stage="acquire its shared proxy lock")
@@ -1980,6 +1985,16 @@ def _post_setup(name: str, workdir: Path, is_podman: bool) -> None:
                            stage="record completed setup")
 
 
+@contextlib.contextmanager
+def _discard_on_failure(name: str):
+    """Cover pre-run proxy/setup failures after any inner proxy lock unwinds."""
+    try:
+        yield
+    except BaseException:
+        discard_container(name)
+        raise
+
+
 def discard_container(name: str) -> None:
     """Best-effort removal of a container whose launch failed or was abandoned
     before a pane attached to it (never raises)."""
@@ -2215,10 +2230,12 @@ def release_on_exit(name: str, cid: str, generation: str, runtime: str,
                      outcome.summary(), outcome.release_refused)
 
 
-def remove_container(name: str) -> bool:
+def remove_container(name: str, *, container_id: str | None = None) -> bool:
     """Force-remove a container and its push proxy, then wait until it is gone.
 
     Return True when an authoritative unshared proxy mount was handled.
+    When supplied, ``container_id`` pins inspection and runtime removal to the
+    checked allocation; ``name`` is only the locked proxy-bookkeeping key.
 
     If another 'docker rm -f' is already in flight (e.g. the previous session's
     EXIT trap), this still blocks until the container has fully disappeared so
@@ -2229,16 +2246,17 @@ def remove_container(name: str) -> bool:
         defer_unshared_release, forget_unshared_proxy,
     )
     _log.info("remove_container: name=%s", name)
-    proxy = capture_unshared_proxy(name)
+    target = container_id or name
+    proxy = capture_unshared_proxy(target)
     pending = defer_unshared_release(proxy, name) if proxy else None
-    _run_runtime("rm", "-f", name, check=False, timeout=30)
+    _run_runtime("rm", "-f", target, check=False, timeout=30)
     # Wait for the container to be fully gone.  When another rm is already in
     # flight the daemon returns "removal already in progress" and our rm returns
     # immediately, but the container still exists for a brief moment.
     gone = False
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        result = _run_runtime("inspect", name, check=False, timeout=5)
+        result = _run_runtime("inspect", target, check=False, timeout=5)
         if result.returncode != 0:
             error = (result.stderr or "").strip()
             if _container_absent(error):
@@ -2466,7 +2484,7 @@ def _remove_captured_container(name: str, cid: str, generation: str,
                 return False
         # Keep removal and proxy cleanup in one launch exclusion. Explicit
         # force cleanup bypasses pane ownership and, by default, retention.
-        remove_container(name)
+        remove_container(name, container_id=cid)
         return True
 
 

@@ -76,7 +76,7 @@ def test_expired_identity_lease_allows_reap(renamed, monkeypatch):
     removed, _ = reaper._remove_checked(
         reaper.Decision(renamed, "remove", "no owner"), reaper.Scope())
     assert removed
-    remove.assert_called_once_with(NEW)
+    remove.assert_called_once_with(NEW, container_id=CID)
 
 
 def test_identity_lease_does_not_cross_runtime_domains(renamed, monkeypatch):

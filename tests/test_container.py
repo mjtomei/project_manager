@@ -1015,8 +1015,8 @@ class TestCleanupContainers:
         count = cleanup_qa_containers("pr1", "loop1")
         assert count == 2
         assert mock_rm.call_count == 2
-        mock_rm.assert_any_call("pm-qa-pr1-loop1-s1")
-        mock_rm.assert_any_call("pm-qa-pr1-loop1-s2")
+        mock_rm.assert_any_call("pm-qa-pr1-loop1-s1", container_id="id-pm-qa-pr1-loop1-s1")
+        mock_rm.assert_any_call("pm-qa-pr1-loop1-s2", container_id="id-pm-qa-pr1-loop1-s2")
 
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")

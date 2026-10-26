@@ -78,6 +78,43 @@ def test_successful_retry_clears_launch_failure(scenario_state, monkeypatch):
     discard.assert_not_called()
 
 
+@pytest.mark.parametrize("failure", [None, "exception", "build"])
+@pytest.mark.parametrize("containers", [True, False])
+def test_concretizer_launch_failure_keeps_real_error(scenario_state, monkeypatch, failure, containers):
+    state, scenario = scenario_state
+    scenario.window_name = None
+    clone = Path(scenario.worktree_path)
+    monkeypatch.setattr(qa_loop, "create_scenario_workdir",
+                        lambda *a, **k: (clone, clone.parent / "scratch"))
+    command = MagicMock(return_value="concretizer")
+    window = MagicMock(return_value=None)
+    if failure == "build":
+        command.side_effect = RuntimeError("command build failed")
+    elif failure == "exception":
+        window.side_effect = subprocess.CalledProcessError(
+            1, "tmux new-window", stderr=b"can't find session: pm-t")
+    monkeypatch.setattr(qa_loop, "_build_concretize_cmd", command)
+    monkeypatch.setattr(tmux, "new_window_get_pane", window)
+    discard = MagicMock()
+    monkeypatch.setattr(container, "discard_unowned_container", discard)
+    launch = (qa_loop._launch_scenarios_in_containers if containers
+              else qa_loop._launch_scenarios_in_tmux)
+    launch(state, {}, {"id": state.pr_id}, "pm-t", None, str(clone))
+
+    assert qa_loop._is_launch_failure(state, 1)
+    assert not state.scenario_verdicts
+    assert scenario.window_name is None
+    if failure == "build":
+        assert "command build failed" in state.scenario_verdict_reasons[1]
+    elif failure == "exception":
+        assert "can't find session: pm-t" in state.scenario_verdict_reasons[1]
+    if containers:
+        discard.assert_called_once_with(
+            scenario.container_name, container_id="cid", generation="captured-generation")
+    else:
+        discard.assert_not_called()
+
+
 @pytest.mark.parametrize("viewed", [{"@5"}, {"@other"}, set()])
 def test_pre_worker_status_failure_preserves_viewed_concretizer(
         scenario_state, monkeypatch, viewed):
@@ -109,7 +146,8 @@ def test_pre_worker_status_failure_preserves_viewed_concretizer(
 
 @pytest.mark.parametrize("failure", [None, "exception", "build"])
 @pytest.mark.parametrize("viewed", [set(), {"@5"}, None])
-def test_worker_split_failure_keeps_real_launch_error(scenario_state, monkeypatch, failure, viewed):
+@pytest.mark.parametrize("containers", [True, False])
+def test_worker_split_failure_keeps_real_launch_error(scenario_state, monkeypatch, failure, viewed, containers):
     state, scenario = scenario_state
     scenario.window_name = None
     clone = Path(scenario.worktree_path)
@@ -134,15 +172,16 @@ def test_worker_split_failure_keeps_real_launch_error(scenario_state, monkeypatc
     monkeypatch.setattr(qa_loop, "_viewed_window_ids", lambda *a: viewed)
     monkeypatch.setattr(tmux, "pane_window_id", lambda *a: "@5")
 
-    qa_loop._launch_scenarios_in_containers(
-        state, {}, {"id": state.pr_id}, "pm-t", None, str(clone))
+    launch = (qa_loop._launch_scenarios_in_containers if containers
+              else qa_loop._launch_scenarios_in_tmux)
+    launch(state, {}, {"id": state.pr_id}, "pm-t", None, str(clone))
 
     assert qa_loop._is_launch_failure(state, 1)
     assert not state.scenario_verdicts
     assert scenario.session_id is None
     assert scenario.window_name is None
     release.assert_not_called()
-    if viewed == set():
+    if containers and viewed == set():
         discard.assert_called_once_with(
             scenario.container_name, container_id="cid", generation="captured-generation",
             allowed_owner_panes={"%5"})

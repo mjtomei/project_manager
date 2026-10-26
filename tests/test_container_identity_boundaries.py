@@ -166,7 +166,7 @@ def test_owner_release_follows_renamed_allocation(monkeypatch, legacy):
     remove = Mock()
     monkeypatch.setattr(cm, "remove_container", remove)
     assert reaper._remove_checked(decision, reaper.Scope())[0]
-    remove.assert_called_once_with(new)
+    remove.assert_called_once_with(new, container_id=cid)
     outcome.removed.append(new)
     reaper._prune_releases(outcome, reaper.Scope(), float("inf"))
     assert reaper._release_records() == []

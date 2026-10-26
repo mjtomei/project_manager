@@ -51,7 +51,8 @@ class TestCleanupPrContainers:
         names = [f"pm-qa-pr-001-l1-s{i}" for i in range(4)]
         mock_runtime.return_value = _inventory(names)
 
-        def slow_remove(name):
+        def slow_remove(name, *, container_id):
+            assert container_id == "id-" + name
             time.sleep(0.5)
 
         with patch("pm_core.container.remove_container", side_effect=slow_remove):

@@ -2080,22 +2080,23 @@ def _launch_scenarios_in_tmux(
 
         import uuid as _uuid
         scenario.concretize_session_id = str(_uuid.uuid4())
-        concretize_cmd = _build_concretize_cmd(
-            scenario, pr_data, data, cwd=scenario_cwd,
-            instruction_content=instruction_content,
-            session_id=scenario.concretize_session_id,
-            session_tag=state.session_tag)
         try:
+            concretize_cmd = _build_concretize_cmd(
+                scenario, pr_data, data, cwd=scenario_cwd,
+                instruction_content=instruction_content,
+                session_id=scenario.concretize_session_id,
+                session_tag=state.session_tag)
+            if state.stop_requested:
+                return
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
                 cwd=scenario_cwd, switch=False)
-        except Exception:
-            concretize_pane = None
-        if not concretize_pane:
+            if not concretize_pane:
+                raise RuntimeError(f"no pane returned for '{win_name}'")
+        except Exception as exc:
             _log.warning("Failed to create window for scenario %d",
-                         scenario.index)
-            _record_launch_failure(
-                state, scenario, f"tmux window '{win_name}' could not be created")
+                         scenario.index, exc_info=True)
+            _record_launch_failure(state, scenario, exc)
             return
 
         # Set window_name now so the status dashboard can navigate to
@@ -2163,15 +2164,18 @@ def _launch_scenarios_in_tmux(
         if refined_steps:
             scenario.steps = refined_steps
 
-        child_cmd, pane_cwd = _build_scenario_run_cmd(
-            scenario, state, data, transcript, _qa_resolution,
-            session=session, workdir_path=workdir_path,
-        )
-
         try:
+            child_cmd, pane_cwd = _build_scenario_run_cmd(
+                scenario, state, data, transcript, _qa_resolution,
+                session=session, workdir_path=workdir_path,
+            )
+            if state.stop_requested:
+                return
             scenario_pane = tmux_mod.split_pane_at(
                 concretize_pane, "v", child_cmd, background=True,
                 cwd=pane_cwd)
+            if not scenario_pane:
+                raise RuntimeError(f"no worker pane returned for '{win_name}'")
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
             scenario.transcript_path = transcript
@@ -2180,9 +2184,13 @@ def _launch_scenarios_in_tmux(
                 scenario.session_id = session_id_from_transcript(transcript)
             except Exception:
                 scenario.session_id = None
-        except Exception:
+        except Exception as exc:
             _log.warning("Failed to split scenario pane for scenario %d",
                          scenario.index, exc_info=True)
+            _record_launch_failure(state, scenario, exc)
+            scenario.pane_id = None
+            scenario.window_name = None
+            return
 
         if scenario.window_name:
             _log.info("Launched scenario %d (%s) in window %s",
@@ -2349,6 +2357,8 @@ def _launch_scenarios_in_containers(
                 write_dir=str(clone_path),
                 session_id=scenario.concretize_session_id,
                 session_tag=state.session_tag)
+            if state.stop_requested:
+                return
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
                 cwd=workdir_path, switch=False)
@@ -2436,6 +2446,8 @@ def _launch_scenarios_in_containers(
                 scenario, state, data, transcript, _qa_resolution,
                 session=None, workdir_path=workdir_path,
             )
+            if state.stop_requested:
+                return
             scenario_pane = tmux_mod.split_pane_at(
                 concretize_pane, "v", exec_cmd, background=True,
                 cwd=pane_cwd)
