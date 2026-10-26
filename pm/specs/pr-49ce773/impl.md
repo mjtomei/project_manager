@@ -79,8 +79,18 @@
    a warning and keeps the complete previous state: build the replacement
    window maps and navigation inside the error handler before assigning any
    state, including when YAML parses but a PR entry is malformed. Validate that
-   every entry has a non-empty string local `id` before building navigation:
+   every entry has a command-safe string local `id` before building navigation
+   (`[A-Za-z0-9][A-Za-z0-9_.-]*`, covering generated and legacy IDs):
    `gh_pr_number` alone can provide a display id but cannot support dispatch.
+   Malformed initial data must show a logged, readable error and wait for
+   dismissal rather than raising a traceback. There is no last-good snapshot
+   on initial load.
+   Pending actions retain the selected local ID across refresh, even if its
+   GitHub number is removed or reassigned to another PR. If that local ID is
+   gone, refuse dispatch and show a lookup-failure notice; never retarget the
+   action to the new owner of the old display number.
+   Refresh the caller/other-session active-window indicators in the same
+   transaction as the window-name map so navigation redraws current dots.
    h/l/←/→ (and 0 with a home PR) stay in `--expect` even when the list has
    one entry — unadvertised,
    they act as a reload, so a PR that is reopened or gains a window after

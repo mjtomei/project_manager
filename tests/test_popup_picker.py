@@ -893,7 +893,8 @@ class TestPopupPickerMergedNavigation:
 
 
 class TestPopupPickerRefreshFailures:
-    @pytest.mark.parametrize("bad_id", [None, "", 123, ["pr-a"], "missing"])
+    @pytest.mark.parametrize("bad_id", [None, "", 123, ["pr-a"], "missing",
+                                       "pr-a'", "pr-a b", "pr-a\n", "pr-a\\b"])
     @pytest.mark.parametrize("key", ["s", "0", "l"])
     def test_numbered_pr_with_invalid_local_id_keeps_snapshot(
             self, tmp_path, monkeypatch, bad_id, key):
@@ -1040,6 +1041,89 @@ class TestPopupPickerRefreshFailures:
             [(0, "l\n"), (0, f"{direction}\n"), (130, "")], on_launch=on_launch)
         assert _shown(fzf.calls[1]) == "PR Actions — pr-b  (2/3)"
         assert _shown(fzf.calls[2]).startswith("PR Actions — #12 ")
+        run_cmd.assert_not_called()
+
+
+class TestPopupPickerActiveWindows:
+    def test_navigation_refreshes_selected_session_indicators(self, tmp_path, monkeypatch):
+        from pm_core.cli import session as sess
+
+        prs = [_pr("pr-a")]
+
+        def on_launch(n):
+            if n == 1:
+                monkeypatch.setattr(sess, "_session_active_windows",
+                                    lambda base: {"pm-other": "@1"})
+
+        fzf, _ = _run_picker(
+            tmp_path, monkeypatch, prs, ["pr-a", "review-pr-a"], "pr-a",
+            [(0, "l\n"), (130, "")], on_launch=on_launch)
+        assert "○ review" not in fzf.calls[0]["input"]
+        assert "○ review" in fzf.calls[1]["input"]
+
+
+class TestPopupPickerIdentity:
+    @pytest.mark.parametrize("mode", ["shortcut", "enter", "fresh", "loop", "fallback"])
+    @pytest.mark.parametrize("removed", [False, True])
+    def test_reassigned_number_does_not_retarget_action(
+            self, tmp_path, monkeypatch, mode, removed):
+        from pm_core.cli import session as sess
+
+        prs = [_pr("pr-a", gh_pr_number=12), _pr("pr-b")]
+        prefix = [(0, "z\n")] * {"fresh": 1, "loop": 2}.get(mode, 0)
+        row = next(d for d, c, _ in sess._build_picker_lines(prs, "#12")
+                   if c == "pr review pr-a")
+
+        def reassign():
+            prs[0].pop("gh_pr_number")
+            prs[1]["gh_pr_number"] = 12
+            if removed:
+                prs.pop(0)
+
+        def on_launch(n):
+            if n == len(prefix) + 1:
+                reassign()
+
+        def choose(prompt):
+            reassign()
+            return "d"
+
+        selection = f"\n{row}\n" if mode == "enter" else "d\n"
+        with patch("builtins.input", side_effect=choose):
+            _, run_cmd = _run_picker(
+                tmp_path, monkeypatch, prs, ["#12", "pr-b"], "#12",
+                prefix + [(0, selection), (130, "")],
+                on_launch=on_launch, has_fzf=mode != "fallback")
+        if removed:
+            run_cmd.assert_not_called()
+        else:
+            assert run_cmd.call_count == 1
+            assert "pr-a" in run_cmd.call_args.args[0]
+            assert "pr-b" not in run_cmd.call_args.args[0]
+
+    def test_initial_parse_error_waits_for_dismissal(self, tmp_path, monkeypatch, capsys):
+        from pm_core.cli import session as sess
+
+        reg = tmp_path / "registry.json"
+        reg.write_text("{}")
+        with patch.object(sess.pane_registry, "registry_path", return_value=reg), \
+             patch.object(sess, "_resolve_root_from_session", return_value=tmp_path), \
+             patch.object(sess.store, "load", side_effect=sess.store.ProjectYamlParseError("bad YAML")), \
+             patch.object(sess, "_wait_dismiss") as dismiss:
+            with pytest.raises(SystemExit) as exc:
+                sess.popup_picker_cmd.callback("pm-x", "#12")
+        assert exc.value.code == 1
+        dismiss.assert_called_once()
+        assert "Could not load PR actions: bad YAML" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("bad_id", [None, "", "pr-a'", "pr-a b"])
+    def test_invalid_initial_id_shows_readable_error(
+            self, tmp_path, monkeypatch, capsys, bad_id):
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, [_pr(bad_id, gh_pr_number=12)],
+            ["#12"], "#12", [])
+        assert "Could not load PR actions" in capsys.readouterr().out
+        assert not fzf.calls
         run_cmd.assert_not_called()
 
 

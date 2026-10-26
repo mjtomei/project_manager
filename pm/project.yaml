@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T14:07:20.486607+00:00'
+  updated_at: '2026-10-26T14:24:06.459538+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16228,6 +16228,33 @@ prs:
       and sign-off remain required. No live QA PASS claimed.'
     created_at: '2026-10-26T14:07:20Z'
     last_edited: '2026-10-26T14:07:20Z'
+  - id: note-7977dca
+    text: 'Review 1eaf i4: fixed action retargeting when a selected GitHub number
+      moves to another PR (pending actions now retain the selected local ID and refuse
+      if it disappears); malformed initial project data now logs a readable error
+      and waits for dismissal; command-unsafe quoted/whitespace/backslash local IDs
+      are rejected before snapshot publication. Incidental fix: active-session window
+      dots refresh atomically with the window map rather than remaining stale. Added
+      regression tests and updated impl/QA specs (E6, E11, C1). Pre-fix repro: 23
+      failed / 15 controls passed; final targeted popup/session/tmux tests: 233 passed.
+      Full suite after final edits is running. No live QA PASS claimed; fresh QA/sign-off
+      remain required. Existing local-id open-badge alias issue is explicitly excluded
+      by spec and already tracked as pr-00d5023 / pr-9b96145. No standalone follow-ups
+      created; transfer stash and verify-s15-followup.md preserved.'
+    created_at: '2026-10-26T14:21:13Z'
+    last_edited: '2026-10-26T14:21:13Z'
+  - id: note-a688a2f
+    text: 'Review 1eaf i4 final validation: full suite after final code edits passed:
+      3616 passed, 1 skipped, 3 warnings in 167.39s. Targeted popup/session/tmux selection:
+      233 passed. Real git via PATH=/usr/bin:/bin, scratch-only declared markdown
+      dependency, PM_HOST_HOME unset for the previously verified installer-fixture
+      issue. Evidence: /pm-captures/review-1eaf-i4-full-final.txt, review-1eaf-i4-targeted-final.txt,
+      review-1eaf-i4-repro.txt, review-1eaf-i4-summary.txt. Pre-edit full run and
+      intermediate targeted runs are superseded. NEEDS_WORK because fixes applied;
+      fresh review/live QA (E6, E11, C1 plus prior R13/E10) and sign-off required.
+      No live QA PASS claimed.'
+    created_at: '2026-10-26T14:24:06Z'
+    last_edited: '2026-10-26T14:24:06Z'
   model: provider:chatgpt-astra
   session_models:
     impl: provider:chatgpt-astra

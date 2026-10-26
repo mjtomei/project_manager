@@ -1170,13 +1170,16 @@ def _build_nav_entries(
     """
     from pm_core.cli.helpers import _pr_display_id
 
+    import re
+
     # A GitHub number can provide a display id even when the local id is
     # missing or malformed. Commands still require the local id, so reject
     # such snapshots here, inside the refresh transaction, before rendering.
     for pr in prs:
         pr_id = pr.get("id") if isinstance(pr, dict) else None
-        if not isinstance(pr_id, str) or not pr_id.strip():
-            raise ValueError("Picker PR entry requires a non-empty string id")
+        if (not isinstance(pr_id, str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", pr_id) is None):
+            raise ValueError("Picker PR entry requires a non-empty, command-safe string id")
 
     home = _find_pr_for_window_id(prs, window_pr_id) if window_pr_id else None
     home_pr = _pr_display_id(home) if home is not None else window_pr_id
@@ -1904,6 +1907,10 @@ def popup_picker_cmd(session: str, window_name: str):
     except FileNotFoundError:
         click.echo("No project.yaml found.")
         _pause_and_exit(1)
+    except Exception as e:
+        _log.warning("popup-picker: initial load failed: %s", e)
+        click.echo(f"Could not load PR actions: {e}")
+        _pause_and_exit(1)
     # Make subcommands inherit the session's root rather than walking
     # up from the popup's cwd (which may be outside the repo or deleted).
     os.environ["PM_PROJECT"] = str(root)
@@ -1932,8 +1939,13 @@ def popup_picker_cmd(session: str, window_name: str):
     # home_pr is None and navigation cycles through whichever active PRs
     # have live windows.
     window_pr_id = current_pr
-    nav_pr_ids, pr_by_disp, home_pr = _build_nav_entries(
-        prs, window_pr_id, open_windows)
+    try:
+        nav_pr_ids, pr_by_disp, home_pr = _build_nav_entries(
+            prs, window_pr_id, open_windows)
+    except (ValueError, TypeError, KeyError) as e:
+        _log.warning("popup-picker: initial navigation failed (root=%s): %s", root, e)
+        click.echo(f"Could not load PR actions: {e}")
+        _pause_and_exit(1)
 
     if not nav_pr_ids:
         click.echo("PR Actions (prefix+P)")
@@ -2005,7 +2017,7 @@ def popup_picker_cmd(session: str, window_name: str):
         dispatch can refuse to act on that stale snapshot.
         """
         nonlocal prs, nav_pr_ids, pr_by_disp, home_pr
-        nonlocal open_windows, name_to_wid
+        nonlocal open_windows, name_to_wid, caller_wid, other_wids
         try:
             fresh_prs = store.load(root).get("prs") or []
             fresh_windows = tmux_mod.list_windows(base)
@@ -2013,6 +2025,9 @@ def popup_picker_cmd(session: str, window_name: str):
             fresh_name_to_wid = {w["name"]: w["id"] for w in fresh_windows}
             fresh_nav, fresh_by_disp, fresh_home = _build_nav_entries(
                 fresh_prs, window_pr_id, fresh_open)
+            fresh_active = _session_active_windows(base)
+            fresh_caller = fresh_active.get(session)
+            fresh_others = {wid for s, wid in fresh_active.items() if s != session}
         except Exception as e:
             _log.warning("popup-picker: refresh failed, keeping state: %s", e)
             return False
@@ -2021,6 +2036,7 @@ def popup_picker_cmd(session: str, window_name: str):
         prs = fresh_prs
         open_windows = fresh_open
         name_to_wid = fresh_name_to_wid
+        caller_wid, other_wids = fresh_caller, fresh_others
         nav_pr_ids, pr_by_disp, home_pr = fresh_nav, fresh_by_disp, fresh_home
         return True
 
@@ -2082,11 +2098,24 @@ def popup_picker_cmd(session: str, window_name: str):
         """Refresh before either interface dispatches a selected action."""
         nonlocal current_pr, nav_index, lines, _picked_pr, _label_to_cmd
         nonlocal fzf_input_lines
+        # Display numbers can be reassigned during state repair. Bind the
+        # pending action to the local identity the user actually selected,
+        # never to whichever PR now owns the old display number.
+        selected_id = _picked_pr["id"] if _picked_pr is not None else None
         if not _refresh_state():
             return False
-        current_pr = _canonical_id(current_pr)
+        from pm_core.cli.helpers import _pr_display_id
+
+        selected = next((p for p in prs if p["id"] == selected_id), None)
+        current_pr = (_pr_display_id(selected) if selected is not None
+                      else selected_id or current_pr)
         nav_index = _sync_index(current_pr, nav_index)
-        lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
+        if selected is None:
+            _picked_pr, _label_to_cmd = None, {}
+            lines = [(f"  {_no_actions_notice(current_pr, None)}", "", current_pr)]
+            _log.warning("popup-picker: selected PR %r disappeared before dispatch", selected_id)
+        else:
+            lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
         fzf_input_lines = [d for d, _, _ in lines]
         return label in _label_to_cmd
 

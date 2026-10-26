@@ -131,7 +131,10 @@ snapshot (warning in log), does not crash, and navigation still works within
 that snapshot. Repeat with syntactically valid YAML containing a PR mapping
 with `status` but no `id`, including a numbered home PR whose `gh_pr_number`
 still resolves its display id. Also try null, empty and non-string local ids;
-none may replace the last-good snapshot or be used in a command. After repairing
+none may replace the last-good snapshot or be used in a command. Include quoted,
+backslash-containing and whitespace-containing IDs. Opening the popup with
+malformed initial data must show `Could not load PR actions: ...`, log the
+failure and wait for dismissal without a traceback. After repairing
 the file, the next nav key reloads normally. While refresh is failing, shortcut,
 Enter-on-action, fresh/loop chord and no-fzf selections must not dispatch cached
 actions. Repair the file with
@@ -155,6 +158,12 @@ its local-id window remains, then next is pressed, **Then** C is shown under
 its new number rather than skipped in favour of A. Repeat in the other
 direction with A gaining the number and prev pressed; A must be reached.
 
+E11. **Given** the popup displays A as #12, **When** another actor removes
+A's GitHub number and assigns #12 to B before action dispatch, **Then** the
+pending action still targets A's local ID, never B. Repeat with shortcut,
+Enter-on-action, fresh/loop chords and the no-fzf menu. If A itself was removed,
+no command runs and a lookup-failure notice is shown.
+
 ## Concurrent use / shared resources
 
 Shared resources: `pm/project.yaml` (read on each nav/dispatch, written by other
@@ -165,6 +174,8 @@ client session), the pm log file (warnings).
   clients/grouped sessions) while a third actor edits statuses and creates/kills
   windows: each popup's nav list/count reflects the change on its next key, none
   crash/exit, and dispatch from one popup doesn't corrupt the other's view.
+  When another client changes its selected window, the next navigation reload
+  moves the corresponding open-circle indicator to that window's action row.
 - C2. Rapid nav keypresses while project.yaml is being rewritten in a loop: no
   traceback, index never out of range, header id always matches rows.
 - C3. Two clients attached to grouped sessions (e.g. `<base>~1`, `<base>~2`):
