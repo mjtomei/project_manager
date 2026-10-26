@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T17:17:45.236970+00:00'
+  updated_at: '2026-10-26T18:11:58.601518+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16536,6 +16536,25 @@ prs:
       PR actions … Press q/Esc/Enter to close" screen; a reopen works. Captures: /pm-captures/scenarios/25/{story1-typeahead,story2-counted-burst}.'
     created_at: '2026-10-26T17:00:45Z'
     last_edited: '2026-10-26T17:00:45Z'
+  - id: note-bbf305a
+    text: 'Review 8d08 i1 (efc49f7d + 77ae66e4): fresh full-diff review. One new-code
+      cleanup in 77ae66e4 — dropped the unused `nonlocal current_pr` in `_still_has_action`
+      (it only reads the variable; navigation owns it); this was the only pyflakes
+      warning the PR introduced. Full suite after the edit: 3711 passed, 1 skipped
+      (real git PATH, PM_HOST_HOME unset, markdown dep in scratch). Also drove 1000
+      randomized picker scenarios (4628 fake-fzf launches with mid-run status/GitHub-number
+      mutations) asserting header id == title/notice row, 1<=i<=n and at most one
+      notice row: no failures. Re-reviewed the post-PASS QA fixes 5ba232ac (two-row
+      refusal copy; POSIX stty/dd popup failure handler) and 9d687e29 (pr start fast
+      path names the switched grouped session), plus merge 37637456/c712805d (one
+      PM_POPUP_SESSION mechanism, has-session =name stale guard, no PM_CALLER_SESSION):
+      sound. Non-blocking, left unchanged: _refresh_state cannot tell a tmux list-windows
+      error from an empty window list (list_windows returns [] on error repo-wide;
+      self-heals next key), and the popup shell failure handler adds a second dismissal
+      after the picker own error pause (pre-existing on bash, documented by S21).
+      No live QA PASS claimed; QA (E6/E11/C1/R13/E10) and sign-off still required.'
+    created_at: '2026-10-26T18:11:58Z'
+    last_edited: '2026-10-26T18:11:58Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
