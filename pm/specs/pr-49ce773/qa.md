@@ -196,7 +196,10 @@ without dispatch. Also try `title: null` and numeric titles (including `0`)
 on a live PR: navigation remains usable and titles render as blank/text rather
 than crashing; zero must render as `0`, not blank. Repeat valid-YAML partial
 writes with a missing, null, empty or truncated status (`merg`): the picker must
-reject the snapshot, not normalize it to actionable pending. Exercise navigation,
+reject the snapshot, not normalize it to actionable pending. A list or mapping
+`status` (e.g. `[in_review]`, `{state: qa}`) must produce the same entry-naming
+`Picker PR entry requires a valid status: entry #N (...)` message, never
+`TypeError: unhashable type`. Exercise navigation,
 fzf dispatch and the no-fzf selection, then repair to merged and verify its
 notice. Also use YAML-escaped control characters (NUL/newline/escape) in
 `gh_pr_number`: reject the snapshot before fzf launches, retain the last-good
@@ -275,6 +278,12 @@ Finally, open from #13 whose local ID is the legacy numeric string `12`;
 remove that PR while another live PR owns GitHub #12. Home must show the missing
 local `12` notice with no actions, not reinterpret it as GitHub #12. Navigation
 may explicitly reach the other live PR and dispatch there.
+Also open the popup from a window whose name the grammar cannot read: a live PR
+whose only id is the legacy numeric string `12` (window `12`, no
+`gh_pr_number`), and a live PR whose local id ends in `-s1` (window `pr-a-s1`)
+next to a live `pr-a`. In both cases home must be the invoking window's PR (its
+header names it, `0` returns to it, an action dispatches for its local id), not
+the first live PR in file order and not the `-s`-stripped `pr-a`.
 
 E12. **Given** the popup body cannot run pm (e.g. `pm` is missing from the
 tmux server's PATH, or pm exits non-zero without its own pause), **When** the

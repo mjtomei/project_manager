@@ -1145,10 +1145,14 @@ def _find_pr_for_window_id(prs: list[dict], window_pr_id: str) -> dict | None:
     wid = (window_pr_id or "").strip()
     if not wid:
         return None
-    for p in prs:
+    # ``prs`` may still be the raw snapshot (the picker validates it after
+    # this lookup), so only entries that can be keyed by id are considered.
+    keyed = [p for p in prs
+             if isinstance(p, dict) and isinstance(p.get("id"), str)]
+    for p in keyed:
         if _pr_display_id(p) == wid:
             return p
-    return _resolve_pr_id({"prs": prs}, wid)
+    return _resolve_pr_id({"prs": keyed}, wid)
 
 
 def _describe_pr_entry(index: int, pr) -> str:
@@ -1202,7 +1206,11 @@ def _build_nav_entries(
                 or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", pr_id) is None):
             raise ValueError("Picker PR entry requires a non-empty, "
                              f"command-safe string id: {where}")
-        if pr.get("status") not in VALID_PR_STATES:
+        status = pr.get("status")
+        # ``in`` hashes its operand: a YAML list/mapping status would raise
+        # TypeError here and the user would get "unhashable type" instead of
+        # the entry that needs repairing.
+        if not isinstance(status, str) or status not in VALID_PR_STATES:
             raise ValueError(f"Picker PR entry requires a valid status: {where}")
         display_id = _pr_display_id(pr)
         if not display_id.isprintable():
@@ -1211,7 +1219,7 @@ def _build_nav_entries(
         # Partial state repairs can temporarily assign a number to two PRs.
         # Historical terminal-only duplicates are harmless (no actions), but
         # any collision involving a live PR makes display lookup unsafe.
-        terminal = pr.get("status") in _TERMINAL_STATUSES
+        terminal = status in _TERMINAL_STATUSES
         if (pr_id in local_ids or (display_id in display_terminal
                 and not (terminal and display_terminal[display_id]))):
             raise ValueError("Picker PR entries have ambiguous local or display "
@@ -1996,6 +2004,16 @@ def popup_picker_cmd(session: str, window_name: str):
     # home_pr is None and navigation cycles through whichever active PRs
     # have live windows.
     window_pr_id = current_pr
+    # A window is named by its PR's display id, which is the local id when
+    # there is no GitHub number.  The name grammar only knows ``#N`` and
+    # ``pr-<alnum>``, so prefer an exact snapshot match on the raw window
+    # name: it keeps home anchored for a legacy numeric, dotted or
+    # underscored local id, and for an id that itself ends in ``-s<N>``
+    # (which the grammar would otherwise read as a QA scenario suffix).
+    # Non-PR windows (``tui``, ``pm-meta``) match no PR and are unaffected.
+    if window_name and isinstance(prs, list):
+        if _find_pr_for_window_id(prs, window_name) is not None:
+            window_pr_id = window_name
     home_local_id = None
 
     def _navigation(prs, windows):

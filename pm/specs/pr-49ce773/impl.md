@@ -195,6 +195,12 @@ for the removed number resolves to whichever PR now owns that number.
 
 - `_label_to_cmd` must be empty for terminal PRs (already, via
   `_actions_for_status`).
+- Snapshot validation must be type-safe before hashing: a YAML list or
+  mapping `status` would raise `TypeError: unhashable type` from the
+  `VALID_PR_STATES` membership test and the user would get that instead of
+  the entry-naming error, so status is checked with `isinstance(status,
+  str)` first and still rejected through the usual
+  `Picker PR entry requires a valid status: entry #N (...)` message.
 - The `nav_index` lookup for `0` (home) must use the canonicalized home id.
 - The fallback (no fzf) path has no navigation; with no actions it prints
   the header + notice and waits for dismissal (`_pause_and_exit(0)`), same
@@ -258,11 +264,26 @@ for the removed number resolves to whichever PR now owns that number.
   or terminal control sequences. Preserve the original title in project data.
 - QA scenario-only windows (`qa-#N-s1`) count as open windows for the nav
   list, matching `_build_picker_lines`' `[open]` matching.
+- The window-name grammar (`#N`, `pr-<alnum>`, optional
+  `review-`/`qa-`/`signoff-`/`merge-` prefix and `-s<N>` suffix) is only a
+  fallback.  The raw window name is first resolved against the snapshot, and
+  an exact match wins: a window is named by its PR's display id, i.e. the
+  local id when there is no `gh_pr_number`, and the snapshot validation
+  accepts legacy numeric (`12`), dotted/underscored (`pr-a_b`) and
+  `-s<digits>`-suffixed local ids that the grammar cannot read (the suffix
+  rule would otherwise strip `-s1` and resolve `pr-a` instead of `pr-a-s1`,
+  dispatching that PR's action).  Non-PR windows (`tui`, `pm-meta`) match no
+  PR and are unaffected.
 
 - Single PR in nav list and it's actionless: no nav hint or `(i/n)`; h/l/0
   only reload (req 8); Enter is ignored; q/Esc quits.  No exit-on-keypress.
 - Home PR is merged and also has open windows: appears once (dedup by
   canonical display id).
+- Two terminal records sharing one display number (historical duplicates,
+  both actionless) are ambiguous for a window named by that number: with no
+  persisted window→PR association the picker anchors home to the first such
+  record in project.yaml order and shows that record's notice.  No action can
+  be dispatched for either, so this is a naming limitation, not a misdispatch.
 - Two windows for the same PR under both id forms: one nav entry.
 - Navigating from an actionless PR to an actionable one restores the full
   expect list/hints on the next fzf launch (header recomputed per loop).

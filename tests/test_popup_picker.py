@@ -531,6 +531,31 @@ class TestBuildNavEntriesRejection:
         assert "entry #2" in msg
         assert "status='merg'" in msg
 
+    @pytest.mark.parametrize("status", [["in_review"], {"state": "qa"}])
+    def test_unhashable_status_names_entry(self, status):
+        """A YAML list/mapping status must raise the entry-naming ValueError,
+        not TypeError: unhashable type (the set membership test hashes it)."""
+        prs = [_pr("pr-ok"), _pr("pr-a", status=status)]
+        with pytest.raises(ValueError) as exc:
+            _build_nav_entries(prs, None, set())
+        msg = str(exc.value)
+        assert "valid status" in msg
+        assert "entry #2" in msg
+        assert f"status={status!r}" in msg
+
+    @pytest.mark.parametrize("status", [["in_review"], {"state": "qa"}])
+    def test_unhashable_status_popup_error_names_entry(
+            self, tmp_path, monkeypatch, capsys, status):
+        prs = [_pr("pr-ok"), _pr("pr-a", status=status)]
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["pr-ok"], "pr-ok", [])
+        out = capsys.readouterr().out
+        assert "Could not load PR actions" in out
+        assert "entry #2" in out
+        assert "unhashable" not in out
+        assert not fzf.calls
+        run_cmd.assert_not_called()
+
     def test_non_mapping_entry_names_its_type(self):
         with pytest.raises(ValueError) as exc:
             _build_nav_entries(["pr-a"], None, set())
@@ -770,6 +795,28 @@ class TestPopupPickerNoActions:
             tmp_path, monkeypatch, self.PRS, ["pr-r"], "pr-r", [(0, "s\n")])
         assert _header(fzf.calls[0]).startswith("PR Actions — #240")
         assert "pr-r" in run_cmd.call_args.args[0]
+
+    def test_legacy_numeric_local_id_window_pins_home(self, tmp_path, monkeypatch):
+        """A PR whose local id is the legacy numeric string `12` has a window
+        named `12`, which the window-name grammar cannot read.  The snapshot
+        match must still anchor home, or the picker opens on another PR."""
+        prs = [_pr("pr-c", status="in_review"), _pr("12", status="in_progress")]
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["pr-c", "12"], "12", [(0, "s\n")])
+        assert _header(fzf.calls[0]).startswith("PR Actions — 12  (2/2)")
+        run_cmd.assert_called_once_with("pr start 12", "pm-x")
+
+    def test_scenario_suffix_like_local_id_window_pins_its_own_pr(
+            self, tmp_path, monkeypatch):
+        """A local id ending in -s<N> is legal, and its window is named by that
+        id.  The grammar would strip the suffix and resolve pr-a instead, so an
+        exact snapshot match must win and dispatch for pr-a-s1."""
+        prs = [_pr("pr-a", status="in_review"), _pr("pr-a-s1", status="in_progress")]
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["pr-a", "pr-a-s1"], "pr-a-s1",
+            [(0, "s\n")])
+        assert _header(fzf.calls[0]).startswith("PR Actions — pr-a-s1  (2/2)")
+        run_cmd.assert_called_once_with("pr start pr-a-s1", "pm-x")
 
 
 def _shown(call):
