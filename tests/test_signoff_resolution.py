@@ -701,6 +701,34 @@ def test_malformed_qa_status_does_not_crash_the_signoff_prompt(w):
     assert "qa_status.json malformed" in text
 
 
+def test_malformed_qa_resume_revision_does_not_crash_the_prompt(w):
+    """A non-string ``planner_head`` is malformed evidence, not a revision.
+
+    The evidence block and the prompt slice/print that value; an int (or a
+    list) would raise out of the sign-off launch, which the QA contract
+    forbids ("no crash from malformed evidence").
+    """
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps({"overall": "PASS"}))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": 123, "planner_code_changes": []}))
+
+    evidence = signoff.qa_evidence(PR)
+    assert evidence["planner_head"] is None
+    rec = integration.check_integration(w.pm_dir, PR)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_REVIEW, rec["head"], "manual",
+        integration=integration.binding(rec))
+    assert pr_entry(w)["signoff"]["evidence"]["qa"]["planner_head"] is None
+
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(store.load(w.pm_dir), PR)
+    assert "no recorded revision" in text
+    assert "qa@123" not in text
+
+
 def test_behavioral_changes_are_focused_on_this_pr_and_its_dependencies(w):
     data = store.load(w.base_pm)
     data["prs"].append({"id": "pr-999", "title": "Other", "status": "merged"})
@@ -1418,6 +1446,55 @@ def test_signoff_prompt_falls_back_to_the_base_branch_for_an_unmerged_base(w):
     assert "0 file(s)" not in text
 
 
+def test_review_and_qa_prompts_diff_against_the_applied_base(w):
+    """Review/QA prompts must not list the merged base commits as PR changes.
+
+    A resolved metadata conflict is applied at sign-off launch, so by the time
+    review/QA run the branch already contains the base while the workdir's own
+    base ref still points before it.  Their primary diff command must use the
+    exact applied base, not the stale base branch.
+    """
+    rec = _metadata_conflict(w)
+    applied_base = rec["resolution"]["resolved_from"]["base_sha"]
+    assert applied_base == rec["base_sha"]
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        review = prompt_gen.generate_review_prompt(data, PR)
+        planner = prompt_gen.generate_qa_planner_prompt(data, PR)
+    assert f"git diff {applied_base[:12]}...HEAD" in review
+    assert "git diff master...HEAD" not in review
+    assert f"git diff {applied_base[:12]}...HEAD" in planner
+    assert "git diff master...HEAD" not in planner
+
+
+def test_review_prompt_diffs_against_the_base_a_clean_bounce_merged(w):
+    """A clean bounce leaves the CLEAN check, but the branch has the base.
+
+    The applied merge is recorded only in the return record, so the review
+    prompt must take its diff base from there instead of the stale branch ref.
+    """
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, rec["head"], rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    ret = pr_entry(w)["signoff_return"]
+    assert ret["applied"]["base_sha"] == rec["base_sha"]
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        review = prompt_gen.generate_review_prompt(data, PR)
+    assert f"git diff {rec['base_sha'][:12]}...HEAD" in review
+    assert "git diff master...HEAD" not in review
+
+
 def test_signoff_prompt_counts_behavior_changes_stored_without_a_total(w):
     """21-30 base behaviour changes are stored in full with no count key.
 
@@ -1643,6 +1720,24 @@ def test_integrate_cli_prints_the_resolution(w):
             pr_mod.pr, ["signoff", "integrate", PR, "--no-resolve"])
     assert r.exit_code != 0
     assert "CONFLICTS" in r.output
+
+
+def test_integrate_cli_never_calls_a_failed_resolution_resolved(w):
+    """A retained attempt is reported as attempted, never as resolved.
+
+    The summary and the unresolved line already say the conflict stands; the
+    per-path line must agree, or a person reading the output would believe the
+    metadata was reconciled when the merge is still blocked.
+    """
+    rec = _status_conflict(w)
+    assert rec["status"] == integration.CONFLICT
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr, ["signoff", "integrate", PR])
+    assert r.exit_code != 0
+    assert "attempted: pm/project.yaml (by record id — NOT resolved)" in r.output
+    assert "\n  resolved: pm/project.yaml" not in r.output
+    assert "unresolved: pm/project.yaml" in r.output
 
 
 def test_integrate_cli_apply_applies_a_clean_recheck_of_a_resolved_check(w):

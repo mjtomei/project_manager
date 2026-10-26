@@ -334,9 +334,13 @@ def qa_evidence(pr_id: str) -> dict | None:
     if not isinstance(resume, dict):
         resume = {}
     changes = resume.get("planner_code_changes")
+    # The revision is printed/sliced by the prompt and written to project.yaml:
+    # a non-string value is malformed evidence, not a revision (slicing it
+    # would raise out of the sign-off launch).
+    planner_head = resume.get("planner_head")
     out = {
         "overall": status.get("overall"),
-        "planner_head": resume.get("planner_head"),
+        "planner_head": planner_head if isinstance(planner_head, str) else None,
         "planner_code_changes": (
             changes if isinstance(changes, list) else []),
         "status_file": str(path),
@@ -787,8 +791,14 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             rec = integration.prepare(root, pr_id)
             print(f"Integration: {integration.summary(rec)}")
             if rec.get("resolution"):
+                unresolved = integration.unresolved_paths(rec)
                 for entry in (rec["resolution"].get("paths") or []):
-                    print(f"  resolved {entry.get('path')} by record id")
+                    path = entry.get("path")
+                    if path in unresolved:
+                        print(f"  attempted {path} by record id "
+                              "— NOT resolved")
+                    else:
+                        print(f"  resolved {path} by record id")
                 if rec["resolution"].get("applied_merge_sha"):
                     print("  applied to the PR branch as "
                           f"{rec['resolution']['applied_merge_sha'][:12]}")

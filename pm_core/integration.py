@@ -1606,6 +1606,25 @@ def valid_for(record: dict | None, head: str | None) -> bool:
     return True
 
 
+def unresolved_paths(record: dict | None) -> set[str]:
+    """Paths a retained resolution attempt could *not* reconcile.
+
+    A failed attempt keeps its per-path details on the record (so the agent can
+    see what was tried), but a path listed there must never be presented as
+    resolved — the CLI and the sign-off launch both label the paths.  A
+    ``conflict`` record's attempt was never applied, so every path it touched
+    is an attempt even when its ``unresolved`` list was truncated.
+    """
+    record = record or {}
+    resolution = record.get("resolution") or {}
+    paths = {e.get("path") for e in resolution.get("unresolved") or []
+             if e.get("path")}
+    if record.get("status") == CONFLICT:
+        paths |= {p.get("path") for p in resolution.get("paths") or []
+                  if p.get("path")}
+    return paths
+
+
 def _added_count(entry: dict, key: str) -> int:
     """Added-record count for one resolved path, nested lists included.
 

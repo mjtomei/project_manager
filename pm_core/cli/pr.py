@@ -1699,8 +1699,16 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
         if rec.get(key):
             click.echo(f"  {label}: {', '.join(rec[key])}")
     resolution = rec.get("resolution") or {}
+    # A failed attempt keeps its per-path details on the record; never label a
+    # path it could not reconcile as "resolved" (the unresolved line below is
+    # the authoritative one).
+    unresolved = integration.unresolved_paths(rec)
     for entry in resolution.get("paths") or []:
-        click.echo(f"  resolved: {entry.get('path')} (by record id)")
+        path = entry.get("path")
+        if path in unresolved:
+            click.echo(f"  attempted: {path} (by record id — NOT resolved)")
+        else:
+            click.echo(f"  resolved: {path} (by record id)")
         for key, label in (("added_ours", "added from PR"),
                            ("added_theirs", "added from base"),
                            ("merged_fields", "merged fields"),

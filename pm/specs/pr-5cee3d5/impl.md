@@ -208,7 +208,9 @@ merged base commits as PR changes.
   `sha_source: inferred-from-qa` — otherwise pm states it does not record
   the review revision),
 - `qa` (latest `qa_status.json` `overall`, plus `planner_head` and
-  `planner_code_changes` from its sibling `qa_resume.json`),
+  `planner_code_changes` from its sibling `qa_resume.json`; malformed evidence
+  is recorded as unreadable/absent, never raised — a non-string
+  `planner_head` is no revision, so the block and the prompt do not slice it),
 - `prior_signoff` (previous record's sha/verdict/ts, if any),
 - `required_return_stage` (the verdict mapped to its stage),
 - agent-declared reuse from `report.html` meta tags (only trusted when the
@@ -248,7 +250,14 @@ clean base merged by a bounce — instead of `origin/<base>`, which pm never
 updates and which would list the merged base commits as PR changes; the
 base-changes range is shown as the pre-apply range for an applied
 resolution, and omitted (rather than printed empty as "0 file(s)") when the
-base is inside HEAD with no recorded pre-apply range.
+base is inside HEAD with no recorded pre-apply range. The same exact-base
+rule applies to the review and QA prompts' own diff command (and the QA
+interactive prompt): once a bounce has integrated the base, diffing the
+workdir's stale `<base>`/`origin/<base>` ref would list the merged base
+commits as PR changes. The applied base is taken from the applied resolution,
+a newer `up_to_date` check, or the merge a bounce recorded in
+`signoff_return.applied` (a clean bounce leaves the pre-merge `clean` check
+in place).
 
 ### R7. Merge gate / publication identity
 `merge_gate_refusal` additionally requires:
@@ -285,7 +294,10 @@ invalidates and returns to sign-off.
 `pm pr signoff integrate <pr>`:
 - `--resolve/--no-resolve` (default resolve),
 - prints the resolution summary, unresolved conflicts, applied merge and the
-  delta file path; exits 1 on unresolved conflict/error;
+  delta file path; exits 1 on unresolved conflict/error. A path a failed
+  attempt could not reconcile is labelled as an attempt (never "resolved"),
+  in the CLI output and in the sign-off launch — the summary, the
+  `unresolved:` line and the per-path line must agree;
 - `--apply` applies a `CLEAN` or `RESOLVED` candidate (the existing clean
   behavior is preserved), including a `RESOLVED` check whose re-check in
   `prepare` comes back `CLEAN` because the base moved between the two checks.
@@ -349,6 +361,13 @@ tests):
     describes; a failed behaviour summary still requires the justification
     (and the prompt says the summary failed); a resolved approval whose head
     is already in the base is recovered, not refused for a missing candidate.
+14. Malformed evidence and honest surfaces: a non-string `qa_resume.json`
+    `planner_head` is recorded as no revision and does not crash the prompt;
+    the `integrate` CLI (and the launch) label a failed attempt's paths as
+    attempted, never resolved; the review and QA prompts diff against the
+    exact base the branch contains — the applied resolution, a newer
+    `up_to_date` check, or the merge a clean bounce recorded — so the merged
+    base commits never read as the PR's own changes.
 
 ## Implicit requirements
 

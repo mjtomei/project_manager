@@ -304,6 +304,13 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
             f"1. Pull the latest changes for `{branch}` from the remote. "
             f"Resolve any merge conflicts before continuing.\n"
         )
+    # A bounce integrates the base into the branch (a resolved metadata
+    # conflict, or a clean base), while the workdir's own base ref may predate
+    # that merge: diff against the exact base the branch contains, or the
+    # merged base commits would read as the PR's own changes.
+    branch_base = _diff_base(pr)
+    if branch_base:
+        diff_cmd = f"git diff {branch_base[:12]}...HEAD"
 
     # Renumber steps based on whether pull step is present
     n = 2 if pull_step else 1
@@ -430,8 +437,9 @@ def _diff_base(pr: dict) -> str | None:
     ref (``origin/<base>``, or the local branch) may still point before that
     merge: pm fetches the base into its own ref, never ``origin/<base>``.  A
     ``<base>...HEAD`` diff would then list the merged base commits as PR
-    changes.  An ``up_to_date`` check means the recorded base is an ancestor
-    of HEAD, so diffing against that exact revision is correct.
+    changes.  An ``up_to_date`` check (or the merge a bounce recorded in
+    ``signoff_return``) means the recorded base is an ancestor of HEAD, so
+    diffing against that exact revision is correct.
     """
     from pm_core import integration as integ
     resolution_base = _applied_resolution_base(pr)
@@ -440,6 +448,13 @@ def _diff_base(pr: dict) -> str | None:
     record = pr.get("integration") or {}
     if record.get("status") == integ.UP_TO_DATE and record.get("base_sha"):
         return record["base_sha"]
+    # A bounce records the merge it applied in ``signoff_return``; the branch
+    # still contains that base even though the integration record (a clean
+    # check made before the merge) names the pre-merge HEAD.  The record is
+    # checked first so a later, newer ``up_to_date`` base wins.
+    applied = (pr.get("signoff_return") or {}).get("applied") or {}
+    if applied.get("merge_sha") and applied.get("base_sha"):
+        return applied["base_sha"]
     return None
 
 
@@ -583,7 +598,7 @@ def _evidence_revision_lines(pr_id: str) -> list[str]:
     head = qa.get("planner_head")
     if not head:
         why = ("qa_status.json unreadable" if qa.get("error")
-               else "qa_resume.json missing")
+               else "qa_resume.json has no recorded revision")
         lines.append(f"- QA: no recorded revision ({why})")
         return lines
     overall = qa.get("overall") or "?"
@@ -1968,6 +1983,12 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     branch = pr.get("branch", f"pm/{pr_id}")
     workdir = pr.get("workdir", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
+    # The branch may already contain the base (a resolved metadata conflict or
+    # a clean base merged by a bounce); diff against that exact revision so
+    # the merged base commits are not read as the PR's own changes.
+    branch_base = _diff_base(pr)
+    diff_cmd = (f"git diff {branch_base[:12]}...HEAD" if branch_base
+                else f"git diff {base_branch}...HEAD")
 
     # Get instruction library summary and notes
     library_summary = "No instruction library found."
@@ -2077,7 +2098,7 @@ concurrent-use scenario.
 - **Base branch**: {base_branch}
 - **Workdir**: {workdir}
 
-Inspect the diff yourself — run `git diff {base_branch}...HEAD` in the workdir
+Inspect the diff yourself — run `{diff_cmd}` in the workdir
 to see what changed.  Read source files as needed to understand the context.
 Make sure to not get bogged down too much in the details and method names. Try
 to abstract out user stories that exercise the changes.
@@ -2199,6 +2220,9 @@ def generate_qa_interactive_prompt(data: dict, pr_id: str,
     branch = pr.get("branch", f"pm/{pr_id}")
     pr_workdir = pr.get("workdir", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
+    branch_base = _diff_base(pr)
+    diff_cmd = (f"git diff {branch_base[:12]}...HEAD" if branch_base
+                else f"git diff {base_branch}...HEAD")
 
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
     pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
@@ -2271,7 +2295,7 @@ This is an interactive session — you work with the user to manually test and
 explore the PR's changes.
 
 Help the user with whatever they need:
-- Inspect code changes (`git diff {base_branch}...HEAD`)
+- Inspect code changes (`{diff_cmd}`)
 - Run tests, build the project, try out features
 - Debug issues found by automated scenarios
 - Write and run ad-hoc test scripts in the scratch dir
