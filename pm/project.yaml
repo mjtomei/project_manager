@@ -16475,6 +16475,22 @@ prs:
       355 passed. Captures /pm-captures/scenarios/21 (README.md + per-triple manifests).'
     created_at: '2026-10-26T17:13:33Z'
     last_edited: '2026-10-26T17:13:33Z'
+  - id: note-77f4312
+    text: 'S24 refine (2026-10-26, HEAD ece16459): two-client fixture notes for the
+      C1/C3/C5 run. fzf 0.56.3 is NOT installed in the QA container — install the
+      aarch64 release to /usr/local/bin before starting (without fzf the picker falls
+      back to the numbered menu, which has no navigation, so the two-popup steps do
+      not apply). `pm pr start` refuses unless the PR is in the committed project.yaml
+      on the base branch, so `git add -A && git commit` after bootstrapping statuses.
+      For C3 dispatch from client 1 use `s`/Enter on a start row (or `z s`), never
+      `e`: edit is `tui:edit` and goes through the TUI command bar, so it does not
+      switch a grouped client window. For C5, pr-f98ac63 remains half-open at HEAD:
+      the fake-claude gate is fixed (`pm pr review` derives the tag from PM_POPUP_SESSION),
+      but popup/picker/dispatch log lines from a PR-workdir window still key off cwd
+      and land in `~/.pm/debug/pm-pr-<id>-…-<hash>.log`, not the session tag log —
+      report that as the known pr-f98ac63 gap, not a regression of this PR.'
+    created_at: '2026-10-26T17:00:35Z'
+    last_edited: '2026-10-26T17:00:35Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

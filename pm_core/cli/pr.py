@@ -962,7 +962,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     if impl_workdir:
                         _add_companion_pane(pm_session, existing, impl_workdir, "impl")
                     tmux_mod.select_window(pm_session, existing["id"])
-                    click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                    click.echo(f"Switched to existing window '{window_name}' "
+                               f"(session: {tmux_mod.current_or_base_session(pm_session)})")
                     return
                 elif background:
                     # Window already exists, nothing to do in background mode
@@ -970,7 +971,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     return
                 else:
                     tmux_mod.select_window(pm_session, existing["id"])
-                    click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                    click.echo(f"Switched to existing window '{window_name}' "
+                               f"(session: {tmux_mod.current_or_base_session(pm_session)})")
                     return
 
     repo_url = data["project"]["repo"]
