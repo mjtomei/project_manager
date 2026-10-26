@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T05:40:07.553151+00:00'
+  updated_at: '2026-10-26T05:58:18.230975+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34189,6 +34189,24 @@ prs:
       qa-run-bg with no pm session.'
     created_at: '2026-10-26T05:40:07Z'
     last_edited: '2026-10-26T05:40:07Z'
+  - id: note-2bbbf75
+    text: 'Review d5f9 i1 (CODE CHANGE, small, needs normal re-review): S65 72614e5d
+      (refused sign-off qa hop relaunches over the judged qa window once fixed), S66
+      e123fb27 (provider check before the review-PASS move to qa; verifier skipped
+      with qa-verify-pass off; mid-run verifier/finalizer provider error stops the
+      run; TUI keeps the QA stopped line, no note) and the S67 qa.md delta (1593414d,
+      facts checked against code) reviewed independently, sound. Gap fixed in 72614e5d:
+      the sign-off qa hop tick ignored its claim_return_launch result, so a concurrent
+      qa tick that claimed the re-run between the hop and the claim also launched
+      (duplicate driver); it now launches only when it wins. setup_stop comments now
+      cover the mid-run stops. Incidental: tests/test_hook_events.py tmp_hooks_home
+      unsets PM_HOST_HOME (exported in pm containers, the installer wrote into the
+      real host home and the test failed). Filed pr-242ebdd: after a mid-run stop
+      (or any qa-run-bg death) every tick says running: qa until the qa window is
+      closed, remedy only in the pm log. 1 new test, mutation caught; full suite 3863
+      passed rc 0; /pm-captures/review-d5f9-i1 (README).'
+    created_at: '2026-10-26T05:58:18Z'
+    last_edited: '2026-10-26T05:58:18Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -35105,6 +35123,34 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-26T05:39:58.795172+00:00'
   updated_at: '2026-10-26T05:39:58.795172+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-242ebdd
+  plan: bugs
+  title: 'Bug: pm pr auto-sequence reports "running: qa" forever after its detached
+    QA driver stops mid-run'
+  branch: pm/pr-242ebdd-bug-pm-pr-auto-sequence-reports-running-qa-forever
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py pr_auto_sequence, status qa, overall None branch:
+    when qa_status.json has no overall and a qa-<pr> window exists the tick prints
+    "running: qa" and never relaunches, even when the qa-run-bg driver is dead. Since
+    pr-592e4bd e123fb27 a verifier or finalizer provider removed mid-run stops the
+    run (QA stopped for <pr> warning in the pm log only, driver rc 1); any other driver
+    crash (traceback in the pm log) ends the same way. Repro (QA S66, /pm-captures/scenarios/66):
+    auto-sequence a PR into qa, remove the qa_verification or qa_finalize provider
+    while workers run; after the stop every tick says running: qa until the qa window
+    is closed by hand, and the remedy is only in the pm log. The TUI resume scan already
+    detects a dead driver from the qa_resume.json pid; the tick could use the same
+    check to report the stop (Error: line while the provider is broken) and relaunch
+    or resume once fixed, with a claim so sequential ticks do not double it (see pr-7a83b6d).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T05:50:12.295715+00:00'
+  updated_at: '2026-10-26T05:50:12.295715+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

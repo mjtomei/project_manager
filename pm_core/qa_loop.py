@@ -232,8 +232,9 @@ class QALoopState:
     # so the finalize gate agrees with the poll even if the setting changes
     # mid-run.
     verify_pass_enabled: bool | None = None
-    # The run ended on a provider setup error before any result (see
-    # _crash_output): nothing ran that a QA note could report.
+    # The run ended on a provider setup error (see _crash_output): at launch,
+    # or a verifier/finalizer provider that broke mid-run.  Either way there
+    # is no overall verdict for a QA note to report.
     setup_stop: bool = False
     # Scenario 0 (interactive) — tracked separately, never polled for verdicts
     scenario_0: QAScenario | None = None

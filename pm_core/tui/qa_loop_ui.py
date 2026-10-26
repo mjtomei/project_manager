@@ -539,9 +539,10 @@ def _record_completion(app, state: QALoopState) -> bool:
                 return False
             done.add("transition")
         if "note" not in done and state.setup_stop:
-            # Nothing ran (a provider setup error stopped the run before
-            # any result): an empty "QA ERROR:" note would only tell later
-            # sessions about a run that never happened.
+            # A provider setup error stopped the run with no overall
+            # verdict (at launch, or a verifier/finalizer mid-run): a
+            # "QA ERROR:" note would only tell later sessions about a run
+            # that has no result; the restart after the fix records one.
             done.add("note")
         if "note" not in done:
             if not _record_qa_note(app, state, lock_timeout=store.NO_WAIT):

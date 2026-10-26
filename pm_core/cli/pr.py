@@ -3724,10 +3724,12 @@ def pr_auto_sequence(pr_id: str):
         if hop == "qa":
             # Claimed (after the provider check) so the qa tick's
             # ``awaiting`` relaunch leaves this driver alone until it starts.
+            # A concurrent qa tick may already have claimed it in between
+            # the hop and here: that tick launches, this one must not.
             from pm_core.signoff import claim_return_launch
             _check_qa_launch(root, pr_id)
-            claim_return_launch(root, pr_id, "qa")
-            _launch_qa_detached(root, pr_id)
+            if claim_return_launch(root, pr_id, "qa"):
+                _launch_qa_detached(root, pr_id)
             click.echo("sign_off: re-qa")
             return
         # A review/impl hop's return record already holds the launch claim

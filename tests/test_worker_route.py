@@ -3349,3 +3349,17 @@ def test_tui_keeps_a_setup_stop_on_screen_and_records_no_note(
     else:
         note.assert_called_once()
         assert shown[-1] == "QA finished for pr-001: ERROR"
+
+
+def test_reqa_hop_leaves_a_launch_another_tick_claimed(pm_home_dir, tmp_path):
+    """A qa tick that claimed the re-run between the hop and the hop tick's
+    claim launches it; the hop tick must not start a second driver."""
+    pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+          "branch": "pm/pr-001"}
+    data = {"project": {}, "prs": [pr]}
+    old = _judged_run(tmp_path)
+    with patch("pm_core.signoff.claim_return_launch", return_value=False):
+        result, popen = _reqa_tick(tmp_path, data, status_path=old)
+    assert result.exit_code == 0, result.output
+    assert "sign_off: re-qa" in result.output
+    popen.assert_not_called()
