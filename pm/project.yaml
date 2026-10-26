@@ -12595,6 +12595,36 @@ prs:
       next review, outstanding runtime scenarios and independent sign-off remain required.'
     created_at: '2026-10-26T03:30:16Z'
     last_edited: '2026-10-26T03:30:16Z'
+  - id: note-c3bedf2
+    text: S19 found/fixed config CLI cwd-tag bug while driving two actual tmux clients.
+      Base and grouped command popups now show initiating base fake config via existing
+      current-session resolver; explicit --tag preserved. Related existing pr-ea4fffa
+      noted. Actual host picker/code/meta override checks and real isolated Podman
+      launch/reap/normal release exercised; standard image smoke failed GPU error1002,
+      authorized smoke-only omission recovery succeeded (not build-base PASS). Full
+      sanitized suite 3949 passed, 2 skipped, 5 warnings; focused251. Evidence /pm-captures/scenarios/19;
+      final detailed handoff follows.
+    created_at: '2026-10-26T04:22:38Z'
+    last_edited: '2026-10-26T04:22:38Z'
+  - id: note-f74d6c8
+    text: 'S19 final (chatgpt/gpt-6-astra-high): b30a7bc0 pushed config CLI base-session
+      resolution fix; two real 120x40/80x30 PTY clients reproduced missing cwd-tag
+      configs then verified A/B configs including grouped sessions. Base code/meta
+      override vs shell-cwd paths, simultaneous picker orders, direct reuse, same-base
+      grouped focus, cancellation and invalid-PR error exercised. Real private Podman
+      A pending launch 04:19:54.859–04:20:05.340 overlapped B scoped reap 04:19:55.903–04:20:06.555;
+      B age130+s exact ID kept, evidence grew, A-IMPL sole new pane. Standard build
+      STEP17 GPU1002 failed; authorized Chromium-smoke-RUN-only recovery image used,
+      not unmodified build PASS. Three Ctrl-D releases2.60/4.35/6.51s, B survived
+      A releases; 645 hashes unchanged, 210 contiguous evidence lines, final private
+      runtime empty. Full3949 passed/2 skipped/5 warnings; focused251. LIMITS: final
+      grouped preview/reap did not overlap (reap ended before preview); separate post-launch
+      picker navigation for new PR not saved. Do not waive these clauses on next run.
+      Evidence /pm-captures/scenarios/19/manifest.md, 11 cast/H264 pairs, original
+      failures retained. No shared containers/quotas touched.'
+    created_at: '2026-10-26T04:25:58Z'
+    last_edited: '2026-10-26T04:25:58Z'
+
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -31906,6 +31936,26 @@ prs:
       launches, and skip-permissions lookup.'
     created_at: '2026-10-22T15:07:29Z'
     last_edited: '2026-10-22T15:07:29Z'
+  - id: note-1dc8156
+    text: 'S19 real two-client QA reproduced adjacent config CLI bug: prefix+M fake-claude
+      config show from each PR companion uses cwd workdir tag and reports no config
+      despite base fake config. Popup which code routing (including meta override)
+      works. Fix underway in #241: config tag resolution uses existing current PM
+      session helper before cwd fallback, explicit --tag preserved. Pre-fix actual
+      PTY captures /pm-captures/scenarios/19/pre-fix; subprocess regression fails
+      with same No fake-claude config output.'
+    created_at: '2026-10-26T04:17:00Z'
+    last_edited: '2026-10-26T04:17:00Z'
+  - id: note-1d3fc07
+    text: 'S19 config CLI adjacent fix committed/pushed b30a7bc0 in pr-1139060: resolve
+      implicit config set/show/clear tag through current PM base session, preserve
+      explicit --tag and cwd fallback. Real base and grouped popups show distinct
+      A/B configs post-fix; focused251 and full3949 passed/2 skipped. Does not claim
+      all existing launcher-routing scope of this bug complete. Before/after /pm-captures/scenarios/19/pre-fix
+      and post-fix; manifest records remaining scenario coverage limits.'
+    created_at: '2026-10-26T04:25:59Z'
+    last_edited: '2026-10-26T04:25:59Z'
+
 - id: pr-3f52b15
   plan: bugs
   title: 'Bug: pm-home window created from a PR workdir shows that clone''s stale
