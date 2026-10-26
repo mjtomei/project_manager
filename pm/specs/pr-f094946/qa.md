@@ -64,7 +64,13 @@ result is polled. The log pane is not registered as `qa-planner`, and the QA
 loop goes on to produce scenarios. Execution-only `pm qa run` and recreated
 QA windows also retain main-pane registration when the status pane is added,
 without duplicate planner entries. Transient registry/layout failures must
-not abort a healthy planner; status setup retries missing registration.
+not abort a healthy planner; status setup retries missing registration. The
+QA main pane must outlive the run: an execution-only `pm qa run` (or a run
+restarted after its `qa-<pr>` window was killed) still has its `qa-<pr>`
+window, status pane and planner registration at the end, instead of a window
+that vanished before its pane could be found (S25). A later run over a
+killed window leaves exactly one `qa-planner` entry and no registration
+under the dead window id (9ead i1).
 
 **R4: Plain `t` still switches to a new QA window.**
 Given a PR in review or QA with no `qa-<pr>` window, and the user on the TUI,
@@ -73,8 +79,10 @@ bar),
 Then the user's client is switched to the new `qa-<pr>` window.
 Also cover a background run already accepted but still preparing its first
 window: `t` reuses that run and requests focus when the window is created,
-without starting a second worker. Dismissing its popup before creation must
-still suppress that selection.
+without starting a second worker, and its answer ("QA already running for
+<pr>") is visible even while another confirmation holds the log line
+(df89a6f0). Dismissing its popup before creation must still suppress that
+selection.
 
 **R5: Dismissing the popup spinner still keeps focus.**
 Given the user starts QA from the popup or picker, which shows a spinner,
@@ -191,6 +199,27 @@ applies to both the self-driving bounce and the plain-`t` / auto-start bounce,
 which goes back through auto-start's check_and_start. An existing sticky
 review-completion message must not suppress this confirmation either.
 
+**R15: A CLI-driven QA run is visible in the shared per-PR run state
+(9a46d187, 1789774d).** When `pm pr auto-sequence <pr>` spawns the detached
+`pm pr qa-run-bg` driver, that PR gets the same `~/.pm/runtime/<pr>.json`
+record a TUI-run QA gets: `qa: running` while it runs (keeping any pending
+`suppress_switch`, which belongs to a user start, not this driver), `done`
+plus the verdict when it produces one, `failed` on an exception. A run that
+ends without a verdict — the PR merged or closed while it ran — leaves no
+lingering `running` entry, so the picker and home window do not show a QA
+run that no longer exists. The merged/closed guard still returns before
+creating a window and before writing anything.
+
+**R16: Registry pruning is safe for live sessions (9ead i1).** Registry
+entries for windows that no longer exist are dropped as the next
+registration happens, so a killed QA window's panes do not linger under a
+stale window id. Pruning never wipes a live session's registry: an absent
+session, or an empty/failed window query (a live session always has at
+least one window), leaves every entry intact. Concurrent registration,
+pruning and layout from the QA loop, TUI pane actions and CLI runs share
+the locked registry file without losing entries or duplicating
+`qa-planner`.
+
 Out of scope, filed separately: pr-064fe5b (user `zz t` over a leftover
 `qa-<pr>` window replaces it without focusing). R6 for `zz t` applies only
 when no `qa-<pr>*` window exists. pr-2428766 overlaps R13.
@@ -234,6 +263,22 @@ when no `qa-<pr>*` window exists. pr-2428766 overlaps R13.
   `TestZZTStart::test_poll_timer_survives_slow_worker_start` and
   `TestZZTStart::test_worker_start_failure_clears_running` from
   `tests/test_qa_self_driving.py` for deterministic startup-race evidence.
+* `~/.pm/runtime/<pr>.json` is the shared per-PR action record the popup
+  spinner, the picker and auto-start's last-verdict check read; inspect it
+  for `qa` `running`/`done`/`failed`. `qa_status.json` overall PASS can
+  precede finalization — wait for the finalize verdict and the TUI's
+  completion line, not the status file alone.
+* `pm session` already creates a `<sess>~1` grouped view. Keep the CLI
+  actor's pane alive: a detached child that inherits a dead `TMUX_PANE`
+  cannot resolve its session.
+* A single `q`/Esc rarely lands in the popup spinner's dismissal gap — the
+  spinner also treats `qa-<pr>-s0` as window_open, so send the dismissal
+  repeatedly once the spinner paints. The initial `zz t` start logs "QA
+  loop started for <pr> (N passes required)"; "Starting QA for <pr>"
+  appears only on a self-driving restart.
+* `pm pr qa-run-bg` is hidden and logs the merged/closed skip to the debug
+  log, not stdout. Use `pm pr auto-sequence` for the user-facing driver
+  behavior and the debug log for the guard evidence.
 
 ## Pass/fail criteria
 
@@ -249,7 +294,10 @@ when no `qa-<pr>*` window exists. pr-2428766 overlaps R13.
   to a newly created QA window. Or popup dismissal no longer keeps focus.
   R10–R14 failures also fail QA: stale status/selection, stalled completion
   processing, or confirmations absent from the rendered TUI are not waived
-  by passing the original focus check.
+  by passing the original focus check. R15/R16 failures also fail QA: a
+  CLI-driven QA run with no shared runtime record, a `running` entry left
+  behind after a merged/closed run, or a registry pruned past its live
+  windows.
 
 ## Ambiguities (resolved)
 
