@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T21:53:37.265919+00:00'
+  updated_at: '2026-10-26T22:21:31.458991+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16751,6 +16751,26 @@ prs:
       required. (2026-10-26T21:52:00Z)'
     created_at: '2026-10-26T21:53:37Z'
     last_edited: '2026-10-26T21:53:37Z'
+  - id: note-4480c5c
+    text: 'Review 32f9 i3 (HEAD 71a03c97, base master 211a6128): fresh full-diff review
+      — no functional defect found. The no-exit contract, local-identity navigation,
+      refresh atomicity, dispatch re-validation, fzf exit-code handling, title sanitisation
+      and the usable_prs sync filter all match the impl/qa specs; I could not construct
+      a keypress path that closes the picker other than q/Esc (or the documented empty-list
+      / initial-load exits). One diagnosability gap fixed: _build_nav_entries fails
+      the whole snapshot closed, but its four rejection messages named only the rule
+      ("requires a valid status", ...), so on the 494-entry project.yaml a user could
+      not tell which entry to repair. Added _describe_pr_entry(index, pr) to every
+      message — 1-based position plus id/gh_pr_number/status when present, repr-escaped
+      so a NUL renders as \x00 — and the ambiguity message now says which entry collides.
+      Messages keep their old prefixes. 6 regression tests (TestBuildNavEntriesRejection)
+      plus impl.md and qa.md E6 updated. Full suite after final code/test edits: 3732
+      passed, 1 skipped; focused popup/session/tmux 456 passed; pyflakes no new warnings
+      vs master. Evidence /pm-captures/review-32f9-i3/. No live QA PASS claimed: fresh
+      QA (E6 including the new error text, E11, C1, R13, E10) and sign-off remain
+      required.'
+    created_at: '2026-10-26T22:21:31Z'
+    last_edited: '2026-10-26T22:21:31Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
