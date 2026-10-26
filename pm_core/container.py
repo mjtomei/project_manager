@@ -293,16 +293,20 @@ _build_lock = threading.Lock()
 # Cached image-existence results. When many QA scenarios launch in
 # parallel, each one's ``create_container`` call invokes ``image_exists``
 # concurrently; under load, ``podman image inspect`` hits the 10 s
-# subprocess timeout and reports false negatives, so scenarios spuriously
-# fail with "image not found".  Coalesce concurrent callers onto a
-# single inspect and cache the result for a short TTL.
-_image_exists_cache: dict[str, tuple[float, bool]] = {}
+# subprocess timeout.  Coalesce concurrent callers onto a single inspect
+# and cache the result for a short TTL.  A timeout is cached as unknown
+# (None), never as "missing": an unanswered check is not evidence the
+# image is gone, and reporting it as missing aborted real QA launches.
+_image_exists_cache: dict[str, tuple[float, bool | None]] = {}
 _image_exists_lock = threading.Lock()
 _IMAGE_EXISTS_TTL = 30.0
 
 
-def image_exists(tag: str = DEFAULT_IMAGE) -> bool:
+def image_exists(tag: str = DEFAULT_IMAGE) -> bool | None:
     """Check if the container image exists locally.
+
+    Returns ``None`` when the runtime did not answer in time — presence is
+    unknown, so callers must not report the image as missing.
 
     Thread-safe and cached for ``_IMAGE_EXISTS_TTL`` seconds.  The lock is
     held across the subprocess call so N concurrent callers collapse onto
@@ -321,9 +325,12 @@ def image_exists(tag: str = DEFAULT_IMAGE) -> bool:
                 [runtime, "image", "inspect", tag],
                 capture_output=True, timeout=10,
             )
-            exists = result.returncode == 0
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+            exists: bool | None = result.returncode == 0
+        except FileNotFoundError:
             exists = False
+        except subprocess.TimeoutExpired:
+            _log.warning("Image check for %s timed out — presence unknown", tag)
+            exists = None
         _image_exists_cache[tag] = (time.monotonic(), exists)
         return exists
 
@@ -392,9 +399,18 @@ def _run_runtime(*args: str, check: bool = True,
 
 
 def current_container_id(name: str) -> str | None:
-    """Full id of the container now holding *name*; "" if none, None if unknown."""
-    result = _run_runtime("inspect", "-f", "{{.Id}}", name,
-                          check=False, timeout=10)
+    """Full id of the container now holding *name*; "" if none, None if unknown.
+
+    An inspect the runtime does not answer in time is unknown, not absent —
+    a raised timeout here used to abort a launch that merely raced other
+    containers' ``run`` calls.
+    """
+    try:
+        result = _run_runtime("inspect", "-f", "{{.Id}}", name,
+                              check=False, timeout=10)
+    except subprocess.TimeoutExpired:
+        _log.warning("Identity check for %s timed out — ownership unknown", name)
+        return None
     if result.returncode == 0:
         return result.stdout.strip() or None
     return "" if _container_absent(result.stderr or "") else None
@@ -1452,6 +1468,10 @@ def pids_pressure(threshold: float = 0.9) -> list[tuple[str, int, int]]:
                   if lim > 0 and c >= threshold * lim)
 
 
+_IDENTITY_PROBE_BUDGET = 45.0  # seconds; concurrent runs can hold the lock ~40s
+_IDENTITY_PROBE_INTERVAL = 1.0
+
+
 def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
                      *, session_tag: str | None, pr_id: str | None) -> str | None:
     """Return the id of a running, fully set-up container named *name*.
@@ -1467,12 +1487,26 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
     # Capture before checking state: a stopped container can be replaced by an
     # external runtime client without acquiring PM's name lock. Every subsequent
     # probe/removal must address this allocation, never the reusable name.
+    # A busy runtime can leave the first inspect unanswered while other
+    # scenarios' ``run`` calls hold its storage lock.  Keep asking for a
+    # bounded time: an unknown answer is not proof the name is free, and
+    # guessing either way is unsafe.
+    deadline = time.monotonic() + _IDENTITY_PROBE_BUDGET
     container_id = current_container_id(name)
+    while container_id is None and time.monotonic() < deadline:
+        time.sleep(_IDENTITY_PROBE_INTERVAL)
+        container_id = current_container_id(name)
     if container_id is None:
         # Preserve a runtime's diagnostic on this error path; a later successful
         # state probe cannot restore the missing immutable identity.
-        container_is_running(name)
-        raise launch_error(name, "runtime", "existing container identity unavailable",
+        try:
+            container_is_running(name)
+        except subprocess.TimeoutExpired:
+            pass
+        raise launch_error(name, "runtime",
+                           f"existing container identity unavailable after "
+                           f"{_IDENTITY_PROBE_BUDGET:.0f}s of unanswered runtime "
+                           f"inspects; retry when the runtime is responsive",
                            stage="be reused")
     if not container_id:
         return None
@@ -1601,12 +1635,14 @@ def _create_fresh(
 
     # Auto-build the pm-dev image if it's the default and not yet built.
     # Use a lock so concurrent create_container calls don't all build at once.
-    if config.image == DEFAULT_IMAGE and not image_exists(config.image):
+    # An unknown result (None) proceeds: ``run`` reports a real missing image.
+    present = image_exists(config.image)
+    if config.image == DEFAULT_IMAGE and present is False:
         with _build_lock:
-            if not image_exists(config.image):
+            if image_exists(config.image) is False:
                 _log.info("Default image %s not found — building automatically", config.image)
                 build_image(tag=config.image, quiet=True)
-    elif config.image != DEFAULT_IMAGE and not image_exists(config.image):
+    elif config.image != DEFAULT_IMAGE and present is False:
         runtime = _get_runtime()
         raise ContainerError(
             f"Image '{config.image}' not found in {runtime}. "
