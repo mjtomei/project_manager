@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T00:37:51.177544+00:00'
+  updated_at: '2026-10-26T00:55:03.412335+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33982,6 +33982,22 @@ prs:
       it.'
     created_at: '2026-10-26T00:37:51Z'
     last_edited: '2026-10-26T00:37:51Z'
+  - id: note-e2f3f68
+    text: 'Review c189 i9 (4dcf8a2d, CODE CHANGE, small, needs normal re-review):
+      i8 38d54909 (_configured_router_urls skips malformed entries) reviewed independently
+      and sound. Gap fixed (null/string cases already broken on master): a hand-edited
+      providers.yaml entry for the SELECTED provider (null/string entry, non-string
+      field, unknown type, list alias_models) raised AttributeError/ValueError from
+      the launch, from the refiner/worker route gate (check_route raised, so the QA
+      thread died instead of waiting with a remedy), and from pm model show/provider
+      list. get_provider now raises ProviderEntryError, a ProviderNotFoundError naming
+      the file and the field, strict or not, never a plain-claude fallback. So the
+      CLI prints one Error: line, the route gate waits with its remedy, QA shows "QA
+      stopped: ...", describe says (INVALID ENTRY in providers.yaml), and provider
+      list shows INVALID ENTRY lines. 11 mutations caught. Venv lacked markdown (3.10.3
+      installed). Full suite 3829 passed, rc 0; impl.md c189 i9; /pm-captures/review-c189-i9.'
+    created_at: '2026-10-26T00:55:03Z'
+    last_edited: '2026-10-26T00:55:03Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
