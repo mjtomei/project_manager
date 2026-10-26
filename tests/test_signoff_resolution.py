@@ -1200,6 +1200,40 @@ def test_signoff_prompt_shows_the_resolution_and_evidence_contract(w):
     assert f"review@{original_head[:12]}" in text
 
 
+def test_signoff_prompt_diffs_against_the_applied_base(w):
+    """After a launch apply the workdir's own base ref is stale.
+
+    ``git diff master...HEAD`` would then list the merged base commits as PR
+    changes, so the prompt's primary diff command must name the exact base
+    revision the resolution was applied on.
+    """
+    rec = _metadata_conflict(w)
+    # The workdir's own base ref still points at the pre-base commit.
+    assert git(w.wd, "rev-parse", "master") != rec["base_sha"]
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert f"git diff {rec['base_sha'][:12]}...HEAD" in text
+    assert "git diff master...HEAD" not in text
+
+    # Without an applied resolution the usual base-branch diff is right (the
+    # merge-base is the fork point, so a stale base ref does not matter).
+    def _drop_applied(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ.get("resolution") or {})
+        resolution.pop("applied_merge_sha", None)
+        integ["resolution"] = resolution
+        integ["resolution_digest"] = integration._resolution_digest(resolution)
+    store.locked_update(w.pm_dir, _drop_applied)
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "git diff master...HEAD" in text
+
+
 def test_a_failed_resolution_is_not_reported_as_resolved(w):
     """The retained attempt is visible, but never claimed as a resolution.
 

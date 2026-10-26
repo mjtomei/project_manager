@@ -402,6 +402,21 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
     return "\n" + "\n".join(lines) + "\n"
 
 
+def _applied_resolution_base(pr: dict) -> str | None:
+    """The base revision an applied metadata resolution merged into the branch.
+
+    ``None`` unless pm resolved a metadata-only conflict and applied the
+    result: only then does the branch contain the base, which makes the
+    workdir's own base ref (``origin/<base>``) an unreliable diff target.
+    """
+    integ = pr.get("integration") or {}
+    resolution = integ.get("resolution") or {}
+    if not resolution.get("applied_merge_sha"):
+        return None
+    resolved_from = resolution.get("resolved_from") or {}
+    return resolved_from.get("base_sha") or integ.get("base_sha") or None
+
+
 def _signoff_integration_block(pr: dict, pr_id: str) -> str:
     """The integration check sign-off reviews (see pm_core.integration)."""
     from pm_core import integration as integ
@@ -458,12 +473,14 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
                 f"`{(resolved_from.get('base_sha') or '?')[:12]}` (merge-base "
                 f"`{(resolved_from.get('merge_base') or '?')[:12]}`).")
         if resolution.get("applied_merge_sha"):
+            applied_base = _applied_resolution_base(pr) or base_sha
+            shown_base = applied_base[:12] if applied_base else "<base>"
             lines.append(
                 f"- Applied to the PR branch as "
                 f"`{resolution['applied_merge_sha'][:12]}`: the branch now "
                 "includes the base merge, so review/verify the integrated "
                 "result. The PR's own changes remain "
-                f"`git diff {base_sha[:12] if base_sha else '<base>'}...HEAD`; "
+                f"`git diff {shown_base}...HEAD`; "
                 f"`git diff "
                 f"{(resolved_from.get('head') or '<old head>')[:12]} "
                 "HEAD` shows the whole base merge as applied to this branch "
@@ -558,6 +575,14 @@ def generate_signoff_prompt(data: dict, pr_id: str,
         diff_cmd = f"git diff {base_branch}...HEAD"
     else:
         diff_cmd = f"git diff origin/{base_branch}...HEAD"
+    # A resolved metadata conflict is applied at sign-off launch: the branch now
+    # carries the base merge.  The workdir's own base ref may predate that merge
+    # (pm fetches the base into its own ref), so `<base>...HEAD` would list the
+    # merged base commits as PR changes — diff against the exact base the
+    # resolution was applied on instead.
+    applied_base = _applied_resolution_base(pr)
+    if applied_base:
+        diff_cmd = f"git diff {applied_base[:12]}...HEAD"
 
     # Plan / sibling context (scope awareness for the router).
     plan_ref = pr.get("plan")
