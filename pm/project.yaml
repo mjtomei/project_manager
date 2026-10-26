@@ -29479,7 +29479,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-26T17:51:15.076051+00:00'
+  updated_at: '2026-10-26T17:54:44.527455+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29809,6 +29809,29 @@ prs:
       PR; compare against /opt/pm-src before classifying.'
     created_at: '2026-10-26T16:43:38Z'
     last_edited: '2026-10-26T16:43:38Z'
+  - id: note-abdb79e
+    text: 'QA S25 (2026-10-26) NEEDS_WORK — found and fixed: execution-only `pm qa
+      run` (and any run restarted after its qa-<P> window was killed) created the
+      QA window with `echo ''QA execution''`, which exits at once (no remain-on-exit),
+      so new_window_get_pane returned None: no qa-status split, no qa-planner registration
+      (fef8 i1 helper never ran), window gone at the end, and the finalizer skipped
+      too (it returns None when the window is absent). Fix 87f40ccb: _QA_MAIN_PANE_CMD
+      (`echo ...; exec sleep infinity`) via new _ensure_qa_main_pane(), plus pane_registry.prune_dead_windows()
+      called from _register_qa_planner so panes of a killed window no longer linger
+      under the old @id. Runtime re-run of the same story: both runs leave qa-<P>
+      with qa-planner once + qa-status (+qa-finalize), stale @ids pruned, client on
+      main; read-only-registry story and the still-open-window re-run story held (no
+      duplicate qa-planner); plan-pane story held (Launched plan pane over the sticky
+      review line, then Focused existing plan pane, one plan pane). Full suite 3551
+      passed, 1 skipped. Master /opt/pm-src also never registers the qa main pane
+      (its finalizer opens a finalize-only window), so the registration gap predates
+      the PR; losing the window/finalize pane is branch-specific. Environment notes:
+      fake planner writes no QA spec (each project seeds pm/specs/<P>/qa.md); container
+      has no `less` (story 4 used a stand-in pager); a re-run with the window still
+      open adds a second qa-status pane/entry (recorded, not required). Evidence:
+      /pm-captures/scenarios/25/ (pre-fix vs post-fix cross-linked in story1 manifests).'
+    created_at: '2026-10-26T17:54:44Z'
+    last_edited: '2026-10-26T17:54:44Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
