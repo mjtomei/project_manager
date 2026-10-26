@@ -232,21 +232,28 @@ tests):
 10. Notes appended to the same PR record on both sides (the merge base has no
     `notes` key) resolve, both notes survive, and the nested ids are named in
     the summary/prompt; the same id with different content is still ambiguous.
-11. Approval guards: a too-short `pm-signoff-candidate` is not accepted, an
-    unapplied resolution cannot be justified, and a concurrent apply that
-    already integrated the base is not committed over or reset away.
+11. Approval guards: a too-short or wrong `pm-signoff-candidate` is not
+    accepted, an unapplied resolution cannot be justified, an approval bound
+    to an unapplied or unresolved resolution is refused by the merge gate
+    even when recorded directly, a re-checked record for another HEAD is
+    refused, and a concurrent apply that already integrated the base is not
+    committed over or reset away.
 12. Resolver safety rails: conflicting reorders, field (scalar-key)
     deletion-vs-edit in both directions, a merged document with an invalid
     status or a plan cycle, a nested duplicate id, and a merge that loses a
     side's change are all refused (a one-sided field deletion is kept).
 13. Apply/merge guards: a re-resolution whose blob differs from the recorded
     one is refused and the workdir left untouched; an apply that hits a
-    conflict outside the recorded resolution aborts; a HEAD moved under the
-    apply is refused; an unresolved `RESOLVED` record is not mergeable; a
-    changed (or digest-inconsistent) resolution invalidates the approval; an
-    applied resolution's behavioural changes survive a benign re-check and a
-    failed check keeps the bound resolution; a config-file base change (e.g.
-    `pyproject.toml`) requires the same justification as `project.yaml`.
+    conflict outside the recorded resolution aborts; a clean or re-resolved
+    merge whose tree differs from the candidate is aborted; a HEAD moved
+    under the apply is refused; an unresolved `RESOLVED` record is not
+    mergeable (and never looks approved without its provenance); a changed
+    (or digest-inconsistent) resolution invalidates the approval; an applied
+    resolution's behavioural changes survive a benign re-check and a failed
+    check keeps the bound resolution; a config-file base change (e.g.
+    `pyproject.toml`) requires the same justification as `project.yaml`; the
+    full `integration.json` record carries the digest of the resolution it
+    describes.
 
 ## Implicit requirements
 

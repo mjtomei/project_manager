@@ -1284,6 +1284,13 @@ def _prepare_bounce(root: Path, pr_id: str, verdict: str, hop: str,
             resolution = dict(rec.get("resolution") or {})
             if resolution:
                 resolution["applied_merge_sha"] = merge_sha
+                # The record this bounce applied may be a fresh (unapplied)
+                # RESOLVED check, which carries no resolved_from yet; the next
+                # stage must still see the revisions the resolution combined.
+                resolution.setdefault("resolved_from", {
+                    "head": sha, "base_sha": rec.get("base_sha"),
+                    "merge_base": rec.get("merge_base"),
+                    "status": rec.get("status")})
                 rec["resolution"] = resolution
             pr = dict(pr, integration=rec)
             _log.info("sign-off %s: integrated %s@%s into the branch as %s",

@@ -1268,10 +1268,14 @@ def _record_check(root: Path, pr_id: str, record: dict) -> dict:
                     old_behavior + list(record.get("base_behavior_changes")
                                         or [])))
 
-    # Artifacts first: they set the resolution diff path the compact record
-    # carries (the full diff itself never goes into project.yaml).
-    _write_artifacts(pr_id, record)
+    # Compute the digest before writing the artifact: integration.json is the
+    # full record a person assesses, and it must carry the digest of the
+    # resolution it describes (a later re-check/binding compares it).
+    # ``_write_artifacts`` then sets the diff path the compact record carries
+    # (the full diff itself never goes into project.yaml); the digest ignores
+    # that host-specific path.
     record["resolution_digest"] = _resolution_digest(record.get("resolution"))
+    _write_artifacts(pr_id, record)
 
     def _apply(d):
         p = store.get_pr(d, pr_id)

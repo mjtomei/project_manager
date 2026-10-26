@@ -306,6 +306,10 @@ def test_250_metadata_conflict_resolves_and_all_records_survive(w):
     diff_path = Path(resolution["diff_path"])
     assert diff_path.is_file()
     assert "resolved" in diff_path.read_text()
+    # The full artifact must carry the digest of the resolution it records.
+    artifact = json.loads((w.croot / PR / "integration.json").read_text())
+    assert artifact.get("resolution_digest") == rec["resolution_digest"], (
+        artifact.get("resolution_digest"), rec["resolution_digest"])
 
     # QA evidence revision is captured from the QA run's resume snapshot.
     qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
@@ -525,6 +529,90 @@ def test_resolved_approval_is_refused_when_the_recorded_candidate_changed(w):
     assert refusal and "candidate changed" in refusal
 
 
+def test_merge_gate_refuses_a_rechecked_record_for_another_head(w):
+    """Defense in depth: the approval's HEAD must match the current record."""
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+
+    def _tamper(d):
+        store.get_pr(d, PR)["integration"]["head"] = "f" * 40
+    store.locked_update(w.pm_dir, _tamper)
+    refusal = signoff.merge_gate_refusal(
+        pr_entry(w), signoff.head_sha(str(w.wd)), "master")
+    assert refusal and "another HEAD" in refusal
+
+
+def test_merge_gate_refuses_a_clean_approval_without_the_evidence_statement(w):
+    """A clean base change needs the statement even without a resolution."""
+    data = store.load(w.base_pm)
+    data["project"]["model_config"] = {"session_models": {"impl": "model-new"}}
+    store.save(data, w.base_pm)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base changes model")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    assert rec["base_behavior_changes"]
+    assert not (rec.get("resolution") or {}), "this case has no resolution"
+
+    write_report(w, rec)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, rec["head"], "manual",
+        integration=integration.binding(rec))
+    assert signoff.merge_gate_refusal(pr_entry(w), rec["head"], "master") is None
+
+    write_report(w, rec, evidence=False)
+    refusal = signoff.merge_gate_refusal(pr_entry(w), rec["head"], "master")
+    assert refusal and "behavioural changes" in refusal
+
+
+def test_merge_gate_refuses_an_approval_bound_to_an_unapplied_resolution(w):
+    """A bound resolution that was never applied cannot be published."""
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    head = git(w.wd, "rev-parse", "HEAD")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+    assert not rec["resolution"].get("applied_merge_sha")
+
+    # Record the approval directly (the manual/CLI paths refuse it): the gate
+    # is the last line and must refuse it on its own.
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, head, "manual",
+        integration=integration.binding(rec))
+    refusal = signoff.merge_gate_refusal(pr_entry(w), head, "master")
+    assert refusal and "was not applied" in refusal
+
+
+def test_merge_gate_refuses_an_approval_bound_to_unresolved_resolution(w):
+    """An approval recorded against an ambiguous resolution never publishes."""
+    head = git(w.wd, "rev-parse", "HEAD")
+    resolution = {
+        "paths": [{"path": "pm/project.yaml"}],
+        "unresolved": [{"path": "pm/project.yaml",
+                        "conflicts": ["ambiguous record"]}],
+    }
+    rec = {"status": integration.RESOLVED, "head": head,
+           "base_branch": "master",
+           "base_sha": git(w.repo, "rev-parse", "master"),
+           "candidate_tree": git(w.wd, "rev-parse", "HEAD^{tree}"),
+           "resolution": resolution,
+           "resolution_digest": integration._resolution_digest(resolution)}
+
+    def _set(d):
+        store.get_pr(d, PR)["integration"] = integration.compact(rec)
+    store.locked_update(w.pm_dir, _set)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, head, "manual",
+        integration=integration.binding(rec))
+    refusal = signoff.merge_gate_refusal(pr_entry(w), head, "master")
+    assert refusal and "unresolved" in refusal
+
+
 def test_resolution_digest_survives_a_benign_recheck(w):
     """A re-check after the apply must not look like a changed resolution.
 
@@ -580,6 +668,21 @@ def test_approval_rejects_a_candidate_tag_too_short_to_identify_the_tree(w):
     assert problem and "pm-signoff-candidate" in problem and "usable" in problem
 
 
+def test_approval_rejects_a_candidate_tag_for_another_tree(w):
+    """A long-enough tag that names a different tree is not the approval."""
+    rec = _metadata_conflict(w)
+    (w.croot / PR).mkdir(parents=True, exist_ok=True)
+    (w.croot / PR / "report.html").write_text(
+        f'<html><head><meta name="pm-signoff-head" content="{rec["head"]}">'
+        f'<meta name="pm-signoff-candidate" content="{"z" * 40}">'
+        '<meta name="pm-signoff-evidence" content="review@deadbee,qa@cafef00">'
+        '<meta name="pm-signoff-evidence-reason" content="records only">'
+        '</head><body/></html>')
+    problem = signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"])
+    assert problem and "does not name the approved candidate" in problem
+
+
 def test_resolved_approval_is_stale_when_head_moves_after_the_apply(w):
     """A commit after the applied resolution needs a fresh sign-off."""
     rec = _metadata_conflict(w)
@@ -610,6 +713,28 @@ def test_compact_resolution_bounds_records_and_is_idempotent():
     assert integration._compact_resolution(compact) == compact
     assert integration._resolution_digest(resolution) == \
         integration._resolution_digest(compact)
+
+
+def test_summary_counts_records_beyond_the_bounded_id_lists():
+    """The summary count comes from the per-path counts, not the capped ids."""
+    entry = {"path": "pm/project.yaml",
+             "added_ours": [f"pr-{i}" for i in range(20)],
+             "records": {"prs": {"added_ours": 45, "added_theirs": 3,
+                                 "changed": 0, "removed": 0}}}
+    rec = {"status": integration.RESOLVED, "base_branch": "master",
+           "base_sha": "a" * 40, "resolution": {"paths": [entry]}}
+    summary = integration.summary(rec)
+    assert "45 added from PR" in summary
+    assert "3 from base" in summary
+
+
+def test_compact_bounds_base_behavior_changes():
+    """The behavioural summary is bounded in project.yaml like the rest."""
+    record = {"status": integration.CLEAN, "base_sha": "a" * 40,
+              "base_behavior_changes": [f"change {i}" for i in range(50)]}
+    out = integration.compact(record)
+    assert len(out["base_behavior_changes"]) == integration._BEHAVIOR_LIMIT
+    assert out["base_behavior_count"] == 50
 
 
 def test_recorded_evidence_lists_are_bounded(w):
@@ -718,6 +843,11 @@ def test_bounce_to_review_applies_the_resolved_candidate(w):
     assert ret["applied"]["from_head"] == original_head
     assert ret["integration"]["resolution"]["applied_merge_sha"] \
         == ret["applied"]["merge_sha"]
+    # The next stage also sees the revisions the resolution combined.
+    assert ret["integration"]["resolution"]["resolved_from"]["head"] \
+        == original_head
+    assert ret["integration"]["resolution"]["resolved_from"]["base_sha"] \
+        == rec["base_sha"]
     assert git(w.wd, "rev-parse", "HEAD") == ret["applied"]["merge_sha"]
     assert git(w.wd, "rev-parse", "HEAD^{tree}") == rec["candidate_tree"]
     assert git(w.wd, "rev-parse", "--abbrev-ref", "HEAD") == BRANCH
@@ -828,6 +958,36 @@ def test_integrate_cli_apply_applies_a_clean_recheck_of_a_resolved_check(w):
             pr_mod.pr, ["signoff", "integrate", PR, "--apply"])
     assert r.exit_code == 0, r.output
     assert applied == {"status": integration.CLEAN}
+
+
+def test_integrate_cli_apply_applies_a_resolved_candidate(w):
+    """`--apply` on a metadata-only conflict applies and records the merge."""
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    head = git(w.wd, "rev-parse", "HEAD")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(
+            pr_mod.pr, ["signoff", "integrate", PR, "--apply"])
+    assert r.exit_code == 0, r.output
+    # The applied re-check reads "up to date", but the resolution that was
+    # applied is still printed (and recorded).
+    assert "resolved: pm/project.yaml (by record id)" in r.output
+    assert "added from PR: pr-300" in r.output
+    assert "added from base: pr-250" in r.output
+    rec = pr_entry(w)["integration"]
+    assert rec["status"] == integration.UP_TO_DATE
+    assert rec["resolution"]["applied_merge_sha"]
+    assert rec["resolution"]["applied_merge_sha"] != head
+    assert git(w.wd, "rev-parse", "HEAD") == rec["resolution"]["applied_merge_sha"]
+    assert git(w.wd, "rev-parse", "HEAD^{tree}") == rec["candidate_tree"]
+    assert sorted(pr_ids(w.wd / "pm")) == [
+        "pr-100", PR, "pr-250", "pr-300"]
 
 
 def test_integrate_cli_apply_exits_nonzero_when_it_cannot_apply(w):
@@ -990,6 +1150,49 @@ def test_apply_refuses_a_non_deterministic_resolution(w):
     assert "pr-250" not in (w.wd / "pm" / "project.yaml").read_text()
 
 
+def test_apply_refuses_a_clean_merge_with_another_candidate_tree(w):
+    """Even a conflict-free merge must reproduce the recorded candidate."""
+    head = git(w.wd, "rev-parse", "HEAD")
+    base = git(w.repo, "rev-parse", "master")
+    record = {"status": integration.RESOLVED, "head": head, "base_sha": base,
+              "candidate_tree": "0" * 40,
+              "resolution": {"paths": [{"path": "pm/project.yaml"}]}}
+    # Already up to date: nothing to undo, but the tree is not the candidate.
+    merged, err = integration._apply_resolution(
+        record, str(w.wd), head, base, "Integrate master")
+    assert merged is None and "different tree" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+
+    # A real (clean) merge is aborted when its tree is not the candidate.
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    git(w.wd, "fetch", "-q", "origin")
+    base = git(w.wd, "rev-parse", "origin/master")
+    merged, err = integration._apply_resolution(
+        dict(record, base_sha=base), str(w.wd), head, base, "Integrate master")
+    assert merged is None and "different tree" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "status", "--porcelain") == ""
+
+
+def test_apply_refuses_a_resolved_merge_with_another_candidate_tree(w):
+    """The re-applied resolution must reproduce the recorded candidate."""
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    head = git(w.wd, "rev-parse", "HEAD")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+
+    merged, err = integration.apply_integration(
+        w.pm_dir, PR, dict(rec, candidate_tree="0" * 40))
+    assert merged is None and "different tree" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "status", "--porcelain") == ""
+
+
 def test_apply_refuses_conflicts_outside_the_recorded_resolution(w):
     """The apply step never makes a new substantive conflict resolution."""
     commit(w.wd, "shared.txt", "pr\n", "pr edits shared")
@@ -1026,6 +1229,38 @@ def test_apply_refuses_when_head_moved_under_the_resolution(w):
         record, str(w.wd), "0" * 40, base, "Integrate master")
     assert merged is None and "HEAD moved" in err
     assert git(w.wd, "rev-parse", "HEAD") == head
+
+
+def test_effective_verdict_coerces_an_unresolved_resolved_merge():
+    """A RESOLVED record that still carries unresolved entries is not safe."""
+    head = "a" * 40
+    rec = {"status": integration.RESOLVED, "head": head,
+           "base_sha": "b" * 40, "candidate_tree": "c" * 40,
+           "resolution": {"paths": [], "unresolved": [
+               {"path": "pm/project.yaml", "conflicts": ["pr-1.status"]}]}}
+    verdict, why = signoff.effective_verdict(SIGNOFF_MERGE, rec, head)
+    assert verdict == SIGNOFF_IMPL and "could not resolve" in why
+    assert signoff.effective_verdict(SIGNOFF_REVIEW, rec, head)[0] == \
+        SIGNOFF_IMPL
+    # BLOCKED/IMPL pass through: only the forward routes are coerced.
+    assert signoff.effective_verdict(SIGNOFF_IMPL, rec, head) == \
+        (SIGNOFF_IMPL, None)
+
+
+def test_compute_candidate_never_approves_a_bare_tree(w, monkeypatch):
+    """A tree without a conflict-free resolution record is not ``resolved``."""
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    head = git(w.wd, "rev-parse", "HEAD")
+    base = git(w.repo, "rev-parse", "master")
+    resolution = {"paths": [], "unresolved": [
+        {"path": "pm/project.yaml", "conflicts": ["ambiguous record"]}]}
+    monkeypatch.setattr(integration, "_git_version", lambda: (2, 30))
+    monkeypatch.setattr(
+        integration, "_worktree_merge",
+        lambda *a, **k: ("f" * 40, ["pm/project.yaml"], None, resolution))
+    rec = integration.compute_candidate(str(w.wd), head, base)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["candidate_tree"] is None
 
 
 def test_valid_for_rejects_an_unresolved_resolved_record():
