@@ -1614,12 +1614,20 @@ def unresolved_paths(record: dict | None) -> set[str]:
     resolved — the CLI and the sign-off launch both label the paths.  A
     ``conflict`` record's attempt was never applied, so every path it touched
     is an attempt even when its ``unresolved`` list was truncated.
+
+    A resolution *carried forward* from an earlier applied merge is not an
+    attempt at the current conflict (see ``_carry_forward``): the merge is an
+    ancestor of HEAD, so those paths were reconciled and applied, and the
+    conflict the record now reports is somewhere else.  Marking them
+    "attempted — NOT resolved" would contradict the summary and send the agent
+    to hand-merge a file that is not conflicted.
     """
     record = record or {}
     resolution = record.get("resolution") or {}
     paths = {e.get("path") for e in resolution.get("unresolved") or []
              if e.get("path")}
-    if record.get("status") == CONFLICT:
+    if record.get("status") == CONFLICT \
+            and not resolution.get("applied_merge_sha"):
         paths |= {p.get("path") for p in resolution.get("paths") or []
                   if p.get("path")}
     return paths

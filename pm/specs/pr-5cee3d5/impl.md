@@ -248,9 +248,14 @@ lists just the resolution changes). The prompt's primary diff command names
 the exact base revision the branch contains — an applied resolution or a
 clean base merged by a bounce — instead of `origin/<base>`, which pm never
 updates and which would list the merged base commits as PR changes; the
-base-changes range is shown as the pre-apply range for an applied
-resolution, and omitted (rather than printed empty as "0 file(s)") when the
-base is inside HEAD with no recorded pre-apply range. The same exact-base
+base-changes range is shown as the pre-apply range only while the base
+inside HEAD is still the checked base (the recorded merge base equals it),
+and omitted (rather than printed empty as "0 file(s)") when the base is
+inside HEAD with no recorded pre-apply range. Once the base has moved on
+past an applied resolution, the recorded merge base is the applied base, so
+the range starts there — using the pre-apply merge base would list the
+commits the resolution already merged as new base changes and disagree with
+the recorded file count. The same exact-base
 rule applies to the review and QA prompts' own diff command (and the QA
 interactive prompt): once a bounce has integrated the base, diffing the
 workdir's stale `<base>`/`origin/<base>` ref would list the merged base
@@ -297,7 +302,12 @@ invalidates and returns to sign-off.
   delta file path; exits 1 on unresolved conflict/error. A path a failed
   attempt could not reconcile is labelled as an attempt (never "resolved"),
   in the CLI output and in the sign-off launch — the summary, the
-  `unresolved:` line and the per-path line must agree;
+  `unresolved:` line and the per-path line must agree. A resolution *carried
+  forward* from an earlier applied merge (R4) is not an attempt at the
+  current conflict: its paths were reconciled and applied, and the conflict
+  the record now reports is elsewhere, so they are not labelled "attempted —
+  NOT resolved" (the prompt calls it an earlier, already-applied resolution
+  and says the current conflict is separate);
 - `--apply` applies a `CLEAN` or `RESOLVED` candidate (the existing clean
   behavior is preserved), including a `RESOLVED` check whose re-check in
   `prepare` comes back `CLEAN` because the base moved between the two checks.
@@ -364,7 +374,9 @@ tests):
 14. Malformed evidence and honest surfaces: a non-string `qa_resume.json`
     `planner_head` is recorded as no revision and does not crash the prompt;
     the `integrate` CLI (and the launch) label a failed attempt's paths as
-    attempted, never resolved; the review and QA prompts diff against the
+    attempted, never resolved, while a resolution carried forward from an
+    earlier applied merge is not labelled an attempt (the current conflict is
+    separate); the review and QA prompts diff against the
     exact base the branch contains — the applied resolution, a newer
     `up_to_date` check, or the merge a clean bounce recorded — so the merged
     base commits never read as the PR's own changes.

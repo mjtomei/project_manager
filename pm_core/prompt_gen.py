@@ -484,7 +484,14 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         # brought (the resolution block names the same revisions).
         range_base = rec["merge_base"]
         pre = resolution.get("resolved_from") or {}
-        if resolution.get("applied_merge_sha") and pre.get("merge_base"):
+        if resolution.get("applied_merge_sha") and pre.get("merge_base") \
+                and range_base == base_sha:
+            # Only when the base is the one already inside HEAD.  If the base
+            # has moved on since the apply, the recorded merge base is the
+            # current one and the range below is already correct — using the
+            # pre-apply merge base would list the commits the resolution
+            # already merged as if they were new base changes (and disagree
+            # with the recorded base_files_count).
             range_base = pre["merge_base"]
         if range_base != base_sha:
             count = rec.get("base_files_count", 0)
@@ -504,6 +511,15 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         if resolution.get("unresolved"):
             lines.append("**Metadata conflict resolution attempted (pm, by "
                          "record id) — NOT resolved:**")
+        elif rec.get("status") in (integ.CONFLICT, integ.ERROR) \
+                and resolution.get("applied_merge_sha"):
+            # The record carries a resolution an earlier merge applied (see
+            # integration._carry_forward); the conflict/error above is a
+            # different, current problem.  Do not present the applied
+            # resolution as this check's outcome.
+            lines.append("**Earlier metadata conflict resolution (pm, by "
+                         "record id), already applied — the conflict above is "
+                         "separate:**")
         else:
             lines.append("**Metadata conflict resolution (pm, by record id):**")
         for entry in resolution.get("paths") or []:

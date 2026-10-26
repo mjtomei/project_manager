@@ -1446,6 +1446,37 @@ def test_signoff_prompt_falls_back_to_the_base_branch_for_an_unmerged_base(w):
     assert "0 file(s)" not in text
 
 
+def test_prompt_base_range_after_the_base_moves_past_an_applied_resolution(w):
+    """A later base move is not re-described as the whole pre-apply range.
+
+    The applied resolution is carried forward, but the recorded merge base is
+    now the applied base.  The "base changes" range must start there: using
+    the pre-apply merge base would list the commits the resolution already
+    merged as new base changes, and the recorded file count (computed over
+    the current range) would no longer match.
+    """
+    rec = _metadata_conflict(w)
+    applied_base = rec["base_sha"]
+    pre_merge_base = rec["resolution"]["resolved_from"]["merge_base"]
+    assert pre_merge_base != applied_base
+
+    # The base moves on cleanly: nothing for the resolution to reconcile.
+    commit(w.repo, "base_only.txt", "base\n", "base moves ahead")
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.CLEAN, again
+    assert again["merge_base"] == applied_base
+    assert again["resolution"]["applied_merge_sha"]
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert (f"git log --oneline {applied_base[:12]}.."
+            f"{again['base_sha'][:12]}") in text
+    assert f"{pre_merge_base[:12]}.." not in text
+    assert "(1 file(s))" in text
+
+
 def test_review_and_qa_prompts_diff_against_the_applied_base(w):
     """Review/QA prompts must not list the merged base commits as PR changes.
 
@@ -1738,6 +1769,49 @@ def test_integrate_cli_never_calls_a_failed_resolution_resolved(w):
     assert "attempted: pm/project.yaml (by record id — NOT resolved)" in r.output
     assert "\n  resolved: pm/project.yaml" not in r.output
     assert "unresolved: pm/project.yaml" in r.output
+
+
+def test_a_carried_applied_resolution_is_not_labelled_a_failed_attempt(w):
+    """A resolution carried from an earlier applied merge is not an attempt.
+
+    ``integration._carry_forward`` keeps an applied resolution on a later
+    ``conflict``/``error`` record so its provenance (and the explicit-reuse
+    requirement) survives.  The current conflict is then somewhere else (here
+    a code file), so the per-path line must not claim pm failed to reconcile
+    ``project.yaml`` — that would contradict the summary and send the agent to
+    hand-merge a file that is not conflicted.
+    """
+    rec = _metadata_conflict(w)
+    applied = rec["resolution"]["applied_merge_sha"]
+    # The branch and a new base commit now conflict on code, not metadata.
+    commit(w.wd, "shared.txt", "pr\n", "branch edits shared")
+    commit(w.repo, "shared.txt", "base\nmore\n", "base edits shared")
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.CONFLICT
+    assert again["conflicts"] == ["shared.txt"]
+    # The applied resolution is carried forward ...
+    assert again["resolution"]["applied_merge_sha"] == applied
+    # ... but it is not a failed attempt at the current conflict.
+    assert integration.unresolved_paths(again) == set()
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(
+            pr_mod.pr, ["signoff", "integrate", PR, "--record"])
+    assert r.exit_code != 0
+    assert "conflicts: shared.txt" in r.output
+    assert "NOT resolved" not in r.output
+    assert "resolved: pm/project.yaml (by record id)" in r.output
+
+    # The sign-off prompt names the current conflict and qualifies the earlier
+    # resolution instead of presenting it as this check's outcome.
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "Conflicting paths: `shared.txt`" in text
+    assert "already applied" in text
 
 
 def test_integrate_cli_apply_applies_a_clean_recheck_of_a_resolved_check(w):
