@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T13:52:58.941106+00:00'
+  updated_at: '2026-10-26T14:07:20.486607+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16201,6 +16201,33 @@ prs:
       QA/sign-off remain required. No architectural blocker or new standalone follow-up.'
     created_at: '2026-10-26T13:52:58Z'
     last_edited: '2026-10-26T13:52:58Z'
+  - id: note-693689a
+    text: 'Review 1eaf i3: fixed a remaining refresh atomicity hole: a PR retaining
+      gh_pr_number but missing its local id passed nav construction and then crashed
+      during rendering; null/empty/non-string ids could also produce invalid commands.
+      Navigation construction now validates local ids before publishing the snapshot.
+      Fixed falsey title normalization (0 now renders as 0; only null is blank). Added
+      19 regression cases; 17 invalid-id cases and 2 falsey-title cases failed before
+      fixes, targeted popup/session suite now 308 passed. Implementation and QA E6
+      updated. Full final suite pending; earlier review-1eaf-i3-full.txt was stopped
+      and is superseded. Evidence /pm-captures/review-1eaf-i3-{repro,title-repro,targeted-final,summary}.txt.
+      No architectural blocker, no standalone follow-ups, no live QA PASS claimed.
+      Fresh review/live QA/sign-off remain required; preserve prior R13/E10 and updated
+      E6 coverage. Transfer stash and verify-s15-followup.md retained unchanged.'
+    created_at: '2026-10-26T14:06:10Z'
+    last_edited: '2026-10-26T14:06:10Z'
+  - id: note-bed37cd
+    text: 'Review 1eaf i3 final validation: full suite after final code edits passed:
+      3588 passed, 1 skipped, 3 warnings in 165.11s. Used real git (PATH=/usr/bin:/bin),
+      scratch-only declared markdown dependency, and unset PM_HOST_HOME for the previously
+      verified installer-fixture environment issue. Expanded popup/session subset:
+      308 passed. Evidence: /pm-captures/review-1eaf-i3-full-final.txt, /pm-captures/review-1eaf-i3-targeted-final.txt,
+      /pm-captures/review-1eaf-i3-summary.txt. Earlier full run was stopped before
+      fixes and is superseded. NEEDS_WORK because fixes were applied; fresh native
+      review, live QA including malformed numbered-id recovery and prior R13/E10 coverage,
+      and sign-off remain required. No live QA PASS claimed.'
+    created_at: '2026-10-26T14:07:20Z'
+    last_edited: '2026-10-26T14:07:20Z'
   model: provider:chatgpt-astra
   session_models:
     impl: provider:chatgpt-astra

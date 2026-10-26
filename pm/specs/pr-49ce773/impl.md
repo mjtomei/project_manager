@@ -78,8 +78,11 @@
    are recomputed every render since `n` can change.  A failed reload logs
    a warning and keeps the complete previous state: build the replacement
    window maps and navigation inside the error handler before assigning any
-   state, including when YAML parses but a PR entry is malformed.  h/l/←/→ (and 0 with a home
-   PR) stay in `--expect` even when the list has one entry — unadvertised,
+   state, including when YAML parses but a PR entry is malformed. Validate that
+   every entry has a non-empty string local `id` before building navigation:
+   `gh_pr_number` alone can provide a display id but cannot support dispatch.
+   h/l/←/→ (and 0 with a home PR) stay in `--expect` even when the list has
+   one entry — unadvertised,
    they act as a reload, so a PR that is reopened or gains a window after
    the list collapsed to one entry is still reachable (QA E4; observed by
    the S3 refiner).
@@ -141,7 +144,8 @@ number must show the lookup-failure notice, not another PR's actions.
 - `z s` chord started before the PR merged: re-checked at the second key,
   no fresh-start command is built for the merged PR.
 - A null or numeric title loaded from YAML must not crash rendering: coerce
-  presentation titles to text (null renders blank) before truncation.
+  presentation titles to text (only null renders blank, zero renders `0`)
+  before truncation.
 - QA scenario-only windows (`qa-#N-s1`) count as open windows for the nav
   list, matching `_build_picker_lines`' `[open]` matching.
 

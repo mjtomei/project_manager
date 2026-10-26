@@ -893,7 +893,55 @@ class TestPopupPickerMergedNavigation:
 
 
 class TestPopupPickerRefreshFailures:
-    @pytest.mark.parametrize("title", [None, 123])
+    @pytest.mark.parametrize("bad_id", [None, "", 123, ["pr-a"], "missing"])
+    @pytest.mark.parametrize("key", ["s", "0", "l"])
+    def test_numbered_pr_with_invalid_local_id_keeps_snapshot(
+            self, tmp_path, monkeypatch, bad_id, key):
+        import yaml
+        from pm_core.cli import session as sess
+
+        prs = [_pr("pr-a", gh_pr_number=12), _pr("pr-b")]
+        real_load = sess.store.load
+
+        def on_launch(n):
+            if n == 1:
+                broken = dict(prs[0], id=bad_id)
+                if bad_id == "missing":
+                    broken.pop("id")
+                (tmp_path / "project.yaml").write_text(
+                    yaml.safe_dump({"prs": [broken, prs[1]]}))
+                # The real loader accepts these ids; refresh must validate
+                # them before replacing the last-good picker snapshot.
+                prs[:] = real_load(tmp_path)["prs"]
+            elif n == 2:
+                prs[0] = _pr("pr-a", status="merged", gh_pr_number=12)
+
+        with patch.object(sess, "_log") as log:
+            fzf, run_cmd = _run_picker(
+                tmp_path, monkeypatch, prs, ["#12", "pr-b"], "#12",
+                [(0, f"{key}\n"), (0, "0\n"), (130, "")],
+                on_launch=on_launch)
+        assert len(fzf.calls) == 3
+        assert "No actions — PR is merged." in fzf.calls[-1]["input"]
+        assert any("refresh failed" in c.args[0]
+                   for c in log.warning.call_args_list)
+        run_cmd.assert_not_called()
+
+    @pytest.mark.parametrize("choice", ["1", "s"])
+    def test_numbered_pr_missing_local_id_blocks_fallback(
+            self, tmp_path, monkeypatch, choice):
+        prs = [_pr("pr-a", gh_pr_number=12)]
+
+        def choose(prompt):
+            prs[0].pop("id")
+            return choice
+
+        with patch("builtins.input", side_effect=choose):
+            _, run_cmd = _run_picker(
+                tmp_path, monkeypatch, prs, ["#12"], "#12", [], has_fzf=False)
+        run_cmd.assert_not_called()
+
+    @pytest.mark.parametrize("title", [None, 123, 0, False])
     def test_non_string_title_does_not_crash_navigation(self, tmp_path, monkeypatch, title):
         prs = [_pr("pr-a"), _pr("pr-b")]
 
@@ -909,6 +957,9 @@ class TestPopupPickerRefreshFailures:
             "PR Actions — pr-b  (2/2)",
             "PR Actions — pr-a  (1/2)",
         ]
+        rendered_title = "" if title is None else str(title)
+        assert fzf.calls[1]["input"].splitlines()[0] == (
+            f"  pr-b  (in_progress)  {rendered_title}")
         run_cmd.assert_not_called()
 
     @pytest.mark.parametrize("mode", ["shortcut", "enter", "fresh", "loop"])

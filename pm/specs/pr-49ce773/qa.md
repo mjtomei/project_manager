@@ -129,12 +129,16 @@ E6. **Given** project.yaml is momentarily unparsable while the popup is open,
 **When** the user navigates, **Then** the popup keeps the complete last-good
 snapshot (warning in log), does not crash, and navigation still works within
 that snapshot. Repeat with syntactically valid YAML containing a PR mapping
-with `status` but no `id`; after repairing the file, the next nav key reloads
-normally. While refresh is failing, shortcut, Enter-on-action, fresh/loop chord
-and no-fzf selections must not dispatch cached actions. Repair the file with
+with `status` but no `id`, including a numbered home PR whose `gh_pr_number`
+still resolves its display id. Also try null, empty and non-string local ids;
+none may replace the last-good snapshot or be used in a command. After repairing
+the file, the next nav key reloads normally. While refresh is failing, shortcut,
+Enter-on-action, fresh/loop chord and no-fzf selections must not dispatch cached
+actions. Repair the file with
 the selected PR merged/closed; the next fzf action attempt shows its notice
-without dispatch. Also try `title: null` and a numeric title on a live PR:
-navigation remains usable and titles render as blank/text rather than crashing.
+without dispatch. Also try `title: null` and numeric titles (including `0`)
+on a live PR: navigation remains usable and titles render as blank/text rather
+than crashing; zero must render as `0`, not blank.
 E7. **Given** the home PR's windows are all closed while the popup is open,
 **When** user presses home, **Then** home PR still shown.
 E8. **Given** a live PR is shown, **When** the user moves to an action row and

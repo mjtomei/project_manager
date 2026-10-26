@@ -1170,6 +1170,14 @@ def _build_nav_entries(
     """
     from pm_core.cli.helpers import _pr_display_id
 
+    # A GitHub number can provide a display id even when the local id is
+    # missing or malformed. Commands still require the local id, so reject
+    # such snapshots here, inside the refresh transaction, before rendering.
+    for pr in prs:
+        pr_id = pr.get("id") if isinstance(pr, dict) else None
+        if not isinstance(pr_id, str) or not pr_id.strip():
+            raise ValueError("Picker PR entry requires a non-empty string id")
+
     home = _find_pr_for_window_id(prs, window_pr_id) if window_pr_id else None
     home_pr = _pr_display_id(home) if home is not None else window_pr_id
 
@@ -1266,7 +1274,8 @@ def _build_picker_lines(
         return []
 
     lines: list[tuple[str, str, str]] = []
-    title = str(pr.get("title") or "")
+    title = pr.get("title")
+    title = "" if title is None else str(title)
     max_title = 40
     short_title = (title[:max_title - 1] + "…") if len(title) > max_title else title
 
