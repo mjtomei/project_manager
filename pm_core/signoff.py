@@ -202,7 +202,14 @@ def stamp_signoff_launch(transcript, sha: str | None,
 
     *base_sha* (second line) is the base revision of the integration check
     the run was launched with: its verdict may only bind to that check.
+
+    *base_sha* is hand-editable state by the time it reaches here
+    (``prepare`` can return the stored record when a concurrent apply won):
+    a non-string value is not a revision, so it stamps nothing instead of
+    raising out of the sign-off launch.  The same guard covers *sha*.
     """
+    sha = sha if isinstance(sha, str) and sha else None
+    base_sha = base_sha if isinstance(base_sha, str) and base_sha else None
     stamp = signoff_launch_stamp(transcript)
     try:
         if sha:

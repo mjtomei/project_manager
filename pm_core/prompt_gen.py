@@ -477,6 +477,13 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
             # already merged as if they were new base changes (and disagree
             # with the recorded base_files_count).
             range_base = pre["merge_base"]
+        elif range_base == base_sha \
+                and isinstance(rec.get("base_range_from"), str) \
+                and rec["base_range_from"]:
+            # A clean base merged by a bounce has no resolution to name the
+            # pre-merge range; the check that saw the base outside the branch
+            # recorded it (``integration._carry_base_interaction``).
+            range_base = rec["base_range_from"]
         if range_base != base_sha:
             count = rec.get("base_files_count", 0)
             lines.append(

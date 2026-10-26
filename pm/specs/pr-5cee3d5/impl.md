@@ -141,6 +141,20 @@ base-changes range) and the overlap onto the applied record, and a later
 re-check carries them forward with the resolution (the compact record keeps
 the count when only `base_files_count` survives).
 
+A **clean** base merged by a bounce (`_prepare_bounce` applies a `CLEAN`
+record too) has no resolution to carry, yet it puts the base inside HEAD the
+same way: the next check's `merge-base(HEAD, base)` is the base itself, so its
+own base diff is empty. The same requirement therefore applies without a
+resolution: `integration._carry_base_interaction` carries the earlier check's
+`base_files`/`base_files_count`, `overlap`, `base_behavior_changes` (and
+`base_behavior_error`) when the old record assessed the *same* base revision
+and the branch now contains it (a check that still sees a base diff of its
+own has a newer summary and keeps it). It also records the pre-merge merge
+base as `base_range_from` (the recorded `merge_base` is the base itself now,
+which would print as an empty range), so the sign-off prompt still names the
+range the base brought; the prompt falls back to it only when the recorded
+merge base equals the fetched base.
+
 ### R4. Apply the resolved merge to the PR branch before sign-off runs
 For the GitHub backend `gh pr merge` cannot merge a conflicted branch, and
 sign-off's report/verdict must bind to a candidate that can actually be
@@ -396,7 +410,11 @@ tests):
    evidence instructions; `integrate` prints the resolution; after an applied
    resolution the prompt still lists the files changed on both sides and the
    base-changes file count (carried through the post-apply re-check and a
-   later one).
+   later one). The same must hold after a **clean** base merged by a bounce:
+   the next sign-off keeps the base's behaviour changes, the file count and
+   the pre-merge base range (`base_range_from`), and the merge gate still
+   requires the evidence statement; a newer base's own summary replaces the
+   carried one.
 10. Notes appended to the same PR record on both sides (the merge base has no
     `notes` key) resolve, both notes survive, and the nested ids are named in
     the summary/prompt; the same id with different content is still ambiguous.
@@ -478,7 +496,11 @@ tests):
     resolution's provenance is still carried. A carry-forward
     of an already-bounded list also keeps its recorded total
     (`overlap_total`, `base_behavior_count`), so the prompt does not
-    under-report "… N more" after the re-check.
+    under-report "… N more" after the re-check. The sign-off launch stamp is
+    another: `prepare` can return the *stored* record when a concurrent apply
+    won, so `stamp_signoff_launch` receives a hand-editable `base_sha`; a
+    non-string value stamps nothing instead of raising `TypeError` out of the
+    launch before the sign-off window is created.
 
 ## Implicit requirements
 

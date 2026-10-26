@@ -1469,13 +1469,66 @@ def _carry_base_files(record: dict, old: dict) -> None:
             record["overlap_total"] = total
 
 
+def _carry_base_interaction(record: dict, old: dict) -> None:
+    """Keep an earlier check's base-interaction summary on *record*.
+
+    A clean base merged by a bounce puts the base inside HEAD without a
+    resolution to carry (``_prepare_bounce`` applies it; only a resolved
+    candidate re-records the applied record).  The next check's own base diff
+    is then empty — ``merge-base(HEAD, base)`` is the base itself — so the
+    files the base changed, the overlap and the behaviour-relevant changes
+    would vanish from the sign-off prompt, and with them the merge gate's
+    evidence requirement, even though the check still describes the same base
+    revision.  Carry them while the old record assessed that same base and
+    the branch now contains it.
+
+    The pre-merge merge base is carried as ``base_range_from`` so the prompt
+    can still show the base-changes range: the recorded ``merge_base`` is the
+    base itself now and would print as an empty range.
+    """
+    old_base = revision_of(old.get("base_sha"))
+    new_base = revision_of(record.get("base_sha"))
+    if not (old_base and old_base == new_base):
+        return
+    # ``merge-base(HEAD, base) == base`` means the branch contains the base.
+    # A check that still sees a base diff of its own (the base moved on) has
+    # its own, newer summary and must not inherit this one.
+    if record.get("merge_base") != new_base or record.get("base_files"):
+        return
+    if not (old.get("base_files") or old.get("base_files_count")
+            or old.get("overlap") or old.get("base_behavior_changes")
+            or old.get("base_behavior_error")):
+        return
+    _carry_base_files(record, old)
+    old_range = revision_of(old.get("base_range_from"))
+    if not old_range and revision_of(old.get("merge_base")) != new_base:
+        # The check that saw the base outside the branch recorded the real
+        # pre-merge merge base; a later re-check only carries it forward.
+        old_range = revision_of(old.get("merge_base"))
+    if old_range and old_range != new_base:
+        record["base_range_from"] = old_range
+    old_behavior = _as_list(old.get("base_behavior_changes"))
+    if old_behavior:
+        own_behavior = _as_list(record.get("base_behavior_changes"))
+        record["base_behavior_changes"] = list(dict.fromkeys(
+            old_behavior + own_behavior))
+        if not own_behavior:
+            _carry_behavior_total(record, old, old_behavior)
+    if old.get("base_behavior_error") \
+            and not record.get("base_behavior_changes") \
+            and not record.get("base_behavior_error"):
+        record["base_behavior_error"] = old["base_behavior_error"]
+
+
 def _carry_forward(record: dict, pr_entry: dict) -> dict:
     """Carry provenance from *pr_entry*'s stored record onto *record*.
 
     A re-check after pm applied a resolved candidate sees a clean/up-to-date
     merge; the resolution that produced the applied head must stay visible
     (and bound), so it is carried when the applied merge is an ancestor of
-    the new HEAD.
+    the new HEAD.  A clean base merged by a bounce carries no resolution, so
+    its base-interaction summary is carried separately (see
+    :func:`_carry_base_interaction`).
     """
     old = _mapping(pr_entry.get("integration"))
     old_resolution = resolution_of(old)
@@ -1553,6 +1606,11 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
                 _carry_behavior_total(record, old, carried_behavior)
         if old.get("base_behavior_error"):
             record["base_behavior_error"] = old["base_behavior_error"]
+    elif not record.get("resolution") and not old_resolution:
+        # No resolution on either side: this is the clean-bounce path (or a
+        # plain re-check).  The base-interaction summary must survive the
+        # base moving into HEAD the same way it does for a resolution.
+        _carry_base_interaction(record, old)
     return record
 
 

@@ -3379,3 +3379,83 @@ def test_the_prompt_says_a_resolution_was_not_applied(w):
     assert "**Not applied**" in text
     assert "has not been applied yet" in text
     assert "Applied to the PR branch as" not in text
+
+
+def test_a_clean_bounce_keeps_the_base_interaction_summary(w):
+    """A clean base merged by a bounce must not lose what the base brought.
+
+    ``_prepare_bounce`` merges a clean base into the branch without a
+    resolution, so the next check sees the base inside HEAD and its own base
+    diff is empty.  Losing the earlier summary would hide the
+    behaviour-relevant base changes from the sign-off prompt and stop the
+    merge gate requiring the explicit evidence statement — the same hole the
+    applied-resolution carry-forward closes.
+    """
+    commit(w.repo, "pyproject.toml", "[project]\nname = 'p'\n", "base config")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN, rec
+    assert any("pyproject.toml" in c for c in rec["base_behavior_changes"])
+    pre_merge_base = rec["merge_base"]
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, rec["head"], rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert any("pyproject.toml" in c
+               for c in again["base_behavior_changes"]), again
+    assert again["base_range_from"] == pre_merge_base
+    stored = pr_entry(w)["integration"]
+    assert stored["base_files_count"] == 1, stored
+    # The merge gate must still ask for the explicit reuse/checks statement.
+    assert signoff.approval_justification_problem(PR, stored, again["head"])
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "`pyproject.toml` changed on the base" in text
+    assert f"{pre_merge_base[:12]}..{again['base_sha'][:12]}" in text
+    assert "(1 file(s))" in text
+
+    # A later launch re-checks again: the compact record carries the summary.
+    later = integration.prepare(w.pm_dir, PR)
+    assert any("pyproject.toml" in c for c in later["base_behavior_changes"])
+    assert later["base_range_from"] == pre_merge_base
+
+
+def test_a_new_base_does_not_inherit_the_earlier_bases_summary(w):
+    """Once the base moves on, its own changes replace the carried summary."""
+    commit(w.repo, "pyproject.toml", "[project]\nname = 'p'\n", "base config")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN, rec
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, rec["head"], rec["base_sha"])
+    signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    integration.prepare(w.pm_dir, PR)
+
+    commit(w.repo, "requirements.txt", "pytest\n", "base moves on")
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.CLEAN, again
+    assert any("requirements.txt" in c
+               for c in again["base_behavior_changes"]), again
+    assert not any("pyproject.toml" in c
+                   for c in again["base_behavior_changes"]), again
+    assert again["base_files"] == ["requirements.txt"], again
+    assert "base_range_from" not in again
+
+
+def test_stamp_signoff_launch_ignores_a_non_string_revision(w):
+    """A hand-edited non-string base revision must not crash the launch."""
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    sha = "a" * 40
+    signoff.stamp_signoff_launch(transcript, sha, 5)
+    assert signoff.signoff_launched_sha(w.tdir, PR) == sha
+    assert signoff.signoff_launched_base(w.tdir, PR) is None
