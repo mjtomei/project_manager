@@ -319,6 +319,9 @@ intact to protect concurrent waiters and delayed releases.
   before its required chown, and propagate either command's failure. Ownership
   repair explicitly execs as root on both Podman and Docker, since the image may
   declare `USER pm`; Docker's copied config ownership repair does the same.
+  Stopped allocations also require a fresh live-owner check before recreation;
+  stopped state alone does not authorize deleting a live pane's filesystem,
+  and unavailable ownership inspection refuses recreation.
 
 ### R6 — Real launch errors
 `ContainerLaunchError(ContainerError)` carries `kind`
@@ -377,7 +380,13 @@ ID/generation before dispatch and rechecks it under the launch lock. A concurren
 replacement or reused allocation is skipped, and removal plus proxy release
 remain inside the lock. Retention-aware bulk callers carry their retention policy
 into the removal worker and recheck it under that lock, so a retention marker
-written after inventory still protects the allocation.
+written after inventory still protects the allocation. Explicit bulk cleanup
+persists partial failures and reports them through PR/session cleanup summaries
+and CLI failure status, rather than treating an empty removed list as success.
+All container failure diagnostics carry the captured allocation ID so a later
+same-name replacement retires stale errors without granting owner-release authority.
+Explicit and automatic outcome writes share a bounded state lock to preserve
+concurrent failures; inability to persist an outcome is itself reported.
 
 ### R8 — Bounded launch concurrency / backpressure
 - A process-wide semaphore bounds concurrent container creates

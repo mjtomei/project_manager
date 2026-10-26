@@ -313,6 +313,7 @@ def test_stopped_preclean_uses_identity_captured_before_state(monkeypatch, tmp_p
     monkeypatch.setattr(cm, "current_container_id", identity)
     monkeypatch.setattr(cm, "container_is_running", running)
     monkeypatch.setattr(reaper, "is_retained", lambda *a: allocation == "retained")
+    monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
     remove = Mock()
     monkeypatch.setattr(cm, "remove_container", remove)
     if allocation == "retained":

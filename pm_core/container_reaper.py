@@ -1071,7 +1071,8 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
         full_pass = scope == Scope()
         inventory = {d.info.name for d in out.decisions}
         _prune_releases(out, scope, listed_at)
-        _record(out, scope, reason, inventory=inventory if full_pass else None)
+        _record(out, scope, reason, inventory=inventory if full_pass else None,
+                observed_at=listed_at)
         if full_pass:
             _prune_lock_files(inventory)
             _prune_retain_markers({d.info.name: d.info.id for d in out.decisions
@@ -1226,23 +1227,39 @@ def last_state() -> dict:
 
 
 def _record(out: Outcome, scope: Scope, reason: str,
-            inventory: set[str] | None = None) -> None:
+            inventory: set[str] | None = None, *, observed_at: float | None = None) -> None:
     """Persist the outcome; *inventory* (full-scope passes) prunes failures
     for containers that no longer exist."""
+    # Explicit bulk cleanup also publishes outcomes. Serialize the read/merge/
+    # replace with ordinary reconcile so one process cannot erase the other's
+    # failed removals or race on the temporary file.
+    with container_mod._file_lock("reaper-state", timeout=30) as locked:
+        if not locked:
+            out.failures["cleanup state"] = "cleanup outcome lock unavailable; retry with pm container reap"
+            return
+        _record_locked(out, scope, reason, inventory, observed_at)
+
+
+def _record_locked(out: Outcome, scope: Scope, reason: str,
+                   inventory: set[str] | None = None,
+                   observed_at: float | None = None) -> None:
     prev = last_state()
     failures = dict(prev.get("failures") or {})
     domain = _runtime_domain()
     if inventory is not None and domain is not None:
         failures = {k: v for k, v in failures.items()
-                    if k in inventory or k.startswith("push proxy ")}
+                    if k in inventory or k.startswith("push proxy ")
+                    or observed_at is not None and v.get("at", 0) >= observed_at}
     for proxy in out.proxies_released:
         failures.pop(f"push proxy {proxy}", None)
-    if "push proxy sweep" not in out.failures:
+    if reason != "explicit-cleanup" and "push proxy sweep" not in out.failures:
         failures.pop("push proxy sweep", None)
     for d in out.decisions:
         if domain is None:
             continue  # unknown inventory domain cannot retire legacy failures
         previous = failures.get(d.info.name, {})
+        if observed_at is not None and previous.get("at", 0) >= observed_at:
+            continue  # a bulk result newer than this inventory is not stale
         if (d.info.name in out.removed or
                 previous.get("id") and previous["id"] != d.info.id or
                 previous.get("owner_release") and
@@ -1250,11 +1267,13 @@ def _record(out: Outcome, scope: Scope, reason: str,
             failures.pop(d.info.name, None)
     ids = {d.info.name: d.info.id for d in out.decisions}
     for name, err in out.failures.items():
-        failures[name] = {"error": err, "at": int(time.time()), "reason": reason}
+        if observed_at is not None and failures.get(name, {}).get("at", 0) >= observed_at:
+            continue
+        failures[name] = {"error": err, "at": time.time(), "reason": reason}
+        if ids.get(name):
+            failures[name]["id"] = ids[name]
         if name in out.released_failures:
             failures[name]["owner_release"] = True
-            if ids.get(name):
-                failures[name]["id"] = ids[name]
             decision = next((d for d in out.decisions if d.info.name == name), None)
             if decision and decision.release_generation is not None:
                 failures[name]["generation"] = decision.release_generation
@@ -1272,8 +1291,9 @@ def _record(out: Outcome, scope: Scope, reason: str,
         tmp = f.with_suffix(".tmp")
         tmp.write_text(json.dumps(state, indent=1))
         os.replace(tmp, f)
-    except OSError:
-        _log.debug("could not record reaper state", exc_info=True)
+    except OSError as exc:
+        out.failures["cleanup state"] = f"could not persist cleanup outcome: {exc}"
+        _log.warning("could not record reaper state", exc_info=True)
 
 
 def pending_failures() -> dict[str, dict]:

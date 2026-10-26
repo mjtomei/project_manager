@@ -330,6 +330,10 @@ class TestNestedPodmanRunArgs:
 
 @patch("pm_core.container.container_is_running", return_value=False)
 class TestCreateContainerPodman:
+    @pytest.fixture(autouse=True)
+    def unowned(self, monkeypatch):
+        monkeypatch.setattr("pm_core.container_reaper.live_owner_panes", lambda *a: [])
+
     """Podman-specific create_container tests."""
 
     @patch("pm_core.container._get_runtime", return_value="podman")
@@ -493,6 +497,10 @@ class TestCreateContainerPodman:
 @patch("pm_core.container._get_runtime", return_value="docker")
 @patch("pm_core.container.container_is_running", return_value=False)
 class TestCreateContainer:
+    @pytest.fixture(autouse=True)
+    def unowned(self, monkeypatch):
+        monkeypatch.setattr("pm_core.container_reaper.live_owner_panes", lambda *a: [])
+
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")
@@ -770,8 +778,9 @@ class TestContainerReuse:
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")
     def test_creates_new_when_not_running(self, mock_docker, mock_rm,
-                                          mock_running, mock_exists, _mock_runtime):
-        """A new container is created when none exists."""
+                                          mock_running, mock_exists, _mock_runtime, monkeypatch):
+        """A new container replaces a stopped, unowned allocation."""
+        monkeypatch.setattr("pm_core.container_reaper.live_owner_panes", lambda *a: [])
         mock_docker.return_value = MagicMock(stdout="newid\n", returncode=0)
         config = ContainerConfig()
         cid = create_container(name="pm-test", config=config,
@@ -1167,6 +1176,10 @@ class TestBuildGitSetupScript:
 @patch("pm_core.container._get_runtime", return_value="docker")
 @patch("pm_core.container.container_is_running", return_value=False)
 class TestCreateContainerPushProxy:
+    @pytest.fixture(autouse=True)
+    def unowned(self, monkeypatch):
+        monkeypatch.setattr("pm_core.container_reaper.live_owner_panes", lambda *a: [])
+
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.push_proxy.start_push_proxy",
            return_value="/tmp/pm-push-proxy-test/push.sock")

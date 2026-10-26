@@ -98,6 +98,33 @@ def test_qa_recovery_accepts_identity_before_restart(reusable, monkeypatch):
                                reuse_identity=reusable) == "cid"
 
 
+@pytest.mark.parametrize("ownership", ["live", "unknown", "unowned"])
+def test_stopped_reuse_checks_owner_before_removing(monkeypatch, ownership):
+    monkeypatch.setattr(cm, "current_container_id", lambda *a: "cid")
+    monkeypatch.setattr(cm, "container_is_running", lambda *a: False)
+    monkeypatch.setattr(reaper, "is_retained", lambda *a: False)
+    owners = Mock(return_value=["%original"] if ownership == "live" else [])
+    if ownership == "unknown":
+        owners.side_effect = cm.ContainerError("tmux ownership unavailable")
+    monkeypatch.setattr(reaper, "live_owner_panes", owners)
+    remove = Mock()
+    monkeypatch.setattr(cm, "remove_container", remove)
+    fresh = Mock(return_value="new-id")
+    monkeypatch.setattr(cm, "_create_fresh", fresh)
+    monkeypatch.setattr(cm, "_renew_launch", Mock())
+
+    if ownership == "unowned":
+        assert cm.create_container(NAME, cm.ContainerConfig(), Path("/w")) == "new-id"
+        remove.assert_called_once_with(NAME, container_id="cid")
+        fresh.assert_called_once()
+    else:
+        with pytest.raises(cm.ContainerError, match="live pane|ownership unavailable"):
+            cm.create_container(NAME, cm.ContainerConfig(), Path("/w"))
+        remove.assert_not_called()
+        fresh.assert_not_called()
+    owners.assert_called_once_with(NAME, "cid")
+
+
 def test_qa_relaunch_passes_captured_ownership(monkeypatch):
     scenario = qa_loop.QAScenario(index=1, title="test", focus="", steps="",
                                  container_name=NAME, container_id="cid",

@@ -3051,6 +3051,9 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
         if summary["registry_windows"]:
             click.echo(f"  registry: {', '.join(summary['registry_windows'])}")
         trigger_tui_refresh()
+        if summary.get("container_failures"):
+            click.echo("Container cleanup incomplete; retry with 'pm container reap'.", err=True)
+            raise SystemExit(1)
         return
 
     if prune:

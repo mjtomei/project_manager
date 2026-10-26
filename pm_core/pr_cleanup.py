@@ -42,7 +42,7 @@ def cleanup_pr_resources(session: str | None, pr: dict, *,
     call when no resources exist. Returns a summary dict::
 
         {"windows": [...], "containers": [...], "registry_windows": [...],
-         "sockets": [...]}
+         "sockets": [...], "container_failures": {name: error}}
 
     *background_containers* (automatic callers on the TUI event loop) hands
     the containers to a background, PR-scoped reconcile instead: removal
@@ -52,7 +52,7 @@ def cleanup_pr_resources(session: str | None, pr: dict, *,
     pr_id = pr["id"]
     display_id = _pr_display_id(pr)
     summary = {"windows": [], "containers": [], "registry_windows": [],
-               "sockets": [], "runtime_state": False}
+               "sockets": [], "runtime_state": False, "container_failures": {}}
 
     if session:
         try:
@@ -69,8 +69,9 @@ def cleanup_pr_resources(session: str | None, pr: dict, *,
     else:
         try:
             summary["containers"] = container_mod.cleanup_pr_containers(
-                pr_id, session_tag=session_tag)
-        except Exception as e:  # pragma: no cover
+                pr_id, session_tag=session_tag, failures=summary["container_failures"])
+        except Exception as e:
+            summary["container_failures"]["container cleanup"] = str(e)
             _log.warning("cleanup_pr_containers failed: %s", e)
 
     # remove_container already released these proxies. Never stop them again
@@ -110,4 +111,9 @@ def format_summary(summary: dict) -> str:
         parts.append(f"{len(summary['containers'])} container(s)")
     if summary["registry_windows"]:
         parts.append(f"{len(summary['registry_windows'])} registry entry(s)")
+    failures = summary.get("container_failures") or {}
+    if failures:
+        details = "; ".join(f"{name}: {error}" for name, error in failures.items())
+        parts.append(f"{len(failures)} container cleanup failure(s) ({details}); "
+                     "retry with pm container reap")
     return ", ".join(parts) if parts else "nothing to clean"

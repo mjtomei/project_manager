@@ -1455,6 +1455,12 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
         if container_reaper.is_retained(name, container_id):
             raise launch_error(name, "incomplete", "container is explicitly retained; release it before recreation",
                                stage="be reused")
+        owners = container_reaper.live_owner_panes(name, container_id)
+        if owners:
+            raise launch_error(
+                name, "incomplete",
+                f"live pane(s) {', '.join(owners)} still own the stopped container; "
+                "close that session before recreation", stage="be reused")
         remove_container(name, container_id=container_id)
         return None
 
@@ -2580,6 +2586,7 @@ def remove_containers(names: list[str], *, workers: int = 4,
     removed: list[str] = []
     failures: dict[str, str] = {}
     allocations: list[tuple[str, str, str]] = []
+    captured_ids: dict[str, str] = {}
     for name in dict.fromkeys(names):
         try:
             with launch_lock(name) as locked:
@@ -2590,23 +2597,38 @@ def remove_containers(names: list[str], *, workers: int = 4,
                     raise ContainerError(f"Container '{name}' identity unknown during cleanup")
                 if not cid:
                     continue
+                captured_ids[name] = cid
                 allocations.append((name, cid, cleanup_generation(name)))
         except Exception as exc:
             failures[name] = str(exc)
-    if not allocations:
-        return removed, failures
-    with ThreadPoolExecutor(max_workers=max(1, min(len(allocations), workers))) as ex:
-        futures = [(c, ex.submit(contextvars.copy_context().run,
-                                _remove_captured_container, c, cid, generation,
-                                include_retained))
-                   for c, cid, generation in allocations]
-        for cname, fut in futures:
-            try:
-                if fut.result():
-                    removed.append(cname)
-            except Exception as e:
-                _log.warning("remove_container(%s) failed: %s", cname, e)
-                failures[cname] = str(e)
+    if allocations:
+        with ThreadPoolExecutor(max_workers=max(1, min(len(allocations), workers))) as ex:
+            futures = [(c, ex.submit(contextvars.copy_context().run,
+                                    _remove_captured_container, c, cid, generation,
+                                    include_retained))
+                       for c, cid, generation in allocations]
+            for cname, fut in futures:
+                try:
+                    if fut.result():
+                        removed.append(cname)
+                except Exception as e:
+                    _log.warning("remove_container(%s) failed: %s", cname, e)
+                    failures[cname] = str(e)
+    if removed or failures:
+        from pm_core import container_reaper
+        scope = container_reaper.Scope(names=set(names))
+        out = container_reaper.Outcome(
+            scope=scope.describe(), removed=removed, failures=failures,
+            decisions=[container_reaper.Decision(
+                container_reaper.ContainerInfo(name=name, id=cid),
+                "remove", "explicit cleanup") for name, cid in captured_ids.items()])
+        # Record failures without granting future passes forced owner-release
+        # authority. The reaper serializes this merge with automatic outcomes.
+        try:
+            container_reaper._record(out, scope, "explicit-cleanup")
+        except Exception as exc:
+            out.failures["cleanup state"] = f"could not persist cleanup outcome: {exc}"
+        failures = out.failures
     return removed, failures
 
 
@@ -2640,14 +2662,16 @@ def cleanup_qa_containers(pr_id: str, loop_id: str,
 
 def cleanup_pr_containers(pr_id: str,
                           session_tag: str | None = None,
-                          include_retained: bool = True) -> list[str]:
+                          include_retained: bool = True, *,
+                          failures: dict[str, str] | None = None) -> list[str]:
     """Remove every container for a PR: impl, review, sign-off and QA (all loops).
 
     Matches session-tagged (``pm-{session_tag}-{kind}-{pr_id}``) and legacy
     (``pm-{kind}-{pr_id}``) names.  Called after the PR's windows were
     killed (merge, ``pm pr cleanup --resources``, TUI cleanup), so pane
     ownership is not consulted; explicitly retained containers are kept
-    when *include_retained* is False.  Returns the list of names removed.
+    when *include_retained* is False. Returns the list of names removed; an
+    optional *failures* output mapping receives errors for partial cleanup.
     """
     from pm_core import container_reaper
     inventory = container_reaper.list_containers()
@@ -2659,8 +2683,10 @@ def cleanup_pr_containers(pr_id: str,
                   and info.kind != "qa-debug"
                   and (include_retained or not container_reaper.is_retained(info.name, info.id))]
 
-    removed, _failures = remove_containers(
+    removed, cleanup_failures = remove_containers(
         candidates, workers=8, include_retained=include_retained)
+    if failures is not None:
+        failures.update(cleanup_failures)
     if removed:
         _log.info("Cleaned up %d container(s) for %s", len(removed), pr_id)
     return removed
@@ -2693,20 +2719,26 @@ def cleanup_orphaned_qa_containers(session: str, pr_id: str,
     return len(outcome.removed)
 
 
-def cleanup_session_containers(session_tag: str) -> int:
+def cleanup_session_containers(session_tag: str, *,
+                               failures: dict[str, str] | None = None) -> int:
     """Remove containers with this exact session owner, including renamed ones.
 
-    Returns the number of containers removed.
+    Returns the number removed; an optional output mapping receives failures.
     """
     from pm_core import container_reaper
     inventory = container_reaper.list_containers()
     if inventory is None:
-        _log.warning("Cannot inspect containers for session %s; cleanup deferred", session_tag)
+        message = f"Cannot inventory containers for session {session_tag}; cleanup deferred"
+        _log.warning(message)
+        if failures is not None:
+            failures["container inventory"] = message
         return 0
     names = [info.name for info in inventory if info.session_tag == session_tag]
     if not names:
         return 0
-    removed, _failures = remove_containers(names)
+    removed, cleanup_failures = remove_containers(names)
+    if failures is not None:
+        failures.update(cleanup_failures)
     if removed:
         _log.info("Cleaned up %d container(s) for session %s", len(removed), session_tag)
     return len(removed)

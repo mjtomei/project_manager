@@ -613,11 +613,16 @@ def session_kill(start_dir):
 
     # Clean up containers and push proxies belonging to this session
     session_tag = session_name.removeprefix("pm-")
+    cleanup_failures: dict[str, str] = {}
     if session_tag:
         from pm_core.container import cleanup_session_containers
         from pm_core.push_proxy import stop_session_proxies
-        n_containers = cleanup_session_containers(session_tag)
-        n_proxies = stop_session_proxies(session_tag)
+        n_containers = cleanup_session_containers(session_tag, failures=cleanup_failures)
+        try:
+            n_proxies = stop_session_proxies(session_tag)
+        except Exception as exc:
+            cleanup_failures["push proxies"] = str(exc)
+            n_proxies = 0
         if n_containers or n_proxies:
             _log.info("Session kill cleanup: %d container(s), %d proxy(ies)",
                       n_containers, n_proxies)
@@ -630,6 +635,11 @@ def session_kill(start_dir):
             pass
 
     click.echo(f"Killed session '{session_name}'.")
+    if cleanup_failures:
+        for name, error in cleanup_failures.items():
+            click.echo(f"  Cleanup failed for {name}: {error}", err=True)
+        click.echo("Resource cleanup incomplete; retry with 'pm container reap'.", err=True)
+        raise SystemExit(1)
 
 
 @session.command("cleanup")

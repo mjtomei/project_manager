@@ -49,6 +49,7 @@ def test_restart_alias_uses_canonical_lock_and_generation(monkeypatch, alias):
 def _fresh(monkeypatch, tmp_path, *, proxy=False, git_setup=""):
     calls = []
     monkeypatch.setattr(cm, "container_is_running", lambda n: False)
+    monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
     monkeypatch.setattr(cm, "image_exists", lambda *a: True)
     monkeypatch.setattr(cm, "_get_runtime", lambda: "podman")
     monkeypatch.setattr(cm, "_resolve_claude_binary", lambda: None)

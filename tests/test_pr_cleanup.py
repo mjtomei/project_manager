@@ -100,7 +100,7 @@ class TestCleanupPrResources:
         assert summary["registry_windows"] == ["pr-001"]
         # Session tag should strip the pm- prefix
         mock_container.cleanup_pr_containers.assert_called_once_with(
-            "pr-001", session_tag="mysess")
+            "pr-001", session_tag="mysess", failures={})
 
     def test_does_not_stop_replacement_proxy_after_container_cleanup(self):
         name = "pm-qa-pr-001-l1-s0"

@@ -484,6 +484,30 @@ class TestReaperOwnership:
         assert out.removed == [name]
         assert reaper.pending_failures() == {}
 
+    @pytest.mark.parametrize("replacement", [False, True])
+    @pytest.mark.parametrize("protection", ["live", "retained"])
+    def test_automatic_failure_tracks_allocation_identity(
+            self, fake_env, replacement, protection):
+        name = "pm-repo-ab12-review-pr-aaaa"
+        original = _info(name)
+        fake_env["containers"] = [original]
+        fake_env["fail"] = {name}
+        assert name in reaper.reconcile(reason="periodic").failures
+
+        current = _info(name, id="replacement") if replacement else original
+        fake_env["containers"] = [current]
+        fake_env["fail"] = set()
+        if protection == "live":
+            fake_env["panes"] = _Panes([f"podman exec -it {name} worker"])
+        else:
+            reaper.retain(name, container_id=current.id)
+        assert not reaper.reconcile(reason="periodic").removed
+        assert (name in reaper.pending_failures()) is not replacement
+        if not replacement:
+            failure = reaper.pending_failures()[name]
+            assert failure["id"] == original.id
+            assert not failure.get("owner_release")
+
     def test_owner_release_ignores_own_panes_but_not_retention(self, fake_env):
         a = "pm-repo-ab12-qa-pr-aaaa-L-s1"
         b = "pm-repo-ab12-qa-pr-aaaa-L-s2"
@@ -727,6 +751,7 @@ class TestCreateFailureCleanup:
         monkeypatch.setattr(cm, "_run_runtime", rt)
         monkeypatch.setattr(cm, "_get_runtime", lambda: "podman")
         monkeypatch.setattr(cm, "container_is_running", lambda n: False)
+        monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
         monkeypatch.setattr(cm, "image_exists", lambda *a: True)
         monkeypatch.setattr(cm, "keyring_pressure", lambda *a, **k: None)
         monkeypatch.setattr(cm, "_SETUP_TIMEOUT", 0.3)
