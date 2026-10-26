@@ -1298,6 +1298,9 @@ def _record_applied_integration(root: Path, pr_id: str, rec: dict,
     """
     from pm_core import integration as integ
     updated = dict(rec, head=merge_sha, status=integ.UP_TO_DATE)
+    # The apply that this call records succeeded: an earlier "could not apply"
+    # (e.g. a dirty workdir at sign-off launch) no longer describes the record.
+    updated.pop("apply_error", None)
     resolution = updated.get("resolution") or {}
     if resolution.get("resolved_from"):
         # Keep the revisions the resolution combined visible at the top

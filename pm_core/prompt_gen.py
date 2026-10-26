@@ -466,7 +466,9 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
                 f"`git diff {base_sha[:12] if base_sha else '<base>'}...HEAD`; "
                 f"`git diff "
                 f"{(resolved_from.get('head') or '<old head>')[:12]} "
-                "HEAD` shows exactly what the resolution added.")
+                "HEAD` shows the whole base merge as applied to this branch "
+                "(the resolution is only its project.yaml part; the delta "
+                "file below lists just the resolution changes).")
         elif rec.get("apply_error"):
             lines.append(f"- **Not applied**: {rec['apply_error']}. A "
                          f"{SIGNOFF_MERGE} is blocked until the resolution can "
@@ -620,6 +622,12 @@ isolated candidate (your worktree and the base branch were not touched):
    the candidate). Your verdict is bound to the check shown above; if a
    refresh shows the base moved, say so in the report — the merge step
    re-runs sign-off when the base it approved is no longer current.
+
+   Read what changed on the base since the PR branched (see the integration
+   section above) and judge whether it interacts with this PR: semantic
+   overlap (the same behaviour, APIs, data or tests changed on both sides)
+   or changed behaviour the PR relies on. Line/file counts alone are not the
+   rule.
 
    If pm **resolved a metadata-only conflict** (shown above), inspect the
    resolution delta and the integrated branch. Confirm that every record

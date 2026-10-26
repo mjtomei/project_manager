@@ -201,7 +201,12 @@ renders the resolution (paths, ids added/changed/removed, unresolved), the
 delta file path, the applied merge, the base behavior changes, the available
 evidence revisions, and instructions: metadata-only conflicts are not an
 automatic exemption; state reuse or the targeted checks; choose the earliest
-affected stage.
+affected stage. The pre-existing base-interaction guidance stays in step 0
+(read the base diff, judge semantic overlap — the same behaviour/APIs/data/
+tests changed on both sides — line/file counts alone are not the rule), and
+the applied-resolution diff is described accurately: `git diff <old head>
+HEAD` shows the whole base merge, not only the resolution (the delta file
+lists just the resolution changes).
 
 ### R7. Merge gate / publication identity
 `merge_gate_refusal` additionally requires:

@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T03:05:16.116961+00:00'
+  updated_at: '2026-10-26T03:28:03.948434+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32746,6 +32746,20 @@ prs:
       Evidence: /pm-captures/review-9028-i10/.'
     created_at: '2026-10-26T03:05:16Z'
     last_edited: '2026-10-26T03:05:16Z'
+  - id: note-aa25bd1
+    text: 'review-loop 9028 i11: restored the base-interaction judgment guidance the
+      prompt rewrite had dropped — step 0 again tells sign-off to read what changed
+      on the base since the PR branched and judge semantic overlap (the same behaviour/APIs/data/tests
+      changed on both sides; line/file counts alone are not the rule), which is why
+      it reads the base diff at all. Also corrected the applied-resolution block:
+      `git diff <old head> HEAD` shows the whole base merge, not "exactly what the
+      resolution added" (the delta file lists just the resolution changes), and `_record_applied_integration`
+      now clears `apply_error` when a bounce applies the resolution so the record
+      no longer claims an applied resolution was not applied. Tests: prompt guidance/wording
+      assertions + a dirty-workdir bounce test; 79 in test_signoff_resolution.py;
+      full suite 3434 passed, 1 skipped (markdown module absent).'
+    created_at: '2026-10-26T03:28:03Z'
+    last_edited: '2026-10-26T03:28:03Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work

@@ -1129,6 +1129,17 @@ def test_signoff_prompt_shows_the_resolution_and_evidence_contract(w):
     assert "pm-signoff-candidate" in text
     assert "pm-signoff-evidence" in text
     assert "metadata is not an automatic exemption" in text
+    # The base-interaction judgment guidance stays in the prompt: it is why
+    # sign-off reads the base diff at all.  Normalize the wrapping so the
+    # assertion is about the instruction, not the line breaks.
+    flat = " ".join(text.split())
+    assert "judge whether it interacts" in flat
+    assert "semantic overlap" in flat
+    assert "Line/file counts alone are not the rule" in flat
+    # The applied-resolution diff is described honestly: it shows the whole
+    # base merge, not only the resolution.
+    assert "shows exactly what the resolution added" not in text
+    assert "whole base merge as applied" in text
     # The evidence revisions the reuse statement must name are surfaced.
     assert f"qa@{original_head[:12]}" in text
     assert f"review@{original_head[:12]}" in text
@@ -1852,3 +1863,38 @@ def test_a_bounce_that_applies_the_resolution_records_the_provenance(w):
     # The explicit-reuse requirement still applies to an approval.
     assert signoff.approval_justification_problem(
         PR, pr_entry(w)["integration"], again["head"])
+
+
+def test_a_bounce_that_applies_clears_a_stale_apply_error(w):
+    """A successful bounce apply must not leave the old "not applied" claim.
+
+    ``prepare`` at sign-off launch could not touch a dirty workdir, so the
+    record carried ``apply_error``; the bounce then applied the resolution.
+    The record must describe the applied merge, not the failed attempt.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    (w.wd / "keep.txt").write_text("uncommitted\n")
+
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+    assert rec.get("apply_error")
+
+    # The workdir is clean again, so the bounce applies the resolution.
+    (w.wd / "keep.txt").write_text("keep\n")
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(
+        transcript, git(w.wd, "rev-parse", "HEAD"), rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.UP_TO_DATE
+    assert stored["resolution"]["applied_merge_sha"]
+    assert "apply_error" not in stored
