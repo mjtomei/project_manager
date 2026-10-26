@@ -75,6 +75,12 @@ ERROR = "error"
 # Statuses whose candidate may be published (conflict-free, not yet merged).
 MERGEABLE = (UP_TO_DATE, CLEAN, RESOLVED)
 
+# A concurrent actor moved the PR HEAD between the check and the apply (two
+# operators running ``--apply`` at once).  Named so the caller can tell this
+# lost race from a workdir that genuinely cannot take the merge.
+HEAD_MOVED = "PR HEAD moved since the integration check"
+HEAD_MOVED_APPLYING = "PR HEAD moved while applying the resolution"
+
 # Where the fetched base revision is pinned in the PR workdir, so the
 # candidate's objects stay reachable and no shared ref (FETCH_HEAD,
 # origin/<base>) an agent may be using is relied on.
@@ -1295,28 +1301,24 @@ def _write_artifacts(pr_id: str, record: dict) -> None:
             _log.warning("integration.json for %s: %s", pr_id, e)
 
 
-def _record_check(root: Path, pr_id: str, record: dict) -> dict:
-    """Record *record* on the PR, carrying resolution provenance forward.
+def _carry_forward(record: dict, pr_entry: dict) -> dict:
+    """Carry provenance from *pr_entry*'s stored record onto *record*.
 
     A re-check after pm applied a resolved candidate sees a clean/up-to-date
     merge; the resolution that produced the applied head must stay visible
     (and bound), so it is carried when the applied merge is an ancestor of
     the new HEAD.
     """
-    try:
-        old_pr = store.get_pr(store.load(root), pr_id) or {}
-    except Exception:
-        old_pr = {}
-    old = old_pr.get("integration") or {}
+    old = pr_entry.get("integration") or {}
     if not record.get("resolution") and old.get("resolution"):
         applied = (old.get("resolution") or {}).get("applied_merge_sha")
-        workdir = old_pr.get("workdir")
+        workdir = pr_entry.get("workdir")
         if not workdir or not Path(workdir).is_dir():
             # ``run_check`` may have computed this check from the current
             # checkout when the recorded workdir is not visible (e.g. inside
             # a container); resolve the ancestry from that same checkout so
             # the applied resolution is not silently dropped.
-            workdir = _cwd_checkout_of(old_pr)
+            workdir = _cwd_checkout_of(pr_entry)
         new_head = record.get("head")
         if applied and workdir and new_head and Path(workdir).is_dir() \
                 and (applied == new_head
@@ -1346,6 +1348,44 @@ def _record_check(root: Path, pr_id: str, record: dict) -> dict:
         # behavioural changes the approval was required to assess: the
         # merge gate would then no longer ask for the evidence statement.
         record["base_behavior_changes"] = list(old["base_behavior_changes"])
+    return record
+
+
+def _check_is_stale(record: dict, pr_entry: dict) -> bool:
+    """Whether *record* was computed before a concurrent actor moved HEAD.
+
+    A check that starts before a parallel apply reads the old HEAD but can
+    finish (and try to record) after it.  That record describes a revision
+    the branch no longer has, so it must not overwrite the record that
+    describes the revision the branch is on now.
+    """
+    old = pr_entry.get("integration") or {}
+    workdir = pr_entry.get("workdir")
+    if not workdir or not Path(workdir).is_dir():
+        return False
+    now = _out(_git("rev-parse", "HEAD", cwd=workdir))
+    head = record.get("head")
+    if not now or not head or now == head:
+        return False
+    return old.get("head") == now
+
+
+def _record_check(root: Path, pr_id: str, record: dict) -> dict:
+    """Record *record* on the PR, carrying resolution provenance forward.
+
+    The carry-forward runs again inside the locked update.  Two operators can
+    run ``--apply``/``--record`` at once, and one can store an applied record
+    between this check's read and its write; overwriting that with a bare
+    up-to-date record would lose the applied revision and its provenance (a
+    later ``--record`` cannot restore them once the branch carries the base).
+    A check computed before the HEAD moved is dropped the same way: it must
+    not replace the record that describes the branch's current revision.
+    """
+    try:
+        old_pr = store.get_pr(store.load(root), pr_id) or {}
+    except Exception:
+        old_pr = {}
+    _carry_forward(record, old_pr)
 
     # Compute the digest before writing the artifact: integration.json is the
     # full record a person assesses, and it must carry the digest of the
@@ -1354,15 +1394,40 @@ def _record_check(root: Path, pr_id: str, record: dict) -> dict:
     # carries (the full diff itself never goes into project.yaml); the digest
     # ignores that host-specific path.
     record["resolution_digest"] = _resolution_digest(record.get("resolution"))
-    _write_artifacts(pr_id, record)
+    resolution = record.get("resolution")
+    if resolution and not resolution.get("diff_path"):
+        # Set it before compaction so the compact record carries the pointer;
+        # the file itself is written with the artifact below.
+        path = resolution_diff_path(pr_id)
+        if path is not None:
+            resolution["diff_path"] = str(path)
+
+    final = {"record": record, "stale": False}
 
     def _apply(d):
         p = store.get_pr(d, pr_id)
-        if p is not None:
-            p["integration"] = compact(record)
+        if p is None:
+            return
+        if _check_is_stale(record, p):
+            # Keep the record that describes the branch's current revision
+            # (and its applied resolution).
+            final["record"] = p.get("integration") or record
+            final["stale"] = True
+            return
+        merged = _carry_forward(record, p)
+        merged["resolution_digest"] = _resolution_digest(
+            merged.get("resolution"))
+        p["integration"] = compact(merged)
+        final["record"] = merged
 
     store.locked_update(root, _apply)
-    return record
+    final_record = final["record"]
+    if final["stale"]:
+        # The stored record (and the winner's artifact) is the one that
+        # describes the branch; do not overwrite either.
+        return final_record
+    _write_artifacts(pr_id, final_record)
+    return final_record
 
 
 def check_integration(root: Path, pr_id: str, *, data: dict | None = None,
@@ -1394,7 +1459,10 @@ def prepare(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
     The branch is re-checked afterwards and the resolution provenance is
     carried onto the clean/up-to-date record the sign-off verdict binds to.
     A workdir that cannot take the merge keeps the ``resolved`` record plus
-    ``apply_error``; sign-off cannot approve it.
+    ``apply_error``; sign-off cannot approve it.  When the apply lost a race
+    with a concurrent apply (the PR HEAD moved under it), the revision the
+    branch now has is re-checked and recorded instead, so the winner's
+    applied record is never overwritten by the loser's stale one.
     """
     record = check_integration(root, pr_id, data=data)
     if record.get("status") != RESOLVED:
@@ -1407,6 +1475,27 @@ def prepare(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
         record["apply_error"] = err
         _log.warning("sign-off %s: resolved integration not applied: %s",
                      pr_id, err)
+        # Two operators can run ``--apply`` at the same time.  The loser's
+        # apply fails once the winner has moved the PR HEAD; recording the
+        # loser's *stale* resolved check would then overwrite the winner's
+        # applied record — a lost update that drops the applied revision and
+        # the resolution provenance (a later ``--record`` cannot restore
+        # them once the branch already carries the base).  When the branch
+        # now has a different revision, re-check that revision and record
+        # it; ``_record_check`` carries the winner's applied resolution
+        # forward onto the up-to-date record.
+        if err in (HEAD_MOVED, HEAD_MOVED_APPLYING):
+            fresh = store.load(root)
+            pr_now = store.get_pr(fresh, pr_id)
+            if pr_now is not None:
+                current = run_check(fresh, pr_now, root,
+                                    base_sha=record.get("base_sha"))
+                if (current.get("status") in MERGEABLE
+                        and current.get("head") != record.get("head")):
+                    _log.info("sign-off %s: HEAD moved during apply; recorded "
+                              "%s at %s", pr_id, current.get("status"),
+                              (current.get("head") or "")[:8])
+                    return _record_check(root, pr_id, current)
         return _record_check(root, pr_id, record)
     previous = record
     # Re-check against the exact revision just applied, not a fresh fetch: a
@@ -1538,7 +1627,7 @@ def apply_integration(root: Path, pr_id: str, record: dict | None = None,
         return None, "no PR workdir"
     head = _out(_git("rev-parse", "HEAD", cwd=workdir))
     if head != record.get("head"):
-        return None, "PR HEAD moved since the integration check"
+        return None, HEAD_MOVED
     branch = pr.get("branch") or ""
     cur = _out(_git("rev-parse", "--abbrev-ref", "HEAD", cwd=workdir))
     if branch and cur != branch:
@@ -1576,7 +1665,7 @@ def _apply_resolution(record: dict, workdir: str, head: str, base_sha: str,
     if _out(_git("rev-parse", "HEAD", cwd=workdir)) != head:
         # Re-check right before touching the worktree: the caller verified
         # HEAD, but another process may have moved it since.
-        return None, "PR HEAD moved while applying the resolution"
+        return None, HEAD_MOVED_APPLYING
     m = _git(*no_hooks, "-c", "rerere.enabled=false", "merge", "--no-commit",
              "--no-ff", base_sha, cwd=workdir)
     if m.returncode == 0:

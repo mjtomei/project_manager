@@ -812,6 +812,112 @@ def test_resolution_digest_survives_a_benign_recheck(w):
     assert "resolved" in artifact["resolution"]["diff"]
 
 
+def test_a_concurrent_apply_does_not_overwrite_the_applied_record(
+        w, monkeypatch):
+    """The loser of two simultaneous ``--apply`` runs must not clobber the
+    winner's applied record with its stale resolved check.
+
+    Its apply fails with "PR HEAD moved"; recording that stale record would
+    drop the applied revision and the resolution provenance (and a later
+    ``--record`` could not restore them once the branch carries the base).
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    stale_head = git(w.wd, "rev-parse", "HEAD")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    # Winner: applies the resolution and records the applied revision.
+    won = integration.prepare(w.pm_dir, PR)
+    assert won["status"] == integration.UP_TO_DATE
+    applied = won["resolution"]["applied_merge_sha"]
+    assert pr_entry(w)["integration"]["resolution"]["applied_merge_sha"] == \
+        applied
+
+    # Loser: its check ran before the winner applied, and its own apply now
+    # finds the HEAD moved.
+    stale = dict(won)
+    stale.update(status=integration.RESOLVED, head=stale_head)
+    stale.pop("resolution", None)
+    stale.pop("resolution_digest", None)
+    monkeypatch.setattr(integration, "check_integration",
+                        lambda *a, **k: dict(stale))
+    monkeypatch.setattr(integration, "apply_integration",
+                        lambda *a, **k: (None, integration.HEAD_MOVED))
+
+    lost = integration.prepare(w.pm_dir, PR)
+    assert lost["status"] == integration.UP_TO_DATE, lost
+    assert lost["head"] == git(w.wd, "rev-parse", "HEAD")
+    assert lost["resolution"]["applied_merge_sha"] == applied
+    assert not lost.get("apply_error")
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.UP_TO_DATE
+    assert stored["head"] == git(w.wd, "rev-parse", "HEAD")
+    assert stored["resolution"]["applied_merge_sha"] == applied
+    assert not stored.get("apply_error")
+
+
+def test_record_check_carries_the_applied_resolution_under_the_lock(
+        w, monkeypatch):
+    """The carry-forward is decided on the state actually stored.
+
+    A concurrent writer can store an applied record between this check's
+    read and its write; the write must still carry that applied resolution
+    (otherwise a plain up-to-date re-check would drop it).
+    """
+    rec = _metadata_conflict(w)
+    applied = rec["resolution"]["applied_merge_sha"]
+    real_load = store.load
+    calls = {"n": 0}
+
+    def stale_first_load(root, **kwargs):
+        data = real_load(root, **kwargs)
+        if calls["n"] == 0:
+            # The pre-lock read predates the winner's write.
+            p = store.get_pr(data, PR)
+            if p is not None:
+                p["integration"] = {
+                    k: v for k, v in (p.get("integration") or {}).items()
+                    if k != "resolution"}
+        calls["n"] += 1
+        return data
+
+    monkeypatch.setattr(store, "load", stale_first_load)
+    head = git(w.wd, "rev-parse", "HEAD")
+    bare = {"status": integration.UP_TO_DATE, "head": head,
+            "base_sha": rec["base_sha"], "base_branch": "master",
+            "target_repo": str(w.repo),
+            "candidate_tree": rec["candidate_tree"]}
+    out = integration._record_check(w.pm_dir, PR, bare)
+    assert out["resolution"]["applied_merge_sha"] == applied
+    stored = pr_entry(w)["integration"]
+    assert stored["head"] == head
+    assert stored["resolution"]["applied_merge_sha"] == applied
+
+
+def test_a_stale_check_does_not_replace_the_record_for_the_current_head(w):
+    """A check that started before a concurrent apply reads the old HEAD but
+    can finish after it; recording it would describe a revision the branch no
+    longer has and drop the applied provenance."""
+    rec = _metadata_conflict(w)
+    applied = rec["resolution"]["applied_merge_sha"]
+    old_head = rec["resolution"]["resolved_from"]["head"]
+    assert old_head != rec["head"]
+    stale = {"status": integration.RESOLVED, "head": old_head,
+             "base_sha": rec["base_sha"], "base_branch": "master",
+             "target_repo": str(w.repo),
+             "candidate_tree": rec["candidate_tree"],
+             "conflicts": ["pm/project.yaml"]}
+    out = integration._record_check(w.pm_dir, PR, stale)
+    assert out["head"] == rec["head"]
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.UP_TO_DATE
+    assert stored["head"] == rec["head"]
+    assert stored["resolution"]["applied_merge_sha"] == applied
+
+
 def test_prepare_records_the_recheck_once_with_the_resolution(w, monkeypatch):
     """The post-apply re-check is written once, already carrying the
     resolution.
