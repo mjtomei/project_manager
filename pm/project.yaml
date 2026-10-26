@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T10:35:17.634027+00:00'
+  updated_at: '2026-10-26T12:50:01.426283+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34318,6 +34318,44 @@ prs:
       builds (filed pr-3108a1b).'
     created_at: '2026-10-26T10:35:17Z'
     last_edited: '2026-10-26T10:35:17Z'
+  - id: note-f299831
+    text: 'S76 refine (2026-10-26): on master PR notes are capped at PR_NOTES_BUDGET
+      35 KB, and the refiner prompt has no PR description or notes. So pad the PR
+      description to >=125 KB (short lines) for planner/worker/impl/review, and bind
+      a >=125 KB pm/qa/instructions entry for refiners. The Read tool caps output
+      (~25k tokens, 2000 chars/line), so stubs must page Read with offset/limit. Refiner/worker/impl/review
+      panes stay alive after their verdict: a file goes only on a normal /exit, and
+      a killed pane skips the `; rm -f` (an observation). The QA scenario containers
+      use cleanup=False and are removed by the next QA start or `pm container cleanup`.
+      The 6 test_worker_route log-record failures in a scratch venv also fail on unmerged
+      07520c1b.'
+    created_at: '2026-10-26T11:18:39Z'
+    last_edited: '2026-10-26T11:18:39Z'
+  - id: note-f61db64
+    text: 'QA S76 (2026-10-26, merge smoke of origin/master 211a6128 into 07520c1b,
+      real claude vs stubs, host + container; captures /pm-captures/scenarios/76,
+      REPORT.md): every Then held on the merge (fdd1f8dc). The planner, 3 refiners,
+      3 workers, impl and review all ran file-backed with launch lines ending in a
+      bootstrap plus `; rm -f`, and their Reads covered each file whole. Routing,
+      router env prefix, the route-down wait and recovery (10.1 s), the relaunch deferral,
+      retry 1/10 and relaunch, container bridge and mounts, and per-session file removal
+      all held, with no leaks. Pre-merge control: refiner/worker/planner prefixes
+      are byte-identical after normalizing UUID, run hash and index. Full suite: the
+      same 6 test_worker_route caplog failures on merge and on 07520c1b. CODE CHANGE
+      needing normal re-review: `pm container cleanup` split podman 3.4.4 ps lines
+      on a tab that podman prints as spaces, so it ran rm -f on "<name>  Up 4 minutes
+      ago" and printed "Removed 1" while the container stayed (pre-existing on master).
+      Fixed with a whitespace split, plus a regression test TestContainerCleanupCommand
+      (mutation-checked). Spec slips: (1) qa_concretize falls back to qa, not qa_scenario,
+      so route it explicitly; (2) worker prompts hold neither the PR description nor
+      the instruction file (6677 B), so S76 made them oversized with ~125 KB refined
+      steps; (3) TEST_DIR under /workspace makes the pm wrapper cwd-walk run the unmerged
+      /workspace pm_core, so put it outside any pm_core clone; (4) build-base fails
+      at the Chromium smoke step, so build without it. Observation: a killed worker
+      leaves its pm_prompt file (pr-19e8114). The branch still needs the master merge
+      before the manual merge gate; this QA did not commit it.'
+    created_at: '2026-10-26T12:50:01Z'
+    last_edited: '2026-10-26T12:50:01Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs

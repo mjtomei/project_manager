@@ -288,8 +288,12 @@ def container_cleanup(pr_id: str | None):
 
     removed = 0
     for line in lines:
-        parts = line.split("\t", 1)
-        name = parts[0].strip()
+        # Split on whitespace, not "\t": podman 3.x prints the format's
+        # "\t" as spaces, and container names never contain whitespace.
+        parts = line.split(None, 1)
+        if not parts:
+            continue
+        name = parts[0]
         status = parts[1].strip() if len(parts) > 1 else ""
         if pr_id and pr_id not in name:
             continue
