@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T18:11:58.601518+00:00'
+  updated_at: '2026-10-26T19:30:44.945006+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16555,6 +16555,26 @@ prs:
       No live QA PASS claimed; QA (E6/E11/C1/R13/E10) and sign-off still required.'
     created_at: '2026-10-26T18:11:58Z'
     last_edited: '2026-10-26T18:11:58Z'
+  - id: note-0c996a6
+    text: 'QA S27 (2026-10-26, HEAD ba948cab) PASS on all six stories: two popups
+      + third actor (merge B / open D window / kill review-M), per-session ●/○ markers,
+      grouped-session dispatch isolation, d from a PR-workdir window (fake-claude
+      PASS, log keying in the pm-pr-<id>-… log as expected), a client grouped session
+      disappearing, and 30 type-ahead nav pairs against a project.yaml rewrite loop
+      (60/60 frames valid, #77 shown, 20 refresh-failed warnings = the v4 share of
+      ~90 keypresses, then e → tui:edit + edit_skip). No code change. Harness gotchas
+      for the next run: (1) never send `C-b d` while a popup has focus — fzf swallows
+      C-b and dispatches the trailing d (review); use `tmux detach-client -s =<session>`
+      to end a cast; (2) start the tmux server with LANG=LC_ALL=C.UTF-8 or tmux renders
+      ACS and both `—` and `●` become `_`, making the ●/○ checks unreadable; (3) story
+      5/6 counts assume the pre-story-1 fixture, but story 1(a) merges B and (b) opens
+      D window, so later nav lists are [A,C,D] and the (2/3) entry is C, not B; (4)
+      after story 5 kills <base>~1, recreate it with `tmux new-session -d -s <base>~1
+      -t =<base>` before re-attaching; (5) run `pm pr edit` with cwd inside the fixture
+      — from /workspace it resolves the real project. Captures: /pm-captures/scenarios/27
+      (REPORT.md + per-story cast/mp4/transcript/evidence).'
+    created_at: '2026-10-26T19:30:44Z'
+    last_edited: '2026-10-26T19:30:44Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
