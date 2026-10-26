@@ -1350,6 +1350,24 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
       container-by-name `ANTHROPIC_BASE_URL`/`ANTHROPIC_SMALL_FAST_MODEL`
       removal, the marker-only case and one nested launch from inside a
       container session; RQ43 in container panes.
+      S63 harness facts (2026-10-26, run on 09a23249):
+      - Claude sends an `http://` `ANTHROPIC_BASE_URL` through
+        `HTTPS_PROXY` as well. A nested launch whose base URL is the main
+        stub therefore needs the stub host in `NO_PROXY`
+        (`127.0.0.1,localhost,<stub host>`). Otherwise its requests reach
+        the refusing proxy as plain POSTs and the stub never sees them.
+      - A relay that forwards a routed session's turns to the real route
+        unchanged sees no classifier request from it: model-chosen tool
+        calls are not classified client-side (as in S59). Classifier
+        traffic from a routed container pane needs a relay-scripted Agent
+        round (the RQ43 method).
+      - The `/model` picker's Enter sets the default in the shared
+        `~/.claude/settings.json`, which moves later no-model sessions.
+        Use `s` (this session only). A "Switch model?" confirm then
+        follows.
+      - A second `pm pr start` of the same PR in a plain terminal resumes
+        it (`--resume`) without a new turn. Type a prompt to make a
+        request.
     - S64: RQ45 on stubs only (no real work account): hand-edited
       providers.yaml across launch surfaces, QA gate wait and recovery,
       the provider CLI, a non-Claude router (no classifier pin), and
