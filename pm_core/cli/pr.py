@@ -1655,10 +1655,10 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
     additions survive; real field/deletion/ambiguity conflicts do not).
     Read-only by default (the sign-off launch records the check its verdict
     binds to); ``--record`` stores it on the PR and in
-    ``$CAP/integration.json``.  ``--apply`` merges a *clean* result, or
-    applies a *resolved* one and verifies the resulting tree, then
-    re-records the applied candidate.  Exits 1 when the integration
-    conflicts or the check fails.
+    ``$CAP/integration.json``.  ``--apply`` merges a *clean* result into the
+    PR branch, or applies a *resolved* candidate (verifying the resulting
+    tree equals the recorded candidate) and re-records it.  Exits 1 when the
+    integration conflicts or the check fails.
     """
     from pm_core import integration
 

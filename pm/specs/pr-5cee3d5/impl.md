@@ -141,10 +141,14 @@ PR branch, or that has a merge in progress.
 allows MERGE / REVIEW / REQA for `RESOLVED` candidates that were applied.
 `_prepare_bounce` integrates a `RESOLVED` record the same way it integrates a
 `CLEAN` one (via `apply_integration`), so review/QA run on the integrated
-tree. The return record (`build_return_record`, `format_signoff_return`) adds
-the resolution summary, `applied_merge_sha`, and the original
-`resolved_from` revisions; the prompt tells the next stage to verify the
-integrated result, not only the PR's own diff.
+tree. When the bounce is the first successful apply (sign-off launch could
+not touch a dirty workdir), the applied record is persisted on the PR
+(`up_to_date` at the merge commit, resolution bound) so a later check carries
+the provenance forward instead of dropping it — and with it the explicit
+reuse requirement. The return record (`build_return_record`,
+`format_signoff_return`) adds the resolution summary, `applied_merge_sha`,
+and the original `resolved_from` revisions; the prompt tells the next stage
+to verify the integrated result, not only the PR's own diff.
 
 ### R6. Evidence provenance and explicit reuse
 `record_signoff_verdict` gains an `evidence` block on `pr["signoff"]`:

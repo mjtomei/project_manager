@@ -1397,3 +1397,116 @@ def test_config_path_base_change_requires_justification(w):
     write_report(w, rec)
     assert signoff.approval_justification_problem(
         PR, pr_entry(w)["integration"], rec["head"]) is None
+
+
+# --- the git >= 2.38 (merge-tree) path resolves through the worktree -------
+
+def test_new_git_merge_tree_conflict_resolves_via_the_worktree(w, monkeypatch):
+    """git >= 2.38 reports the conflict in memory; the resolution still runs
+    in the isolated worktree and yields the same ``RESOLVED`` candidate."""
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    head = git(w.wd, "rev-parse", "HEAD")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    git(w.wd, "fetch", "-q", "origin")
+    base = git(w.wd, "rev-parse", "origin/master")
+
+    monkeypatch.setattr(integration, "_git_version", lambda: (2, 45))
+    monkeypatch.setattr(integration, "_merge_tree",
+                        lambda *a, **k: (None, ["pm/project.yaml"], None))
+    rec = integration.compute_candidate(str(w.wd), head, base)
+    assert rec["status"] == integration.RESOLVED, rec
+    assert rec["candidate_tree"]
+    assert rec["resolution"]["paths"][0]["path"] == "pm/project.yaml"
+    assert not rec["resolution"]["unresolved"]
+    # The check is read-only: the PR workdir's HEAD and records are untouched
+    # (the base's pr-250 exists only in the isolated candidate).
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert sorted(pr_ids(w.wd / "pm")) == ["pr-100", PR, "pr-300"]
+
+
+def test_new_git_worktree_failure_is_a_conflict_with_provenance(w, monkeypatch):
+    """A failed worktree resolution stays CONFLICT — never a bare tree."""
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    git(w.wd, "fetch", "-q", "origin")
+    head = git(w.wd, "rev-parse", "HEAD")
+    base = git(w.wd, "rev-parse", "origin/master")
+
+    monkeypatch.setattr(integration, "_git_version", lambda: (2, 45))
+    monkeypatch.setattr(integration, "_merge_tree",
+                        lambda *a, **k: (None, ["pm/project.yaml"], None))
+    monkeypatch.setattr(
+        integration, "_worktree_merge",
+        lambda *a, **k: (None, ["pm/project.yaml"],
+                         "candidate worktree failed", None))
+    rec = integration.compute_candidate(str(w.wd), head, base)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["candidate_tree"] is None
+    unresolved = rec["resolution"]["unresolved"]
+    assert unresolved[0]["path"] == "pm/project.yaml"
+    assert "candidate worktree failed" in unresolved[0]["conflicts"]
+
+
+def test_new_git_non_metadata_conflict_is_never_resolved(w, monkeypatch):
+    """Only a conflict confined to project.yaml triggers the worktree resolver."""
+    commit(w.wd, "shared.txt", "pr\n", "pr edits shared")
+    commit(w.repo, "shared.txt", "base\nmore\n", "base edits shared")
+    git(w.wd, "fetch", "-q", "origin")
+    head = git(w.wd, "rev-parse", "HEAD")
+    base = git(w.wd, "rev-parse", "origin/master")
+    called = []
+
+    monkeypatch.setattr(integration, "_git_version", lambda: (2, 45))
+    monkeypatch.setattr(integration, "_merge_tree",
+                        lambda *a, **k: (None, ["shared.txt"], None))
+    monkeypatch.setattr(
+        integration, "_worktree_merge",
+        lambda *a, **k: called.append(1) or (None, [], None, None))
+    rec = integration.compute_candidate(str(w.wd), head, base)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["resolution"] is None
+    assert called == []
+
+
+def test_a_bounce_that_applies_the_resolution_records_the_provenance(w):
+    """A bounce can be the first successful apply (``prepare`` could not touch
+    a dirty workdir).  The applied resolution must survive the next check, or
+    the later approval would not need the explicit reuse statement."""
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+    assert not rec["resolution"].get("applied_merge_sha")
+
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(
+        transcript, git(w.wd, "rev-parse", "HEAD"), rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    ret = pr_entry(w)["signoff_return"]
+    applied_sha = ret["integration"]["resolution"]["applied_merge_sha"]
+    assert applied_sha
+    # The applied candidate is recorded on the PR, not only in the return.
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.UP_TO_DATE
+    assert stored["head"] == applied_sha
+    assert stored["resolution"]["applied_merge_sha"] == applied_sha
+
+    # The next sign-off check carries it forward instead of dropping it.
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    assert again["resolution"]["applied_merge_sha"] == applied_sha
+    assert again["resolution_digest"] == stored["resolution_digest"]
+    # The explicit-reuse requirement still applies to an approval.
+    assert signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], again["head"])

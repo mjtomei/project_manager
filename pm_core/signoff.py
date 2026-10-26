@@ -1259,6 +1259,38 @@ def stale_reason(record: dict) -> str:
     return "HEAD moved"
 
 
+def _record_applied_integration(root: Path, pr_id: str, rec: dict,
+                                reviewed: str | None,
+                                merge_sha: str) -> None:
+    """Persist the resolved candidate a bounce applied to the branch.
+
+    The branch now contains the base, so the record becomes ``up_to_date`` at
+    the merge commit and keeps its resolution (with ``applied_merge_sha``);
+    a later check then carries the provenance forward.  Guarded on the
+    reviewed head: a concurrent check that already recorded another revision
+    wins.
+    """
+    from pm_core import integration as integ
+    updated = dict(rec, head=merge_sha, status=integ.UP_TO_DATE)
+    updated["resolution_digest"] = integ._resolution_digest(
+        updated.get("resolution"))
+    compact = integ.compact(updated)
+
+    def _apply(d):
+        p = store.get_pr(d, pr_id)
+        if p is None:
+            return
+        cur = p.get("integration") or {}
+        if reviewed and cur.get("head") and cur["head"] != reviewed:
+            return
+        p["integration"] = compact
+    try:
+        store.locked_update(root, _apply)
+    except Exception as e:  # provenance is best-effort; the bounce goes on
+        _log.warning("sign-off %s: could not record the applied resolution: "
+                     "%s", pr_id, e)
+
+
 def _prepare_bounce(root: Path, pr_id: str, verdict: str, hop: str,
                     sha: str | None, original: str | None,
                     coerced: str | None) -> dict:
@@ -1274,6 +1306,7 @@ def _prepare_bounce(root: Path, pr_id: str, verdict: str, hop: str,
     rec = pr.get("integration") or {}
     if pr.get("status") == "sign_off" and rec.get("head") == sha \
             and rec.get("status") in (integ.CLEAN, integ.RESOLVED):
+        reviewed = rec.get("head")
         merge_sha, apply_error = integ.apply_integration(root, pr_id, rec)
         if merge_sha:
             applied = {"from_head": sha, "merge_sha": merge_sha,
@@ -1293,6 +1326,15 @@ def _prepare_bounce(root: Path, pr_id: str, verdict: str, hop: str,
                     "status": rec.get("status")})
                 rec["resolution"] = resolution
             pr = dict(pr, integration=rec)
+            if resolution:
+                # Record that the branch now carries the resolved candidate.
+                # ``prepare`` normally applies at sign-off launch; a bounce is
+                # the first successful apply when the launch could not touch a
+                # dirty workdir.  Without this, the next check sees an
+                # up-to-date branch but no ``applied_merge_sha`` and drops the
+                # provenance — losing the explicit-reuse requirement.
+                _record_applied_integration(root, pr_id, rec, reviewed,
+                                            merge_sha)
             _log.info("sign-off %s: integrated %s@%s into the branch as %s",
                       pr_id, rec.get("base_branch"),
                       (rec.get("base_sha") or "")[:8], merge_sha[:8])
