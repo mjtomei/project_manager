@@ -1053,10 +1053,12 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     win = tmux_mod.find_window_by_name(pm_session, window_name)
                     if win:
                         tmux_mod.set_shared_window_size(pm_session, win["id"])
-                click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
-                # A sign-off IMPL return is now being worked on.
+                # A sign-off IMPL return is now being worked on.  Cleared
+                # before the echo, which fails (EPIPE) when the TUI that
+                # launched this restarted meanwhile (see _launch_review_window).
                 from pm_core.signoff import clear_return_awaiting
                 clear_return_awaiting(root, pr_id, "impl")
+                click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
                 return
             except Exception as e:
                 click.echo(f"Failed to create tmux window: {e}", err=True)
@@ -1353,10 +1355,14 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         if review_win_id:
             pane_layout.rebalance(pm_session, review_win_id)
 
-        click.echo(f"Opened review window '{window_name}'")
-        # A sign-off REVIEW return is now being reviewed.
+        # A sign-off REVIEW return is now being reviewed.  Cleared before
+        # the echo: a TUI that launched this and restarted meanwhile left
+        # stdout a broken pipe, and the echo's EPIPE would skip the clear
+        # while the window runs (S75), so a tick after the claim expired
+        # would launch a second --fresh review over it.
         from pm_core.signoff import clear_return_awaiting
         clear_return_awaiting(state_root(), pr_entry["id"], "review")
+        click.echo(f"Opened review window '{window_name}'")
     except Exception as e:
         _log.warning("Failed to launch review window: %s", e)
         click.echo(f"Review window error: {e}")
