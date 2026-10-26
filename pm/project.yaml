@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T17:13:33.104994+00:00'
+  updated_at: '2026-10-26T17:17:45.236970+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16491,6 +16491,20 @@ prs:
       report that as the known pr-f98ac63 gap, not a regression of this PR.'
     created_at: '2026-10-26T17:00:35Z'
     last_edited: '2026-10-26T17:00:35Z'
+  - id: note-1449e46
+    text: 'QA S24 (2026-10-26, HEAD ece16459 + fix 9d687e29): story 1 (two popups,
+      actor edits project.yaml / opens and kills windows) held in full; story 3 (d
+      from a PR-workdir window) held, fake-claude honoured, log lines in the PR-workdir
+      log — pr-f98ac63 log-keying still open; story 4 (detach + kill <base>~1, then
+      dispatch from ~2) held, nothing mentions ~1. Story 2 FAILED on the Then and
+      is fixed: pr start fast-path printed the base session while select_window targeted
+      the calling client grouped session, so the popup said "(session: <base>)" instead
+      of "<base>~1". pm_core/cli/pr.py now echoes tmux_mod.current_or_base_session(pm_session);
+      regression test TestPrStartFastPathSessionMessage fails on the old code. Full
+      suite 3709 passed, 1 skipped. Captures /pm-captures/scenarios/24 (REPORT.md,
+      pre-fix/ and post-fix/ with casts+mp4).'
+    created_at: '2026-10-26T17:17:45Z'
+    last_edited: '2026-10-26T17:17:45Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
