@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T00:25:47.329210+00:00'
+  updated_at: '2026-10-26T00:37:51.177544+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33964,6 +33964,24 @@ prs:
       owed; it now includes a nested launch inside a container.'
     created_at: '2026-10-26T00:25:47Z'
     last_edited: '2026-10-26T00:25:47Z'
+  - id: note-44892ea
+    text: 'Review c189 i8 (38d54909, CODE CHANGE, small, needs normal re-review):
+      post-QA fixes ff65f489/3ee69236/79b6ddd7, spec 0e13c5f8 (S60 clarifications:
+      C isolation by session, pinned Agent has no model, z d busy guard, stub classifier)
+      and c189 i1-i7 (incl. R9 c7b52962 launch_env, i7 tests 3d6c1b4d) reviewed independently
+      and sound, except one R9 regression: _is_route_base_url built every providers.yaml
+      entry via list_providers, so one hand-edited entry that is not a provider (null/string
+      entry, non-string api_base, list alias_models, list providers block) raised
+      AttributeError on every launch that sets no ANTHROPIC_BASE_URL of its own (all
+      main-account roles) while an endpoint was inherited (user proxy, QA stub, host
+      claude-mixed env); pre-R9 ee82dc0c built them. Router URLs are now read raw
+      (_configured_router_urls), malformed entries skipped. 6 regressions, 8 mutations
+      caught; markdown 3.10.3 installed first; full suite 3818 passed rc 0; /pm-captures/review-c189-i8.
+      Observation (by the R9 decision, unchanged): a non-route provider session own
+      ANTHROPIC_BASE_URL/API key/ANTHROPIC_MODEL stays inherited by pm launches inside
+      it.'
+    created_at: '2026-10-26T00:37:51Z'
+    last_edited: '2026-10-26T00:37:51Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
