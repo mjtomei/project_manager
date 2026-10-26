@@ -538,6 +538,11 @@ def _record_completion(app, state: QALoopState) -> bool:
                                          "in_review", lock_timeout=store.NO_WAIT):
                 return False
             done.add("transition")
+        if "note" not in done and state.setup_stop:
+            # Nothing ran (a provider setup error stopped the run before
+            # any result): an empty "QA ERROR:" note would only tell later
+            # sessions about a run that never happened.
+            done.add("note")
         if "note" not in done:
             if not _record_qa_note(app, state, lock_timeout=store.NO_WAIT):
                 return False
@@ -1020,6 +1025,10 @@ def _on_qa_complete(app, state: QALoopState) -> bool:
         )
         if sd:
             _log.info("QA self-driving: INPUT_REQUIRED — loop paused")
+    elif state.setup_stop:
+        # Keep "QA stopped: <problem>; <remedy>, then start QA again" on
+        # screen: a bare "QA finished: ERROR" replaced it within a second.
+        app.log_message(escape(f"QA [{pr_id}]: {state.latest_output}"))
     else:
         app.log_message(f"QA finished for {pr_id}: {verdict}")
 

@@ -3175,3 +3175,177 @@ def test_reqa_hop_claims_its_launch(pm_home_dir, tmp_path):
     result, popen = _reqa_tick(tmp_path, data, status_path=old, window=False)
     assert result.output.strip() == "running: qa"
     popen.assert_not_called()
+
+
+# QA S66 (RQ46 open points a, b; provider broken mid-run; TUI t replay).
+# (a) The review-PASS tick moved the PR to qa before the provider check, so
+# after a refused launch the next qa tick read the earlier run's
+# qa_status.json (a stale NEEDS_WORK bounced the PR back to review, every
+# other tick) or, with that status ignored, an earlier qa-<pr> window
+# ("running: qa" with no launch ever retried).  (b) With qa-verify-pass off the
+# check still resolved the verifier, which such a run never launches.
+def _review_pass_tick(pr, data):
+    from click.testing import CliRunner
+    from pm_core.cli import pr as pr_cli
+    with patch.object(pr_cli, "state_root", return_value=Path("/nonexistent")), \
+            patch.object(pr_cli.store, "load", return_value=data), \
+            patch.object(pr_cli, "_get_pm_session", return_value="pm-test"), \
+            patch.object(pr_cli, "_auto_seq_transcript_dir",
+                         return_value=Path(tempfile.mkdtemp())), \
+            patch.object(pr_cli, "_check_review_verdict",
+                         return_value=("PASS", 2)), \
+            patch.object(pr_cli, "trigger_tui_refresh"), \
+            patch.object(pr_cli.store, "locked_update",
+                         side_effect=lambda root, fn, **k: fn(data)), \
+            patch.object(pr_cli.subprocess, "Popen") as popen:
+        result = CliRunner().invoke(pr_cli.pr_auto_sequence, [pr["id"]])
+    return result, popen
+
+
+def test_review_pass_tick_refuses_before_moving_the_pr_to_qa(pm_home_dir):
+    pr = {"id": "pr-001", "status": "in_review", "branch": "b",
+          "session_models": {"qa_planning": "provider:missing-route"}}
+    data = {"project": {}, "prs": [pr]}
+    result, popen = _review_pass_tick(pr, data)
+    assert isinstance(result.exception, ProviderNotFoundError)
+    popen.assert_not_called()
+    # Still in review: the next tick retries the launch (same error) and
+    # never acts on an earlier QA run's status or window.
+    assert pr["status"] == "in_review"
+    del pr["session_models"]
+    result, popen = _review_pass_tick(pr, data)
+    assert result.exit_code == 0 and result.output.strip() == "advanced: qa"
+    assert pr["status"] == "qa"
+    assert popen.call_args.args[0][-2:] == ["qa-run-bg", "pr-001"]
+
+
+@pytest.mark.parametrize("verify", [True, False])
+def test_verifier_provider_is_checked_only_when_verification_runs(
+        pm_home_dir, verify):
+    from pm_core import qa_loop
+    pr = {"id": "pr-001",
+          "session_models": {"qa_verification": "provider:missing-route"}}
+    with patch.object(qa_loop, "_is_verification_enabled", return_value=verify):
+        if verify:
+            with pytest.raises(ProviderNotFoundError, match="missing-route"):
+                qa_loop.check_ungated_qa_providers(pr, {})
+        else:
+            qa_loop.check_ungated_qa_providers(pr, {})
+        pr["session_models"] = {"qa_finalize": "provider:missing-route"}
+        with pytest.raises(ProviderNotFoundError, match="missing-route"):
+            qa_loop.check_ungated_qa_providers(pr, {})
+
+
+# A provider broken mid-run (after the launch check): each verification
+# ended "Verification thread crashed" with a traceback, flagged the worker
+# ("verification thread crashed") and, after the retries, marked it
+# NEEDS_WORK; a broken finalizer gave "Failed to run QA finalize pane" with a
+# traceback after the overall PASS was published (finalize=None), which the
+# next tick took on to sign-off.  Now the run stops with the setup error
+# (one "QA stopped" warning, see _log_thread_end) and records no verdict.
+def test_verifier_setup_error_stops_the_run_without_flagging_the_worker(
+        pm_home_dir, tmp_path):
+    import itertools
+    from pm_core import qa_loop
+    sc = qa_loop.QAScenario(index=1, title="S1", focus="t")
+    sc.window_name, sc.pane_id, sc.session_id = "qa-pr-001-s1", "%1", "sid-1"
+    state = qa_loop.QALoopState(pr_id="pr-001")
+    state.qa_workdir = str(tmp_path)
+    state.scenarios = [sc]
+    event = {"event_type": "idle_prompt", "timestamp": time.time() + 1000,
+             "session_id": "sid-1"}
+    spins = itertools.count()
+
+    def sleep(_):
+        assert next(spins) < 2000, "poll loop never stopped"
+
+    with patch.object(qa_loop, "_verify_single_scenario",
+                      side_effect=lambda *a, **k: _launch_on_missing_provider(
+                          session_type="qa_verification")), \
+            patch.object(qa_loop, "_send_submitted") as follow_up, \
+            patch.object(qa_loop.time, "sleep", side_effect=sleep), \
+            patch.object(qa_loop.time, "monotonic",
+                         side_effect=itertools.count(0, 100)), \
+            patch("pm_core.hook_events.read_event", return_value=event), \
+            patch.object(qa_loop, "extract_verdict_from_transcript",
+                         return_value="PASS"), \
+            patch("pm_core.tmux.capture_pane", return_value="PASS"), \
+            patch("pm_core.tmux.pane_exists", return_value=True), \
+            patch.object(qa_loop, "_is_verification_enabled", return_value=True):
+        with pytest.raises(ProviderNotFoundError, match="missing-route"):
+            qa_loop._poll_tmux_verdicts(state, {}, {}, "sess", str(tmp_path),
+                                        tmp_path / "status.json",
+                                        lambda *a: None)
+    follow_up.assert_not_called()
+    assert qa_loop.VERDICT_NEEDS_WORK not in state.scenario_verdicts.values()
+
+
+def test_finalizer_setup_error_stops_the_run_before_the_overall(
+        pm_home_dir, tmp_path):
+    from pm_core import qa_loop
+    state = qa_loop.QALoopState(pr_id="pr-001")
+    state.scenarios = [qa_loop.QAScenario(index=1, title="A", focus="a")]
+    state.scenario_verdicts = {1: qa_loop.VERDICT_PASS}
+    pr = {"id": "pr-001", "branch": "b",
+          "session_models": {"qa_finalize": "provider:missing-route"}}
+    with patch.object(qa_loop, "_poll_tmux_verdicts"), \
+            patch.object(qa_loop, "_write_status_file") as write_status, \
+            patch.object(qa_loop, "_write_resume_file"), \
+            patch.object(qa_loop, "_persist_scenario_verdicts"), \
+            patch.object(qa_loop, "_run_qa_finalize_pane") as finalize, \
+            pytest.raises(ProviderNotFoundError, match="missing-route"):
+        qa_loop._execute_and_finalize(
+            state, tmp_path, pr, {}, "pm-test", "qa-w", str(tmp_path),
+            tmp_path / "status.json", None, use_containers=False,
+            concurrency_cap=0, queued_scenarios=[], notify=lambda: None)
+    finalize.assert_not_called()
+    assert not [c for c in write_status.call_args_list
+                if c.kwargs.get("overall")]
+    # Broken between that check and the launch: still a stop, not a crash.
+    pr["session_models"] = {}
+    finalize.side_effect = lambda *a, **k: _launch_on_missing_provider(
+        session_type="qa_finalize")
+    with patch.object(qa_loop, "_poll_tmux_verdicts"), \
+            patch.object(qa_loop, "_write_status_file"), \
+            patch.object(qa_loop, "_write_resume_file"), \
+            patch.object(qa_loop, "_persist_scenario_verdicts"), \
+            patch.object(qa_loop, "_run_qa_finalize_pane", finalize), \
+            pytest.raises(ProviderNotFoundError):
+        qa_loop._execute_and_finalize(
+            state, tmp_path, pr, {}, "pm-test", "qa-w", str(tmp_path),
+            tmp_path / "status.json", None, use_containers=False,
+            concurrency_cap=0, queued_scenarios=[], notify=lambda: None)
+
+
+# TUI t replay of bad02547: "QA stopped: <problem>; <remedy>, then start QA
+# again" was replaced on the command bar within a second by "QA finished for
+# <pr>: ERROR", and the stopped run recorded an empty "QA ERROR:  (workdir:
+# ...)" note, so the PR carried two QA notes after the rerun.
+@pytest.mark.parametrize("error", ["provider", "other"])
+def test_tui_keeps_a_setup_stop_on_screen_and_records_no_note(
+        pm_home_dir, tmp_path, error):
+    from unittest.mock import MagicMock
+    from pm_core import qa_loop
+    from pm_core.tui import qa_loop_ui
+    state = qa_loop.QALoopState(pr_id="pr-001")
+    side = ((lambda *a, **k: _launch_on_missing_provider(
+        session_type="qa_planning")) if error == "provider"
+        else RuntimeError("boom"))
+    with patch.object(qa_loop, "run_qa_sync", side_effect=side):
+        qa_loop.start_qa_background(state, Path("/nonexistent"),
+                                    {"id": "pr-001"}).join(5)
+    assert state.setup_stop is (error == "provider")
+    app = MagicMock()
+    app._root = tmp_path
+    app._self_driving_qa = {}
+    with patch.object(qa_loop_ui, "_record_qa_note", return_value=True) as note:
+        assert qa_loop_ui._on_qa_complete(app, state)
+    shown = [c.args[0] for c in app.log_message.call_args_list]
+    if error == "provider":
+        note.assert_not_called()
+        assert shown[-1].startswith("QA \\[pr-001]: QA stopped: provider "
+                                    "'missing-route' is not configured")
+        assert shown[-1].endswith(", then start QA again")
+    else:
+        note.assert_called_once()
+        assert shown[-1] == "QA finished for pr-001: ERROR"

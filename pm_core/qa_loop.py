@@ -232,6 +232,9 @@ class QALoopState:
     # so the finalize gate agrees with the poll even if the setting changes
     # mid-run.
     verify_pass_enabled: bool | None = None
+    # The run ended on a provider setup error before any result (see
+    # _crash_output): nothing ran that a QA note could report.
+    setup_stop: bool = False
     # Scenario 0 (interactive) — tracked separately, never polled for verdicts
     scenario_0: QAScenario | None = None
     # PR-branch commit the planner handed off (published before fan-out);
@@ -3357,6 +3360,8 @@ def _poll_tmux_verdicts(
     verifying: set[int] = set()
     # Results from background verification threads
     verification_results: dict[int, tuple[bool, str]] = {}
+    # Provider setup errors met by verification threads (they end the run).
+    setup_errors: list[Exception] = []
     verification_lock = threading.Lock()
     # Idle-reminder state: when we last sent a reminder, keyed by scenario index.
     _reminder_timeout = _get_verdict_reminder_timeout()
@@ -3440,6 +3445,7 @@ def _poll_tmux_verdicts(
         def _stop() -> bool:
             return state.stop_requested
 
+        from pm_core.providers import ProviderNotFoundError
         try:
             passed, reason, _vpane = _verify_single_scenario(
                 scenario, verdict, content, pr_data, data,
@@ -3448,6 +3454,13 @@ def _poll_tmux_verdicts(
                 session_tag=state.session_tag,
                 pr_workdir=workdir_path,
             )
+        except ProviderNotFoundError as exc:
+            # A setup error (the provider broke mid-run): no verifier ran,
+            # so it is no verdict on the worker.  The poll loop stops the
+            # run with it (one "QA stopped" warning, see _log_thread_end).
+            with verification_lock:
+                setup_errors.append(exc)
+            return
         except Exception:
             _log.warning("Verification thread crashed for scenario %d — "
                          "leaving unverified so finalize blocks",
@@ -3555,6 +3568,8 @@ def _poll_tmux_verdicts(
 
         # Check for completed verifications
         with verification_lock:
+            if setup_errors:
+                raise setup_errors[0]
             completed_verifications = dict(verification_results)
             verification_results.clear()
 
@@ -5034,6 +5049,14 @@ def _execute_and_finalize(
     else:
         state.latest_verdict = VERDICT_PASS
 
+    if state.scenarios:
+        # The finalizer launches without a route gate: a provider that broke
+        # mid-run stops the run here, before an overall is published that
+        # a later auto-sequence tick would act on (finalize=None).
+        from pm_core.providers import get_provider
+        res = _resolve_qa_model(pr_data, data, session_type="qa_finalize")
+        get_provider(res.provider, strict=bool(res.provider))
+
     # Snapshot the final scenario verdicts BEFORE publishing overall: a
     # restart recovers a run whose status file has an overall from this
     # snapshot, and the blocking finalizer below may never return (its
@@ -5065,12 +5088,15 @@ def _execute_and_finalize(
         _log.warning("QA finalize: skipped for %s — no scenarios ran",
                      state.pr_id)
     else:
+        from pm_core.providers import ProviderNotFoundError
         try:
             state.finalize_verdict = _run_qa_finalize_pane(
                 state, pr_data, session, window_name, workdir_path,
                 stop_check=lambda: state.stop_requested,
                 project_data=data,
             )
+        except ProviderNotFoundError:
+            raise
         except Exception:
             _log.exception("Failed to run QA finalize pane")
 
@@ -5213,6 +5239,11 @@ def resume_qa_sync(
     )
 
 
+def _is_setup_error(exc: Exception) -> bool:
+    from pm_core.providers import ProviderNotFoundError
+    return isinstance(exc, ProviderNotFoundError)
+
+
 def _crash_output(exc: Exception, default: str) -> str:
     """What a crashed QA thread shows on the TUI.
 
@@ -5221,8 +5252,8 @@ def _crash_output(exc: Exception, default: str) -> str:
     with a remedy, not a bare crash: launches never fall back to the main
     account, so the user has to fix the setting before restarting QA.
     """
-    from pm_core.providers import PROVIDER_SETTING_HINT, ProviderNotFoundError
-    if isinstance(exc, ProviderNotFoundError):
+    from pm_core.providers import PROVIDER_SETTING_HINT
+    if _is_setup_error(exc):
         return f"QA stopped: {exc}; {PROVIDER_SETTING_HINT}, then start QA again"
     return default
 
@@ -5238,11 +5269,15 @@ def check_ungated_qa_providers(pr_data: dict, project_data: dict) -> None:
 
     For callers that cannot show ``QA stopped: …`` (the detached
     auto-sequence driver writes nothing a later tick reads), so the error
-    surfaces before the run starts rather than ending it unseen.
+    surfaces before the run starts rather than ending it unseen.  With
+    ``qa-verify-pass`` off no verifier is launched, so its provider is not
+    checked (the TUI ``t`` run would complete without it).
     """
     from pm_core.providers import get_provider
+    types = [t for t in _UNGATED_QA_SESSION_TYPES
+             if t != "qa_verification" or _is_verification_enabled()]
     resolutions = [_resolve_qa_model(pr_data, project_data, session_type=t)
-                   for t in _UNGATED_QA_SESSION_TYPES]
+                   for t in types]
     resolutions.append(_resolve_interactive_model(pr_data, project_data))
     for res in resolutions:
         get_provider(res.provider, strict=bool(res.provider))
@@ -5255,8 +5290,7 @@ def _log_thread_end(exc: Exception, what: str, pr_id: str) -> None:
     with a remedy, so it is one warning line, not a crash traceback; any
     other exception keeps its traceback.
     """
-    from pm_core.providers import ProviderNotFoundError
-    if isinstance(exc, ProviderNotFoundError):
+    if _is_setup_error(exc):
         _log.warning("QA stopped for %s: %s", pr_id, exc)
     else:
         _log.exception("%s crashed for %s", what, pr_id)
@@ -5278,6 +5312,7 @@ def start_qa_background(
             state.running = False
             state.latest_verdict = "ERROR"
             state.latest_output = _crash_output(exc, "QA thread crashed")
+            state.setup_stop = _is_setup_error(exc)
             if on_update:
                 on_update(state)
 
@@ -5301,6 +5336,7 @@ def resume_qa_background(
             state.running = False
             state.latest_verdict = "ERROR"
             state.latest_output = _crash_output(exc, "QA resume thread crashed")
+            state.setup_stop = _is_setup_error(exc)
             if on_update:
                 on_update(state)
 

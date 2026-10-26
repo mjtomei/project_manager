@@ -3559,7 +3559,12 @@ def pr_auto_sequence(pr_id: str):
             if project.get("skip_qa"):
                 click.echo("ready_to_merge (skip_qa)")
                 return
-            # Transition to qa and launch QA in a detached subprocess.
+            # Transition to qa and launch QA in a detached subprocess.  A
+            # provider setup error is reported before the move: a PR left in
+            # qa with no run would have its next tick act on an earlier
+            # run's qa_status.json (a stale NEEDS_WORK bounces it back to
+            # review) or qa window ("running: qa", the launch never retried).
+            _check_qa_launch(root, pr_id)
             def _to_qa(d):
                 p = store.get_pr(d, pr_id)
                 if p and p.get("status") == "in_review":
