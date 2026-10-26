@@ -369,6 +369,10 @@ def _entry_problem(entry) -> str | None:
     if entry.get("type") and entry["type"] not in PROVIDER_TYPES:
         return (f"unknown type {entry['type']!r} "
                 f"(one of {', '.join(PROVIDER_TYPES)})")
+    caps = entry.get("capabilities")
+    if caps is not None and not (
+            isinstance(caps, list) and all(isinstance(c, str) for c in caps)):
+        return "'capabilities' must be a list of names"
     aliases = entry.get("alias_models")
     if aliases is not None and not (
             isinstance(aliases, dict)
@@ -411,23 +415,59 @@ def _providers_path():
     return pm_home() / PROVIDERS_FILE
 
 
-def load_providers() -> dict[str, Any]:
-    """Load the providers.yaml config file.
-
-    Returns the raw parsed YAML dict, or empty dict if file doesn't exist.
-    """
+def _read_providers_file() -> tuple[dict[str, Any], str | None]:
+    """``(data, problem)``: providers.yaml as a mapping, or ``({}, why)``
+    when the file is there but cannot be read as one."""
     path = _providers_path()
     if not path.exists():
-        return {}
+        return {}, None
     try:
         import yaml
         data = yaml.safe_load(path.read_text()) or {}
     except Exception as e:
         _log.warning("Failed to load %s: %s", path, e)
-        return {}
+        mark = getattr(e, "problem_mark", None)
+        return {}, "it is not valid YAML" + (
+            f" (line {mark.line + 1})" if mark is not None else "")
     if not isinstance(data, dict):
         _log.warning("Ignoring %s: not a mapping", path)
-        return {}
+        return {}, "it is not a mapping"
+    return data, None
+
+
+def load_providers() -> dict[str, Any]:
+    """Load the providers.yaml config file.
+
+    Returns the raw parsed YAML dict, or empty dict if file doesn't exist
+    (or cannot be read as a mapping).
+    """
+    return _read_providers_file()[0]
+
+
+class ProvidersFileError(ValueError):
+    """providers.yaml cannot be changed: pm cannot read it as a mapping."""
+
+
+def load_providers_for_edit() -> dict[str, Any]:
+    """providers.yaml to change and save back, its ``providers`` block a
+    mapping (a blank block, e.g. every entry commented out, reads as empty).
+
+    Raises :class:`ProvidersFileError` when the file is there but pm cannot
+    read it (not valid YAML, not a mapping, a ``providers`` block that is
+    not a mapping): saving over it would lose what the user wrote, and
+    ``load_providers`` reads such a file as empty.
+    """
+    data, problem = _read_providers_file()
+    if problem is None:
+        entries = data.get("providers")
+        if entries is None:
+            data["providers"] = {}
+        elif not isinstance(entries, dict):
+            problem = "its 'providers' block is not a mapping"
+    if problem:
+        raise ProvidersFileError(
+            f"{_providers_path()} cannot be changed: {problem}. Fix it by "
+            "hand (pm left it unchanged).")
     return data
 
 
@@ -538,8 +578,11 @@ def get_default_provider() -> str:
 
 
 def set_default_provider(name: str) -> None:
-    """Set the default provider in providers.yaml."""
-    config = load_providers()
+    """Set the default provider in providers.yaml.
+
+    Raises :class:`ProvidersFileError` when the file cannot be changed.
+    """
+    config = load_providers_for_edit()
     config["default"] = name
     save_providers(config)
 

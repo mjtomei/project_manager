@@ -89,6 +89,17 @@ def _display_test_result(result) -> None:
         click.echo(f"  Tool use: FAILED ({result.tool_use_detail})", err=True)
 
 
+def _load_for_edit() -> dict:
+    """providers.yaml to change; exits with an Error line when pm cannot
+    read it (it is then left as it is, never overwritten)."""
+    from pm_core.providers import ProvidersFileError, load_providers_for_edit
+    try:
+        return load_providers_for_edit()
+    except ProvidersFileError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+
+
 @provider_group.command("add")
 @click.argument("name")
 @click.option("--type", "ptype", default="local",
@@ -129,7 +140,7 @@ def provider_add(name: str, ptype: str, api_base: str, api_key: str,
           --credentials-file ~/.claude-work/.credentials.json
     """
     from pm_core.providers import (
-        ProviderConfig, load_providers, save_providers, check_provider,
+        ProviderConfig, check_provider, save_providers,
     )
 
     # Build a temporary ProviderConfig to test before saving
@@ -150,6 +161,8 @@ def provider_add(name: str, ptype: str, api_base: str, api_key: str,
             raise SystemExit(1)
         skip_check = True  # checked by 'pm provider test' instead
 
+    config = _load_for_edit()  # before the check, which may prompt
+
     if not skip_check:
         click.echo(f"Checking provider '{name}'...")
         result = check_provider(provider)
@@ -163,10 +176,6 @@ def provider_add(name: str, ptype: str, api_base: str, api_key: str,
             if not click.confirm("Add this provider anyway?"):
                 click.echo("Aborted.")
                 raise SystemExit(1)
-
-    config = load_providers()
-    if "providers" not in config:
-        config["providers"] = {}
 
     entry: dict = {"type": ptype, "api_base": api_base}
     if api_key:
@@ -190,14 +199,14 @@ def provider_add(name: str, ptype: str, api_base: str, api_key: str,
 @click.argument("name")
 def provider_remove(name: str):
     """Remove a configured provider."""
-    from pm_core.providers import load_providers, save_providers
+    from pm_core.providers import save_providers
 
     if name == "claude":
         click.echo("Cannot remove the built-in 'claude' provider.", err=True)
         raise SystemExit(1)
 
-    config = load_providers()
-    providers = config.get("providers", {})
+    config = _load_for_edit()
+    providers = config["providers"]
     if name not in providers:
         click.echo(f"Provider '{name}' not found.", err=True)
         raise SystemExit(1)
@@ -220,11 +229,11 @@ def provider_default(name: str):
       pm provider default ollama
       pm provider default claude
     """
-    from pm_core.providers import load_providers, set_default_provider
+    from pm_core.providers import set_default_provider
 
+    config = _load_for_edit()
     if name != "claude":
-        config = load_providers()
-        if name not in config.get("providers", {}):
+        if name not in config["providers"]:
             click.echo(f"Provider '{name}' not found. Add it first with 'pm provider add'.",
                         err=True)
             raise SystemExit(1)

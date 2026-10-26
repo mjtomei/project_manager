@@ -2746,6 +2746,8 @@ _BAD_ENTRIES = {
                      "model": MODEL},
     "list_aliases": {"type": "router", "api_base": "http://127.0.0.1:8790",
                      "model": MODEL, "alias_models": ["x"]},
+    "int_capabilities": {"type": "router", "api_base": "http://127.0.0.1:8790",
+                         "model": MODEL, "capabilities": 5},
 }
 
 
@@ -2798,6 +2800,7 @@ def test_provider_list_and_test_name_an_invalid_entry(pm_home_dir):
     import yaml
     (pm_home_dir / "providers.yaml").write_text(yaml.safe_dump({"providers": {
         "broken": None,
+        "caps": {"type": "local", "api_base": "http://x", "capabilities": 5},
         ROUTE: {"type": "router", "api_base": "http://127.0.0.1:8790",
                 "model": MODEL}}}))
     cli = TestProviderCLI()
@@ -2805,6 +2808,9 @@ def test_provider_list_and_test_name_an_invalid_entry(pm_home_dir):
     assert r.exit_code == 0, r.output
     assert f"{ROUTE}  type=router" in r.output
     assert "broken  INVALID ENTRY: expected a mapping, got NoneType" in r.output
+    # Was joined raw (TypeError for 5; "c, o, d, e" for a string).
+    assert ("caps  INVALID ENTRY: 'capabilities' must be a list of names"
+            in r.output)
     r = cli._run("test", "broken")
     assert r.exit_code == 1 and "is not a valid entry" in r.output
 
@@ -2825,6 +2831,56 @@ def test_non_mapping_providers_file_is_ignored(pm_home_dir, text):
     assert get_provider().name == "claude"
     with pytest.raises(ProviderNotFoundError, match="is not configured"):
         get_provider(ROUTE, strict=True)
+
+
+# Review c189 i10: since i9 a blank `providers:` block (every entry
+# commented out) reads as no providers, so launches say "add it with 'pm
+# provider add ...'", but add/remove/default indexed the block and raised
+# TypeError.  And i9 reads a non-mapping file as empty, so `pm provider add`
+# overwrote it (pre-i9 it crashed before writing).
+_ADD_ROUTE = ("add", ROUTE, "--type", "router", "--api-base",
+              "http://127.0.0.1:8790", "--model", MODEL)
+
+
+def test_provider_edits_fill_a_blank_providers_block(pm_home_dir):
+    path = pm_home_dir / "providers.yaml"
+    path.write_text("default: claude\nproviders:\n  # claude-work: ...\n")
+    cli = TestProviderCLI()
+    for args, out in ((("remove", "x"), "Provider 'x' not found."),
+                      (("default", "x"), "Provider 'x' not found.")):
+        r = cli._run(*args)
+        assert (r.exit_code, type(r.exception)) == (1, SystemExit), r.output
+        assert out in r.output
+    r = cli._run(*_ADD_ROUTE)  # the remedy the launch error names
+    assert r.exit_code == 0, r.output
+    assert get_provider(ROUTE, strict=True).model == MODEL
+    assert cli._run("default", ROUTE).exit_code == 0
+    assert get_provider().name == ROUTE
+
+
+@pytest.mark.parametrize("text,why", [
+    ("- a\n- b\n", "it is not a mapping"),
+    (f"providers: [{ROUTE}]\n", "its 'providers' block is not a mapping"),
+    ("providers:\n  a: [\n", "it is not valid YAML (line 3)"),
+], ids=["list_file", "list_block", "bad_yaml"])
+def test_provider_edits_leave_an_unreadable_file_alone(pm_home_dir, monkeypatch,
+                                                      text, why):
+    from pm_core.providers import ProvidersFileError, set_default_provider
+    path = pm_home_dir / "providers.yaml"
+    path.write_text(text)
+    cli = TestProviderCLI()
+    # Refused before the endpoint check, which may ask to confirm.
+    monkeypatch.setattr("pm_core.providers.check_provider",
+                        lambda p: pytest.fail("checked a provider it cannot save"))
+    for args in (_ADD_ROUTE, ("add", "ollama", "--api-base", "http://x"),
+                 ("remove", ROUTE), ("default", ROUTE), ("default", "claude")):
+        r = cli._run(*args)
+        assert (r.exit_code, type(r.exception)) == (1, SystemExit), r.output
+        assert f"Error: {path} cannot be changed: {why}." in r.output
+        assert path.read_text() == text
+    with pytest.raises(ProvidersFileError):
+        set_default_provider("claude")
+    assert path.read_text() == text
 
 
 @pytest.mark.parametrize("starter,default", [

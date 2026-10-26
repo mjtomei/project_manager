@@ -1582,6 +1582,33 @@ vs fix). Tests: `test_invalid_selected_entry_is_reported_like_a_missing_provider
 `test_valid_entries_with_null_fields_still_load` and
 `test_non_mapping_providers_file_is_ignored[2]`. 11 mutations caught
 (`/pm-captures/review-c189-i9/mutation-checks.log`).
-Latest full suite: 3829 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
+Full suite 3829 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
 PYTHONPATH=/workspace, markdown 3.10.3 installed first;
 `/pm-captures/review-c189-i9/full-suite.log`).
+Review loop c189 i10 found i9's selected-entry handling sound and fixed
+the provider CLI it points users to:
+- Since i9 a blank `providers:` block (every entry commented out) reads as
+  no providers, so a launch says "add it with 'pm provider add …'".
+  `pm provider add`, `remove` and `default` still indexed the block and
+  raised `TypeError`, so that remedy crashed.
+- i9 also reads a providers.yaml that is not a mapping as empty, so
+  `pm provider add` silently replaced such a file. Before i9 it crashed
+  before writing. A file that is not valid YAML was replaced too, which
+  was already the case on master.
+- The three edit commands now load through
+  `providers.load_providers_for_edit`. A blank block reads as empty. A
+  file pm cannot read (not valid YAML, not a mapping, a `providers` block
+  that is not a mapping) gets one `Error: <path> cannot be changed: …`
+  line, rc 1, and is left unchanged. `add` refuses before its endpoint
+  check and confirm prompt.
+- `capabilities` is now validated like the other fields: a list of names.
+  `pm provider list` joined it raw, so `capabilities: 5` crashed the
+  listing that i9 made name invalid entries (pre-existing on master).
+See `/pm-captures/review-c189-i10/providers-file-cli-repro-{before,after}.txt`
+(4847ac05 and HEAD vs fix). Tests: `test_provider_edits_fill_a_blank_providers_block`,
+`test_provider_edits_leave_an_unreadable_file_alone[3]`, plus an
+`int_capabilities` case in the i9 tests. 8 mutations caught
+(`/pm-captures/review-c189-i10/mutation-checks.log`).
+Latest full suite: 3834 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
+PYTHONPATH=/workspace, markdown 3.10.3 installed first;
+`/pm-captures/review-c189-i10/full-suite.log`).
