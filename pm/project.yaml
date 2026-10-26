@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-26T17:00:29.671761+00:00'
+  updated_at: '2026-10-26T17:06:54.814861+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -13272,6 +13272,65 @@ prs:
       deviation remain recorded in /pm-captures/scenarios/20/qualification/.'
     created_at: '2026-10-26T17:00:29Z'
     last_edited: '2026-10-26T17:00:29Z'
+  - id: note-b364edc
+    text: 'QA S21 2026-10-26 (started on chatgpt/gpt-6-astra-high at 25751700; the
+      account switched mid-run to work Opus 5.5 and then deepseek/deepseek-v4.1-flash-1017[1m],
+      which finished the run — same session, container, fixture and evidence). Fresh
+      private editable-install/nested-Podman fixture under /scratch/s21-76190700 (symlink
+      to the scratchpad), PM session pm-project-11971164, A=pr-25b6e71, B=pr-dc1f95b,
+      B2=pr-140dd9a.
+
+
+      Qualification: real PM impl container d8d8d497 full ID, source hash, native
+      JSONL + idle hook, and a normal proxy push matching origin SHA5e901d6e. Standard
+      build-base failed Chromium inotify errno24/GPU error1002; the authorized smoke-RUN-only
+      recovery image 6253ae99 was built and used (never reported as an unmodified
+      build PASS).
+
+
+      EXECUTED: B and B2 ten-worker controls (all 10 full IDs each, incl. distinct
+      s1/s10; source readable; permitted push through the worker proxy matched origin
+      — B2 pushed again after A completed). A mixed attempt 23f8099c4cdae01c: 9 verified
+      PASS + 1 NEEDS_WORK, aggregate NEEDS_WORK, automatic finalization FINALIZE_DONE,
+      TUI "returning to review", no separate finalize action; all ten A allocations
+      were released at run end (removed 9 + 1, failed 0) before the finalizer started;
+      controls'' 20 IDs, host source/spec hashes, intended commit, dirty edit and
+      377+79 immutable snapshots intact within the 600s deadline. A fresh attempt
+      0dd844def3839595 launched as a genuinely new attempt (renumbered s11-s20) after
+      a real correction commit 91d63f16 delivered to the branch.
+
+
+      BLOCKING DEFECT (found and fixed here): under concurrent launches the runtime
+      serialises on its storage lock (run 28-44s) while probes had 10s. image_exists
+      cached a timed-out image inspect as "missing" (8 bogus "Image not found" launch
+      failures for a qualified image in the first B attempt), and current_container_id
+      raised TimeoutExpired out of create_container, aborting fresh-A scenarios 16/19
+      with "identity unavailable". Fixed in 0c9c05fc: image_exists is tri-state (None
+      = unknown, never cached as missing), current_container_id returns None (unknown)
+      per its contract, and the reuse preflight retries for a bounded 45s before failing
+      closed with a truthful diagnostic. Readiness-probe polling was already fixed
+      upstream (f02a1e70); that hunk was dropped on rebase. 6 new regression cases
+      fail pre-fix and pass now; full suite green (see /pm-captures/scenarios/21/full-suite-final.log).
+
+
+      CONSEQUENCE: the fresh-A all-PASS assertion is INVALIDATED by that real launch
+      failure even though 8/10 workers passed, so story 2 cannot pass. NOT EXECUTED:
+      the five ordered cancellation trials (clone return, initial allocation return,
+      active concretization, queued allocation return, dead-worker retry allocation
+      return), the `/pr qa fresh` overlap/supersession story with delayed old-ID removals,
+      and all four mixed-ownership stories (retention, viewed window, failed attachment,
+      scoped reap). No runtime QA PASS is claimed for them and none should be inferred
+      from this run.
+
+
+      Environment notes for a rerun: PM ignores the explicit CONTAINERS_STORAGE_CONF
+      graphroot and uses XDG paths; the authoritative reported paths are in prerequisites/podman-info.json.
+      pm container status keeps reporting two "release runtime domain unknown" diagnostics
+      for impl allocations that are already absent (the advertised `pm container reap
+      --pr/--session` retry does not clear them) — filed as observed behaviour, not
+      fixed here. Evidence index: /pm-captures/scenarios/21/manifest.md.'
+    created_at: '2026-10-26T17:06:54Z'
+    last_edited: '2026-10-26T17:06:54Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -32939,7 +32998,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T16:12:49.584678+00:00'
-  updated_at: '2026-10-25T16:12:49.584678+00:00'
+  updated_at: '2026-10-26T17:07:01.903910+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32953,6 +33012,15 @@ prs:
       standard build success. No quota changes.'
     created_at: '2026-10-26T04:17:15Z'
     last_edited: '2026-10-26T04:17:15Z'
+  - id: note-dfefec5
+    text: 'S21 (2026-10-26, HEAD25751700) reproduces the standard build-base Chromium
+      failure: STEP17 inotify_init errno24 + GPU process launch error1002, build exit1.
+      Original cast/H264/log retained under /pm-captures/scenarios/21/prerequisites;
+      the authorized smoke-RUN-only recovery image built and then qualified a genuine
+      PM worker, exec, transcript/hook and proxy push. No unmodified build-base PASS
+      is claimed.'
+    created_at: '2026-10-26T17:07:01Z'
+    last_edited: '2026-10-26T17:07:01Z'
 - id: pr-b28e042
   plan: bugs
   title: 'Bug: manual fake-agent launchers do not create transcripts and ignore configured
