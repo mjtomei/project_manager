@@ -1366,6 +1366,7 @@ def test_integrate_cli_prints_the_resolution(w):
     git(w.repo, "add", ".")
     git(w.repo, "commit", "-q", "-m", "base records")
 
+    head_before = git(w.wd, "rev-parse", "HEAD")
     with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
          patch.object(pr_mod, "trigger_tui_refresh"):
         r = CliRunner().invoke(pr_mod.pr, ["signoff", "integrate", PR])
@@ -1373,6 +1374,15 @@ def test_integrate_cli_prints_the_resolution(w):
     assert "resolved by record" in r.output
     assert "added from PR: pr-300" in r.output
     assert "added from base: pr-250" in r.output
+    # R1/R8: the read-only check names the delta file and leaves it on disk,
+    # without recording the check on the PR or touching the workdir.
+    diff_path = w.croot / PR / "integration-resolution.diff"
+    assert diff_path.is_file()
+    assert f"resolution delta: {diff_path}" in r.output
+    assert "resolved" in diff_path.read_text()
+    assert "integration" not in store.get_pr(store.load(w.pm_dir), PR)
+    assert git(w.wd, "rev-parse", "HEAD") == head_before
+    assert git(w.wd, "status", "--porcelain") == ""
 
     with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
          patch.object(pr_mod, "trigger_tui_refresh"):

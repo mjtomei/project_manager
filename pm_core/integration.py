@@ -1259,10 +1259,14 @@ def resolution_diff_path(pr_id: str) -> Path | None:
     return croot / pr_id / "integration-resolution.diff" if croot else None
 
 
-def _write_artifacts(pr_id: str, record: dict) -> None:
-    """Write the full record + the human-readable resolution delta."""
-    # The delta first: the full record written below must carry the pointer
-    # to it (the compact state in project.yaml carries the same pointer).
+def write_resolution_delta(pr_id: str, record: dict) -> str | None:
+    """Write the human-readable resolution delta for *record*.
+
+    Returns the delta's path, or None when the record carries no resolution
+    (or only an empty delta).  Shared by the recorded artifact write and the
+    read-only ``pm pr signoff integrate`` surface: the check records nothing
+    on the PR, but the delta its output names must be inspectable on disk.
+    """
     resolution = record.get("resolution") or {}
     diff = resolution.get("diff")
     diff_path = resolution_diff_path(pr_id)
@@ -1274,6 +1278,14 @@ def _write_artifacts(pr_id: str, record: dict) -> None:
             resolution["diff_path"] = str(diff_path)
         except OSError as e:
             _log.warning("integration resolution diff for %s: %s", pr_id, e)
+    return resolution.get("diff_path")
+
+
+def _write_artifacts(pr_id: str, record: dict) -> None:
+    """Write the full record + the human-readable resolution delta."""
+    # The delta first: the full record written below must carry the pointer
+    # to it (the compact state in project.yaml carries the same pointer).
+    write_resolution_delta(pr_id, record)
     path = integration_json_path(pr_id)
     if path is not None:
         try:

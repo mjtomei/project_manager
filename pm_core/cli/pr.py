@@ -1684,6 +1684,9 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
                                             resolve=resolve)
     else:
         rec = integration.run_check(data, pr_entry, root, resolve=resolve)
+        # The read-only check records nothing on the PR, but the delta its
+        # output names must exist for the resolution to be inspectable.
+        integration.write_resolution_delta(pr_id, rec)
     click.echo(f"PR {pr_id}: {integration.summary(rec)}")
     click.echo(f"  target: {rec.get('base_branch')} of {rec.get('target_repo')}")
     click.echo(f"  head:   {rec.get('head')}")
