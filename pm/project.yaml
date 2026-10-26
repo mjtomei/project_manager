@@ -12658,6 +12658,32 @@ prs:
       unexecuted concurrent/resume/fault trials.'
     created_at: '2026-10-26T04:34:25Z'
     last_edited: '2026-10-26T04:34:25Z'
+  - id: note-43d175d
+    text: 'QA S11 2026-10-26 (actual harness model chatgpt/gpt-6-astra-high), HEAD
+      d53b8fd2: real isolated rootless Podman qualification succeeded after original
+      build-base failed Chromium inotify errno24/GPU unusable; used ONLY authorized
+      smoke RUN omission, preserved both builds. PM impl worker native JSONL+idle
+      hook and permitted proxy push qualified. Fixture /scratch/s11-qualification,
+      session project-1c70b8ef, A=pr-5d84c93 B=pr-1cacce8. Ten actual B no-verdict
+      workers stayed live with original IDs. A d9f913d1d9640818 allocated ten containers
+      but s10 concretizer pane %39 disappeared before split (unexplained; no injected
+      fault), so NEEDS_WORK never emitted: nine verified PASS, one genuine launch
+      error with no agent verdict, aggregate INPUT_REQUIRED and FINALIZE_DONE. Thus
+      required mixed-result Given was not achieved; no PASS or cancellation/retry/viewed-owner/supersession
+      coverage claimed. All ten captured A IDs subsequently gone by 04:31:13, before
+      any second A/manual apply; B IDs unchanged, s1 proxy push usable, immutable
+      source/capture/transcript hashes held. Two concurrent cleanup inspect timeouts
+      were surfaced with exact IDs (both later absent). After assertions, TUI stop
+      B released its ten IDs, private runtime empty and both proxies stopped. Preserve
+      native failure and investigate lost concretizer before rerunning independent
+      stories. Setup corrections: host PATH needs /workspace/bin/fake-claude; author/commit
+      QA specs because fake planner cannot generate them; pull fixture PR workdirs
+      after pushing specs; interactive s0 consumes qa_scenario sequence, reset before
+      numbered workers or reserve first entry. Evidence /pm-captures/scenarios/11
+      (casts, H264, full IDs, native statuses/logs, source bundle). No product source
+      fix or unit-test substitute.'
+    created_at: '2026-10-26T04:34:48Z'
+    last_edited: '2026-10-26T04:34:48Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
