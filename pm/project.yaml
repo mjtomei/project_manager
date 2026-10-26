@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T14:26:46.836339+00:00'
+  updated_at: '2026-10-26T16:22:35.796202+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34402,6 +34402,47 @@ prs:
       reaper child.'
     created_at: '2026-10-26T14:26:46Z'
     last_edited: '2026-10-26T14:26:46Z'
+  - id: note-ccf499c
+    text: 'S79 refine: a sign-off return to REVIEW can never carry "Conflicting paths":
+      effective_verdict coerces REVIEW/REQA/MERGE to IMPL when the integration of
+      the reviewed HEAD is a conflict. Test the bounded review-return block with a
+      CLEAN base move touching >40 files on both sides (overlap_total, merged into
+      the branch as applied.merge_sha). Test the conflict list on the IMPL return.
+      Per-PR session_models.review also routes signoff (signoff falls back to review),
+      so pin signoff explicitly when only review/impl should be routed.'
+    created_at: '2026-10-26T15:00:35Z'
+    last_edited: '2026-10-26T15:00:35Z'
+  - id: note-2f5720a
+    text: 'QA S79 (2026-10-26, merge smoke c161f2cc + origin/master 211a6128 = scratch
+      80b9dacb, real claude vs stubs, host + container; captures /pm-captures/scenarios/79/REPORT.md):
+      CODE CHANGE 2ad57eff needs normal re-review. Suites: merge 4018 passed / base
+      c161f2cc 3865 passed, same 6 test_worker_route caplog env failures; aa1f5c32
+      and 1f122df9 survive the merge. FOUND on the merge (pre-existing on the branch,
+      tui/ unchanged by master): (A) a tick launched the SIGNOFF_REVIEW review, `pm
+      tui restart --breadcrumb` at awaiting:review, and the restarted TUI (no in-memory
+      loop, awaiting already cleared) started a review loop whose --fresh killed the
+      tick review 0.6 s later (two launches per return; the 185 s re-check after a
+      skipped claim does the same); (B) after the TUI relaunched an IMPL return, the
+      next tick judged the new pane idle from its stale auto-sequence impl-<pr>.jsonl
+      symlink (earlier idle session) and moved P to in_review 1.2 s into the rework
+      (TUI mirror case seen too). Fix: tui/auto_start._adopt_return_review adopts
+      the live review window of a launched return (session active since the return)
+      as iteration 1 of a resumed loop; claude_launcher.pane_runs_transcript gates
+      both impl-idle checks (cli/pr._check_impl_idle, tui/review_loop_ui._poll_impl_idle)
+      on the pane running the symlinked session. tests/test_return_driver_handoff.py
+      (11, mutation-checked); full suite with fix 3876 passed + same 6. Post-fix live:
+      review return one window (TUI logged consume_breadcrumb + "Review loop resumed
+      for <P> at iteration 1"), impl return one window kept >185 s, held review PASS
+      200 s; return blocks bounded (20 paths + "(+40 more; ...)" from overlap_total,
+      clean merge sha line; impl block conflict lists both bounded); 15 file-backed
+      sessions read whole, files removed on /exit; router only work/, main 0 (host);
+      container: bridge prefix + --model work/, cleanup --pr printed Removing x2 +
+      Removed 2 twice, containers gone, no secrets in prompts/inspect/captures. build-base
+      still fails at the Chromium smoke RUN. Scratch merge lacks S78 50b5bd91. The
+      branch still needs the master merge before the manual merge gate; not committed
+      by this QA.'
+    created_at: '2026-10-26T16:22:35Z'
+    last_edited: '2026-10-26T16:22:35Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
