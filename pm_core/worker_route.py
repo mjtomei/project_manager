@@ -45,7 +45,8 @@ from urllib.parse import urlparse
 
 from pm_core import route_bridge
 from pm_core.paths import configure_logger, pm_home
-from pm_core.providers import (ProviderConfig, ProviderNotFoundError, get_provider,
+from pm_core.providers import (ProviderConfig, ProviderEntryError,
+                               ProviderNotFoundError, get_provider,
                                launch_env)
 
 _log = configure_logger("pm.worker_route")
@@ -179,6 +180,9 @@ def describe(resolution, *, container: bool = False) -> str:
     effort = getattr(resolution, "effort", None) or "(default)"
     try:
         cfg = router_for(resolution)
+    except ProviderEntryError:
+        return (f"route={resolution.provider} (INVALID ENTRY in "
+                f"providers.yaml) effort={effort}")
     except ProviderNotFoundError:
         return (f"route={resolution.provider} (NOT CONFIGURED) "
                 f"effort={effort}")

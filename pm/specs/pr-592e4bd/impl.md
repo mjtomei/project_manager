@@ -67,7 +67,8 @@ it always runs plain `claude`, with `ANTHROPIC_BASE_URL` rewritten to
 (`--session-id`) are unchanged. The fake-claude branch is untouched (no
 ensure step). An explicitly named provider that is not configured raises
 `ProviderNotFoundError` (strict `get_provider`) instead of silently falling
-back to the built-in claude provider.
+back to the built-in claude provider. So does an entry that is there but is
+not a provider (`ProviderEntryError`, a subclass; review loop c189 i9).
 
 R4. **Container connectivity without exposing the router.** Stdlib-only
 `pm_core/route_bridge.py`:
@@ -1551,6 +1552,36 @@ and an entry that is not a well-formed router is skipped.
 `test_malformed_provider_entries_do_not_break_launches[5 cases]` and
 `test_router_beside_a_malformed_entry_is_still_recognised`; 8 mutations
 caught (`/pm-captures/review-c189-i8/mutation-checks.log`).
-Latest full suite: 3818 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
+Full suite 3818 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
 PYTHONPATH=/workspace, markdown 3.10.3 installed first;
 `/pm-captures/review-c189-i8/full-suite.log`).
+Review loop c189 i9 found i8 sound and closed the matching gap for the
+*selected* provider, which was there on master for null and string entries.
+A hand-edited entry that is not a provider (a null or string entry, a
+non-string field, an unknown `type`, a list `alias_models`) raised
+`AttributeError` or `ValueError` from whichever step first touched the
+field. That broke the launch (a traceback, or "QA thread crashed" for
+planner/s0/verifier/finalizer), the refiner/worker route gate
+(`check_route` itself raised, so the QA thread died instead of waiting with
+a remedy), `pm model show` and `pm provider list`.
+- `get_provider` now raises `ProviderEntryError` for such an entry. It is a
+  `ProviderNotFoundError` naming the file and the field, raised strict or
+  not, and never falls back to plain claude.
+- Every launch surface therefore reports it as it reports a missing
+  provider: one `Error:` line, the route gate's wait with its remedy (the
+  launch goes ahead once the entry is fixed), and `QA stopped: …`.
+- `describe` (and so `pm model show`) says `(INVALID ENTRY in
+  providers.yaml)`. `pm provider list` lists such entries as
+  `INVALID ENTRY: <problem>` beside the valid ones.
+- A blank field reads as unset, as an absent key does. A providers.yaml
+  that is not a mapping is ignored like one that does not parse.
+See `/pm-captures/review-c189-i9/invalid-selected-entry-repro.txt` (4847ac05
+vs fix). Tests: `test_invalid_selected_entry_is_reported_like_a_missing_provider[6 cases]`,
+`test_invalid_selected_entry_is_a_clean_cli_error`,
+`test_provider_list_and_test_name_an_invalid_entry`,
+`test_valid_entries_with_null_fields_still_load` and
+`test_non_mapping_providers_file_is_ignored[2]`. 11 mutations caught
+(`/pm-captures/review-c189-i9/mutation-checks.log`).
+Latest full suite: 3829 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
+PYTHONPATH=/workspace, markdown 3.10.3 installed first;
+`/pm-captures/review-c189-i9/full-suite.log`).

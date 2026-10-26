@@ -2688,11 +2688,11 @@ def test_impl_start_builds_and_wraps_for_the_selected_route(tmp_path, monkeypatc
         tmux.new_window_get_pane.assert_not_called()
 
 
-def _launch_on_missing_provider(**kw):
+def _launch_on_missing_provider(provider="missing-route", **kw):
     """The real launcher with a provider this host does not configure."""
     from pm_core.claude_launcher import build_claude_shell_cmd
     with patch("pm_core.claude_launcher.log_shell_command"):
-        return build_claude_shell_cmd(provider="missing-route", **kw)
+        return build_claude_shell_cmd(provider=provider, **kw)
 
 
 def test_unconfigured_provider_is_a_clean_cli_error(pm_home_dir, monkeypatch, capsys):
@@ -2729,6 +2729,102 @@ def test_unconfigured_provider_explains_a_stopped_qa_run(pm_home_dir, starter):
         "QA stopped: provider 'missing-route' is not configured")
     assert "'pm model show' lists them" in state.latest_output
     assert state.latest_output.endswith("then start QA again")
+
+
+# Review c189 i9: a hand-edited entry for the *selected* provider used to
+# raise AttributeError/ValueError from whichever launch step touched the
+# bad field (a traceback, "QA thread crashed", a crashed `pm model show`).
+# It is now a ProviderNotFoundError (ProviderEntryError), reported like a
+# missing provider on every surface, and never a fallback to plain claude.
+_BAD_ENTRIES = {
+    "null": None,
+    "string": "router",
+    "int_api_base": {"type": "router", "api_base": 8790, "model": MODEL},
+    "int_model": {"type": "router", "api_base": "http://127.0.0.1:8790",
+                  "model": 5},
+    "unknown_type": {"type": "routr", "api_base": "http://127.0.0.1:8790",
+                     "model": MODEL},
+    "list_aliases": {"type": "router", "api_base": "http://127.0.0.1:8790",
+                     "model": MODEL, "alias_models": ["x"]},
+}
+
+
+def _write_entry(home: Path, entry):
+    import yaml
+    (home / "providers.yaml").write_text(
+        yaml.safe_dump({"providers": {ROUTE: entry}}))
+
+
+@pytest.mark.parametrize("case", list(_BAD_ENTRIES))
+def test_invalid_selected_entry_is_reported_like_a_missing_provider(
+        pm_home_dir, case):
+    from pm_core.claude_launcher import _resolve_provider, build_claude_shell_cmd
+    from pm_core.providers import ProviderEntryError
+    _write_entry(pm_home_dir, _BAD_ENTRIES[case])
+    for strict in (True, False):  # never the non-strict claude fallback
+        with pytest.raises(ProviderEntryError,
+                           match=f"provider '{ROUTE}' in .*providers.yaml "
+                                 "is not a valid entry"):
+            get_provider(ROUTE, strict=strict)
+    with pytest.raises(ProviderNotFoundError):
+        build_claude_shell_cmd(prompt="hi", provider=ROUTE)
+    with pytest.raises(ProviderNotFoundError):
+        _resolve_provider(ROUTE)
+    res = ModelResolution(provider=ROUTE, effort="high")
+    st = worker_route.check_route(res)  # the QA gates wait on this
+    assert not st.ok and "is not a valid entry" in st.problem
+    assert "Remedy:" in st.message()
+    assert worker_route.describe(res) == (
+        f"route={ROUTE} (INVALID ENTRY in providers.yaml) effort=high")
+    assert worker_route.container_mounts(res) == {}
+
+
+def test_invalid_selected_entry_is_a_clean_cli_error(pm_home_dir, monkeypatch,
+                                                     capsys):
+    import pm_core.cli as cli_mod
+    _write_entry(pm_home_dir, None)
+    monkeypatch.setattr(cli_mod, "cli", lambda: _launch_on_missing_provider(
+        ROUTE, session_type="review", container=True))
+    with pytest.raises(SystemExit) as exc:
+        cli_mod.main()
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert err.startswith(f"Error: provider '{ROUTE}' in ")
+    assert "expected a mapping, got NoneType" in err
+    assert f"'pm provider add {ROUTE} ...'" in err and "Traceback" not in err
+
+
+def test_provider_list_and_test_name_an_invalid_entry(pm_home_dir):
+    import yaml
+    (pm_home_dir / "providers.yaml").write_text(yaml.safe_dump({"providers": {
+        "broken": None,
+        ROUTE: {"type": "router", "api_base": "http://127.0.0.1:8790",
+                "model": MODEL}}}))
+    cli = TestProviderCLI()
+    r = cli._run("list")
+    assert r.exit_code == 0, r.output
+    assert f"{ROUTE}  type=router" in r.output
+    assert "broken  INVALID ENTRY: expected a mapping, got NoneType" in r.output
+    r = cli._run("test", "broken")
+    assert r.exit_code == 1 and "is not a valid entry" in r.output
+
+
+def test_valid_entries_with_null_fields_still_load(pm_home_dir):
+    # A key left blank (`launcher:`) reads as unset, as an absent key does.
+    _write_entry(pm_home_dir, {"type": "router", "api_base":
+                               "http://127.0.0.1:8790", "model": MODEL,
+                               "launcher": None, "alias_models": None})
+    p = get_provider(ROUTE, strict=True)
+    assert (p.launcher, p.alias_models, p.model) == ("", {}, MODEL)
+
+
+@pytest.mark.parametrize("text", ["- a\n- b\n", f"providers: [{ROUTE}]\n"],
+                         ids=["list_file", "list_block"])
+def test_non_mapping_providers_file_is_ignored(pm_home_dir, text):
+    (pm_home_dir / "providers.yaml").write_text(text)
+    assert get_provider().name == "claude"
+    with pytest.raises(ProviderNotFoundError, match="is not configured"):
+        get_provider(ROUTE, strict=True)
 
 
 @pytest.mark.parametrize("starter,default", [

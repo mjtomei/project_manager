@@ -162,18 +162,15 @@ def _configured_router_urls() -> set[str]:
     """Host and in-container addresses of the routers configured here.
 
     Read on every launch that inherits an ANTHROPIC_BASE_URL, so the
-    entries are read raw and one that is not a well-formed router
-    (hand-edited providers.yaml: a null entry, a non-string api_base) is
-    skipped: it names no address to recognise, and it must not fail a
-    launch that does not use it (list_providers would raise on it).
+    entries are read raw: one with no usable address (hand-edited
+    providers.yaml: a null entry, a non-string api_base) is skipped and
+    never fails a launch that does not use it, and a router whose other
+    fields are broken (list_providers leaves it out) still names its
+    address.
     """
     from pm_core import worker_route
-    config = load_providers()
-    entries = config.get("providers") if isinstance(config, dict) else None
-    if not isinstance(entries, dict):
-        return set()
     urls = set()
-    for name, entry in entries.items():
+    for name, entry in _provider_entries().items():
         if not isinstance(entry, dict) or entry.get("type") != "router":
             continue
         base = entry.get("api_base")
@@ -216,6 +213,17 @@ def launch_env(provider: "ProviderConfig", env: dict[str, str],
 
 class ProviderNotFoundError(LookupError):
     """An explicitly named provider is not configured in providers.yaml."""
+
+
+class ProviderEntryError(ProviderNotFoundError):
+    """A providers.yaml entry that cannot be read as a provider.
+
+    Hand-edited YAML: a null or string entry, a non-string field, an
+    unknown type, a list alias_models.  A ProviderNotFoundError, so every
+    launch surface reports it as it reports a missing provider (one
+    ``Error:`` line, a route gate's remedy, ``QA stopped: …``) and nothing
+    falls back to the built-in claude provider.
+    """
 
 
 # The other way out of a ProviderNotFoundError (its message names the
@@ -346,19 +354,54 @@ def _resolve_env_ref(value: str) -> str:
     return value
 
 
+_PROVIDER_STR_FIELDS = ("type", "api_base", "api_key", "model", "launcher",
+                        "credentials_file", "refresh_command", "remedy")
+
+
+def _entry_problem(entry) -> str | None:
+    """Why a providers.yaml entry is not a provider, or None if it is."""
+    if not isinstance(entry, dict):
+        return f"expected a mapping, got {type(entry).__name__}"
+    for key in _PROVIDER_STR_FIELDS:
+        value = entry.get(key)
+        if value is not None and not isinstance(value, str):
+            return f"{key!r} must be a string"
+    if entry.get("type") and entry["type"] not in PROVIDER_TYPES:
+        return (f"unknown type {entry['type']!r} "
+                f"(one of {', '.join(PROVIDER_TYPES)})")
+    aliases = entry.get("alias_models")
+    if aliases is not None and not (
+            isinstance(aliases, dict)
+            and all(isinstance(k, str) and isinstance(v, str)
+                    for k, v in aliases.items())):
+        return "'alias_models' must map variable names to model names"
+    return None
+
+
 def _config_to_provider(name: str, entry: dict) -> ProviderConfig:
-    """Build a ProviderConfig from a providers.yaml entry."""
+    """Build a ProviderConfig from a providers.yaml entry.
+
+    Raises :class:`ProviderEntryError` for an entry that is not a provider
+    (it used to surface as an AttributeError/ValueError traceback from
+    whichever launch first touched the bad field).
+    """
+    problem = _entry_problem(entry)
+    if problem:
+        raise ProviderEntryError(
+            f"provider {name!r} in {_providers_path()} is not a valid "
+            f"entry: {problem} (fix it there, or replace it with "
+            f"'pm provider add {name} ...')")
     return ProviderConfig(
         name=name,
-        type=entry.get("type", "local"),
-        api_base=entry.get("api_base", ""),
-        api_key=entry.get("api_key", ""),
-        model=entry.get("model", ""),
-        capabilities=entry.get("capabilities", []),
-        launcher=entry.get("launcher", ""),
-        credentials_file=entry.get("credentials_file", ""),
-        refresh_command=entry.get("refresh_command", ""),
-        remedy=entry.get("remedy", ""),
+        type=entry.get("type") or "local",
+        api_base=entry.get("api_base") or "",
+        api_key=entry.get("api_key") or "",
+        model=entry.get("model") or "",
+        capabilities=entry.get("capabilities") or [],
+        launcher=entry.get("launcher") or "",
+        credentials_file=entry.get("credentials_file") or "",
+        refresh_command=entry.get("refresh_command") or "",
+        remedy=entry.get("remedy") or "",
         alias_models=dict(entry.get("alias_models") or {}),
     )
 
@@ -378,10 +421,14 @@ def load_providers() -> dict[str, Any]:
         return {}
     try:
         import yaml
-        return yaml.safe_load(path.read_text()) or {}
+        data = yaml.safe_load(path.read_text()) or {}
     except Exception as e:
         _log.warning("Failed to load %s: %s", path, e)
         return {}
+    if not isinstance(data, dict):
+        _log.warning("Ignoring %s: not a mapping", path)
+        return {}
+    return data
 
 
 def save_providers(data: dict[str, Any]) -> None:
@@ -437,7 +484,9 @@ def get_provider(name: str | None = None, *,
         return ProviderConfig(name=BUILTIN_CLAUDE)
 
     # Look up the named provider in config
-    providers = config.get("providers", {})
+    providers = config.get("providers")
+    if not isinstance(providers, dict):
+        providers = {}
     if resolved not in providers:
         if strict and name:
             raise ProviderNotFoundError(
@@ -450,12 +499,28 @@ def get_provider(name: str | None = None, *,
 
 
 def list_providers() -> list[ProviderConfig]:
-    """List all configured providers (including built-in claude)."""
+    """List all configured providers (including built-in claude).
+
+    Entries that are not providers are left out
+    (:func:`invalid_provider_entries` names them).
+    """
     result = [ProviderConfig(name=BUILTIN_CLAUDE)]
-    config = load_providers()
-    for name, entry in config.get("providers", {}).items():
-        result.append(_config_to_provider(name, entry))
+    for name, entry in _provider_entries().items():
+        if _entry_problem(entry) is None:
+            result.append(_config_to_provider(name, entry))
     return result
+
+
+def invalid_provider_entries() -> dict[str, str]:
+    """``{name: problem}`` for the providers.yaml entries that are not
+    providers."""
+    return {name: problem for name, entry in _provider_entries().items()
+            if (problem := _entry_problem(entry))}
+
+
+def _provider_entries() -> dict:
+    entries = load_providers().get("providers")
+    return entries if isinstance(entries, dict) else {}
 
 
 def set_session_provider(provider_name: str, session_tag: str | None = None) -> None:

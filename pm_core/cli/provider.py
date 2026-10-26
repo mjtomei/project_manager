@@ -17,7 +17,9 @@ def provider_group():
 @provider_group.command("list")
 def provider_list():
     """List all configured providers."""
-    from pm_core.providers import list_providers, get_default_provider
+    from pm_core.providers import (
+        get_default_provider, invalid_provider_entries, list_providers,
+    )
 
     default = get_default_provider()
     providers = list_providers()
@@ -36,6 +38,8 @@ def provider_list():
             click.echo(f"  {p.name}{marker}  type={p.type}  api_base={p.api_base}{model_str}")
             if p.capabilities:
                 click.echo(f"    capabilities: {', '.join(p.capabilities)}")
+    for name, problem in invalid_provider_entries().items():
+        click.echo(f"  {name}  INVALID ENTRY: {problem}")
 
 
 def _router_detail_lines(p) -> list[str]:
