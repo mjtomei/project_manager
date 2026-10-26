@@ -1472,6 +1472,34 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
       override: the `QA stopped` line stays, no note, the other PR is
       unaffected, `qa-verify-pass` switched on mid-run keeps the run's
       own setting, and the restart after the fix records one note.
+  - Twenty-eighth pass (S71+), delta-only, for the two product fixes made
+    during QA run d212e870835ab7b9 and reviewed in e932 i1, each so far
+    checked live only by the scenario that wrote it: 109bca54 (S68: the
+    qa launch claim outlives `awaiting`, and a qa tick with no window
+    treats a fresh qa claim like the window, so a tick while the re-run
+    driver replaces the judged qa window starts no second driver) and
+    75708c0b (S69: the resume snapshot is written before the finalizer
+    provider check, so a run stopped there keeps every verification and
+    a TUI adopting it does not verify again). Stubs only, host mode,
+    S65–S69 harness. Pre-fix controls: 4648d501 for 109bca54 (75708c0b
+    included), 4d79012a for 75708c0b. Master adds only
+    pm_core/cli/meta.py since the branch point, so no merge smoke.
+    - S71: the sign-off `qa` hop gap race at swept tick offsets, the
+      claim's 180 s expiry when the re-run driver dies after clearing
+      `awaiting` (one relaunch, then never "running: qa" from a stale
+      claim), a second sign-off REQA soon after the first re-run (a new
+      return record, one driver), the hop/claim race of 8edbe269 forced
+      with a brief project-lock holder, and the TUI watching all of it.
+      Open point from code reading: TUI auto-start's QA start for a PR
+      awaiting `qa` takes no claim, so a TUI auto-start target also
+      ticked by `pm pr auto-sequence` may get a TUI loop and a driver at
+      once; S71 decides whether that happens and whether it is
+      pre-existing (control).
+    - S72: a finalizer provider broken after the last verification, on
+      the detached driver (TUI adoption) and on TUI `t` (kill -9 + `pm
+      session` restart), with verification on and off: one `QA stopped`
+      per process, no re-verify, no request after the stop, no verdict,
+      overall, note or `sign_off`; after the fix one normal run.
 
 ## 3. Edge cases
 
