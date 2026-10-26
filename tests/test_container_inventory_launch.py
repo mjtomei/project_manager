@@ -92,14 +92,18 @@ def test_run_spawn_failure_discards_after_proxy_unlock(monkeypatch, tmp_path, fa
         return str(tmp_path / "push.sock")
 
     def runtime(*args, **kwargs):
+        if args[0] == "inspect":
+            assert not held
+            return _result(json.dumps([{"Id": "partial-id", "Config": {
+                "Labels": {cm.LABEL_ATTEMPT: "attempt"}}}]))
         assert held == shared and args[0] == "run"
         events.append("run")
         if failure == "oserror":
             raise OSError(errno.EAGAIN, "Resource temporarily unavailable")
         raise KeyboardInterrupt()
 
-    def discard(target):
-        assert target == name
+    def discard(target, *, container_id):
+        assert target == name and container_id == "partial-id"
         assert not held
         events.append("discard")
 
@@ -123,7 +127,7 @@ def test_run_spawn_failure_discards_after_proxy_unlock(monkeypatch, tmp_path, fa
             name, cm.ContainerConfig(), tmp_path,
             extra_ro_mounts=None, extra_rw_mounts=None, allowed_push_branch="topic",
             session_tag="tag" if shared else None,
-            pr_id="pr-aaaa" if shared else None, labels={})
+            pr_id="pr-aaaa" if shared else None, labels={cm.LABEL_ATTEMPT: "attempt"})
     if failure == "oserror":
         assert "Resource temporarily unavailable" in str(exc.value)
         assert "Errno 11" in str(exc.value)

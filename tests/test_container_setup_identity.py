@@ -1,5 +1,6 @@
 """Setup and recovery must not switch to a same-name replacement allocation."""
 
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import Mock
@@ -249,3 +250,78 @@ def test_reused_setup_timeout_does_not_claim_container_removed(monkeypatch, tmp_
     assert "was removed" not in str(error.value)
     assert "pm container reap --dry-run" in str(error.value)
     remove.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ["conflict", "timeout", "cancel", "proxy"])
+@pytest.mark.parametrize("allocation", ["ours", "foreign", "unknown", "absent"])
+def test_fresh_failure_cleanup_requires_attempt_identity(fresh, monkeypatch, tmp_path,
+                                                        failure, allocation):
+    attempt = "this-launch-attempt"
+    discarded = Mock()
+    stopped = Mock()
+    monkeypatch.setattr(cm, "discard_container", discarded)
+    monkeypatch.setattr(push_proxy, "stop_push_proxy", stopped)
+
+    def runtime(*args, **kwargs):
+        if args[0] == "run":
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(args, 60)
+            if failure == "cancel":
+                raise KeyboardInterrupt()
+            return subprocess.CompletedProcess(args, 125, "", "container name is already in use")
+        assert args[0] == "inspect"
+        if allocation == "unknown":
+            return subprocess.CompletedProcess(args, 1, "", "runtime unavailable")
+        if allocation == "absent":
+            return subprocess.CompletedProcess(args, 1, "", "no such container")
+        labels = {cm.LABEL_ATTEMPT: attempt if allocation == "ours" else "other-attempt"}
+        return subprocess.CompletedProcess(args, 0,
+            json.dumps([{"Id": CID, "Config": {"Labels": labels}}]), "")
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    if failure == "proxy":
+        monkeypatch.setattr(push_proxy, "start_push_proxy",
+                            Mock(side_effect=cm.ContainerError("proxy failed")))
+    expected_error = KeyboardInterrupt if failure == "cancel" else cm.ContainerError
+    with pytest.raises(expected_error):
+        cm._create_fresh(NAME, cm.ContainerConfig(), tmp_path,
+                         extra_ro_mounts=None, extra_rw_mounts=None,
+                         allowed_push_branch="topic" if failure == "proxy" else None,
+                         session_tag=None, pr_id=None,
+                         labels={cm.LABEL_ATTEMPT: attempt})
+    if allocation == "ours":
+        discarded.assert_called_once_with(NAME, container_id=CID)
+    else:
+        discarded.assert_not_called()
+    assert stopped.call_count == (1 if allocation == "absent" else 0)
+    # Fresh creation must not pre-delete a name that may have been claimed
+    # after the caller established absence. Stopped allocation cleanup belongs
+    # to the earlier immutable-ID reuse check instead.
+    cm.remove_container.assert_not_called()
+
+
+@pytest.mark.parametrize("allocation", ["absent", "stopped", "retained"])
+def test_stopped_preclean_uses_identity_captured_before_state(monkeypatch, tmp_path, allocation):
+    events = []
+    def identity(name):
+        events.append(("identity", name))
+        return "" if allocation == "absent" else CID
+    def running(target):
+        events.append(("state", target))
+        assert target == CID
+        return False
+    monkeypatch.setattr(cm, "current_container_id", identity)
+    monkeypatch.setattr(cm, "container_is_running", running)
+    monkeypatch.setattr(reaper, "is_retained", lambda *a: allocation == "retained")
+    remove = Mock()
+    monkeypatch.setattr(cm, "remove_container", remove)
+    if allocation == "retained":
+        with pytest.raises(cm.ContainerError, match="retained"):
+            cm._ensure_reusable(NAME, tmp_path, None, session_tag=None, pr_id=None)
+    else:
+        assert cm._ensure_reusable(NAME, tmp_path, None, session_tag=None, pr_id=None) is None
+    assert events == [("identity", NAME)] + ([] if allocation == "absent" else [("state", CID)])
+    if allocation == "stopped":
+        remove.assert_called_once_with(NAME, container_id=CID)
+    else:
+        remove.assert_not_called()

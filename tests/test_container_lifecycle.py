@@ -759,7 +759,9 @@ class TestCreateFailureCleanup:
         assert ei.value.kind == "keyring"
         assert "disk quota exceeded" in str(ei.value)
         assert "pm container reap" in str(ei.value)
-        assert removed.count("pm-t-impl-pr-1") == 2  # pre-clean + partial discard
+        # The fixture exposes a stopped prior ID but no valid attempt metadata
+        # for the failed run; only the identity-pinned stopped allocation is removed.
+        assert removed.count("pm-t-impl-pr-1") == 1
 
     def test_setup_timeout_removes_partial(self, monkeypatch, no_claude_json):
         rt = _Runtime(exec=lambda *a: _cp(1))

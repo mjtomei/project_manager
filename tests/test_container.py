@@ -346,7 +346,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        run_call = mock_runtime_cmd.call_args_list[0]
+        run_call = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")
         args = run_call[0]
         assert "--userns=keep-id" in args
 
@@ -366,7 +366,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        args = mock_runtime_cmd.call_args_list[0][0]
+        args = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")[0]
         assert "--memory" not in args
         assert "--cpus" not in args
         # The relaxed-sandbox accommodations still apply.
@@ -388,7 +388,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        args = mock_runtime_cmd.call_args_list[0][0]
+        args = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")[0]
         assert "--memory" in args
         assert "--cpus" in args
 
@@ -406,7 +406,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        run_call = mock_runtime_cmd.call_args_list[0]
+        run_call = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")
         setup_script = run_call[0][-1]  # last arg is the bash -c script
         assert "groupadd" not in setup_script
         assert "useradd" not in setup_script
@@ -426,7 +426,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        run_call = mock_runtime_cmd.call_args_list[0]
+        run_call = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")
         setup_script = run_call[0][-1]
         assert "su -" not in setup_script
         assert "su -c" not in setup_script
@@ -445,7 +445,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        run_call = mock_runtime_cmd.call_args_list[0]
+        run_call = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")
         args = run_call[0]
         assert "--userns=keep-id" not in args
 
@@ -465,7 +465,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        run_call = mock_runtime_cmd.call_args_list[0]
+        run_call = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")
         args = list(run_call[0])
         host_home = str(Path.home())
         assert f"PM_HOST_HOME={host_home}" in args
@@ -484,7 +484,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        run_call = mock_runtime_cmd.call_args_list[0]
+        run_call = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")
         setup_script = run_call[0][-1]
         assert "groupadd" in setup_script
         assert "useradd" in setup_script
@@ -507,10 +507,10 @@ class TestCreateContainer:
         )
 
         assert cid == "abc123"
-        mock_rm.assert_called_once_with("pm-test")
+        mock_rm.assert_called_once_with("pm-test", container_id="abc123")
 
-        # First call is `docker run`, subsequent calls are readiness checks
-        run_call = mock_docker.call_args_list[0]
+        # Find creation after the immutable-ID preflight inspection.
+        run_call = next(c for c in mock_docker.call_args_list if c.args[0] == "run")
         args = run_call[0]
         assert args[0] == "run"
         assert "-d" in args
@@ -721,6 +721,7 @@ class TestCreateContainer:
     @patch("pm_core.container._run_runtime")
     def test_missing_custom_image_raises(self, mock_docker, mock_rm, mock_exists, _mock_running, _mock_runtime):
         """Missing custom image raises a clear error."""
+        mock_docker.return_value = MagicMock(returncode=1, stdout="", stderr="no such container")
         config = ContainerConfig(image="custom:v1")
 
         with pytest.raises(ContainerError, match="not found in docker"):
@@ -776,9 +777,9 @@ class TestContainerReuse:
         cid = create_container(name="pm-test", config=config,
                                workdir=Path("/w"))
         assert cid == "newid"
-        mock_rm.assert_called_once_with("pm-test")
-        # First docker call should be "run"
-        assert mock_docker.call_args_list[0][0][0] == "run"
+        mock_rm.assert_called_once_with("pm-test", container_id="newid")
+        # Creation follows identity-pinned stopped-container cleanup.
+        assert next(c for c in mock_docker.call_args_list if c.args[0] == "run")[0][0] == "run"
 
 
 class TestResolveClaudeBinary:
@@ -1226,7 +1227,7 @@ class TestCreateContainerPushProxy:
             create_container(name="test", config=config, workdir=Path("/w"),
                              allowed_push_branch="pm/pr-123")
 
-        args = mock_docker.call_args_list[0][0]
+        args = next(c for c in mock_docker.call_args_list if c.args[0] == "run")[0]
         setup_script = args[-1]
         assert "/home/pm/.local/bin/git" in setup_script
         assert "REAL_GIT=/usr/bin/git" in setup_script

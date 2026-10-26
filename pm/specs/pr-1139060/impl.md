@@ -138,7 +138,11 @@ operations do not take PM's launch lock.
   A failed worker split releases its concretizer-only allocation unless
   retained or viewed, and is not polled as a worker. A missing split pane ID is
   not proof that the worker never attached: locked cleanup must confirm the
-  concretizer is the only owner, preserving additional or unknown owners.
+  concretizer is the only owner, preserving additional or unknown owners. Once
+  that locked check authorizes ending the concretizer, persist an identity-bound
+  owner release before removal so a transient removal failure remains visible
+  and retryable despite the surviving concretizer pane. Unknown runtime identity
+  or failed release persistence refuses this teardown.
 - **Supersede**: a new QA run no longer removes the previous run's containers
   synchronously; it kicks a background, PR-scoped reconcile (old windows are
   already killed by `_cleanup_stale_scenario_windows`, so they are unowned).
@@ -299,7 +303,13 @@ intact to protect concurrent waiters and delayed releases.
   discard the partial allocation after releasing the proxy lock, preserving
   the original cause or cancellation. The same cleanup covers failures during
   proxy startup and pre-run setup-script preparation, so an already-started
-  unshared proxy is not stranded before a container exists. Cancellation during
+  unshared proxy is not stranded before a container exists. If `run` fails before
+  returning an allocation ID, inspect ID and attempt labels together and discard
+  only this launch's attempt by immutable ID; a name collision or an external
+  replacement must never authorize name-only cleanup. Stopped-allocation recovery
+  captures its ID before probing state and removes only that ID; fresh creation
+  does not repeat a name-only pre-clean. Unknown identity preserves
+  the allocation and proxy rather than guessing absence. Cancellation during
   final fresh-allocation generation/identity publication also discards that
   allocation while its launch lock is held. Once the allocation ID is captured,
   setup/config writes, reuse probes, recovery, proxy-mount inspection and failed

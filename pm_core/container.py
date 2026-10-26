@@ -1366,8 +1366,8 @@ def restart_container(name: str, *, container_id: str | None = None) -> None:
     except ContainerLaunchError as e:
         if e.kind != "timeout":
             raise
-        # The "timeout" message says the partial container was removed —
-        # true for a fresh create, not here: the restarted container stays.
+        # Describe a failed recovery rather than an initial setup timeout;
+        # the restarted container and its filesystem remain available.
         raise launch_error(name, "runtime", e.stderr,
                            stage="come back up after restart") from e
     if not _setup_complete(container_id):
@@ -1439,19 +1439,24 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
     killed — that raises instead.
     """
     from pm_core import container_reaper
-    if not container_is_running(name):
-        # A retained allocation may have been renamed, so a name-only filter
-        # cannot rule it out. Resolve the ID whenever retention records exist.
-        if container_reaper.retained_names():
-            cid = current_container_id(name)
-            if cid is None or cid and container_reaper.is_retained(name, cid):
-                raise launch_error(name, "incomplete", "container is explicitly retained or its identity is unknown; release it before recreation",
-                                   stage="be reused")
-        return None
+    # Capture before checking state: a stopped container can be replaced by an
+    # external runtime client without acquiring PM's name lock. Every subsequent
+    # probe/removal must address this allocation, never the reusable name.
     container_id = current_container_id(name)
-    if not container_id:
+    if container_id is None:
+        # Preserve a runtime's diagnostic on this error path; a later successful
+        # state probe cannot restore the missing immutable identity.
+        container_is_running(name)
         raise launch_error(name, "runtime", "existing container identity unavailable",
                            stage="be reused")
+    if not container_id:
+        return None
+    if not container_is_running(container_id):
+        if container_reaper.is_retained(name, container_id):
+            raise launch_error(name, "incomplete", "container is explicitly retained; release it before recreation",
+                               stage="be reused")
+        remove_container(name, container_id=container_id)
+        return None
 
     complete, wedged, probe_err = _probe_setup(container_id)
     retained = container_reaper.is_retained(name, container_id)
@@ -1552,7 +1557,8 @@ def _create_fresh(
     labels: dict[str, str],
 ) -> str:
     """Create a new container (caller holds the launch lock and a slot)."""
-    remove_container(name)
+    labels = dict(labels)
+    labels.setdefault(LABEL_ATTEMPT, uuid.uuid4().hex)
 
     # Auto-build the pm-dev image if it's the default and not yet built.
     # Use a lock so concurrent create_container calls don't all build at once.
@@ -1743,7 +1749,7 @@ def _create_fresh(
     shared_proxy = bool(allowed_push_branch and session_tag and pr_id)
     proxy_guard = (proxy_lock(session_tag, pr_id) if shared_proxy
                    else contextlib.nullcontext(True))
-    with _discard_on_failure(name), proxy_guard as proxy_locked:
+    with _discard_on_failure(name, labels[LABEL_ATTEMPT]), proxy_guard as proxy_locked:
         if not proxy_locked:
             raise launch_error(name, "proxy", "another operation still holds the proxy lock",
                                stage="acquire its shared proxy lock")
@@ -1844,7 +1850,7 @@ def _create_fresh(
         # podman may leave a "created" container behind on failure.  Discard
         # outside the proxy lock: the removal re-takes it to decide whether
         # the shared proxy is now unused.
-        discard_container(name)
+        _discard_failed_attempt(name, labels[LABEL_ATTEMPT])
         raise run_error
     container_id = result.stdout.strip()
 
@@ -2021,13 +2027,39 @@ def _post_setup(name: str, workdir: Path, is_podman: bool) -> None:
                            stage="record completed setup")
 
 
+def _discard_failed_attempt(name: str, attempt: str) -> None:
+    """Clean a failed run only when its immutable attempt label proves ownership.
+
+    A runtime client need not take PM's launch lock: name conflicts and timed-out
+    runs can leave another allocation at this name. Read ID and labels together,
+    then address only the verified ID. Unknown state preserves the allocation.
+    """
+    try:
+        result = _run_runtime("inspect", name, check=False, timeout=10)
+        if result.returncode != 0:
+            if _container_absent(result.stderr or ""):
+                from pm_core.push_proxy import stop_push_proxy
+                stop_push_proxy(name)
+            return
+        rows = json.loads(result.stdout)
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+            return
+        info = rows[0]
+        labels = (info.get("Config") or {}).get("Labels") or {}
+        cid = info.get("Id") or info.get("ID")
+        if isinstance(cid, str) and cid and attempt and labels.get(LABEL_ATTEMPT) == attempt:
+            discard_container(name, container_id=cid)
+    except Exception:
+        _log.warning("Could not safely clean failed launch attempt for %s", name, exc_info=True)
+
+
 @contextlib.contextmanager
-def _discard_on_failure(name: str):
+def _discard_on_failure(name: str, attempt: str):
     """Cover pre-run proxy/setup failures after any inner proxy lock unwinds."""
     try:
         yield
     except BaseException:
-        discard_container(name)
+        _discard_failed_attempt(name, attempt)
         raise
 
 
@@ -2088,6 +2120,15 @@ def discard_unowned_container(name: str, *, container_id: str | None = None,
                 owners = container_reaper.live_owner_panes(name, current, strict=True)
             if set(owners) - (allowed_owner_panes or set()):
                 return False
+            if allowed_owner_panes:
+                # A failed QA split may leave its concretizer alive. Persist
+                # this checked handoff before removal, otherwise a transient rm
+                # failure makes that pane protect the abandoned allocation forever.
+                if container_reaper._runtime_domain() is None:
+                    return False
+                release_generation = cleanup_generation(name)
+                container_reaper._record_release(
+                    name, current, release_generation, "failed-worker-attachment")
             unshared_released = remove_container(current)
             # Removal by ID cannot derive a shared key. A captured unshared
             # mount, however, must never be followed by name-based cleanup.
