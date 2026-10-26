@@ -549,7 +549,13 @@ def _preservation_problems(base, side, merged, label: str) -> list[str]:
 
 
 def _shape_problems(data) -> list[str]:
-    """Read-only shape/status validation of the merged document."""
+    """Read-only shape/status validation of the merged document.
+
+    ``store``'s own validators cannot be reused here: they *normalize*
+    (an invalid PR status silently becomes ``pending``) and raise on the
+    first problem, while a resolution must refuse a document that is
+    malformed on either side and report every problem to the agent.
+    """
     from pm_core.pr_utils import VALID_PR_STATES
     from pm_core.store import VALID_PLAN_STATUSES
 

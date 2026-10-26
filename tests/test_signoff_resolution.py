@@ -110,7 +110,8 @@ def pr_entry(w) -> dict:
 
 def write_report(w, rec: dict, verdict: str = SIGNOFF_MERGE, *,
                  candidate: bool = True, evidence: bool = True,
-                 reason: bool = True, head: str | None = None,
+                 reason: bool = True, checks: bool = False,
+                 head: str | None = None,
                  base: str | None = None) -> None:
     (w.croot / PR).mkdir(parents=True, exist_ok=True)
     extra = ""
@@ -123,6 +124,9 @@ def write_report(w, rec: dict, verdict: str = SIGNOFF_MERGE, *,
     if reason:
         extra += ('<meta name="pm-signoff-evidence-reason" '
                   'content="only independent project.yaml records changed">')
+    if checks:
+        extra += ('<meta name="pm-signoff-checks" '
+                  'content="ran the resolver tests against the merged tree">')
     (w.croot / PR / "report.html").write_text(
         f'<html><head><meta name="pm-signoff-verdict" content="{verdict}">'
         f'<meta name="pm-signoff-head" content="{head or rec.get("head")}">'
@@ -259,6 +263,49 @@ def test_id_list_absent_from_the_base_merges_like_an_empty_one():
     merged, details = integration.resolve_project_yaml(base, ours, other)
     assert merged is None
     assert any("added on both sides" in c for c in details["conflicts"])
+
+
+def test_a_record_deleted_by_both_sides_is_removed():
+    """Deleting the same record on both sides is agreement, not a conflict."""
+    base = ("project:\n  name: p\nprs:\n"
+            "- id: pr-1\n  status: pending\n"
+            "- id: pr-2\n  status: pending\n")
+    ours = ("project:\n  name: p\nprs:\n"
+            "- id: pr-1\n  status: pending\n"
+            "- id: pr-3\n  status: pending\n")
+    theirs = ("project:\n  name: p\nprs:\n"
+              "- id: pr-1\n  status: pending\n"
+              "- id: pr-4\n  status: pending\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is not None, details
+    assert "pr-2" not in merged
+    assert "pr-3" in merged and "pr-4" in merged
+
+
+def test_preservation_catches_a_lost_record(monkeypatch):
+    """The preservation net also covers id-keyed records, not only scalars."""
+    base = ("project:\n  name: p\nprs:\n"
+            "- id: pr-1\n  status: pending\n"
+            "- id: pr-2\n  status: pending\n")
+    ours = base.replace(
+        "- id: pr-2\n  status: pending\n",
+        "- id: pr-2\n  status: pending\n- id: pr-3\n  status: pending\n")
+    theirs = base.replace(
+        "- id: pr-2\n  status: pending\n",
+        "- id: pr-2\n  status: pending\n- id: pr-4\n  status: pending\n")
+    real = integration._merge_id_list
+
+    def lossy(b, o, t, path, actions):
+        value, conflicts = real(b, o, t, path, actions)
+        if path == "prs" and value is not None:
+            value = [e for e in value if e["id"] != "pr-3"]
+        return value, conflicts
+
+    monkeypatch.setattr(integration, "_merge_id_list", lossy)
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("PR branch record lost: prs[pr-3]" in c
+               for c in details["conflicts"])
 
 
 def test_resolved_text_uses_pm_writer_and_reparses():
@@ -477,6 +524,63 @@ def test_clean_base_behavior_change_requires_justification(w):
         r = CliRunner().invoke(pr_mod.pr, ["signoff", "record", PR])
     assert r.exit_code == 0, r.output
     assert signoff.merge_gate_refusal(pr_entry(w), head, "master") is None
+
+
+def test_a_targeted_checks_statement_satisfies_the_reuse_requirement(w):
+    """The report may state targeted checks instead of reused evidence.
+
+    The gate accepts either an explicit reuse statement (evidence + reason)
+    or the checks the agent actually ran; a checks-only report is a recorded
+    act, not an invented approval.
+    """
+    rec = _metadata_conflict(w)
+    write_report(w, rec, evidence=False, reason=False, checks=True)
+    assert signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"]) is None
+    # And it records as a valid approval (the gate agrees).
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, rec["head"], "manual",
+        integration=integration.binding(pr_entry(w)["integration"]))
+    assert pr_entry(w)["signoff"]["evidence"]["checks"]
+    assert signoff.merge_gate_refusal(pr_entry(w), rec["head"], "master") is None
+
+
+def test_evidence_records_the_prior_decision_and_an_honest_review_revision(w):
+    """R6 provenance: the block names the prior sign-off and never invents a
+    review revision when QA committed code after the review ran."""
+    rec = _metadata_conflict(w)
+    write_report(w, rec, verdict=SIGNOFF_REVIEW)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_REVIEW, rec["head"], "manual",
+        integration=integration.binding(pr_entry(w)["integration"]))
+    first = pr_entry(w)["signoff"]["evidence"]
+    assert first["prior_signoff"] is None       # nothing preceded it
+    assert first["required_return_stage"] == "review"
+
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps(
+        {"pr_id": PR, "overall": "PASS", "scenarios": []}))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": "f" * 40, "planner_code_changes": ["fix.py"]}))
+
+    write_report(w, rec, verdict=SIGNOFF_MERGE)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, rec["head"], "manual",
+        integration=integration.binding(pr_entry(w)["integration"]))
+    ev = pr_entry(w)["signoff"]["evidence"]
+    assert ev["reviewed_head"] == rec["head"]
+    assert ev["required_return_stage"] == "merge"
+    assert ev["prior_signoff"]["verdict"] == SIGNOFF_REVIEW
+    assert ev["prior_signoff"]["sha"] == rec["head"]
+    assert ev["prior_signoff"]["origin"] == "manual"
+    # QA recorded code changes, so pm does not claim the review saw that
+    # revision — it says so instead of guessing.
+    assert ev["review"]["sha"] is None
+    assert ev["review"]["sha_source"] is None
+    assert "does not record" in ev["review"]["note"]
+    assert ev["qa"]["planner_head"] == "f" * 40
+    assert ev["qa"]["planner_code_changes"] == ["fix.py"]
 
 
 def test_behavioral_changes_are_focused_on_this_pr_and_its_dependencies(w):

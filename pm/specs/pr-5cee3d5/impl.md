@@ -90,9 +90,10 @@ non-empty base diff (clean merge included):
   `project.skip_qa`, `project.base_branch`, `project.backend`,
   `project.nested_podman`, `project.libyaml`, PR `status` / `depends_on` /
   `model` / `session_models` / `plan`, plan `status`;
-- for changed dependency/config paths (`pyproject.toml`, `requirements*.txt`,
-  `setup.py`/`setup.cfg`, `package.json`, `Dockerfile`, `install.sh`): the
-  path with a one-line note.
+- for changed dependency/config paths (`pyproject.toml`, `requirements*.txt`
+  / `requirements*.in`, `setup.py`/`setup.cfg`, `package.json`, `Dockerfile`,
+  `install.sh`, `Makefile`) and CI workflow files (`.github/workflows/`):
+  the path with a one-line note.
 Recorded (bounded) in the integration record and shown in the sign-off prompt
 so the agent must weigh them even when Git reports a clean merge. PM does not
 auto-approve or auto-reject on them — the agent decides and must say so.
@@ -248,7 +249,8 @@ tests):
 12. Resolver safety rails: conflicting reorders, field (scalar-key)
     deletion-vs-edit in both directions, a merged document with an invalid
     status or a plan cycle, a nested duplicate id, and a merge that loses a
-    side's change are all refused (a one-sided field deletion is kept).
+    side's change (scalar or id-keyed record) are all refused (a one-sided
+    field deletion is kept; a record both sides deleted is removed).
 13. Apply/merge guards: a re-resolution whose blob differs from the recorded
     one is refused and the workdir left untouched; an apply that hits a
     conflict outside the recorded resolution aborts; a clean or re-resolved
