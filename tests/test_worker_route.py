@@ -231,6 +231,56 @@ class TestBuildShellCmd:
                        "CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1 "
                        "claude --model claude-opus-5-5 --effort high")
 
+    def test_oversized_prompt_on_route_runs_from_file(self, pm_home_dir,
+                                                      tmp_path):
+        # The routed launch execs through ``env``, which hit E2BIG ("/usr/bin/
+        # env: Argument list too long") on a review prompt over
+        # MAX_ARG_STRLEN.  Routing keeps master's file-backed delivery: argv
+        # carries the one-sentence pointer, the file the full prompt.
+        import subprocess
+        from pm_core.prompt_bounds import MAX_ARG_STRLEN
+        _write_providers(pm_home_dir)
+        prompt = "review instruction\n" * (MAX_ARG_STRLEN // 10)
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        stub = bindir / "claude"
+        stub.write_text('#!/bin/sh\nfor a; do last="$a"; done\n'
+                        'f="${last#*file at }"; f="${f%.}"\n'
+                        'printf "%s\\n" "$last"; wc -c < "$f"\n')
+        stub.chmod(0o755)
+        work = tmp_path / "w"
+        work.mkdir()
+        cmd = self._build(provider=ROUTE, prompt=prompt, cwd=str(work),
+                          session_id="s" * 8)
+        assert self._pin_env(cmd) == (MODEL, "1")
+        cmd = cmd.rsplit("; rm -f", 1)[0]  # keep the file to measure it
+        out = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True,
+                             env={"PATH": f"{bindir}:/usr/bin:/bin"})
+        assert out.returncode == 0, out.stderr
+        pointer, size = out.stdout.splitlines()
+        path = work / "pm" / "prompts" / f"pm_prompt_{'s' * 8}.txt"
+        assert pointer == f"Your complete instructions are in the file at {path}."
+        assert int(size) == len(prompt.encode())
+
+        # In a container the file is written to the host workdir and named
+        # by the container path claude sees.
+        ctr = self._build(provider=ROUTE, prompt=prompt, cwd="/workspace",
+                          write_dir=str(work), container=True,
+                          session_id="t" * 8)
+        assert ctr.startswith("python3 -I /opt/pm-src/pm_core/route_bridge.py ")
+        assert self._pin_env(ctr) == (MODEL, "1")
+        assert ("'Your complete instructions are in the file at "
+                f"/workspace/pm/prompts/pm_prompt_{'t' * 8}.txt.'") in ctr
+        assert (work / "pm" / "prompts" / f"pm_prompt_{'t' * 8}.txt"
+                ).read_text() == prompt
+        assert len(ctr) < 4096
+
+    @staticmethod
+    def _pin_env(cmd):
+        env = _cmd_env(cmd)
+        return (env.get("CLAUDE_CODE_SUBAGENT_MODEL"),
+                env.get("CLAUDE_CODE_SUBAGENT_MODEL_FORCE"))
+
     def test_fake_claude_has_no_ensure_step(self, pm_home_dir):
         from pm_core.claude_launcher import build_claude_shell_cmd
         _write_providers(pm_home_dir)

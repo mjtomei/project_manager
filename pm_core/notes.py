@@ -17,6 +17,7 @@ Local section (gitignored, in notes-local.txt):
 from pathlib import Path
 import re
 
+
 NOTES_FILENAME = "notes.txt"
 LOCAL_NOTES_FILENAME = "notes-local.txt"
 
@@ -31,6 +32,7 @@ PROMPT_SECTIONS: dict[str, tuple[str, ...]] = {
     "merge": ("General", "Merge", "Local"),
     "watcher": ("General", "Watcher", "Local"),
 }
+
 
 # Descriptions shown in the edit template header lines.
 _SECTION_DESCS: dict[str, str] = {
@@ -304,6 +306,9 @@ def notes_section(root: Path, prompt_type: str | None = None) -> str:
         return ""
 
     combined = "\n\n".join(parts)
+    # Session notes are user-authored instructions, so they are inlined whole
+    # and never truncated; an over-limit prompt is delivered by the launcher's
+    # file-backed bootstrap instead (see pm_core.prompt_bounds).
     return f"\n## Session Notes\n{combined}\n"
 
 
@@ -353,4 +358,7 @@ def notes_for_prompt(root: Path, prompt_type: str) -> tuple[str, str]:
                 f"for {label} sessions:\n\n{content}\n"
             )
 
+    # Session notes are user-authored instructions, so both blocks are inlined
+    # whole and never truncated; an over-limit prompt is delivered by the
+    # launcher's file-backed bootstrap instead.
     return general_block, specific_block

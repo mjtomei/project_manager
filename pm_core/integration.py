@@ -379,10 +379,55 @@ def compact(record: dict) -> dict:
     return out
 
 
+def omitted_path_count(vals: list, total, omitted_from_list: int) -> int:
+    """Paths of the *full* record that an abbreviated listing does not show.
+
+    ``compact`` stores only the first ``_YAML_LIST_LIMIT`` paths and records
+    the real length in ``<key>_total``.  A prompt builder then abbreviates the
+    stored list again (``INTEGRATION_MAX_PATHS``), so counting only what it
+    dropped from that list under-reports the loss — a 200-path record renders
+    as "(+20 more)" instead of "(+180 more)", the same under-count
+    ``pm pr show`` fixed for the reader.  Fall back to the list-relative count
+    when the record carries no total (a legacy or hand-written record).
+    """
+    shown = max(0, len(vals) - omitted_from_list)
+    if isinstance(total, int) and not isinstance(total, bool) and total > shown:
+        return total - shown
+    return omitted_from_list
+
+
 def integration_json_path(pr_id: str) -> Path | None:
     from pm_core.paths import captures_root
     croot = captures_root()
     return croot / pr_id / "integration.json" if croot else None
+
+
+def integration_pointer(pr_id: str) -> str:
+    """Where a session can read the full integration record for *pr_id*.
+
+    Prompt builders abbreviate the overlap/conflict path lists (they grow with
+    the diff), and the marker naming what was dropped has to name a place the
+    session can actually read the rest — otherwise the abbreviation is silent
+    loss.
+
+    Deliberately a *runtime-resolved* reference, never an absolute path:
+    ``captures_dir`` resolves for the process that calls it, and every prompt
+    that inlines this marker (impl / review / sign-off / QA planner) is built
+    by the *host* pm process while the session it is handed to runs inside a
+    container.  There the host ``~/.pm/sessions/<tag>/captures/<pr>/`` path
+    does not exist — the same directory is bind-mounted at ``/pm-captures``
+    (``container.create_container``), which is exactly why
+    ``pm qa captures-path`` prints the mount when it runs in a container (see
+    its docstring) and why the bug-fix prompt block references
+    ``$(pm qa captures-path <pr-id>)`` rather than a resolved path.
+
+    Both readers work wherever the session runs: ``$(pm qa captures-path
+    <pr-id>)/integration.json`` is the record :func:`check_integration`
+    writes into the (mounted) captures dir, and ``pm pr show`` prints the
+    record from project.yaml in full.
+    """
+    return (f"read `$(pm qa captures-path {pr_id})/integration.json` "
+            f"or run `pm pr show {pr_id}`")
 
 
 def check_integration(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
