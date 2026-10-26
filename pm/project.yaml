@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-26T03:12:42.258708+00:00'
+  updated_at: '2026-10-26T03:30:16.429692+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -12577,6 +12577,24 @@ prs:
       required.'
     created_at: '2026-10-26T03:12:42Z'
     last_edited: '2026-10-26T03:12:42Z'
+  - id: note-ef470d7
+    text: 'Review-loop 6427 i26 (main and inherited read-only core reviewer chatgpt/gpt-6-astra-high):
+      fixed explicit bulk cleanup falsely reporting a captured allocation removed
+      after an external runtime rename. Missing old names now require immutable-ID
+      absence confirmation; surviving renamed/unknown/timeout results persist failure
+      diagnostics for a fresh-name retry without force-release authority. Existing
+      lifecycle architecture retained; R7 clarified. Before-fix regression: 3 failures,
+      4 controls passed; fixed cleanup subset 42 passed. Core 618 passed, launcher
+      integration 207 passed/2 skipped, adjacent QA/TUI 119 passed. Final sanitized
+      full suite 3948 passed, 2 skipped, 2 existing-class AsyncMock warnings. Source/spec/tests
+      commit 81a33d13. Declared markdown dependency installed; erroneous peripheral
+      file selection and superseded pre-fix full suite retained and labeled. Complete
+      per-file review/evidence: /pm-captures/review-6427-i26-per-file.md; final suite
+      /pm-captures/review-6427-i26-full-suite-final.log. Existing project.yaml routing/handoff/manual-gate
+      edits preserved outside source commit. No real-container QA claim or waiver;
+      next review, outstanding runtime scenarios and independent sign-off remain required.'
+    created_at: '2026-10-26T03:30:16Z'
+    last_edited: '2026-10-26T03:30:16Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
