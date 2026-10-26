@@ -2154,7 +2154,8 @@ def popup_picker_cmd(session: str, window_name: str):
 
     def _still_has_action(label: str) -> bool:
         """Refresh before either interface dispatches a selected action."""
-        nonlocal current_pr, nav_index, lines, _picked_pr, _label_to_cmd
+        # ``current_pr`` is only read here — navigation owns it.
+        nonlocal nav_index, lines, _picked_pr, _label_to_cmd
         nonlocal fzf_input_lines
         # Display numbers can be reassigned during state repair. Bind the
         # pending action to the local identity the user actually selected,
