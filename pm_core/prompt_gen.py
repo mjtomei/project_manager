@@ -536,8 +536,13 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
                      "not an automatic exemption):")
         for change in behavior[:20]:
             lines.append(f"- {change}")
-        if rec.get("base_behavior_count", len(behavior)) > 20:
-            lines.append(f"- … {rec['base_behavior_count'] - 20} more")
+        # ``base_behavior_count`` is only recorded when ``compact`` truncated
+        # the list (> _BEHAVIOR_LIMIT); 21-30 changes are stored in full with
+        # no count, so the total must fall back to the stored list's length
+        # (indexing the absent key would crash the prompt).
+        behavior_total = rec.get("base_behavior_count") or len(behavior)
+        if behavior_total > 20:
+            lines.append(f"- … {behavior_total - 20} more")
     elif rec.get("base_behavior_error"):
         # The summary failed, so the absence of listed changes is not evidence
         # that the base is behaviour-neutral.  Say so: a MERGE still requires

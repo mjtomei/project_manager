@@ -1399,6 +1399,32 @@ def test_signoff_prompt_falls_back_to_the_base_branch_for_an_unmerged_base(w):
     assert "0 file(s)" not in text
 
 
+def test_signoff_prompt_counts_behavior_changes_stored_without_a_total(w):
+    """21-30 base behaviour changes are stored in full with no count key.
+
+    ``compact`` records ``base_behavior_count`` only when it truncates the
+    list (> ``_BEHAVIOR_LIMIT``), so the prompt must fall back to the stored
+    list's length instead of indexing the absent key — that raised KeyError
+    and blocked sign-off from launching on such a base.
+    """
+    integration.check_integration(w.pm_dir, PR)
+    changes = [f"`pm/project.yaml`: change {i}" for i in range(25)]
+    assert integration._BEHAVIOR_LIMIT > len(changes)   # not truncated
+
+    def _store(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["base_behavior_changes"] = changes
+        integ.pop("base_behavior_count", None)
+    store.locked_update(w.pm_dir, _store)
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "… 5 more" in text
+    assert "change 19" in text          # the last one rendered in full
+    assert "change 20" not in text      # beyond the 20-line cap
+
+
 def test_merge_gate_refuses_a_clean_approval_whose_recheck_lost_the_candidate(
         w, monkeypatch):
     """A re-check that cannot name a candidate cannot justify the approval.
