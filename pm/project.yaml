@@ -13082,6 +13082,24 @@ prs:
       coverage remains required.'
     created_at: '2026-10-26T06:31:47Z'
     last_edited: '2026-10-26T06:31:47Z'
+  - id: note-9110aa1
+    text: 'Review-loop 0b6f i4 (main chatgpt/gpt-6-astra-high; inherited read-only
+      code-review helper, no model overrides): fixed live exec/attach ownership missed
+      when runtime clients use abbreviated container IDs. Matching hexadecimal attachment
+      targets conservatively protect all matching allocations, including locked removal
+      and ordinary restart lookup; diagnostics and unambiguous exec payloads remain
+      nonowners. Existing lifecycle architecture retained; R2 clarified. Final original-source
+      assertions: 9 failures/48 controls passed; fixed owner/lifecycle277 passed.
+      Broader core681 passed; launcher/QA210 passed/2 skipped. Final sanitized full
+      suite4030 passed/2 skipped/4 existing-class warnings (2 Click,2 AsyncMock),192.99s.
+      Evidence and all per-file notes /pm-captures/review-0b6f-i4-per-file.md; full
+      suite /pm-captures/review-0b6f-i4-full-suite-final.log. Initial focused attempt
+      lacked pytest after incorrect dev extra; declared test extra installed, original
+      log retained. Pre-existing project routing/handoff/manual-gate and qa.md edits
+      preserved outside source commit. No real-container QA or independent sign-off
+      claim; outstanding coverage remains required.'
+    created_at: '2026-10-26T06:51:59Z'
+    last_edited: '2026-10-26T06:51:59Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

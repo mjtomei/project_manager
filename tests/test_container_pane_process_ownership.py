@@ -27,7 +27,7 @@ def _snapshot(monkeypatch, tmp_path, panes, processes, ps_rc=0):
     return reaper.ContainerInfo(name=NAME, id=CID)
 
 
-@pytest.mark.parametrize("target", [NAME, CID])
+@pytest.mark.parametrize("target", [NAME, CID, CID[:4], CID[:12], CID[:63]])
 def test_exec_below_existing_shell_owns_pane(monkeypatch, tmp_path, target):
     info = _snapshot(monkeypatch, tmp_path,
                      "0\t%7\tpm-project-a\t100\tbash attach.sh\n",
@@ -144,6 +144,57 @@ def test_start_command_owner_is_preserved(monkeypatch, tmp_path):
                      f"0\t%7\tpm-project-a\t100\tbash wrapper {NAME}\n",
                      "100 1 Ss bash\n")
     assert reaper._owner_panes(info, reaper._PaneCache()) == (["%7"], False)
+
+
+@pytest.mark.parametrize("client", ["podman exec -it", "docker attach", "docker container exec -u pm",
+                                    "podman --root /private/store exec -it"])
+def test_short_id_attachment_protects_locked_removal(monkeypatch, tmp_path, client):
+    info = _snapshot(monkeypatch, tmp_path, "0\t%7\tpm-project-a\t100\tbash\n",
+                     f"100 1 Ss bash\n101 100 S {client} {CID[:12]} sh\n")
+    monkeypatch.setattr(reaper.container_mod, "current_container_id", lambda _: CID)
+    monkeypatch.setattr(reaper.container_mod, "recent_launch", lambda *a: False)
+    removed = []
+    monkeypatch.setattr(reaper.container_mod, "remove_container", lambda *a, **kw: removed.append(a))
+    decision = reaper.Decision(info, "remove", "no owner at earlier inventory")
+    ok, reason = reaper._remove_checked(decision, reaper.Scope())
+    assert not ok and "attached concurrently" in reason
+    assert removed == []
+
+
+@pytest.mark.parametrize("command", [
+    f"podman exec other sh -c echo {CID[:12]}",
+    f"docker exec {'b' * 12} sh",
+    f"podman inspect {CID[:12]}",
+    f"agent explain {CID[:12]}",
+    f"podman exec {CID[:12]}0 sh",
+])
+def test_short_id_nonowners_remain_unowned(monkeypatch, tmp_path, command):
+    info = _snapshot(monkeypatch, tmp_path, "0\t%7\tpm-project-a\t100\tbash\n",
+                     f"100 1 Ss bash\n101 100 S {command}\n")
+    assert reaper._owner_panes(info, reaper._PaneCache()) == ([], False)
+
+
+def test_ambiguous_short_id_keeps_each_matching_allocation(monkeypatch, tmp_path):
+    info = _snapshot(monkeypatch, tmp_path, "0\t%7\tpm-project-a\t100\tbash\n",
+                     f"100 1 Ss bash\n101 100 S docker attach {CID[:12]}\n")
+    cache = reaper._PaneCache()
+    assert reaper._owner_panes(info, cache) == (["%7"], False)
+    info.name, info.id = "renamed-other", CID[:12] + "b" * 52
+    assert reaper._owner_panes(info, cache) == (["%7"], False)
+
+
+def test_short_id_is_visible_to_restart_owner_check(monkeypatch, tmp_path):
+    info = _snapshot(monkeypatch, tmp_path, "0\t%7\tpm-project-a\t100\tbash\n",
+                     f"100 1 Ss bash\n101 100 S podman exec -it {CID[:12]} sh\n")
+    monkeypatch.setattr(reaper, "_inspect", lambda *a, **kw: [info])
+    assert reaper.live_owner_panes(NAME, CID) == ["%7"]
+
+
+def test_short_id_in_historical_shell_payload_is_not_attachment(monkeypatch, tmp_path):
+    info = _snapshot(monkeypatch, tmp_path,
+                     f"0\t%7\tpm-project-a\t100\tbash -c 'echo {CID[:12]}; bash'\n",
+                     "100 1 Ss bash\n")
+    assert reaper._owner_panes(info, reaper._PaneCache()) == ([], False)
 
 
 def test_real_shell_descendant_commands():

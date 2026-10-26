@@ -692,7 +692,19 @@ def _owner_panes(info: ContainerInfo, cache: _PaneCache,
             indeterminate = True
             continue
         for pane_id, _sess, cmd in snap.panes:
-            if any(p.search(cmd) for p in pats):
+            matched = any(p.search(cmd) for p in pats)
+            if not matched and re.fullmatch(r"[0-9a-f]{64}", info.id):
+                # Runtime clients accept ID prefixes too. Only attachment
+                # targets (or conservatively ambiguous runtime argv) may claim
+                # a prefix; arbitrary historical shell payloads must not.
+                # A matching prefix protects every possible allocation rather
+                # than guessing uniqueness from a scoped inventory.
+                lines = cmd.splitlines()
+                targets = [_runtime_owner_target(lines[0]), *lines[1:]] if lines else []
+                matched = any(re.fullmatch(r"[0-9a-f]{1,63}", word)
+                              and info.id.startswith(word)
+                              for target in targets for word in target.split())
+            if matched:
                 owners.append(pane_id)
     return owners, indeterminate
 

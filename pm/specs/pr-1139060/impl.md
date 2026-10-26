@@ -70,6 +70,10 @@ removed by automatic or scoped cleanup) when any of:
    `pm container restart NAME` must not identify itself as an attached owner.
    Unambiguous runtime exec/attach commands match only their container target,
    not another container name mentioned in the in-container command payload.
+   Runtime attachment targets also protect matching abbreviated hexadecimal IDs;
+   an ambiguous prefix conservatively protects all matching allocations, not just
+   one guessed from the cleanup scope. Short IDs in unrelated diagnostics or
+   unambiguous exec payloads do not establish ownership.
    Ambiguous runtime global/exec-option syntax remains conservatively protected.
    Query the current process tree with a bounded, non-truncated process listing
    and refresh it at the locked deletion check; failed/malformed
