@@ -3301,6 +3301,26 @@ def test_finalizer_setup_error_stops_the_run_before_the_overall(
     finalize.assert_not_called()
     assert not [c for c in write_status.call_args_list
                 if c.kwargs.get("overall")]
+    # The last poll tick verified scenario 1 after its own snapshot: the
+    # stop still leaves a snapshot that has it verified, so a TUI adopting
+    # the stopped run does not verify it again (S69: a follow-up typed into
+    # the old verifier pane, a flag, the worker asked to re-evaluate).
+    state.qa_workdir = str(tmp_path)
+    state.verified_scenarios = set()
+    with patch.object(qa_loop, "_poll_tmux_verdicts",
+                      side_effect=lambda *a, **k:
+                      state.verified_scenarios.add(1)), \
+            patch.object(qa_loop, "_write_status_file"), \
+            patch.object(qa_loop, "_persist_scenario_verdicts"), \
+            patch.object(qa_loop, "_run_qa_finalize_pane"), \
+            pytest.raises(ProviderNotFoundError, match="missing-route"):
+        qa_loop._execute_and_finalize(
+            state, tmp_path, pr, {}, "pm-test", "qa-w", str(tmp_path),
+            tmp_path / "status.json", None, use_containers=False,
+            concurrency_cap=0, queued_scenarios=[], notify=lambda: None)
+    snap = json.loads(qa_loop._resume_file_path(str(tmp_path)).read_text())
+    assert snap["verified_scenarios"] == [1]
+    assert snap["scenario_verdicts"] == {"1": qa_loop.VERDICT_PASS}
     # Broken between that check and the launch: still a stop, not a crash.
     pr["session_models"] = {}
     finalize.side_effect = lambda *a, **k: _launch_on_missing_provider(

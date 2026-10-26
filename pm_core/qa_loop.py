@@ -5050,6 +5050,20 @@ def _execute_and_finalize(
     else:
         state.latest_verdict = VERDICT_PASS
 
+    # Snapshot the final scenario verdicts BEFORE publishing overall: a
+    # restart recovers a run whose status file has an overall from this
+    # snapshot, and the blocking finalizer below may never return (its
+    # driver or TUI dies).  Published first, the recovered QA note read "?"
+    # for every scenario (S47).  A restart between the two writes resumes
+    # the run with every verdict in hand, which then aggregates again.
+    # Written before the finalizer provider check too: the poll loop's last
+    # tick may have verified a scenario after its own snapshot, and a
+    # setup stop below left that PASS unverified in the snapshot, so the
+    # TUI adopting the stopped run re-verified it (a follow-up typed into
+    # the old verifier pane, a flag, the worker asked to re-evaluate) before
+    # it stopped again (S69).
+    _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
+
     if state.scenarios:
         # The finalizer launches without a route gate: a provider that broke
         # mid-run stops the run here, before an overall is published that
@@ -5057,14 +5071,6 @@ def _execute_and_finalize(
         from pm_core.providers import get_provider
         res = _resolve_qa_model(pr_data, data, session_type="qa_finalize")
         get_provider(res.provider, strict=bool(res.provider))
-
-    # Snapshot the final scenario verdicts BEFORE publishing overall: a
-    # restart recovers a run whose status file has an overall from this
-    # snapshot, and the blocking finalizer below may never return (its
-    # driver or TUI dies).  Published first, the recovered QA note read "?"
-    # for every scenario (S47).  A restart between the two writes resumes
-    # the run with every verdict in hand, which then aggregates again.
-    _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
 
     # Write final status file with overall verdict
     _write_status_file(status_path, state.pr_id, state.scenarios,
