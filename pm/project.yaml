@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T12:50:01.426283+00:00'
+  updated_at: '2026-10-26T13:33:03.492684+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34356,6 +34356,32 @@ prs:
       before the manual merge gate; this QA did not commit it.'
     created_at: '2026-10-26T12:50:01Z'
     last_edited: '2026-10-26T12:50:01Z'
+  - id: note-a534029
+    text: 'QA S75 (2026-10-26, host, all fake-claude; HEAD vs control a23cb3e4 side
+      by side; captures /pm-captures/scenarios/75/REPORT.md): CODE CHANGE aa1f5c32
+      needs normal re-review. Story 1 (dead hop tick, autostart add while the claim
+      is live, 185 s re-check + two ticks under a 1.5 s project.yaml.lock holder)
+      held on HEAD in 3 valid rounds: one launch per PR, ticks won 5/6, TUI won R
+      once (Auto-start: review loop / tick running: review), TUI claim results all
+      after the release; control doubled both PRs in round 3 (pre-bd62bc0d clock).
+      Story 2 (TUI hop, pm tui restart --breadcrumb at awaiting, tick 0/0.5/1 s after
+      consume_breadcrumb) FOUND: the restart closes the pipes of the TUI-launched
+      pm pr review/pm pr start subprocess after it opened the window; its stdout echo
+      raised EPIPE before clear_return_awaiting, so awaiting + the hop claim outlived
+      the open session (HEAD R2 into qa; control R3, where a tick after expiry killed
+      the resumed review window and opened a second). Pre-existing (same order on
+      master). Fix aa1f5c32 clears before the echo in both launches; tests/test_return_awaiting_launch_echo.py
+      (both fail without). Post-fix R4-R6 + I1-I3 held, R6 hit the same EPIPE live
+      and cleared. Full suite 3863 passed, 6 failed = test_worker_route caplog duplicate-record
+      asserts that also fail on 07520c1b in this env. Filed pr-077d22a (TUI auto-start
+      pass uses stale in-memory statuses after a hop tick dies before its refresh:
+      autostart add then runs no catch-up). Harness: a killed hop tick leaves the
+      judged sign-off window open and fakes do not move head, so the next sign_off
+      adopts it and never gets a verdict; close stale signoff-<pr> windows first.
+      Unpark impl via the TUI (close window + autostart add), not pm pr start without
+      --transcript.'
+    created_at: '2026-10-26T13:33:03Z'
+    last_edited: '2026-10-26T13:33:03Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -35444,6 +35470,40 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-26T10:26:45.752726+00:00'
   updated_at: '2026-10-26T10:26:45.752726+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-077d22a
+  plan: bugs
+  title: 'Bug: TUI auto-start pass acts on stale in-memory PR statuses after a pm
+    pr auto-sequence tick dies between its sign-off hop and its TUI refresh'
+  branch: pm/pr-077d22a-bug-tui-auto-start-pass-acts-on-stale-in-memory-pr
+  status: pending
+  depends_on: []
+  description: 'Found in QA S75 (pr-592e4bd, /pm-captures/scenarios/75/story1/round2-INVALID-stale-tui-no-pass).
+    pm pr auto-sequence applies a sign-off hop (status sign_off -> in_review/in_progress,
+    signoff_return.awaiting + launch_claim written inside signoff.step_signoff) and
+    only afterwards calls trigger_tui_refresh() (cli/pr.py sign_off branch). If the
+    tick dies in between (kill -9 the moment awaiting is written), the TUI never gets
+    SIGUSR1 and keeps showing both PRs as sign_off until its 300 s background sync
+    or a manual R (Reload). A `pm autostart add <R> <I> --stop-before-merge` in that
+    window runs check_and_start on app._data (add_targets -> run_worker(check_and_start)
+    with no reload), so the impl catch-up (in_progress PRs) and _auto_start_review_loops
+    (in_review PRs) never see the PRs: no "already claimed, skipping" line, no _recheck_after_claim
+    timer, so the TUI never takes over the expired claim (only a later tick or the
+    5 min sync does). Repro: host project, two PRs driven to sign_off by ticks with
+    fake SIGNOFF_REVIEW / SIGNOFF_IMPL, kill -9 the hop tick when awaiting appears,
+    wait 20 s (not across a 300 s sync boundary), pm autostart add both: pm log shows
+    only "targets +=" lines. Identical on a23cb3e4 (pre-existing). Suggested fix:
+    reload state (app._load_state or a disk re-read of statuses) before the explicit-add
+    scheduler pass, or have check_and_start derive in_progress/in_review candidates
+    from disk.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T12:35:42.944286+00:00'
+  updated_at: '2026-10-26T12:35:42.944286+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
