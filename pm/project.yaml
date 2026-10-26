@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-25T23:24:54.687425+00:00'
+  updated_at: '2026-10-26T00:14:22.931000+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33929,6 +33929,28 @@ prs:
       (README, alias-probe/).'
     created_at: '2026-10-25T23:24:54Z'
     last_edited: '2026-10-25T23:24:54Z'
+  - id: note-e646f93
+    text: 'Review c189 i6 (c7b52962, CODE CHANGE, needs normal re-review + QA RQ44):
+      implemented the user decision of 2026-10-26 on note-7e11292. Each launch builds
+      its routing env from the pm selection (providers.launch_env). It assigns what
+      the selection needs (router pins and classifier, the provider own alias_models,
+      now honoured for every type, the subagent pin). It unsets every other routing
+      variable (ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU,FABLE}_MODEL, ANTHROPIC_SMALL_FAST_MODEL,
+      subagent pin/FORCE, CLAUDE_CODE_AUTO_MODE_MODEL, PM_ROUTE_BASE_URL). It removes
+      an inherited ANTHROPIC_BASE_URL only when that is a route URL: equal to the
+      new PM_ROUTE_BASE_URL marker that routed launches set, or to a configured router
+      (host or in-container form). A user own BASE_URL and unrelated vars stay. Covers
+      build_claude_shell_cmd (host/container/resume/fake), the claude -p helpers,
+      the --live probe and bridge.py. Live, real claude 2.1.310 vs local stubs, pm-built
+      commands under a work-routed parent: pre-fix ee82dc0c no-model/fable/haiku requested
+      work/claude-opus-5-5 (404 at main); post-fix claude-opus-5-5/claude-fable-5-1/claude-haiku-5-5;
+      routed unchanged. 10 mutations caught; conftest clears routing vars, so the
+      suite is stable inside routed sessions; full suite 3807 passed, rc 0. Not live
+      here: container (no image) and interactive panes, so QA twenty-fifth pass S62
+      (qa.md RQ44). Behaviour change: shell-exported alias vars for non-router providers
+      now go in that provider alias_models or Claude settings.json env. Evidence /pm-captures/review-c189-i6.'
+    created_at: '2026-10-26T00:14:22Z'
+    last_edited: '2026-10-26T00:14:22Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
