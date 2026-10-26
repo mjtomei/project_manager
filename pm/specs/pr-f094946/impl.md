@@ -29,7 +29,10 @@
      fails, do not launch QA.
    * Both QA start paths arm the existing shared 1 s poll timer, even if
      no workdir existed at the last refresh. Reuse the review-loop timer
-     helper rather than creating a separate timer per QA run.
+     helper rather than creating a separate timer per QA run. Publish the
+     background run's active state before starting its worker, so a slow
+     initial model/state load cannot let the first poll stop the timer.
+     Reset that state if thread startup fails.
    * A plain-`t` NEEDS_WORK result repaints the tree after reloading the
      `in_review` status, without requiring a manual refresh. Flush pending
      navigation writes before this reload, as `_load_state` does, without

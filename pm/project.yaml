@@ -29479,7 +29479,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-26T13:31:41.623346+00:00'
+  updated_at: '2026-10-26T13:46:11.268755+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29595,6 +29595,16 @@ prs:
       standalone follow-ups created.'
     created_at: '2026-10-26T13:31:41Z'
     last_edited: '2026-10-26T13:31:41Z'
+  - id: note-17ff378
+    text: 'Review 8e01 i2: fixed the remaining R12 startup race. start_qa_background
+      now marks the accepted run active before starting its worker (resetting on thread-start
+      failure), so slow initial model/state loading cannot make the shared poll timer
+      stop for a PR without a workdir. Deterministic gated-worker tests for both start_qa
+      and zz t failed before and pass after; focused tests 95 passed. Evidence: /pm-captures/review-8e01-i2/.
+      Original-condition mutation still fails on the unwanted select_window call.
+      Transfer settings/stash preserved; native QA still required; no standalone follow-ups.'
+    created_at: '2026-10-26T13:46:11Z'
+    last_edited: '2026-10-26T13:46:11Z'
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge

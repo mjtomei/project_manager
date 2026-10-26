@@ -150,6 +150,9 @@ the on-disk selection.
 **R12: QA verdicts get processed and the pass count can be seen (8b793611,
 59254fe1).** A QA start on a PR with no workdir at the last refresh still
 has its verdict handled, so the self-driving restart happens without `r`.
+This also holds if initial model/state loading takes longer than the first
+1 s poll: the accepted background launch is already marked running, keeping
+the shared timer alive until it can process the result.
 "QA PASS (N/M consecutive) — restarting QA" stays on screen for about 3 s
 instead of being overwritten in the same frame by "Starting QA". It also
 appears if another PR's sticky review-completion message is already showing.

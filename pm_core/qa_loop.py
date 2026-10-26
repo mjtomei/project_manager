@@ -4317,7 +4317,15 @@ def start_qa_background(
                 on_update(state)
 
     t = threading.Thread(target=_run, daemon=True, name=f"qa-{state.pr_id}")
-    t.start()
+    # Publish the accepted launch before the worker can block on model/state
+    # loading.  Otherwise the TUI's first poll can stop its timer while this
+    # run has no workdir and still looks idle.
+    state.running = True
+    try:
+        t.start()
+    except Exception:
+        state.running = False
+        raise
     return t
 
 

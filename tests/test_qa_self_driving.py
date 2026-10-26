@@ -90,6 +90,67 @@ class TestZZTStart:
         app.set_interval.assert_called_once()
         assert app._review_loop_timer is app.set_interval.return_value
 
+    @pytest.mark.parametrize("entry_point", ["start_qa", "start_or_stop_qa_loop"])
+    def test_poll_timer_survives_slow_worker_start(self, tmp_path, entry_point):
+        from threading import Event
+        from pm_core import qa_loop
+        from pm_core.tui import qa_loop_ui, review_loop_ui
+
+        app = _make_app(tmp_path, auto_start=False)
+        app._data["prs"][0].pop("workdir")
+        store.save(app._data, app._root)
+        app._review_loop_timer = None
+        app._impl_poll_counter = 0
+        app._qa_resume_poll_counter = 1
+        app._watcher_manager.is_any_running.return_value = False
+        entered, release = Event(), Event()
+        threads = []
+        real_start = qa_loop.start_qa_background
+
+        def slow_run(state, *args):
+            entered.set()
+            assert release.wait(5)
+            state.latest_verdict = VERDICT_PASS
+            state.running = False
+
+        def start(*args):
+            threads.append(real_start(*args))
+            return threads[-1]
+
+        with patch.object(qa_loop, "run_qa_sync", side_effect=slow_run), \
+             patch.object(qa_loop_ui, "start_qa_background", side_effect=start), \
+             patch.object(qa_loop_ui, "_get_qa_pass_count", return_value=2), \
+             patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
+             patch.object(review_loop_ui, "_refresh_tech_tree"):
+            try:
+                getattr(qa_loop_ui, entry_point)(app, "pr-001")
+                assert entered.wait(5)
+                timer = app._review_loop_timer
+                # Tick while the worker is still initializing, with no workdir
+                # to keep the shared timer alive on the PR's behalf.
+                review_loop_ui._poll_loop_state_inner(app)
+                timer.stop.assert_not_called()
+                assert app._review_loop_timer is timer
+            finally:
+                release.set()
+                for thread in threads:
+                    thread.join(timeout=5)
+                    assert not thread.is_alive()
+
+            with patch.object(qa_loop_ui, "_on_qa_complete") as complete:
+                review_loop_ui._poll_loop_state_inner(app)
+            complete.assert_called_once_with(app, app._qa_loops["pr-001"])
+
+    def test_worker_start_failure_clears_running(self, tmp_path):
+        from pm_core.qa_loop import start_qa_background
+
+        state = QALoopState(pr_id="pr-001")
+        with patch("pm_core.qa_loop.threading.Thread") as thread:
+            thread.return_value.start.side_effect = RuntimeError("can't start thread")
+            with pytest.raises(RuntimeError, match="can't start thread"):
+                start_qa_background(state, tmp_path, {"id": "pr-001"})
+        assert state.running is False
+
     def test_moves_in_review_pr_to_qa(self, tmp_path):
         """The first zz t on an in_review PR moves it to qa, as t does."""
         from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
