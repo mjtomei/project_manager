@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T05:58:18.230975+00:00'
+  updated_at: '2026-10-26T07:12:36.818431+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34207,6 +34207,29 @@ prs:
       passed rc 0; /pm-captures/review-d5f9-i1 (README).'
     created_at: '2026-10-26T05:58:18Z'
     last_edited: '2026-10-26T05:58:18Z'
+  - id: note-755f439
+    text: 'QA S69 (2026-10-26, RQ46 auto-sequence, host, stubs; captures /pm-captures/scenarios/69,
+      REPORT.md). Story 1 held on 914a4c3c: rounds with a-bad type: bogus and a stray
+      tab each gave rc 1 + the exact one-line Error (tab: "cannot be looked up ...
+      not valid YAML", never "not configured"; pm provider add refused the file);
+      A/B stayed in_review, 0 drivers, no review i3, no running: qa, 0 Tracebacks;
+      first tick after the fix advanced: qa with one driver + new workdir, then advanced:
+      sign_off on the new PASS (A never bounced). Story 2 held: verify off, E tick
+      advanced: qa, E and TUI t E2 had no verifier pane/line/request, both FINALIZE_DONE;
+      verify on, E3 refused nosuch, in_review, no driver. Story 3: CODE CHANGE 75708c0b
+      needs normal re-review. The finalizer provider check ran before the pre-overall
+      resume snapshot, so after G last verification passed the stop left s2 PASS unverified;
+      the TUI adopting the leftover run re-verified it (follow-up typed into the old
+      fake verifier pane -> DEBUG Traceback, FLAGGED, worker asked to re-evaluate
+      -> new router requests on a stopped run) before stopping again. Snapshot now
+      written before the check; regression fails reverted; full suite 3863 passed.
+      Post-fix replay (G2): one driver warning + one identical TUI adoption warning,
+      nothing else, 0 Tracebacks. F verifier stop, recovery after kill-window (VERIFIED
+      / FINALIZE_DONE / sign_off) held; running: qa after a stop = pr-242ebdd. Observation:
+      advanced: sign_off precedes the finalizer QA complete line (pr-f1d825b). Router
+      only work/, no verifier/400; 0 secrets.'
+    created_at: '2026-10-26T07:12:36Z'
+    last_edited: '2026-10-26T07:12:36Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
