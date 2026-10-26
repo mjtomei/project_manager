@@ -3653,7 +3653,19 @@ def pr_auto_sequence(pr_id: str):
             qa_win = tmux_mod.find_window_by_name(
                 pm_session, f"qa-{display_id}",
             ) if pm_session else None
-            if qa_win:
+            if awaiting == "qa":
+                # Sign-off sent this back to QA and no driver has started
+                # the re-run yet (each clears ``awaiting`` as it starts), so
+                # a qa window is the judged run's: launch — unless another
+                # tick already is.  The hop tick refuses a provider setup
+                # error after the hop, so check before claiming: a claim
+                # held through the fix would hide the launch for minutes.
+                from pm_core.signoff import claim_return_launch
+                _check_qa_launch(root, pr_id)
+                if not claim_return_launch(root, pr_id, "qa"):
+                    click.echo("running: qa")
+                    return
+            elif qa_win:
                 click.echo("running: qa")
                 return
             _launch_qa_detached(root, pr_id)
@@ -3705,6 +3717,11 @@ def pr_auto_sequence(pr_id: str):
             click.echo("paused: sign_off_blocked")
             return
         if hop == "qa":
+            # Claimed (after the provider check) so the qa tick's
+            # ``awaiting`` relaunch leaves this driver alone until it starts.
+            from pm_core.signoff import claim_return_launch
+            _check_qa_launch(root, pr_id)
+            claim_return_launch(root, pr_id, "qa")
             _launch_qa_detached(root, pr_id)
             click.echo("sign_off: re-qa")
             return
@@ -3741,6 +3758,13 @@ def pr_auto_sequence(pr_id: str):
     raise SystemExit(2)
 
 
+def _check_qa_launch(root: Path, pr_id: str) -> None:
+    """Raise the provider setup error a detached QA driver would die on."""
+    from pm_core.qa_loop import check_ungated_qa_providers
+    data = store.load(root)
+    check_ungated_qa_providers(store.get_pr(data, pr_id) or {}, data)
+
+
 def _launch_qa_detached(root: Path, pr_id: str) -> None:
     """Spawn a detached subprocess to drive the QA loop for *pr_id*.
 
@@ -3753,9 +3777,7 @@ def _launch_qa_detached(root: Path, pr_id: str) -> None:
     this tick, no driver spawned) instead of ending the driver unseen and
     being relaunched on every tick.
     """
-    from pm_core.qa_loop import check_ungated_qa_providers
-    data = store.load(root)
-    check_ungated_qa_providers(store.get_pr(data, pr_id) or {}, data)
+    _check_qa_launch(root, pr_id)
     cmd = [sys.executable, "-m", "pm_core.wrapper",
            "pr", "qa-run-bg", pr_id]
     # start_new_session detaches from the parent process group so the

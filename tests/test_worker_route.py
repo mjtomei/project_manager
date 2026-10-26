@@ -3084,3 +3084,94 @@ def test_detached_qa_driver_logs_provider_error_without_traceback(
     else:
         assert ends[0].exc_info
         assert ends[0].getMessage() == "pr_qa_run_bg: QA crashed for pr-001"
+
+
+# QA S65: the sign-off `qa` hop tick applies the hop (status qa, return
+# awaiting qa) before 3e9f6b19's provider check refuses the launch.  The run
+# sign-off judged still has its qa-<pr> window open, so every tick after the
+# fix took that window for the re-run starting ("running: qa") and QA was
+# never launched again.
+def _reqa_tick(tmp_path, data, *, window=True, status_path=None):
+    from click.testing import CliRunner
+    from pm_core.cli import pr as pr_cli
+    with patch.object(pr_cli, "state_root", return_value=tmp_path), \
+            patch.object(pr_cli.store, "load", return_value=data), \
+            patch.object(pr_cli.store, "locked_update",
+                         side_effect=lambda root, fn, **kw: fn(data)), \
+            patch.object(pr_cli, "_get_pm_session", return_value="pm-test"), \
+            patch.object(pr_cli, "trigger_tui_refresh"), \
+            patch.object(pr_cli, "_check_signoff_verdict",
+                         return_value="SIGNOFF_REQA"), \
+            patch.object(pr_cli, "_retire_signoff_window"), \
+            patch.object(pr_cli, "_qa_status_for",
+                         return_value=("PASS", status_path)), \
+            patch.object(pr_cli.tmux_mod, "find_window_by_name",
+                         return_value={"id": "@9"} if window else None), \
+            patch.object(pr_cli.subprocess, "Popen") as popen:
+        result = CliRunner().invoke(pr_cli.pr_auto_sequence, ["pr-001"])
+    return result, popen
+
+
+def _judged_run(tmp_path):
+    """A PASS qa_status.json written before sign-off routed back."""
+    path = tmp_path / "qa_status.json"
+    path.write_text("{}")
+    os.utime(path, (1, 1))
+    return path
+
+
+def test_reqa_hop_refused_then_fixed_launches_over_judged_window(
+        pm_home_dir, tmp_path):
+    pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+          "branch": "pm/pr-001",
+          "session_models": {"qa_planning": "provider:missing-route"}}
+    data = {"project": {}, "prs": [pr]}
+    old = _judged_run(tmp_path)
+
+    result, popen = _reqa_tick(tmp_path, data, status_path=old)
+    assert isinstance(result.exception, ProviderNotFoundError)
+    assert "sign_off: re-qa" not in result.output
+    popen.assert_not_called()
+    assert pr["status"] == "qa"
+    assert pr["signoff_return"]["awaiting"] == "qa"
+    # Refused before claiming: the tick after the fix is not held off.
+    assert "launch_claim" not in pr["signoff_return"]
+
+    for _ in range(2):  # still broken: same error, nothing claimed
+        result, popen = _reqa_tick(tmp_path, data, status_path=old)
+        assert isinstance(result.exception, ProviderNotFoundError)
+        popen.assert_not_called()
+        assert "launch_claim" not in pr["signoff_return"]
+
+    del pr["session_models"]
+    result, popen = _reqa_tick(tmp_path, data, status_path=old)
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "running: qa (launched)"
+    assert popen.call_args.args[0][-2:] == ["qa-run-bg", "pr-001"]
+    assert pr["signoff_return"]["launch_claim"]["hop"] == "qa"
+
+    # The driver has not cleared ``awaiting`` yet: a second tick leaves it.
+    result, popen = _reqa_tick(tmp_path, data, status_path=old)
+    assert result.output.strip() == "running: qa"
+    popen.assert_not_called()
+
+    # Once the driver starts (clears ``awaiting``) its window is the run's.
+    pr["signoff_return"]["awaiting"] = None
+    result, popen = _reqa_tick(tmp_path, data, status_path=old)
+    assert result.output.strip() == "running: qa"
+    popen.assert_not_called()
+
+
+def test_reqa_hop_claims_its_launch(pm_home_dir, tmp_path):
+    """The hop tick's own driver is not doubled by the next tick."""
+    pr = {"id": "pr-001", "title": "T", "status": "sign_off",
+          "branch": "pm/pr-001"}
+    data = {"project": {}, "prs": [pr]}
+    old = _judged_run(tmp_path)
+    result, popen = _reqa_tick(tmp_path, data, status_path=old)
+    assert result.exit_code == 0, result.output
+    assert "sign_off: re-qa" in result.output
+    popen.assert_called_once()
+    result, popen = _reqa_tick(tmp_path, data, status_path=old, window=False)
+    assert result.output.strip() == "running: qa"
+    popen.assert_not_called()

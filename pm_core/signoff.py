@@ -757,7 +757,9 @@ def parse_ts(value):
 
 RETURN_LAUNCH_CLAIM_SECONDS = 180
 # Hops whose relaunch is ``--fresh`` (kills the window it finds) and so
-# needs one launcher; a QA return is guarded by the QA loop's running check.
+# needs one launcher.  A QA return is guarded by the QA loop's running check;
+# ``pm pr auto-sequence`` also claims it, but only after its provider check
+# passes (a refused launch must leave it unclaimed for the tick after a fix).
 _CLAIMED_RETURN_HOPS = ("impl", "review")
 
 
