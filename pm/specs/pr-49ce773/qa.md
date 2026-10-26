@@ -182,7 +182,12 @@ retain the last-good list until repair. Duplicate local IDs must be rejected too
 Opening on either kind of duplicate snapshot shows a readable error and waits
 for dismissal. Historical display-number duplicates where every matching PR is
 merged/closed remain permitted and actionless; they must not block navigation
-to unrelated live PRs. A collision between live and terminal PRs still fails
+to unrelated live PRs. Also open from the TUI on live A=#12 with an earlier
+closed B=#13, then mark A merged and assign B #12. Shortcut, Enter, fresh/loop,
+no-fzf selection and navigation must show A's merged notice, not B's closed
+notice. With no live destinations left, repeat next/prev: A's notice stays
+accurate. Remove A's number and reopen A; navigation reaches A and dispatch
+still targets A's local ID. A collision between live and terminal PRs still fails
 closed. Repair unsafe duplicates, then navigate and dispatch normally.
 Also remove/reassign A's number while its popup is open, then press `0`:
 home must remain A under its current local/display ID, not become B or an

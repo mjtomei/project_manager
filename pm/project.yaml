@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T15:31:42.237477+00:00'
+  updated_at: '2026-10-26T15:47:35.021090+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16354,6 +16354,35 @@ prs:
       E11/C1/R13/E10 plus expanded E6 remain required.'
     created_at: '2026-10-26T15:31:42Z'
     last_edited: '2026-10-26T15:31:42Z'
+  - id: note-3a0fd15
+    text: 'Review 1eaf i9: reproduced and fixed retained terminal-duplicate identity
+      loss. From TUI, A=#12 becomes merged while an earlier closed B gains #12; the
+      allowed terminal-only duplicate snapshot previously re-resolved A as B and showed
+      the wrong closed notice. Rendering now accepts the resolved local identity and
+      retains it through navigation with no surviving destinations. Seven regression
+      cases (shortcut, Enter, fresh/loop, fallback, h/l) failed before the fix and
+      now pass, including repeated navigation and reopen/number-removal recovery.
+      Implementation and QA E11 updated. Focused popup/session/tmux suite: 404 passed.
+      Full final validation pending. No architectural blocker or new standalone follow-up;
+      no live QA PASS claimed. Fresh review/live QA/sign-off remain required, including
+      updated E11 and E6/C1/R13/E10. Transfer stash, all-role Astra settings and verify-s15-followup.md
+      preserved. Evidence /pm-captures/review-1eaf-i9-repro.txt and review-1eaf-i9-targeted-fixed.txt.'
+    created_at: '2026-10-26T15:44:50Z'
+    last_edited: '2026-10-26T15:44:50Z'
+  - id: note-86a4718
+    text: 'Review 1eaf i9 final validation: full suite after final code/test edits
+      passed, 3684 passed, 1 skipped, 3 warnings in 166.45s. Focused popup/session/tmux
+      suite: 404 passed. Used real git PATH, scratch-only declared markdown dependency,
+      PM_HOST_HOME unset for known installer-fixture environment issue. Fix commit
+      f9acd7a9 retains selected local identity across allowed terminal-only display
+      duplicates, including no-destination navigation. Evidence /pm-captures/review-1eaf-i9-full-after-fixes.txt,
+      review-1eaf-i9-targeted-fixed.txt, review-1eaf-i9-repro.txt and review-1eaf-i9-summary.txt.
+      Earlier full-final.txt and targeted.txt are PRE-FIX and superseded. NEEDS_WORK
+      because fixes applied; fresh review/live QA/sign-off required, including expanded
+      E11 and prior E6/C1/R13/E10. No live QA PASS claimed; no standalone follow-up
+      created.'
+    created_at: '2026-10-26T15:47:34Z'
+    last_edited: '2026-10-26T15:47:34Z'
   model: provider:chatgpt-astra
   session_models:
     impl: provider:chatgpt-astra

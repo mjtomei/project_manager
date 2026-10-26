@@ -1384,6 +1384,49 @@ class TestPopupPickerIdentity:
         assert "No actions — PR is" in fzf.calls[0]["input"]
         run_cmd.assert_called_once_with("pr review pr-c", "pm-x")
 
+    @pytest.mark.parametrize("mode", ["shortcut", "enter", "fresh", "loop", "fallback", "h", "l"])
+    def test_selected_terminal_duplicate_keeps_identity(
+            self, tmp_path, monkeypatch, capsys, mode):
+        from pm_core.cli import session as sess
+
+        prs = [_pr("pr-b", status="closed", gh_pr_number=13),
+               _pr("pr-a", gh_pr_number=12)]
+        prefix = [(0, "z\n")] * {"fresh": 1, "loop": 2}.get(mode, 0)
+        row = next(d for d, c, _ in sess._build_picker_lines(prs, "#12")
+                   if c == "pr review pr-a")
+
+        def make_terminal_duplicate():
+            prs[0]["gh_pr_number"] = 12
+            prs[1]["status"] = "merged"
+
+        def on_launch(n):
+            if n == len(prefix) + 1:
+                make_terminal_duplicate()
+            elif n == len(prefix) + 3:
+                prs[1].pop("gh_pr_number")
+                prs[1]["status"] = "in_review"
+
+        def choose(prompt):
+            make_terminal_duplicate()
+            return "d"
+
+        key = mode if mode in ("h", "l") else "d"
+        selection = f"\n{row}\n" if mode == "enter" else f"{key}\n"
+        script = prefix + [(0, selection), (0, "h\n"), (0, "l\n"),
+                           (0, "d\n"), (130, "")]
+        with patch("builtins.input", side_effect=choose):
+            fzf, run_cmd = _run_picker(
+                tmp_path, monkeypatch, prs, ["#12", "pr-a"], "tui", script,
+                on_launch=on_launch, has_fzf=mode != "fallback")
+        if mode == "fallback":
+            assert "No actions — PR is merged." in capsys.readouterr().out
+            run_cmd.assert_not_called()
+        else:
+            for call in fzf.calls[len(prefix) + 1:len(prefix) + 3]:
+                assert "No actions — PR is merged." in call["input"]
+                assert "s" not in _expect(call)
+            run_cmd.assert_called_once_with("pr review pr-a", "pm-x")
+
     @pytest.mark.parametrize("statuses", [("merged", "in_review"), ("in_review", "merged")])
     def test_live_terminal_number_collision_is_rejected(
             self, tmp_path, monkeypatch, capsys, statuses):

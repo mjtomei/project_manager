@@ -91,7 +91,12 @@
    Local IDs must be unique across the snapshot. Canonical display IDs must
    also be unique whenever any matching entry is non-terminal. Historical
    terminal-only duplicates (present in project.yaml) are safe to keep because
-   they have no actions. A partial number reassignment that leaves two PRs
+   they have no actions. When the selected PR becomes terminal and shares a
+   display number with another terminal record, render the already-resolved local
+   identity, not the first display-number match. Retain that identity through
+   repeated navigation when no live destinations remain, so the status notice
+   stays accurate and a later repair/reopen can recover the selected PR.
+   A partial number reassignment that leaves two PRs
    displaying the same `#N` (including int/string equivalents) with either live
    is ambiguous: reject it before publication, retain the last-good navigation
    state and refuse pending actions until repair. Duplicate local IDs are

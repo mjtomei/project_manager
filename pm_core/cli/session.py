@@ -1987,7 +1987,7 @@ def popup_picker_cmd(session: str, window_name: str):
 
     invoking_phase = _current_window_phase(window_name)
 
-    def _resolve_for(pr_disp: str):
+    def _resolve_for(pr_disp: str, picked: dict | None = None):
         """Return (lines, picked_pr, label_to_cmd) for the given PR.
 
         When the PR has no actions (merged/closed, or its lookup failed)
@@ -1995,7 +1995,8 @@ def popup_picker_cmd(session: str, window_name: str):
         ``label_to_cmd`` is empty — the picker stays open so navigation
         to other PRs still works.
         """
-        picked = pr_by_disp.get(pr_disp)
+        if picked is None:
+            picked = pr_by_disp.get(pr_disp)
         if picked is None:
             # Shown but not in the nav list (e.g. it became merged while
             # displayed) — still resolve it so the notice is accurate.
@@ -2003,6 +2004,9 @@ def popup_picker_cmd(session: str, window_name: str):
         label_to_cmd: dict[str, str] = {}
         pr_lines: list[tuple[str, str, str]] = []
         if picked is not None:
+            # Retained on-screen entries also need an identity in this map.
+            # Terminal display numbers may be duplicated in historical data.
+            pr_by_disp[pr_disp] = picked
             for lbl, tpl in _actions_for_status(picked.get("status", "")):
                 label_to_cmd[lbl] = tpl.format(pr_id=picked["id"])
             # Phase indicator only meaningful for the invoking PR — when
@@ -2113,6 +2117,11 @@ def popup_picker_cmd(session: str, window_name: str):
         _refresh_state()
         cur = _canonical_id(old_cur, previous_ids)
         if not nav_pr_ids:
+            # No destination survived. Keep the shown PR's local identity,
+            # not the first historical terminal record with its display number.
+            retained = pr_by_local.get(previous_ids.get(old_cur))
+            if retained is not None:
+                pr_by_disp[cur] = retained
             return cur
         if delta is None:
             return home_pr if home_pr in nav_pr_ids else nav_pr_ids[0]
@@ -2157,7 +2166,7 @@ def popup_picker_cmd(session: str, window_name: str):
             lines = [(f"  {_no_actions_notice(current_pr, None)}", "", current_pr)]
             _log.warning("popup-picker: selected PR %r disappeared before dispatch", selected_id)
         else:
-            lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
+            lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr, selected)
         fzf_input_lines = [d for d, _, _ in lines]
         return label in _label_to_cmd
 
