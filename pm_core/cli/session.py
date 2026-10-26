@@ -2022,6 +2022,21 @@ def popup_picker_cmd(session: str, window_name: str):
         picked = pr_by_local.get(identity)
         return _pr_display_id(picked) if picked is not None else identity
 
+    def _log_no_actions(pr_disp: str, picked: dict | None) -> None:
+        """Log a lookup failure with enough context to diagnose id drift."""
+        from pm_core.cli.helpers import _pr_display_id
+
+        # Pair the two ids to diagnose window-name drift without dumping a
+        # large project's entire PR list on every reload.
+        known_ids = [(p.get("id"), _pr_display_id(p)) for p in prs[:20]]
+        _log.warning(
+            "popup-picker: no actions for %r (window=%r, root=%s, "
+            "found=%s, status=%r, prs_loaded=%d, "
+            "known_ids(local,display)=%r, ids_omitted=%d)",
+            pr_disp, window_name, root, picked is not None,
+            (picked or {}).get("status"), len(prs), known_ids,
+            max(0, len(prs) - len(known_ids)))
+
     def _resolve_for(identity: str):
         """Return (lines, picked_pr, label_to_cmd) for the given PR.
 
@@ -2048,18 +2063,7 @@ def popup_picker_cmd(session: str, window_name: str):
                 name_to_wid=name_to_wid)
         if not pr_lines:
             if picked is None or picked.get("status") not in _TERMINAL_STATUSES:
-                from pm_core.cli.helpers import _pr_display_id
-
-                # Pair the two ids to diagnose window-name drift without
-                # dumping a large project's entire PR list on every reload.
-                known_ids = [(p.get("id"), _pr_display_id(p)) for p in prs[:20]]
-                _log.warning(
-                    "popup-picker: no actions for %r (window=%r, root=%s, "
-                    "found=%s, status=%r, prs_loaded=%d, "
-                    "known_ids(local,display)=%r, ids_omitted=%d)",
-                    pr_disp, window_name, root, picked is not None,
-                    (picked or {}).get("status"), len(prs), known_ids,
-                    max(0, len(prs) - len(known_ids)))
+                _log_no_actions(pr_disp, picked)
             label_to_cmd = {}
             pr_lines = [(f"  {_no_actions_notice(pr_disp, picked)}",
                          "", pr_disp)]
@@ -2177,6 +2181,10 @@ def popup_picker_cmd(session: str, window_name: str):
         if selected is None:
             _picked_pr, _label_to_cmd = None, {}
             lines = [(f"  {_no_actions_notice(current_pr, None)}", "", current_pr)]
+            # The selected PR vanished between selection and dispatch: log the
+            # same lookup-failure diagnostics as a rendered notice so a window
+            # that drifted out of range is diagnosable from the pm log too.
+            _log_no_actions(_display_id(current_pr), None)
             _log.warning("popup-picker: selected PR %r disappeared before dispatch", selected_id)
         else:
             lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
