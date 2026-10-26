@@ -29479,7 +29479,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-26T15:37:29.440965+00:00'
+  updated_at: '2026-10-26T15:58:17.735346+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29716,6 +29716,23 @@ prs:
       standalone follow-up.'
     created_at: '2026-10-26T15:37:29Z'
     last_edited: '2026-10-26T15:37:29Z'
+  - id: note-51e1fa1
+    text: 'Review fef8 i1: reproduced and fixed two regressions from early planner
+      registration: registry/layout exceptions aborted healthy QA before polling,
+      and execution-only pm qa run/recreated windows lost main-pane registration.
+      Added a best-effort shared registration helper, invoked before planning and
+      status setup, without duplicate entries for already registered panes. Both regression
+      cases failed before the fix; added real-registry idempotence and new-plan-window
+      confirmation coverage. Impl spec includes S16/S19 fixes and shared-session focus;
+      QA R3 covers execution-only and transient failures. Focus-condition mutation
+      still fails on the unwanted select_window. Validation: 332 focused passed; final
+      full suite 3540 passed, 1 skipped, 4 AsyncMock warnings (real Git PATH, PM_HOST_HOME
+      unset, declared markdown dependency in scratchpad). Evidence /pm-captures/review-fef8-i1.
+      Original pre/post captures verified; native QA of these fixes remains required.
+      Preserved transfer settings, existing QA edits, drafts and stashes; no standalone
+      follow-up created.'
+    created_at: '2026-10-26T15:57:33Z'
+    last_edited: '2026-10-26T15:58:17Z'
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge
