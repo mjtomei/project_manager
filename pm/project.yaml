@@ -29479,7 +29479,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-26T15:58:17.735346+00:00'
+  updated_at: '2026-10-26T17:10:38.318366+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29749,6 +29749,38 @@ prs:
       created.'
     created_at: '2026-10-26T16:10:05Z'
     last_edited: '2026-10-26T16:13:33Z'
+  - id: note-a9db055
+    text: 'QA S24 (2026-10-26) PASS, no code change, on 66325e40. Two fresh fixtures,
+      three recorded clients each (A user on $S, B watcher on ~1, C viewer on ~2),
+      real TUI keys through A only. Story 1 (5 runs, NEEDS_WORK bounce, user kills
+      completed qa-P windows during P''s 120 s review, C follows the run1->run2 replacement):
+      exactly one select_window total (the initial zz t), A and B pinned to main throughout,
+      C parked briefly on pm-home then settled on the new qa-P, fresh background qa-P
+      created 116 s later right after "Auto-QA: review passed", held confirmations
+      2.990/2.999/2.995/3.024 s with the helper sticky line active 5.06 s / 4.07 s
+      before the first PASS and NEEDS_WORK, counts 1->1->2->3, 65 s quiet with no
+      sixth run. Story 2 (2 passes, nobody watching): restart line 3.012 s, new window
+      ID, no client movement, no select_window and no switch_sessions_to_window line,
+      second PASS 2/2 then quiet. Harness: /pm-captures/scenarios/24/scripts (prepare.py/setup.sh/attach.sh/drive.py/sample.py/cast-check.py/audit.py/render.sh)
+      plus config-story1.json/config-story2.json; HELPER_DELAY=92 s into a 120 s finalizer
+      gives a ~4-5 s sticky overlap (the fake review itself takes ~23 s to report
+      PASS). agg for aarch64 is in the session scratchpad; /tmp/pm-venv needs `pip
+      install -e /workspace pyte` (and pytest for focused tests). Evidence: /pm-captures/scenarios/24/{manifest.md,story1,story2}.'
+    created_at: '2026-10-26T17:10:38Z'
+    last_edited: '2026-10-26T17:10:38Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    signoff: provider:deepseek-flash
+    merge: provider:deepseek-flash
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge
