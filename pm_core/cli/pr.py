@@ -3948,6 +3948,18 @@ def pr_qa_run_bg(pr_id: str):
         raise SystemExit(1)
     if state.latest_verdict:
         _rs.set_action_state(pr_id, "qa", "done", verdict=state.latest_verdict)
+    else:
+        # The run ended without a verdict — the PR merged/closed while it
+        # ran, so run_qa_sync returned early.  Drop the [working] entry
+        # rather than leaving a QA run the picker and home window show as
+        # still live; keep a suppress flag that is *still* pending (a
+        # concurrent user start may have consumed it during the run), since
+        # it belongs to that start rather than this driver's launch.
+        still_pending = (_rs.get_action_state(pr_id, "qa")
+                         or {}).get("suppress_switch")
+        _rs.clear_action(pr_id, "qa")
+        if still_pending:
+            _rs.request_suppress_switch(pr_id, "qa")
 
     # This process finished the run and auto-sequence reads qa_status.json
     # itself, so drop the resume snapshot before exiting.  It exists only so

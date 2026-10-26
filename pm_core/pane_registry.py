@@ -245,10 +245,16 @@ def prune_dead_windows(session: str) -> list[str]:
 
     # Query tmux OUTSIDE the lock, and never prune a session we cannot see:
     # an empty window list from a dead/absent session must not wipe the
-    # registry.
+    # registry.  A live session always has at least one window, so an empty
+    # list here means the query itself failed (or the session died between
+    # the two calls) — not that every registered window is gone.
     if not tmux_mod.session_exists(session):
         return []
     live_windows = {w["id"] for w in tmux_mod.list_windows(session)}
+    if not live_windows:
+        _logger.info("prune_dead_windows: no live windows for %s, skipping",
+                     session)
+        return []
 
     removed: list[str] = []
 

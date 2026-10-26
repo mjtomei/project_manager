@@ -655,3 +655,19 @@ class TestPruneDeadWindows:
 
         assert prune_dead_windows("sess") == []
         assert list(load_registry("sess")["windows"]) == ["@0"]
+
+    @patch("pm_core.tmux.session_exists", return_value=True)
+    @patch("pm_core.tmux.list_windows", return_value=[])
+    def test_unreadable_window_list_never_wipes_the_registry(
+            self, mock_windows, mock_session, registry_dir):
+        """A live session always has a window: an empty list is a failed
+        query (or a session killed between the two calls), not proof that
+        every registered window is gone."""
+        _save_registry("sess", {
+            "session": "sess",
+            "windows": {"@0": {"panes": [{"id": "%0", "role": "tui"}],
+                               "user_modified": False}},
+        })
+
+        assert prune_dead_windows("sess") == []
+        assert list(load_registry("sess")["windows"]) == ["@0"]

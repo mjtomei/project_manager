@@ -61,6 +61,22 @@
      runs or recreated windows, without registering the same planner twice.
      Registration/layout failures are logged rather than aborting healthy
      planning; status-pane setup retries missing early registration.
+   * Execution-only runs (`pm qa run`) and runs restarted after their
+     `qa-<pr>` window was killed create their QA main pane with a command
+     that does not exit (`_QA_MAIN_PANE_CMD`). A bare `echo` exits at once
+     (there is no remain-on-exit), so the window vanished before its pane
+     could be looked up: no status pane, no registration, no window at the
+     end. Registration prunes registry entries whose windows no longer
+     exist (`pane_registry.prune_dead_windows`) so a killed window's panes
+     do not linger under a stale `@id`; an unreadable/empty window list is
+     never treated as "every window is gone".
+   * The CLI QA driver (`pm pr qa-run-bg`, used by `pm pr auto-sequence`)
+     mirrors its run into the shared per-PR runtime state: `running` before
+     the run (keeping any pending `suppress_switch`, which belongs to a user
+     start), `done` + verdict when it produces one, `failed` on an exception.
+     A run that ends without a verdict (the PR merged/closed mid-run) leaves
+     no `running` entry behind, so the picker and home window do not show a
+     QA run that no longer exists.
 
 ## Design
 

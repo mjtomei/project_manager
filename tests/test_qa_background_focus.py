@@ -67,6 +67,10 @@ def _run_to_window_creation(tmp_path, monkeypatch, state, *,
         patch("pm_core.runtime_state.consume_suppress_switch",
               mocks["consume_suppress_switch"]),
         patch("pm_core.qa_loop.find_claude_pane", return_value=planner_pane),
+        # Planner registration runs when a planner pane is found; keep it
+        # off the real tmux server and registry.
+        patch("pm_core.pane_registry.prune_dead_windows", return_value=[]),
+        patch("pm_core.pane_registry.load_registry", return_value={"windows": {}}),
         patch("pm_core.qa_loop.time.sleep"),
     ]
     with ExitStack() as stack:
@@ -103,6 +107,8 @@ class TestRunQaSyncWindowFocus:
             [{"id": "%9", "role": "qa-planner"}] if registered else [])}}}
         with patch("pm_core.tmux.split_pane_at", return_value="%10"), \
                 patch("pm_core.tmux.pane_window_id", return_value="@8"), \
+                patch("pm_core.pane_registry.prune_dead_windows",
+                      return_value=[]), \
                 patch("pm_core.pane_registry.load_registry", return_value=registry), \
                 patch("pm_core.pane_layout.register_and_rebalance") as register:
             qa_loop._add_status_pane("pm-test", "%9", "/qa/status.json")
@@ -116,6 +122,8 @@ class TestRunQaSyncWindowFocus:
 
         monkeypatch.setenv("HOME", str(tmp_path))
         with patch("pm_core.tmux.pane_window_id", return_value="@8"), \
+                patch("pm_core.pane_registry.prune_dead_windows",
+                      return_value=[]), \
                 patch("pm_core.pane_layout.rebalance"):
             qa_loop._register_qa_planner("pm-test", "%9")
             qa_loop._register_qa_planner("pm-test", "%9")

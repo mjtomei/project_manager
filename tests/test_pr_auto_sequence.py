@@ -686,9 +686,31 @@ class TestQaRunBgRuntimeState:
 
             assert result.exit_code == 0, result.output
             rec = runtime_state.get_action_state("pr-001", "qa")
-            assert rec.get("state") == "running"
-            # The flag belongs to the user's start for this PR, not this driver.
+            # The finished run leaves no [working] entry behind ...
+            assert rec.get("state") is None
+            # ... but the flag belongs to the user's start for this PR, not
+            # to this driver, so it survives.
             assert rec.get("suppress_switch") is True
+
+    def test_no_verdict_leaves_no_running_entry(self, runner, tmp_path):
+        """A run that aborts without a verdict (the PR merged mid-run) must
+        not leave the picker and home window showing a live QA run."""
+        from pm_core import runtime_state
+        pr = _pr("qa")
+        data = _data_with(pr)
+        rt = tmp_path / "runtime"
+        rt.mkdir()
+        with patch("pm_core.runtime_state._runtime_dir", return_value=rt), \
+             patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.signoff.clear_return_awaiting"), \
+             patch("pm_core.qa_loop.run_qa_sync"):
+            result = runner.invoke(pr_qa_run_bg, ["pr-001"])
+
+            assert result.exit_code == 0, result.output
+            assert runtime_state.get_action_state("pr-001", "qa") == {}
 
     def test_failure_marks_action_failed(self, runner, tmp_path):
         from pm_core import runtime_state
