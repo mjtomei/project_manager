@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T15:15:43.220118+00:00'
+  updated_at: '2026-10-26T16:57:00.928438+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33092,6 +33092,52 @@ prs:
       + integration_pointer) - preserve both behaviours in the resolution. (2026-10-26T15:15:43Z)'
     created_at: '2026-10-26T15:15:43Z'
     last_edited: '2026-10-26T15:15:43Z'
+  - id: note-account-switch-20261026
+    text: Account transition / controller reload handoff 2026-10-26T16:24:40.272624+00:00.
+      User authorized October29 reset and bug PRs241/242/243 -> provider:claude-work/work
+      Opus/high ALL roles/helpers/signoff; do not restore historical Astra settings.
+      DeepSeek1017/high unchanged; work Claude signoff unchanged. Previous reviewer
+      was examining/fixing post-apply base file-count and overlap evidence; preserve
+      its dirty edits and validate them. Controller restart recovered current QA snapshots
+      but native autostart attempted fresh review launches; those failed during container
+      removal, so original review windows are now gone. Original source/workdir/dirty
+      files, stashes and mounted captures/transcript remain. Read /pm-captures/account-transition-20261026/prior-review-9576f562-6310-4c68-bc39-d2191090326c.jsonl
+      in chunks for exact progress; do not invent completion or waive any pending
+      QA. Original ephemeral review-container processes cannot be assumed live after
+      native cleanup. Reproduce any missing unfinished tests honestly. The new review
+      is recovery of authorized existing work, not a new PR. Manual merge/spec-review-OFF
+      gates remain unchanged. No standalone followup/autostart or master merge is
+      newly authorized.
+    created_at: '2026-10-26T16:24:40.272624+00:00'
+    last_edited: '2026-10-26T16:24:40.272624+00:00'
+  - id: note-4e1d513
+    text: 'review-loop aa73 i1: closed the remaining malformed-state holes in the
+      hand-editable project.yaml contract (R9 item 14) and kept the bounded lists’
+      real totals across a carry-forward. (1) `pm pr merge` no longer raises on a
+      non-mapping `signoff` record or a binding whose `base_sha`/`candidate_tree`
+      is not a string — `merge_gate_refusal`, `fresh_recorded_verdict`, `latest_signoff_verdict`,
+      `is_legacy_approval` and `_step_signoff_locked` read through `_mapping`/`revision_of`,
+      so the gate refuses and the driver/router keep running. (2) `format_signoff_return`
+      no longer slices a non-string `reviewed_head`; `effective_verdict` no longer
+      slices a non-string `base_sha` or joins a non-list `conflicts`; `approval_justification_problem`
+      no longer slices a non-string `candidate_tree`; `pr_signoff_record`/`pr_signoff_integrate`/`_publish_approved`
+      use the same guards. (3) the carry-forward paths used `list(x or [])` (a malformed
+      scalar became a list of characters) — now `_as_list`; and a carried already-bounded
+      list keeps its recorded `overlap_total`/`base_behavior_count` so the prompt
+      does not under-report "… N more" after a benign re-check (same under-count master’s
+      `omitted_path_count` fixed for path lists). Tests: 5 new (129 focused); full
+      suite 3486 passed, 1 skipped, 13 pre-existing env failures (12 markdown module
+      absent, 1 hook receiver fails on master too — verified on an origin/master worktree).
+      MERGE RISK unchanged: the branch is behind origin/master (now 211a6128, which
+      merged #250); master added `pm_core/prompt_bounds.py` and rewrote `_signoff_integration_block`
+      to bound the overlap/conflict lists with `bounded_join` + `omitted_path_count`
+      + `integration_pointer` (`conflicts_total`/`overlap_total`). This branch’s rewritten
+      block does not carry that bounding, so the sign-off integration will conflict
+      there — resolve by keeping both: the PR’s resolution/candidate/applied rendering
+      AND master’s bounded lists + pointer. Do not take this branch’s block wholesale.
+      (2026-10-26T16:35:00Z)'
+    created_at: '2026-10-26T16:57:00Z'
+    last_edited: '2026-10-26T16:57:00Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
