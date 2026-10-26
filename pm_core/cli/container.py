@@ -70,6 +70,20 @@ def _echo_reaper_state() -> None:
         click.echo(f"Last cleanup:    {when} ({state.get('last_reason', '')}): "
                    f"{state.get('last_summary', '')}")
     failures = container_reaper.pending_failures()
+    # An owner release of a still-retained allocation is deferred, not failed:
+    # reap keeps it until the retention is released, so retrying cannot help.
+    with container_reaper.runtime_domain_scope():
+        deferred = sorted(
+            name for name, info in failures.items()
+            if info.get("owner_release")
+            and container_reaper.is_retained(name, str(info.get("id") or "")))
+    for name in deferred:
+        failures.pop(name)
+    if deferred:
+        click.echo("Released while retained (removed once "
+                   "'pm container retain --release' drops the retention):")
+        for name in deferred:
+            click.echo(f"  {name}")
     if failures:
         click.echo(f"Cleanup failures ({len(failures)}) — retry with 'pm container reap':")
         for name, info in sorted(failures.items()):
