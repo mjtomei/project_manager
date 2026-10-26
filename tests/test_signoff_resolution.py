@@ -1526,6 +1526,78 @@ def test_review_prompt_diffs_against_the_base_a_clean_bounce_merged(w):
     assert "git diff master...HEAD" not in review
 
 
+def test_review_prompt_diffs_against_the_newest_base_a_bounce_merged(w):
+    """The branch can contain two bases; diff against the newest one.
+
+    A metadata resolution applies base B1 at sign-off; later the base moves to
+    B2 and a bounce merges B2 into the branch.  The carried resolution still
+    names B1, so taking the applied resolution's base first would make the
+    review prompt diff ``B1...HEAD`` and list B2's commits as the PR's own
+    changes — contradicting the return block, which already names B2.
+    """
+    rec = _metadata_conflict(w)                      # applies base B1
+    b1 = rec["base_sha"]
+    assert rec["resolution"]["applied_merge_sha"]
+
+    commit(w.repo, "base_only.txt", "base\n", "base moves ahead")
+    b2 = git(w.repo, "rev-parse", "HEAD")
+    assert b2 != b1
+    clean = integration.check_integration(w.pm_dir, PR)
+    assert clean["status"] == integration.CLEAN, clean
+
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, clean["head"], clean["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    ret = pr_entry(w)["signoff_return"]
+    assert ret["applied"]["base_sha"] == b2
+    assert git(w.wd, "rev-parse", "HEAD") == ret["applied"]["merge_sha"]
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        review = prompt_gen.generate_review_prompt(data, PR)
+    assert f"git diff {b2[:12]}...HEAD" in review
+    assert f"git diff {b1[:12]}...HEAD" not in review
+    assert "git diff master...HEAD" not in review
+
+
+def test_signoff_prompt_names_the_newest_base_after_a_bounce_merged_it(w):
+    """The resolution block's "PR's own changes" diff names the newest base.
+
+    Same two-base situation as the review case: the applied resolution block
+    must not point the agent at a diff that lists the newer base's commits as
+    the PR's changes.
+    """
+    rec = _metadata_conflict(w)
+    b1 = rec["base_sha"]
+    commit(w.repo, "base_only.txt", "base\n", "base moves ahead")
+    b2 = git(w.repo, "rev-parse", "HEAD")
+    clean = integration.check_integration(w.pm_dir, PR)
+    assert clean["status"] == integration.CLEAN, clean
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, clean["head"], clean["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert again["base_sha"] == b2
+    assert again["resolution"]["applied_merge_sha"]
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert f"git diff {b2[:12]}...HEAD" in text
+    assert f"git diff {b1[:12]}...HEAD" not in text
+
+
 def test_signoff_prompt_counts_behavior_changes_stored_without_a_total(w):
     """21-30 base behaviour changes are stored in full with no count key.
 
@@ -1827,6 +1899,80 @@ def test_a_carried_applied_resolution_is_not_labelled_a_failed_attempt(w):
     assert "pm resolved an *earlier* metadata conflict" in text
     assert "pm resolved the metadata conflict by record id" not in text
     assert "Reconcile it in this branch" in text
+
+
+def test_a_carried_resolution_on_an_error_record_is_not_called_a_conflict(w):
+    """An ``error`` record reports a failed check, not a conflict.
+
+    ``_carry_forward`` keeps an applied resolution on a later ``error`` record
+    too (a transient fetch failure must not drop the applied provenance).  The
+    prompt and the return text then qualify it as an earlier resolution, but
+    must name the *current* problem correctly — there is no conflict above.
+    """
+    rec = _metadata_conflict(w)
+    assert rec["resolution"]["applied_merge_sha"]
+
+    def _error(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["status"] = integration.ERROR
+        integ["error"] = "fetch master failed: boom"
+        integ["conflicts"] = []
+        integ.pop("candidate_tree", None)
+    store.locked_update(w.pm_dir, _error)
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "the failed check above is separate" in text
+    assert "the conflict above is separate" not in text
+
+    head = git(w.wd, "rev-parse", "HEAD")
+    ret = signoff.build_return_record(
+        pr_entry(w), signoff.SIGNOFF_IMPL, "impl", reviewed_head=head)
+    text = signoff.format_signoff_return(dict(pr_entry(w), signoff_return=ret))
+    assert "already applied; the failed check above is separate" in text
+    assert "the conflict above is separate" not in text
+
+
+def test_return_text_names_the_newest_base_the_branch_contains(w):
+    """The return text's diff hint names the newest base, not the resolution's.
+
+    A resolution applies base B1; a later bounce merges B2 into the branch.
+    When a subsequent conflict routes the PR back, the return text must not
+    point at ``git diff B1 HEAD`` — that lists B2's commits as the PR's own
+    changes.
+    """
+    rec = _metadata_conflict(w)                      # applies base B1
+    b1 = rec["base_sha"]
+    commit(w.repo, "base_only.txt", "base\n", "base moves ahead")
+    b2 = git(w.repo, "rev-parse", "HEAD")
+    assert b2 != b1
+    clean = integration.check_integration(w.pm_dir, PR)
+    assert clean["status"] == integration.CLEAN, clean
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, clean["head"], clean["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    assert pr_entry(w)["signoff_return"]["applied"]["base_sha"] == b2
+
+    # The next base conflicts on code: the record carries the applied
+    # resolution but this bounce applies nothing.
+    commit(w.wd, "shared.txt", "pr\n", "branch edits shared")
+    commit(w.repo, "shared.txt", "base\n", "base edits shared")
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.CONFLICT
+    assert again["resolution"]["applied_merge_sha"]
+
+    head = git(w.wd, "rev-parse", "HEAD")
+    ret = signoff.build_return_record(
+        pr_entry(w), SIGNOFF_IMPL, "impl", reviewed_head=head)
+    text = signoff.format_signoff_return(dict(pr_entry(w), signoff_return=ret))
+    assert f"git diff {b2[:12]} HEAD" in text
+    assert f"git diff {b1[:12]} HEAD" not in text
 
 
 def test_integrate_cli_apply_applies_a_clean_recheck_of_a_resolved_check(w):
@@ -2464,6 +2610,38 @@ def test_a_failed_recheck_keeps_a_failed_summary(w, monkeypatch):
     write_report(w, again, candidate=False, evidence=False, reason=False)
     refusal = signoff.merge_gate_refusal(pr_entry(w), again["head"], "master")
     assert refusal and "behavioural changes" in refusal
+
+
+def test_an_applied_resolution_keeps_a_failed_behavior_summary(w, monkeypatch):
+    """The post-apply re-check cannot re-summarise a base now inside HEAD.
+
+    ``base_behavior_error`` is not an exemption: the merge gate requires the
+    evidence statement for it.  Applying the resolution must carry it, or a
+    resolved approval would silently need no statement at all — the re-check
+    sees no base diff and produces neither changes nor an error.
+    """
+    def boom(*a, **k):
+        raise RuntimeError("summary exploded")
+
+    monkeypatch.setattr(integration, "base_behavior_changes", boom)
+    rec = _metadata_conflict(w)
+    assert rec["status"] == integration.UP_TO_DATE
+    assert rec["resolution"]["applied_merge_sha"]
+    assert "summary exploded" in (rec.get("base_behavior_error") or "")
+    assert not rec.get("base_behavior_changes")
+
+    # A benign re-check keeps it too (the record no longer has a base diff).
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    assert "summary exploded" in (again.get("base_behavior_error") or "")
+
+    # Recording a MERGE without the statement is refused, exactly as for a
+    # listed behavioural change.
+    write_report(w, rec, evidence=False, reason=False)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr, ["signoff", "record", PR])
+    assert r.exit_code != 0 and "pm-signoff-evidence" in r.output
 
 
 def test_config_path_base_change_requires_justification(w):

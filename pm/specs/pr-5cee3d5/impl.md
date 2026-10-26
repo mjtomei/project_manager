@@ -125,7 +125,12 @@ is recorded instead of raising). A failed summary is **not** an exemption: the
 merge gate and the prompt treat `base_behavior_error` like a behavioural
 change, so a MERGE still has to state the evidence reused or the targeted
 checks run. Otherwise an unexpected raise would silently drop the requirement
-that makes the agent weigh the new base.
+that makes the agent weigh the new base. It must therefore survive the same
+carry-forward the listed changes do: the post-apply re-check sees no base
+diff (the base is inside HEAD now), so `prepare` copies the pre-apply
+`base_behavior_error` onto the applied record, and a later benign re-check
+carries it forward with the resolution (only when that check produced neither
+changes nor a summary of its own).
 
 ### R4. Apply the resolved merge to the PR branch before sign-off runs
 For the GitHub backend `gh pr merge` cannot merge a conflicted branch, and
@@ -282,7 +287,16 @@ workdir's stale `<base>`/`origin/<base>` ref would list the merged base
 commits as PR changes. The applied base is taken from the applied resolution,
 a newer `up_to_date` check, or the merge a bounce recorded in
 `signoff_return.applied` (a clean bounce leaves the pre-merge `clean` check
-in place).
+in place). The branch can contain more than one base revision (a resolution
+applied at sign-off, then a newer base merged by a later bounce), so
+`integration.contained_base(pr)` collects those candidates, drops any HEAD
+does not contain, and keeps the newest by ancestry — the last check's
+recorded `merge_base` (which survives a later check replacing the
+`up_to_date` record) is one candidate, but only when a base merge is known;
+without one it is just the branch point and the usual base-branch diff
+stays. The same newest-base rule drives the sign-off prompt's
+"PR's own changes remain" line and the return text's `git diff <base> HEAD`
+hint.
 
 ### R7. Merge gate / publication identity
 `merge_gate_refusal` additionally requires:
@@ -390,7 +404,8 @@ tests):
     `pyproject.toml`) requires the same justification as `project.yaml`; the
     full `integration.json` record carries the digest of the resolution it
     describes; a failed behaviour summary still requires the justification
-    (and the prompt says the summary failed); a resolved approval whose head
+    (and the prompt says the summary failed), including across an applied
+    resolution and a later benign re-check; a resolved approval whose head
     is already in the base is recovered, not refused for a missing candidate.
 14. Malformed evidence and honest surfaces: a non-string `qa_resume.json`
     `planner_head` is recorded as no revision and does not crash the prompt;
@@ -403,7 +418,10 @@ tests):
     against the
     exact base the branch contains — the applied resolution, a newer
     `up_to_date` check, or the merge a clean bounce recorded — so the merged
-    base commits never read as the PR's own changes.
+    base commits never read as the PR's own changes; when the branch carries
+    two bases (a resolution applied at sign-off, then a newer base merged by
+    a later bounce), the review prompt, the sign-off prompt's "PR's own
+    changes" line and the return text all name the *newest* one.
 
 ## Implicit requirements
 

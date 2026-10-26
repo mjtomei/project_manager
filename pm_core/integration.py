@@ -1383,6 +1383,14 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
                 record["base_behavior_changes"] = list(dict.fromkeys(
                     old_behavior + list(record.get("base_behavior_changes")
                                         or [])))
+            if old.get("base_behavior_error") \
+                    and not record.get("base_behavior_changes") \
+                    and not record.get("base_behavior_error"):
+                # A summary the earlier check could not compute is not an
+                # exemption (the merge gate requires the evidence statement
+                # for it).  The post-apply re-check sees no base diff, so
+                # without carrying it the requirement would silently vanish.
+                record["base_behavior_error"] = old["base_behavior_error"]
     elif record.get("status") == ERROR \
             and not record.get("base_behavior_changes") \
             and not record.get("base_behavior_error") \
@@ -1580,6 +1588,12 @@ def prepare(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
     # but the base interactions the agent must assess are still relevant.
     record["base_behavior_changes"] = list(
         previous.get("base_behavior_changes") or [])
+    if previous.get("base_behavior_error") \
+            and not record.get("base_behavior_changes"):
+        # A summary pm could not compute is not an exemption: the merge gate
+        # still requires the evidence statement for it, and the post-apply
+        # check cannot produce one (no base diff).
+        record["base_behavior_error"] = previous["base_behavior_error"]
     _log.info("sign-off %s: resolved and applied %s@%s as %s", pr_id,
               previous.get("base_branch"),
               (previous.get("base_sha") or "")[:8], merged[:8])
@@ -1648,6 +1662,73 @@ def carried_applied_resolution(record: dict | None) -> bool:
     resolution = rec.get("resolution") or {}
     return bool(resolution.get("applied_merge_sha")) \
         and rec.get("status") in (CONFLICT, ERROR)
+
+
+def contained_base(pr: dict) -> str | None:
+    """The newest base revision the PR branch already contains, or ``None``.
+
+    Once the branch carries a base — a metadata resolution applied at
+    sign-off, or a clean base merged by a bounce — the workdir's own base ref
+    (``origin/<base>``, or the local branch) may still point before that
+    merge: pm fetches the base into its own ref, never ``origin/<base>``.  A
+    prompt that then says ``<base>...HEAD`` lists the merged base commits as
+    the PR's own changes.
+
+    The branch can contain more than one base revision: a resolution applied
+    at sign-off, then a newer base merged by a later bounce.  Diffing against
+    the older one would list the newer base's commits as the PR's changes, so
+    the candidates are ordered by ancestry and the newest wins.  Candidates,
+    in the order trusted when git cannot order them (e.g. the workdir is not
+    visible): an ``up_to_date`` check's base, the merge a bounce recorded in
+    ``signoff_return.applied``, the last check's recorded merge base (the
+    newest base revision the branch shares with the checked base — it
+    survives a later check replacing an ``up_to_date`` record), and the base
+    an applied resolution merged.
+    """
+    record = pr.get("integration") or {}
+    applied = (pr.get("signoff_return") or {}).get("applied") or {}
+    resolution = record.get("resolution") or {}
+    candidates: list[str] = []
+    if record.get("status") == UP_TO_DATE and record.get("base_sha"):
+        candidates.append(record["base_sha"])
+    if applied.get("merge_sha") and applied.get("base_sha"):
+        candidates.append(applied["base_sha"])
+    # The last check's merge base is the newest base revision the branch
+    # shares with the checked base, and it survives a later check replacing
+    # the ``up_to_date`` record that named the applied base.  Only when a
+    # base merge is known: without one, the merge base is just the branch
+    # point and the usual base-branch diff stays (the workdir ref is not
+    # stale in that case).
+    carries_base = bool(resolution.get("applied_merge_sha")) \
+        or bool(applied.get("merge_sha"))
+    if carries_base and record.get("merge_base"):
+        candidates.append(record["merge_base"])
+    if resolution.get("applied_merge_sha"):
+        resolved_from = resolution.get("resolved_from") or {}
+        base = resolved_from.get("base_sha") or record.get("base_sha")
+        if base:
+            candidates.append(base)
+    candidates = list(dict.fromkeys(c for c in candidates if c))
+    if not candidates:
+        return None
+    workdir = pr.get("workdir")
+    have_workdir = bool(workdir) and Path(workdir).is_dir()
+    if len(candidates) > 1 and have_workdir:
+        # A revision HEAD does not contain (the branch was rewritten, or a
+        # recorded merge base from another repository) cannot be what the
+        # branch carries.
+        usable = [c for c in candidates if is_ancestor(workdir, c, "HEAD")]
+        if usable:
+            candidates = usable
+    newest = candidates[0]
+    if len(candidates) > 1 and have_workdir:
+        for other in candidates[1:]:
+            # ``is_ancestor`` is true for equal revisions too; an unrelated
+            # revision (a force-pushed base) cannot be shown newer, so the
+            # first candidate — the latest check's — stays.
+            if is_ancestor(workdir, newest, other):
+                newest = other
+    return newest
 
 
 def _added_count(entry: dict, key: str) -> int:

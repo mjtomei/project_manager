@@ -414,48 +414,19 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
     return "\n" + "\n".join(lines) + "\n"
 
 
-def _applied_resolution_base(pr: dict) -> str | None:
-    """The base revision an applied metadata resolution merged into the branch.
-
-    ``None`` unless pm resolved a metadata-only conflict and applied the
-    result: only then does the branch contain the base, which makes the
-    workdir's own base ref (``origin/<base>``) an unreliable diff target.
-    """
-    integ = pr.get("integration") or {}
-    resolution = integ.get("resolution") or {}
-    if not resolution.get("applied_merge_sha"):
-        return None
-    resolved_from = resolution.get("resolved_from") or {}
-    return resolved_from.get("base_sha") or integ.get("base_sha") or None
-
-
 def _diff_base(pr: dict) -> str | None:
-    """The exact base revision the branch already contains, or ``None``.
+    """The *newest* base revision the branch already contains, or ``None``.
 
-    Once the branch carries the recorded base — a metadata resolution applied
-    at sign-off, or a clean base merged by a bounce — the workdir's own base
-    ref (``origin/<base>``, or the local branch) may still point before that
+    Once the branch carries a base — a metadata resolution applied at
+    sign-off, or a clean base merged by a bounce — the workdir's own base ref
+    (``origin/<base>``, or the local branch) may still point before that
     merge: pm fetches the base into its own ref, never ``origin/<base>``.  A
     ``<base>...HEAD`` diff would then list the merged base commits as PR
-    changes.  An ``up_to_date`` check (or the merge a bounce recorded in
-    ``signoff_return``) means the recorded base is an ancestor of HEAD, so
-    diffing against that exact revision is correct.
+    changes.  See :func:`pm_core.integration.contained_base` for how the
+    newest base is chosen when the branch contains more than one.
     """
     from pm_core import integration as integ
-    resolution_base = _applied_resolution_base(pr)
-    if resolution_base:
-        return resolution_base
-    record = pr.get("integration") or {}
-    if record.get("status") == integ.UP_TO_DATE and record.get("base_sha"):
-        return record["base_sha"]
-    # A bounce records the merge it applied in ``signoff_return``; the branch
-    # still contains that base even though the integration record (a clean
-    # check made before the merge) names the pre-merge HEAD.  The record is
-    # checked first so a later, newer ``up_to_date`` base wins.
-    applied = (pr.get("signoff_return") or {}).get("applied") or {}
-    if applied.get("merge_sha") and applied.get("base_sha"):
-        return applied["base_sha"]
-    return None
+    return integ.contained_base(pr)
 
 
 def _signoff_integration_block(pr: dict, pr_id: str) -> str:
@@ -515,10 +486,14 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
             # The record carries a resolution an earlier merge applied (see
             # integration._carry_forward); the conflict/error above is a
             # different, current problem.  Do not present the applied
-            # resolution as this check's outcome.
+            # resolution as this check's outcome.  Name that problem as it
+            # actually is: an ``error`` record reports a failed check, not a
+            # conflict.
+            current = ("the conflict above is separate"
+                       if rec.get("status") == integ.CONFLICT
+                       else "the failed check above is separate")
             lines.append("**Earlier metadata conflict resolution (pm, by "
-                         "record id), already applied — the conflict above is "
-                         "separate:**")
+                         f"record id), already applied — {current}:**")
         else:
             lines.append("**Metadata conflict resolution (pm, by record id):**")
         for entry in resolution.get("paths") or []:
@@ -540,7 +515,11 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
                 f"`{(resolved_from.get('base_sha') or '?')[:12]}` (merge-base "
                 f"`{(resolved_from.get('merge_base') or '?')[:12]}`).")
         if resolution.get("applied_merge_sha"):
-            applied_base = _applied_resolution_base(pr) or base_sha
+            # The branch may also contain a *newer* base merged by a bounce
+            # after this resolution; the PR's own changes are relative to the
+            # newest base the branch carries (an older one would list that
+            # newer base's commits as PR changes).
+            applied_base = _diff_base(pr) or base_sha
             shown_base = applied_base[:12] if applied_base else "<base>"
             lines.append(
                 f"- Applied to the PR branch as "

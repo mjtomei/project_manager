@@ -1167,6 +1167,12 @@ def _carried_applied_resolution(record: dict | None) -> bool:
     return integ_mod.carried_applied_resolution(record)
 
 
+def _contained_base(pr: dict) -> str | None:
+    """See :func:`pm_core.integration.contained_base`."""
+    from pm_core import integration as integ_mod
+    return integ_mod.contained_base(pr)
+
+
 def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
     """Prompt block for a PR sign-off sent back (empty when there is none)."""
     rec = open_return(pr)
@@ -1220,10 +1226,14 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 # (``_carry_forward``); the conflict above is a different,
                 # current problem.  Calling it "the" resolution would tell the
                 # step that pm already reconciled the conflict it must fix.
+                # An ``error`` record reports a failed check, not a conflict.
+                current = ("the conflict above is separate and is never "
+                           "auto-resolved"
+                           if integ.get("status") == "conflict"
+                           else "the failed check above is separate")
                 lines.append(
                     "pm resolved an *earlier* metadata conflict by record id "
-                    f"in {paths_text} (already applied; the conflict above is "
-                    "separate and is never auto-resolved).")
+                    f"in {paths_text} (already applied; {current}).")
             else:
                 lines.append(
                     "pm resolved the metadata conflict by record id in "
@@ -1244,9 +1254,12 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 # The launch apply (prepare) leaves no ``applied`` block on
                 # the return record, so the routed step would otherwise use
                 # its usual ``<base>...HEAD`` diff against a stale base ref
-                # and see the merged base commits as PR changes.
+                # and see the merged base commits as PR changes.  The branch
+                # can carry a *newer* base than the resolution merged (a later
+                # bounce), so name the newest one it contains.
                 if not (rec.get("applied") or {}).get("merge_sha"):
-                    applied_base = (resolved_from.get("base_sha")
+                    applied_base = (_contained_base(pr)
+                                    or resolved_from.get("base_sha")
                                     or integ.get("base_sha"))
                     if applied_base:
                         lines.append(

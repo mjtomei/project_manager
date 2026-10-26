@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T13:23:46.974794+00:00'
+  updated_at: '2026-10-26T14:06:32.135075+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33011,6 +33011,37 @@ prs:
       (2026-10-26T13:20:00Z)'
     created_at: '2026-10-26T13:23:46Z'
     last_edited: '2026-10-26T13:23:46Z'
+  - id: note-e42f8a6
+    text: 'review-loop 0eef i4: fixed three residual gaps. (1) A branch can contain
+      two bases — a resolution applied at B1, then a newer base B2 merged by a bounce
+      — and `_diff_base` returned the applied resolution''s base first, so the review
+      / QA-planner / sign-off prompts said `git diff B1...HEAD` and listed B2''s commits
+      as the PR''s own changes, contradicting the same prompt''s return block (which
+      named B2). New `integration.contained_base(pr)` collects the bases the branch
+      may contain (an up_to_date check, a bounce''s applied merge, the last check''s
+      recorded merge_base — only when a base merge is known, else it is just the branch
+      point — and the applied resolution''s base), drops any HEAD does not contain,
+      and keeps the newest by ancestry; prompt_gen._diff_base, the sign-off prompt''s
+      "PR''s own changes remain" line and format_signoff_return''s `git diff <base>
+      HEAD` hint all use it. (2) A carried applied resolution on an *error* record
+      was described as "the conflict above is separate"; an error record reports a
+      failed check, so the prompt and the return text now say "the failed check above
+      is separate". (3) `prepare` copied the pre-apply `base_behavior_changes` but
+      not `base_behavior_error` onto the post-apply record; the re-check sees no base
+      diff, so a failed summary vanished and the merge gate stopped requiring the
+      evidence statement (the "metadata is not an exemption" hole R3 closes for the
+      clean path). It is carried now, and a later benign re-check carries it forward
+      with the resolution. Tests: 5 new in test_signoff_resolution.py (118 focused);
+      full suite 3473 passed, 1 skipped, 13 pre-existing env failures (12 markdown
+      module absent, 1 hook receiver fails on master too). Evidence: /pm-captures/review-0eef-i4/.
+      MERGE RISK unchanged from i3: the branch is 76 commits behind origin/master,
+      which changed all five files this PR touches; prompt_gen._signoff_integration_block
+      is changed on both sides (master bounded the conflict/overlap listings with
+      integration.omitted_path_count + integration_pointer, which this version does
+      not carry), so expect a code conflict at sign-off and preserve both behaviours.
+      (2026-10-26T14:06:28Z)'
+    created_at: '2026-10-26T14:06:32Z'
+    last_edited: '2026-10-26T14:06:32Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
