@@ -12756,6 +12756,75 @@ prs:
       Existing older S12 fixture/captures untouched.'
     created_at: '2026-10-26T04:57:18Z'
     last_edited: '2026-10-26T04:57:18Z'
+  - id: note-121cbbf
+    text: 'Scenario 14 refinement (2026-10-26): use real pm qa run INSTRUCTION_ID
+      --pr CANONICAL_ID for shared actual-QA workers; shell pm pr qa only directs
+      to TUI. No public command resumes a named renamed debug allocation, and container
+      restart does not repair its host proxy: drive renamed unshared coverage via
+      label-aware pm container reap --session TAG, not private repair helpers. Create
+      original-name control by renaming a separately PM-created debug allocation (distinct
+      mounted proxy); attempting to start another unshared proxy at an in-use original
+      directory should refuse, not steal it. Derive proxy directories from actual
+      /run/pm-push-proxy mounts. Exact races require fresh, actor-specific runtime-boundary
+      gate IDs with real run/inspect/rm forwarding and acknowledgment before release;
+      no sleeps as proof, no mocked successful runtime output. A SIGSTOP daemon can
+      still accept Unix connects via its listen backlog: use actual death for dead-proxy
+      repair; for late-exit generation protection use a separate deliberately unlinked
+      stopped-daemon fixture and resume/signal that captured PID only after real public
+      launch creates replacement. Current sandbox Podman info succeeds (3.4.4, rootless
+      arm64), but image store is empty; provision via nested_podman bootstrap and
+      build-base. Prior controller recovery permits only omission of failing Chromium
+      smoke RUN for lifecycle fixture, retaining full packages/runtime; do not claim
+      normal build PASS. Qualify independent stores and file:// absolute bare origin
+      before stories. Runtime QA not executed by this refinement; no PASS claim.'
+    created_at: '2026-10-26T04:04:40Z'
+    last_edited: '2026-10-26T04:04:40Z'
+  - id: note-c886f30
+    text: 'QA S14 interim runtime handoff (2026-10-26, chatgpt/gpt-6-astra-high, source
+      d53b8fd2): real isolated rootless Podman image/build qualification executed.
+      Normal build failed Chromium inotify errno24; authorized smoke-RUN-only image
+      recovery succeeded with actual launch/exec/bind/removal, original failure retained.
+      Story1 real in-flight push acknowledged at bare-origin hook before exact review-pane
+      close; review immutable ID gone in3.064s, impl/actual-QA/unrelated/long-shortened
+      proxy controls pushed exact SHAs afterward; forbidden refs absent. Independent
+      dead-daemon repair: impl working, concurrent review visibly rc1 attachment-lease
+      refusal pre-agent, actual QA preserved, one live new daemon. Independent replacement-generation
+      preserves replacement socket and allowed/forbidden access after verified old
+      TERM+CONT but strict old-process-disappeared Then FAILED: old PID42475 remains
+      Z/PPID1 beyond30s; tracked note-8c369b2 on existing pr-2111fa0. Corrected independent
+      in-flight allocation gate ack/inspect/old-close/release0.22s succeeds and new
+      push exact SHA; scoped cleanup after default120s grace removed final allocation/socket/owner,
+      but exited daemon similarly Z. Initial overlong gate attempt invalidated, preserved,
+      fresh retry used; invalid teardown needed exact captured-ID runtime rm after
+      engine removing/inspect-not-known state, not accepted race evidence. Owner.json
+      permission refusal/retry checks completed; two-store foreign-runtime guard completed
+      with overlap-call timing only, not held-through-decision proof. Debug rename/permission
+      trials still finishing. Evidence under /pm-captures/scenarios/14 with per-story
+      manifests/casts/H264 videos; no product code change or overall PASS claimed.'
+    created_at: '2026-10-26T04:47:05Z'
+    last_edited: '2026-10-26T04:47:05Z'
+  - id: note-f55ed80
+    text: 'QA S14 fix/handoff: concrete distinct-mount original-name replacement stranded
+      old unshared proxy after container removal; tracked pr-b1f2ee3, fixed and PUSHED
+      commit2d1ed2f6. Complete actual-mount inventory under existing launch lock now
+      governs retirement; unknown/domain/socket-generation guards unchanged. Same-state
+      public pre-fix reap rc1 versus post-fix rc0 stopped1 unused proxy, old socket/owner
+      gone, failure clear, identical replacement21646e37738d74e0f48d7c51fd550fe3dc04678669be860c57242c9d61cfc16f
+      and distinct mount preserved; normal allowed SHA4fbfb1438e25f5f812e8eb1c96ae73bb7bedf138,
+      forbidden absent. Baseline regressions2 failed/2 controls, focused225 passed;
+      full suite running. All67 casts have validated H264 siblings; /pm-captures/scenarios/14/README.md
+      and crosslinked pre-fix/post-fix/renamed-proxy manifests. Whole scenario still
+      cannot PASS: strict old daemon disappearance failed Z/PPID1; debug EXIT beat
+      renamed dry-run preview; permission-specific full retry not rerun; two-store
+      B calls overlapped A gate but decision-held ordering unproven. Final post-fix
+      debug replacement remains live in /scratch/s14-permission-retry-20261026 session
+      pm-repo-e733197c because helper teardown was denied by worktree tool guard;
+      no cross-agent bypass. Controller/permitted cleanup needed, prepared script
+      /scratch/s14-20261026-0410/debug-narrow-teardown.sh. All other story runtime
+      inventories emptied, source/evidence preserved. Concurrent S19/S13/S11/S18 branch
+      notes merged without discarding either side.'
+    created_at: '2026-10-26T04:54:56Z'
+    last_edited: '2026-10-26T04:54:56Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -30395,11 +30464,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T14:08:28.137551+00:00'
-  updated_at: '2026-10-14T14:08:28.137551+00:00'
+  updated_at: '2026-10-26T04:37:55.838269+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-8c369b2
+    text: 'QA S14 pr-1139060 (2026-10-26, chatgpt/gpt-6-astra-high) replacement-generation
+      real nested proxy trial: old daemon PID42475/start200353083 exited on verified
+      SIGTERM+SIGCONT without unlinking replacement socket; existing mounted users
+      allowed pushes reached exact origin SHA and forbidden ref rejected. Strict Then
+      requiring old process gone failed: /proc/42475/stat remained Z, PPID1 beyond
+      30s. Outer scenario PID1 does not reap adopted detached proxy daemons; no quota/PID1
+      change attempted. Evidence /pm-captures/scenarios/14/replacement-generation/{recording.cast,recording.mp4,recording.log,zombie-process.txt,old-daemon.json,new-daemon.json}.
+      This is failed assertion, not PASS; preserve as PID1/reaping infrastructure
+      coverage needed on next run.'
+    created_at: '2026-10-26T04:37:55Z'
+    last_edited: '2026-10-26T04:37:55Z'
 - id: pr-0c3659d
   plan: bugs
   title: 'Bug: pm set list shows qa-verify-pass "off" when unset (effective default
@@ -32529,3 +32610,43 @@ prs:
       regression validation and source commit will be recorded on pr-1139060.'
     created_at: '2026-10-26T04:44:27Z'
     last_edited: '2026-10-26T04:44:27Z'
+- id: pr-b1f2ee3
+  plan: bugs
+  title: 'Bug: original-name replacement with distinct mount strands retired debug
+    proxy'
+  branch: pm/pr-b1f2ee3-bug-original-name-replacement-with-distinct-mount-
+  status: pending
+  depends_on: []
+  description: 'Found in pr-1139060 QA S14 real nested runtime. pm_core/push_proxy.py
+    release_captured_unshared_proxy rejects any current_container_id(original_name),
+    even when that live replacement was independently created and mounts its own distinct
+    proxy directory. Repro: launch debug A; rename A; launch debug B with independent
+    proxy then rename B to A original name; close A, remove any companion using A
+    proxy, run scoped pm container reap. Old ID gone but old proxy socket/owner retained
+    with rc1 another owner or launch remains; restoring permission fault also cannot
+    clear. Evidence /pm-captures/scenarios/14/{renamed-debug,permission-retry}, targeted
+    regressions regression-before.log. Narrow fix being implemented on parent QA branch
+    using complete actual-mount inventory under existing launch lock; keep runtime/domain/generation/unknown
+    guards.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T04:48:40.412682+00:00'
+  updated_at: '2026-10-26T04:53:48.115463+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-ee781fc
+    text: Fixed in parent pr-1139060 QA commit 2d1ed2f6 (pushed). Existing original-name
+      launch lock and unknown-ID/domain/socket-generation guards remain; complete
+      actual-mount inventory now decides old directory usage, so a separate distinct-mount
+      replacement cannot strand it. Baseline direct+deferred regressions2 failed/2
+      controls passed; focused225 passed. Real same-resource pre-fix public reap rc1
+      old socket/owner retained; post-fix reap rc0 stopped1 unused proxy, diagnostic
+      cleared, same replacement ID/mount remained and normal allowed push exact SHA4fbfb1438e25f5f812e8eb1c96ae73bb7bedf138,
+      forbidden ref absent. Crosslinked casts/H264/manifests /pm-captures/scenarios/14/pre-fix/renamed-proxy
+      and post-fix/renamed-proxy. Full suite pending; scenario still has independent
+      coverage/PID1 blockers, not whole-story PASS.
+    created_at: '2026-10-26T04:53:48Z'
+    last_edited: '2026-10-26T04:53:48Z'
