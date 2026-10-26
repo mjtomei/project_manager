@@ -1372,6 +1372,19 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
       providers.yaml across launch surfaces, QA gate wait and recovery,
       the provider CLI, a non-Claude router (no classifier pin), and
       `pm provider add` racing live launches.
+    QA S64 (2026-10-26, captures /pm-captures/scenarios/64): for a
+    non-Claude router with no classifier pin, Claude 2.1.310 sent its
+    auto-mode classifier request on the router's own model
+    (`ds/deepseek-v4`, the value pm pins for `ANTHROPIC_DEFAULT_SONNET_MODEL`
+    on routers), not on its unprefixed `claude-sonnet-5…` default as S64
+    predicted. Which model Claude picks is Claude's choice; the RQ43
+    requirement for such a router is only that pm sets no
+    `CLAUDE_CODE_AUTO_MODE_MODEL` (an inherited one is dropped) and the
+    request is never `ds/claude-sonnet-5` or `work/claude-sonnet-5`. A
+    `touch` in the project was allowed without a classifier call; a curl
+    POST was classified. Also S64: a QA run stopped by a provider setup
+    error (`QA stopped: …`) logged "QA background thread crashed" with a
+    traceback in the pm log; it is one warning line now (03ebfb4a).
 
 ## 3. Edge cases
 
