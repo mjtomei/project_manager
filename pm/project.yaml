@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T21:16:05.602799+00:00'
+  updated_at: '2026-10-26T21:53:37.265919+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16712,6 +16712,45 @@ prs:
       plus prior E6/E11/C1/R13/E10. No new standalone follow-up PRs created. (2026-10-26T21:15:00Z)'
     created_at: '2026-10-26T21:16:05Z'
     last_edited: '2026-10-26T21:16:05Z'
+  - id: note-dc721be
+    text: 'Review 32f9 i2 (HEAD aacb6a0c; base master 211a6128 already merged, merge
+      base == master): fresh full-diff review. The picker itself is sound — no defect
+      found this iteration — but the malformed-snapshot sync fix this PR carries (it
+      closes pr-fd581ec) was incomplete and is now finished here. (1) pr_core/pr_sync.py
+      sync_prs and sync_from_github indexed PRs by id on the raw snapshot and called
+      graph.ready_prs(prs) ({pr["id"] ...}); the do_normal_sync guards run after the
+      executor call, so an id-less entry with status `merged`, or one with a non-empty
+      depends_on, still raised KeyError: ''id'' in the sync thread and the TUI logged
+      "Sync error" + traceback every interval. QA S26 missed it because the throwaway
+      project has no workdir, so sync_prs returned early ("No workdirs found"). Fixed
+      with one shared rule: new pm_core.pr_utils.usable_prs() (non-empty string id)
+      filters the snapshot and every apply closure in pr_sync.py and tui/sync.py,
+      and replaces the private _usable_prs in tui/tech_tree.py. Dropped entries are
+      never launchable, so they are also excluded from SyncResult.ready_prs. Tests:
+      TestSyncIgnoresUnusablePrEntries (id-less merged, id-less + depends_on, numeric
+      id, empty id, sync_from_github with an id-less gh-numbered entry) plus a usable_prs
+      unit test; 6/6 new cases fail with the filter reverted and 3 existing do_normal_sync
+      cases fail with the tui/sync guards reverted. impl.md and qa.md E6 extended.
+      (2) Verification performed with no defects: real project.yaml (494 entries)
+      passes the picker''s strict snapshot rules with 0 violations; a randomized invariant
+      driver over 2000 seeds (random PRs/statuses/gh numbers/windows/opening window,
+      nav/action/Enter/z-zz/abort key scripts, mid-run merge/close/number assign-remove-duplicate-reassign/window
+      open-close/prs:[]/delete/invalid-status/non-list mutations) found 0 violations
+      of header==title-row id, 1<=i<=n, exactly one notice row when actionless, action
+      keys absent from --expect when actionless, enter:ignore when actionless; tmux.attached_group_active_windows
+      verified live on tmux 3.2a with an attached client under LC_ALL=C and C.UTF-8;
+      has-session -t =name exact match verified live (does not prefix-match pm-qa~1
+      -> pm-qa~10); pyflakes shows no new warnings vs master; project.yaml merge audit
+      found 0 lost master PR entries and 0 lost master notes. Remaining known boundary,
+      unchanged and out of scope (no new follow-up filed, per the no-standalone-follow-ups
+      authorization): other raw-data consumers of graph.ready_prs (tui/auto_start.check_and_start,
+      cli/pr.py, guide.py) still index ids directly; auto-start is disabled in this
+      project and the sync path itself is now clean. Full suite on the final tree:
+      3726 passed, 1 skipped, 3 warnings. Evidence: /pm-captures/review-32f9-i2/{full-suite.txt,full-suite-final.txt,summary.txt}.
+      Fresh QA (E6 incl. the new sync shapes, E11, C1, R13, E10) and sign-off remain
+      required. (2026-10-26T21:52:00Z)'
+    created_at: '2026-10-26T21:53:37Z'
+    last_edited: '2026-10-26T21:53:37Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
