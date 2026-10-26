@@ -3532,11 +3532,14 @@ def pr_auto_sequence(pr_id: str):
         # the highest one — so continue numbering after them.  An open
         # review window then reviewed the older code: replace it (fresh)
         # rather than switching to it, or no rework review ever runs and
-        # the in_review tick waits on that window forever.
+        # the in_review tick waits on that window forever.  That holds for
+        # any rework of a sign-off return, also when this dir has no
+        # iteration because the TUI ran the earlier reviews (S77).
         _verdict, latest_iter = _check_review_verdict(tdir, pr_id)
         next_iter = latest_iter + 1
-        _launch_review_iteration(pr_id, tdir, next_iter,
-                                 fresh=latest_iter > 0, review_loop=False)
+        _launch_review_iteration(
+            pr_id, tdir, next_iter, review_loop=False,
+            fresh=latest_iter > 0 or open_return(pr_entry) is not None)
         click.echo("advanced: in_review")
         return
 

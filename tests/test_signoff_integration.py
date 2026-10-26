@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -438,6 +439,20 @@ def test_cli_impl_rework_review_continues_iteration_numbering(tmp_path):
     assert kwargs["fresh"] is True
 
 
+def test_cli_impl_rework_review_replaces_window_of_tui_reviews(tmp_path):
+    """QA S77: the TUI ran the earlier reviews (its own transcript dir), so
+    this tick's dir has no iteration.  The rework's review still must not
+    adopt the pre-return review window: the tick switched to it, whose
+    verdict predates the return, and the PR sat in_review with no review."""
+    result, _, review, _ = _seq(
+        tmp_path, _returned("in_progress", "impl", awaiting=None),
+        **{"pm_core.cli.pr._check_impl_idle": {"return_value": (True, False)}})
+    assert result.exit_code == 0, result.output
+    assert "advanced: in_review" in result.output
+    kwargs = review.call_args.kwargs
+    assert kwargs["review_iteration"] == 1
+    assert kwargs["fresh"] is True
+
 def test_cli_first_review_advance_keeps_existing_window(tmp_path):
     result, _, review, _ = _seq(
         tmp_path, {"id": PR, "title": "T", "branch": BRANCH,
@@ -786,6 +801,47 @@ def test_claim_return_launch_has_one_winner_until_cleared(tmp_path):
     assert ret["awaiting"] is None and "launch_claim" not in ret
     assert signoff.claim_return_launch(tmp_path, PR, "review") is False
 
+
+@pytest.mark.parametrize("status,hop", [("in_review", "review"),
+                                        ("in_progress", "impl")])
+def test_clear_waits_out_a_lock_holder_past_its_timeout(tmp_path, status, hop):
+    """QA S77: project.yaml's lock was held past the 2 s timeout as the
+    relaunched session opened.  The clear gave up with a warning, so
+    ``awaiting`` and the hop's claim outlived that session, and the first
+    tick after the claim expired launched a second --fresh session."""
+    now = datetime.now(timezone.utc).isoformat()
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "backend": "local"},
+                "prs": [_returned(status, hop,
+                                  launch_claim={"hop": hop, "at": now})]},
+               tmp_path)
+    held = threading.Event()
+
+    def hold(seconds):
+        with store._lock(tmp_path):
+            held.set()
+            time.sleep(seconds)
+
+    # A caller that must not wait still gets False at once (it retries).
+    t = threading.Thread(target=hold, args=(0.3,))
+    t.start()
+    held.wait()
+    t0 = time.monotonic()
+    assert signoff.clear_return_awaiting(
+        tmp_path, PR, hop, timeout=store.NO_WAIT) is False
+    assert time.monotonic() - t0 < 0.25
+    t.join()
+    assert signoff.return_awaiting(store.get_pr(store.load(tmp_path), PR)) == hop
+
+    held.clear()
+    t = threading.Thread(target=hold, args=(0.6,))
+    t.start()
+    held.wait()
+    assert signoff.clear_return_awaiting(tmp_path, PR, hop, timeout=0.2) is True
+    t.join()
+    ret = store.get_pr(store.load(tmp_path), PR)["signoff_return"]
+    assert ret["awaiting"] is None and "launch_claim" not in ret
+    assert signoff.claim_return_launch(tmp_path, PR, hop) is False
 
 def test_qa_launch_claim_outlives_awaiting(tmp_path):
     """QA S68: the qa driver clears ``awaiting`` before it replaces the

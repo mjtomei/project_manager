@@ -761,6 +761,9 @@ RETURN_LAUNCH_CLAIM_SECONDS = 180
 # ``pm pr auto-sequence`` also claims it, but only after its provider check
 # passes (a refused launch must leave it unclaimed for the tick after a fix).
 _CLAIMED_RETURN_HOPS = ("impl", "review")
+# How long a launcher whose session opened keeps waiting for project.yaml's
+# lock to clear ``awaiting`` (S77: a holder past the 2 s timeout left it set).
+RETURN_CLEAR_WAIT_SECONDS = RETURN_LAUNCH_CLAIM_SECONDS
 
 
 def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
@@ -831,7 +834,11 @@ def clear_return_awaiting(root: Path, pr_id: str, hop: str,
     """The routed *hop* launched a fresh session: stop forcing a relaunch.
 
     False when the lock was not acquired within *timeout* (a caller that
-    must not wait passes ``store.NO_WAIT`` and retries), else True.
+    must not wait passes ``store.NO_WAIT`` and retries), else True.  Any
+    other caller has opened the session: past *timeout* it keeps waiting,
+    up to RETURN_CLEAR_WAIT_SECONDS, rather than leave ``awaiting`` and the
+    hop's claim behind that session (the first driver after the claim
+    expired would launch a second --fresh session over it).
     """
     def _apply(data):
         pr = store.get_pr(data, pr_id)
@@ -847,11 +854,15 @@ def clear_return_awaiting(root: Path, pr_id: str, hop: str,
         data = store.load(root)
         if return_awaiting(store.get_pr(data, pr_id)) != hop:
             return True
-        store.locked_update(root, _apply, timeout=timeout)
-    except store.StoreLockTimeout as e:
-        if timeout == store.NO_WAIT:
-            return False
-        _log.warning("clear sign-off return for %s: %s", pr_id, e)
+        try:
+            store.locked_update(root, _apply, timeout=timeout)
+        except store.StoreLockTimeout as e:
+            if timeout == store.NO_WAIT:
+                return False
+            _log.warning("clear sign-off return for %s: %s; waiting up to "
+                         "%ss more", pr_id, e, RETURN_CLEAR_WAIT_SECONDS)
+            store.locked_update(root, _apply,
+                                timeout=RETURN_CLEAR_WAIT_SECONDS)
     except Exception as e:
         _log.warning("clear sign-off return for %s: %s", pr_id, e)
     return True
