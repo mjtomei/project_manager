@@ -1639,6 +1639,31 @@ Tests: `test_unreadable_providers_file_is_named_not_reported_missing[4]`,
 `test_readable_file_without_the_provider_still_says_add_it`, and
 `test_non_mapping_providers_file_is_ignored` now names the problem. 8
 mutations caught (`/pm-captures/review-c189-i11/mutation-checks.log`).
-Latest full suite: 3839 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
+Full suite 3839 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
 PYTHONPATH=/workspace, markdown 3.10.3 installed first;
 `/pm-captures/review-c189-i11/full-suite.log`).
+Review loop a5a3 i1 found QA S64's bad02547 (a QA thread stopped by a
+provider setup error logs one warning line, no traceback) sound and fixed
+the same error on the auto-sequence QA path:
+- `pm pr auto-sequence` runs QA in a detached `pm pr qa-run-bg` driver
+  whose stdout/stderr go to /dev/null; it writes no `qa_status.json`
+  before the planner launches. A provider setup error of a QA session
+  with no route gate (planner, s0, verifier, finalizer) ended the driver
+  with "QA crashed" and a traceback in the pm log only, and each later
+  tick relaunched it (`running: qa (launched)`), so the watcher never saw
+  a remedy.
+- `_launch_qa_detached` now runs `qa_loop.check_ungated_qa_providers`
+  first: the tick ends with the same one `Error:` line, rc 1, as
+  implementation/review/sign-off launches, and no driver is spawned. Once
+  the setting or providers.yaml is fixed, the next tick launches QA. The
+  routed refiner/worker roles are not checked; their route gate waits
+  with its remedy as before. The driver itself logs via `_log_thread_end`
+  (one warning line for a provider setup error, a traceback otherwise).
+Tests: `test_ungated_qa_provider_check_{raises[4],passes[2],reports_bad_entry}`,
+`test_auto_sequence_qa_launch_is_a_clean_error[4]`,
+`test_auto_sequence_qa_launch_spawns_driver_when_configured`,
+`test_detached_qa_driver_logs_provider_error_without_traceback[2]`; 6
+mutations caught (`/pm-captures/review-a5a3-i1/mutation-checks.log`).
+Latest full suite: 3853 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
+PYTHONPATH=/workspace, markdown installed to a --target dir first;
+`/pm-captures/review-a5a3-i1/full-suite.log`).

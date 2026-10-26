@@ -3747,7 +3747,15 @@ def _launch_qa_detached(root: Path, pr_id: str) -> None:
     Uses the hidden ``pm pr qa-run-bg`` subcommand so the QA scenarios
     run in tmux windows under their own long-lived process.  Subsequent
     auto-sequence ticks read the resulting ``qa_status.json``.
+
+    The driver's output goes nowhere, so a provider setup error of a QA
+    session without a route gate is raised here (one ``Error:`` line from
+    this tick, no driver spawned) instead of ending the driver unseen and
+    being relaunched on every tick.
     """
+    from pm_core.qa_loop import check_ungated_qa_providers
+    data = store.load(root)
+    check_ungated_qa_providers(store.get_pr(data, pr_id) or {}, data)
     cmd = [sys.executable, "-m", "pm_core.wrapper",
            "pr", "qa-run-bg", pr_id]
     # start_new_session detaches from the parent process group so the
@@ -3767,7 +3775,8 @@ def pr_qa_run_bg(pr_id: str):
     Used by ``pm pr auto-sequence`` to spawn a detached QA driver.  Not
     intended for direct human use — prefer the TUI ``t`` key.
     """
-    from pm_core.qa_loop import QALoopState, clear_resume_file, run_qa_sync
+    from pm_core.qa_loop import (QALoopState, _log_thread_end,
+                                 clear_resume_file, run_qa_sync)
 
     root = state_root()
     data = store.load(root)
@@ -3804,7 +3813,7 @@ def pr_qa_run_bg(pr_id: str):
     try:
         run_qa_sync(state, root, pr_entry, on_update=None, max_scenarios=None)
     except Exception as e:
-        _log.exception("pr_qa_run_bg: QA crashed for %s: %s", pr_id, e)
+        _log_thread_end(e, "pr_qa_run_bg: QA", pr_id)
         raise SystemExit(1)
 
     # This process finished the run and auto-sequence reads qa_status.json

@@ -2976,3 +2976,111 @@ def test_other_qa_thread_crashes_keep_their_message(starter, default, caplog):
     assert (state.latest_verdict, state.latest_output) == ("ERROR", default)
     crash = [r for r in caplog.records if "crashed for pr-001" in r.getMessage()]
     assert len(crash) == 1 and crash[0].levelname == "ERROR" and crash[0].exc_info
+
+
+# Review a5a3 i1: `pm pr auto-sequence` runs QA in a detached
+# `pm pr qa-run-bg` driver whose output goes to /dev/null and which writes
+# no qa_status.json before the planner launches.  A provider setup error of
+# a gate-less QA session (planner, s0, verifier, finalizer) ended that driver
+# with a traceback in the pm log only, and every later tick relaunched it
+# ("running: qa (launched)") with no remedy anywhere it reports.
+_UNGATED_ROLES = ["qa_planning", "qa_interactive", "qa_verification",
+                  "qa_finalize"]
+
+
+@pytest.mark.parametrize("role", _UNGATED_ROLES)
+def test_ungated_qa_provider_check_raises(pm_home_dir, role):
+    from pm_core import qa_loop
+    pr = {"id": "pr-001", "session_models": {role: "provider:missing-route"}}
+    with pytest.raises(ProviderNotFoundError, match="missing-route"):
+        qa_loop.check_ungated_qa_providers(pr, {})
+
+
+@pytest.mark.parametrize("pr", [
+    {"id": "pr-001"},
+    # Routed roles wait at their route gate with a remedy instead.
+    {"id": "pr-001", "session_models": {"qa_scenario": "provider:missing-route",
+                                        "qa_concretize": "provider:missing-route"}},
+])
+def test_ungated_qa_provider_check_passes(pm_home_dir, pr):
+    from pm_core import qa_loop
+    qa_loop.check_ungated_qa_providers(pr, {})
+
+
+def test_ungated_qa_provider_check_reports_bad_entry(pm_home_dir):
+    from pm_core import qa_loop
+    (pm_home_dir / "providers.yaml").write_text(
+        "providers:\n  claude-work: just a string\n")
+    pr = {"id": "pr-001", "model": "provider:claude-work"}
+    with pytest.raises(ProviderNotFoundError, match="providers.yaml"):
+        qa_loop.check_ungated_qa_providers(pr, {})
+
+
+@pytest.mark.parametrize("role", _UNGATED_ROLES)
+def test_auto_sequence_qa_launch_is_a_clean_error(pm_home_dir, role,
+                                                  monkeypatch, capsys):
+    import pm_core.cli as cli_mod
+    from pm_core.cli import pr as pr_cli
+    pr = {"id": "pr-001", "status": "qa",
+          "session_models": {role: "provider:missing-route"}}
+    monkeypatch.setattr(pr_cli.store, "load",
+                        lambda root: {"project": {}, "prs": [pr]})
+    with patch.object(pr_cli.subprocess, "Popen") as popen:
+        monkeypatch.setattr(cli_mod, "cli", lambda: pr_cli._launch_qa_detached(
+            Path("/nonexistent"), "pr-001"))
+        with pytest.raises(SystemExit) as exc:
+            cli_mod.main()
+    popen.assert_not_called()
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert err.startswith("Error: provider 'missing-route' is not configured")
+    assert "'pm model show' lists them, PR overrides included" in err
+    assert "Traceback" not in err
+
+
+def test_auto_sequence_qa_launch_spawns_driver_when_configured(pm_home_dir,
+                                                               monkeypatch):
+    from pm_core.cli import pr as pr_cli
+    pr = {"id": "pr-001", "status": "qa",
+          "session_models": {"qa_scenario": "provider:missing-route"}}
+    monkeypatch.setattr(pr_cli.store, "load",
+                        lambda root: {"project": {}, "prs": [pr]})
+    with patch.object(pr_cli.subprocess, "Popen") as popen:
+        pr_cli._launch_qa_detached(Path("/nonexistent"), "pr-001")
+    assert popen.call_args.args[0][-2:] == ["qa-run-bg", "pr-001"]
+
+
+@pytest.mark.parametrize("error,level", [
+    ("provider", "WARNING"), ("other", "ERROR")])
+def test_detached_qa_driver_logs_provider_error_without_traceback(
+        pm_home_dir, tmp_path, caplog, error, level):
+    """The driver logged a provider setup error as "QA crashed" with a
+    traceback, as the TUI QA threads did before bad02547."""
+    import logging
+    from click.testing import CliRunner
+    from pm_core.cli import pr as pr_cli
+    from pm_core import qa_loop
+    pr = {"id": "pr-001", "status": "qa"}
+    data = {"project": {}, "prs": [pr]}
+    side = ((lambda *a, **k: _launch_on_missing_provider(
+        session_type="qa_planning")) if error == "provider"
+        else RuntimeError("boom"))
+    with patch.object(qa_loop._log, "handlers",
+                      qa_loop._log.handlers + [caplog.handler]), \
+            caplog.at_level(logging.DEBUG, logger="pm.qa_loop"), \
+            patch.object(pr_cli, "state_root", return_value=tmp_path), \
+            patch.object(pr_cli.store, "load", return_value=data), \
+            patch.object(pr_cli.store, "locked_update"), \
+            patch("pm_core.signoff.clear_return_awaiting"), \
+            patch.object(qa_loop, "run_qa_sync", side_effect=side):
+        result = CliRunner().invoke(pr_cli.pr_qa_run_bg, ["pr-001"], obj=data)
+    assert result.exit_code == 1
+    ends = [r for r in caplog.records if "pr-001" in r.getMessage()]
+    assert [r.levelname for r in ends] == [level]
+    if error == "provider":
+        assert ends[0].exc_info is None
+        assert ends[0].getMessage().startswith(
+            "QA stopped for pr-001: provider 'missing-route' is not configured")
+    else:
+        assert ends[0].exc_info
+        assert ends[0].getMessage() == "pr_qa_run_bg: QA crashed for pr-001"

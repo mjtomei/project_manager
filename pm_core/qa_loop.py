@@ -5227,6 +5227,27 @@ def _crash_output(exc: Exception, default: str) -> str:
     return default
 
 
+# QA sessions launched without a route gate: a setup error in their
+# provider ends the run (see _crash_output) instead of waiting.
+_UNGATED_QA_SESSION_TYPES = ("qa_planning", "qa_verification", "qa_finalize")
+
+
+def check_ungated_qa_providers(pr_data: dict, project_data: dict) -> None:
+    """Raise :class:`~pm_core.providers.ProviderNotFoundError` when the
+    provider of the planner, s0, verifier or finalizer cannot be looked up.
+
+    For callers that cannot show ``QA stopped: …`` (the detached
+    auto-sequence driver writes nothing a later tick reads), so the error
+    surfaces before the run starts rather than ending it unseen.
+    """
+    from pm_core.providers import get_provider
+    resolutions = [_resolve_qa_model(pr_data, project_data, session_type=t)
+                   for t in _UNGATED_QA_SESSION_TYPES]
+    resolutions.append(_resolve_interactive_model(pr_data, project_data))
+    for res in resolutions:
+        get_provider(res.provider, strict=bool(res.provider))
+
+
 def _log_thread_end(exc: Exception, what: str, pr_id: str) -> None:
     """Log why a QA thread ended.
 
