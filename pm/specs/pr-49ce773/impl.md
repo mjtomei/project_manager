@@ -182,6 +182,16 @@ number must show the lookup-failure notice, not another PR's actions.
 - When nav list ends up empty (only terminal PRs had windows, no home):
   keep the existing "No PR windows open." exit — there is nothing to
   navigate to.  Copy becomes "No active PR windows open." to be accurate.
+- An explicit `prs: []` is a valid empty project: the list collapses to the
+  pinned home. With no PR entries left nothing can supply a display id, so
+  the collapsed home names the invoking window id (`#12`) rather than the
+  retained local id. While other PRs remain, a deleted home keeps its local
+  id — the window name may since belong to a different PR.
+- The TUI's background sync (`pm_core/tui/sync.py do_normal_sync`) must not
+  raise out of the sync loop on a PR entry with no usable string id: such
+  entries are skipped when snapshotting statuses, applying merges and
+  detecting merges, so a partial/externally written project.yaml produces no
+  traceback while the popup picker is rejecting the same snapshot.
 
 ## Ambiguities (resolved)
 

@@ -582,3 +582,19 @@ async def test_return_marker_shown_alongside_running_rework_markers():
         await pilot.pause()
         row = _status_row(app, "pr-a")
         assert "⟳2" in row and "⇤" in row
+
+
+def test_idless_pr_entry_does_not_crash_recompute():
+    # A partial/externally written project.yaml can contain a PR mapping with
+    # a status but no id.  _recompute indexes every entry by id, so keeping
+    # such an entry raised KeyError and took the TUI down on refresh.
+    tree = TechTree([_pr("pr-a"), {"status": "in_review", "title": "no id"},
+                     "not-a-mapping"])
+    assert [p["id"] for p in tree._prs] == ["pr-a"]
+    tree._recompute()  # must not raise
+
+
+def test_update_prs_drops_idless_entries():
+    tree = TechTree([_pr("pr-a")])
+    tree.update_prs([_pr("pr-a"), {"status": "merged"}])
+    assert [p["id"] for p in tree._prs] == ["pr-a"]

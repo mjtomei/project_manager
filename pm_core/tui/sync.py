@@ -127,9 +127,14 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
 
         # Snapshot PR statuses before reload so we can detect merges that
         # happened outside of sync (e.g. `pm pr merge` for local/vanilla).
+        # Entries without a usable string id are skipped rather than
+        # indexed: a partial or externally written project.yaml must not
+        # raise out of the sync loop (the popup picker rejects such
+        # snapshots too, with a readable reason).
         old_statuses = {
             pr["id"]: pr.get("status")
             for pr in (app._data.get("prs") or [])
+            if isinstance(pr, dict) and isinstance(pr.get("id"), str)
         }
 
         # Reload from disk and apply sync results (merged PRs) atomically.
@@ -138,7 +143,9 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
 
             def apply_merged(data):
                 for pr in data.get("prs") or []:
-                    if pr["id"] in merged_set:
+                    if (isinstance(pr, dict)
+                            and isinstance(pr.get("id"), str)
+                            and pr["id"] in merged_set):
                         pr["status"] = "merged"
                         _record_status_timestamp(pr, "merged")
 
@@ -172,6 +179,8 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
         # to disk before triggering a TUI refresh).
         newly_merged = set(result.merged_prs)
         for pr in app._data.get("prs") or []:
+            if not (isinstance(pr, dict) and isinstance(pr.get("id"), str)):
+                continue
             if pr.get("status") == "merged" and old_statuses.get(pr["id"]) != "merged":
                 newly_merged.add(pr["id"])
 

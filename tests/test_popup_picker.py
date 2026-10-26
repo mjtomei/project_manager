@@ -713,6 +713,32 @@ def _shown(call):
     return _header(call).splitlines()[0]
 
 
+class TestPopupPickerEmptyProject:
+    """An explicit `prs: []` is a valid empty project: the list collapses to
+    the pinned home and nothing is dispatchable."""
+
+    def test_empty_project_names_home_window(self, tmp_path, monkeypatch):
+        """With no PR entries left, the collapsed home row names the invoking
+        window id (there is no PR entry to supply a display id) rather than
+        the retained local id."""
+        prs = [_pr("pr-a", status="in_review", gh_pr_number=12),
+               _pr("pr-b", status="qa")]
+
+        def on_launch(n):
+            if n == 1:
+                prs.clear()
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["#12", "pr-b"], "#12",
+            [(0, "l\n"), (130, "")], on_launch=on_launch)
+        collapsed = fzf.calls[1]
+        assert _header(collapsed).splitlines() == ["PR Actions — #12", "q/Esc: quit"]
+        assert "Could not load actions for #12." in collapsed["input"]
+        assert "Could not load actions for pr-a." not in collapsed["input"]
+        # `d` is not in the collapsed expect set: no second action runs.
+        assert "d" not in _expect(collapsed)
+        assert run_cmd.call_count == 0
+
 class TestPopupPickerMergedNavigation:
     """note-40057f4: moving to/from retained merged entries must never
     exit the picker, and live PRs stay reachable in both directions."""

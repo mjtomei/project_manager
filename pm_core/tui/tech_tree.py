@@ -125,6 +125,19 @@ def _node_y(row: int) -> int:
     return row * (NODE_H + V_GAP) + 1
 
 
+def _usable_prs(prs) -> list[dict]:
+    """Drop PR entries that carry no usable string id.
+
+    A partial or externally written project.yaml can hold a PR mapping with
+    a status but no ``id`` (the popup picker rejects such a snapshot with
+    "Picker PR entry requires a non-empty, command-safe string id").  The
+    tree indexes every entry by id, so keeping one would raise KeyError and
+    take the whole TUI down on the next refresh.
+    """
+    return [pr for pr in (prs or [])
+            if isinstance(pr, dict) and isinstance(pr.get("id"), str)]
+
+
 def compute_neighbors(
     ordered_ids: list[str],
     node_positions: dict[str, tuple[int, int]],
@@ -734,7 +747,7 @@ class TechTree(Widget):
 
     def __init__(self, prs: list[dict] | None = None, **kwargs):
         super().__init__(**kwargs)
-        self._prs = prs or []
+        self._prs = _usable_prs(prs)
         self._ordered_ids: list[str] = []
         self._node_positions: dict[str, tuple[int, int]] = {}  # pr_id -> (x_char, row)
         self._hidden_plans: set[str] = set()       # plan IDs to hide ("_standalone" for null-plan PRs)
@@ -791,7 +804,7 @@ class TechTree(Widget):
             self._hide_merged = bool(project["hide_merged"])
 
     def update_prs(self, prs: list[dict]) -> None:
-        self._prs = prs
+        self._prs = _usable_prs(prs)
         self._recompute()
 
     def select_pr(self, pr_id: str) -> None:

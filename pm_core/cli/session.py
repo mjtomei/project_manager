@@ -2020,7 +2020,17 @@ def popup_picker_cmd(session: str, window_name: str):
         from pm_core.cli.helpers import _pr_display_id
 
         picked = pr_by_local.get(identity)
-        return _pr_display_id(picked) if picked is not None else identity
+        if picked is not None:
+            return _pr_display_id(picked)
+        # Home identity that no longer resolves: with no PR entries left at
+        # all (an explicit `prs: []`) nothing can supply a display id, so
+        # name the window the picker was opened from.  While other PRs
+        # remain, keep the retained local id — it is the only unambiguous
+        # name for a deleted home, since the window name may now belong to
+        # a different PR.
+        if identity == home_pr and not prs and window_name:
+            return window_name
+        return identity
 
     def _log_no_actions(pr_disp: str, picked: dict | None) -> None:
         """Log a lookup failure with enough context to diagnose id drift."""

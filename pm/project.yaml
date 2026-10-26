@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-fd581ec
+  active_pr: pr-001
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T19:59:21.124863+00:00'
+  updated_at: '2026-10-26T20:33:52.665157+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16652,6 +16652,30 @@ prs:
       recording-story5 cast+mp4, pre-fix/, post-fix/).'
     created_at: '2026-10-26T19:59:21Z'
     last_edited: '2026-10-26T19:59:21Z'
+  - id: note-435e6ca
+    text: 'QA S26 re-run (2026-10-26, after review of the first PASS) — NEEDS_WORK
+      fixes applied. (1) pm_core/cli/session.py: with an explicit prs: [] the collapsed
+      home now names the invoking window id ("PR Actions — #12" / "Could not load
+      actions for #12.") instead of the retained local id; a deleted home while other
+      PRs remain keeps its local id (existing test_deleted_numeric_local_home_never_resolves_as_github_number
+      still passes). (2) pm_core/tui/sync.py: do_normal_sync skips PR entries without
+      a usable string id (status snapshot, apply_merged, newly-merged detection) —
+      it used to log "ERROR [tui.sync] Sync error" + KeyError: id at sync.py:131.
+      (3) pm_core/tui/tech_tree.py: TechTree.__init__/update_prs drop id-less entries
+      — a manual refresh with such an entry raised KeyError: id in _recompute (tech_tree.py:914)
+      and crashed the whole TUI (TUI unmount, tui-stderr.log). Regression tests: TestPopupPickerEmptyProject::test_empty_project_names_home_window,
+      tests/test_tui_sync_malformed_prs.py (3 cases), 2 new cases in tests/test_tech_tree_widgets.py.
+      Specs impl.md (implicit requirements) and qa.md (E6) updated. Full suite 3717
+      passed, 1 skipped. Live evidence in /pm-captures/scenarios/26 (README + 8 story
+      dirs, each with recording.cast, transcript.log, recording.mp4 and manifest.md):
+      all 8 triples re-executed, including a real SGR mouse double-click on the title
+      row (no dispatch) with a positive control on the review row (dispatches), and
+      two manual TUI refreshes with an id-less snapshot (TUI alive, no traceback).
+      pr-fd581ec closed because its fix landed here. Earlier note-438c963 described
+      pr-fd581ec as a filed follow-up and prs: [] as a benign deviation; both are
+      superseded by this note.'
+    created_at: '2026-10-26T20:33:52Z'
+    last_edited: '2026-10-26T20:33:52Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -34954,36 +34978,6 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
   updated_at: '2026-10-25T21:27:23.093198+00:00'
-  started_at: null
-  reviewed_at: null
-  merged_at: null
-  notes: []
-- id: pr-fd581ec
-  plan: bugs
-  title: 'Bug: TUI background sync raises KeyError ''id'' on a project.yaml PR entry
-    with no id'
-  branch: pm/pr-fd581ec-bug-tui-background-sync-raises-keyerror-id-on-a-pr
-  status: pending
-  depends_on: []
-  description: 'Location: pm_core/tui/sync.py do_normal_sync — the old_statuses dict
-    comprehension (pr["id"]: pr.get("status") for pr in (app._data.get("prs") or []))
-    and the apply_merged loop index pr["id"] without a guard. Repro: with a TUI session
-    running, replace pm/project.yaml (atomic temp + mv -f) with a snapshot whose prs
-    list has an entry that has status but no id (e.g. after a partial/external write),
-    let the TUI reload it, then wait for the 5-minute background sync. Observed 2026-10-26
-    in QA S26 (popup-picker bad-data scenario) at 19:28:00: "ERROR [tui.sync] Sync
-    error" + Traceback ... File "/workspace/pm_core/tui/sync.py", line 131, in <dictcomp>
-    pr["id"]: pr.get("status") KeyError: ''id''. The TUI keeps running but that sync
-    cycle is aborted (merged-PR detection skipped). The popup picker itself rejects
-    the same snapshot cleanly ("Picker PR entry requires a non-empty, command-safe
-    string id"), so this is a separate leniency gap in the TUI sync path. Fix: skip/normalize
-    entries without a usable string id (or validate on load) so a malformed project.yaml
-    cannot break the sync loop.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
-  created_at: '2026-10-26T19:37:53.759555+00:00'
-  updated_at: '2026-10-26T19:37:53.759555+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

@@ -132,7 +132,13 @@ E6. **Given** project.yaml is momentarily unparsable while the popup is open,
 snapshot (warning in log), does not crash, and navigation still works within
 that snapshot. Repeat with a missing `prs` field and `prs: null`, `false`,
 `0`, an empty string or a mapping: these must not replace the last-good list.
-An explicit `prs: []` is a valid empty project. Failed dispatch refreshes must
+An explicit `prs: []` is a valid empty project: the list collapses to the
+pinned home, whose header and notice name the invoking window id (`#12`) —
+with no PR entry left there is no display id — and `d` is not in its expect
+set. While such a malformed snapshot is on disk the TUI's background sync
+must not log a traceback (a PR entry with a status but no `id` used to raise
+`KeyError: 'id'` in `pm_core/tui/sync.py`); the popup's own log lines and the
+captures must stay traceback-free. Failed dispatch refreshes must
 show an explicit "Could not refresh PR actions; no action was run" notice in
 both fzf and the numbered fallback (reopen the latter after repair). The notice
 is two non-actionable rows (the second is "Repair project.yaml and retry.")
