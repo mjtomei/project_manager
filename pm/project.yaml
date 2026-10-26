@@ -12390,6 +12390,24 @@ prs:
       runtime scenarios and independent sign-off remain required.'
     created_at: '2026-10-25T23:37:07Z'
     last_edited: '2026-10-25T23:37:07Z'
+  - id: note-2cca115
+    text: 'Review-loop 6427 i16 (main and inherited read-only helper chatgpt/gpt-6-astra-high):
+      fixed legacy unlabeled unshared-proxy reuse, cross-runtime unshared socket start/repair/release
+      guards, unknown-domain proxy releases deleting allocations before a retryable
+      identity exists, and stale local proxy bookkeeping after authoritative-mount
+      removal. Existing ownership/lock/reaper architecture retained; impl spec clarified.
+      Same-assertion original-source regressions: 10 failed, 2 controls passed; fixed
+      final regression file 13 passed. Launcher integration 143 passed; final proxy
+      suite 83 passed. Intermediate core 509 passed; source-volume filtering experiment
+      rejected/reverted because Podman 3.x does not promise bind-source matching,
+      preserving fresh full inventory safety. Final sanitized full suite completed
+      successfully; exact count/warnings in /pm-captures/review-6427-i16/full-suite-final.log.
+      Evidence and all per-file notes /pm-captures/review-6427-i16/per-file.md. Installed
+      declared markdown dependency. Existing model/handoff/manual-gate edits preserved
+      outside review commit. No real-container QA claim or waiver; outstanding runtime
+      scenarios and independent sign-off remain required.'
+    created_at: '2026-10-26T00:03:15Z'
+    last_edited: '2026-10-26T00:03:54Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

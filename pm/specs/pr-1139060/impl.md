@@ -172,6 +172,12 @@ retryable cleanup rather than permission to delete by name.
   uses the same surviving-user check. Captured unshared socket releases are
   durable and runtime-domain/socket-generation bound, so failed or deferred cleanup
   remains retryable after the container disappears without touching a replacement.
+  Unshared proxy directories carry runtime-domain ownership too; another runtime
+  cannot start, repair, or unlink their sockets based on its own empty inventory.
+  Unknown runtime identity defers removal before deleting an allocation whose
+  mounted proxy needs a durable release. Recognized legacy unlabeled containers
+  still resolve their actual unshared mounts for repair and release. Removal drops
+  matching process-local proxy bookkeeping without a second name-based unlink.
   Failed shared-proxy socket removal preserves its owner record for retry; proxy
   sweep failures and unavailable user inventories appear in CLI/TUI outcomes and
   persisted diagnostics, and successful retry clears those failures.

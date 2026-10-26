@@ -2224,7 +2224,7 @@ def remove_container(name: str) -> bool:
     """
     from pm_core.push_proxy import (
         stop_push_proxy, capture_unshared_proxy, release_captured_unshared_proxy,
-        defer_unshared_release,
+        defer_unshared_release, forget_unshared_proxy,
     )
     _log.info("remove_container: name=%s", name)
     proxy = capture_unshared_proxy(name)
@@ -2252,6 +2252,7 @@ def remove_container(name: str) -> bool:
     # Release the push proxy only after the container is gone.  Failed
     # removal must leave the surviving container's push access intact.
     if proxy:
+        forget_unshared_proxy(name, proxy[1])
         if release_captured_unshared_proxy(proxy):
             pending.unlink(missing_ok=True)
         return True  # the actual mount is authoritative, not a reusable runtime name

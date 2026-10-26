@@ -709,6 +709,10 @@ def start_push_proxy(container_name: str, workdir: str,
     # socket can be found after a TUI restart without a registry.
     sock_dir = os.path.join(tempfile.gettempdir(),
                             f"{_SOCKET_DIR_PREFIX}{container_name}")
+    if not _owner_domain_matches(sock_dir):
+        from pm_core.container import ContainerError
+        raise ContainerError("Existing unshared push proxy belongs to a different or "
+                             "unverifiable runtime; refusing cross-runtime reuse")
     if os.path.isdir(sock_dir) and unshared_proxy_in_use(os.path.join(sock_dir, "push.sock")):
         from pm_core.container import ContainerError
         raise ContainerError(f"Push proxy directory for '{container_name}' is still mounted by another allocation")
@@ -726,6 +730,7 @@ def start_push_proxy(container_name: str, workdir: str,
             pass
 
     _start_proxy_subprocess(sock_path, workdir, allowed_branch)
+    _write_owner_file(sock_dir, "", "", workdir)
 
     with _proxy_lock:
         _active_proxies[container_name] = sock_path
@@ -757,6 +762,12 @@ def _kill_proxy_socket(sock_path: str, expected_identity: tuple[int, int, int] |
                 os.unlink(sock_dir)
             except OSError:
                 pass
+        # Retire ownership only after socket removal succeeds, under the same
+        # path lock so a replacement cannot publish between these operations.
+        try:
+            os.unlink(os.path.join(real_dir, _OWNER_FILE))
+        except FileNotFoundError:
+            pass
         # Clean up the real directory
         try:
             os.rmdir(real_dir)
@@ -814,10 +825,11 @@ def _owner_domain_matches(sock_dir: str) -> bool:
 
 def _write_owner_file(sock_dir: str, session_tag: str, pr_id: str,
                       workdir: str) -> None:
-    """Record which (session, PR) a shared proxy dir serves.
+    """Record a proxy's runtime and, for shared proxies, its session/PR.
 
     Hashed socket dirs can't be mapped back to their tag/PR by name; the
     reaper reads this to decide whether any container still needs the proxy.
+    Unshared proxies use empty session/PR fields and are not globally swept.
     """
     from pm_core.container_reaper import _runtime_domain
     try:
@@ -933,9 +945,14 @@ def mounted_unshared_proxy(name: str) -> tuple[str, str, str] | None:
             raise ValueError("incomplete container mount inspection")
         info = rows[0]
         labels = (info.get("Config") or {}).get("Labels") or {}
-        if labels.get(cm.LABEL_MANAGED) != "1":
+        current_name = (info.get("Name") or name).lstrip("/")
+        parsed = cm.parse_container_name(current_name)
+        if labels.get(cm.LABEL_MANAGED) != "1" and parsed is None:
             return None
-        if labels.get(cm.LABEL_SESSION) and labels.get(cm.LABEL_PR):
+        managed = labels.get(cm.LABEL_MANAGED) == "1"
+        session_tag = labels.get(cm.LABEL_SESSION) if managed else parsed.session_tag
+        pr_id = labels.get(cm.LABEL_PR) if managed else parsed.pr_id()
+        if session_tag and pr_id:
             return None  # shared sockets are released through runtime-user checks
         for mount in info.get("Mounts") or []:
             source = Path(mount.get("Source", ""))
@@ -972,6 +989,9 @@ def repair_unshared_proxy(name: str, workdir: str, allowed_branch: str) -> str:
     if mount is None:
         raise cm.ContainerError(f"Cannot verify mounted push proxy for '{name}'")
     original, path, current = mount
+    if not _owner_domain_matches(str(Path(path).parent)):
+        raise cm.ContainerError("Existing unshared push proxy belongs to a different or "
+                                "unverifiable runtime; refusing cross-runtime reuse")
     guard = (cm.launch_lock(original, timeout=0) if original != current
              else contextlib.nullcontext(True))
     with guard as locked:
@@ -981,6 +1001,7 @@ def repair_unshared_proxy(name: str, workdir: str, allowed_branch: str) -> str:
             if original != current and cm.current_container_id(original) != "":
                 raise cm.ContainerError(f"Cannot repair another allocation's proxy '{original}'")
             _start_proxy_subprocess(path, workdir, allowed_branch)
+            _write_owner_file(str(Path(path).parent), "", "", workdir)
         return path
 
 
@@ -993,7 +1014,11 @@ def _unshared_release_path(proxy) -> Path:
 
 def defer_unshared_release(proxy, name: str = "") -> Path:
     """Persist socket identity before attempting post-removal cleanup."""
-    from pm_core import container_reaper
+    from pm_core import container as cm, container_reaper
+    domain = container_reaper._runtime_domain()
+    if domain is None:
+        raise cm.ContainerError("Cannot record unshared proxy release: runtime domain unknown; "
+                                "preserving container for cleanup retry")
     path = _unshared_release_path(proxy)
     labels = {}
     if name:
@@ -1007,7 +1032,7 @@ def defer_unshared_release(proxy, name: str = "") -> Path:
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".release-")
     try:
         with os.fdopen(fd, "w") as stream:
-            json.dump({"proxy": proxy, "runtime_domain": container_reaper._runtime_domain(),
+            json.dump({"proxy": proxy, "runtime_domain": domain,
                        "session_tag": labels.get("pm.session_tag"),
                        "pr_id": labels.get("pm.pr_id")}, stream)
         os.replace(temporary, path)
@@ -1069,6 +1094,8 @@ def retry_unshared_releases(scope, failures: dict[str, str]) -> list[str]:
 def unshared_proxy_in_use(path: str) -> bool:
     """A renamed allocation may still mount another name's socket directory."""
     from pm_core import container as cm
+    # Do not filter by source volume: Podman 3.x only promises volume names
+    # and mount destinations, which can omit bind-mounted users of this path.
     listing = cm._run_runtime("ps", "-aq", check=False, timeout=30)
     if listing.returncode != 0:
         raise cm.ContainerError("Cannot inventory mounted push proxy users")
@@ -1099,6 +1126,8 @@ def release_captured_unshared_proxy(
     """Release a captured mount without stealing its original name's proxy."""
     from pm_core import container as cm
     original_name, path, identity, current_name = proxy
+    if not _owner_domain_matches(str(Path(path).parent)):
+        return False
     if original_name == current_name:
         # The caller already holds this allocation's launch lock. Its socket
         # may nevertheless remain mounted by a previously renamed allocation.
@@ -1120,6 +1149,15 @@ def release_captured_unshared_proxy(
             return False
         _kill_proxy_socket(path, expected_identity=identity)
         return True
+
+
+def forget_unshared_proxy(container_name: str, socket_path: str) -> None:
+    """Drop local bookkeeping without touching an allocation's mounted socket."""
+    with _proxy_lock:
+        if (_container_to_proxy_key.get(container_name) == container_name
+                and _active_proxies.get(container_name) == socket_path):
+            _container_to_proxy_key.pop(container_name, None)
+            _active_proxies.pop(container_name, None)
 
 
 def stop_push_proxy(container_name: str) -> None:
@@ -1150,7 +1188,9 @@ def stop_push_proxy(container_name: str) -> None:
         own_sock = os.path.join(tempfile.gettempdir(),
                                 f"{_SOCKET_DIR_PREFIX}{container_name}",
                                 "push.sock")
-        if os.path.exists(own_sock) and not unshared_proxy_in_use(own_sock):
+        if (os.path.exists(own_sock)
+                and _owner_domain_matches(str(Path(own_sock).parent))
+                and not unshared_proxy_in_use(own_sock)):
             _kill_proxy_socket(own_sock)
         return
 
@@ -1171,7 +1211,8 @@ def stop_push_proxy(container_name: str) -> None:
     sock_path = os.path.join(tempfile.gettempdir(),
                              f"{_SOCKET_DIR_PREFIX}{key}",
                              "push.sock")
-    if not unshared_proxy_in_use(sock_path):
+    if (_owner_domain_matches(str(Path(sock_path).parent))
+            and not unshared_proxy_in_use(sock_path)):
         _kill_proxy_socket(sock_path)
 
 
