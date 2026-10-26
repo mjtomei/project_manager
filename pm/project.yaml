@@ -32703,11 +32703,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-25T20:35:32.509320+00:00'
+  updated_at: '2026-10-26T01:59:45.207080+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5698dcc
+    text: 'review-loop 9028 i8: found a real #250 gap — pm pr note add / every status
+      change rewrites updated_at via _record_status_timestamp, so two branches that
+      both touched the same record conflicted on updated_at and the metadata resolution
+      failed (the existing notes test bypassed the real path with store.save). Resolver
+      now merges bookkeeping timestamps (created_at/updated_at/last_edited/started_at/reviewed_at/signed_off_at/merged_at)
+      to the later value and excludes them from the lost-change check; real fields
+      still conflict. Also carried base_behavior_changes through a transient ERROR
+      re-check so the merge gate keeps requiring the evidence statement, and hardened
+      qa_evidence against malformed JSON. Tests: 75 in test_signoff_resolution.py;
+      full suite 3429.'
+    created_at: '2026-10-26T01:59:45Z'
+    last_edited: '2026-10-26T01:59:45Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work

@@ -46,6 +46,16 @@ theirs_text)`:
   ambiguous.
 - Non-id lists (`depends_on`, etc.) and scalars are atomic: both changed
   differently is a conflict.
+- **Bookkeeping timestamps are not semantic fields.** `pm pr note add` and
+  every status change call `_record_status_timestamp`, which rewrites
+  `updated_at` (and the transition stamp) even when the rest of the record
+  merges cleanly. Two branches that both touched the same record therefore
+  change `updated_at` to different values on the real #250 note-add path. The
+  resolver takes the later value for `created_at`, `updated_at`,
+  `last_edited`, `started_at`, `reviewed_at`, `signed_off_at` and `merged_at`
+  (non-string values keep the normal conflict rule) and the preservation
+  check does not count the earlier timestamp as a lost change. Every other
+  field still conflicts when both sides changed it differently.
 - After merging, validate that **neither side lost a change**: for every leaf
   or id-entry where each side differs from base, the merged result must carry
   that side's value (or the same value both sides chose). Any violation fails
@@ -240,6 +250,9 @@ tests):
 10. Notes appended to the same PR record on both sides (the merge base has no
     `notes` key) resolve, both notes survive, and the nested ids are named in
     the summary/prompt; the same id with different content is still ambiguous.
+    Cover the *real* command path too: `_record_status_timestamp` bumps
+    `updated_at` on both sides, which must not block the merge, while a real
+    field conflict (e.g. both change `status` differently) still does.
 11. Approval guards: a too-short or wrong `pm-signoff-candidate` is not
     accepted, an unapplied resolution cannot be justified, an approval bound
     to an unapplied or unresolved resolution is refused by the merge gate
@@ -303,6 +316,9 @@ tests):
   conflict was reconciled.
 - `store.merge_3way` (the live-state stash-pop path) is unchanged; the new
   resolver is integration-specific because its conflict policy differs.
+- Bookkeeping timestamps (`updated_at`, `last_edited`, …) both bumped to
+  different values merge to the later value; a non-timestamp value in one of
+  those keys keeps the normal conflict rule.
 - Old git (< 2.38) and new git both resolve; the worktree path is used for
   resolution regardless of `merge-tree`.
 

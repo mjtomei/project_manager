@@ -242,6 +242,36 @@ def remote_ref(workdir: str, target_repo: str, ref: str) -> str | None:
 _MISSING = object()
 _DELETED = object()
 
+# Bookkeeping timestamps are bumped independently whenever either side touches
+# a record: ``pm pr note add`` and every status change call
+# ``_record_status_timestamp``, which rewrites ``updated_at`` (and the
+# transition stamp).  Two branches that both edited the same record therefore
+# change ``updated_at`` to different values even when the records themselves
+# are independently mergeable — the real #250 note-add path does exactly this.
+# These are not semantic fields: take the later value ("last touched") instead
+# of failing the whole metadata resolution, and do not count the earlier value
+# as a lost change.  Anything that is not a string timestamp keeps the normal
+# conflict rule.
+_BOOKKEEPING_TS = frozenset({
+    "created_at", "updated_at", "last_edited", "started_at", "reviewed_at",
+    "signed_off_at", "merged_at",
+})
+
+
+def _bookkeeping_ts(path: str) -> bool:
+    return path.rsplit(".", 1)[-1] in _BOOKKEEPING_TS
+
+
+def _merge_bookkeeping_ts(ours, theirs):
+    """The merged value of a bookkeeping timestamp, or ``_MISSING``."""
+    if not all(v is None or isinstance(v, str) for v in (ours, theirs)):
+        return _MISSING
+    if ours is None:
+        return theirs
+    if theirs is None:
+        return ours
+    return max(ours, theirs)      # ISO-8601 strings sort chronologically
+
 
 def resolve_project_yaml(base_text: str | None, ours_text: str | None,
                          theirs_text: str | None):
@@ -377,6 +407,10 @@ def _merge_value(base, ours, theirs, path: str, actions: dict):
         # The preservation check below proves neither side lost an entry.
         return _merge_id_list([] if base is _MISSING else base, ours, theirs,
                               path, actions)
+    if _bookkeeping_ts(path):
+        value = _merge_bookkeeping_ts(ours, theirs)
+        if value is not _MISSING:
+            return value, []
     return None, [f"{path or '<root>'}: changed differently on both sides"]
 
 
@@ -541,6 +575,10 @@ def _preservation_problems(base, side, merged, label: str) -> list[str]:
                     problems.append(
                         f"{label} record deletion lost: {path}[{rec_id}]")
         elif s != m:
+            # A bookkeeping timestamp both sides bumped is merged as the
+            # later value, so the earlier one is intentionally not carried.
+            if _bookkeeping_ts(path) and _merge_bookkeeping_ts(s, m) == m:
+                return
             problems.append(
                 f"{label} change not preserved at {path or '<root>'}")
 
@@ -1279,6 +1317,14 @@ def _record_check(root: Path, pr_id: str, record: dict) -> dict:
                 record["base_behavior_changes"] = list(dict.fromkeys(
                     old_behavior + list(record.get("base_behavior_changes")
                                         or [])))
+    elif record.get("status") == ERROR \
+            and not record.get("base_behavior_changes") \
+            and old.get("base_behavior_changes") \
+            and record.get("head") and record.get("head") == old.get("head"):
+        # A transient failure (e.g. the base fetch) must not drop the
+        # behavioural changes the approval was required to assess: the
+        # merge gate would then no longer ask for the evidence statement.
+        record["base_behavior_changes"] = list(old["base_behavior_changes"])
 
     # Compute the digest before writing the artifact: integration.json is the
     # full record a person assesses, and it must carry the digest of the

@@ -18,6 +18,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from pm_core import integration, prompt_gen, signoff, store
@@ -311,7 +312,7 @@ def test_preservation_catches_a_lost_record(monkeypatch):
 def test_resolved_text_uses_pm_writer_and_reparses():
     merged, _ = resolve("\n- id: pr-300\n  title: Feat\n  status: pending\n")
     assert merged.startswith(store._YAML_HEADER)
-    data = __import__("yaml").safe_load(merged)
+    data = yaml.safe_load(merged)
     assert [p["id"] for p in data["prs"]] == ["pr-100", "pr-200", "pr-300"]
 
 
@@ -448,6 +449,43 @@ def test_notes_appended_to_the_same_record_on_both_sides_survive(w):
     assert f"prs[{PR}].notes:note-base" in text
 
 
+def test_notes_added_through_the_real_note_path_still_merge(w):
+    """``pm pr note add`` also bumps ``updated_at`` (real path, #250).
+
+    The previous test writes notes straight through ``store.save``; the
+    command a session actually runs also rewrites ``updated_at`` via
+    ``_record_status_timestamp``, so both sides change that bookkeeping field
+    to different values.  That must not defeat the metadata resolution.
+    """
+    from pm_core.cli.helpers import _record_status_timestamp
+
+    def add_note(pm_dir: Path, note_id: str, text: str) -> None:
+        data = store.load(pm_dir)
+        rec = store.get_pr(data, PR)
+        rec.setdefault("notes", []).append({
+            "id": note_id, "text": text,
+            "created_at": "2026-01-01T00:00:00Z",
+            "last_edited": "2026-01-01T00:00:00Z"})
+        _record_status_timestamp(rec)
+        store.save(data, pm_dir)
+
+    add_note(w.wd / "pm", "note-branch", "from the branch")
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "branch note")
+    original_head = git(w.wd, "rev-parse", "HEAD")
+    add_note(w.base_pm, "note-base", "from the base")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base note")
+
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.UP_TO_DATE, rec
+    notes = [n["id"]
+             for n in store.get_pr(store.load(w.wd / "pm"), PR)["notes"]]
+    assert notes == ["note-branch", "note-base"]
+    assert git(w.wd, "rev-parse", "HEAD^{tree}") == rec["candidate_tree"]
+    assert rec["resolution"]["resolved_from"]["head"] == original_head
+
+
 def test_same_field_conflict_routes_to_impl_and_changes_nothing(w):
     append_records(w.wd / "pm", w.repo, ["pr-300"])
     data = store.load(w.wd / "pm")
@@ -581,6 +619,24 @@ def test_evidence_records_the_prior_decision_and_an_honest_review_revision(w):
     assert "does not record" in ev["review"]["note"]
     assert ev["qa"]["planner_head"] == "f" * 40
     assert ev["qa"]["planner_code_changes"] == ["fix.py"]
+
+
+def test_malformed_qa_evidence_does_not_crash_the_record(w):
+    """A corrupt QA snapshot is reported, not raised out of sign-off."""
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps(["not", "a", "mapping"]))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": "f" * 40, "planner_code_changes": 5}))
+
+    evidence = signoff.qa_evidence(PR)
+    assert evidence["overall"] is None
+    assert evidence["planner_code_changes"] == []
+    rec = integration.check_integration(w.pm_dir, PR)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_REVIEW, rec["head"], "manual",
+        integration=integration.binding(rec))
+    assert pr_entry(w)["signoff"]["evidence"]["qa"]["planner_code_changes"] == []
 
 
 def test_behavioral_changes_are_focused_on_this_pr_and_its_dependencies(w):
@@ -1217,6 +1273,54 @@ def test_nested_duplicate_ids_are_ambiguous():
     assert any("duplicate record id" in c for c in details["conflicts"])
 
 
+def test_bookkeeping_timestamps_both_bumped_do_not_block_the_merge():
+    """Real ``pm pr note add`` bumps ``updated_at`` on both sides.
+
+    The timestamps are bookkeeping, not semantics: the record must still
+    merge by id (the earlier value is not a lost change).
+    """
+    base = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+            "  updated_at: '2026-01-01T00:00:00Z'\n")
+    ours = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+            "  updated_at: '2026-01-02T00:00:00Z'\n"
+            "  notes:\n  - id: note-1\n    text: from branch\n")
+    theirs = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: merged\n"
+              "  updated_at: '2026-01-03T00:00:00Z'\n"
+              "  notes:\n  - id: note-2\n    text: from base\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is not None, details
+    doc = yaml.safe_load(merged)
+    rec = doc["prs"][0]
+    assert rec["status"] == "merged"
+    # The later bookkeeping value wins; both notes survive.
+    assert rec["updated_at"] == "2026-01-03T00:00:00Z"
+    assert [n["id"] for n in rec["notes"]] == ["note-1", "note-2"]
+
+
+def test_bookkeeping_timestamp_merge_does_not_mask_a_real_conflict():
+    """A field both sides changed differently is still a conflict."""
+    base = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+            "  updated_at: '2026-01-01T00:00:00Z'\n")
+    ours = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: qa\n"
+            "  updated_at: '2026-01-02T00:00:00Z'\n")
+    theirs = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: merged\n"
+              "  updated_at: '2026-01-03T00:00:00Z'\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("status" in c and "changed differently" in c
+               for c in details["conflicts"])
+
+
+def test_a_non_string_bookkeeping_value_keeps_the_conflict_rule():
+    """Only real timestamps are bookkeeping; a malformed value is a conflict."""
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: '2026-01-01'\n"
+    ours = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: {bad: 1}\n"
+    theirs = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: '2026-01-03'\n"
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("updated_at" in c for c in details["conflicts"])
+
+
 def test_a_merge_that_loses_a_side_change_is_refused(monkeypatch):
     """The preservation check is the safety net under the merge rules.
 
@@ -1485,6 +1589,35 @@ def test_behavior_changes_survive_a_benign_recheck(w):
     refusal = signoff.merge_gate_refusal(
         pr_entry(w), again["head"], "master")
     assert refusal and "evidence" in refusal
+
+
+def test_a_failed_recheck_keeps_the_behavioural_changes(w, monkeypatch):
+    """A clean base's behavioural changes survive a transient check failure.
+
+    Without them the merge gate would no longer require the explicit
+    evidence/checks statement the approval was asked for.
+    """
+    data = store.load(w.base_pm)
+    data["project"]["model_config"] = {"session_models": {"impl": "model-new"}}
+    store.save(data, w.base_pm)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base changes model")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    assert rec["base_behavior_changes"]
+    record_merge(w, rec)
+
+    monkeypatch.setattr(integration, "fetch_base",
+                        lambda *a, **k: (None, "network down"))
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.ERROR
+    assert again["head"] == rec["head"]
+    assert again["base_behavior_changes"] == rec["base_behavior_changes"]
+
+    write_report(w, again, evidence=False)
+    refusal = signoff.merge_gate_refusal(pr_entry(w), again["head"], "master")
+    assert refusal and "behavioural changes" in refusal
 
 
 def test_config_path_base_change_requires_justification(w):

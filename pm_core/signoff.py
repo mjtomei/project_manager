@@ -326,11 +326,18 @@ def qa_evidence(pr_id: str) -> dict | None:
         resume = json.loads((path.parent / "qa_resume.json").read_text())
     except (OSError, ValueError):
         resume = None
-    resume = resume or {}
+    # Malformed evidence must not crash the sign-off record write: record
+    # what is readable and leave the rest empty.
+    if not isinstance(status, dict):
+        status = {}
+    if not isinstance(resume, dict):
+        resume = {}
+    changes = resume.get("planner_code_changes")
     return {
         "overall": status.get("overall"),
         "planner_head": resume.get("planner_head"),
-        "planner_code_changes": list(resume.get("planner_code_changes") or []),
+        "planner_code_changes": (
+            changes if isinstance(changes, list) else []),
         "status_file": str(path),
     }
 
