@@ -127,14 +127,71 @@ def subagent_pin_env(model: str | None,
     return {SUBAGENT_MODEL_ENV: pinned, SUBAGENT_FORCE_ENV: "1"}
 
 
-def subagent_unset_vars(model: str | None) -> tuple[str, ...]:
-    """Subagent pin variables to remove when pm selected no model.
+# Set by a routed launch next to ANTHROPIC_BASE_URL, naming the URL pm put
+# there, so a pm process started inside that session knows the inherited
+# ANTHROPIC_BASE_URL is a route's and not the user's own.
+ROUTE_BASE_URL_ENV = "PM_ROUTE_BASE_URL"
 
-    Such a session runs on the CLI default, so a pin inherited from the
-    caller's environment (e.g. pm itself running inside a routed session,
-    whose ``work/`` pin its endpoint cannot serve) must not reach it.
+# The model-routing variables pm decides on every launch.  A launch sets the
+# ones its selection needs and removes the others, so nothing a caller's
+# environment carries (pm run inside a routed session exports all of them)
+# picks a model or account for it.  ANTHROPIC_BASE_URL is removed only when
+# it is a route's (_is_route_base_url): any other value is the user's own
+# endpoint and stays.
+LAUNCH_ROUTING_ENV_VARS = (*ROUTER_ALIAS_ENV_VARS, SUBAGENT_FORCE_ENV,
+                           AUTO_MODE_MODEL_ENV, ROUTE_BASE_URL_ENV)
+
+
+def _is_route_base_url(url: str | None, environ) -> bool:
+    """Whether an inherited ANTHROPIC_BASE_URL is a route's.
+
+    It is when it is the URL a routed launch recorded (ROUTE_BASE_URL_ENV),
+    or the address of a router configured here, on the host or as its
+    in-container forwarder (a session started before that marker existed,
+    or by the host claude-mixed launcher).
     """
-    return () if model else (SUBAGENT_MODEL_ENV, SUBAGENT_FORCE_ENV)
+    if not url:
+        return False
+    url = url.rstrip("/")
+    if url == (environ.get(ROUTE_BASE_URL_ENV) or "").rstrip("/"):
+        return True
+    from pm_core import worker_route
+    for p in list_providers():
+        if p.type != "router" or not p.api_base:
+            continue
+        try:
+            urls = {p.api_base, worker_route.container_base_url(p)}
+        except ValueError:
+            urls = {p.api_base}
+        if url in {u.rstrip("/") for u in urls}:
+            return True
+    return False
+
+
+def launch_env(provider: "ProviderConfig", env: dict[str, str],
+               model: str | None, environ=None,
+               ) -> tuple[dict[str, str], tuple[str, ...]]:
+    """``(assign, unset)``: the environment of one launch.
+
+    *env* is what the selected *provider* contributes (its ``env_vars()``,
+    or a router's container variant) and *model* the session's effective
+    ``--model`` (None: the CLI default).  pm's own selection decides every
+    LAUNCH_ROUTING_ENV_VARS entry: the subagent pin follows *model*, a
+    routed launch records its URL, and every routing variable the
+    selection does not set is unset rather than inherited from *environ*
+    (the caller's environment, default ``os.environ``).  So are the
+    provider's own unset_env_vars and an inherited route ANTHROPIC_BASE_URL
+    when the selection names none.  Everything else is left as it is.
+    """
+    environ = os.environ if environ is None else environ
+    assign = {**env, **subagent_pin_env(model, provider)}
+    if provider.type == "router" and assign.get("ANTHROPIC_BASE_URL"):
+        assign[ROUTE_BASE_URL_ENV] = assign["ANTHROPIC_BASE_URL"]
+    unset = [*provider.unset_env_vars(), *LAUNCH_ROUTING_ENV_VARS]
+    if ("ANTHROPIC_BASE_URL" not in assign
+            and _is_route_base_url(environ.get("ANTHROPIC_BASE_URL"), environ)):
+        unset.append("ANTHROPIC_BASE_URL")
+    return assign, tuple(dict.fromkeys(v for v in unset if v not in assign))
 
 
 class ProviderNotFoundError(LookupError):
@@ -216,6 +273,9 @@ class ProviderConfig:
                 env["ANTHROPIC_AUTH_TOKEN"] = "ollama"
             if self.type == "claude" and self.model:
                 env["ANTHROPIC_MODEL"] = self.model
+            # launch_env unsets every alias a launch does not set, so this
+            # is where a provider's own alias models go.
+            env.update(self.alias_models)
             return env
 
         if self.type == "openai":
@@ -224,6 +284,7 @@ class ProviderConfig:
                 env["OPENAI_BASE_URL"] = self.api_base
             if self.api_key:
                 env["OPENAI_API_KEY"] = _resolve_env_ref(self.api_key)
+            env.update(self.alias_models)
             return env
 
         return {}
@@ -231,23 +292,14 @@ class ProviderConfig:
     def unset_env_vars(self) -> tuple[str, ...]:
         """Environment variables to remove for this provider's sessions.
 
-        A router authenticates upstream itself; a stray API key or auth
-        token in the caller's environment would only make Claude Code
-        prompt about it (blocking an unattended worker) -- the same
-        variables the claude-mixed launcher unsets.  A main-account
-        (``claude``) session drops a classifier pin inherited from a routed
-        caller, so its auto-mode classifier stays on Claude's default on
-        that account (a router session sets its own, env_vars).  So does a
-        router session that sets none (route_classifier_model): another
-        route's pin must not put its classifier on that route's account.
+        Only what this provider type removes on top of launch_env's
+        routing variables: a router authenticates upstream itself, so a
+        stray API key or auth token in the caller's environment would only
+        make Claude Code prompt about it (blocking an unattended worker) --
+        the same variables the claude-mixed launcher unsets.
         """
         if self.type == "router":
-            unset = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
-            if AUTO_MODE_MODEL_ENV not in self.env_vars():
-                unset += (AUTO_MODE_MODEL_ENV,)
-            return unset
-        if self.type == "claude":
-            return (AUTO_MODE_MODEL_ENV,)
+            return ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
         return ()
 
     def model_flag(self) -> str | None:

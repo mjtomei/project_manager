@@ -164,17 +164,62 @@ installed) makes the pin override all of them and removes `model` from the
 Agent tool. A router's explicit `alias_models` entry for
 `CLAUDE_CODE_SUBAGENT_MODEL` replaces the pinned value and is forced too.
 When pm selects no model (CLI default) it sets no pin and removes an
-inherited one (`env -u` in the shell command, dropped from the `claude -p`
-run env; `providers.subagent_unset_vars`), so the children follow the CLI
-default rather than a caller's pin (QA S61, 3ee69236: pm run inside a
-routed session passed its `work/` pin and FORCE to a no-model session on
-the main endpoint, and every child failed `model_not_found`). A pin a user
-sets in Claude's own `settings.json` `env` is not affected.
+inherited one (R9), so the children follow the CLI default rather than a
+caller's pin (QA S61, 3ee69236: pm run inside a routed session passed its
+`work/` pin and FORCE to a no-model session on the main endpoint, and every
+child failed `model_not_found`). A pin a user sets in Claude's own
+`settings.json` `env` is not affected.
 
 Repro that prompted this: PR241 Astra review 6427 i4 had
 `CLAUDE_CODE_SUBAGENT_MODEL=chatgpt/gpt-6-astra-high` without FORCE. Two
 explicit Fable helpers ran `claude-fable-5-1` and exhausted the main
 account.
+
+R9. **Each launch's routing environment comes from pm's selection**
+(user decision 2026-10-26, answering review loop c189 i6). A pm process
+started inside a routed session inherits everything that session's launch
+set. Before this, a no-model session launched from there ran its whole
+main loop as `work/claude-opus-5-5`, because the CLI default resolves
+through `ANTHROPIC_DEFAULT_OPUS_MODEL`. A main session's Fable, haiku and
+background calls also followed the route, and the route's
+`ANTHROPIC_BASE_URL` stayed. 3ee69236 and f0031965 had dropped only the
+subagent and classifier pins.
+
+Now `providers.launch_env(provider, env, model)` builds the launch's
+routing variables (`LAUNCH_ROUTING_ENV_VARS`: the four
+`ANTHROPIC_DEFAULT_*_MODEL` aliases, `ANTHROPIC_SMALL_FAST_MODEL`, the
+subagent pin and FORCE, `CLAUDE_CODE_AUTO_MODE_MODEL` and
+`PM_ROUTE_BASE_URL`):
+- What the selection needs is assigned: a router's pins and classifier,
+  any provider's own `alias_models` (now honoured for every provider
+  type), and the subagent pin of the effective model.
+- Every other routing variable is unset (`env -u`, or dropped from the
+  `claude -p` run env), whatever the caller's environment holds.
+- A routed launch also records the URL it set in `PM_ROUTE_BASE_URL`.
+- An inherited `ANTHROPIC_BASE_URL` is removed when the selection names
+  none and it is a route's: equal to that marker, or to a router
+  configured here, in its host or in-container form. The second case
+  covers a parent from before the marker, and the host `claude-mixed`
+  launcher.
+- Any other `ANTHROPIC_BASE_URL` is the user's own (a proxy, a QA stub)
+  and stays. So do all non-routing variables, the provider's own
+  variables and Claude's own `settings.json` `env`.
+
+One builder serves `build_claude_shell_cmd` (host, container and
+`--resume` commands and the fake-claude path), `_resolve_provider`
+(`launch_claude`, `launch_claude_print`,
+`launch_claude_print_background`), the `pm provider test --live` probe,
+and `pm_core/bridge.py`'s `claude -p` turn. The bridge selects no model,
+so it only unsets. A main container session gets the host's
+`ANTHROPIC_BASE_URL` and `ANTHROPIC_SMALL_FAST_MODEL` by name
+(`container._CLAUDE_ENV_VARS`), and its command removes them the same way.
+
+A user who exported alias variables in their own shell for a non-router
+provider now sets them in that provider's `alias_models` (or in Claude's
+`settings.json` `env`). Assigned accounts and models are unchanged.
+Regressions: `tests/test_worker_route.py::TestInheritedRoutingEnv`, plus
+the updated exact-command tests. `tests/conftest.py` clears the routing
+variables, so the suite gives the same result inside a routed session.
 
 ## 2. Implicit requirements
 - Effort resolution is independent of provider, so routed types keep `high`.
@@ -213,14 +258,13 @@ account.
   sessions keep the classifier Claude picks, as before f0031965: its
   unprefixed default goes to the router's default backend with the
   caller's credentials, the main account, which is the user's decision
-  for every session not on the work account. A router
-  session with no pin also drops an inherited value, so `pm` run inside a
-  work-routed session does not put another route's classifier on the
-  work account. A main-account
-  (`claude`-type) session removes an inherited value (`env -u`; dropped
-  from the `claude -p` run env), so its classifier keeps Claude's default
-  on that account. `local`/`openai` providers are the user's own endpoints
-  and keep whatever the environment gives them. `pm provider list` names
+  for every session not on the work account. Every launch that sets no
+  classifier pin removes an inherited one (R9): a router session with no
+  pin, so `pm` run inside a work-routed session does not put another
+  route's classifier on the work account, and a main-account session, so
+  its classifier keeps Claude's default on that account. Since R9 this also
+  applies to `local`/`openai` sessions, which set a classifier model only
+  through their own `alias_models`. `pm provider list` names
   the route's classifier model. Sessions launched with
   `--dangerously-skip-permissions` never classify. Residual outside pm's
   control: a server-configured classifier model takes priority over the
@@ -1458,3 +1502,22 @@ with its own `api_base` also drops an inherited classifier pin, and the
 route's classifier pin) (`/pm-captures/review-c189-i5/mutation-checks.log`).
 Latest full suite: 3793 passed, rc 0, on the i5 tree (same env;
 `/pm-captures/review-c189-i5/full-suite.log`).
+Review loop c189 i6 found that a pm process started inside a routed
+session passed that session's aliases and route URL to the sessions it
+launched (R9). On the user's decision of 2026-10-26, each launch's
+routing environment is now built from pm's selection
+(`providers.launch_env`).
+- 10 mutations caught (`/pm-captures/review-c189-i6/mutation-checks.log`).
+- Live: real Claude 2.1.310 ran pm-built commands under a work-routed
+  parent env against local stubs, as a pre-fix (ee82dc0c) vs post-fix
+  comparison (`/pm-captures/review-c189-i6/live-inherited/`).
+  - Pre-fix, the no-model session and the Fable and haiku switches of a
+    plain-model main session all requested `work/claude-opus-5-5` (404
+    at the main stub).
+  - Post-fix they requested `claude-opus-5-5`, `claude-fable-5-1` and
+    `claude-haiku-5-5`.
+  - The plain `--model` and the routed launch were unchanged.
+- Not run live here: a container (no image in the review container) and
+  interactive panes (qa.md twenty-fifth pass).
+Latest full suite: 3807 passed, rc 0, run inside a routed review session
+(`/pm-captures/review-c189-i6/full-suite-r9.log`).

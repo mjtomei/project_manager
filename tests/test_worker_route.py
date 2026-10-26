@@ -22,7 +22,8 @@ import pytest
 from pm_core import route_bridge, worker_route
 from pm_core.model_config import ModelResolution, resolve_model_and_provider
 from pm_core.providers import (
-    ProviderConfig, ProviderNotFoundError, ROUTER_ALIAS_ENV_VARS, get_provider,
+    LAUNCH_ROUTING_ENV_VARS, ProviderConfig, ProviderNotFoundError,
+    ROUTER_ALIAS_ENV_VARS, get_provider, launch_env,
 )
 
 ROUTE = "claude-work"
@@ -218,8 +219,14 @@ class TestBuildShellCmd:
     def test_plain_model_stays_on_claude(self, pm_home_dir):
         cmd = self._build(model="claude-opus-5-5", effort="high")
         # No route, no key handling; only the subagent pin (TestSubagentPin)
-        # and no inherited classifier pin (TestClassifierRoute).
-        assert cmd == ("env -u CLAUDE_CODE_AUTO_MODE_MODEL "
+        # and none of the routing variables it does not set
+        # (TestInheritedRoutingEnv).
+        assert cmd == ("env -u ANTHROPIC_DEFAULT_OPUS_MODEL "
+                       "-u ANTHROPIC_DEFAULT_SONNET_MODEL "
+                       "-u ANTHROPIC_DEFAULT_HAIKU_MODEL "
+                       "-u ANTHROPIC_DEFAULT_FABLE_MODEL "
+                       "-u ANTHROPIC_SMALL_FAST_MODEL "
+                       "-u CLAUDE_CODE_AUTO_MODE_MODEL -u PM_ROUTE_BASE_URL "
                        "CLAUDE_CODE_SUBAGENT_MODEL=claude-opus-5-5 "
                        "CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1 "
                        "claude --model claude-opus-5-5 --effort high")
@@ -322,7 +329,8 @@ class TestClassifierRoute:
         p = ProviderConfig(name=ROUTE, type="router", api_base="http://x:1",
                            model=model)
         assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in p.env_vars()
-        assert "CLAUDE_CODE_AUTO_MODE_MODEL" in p.unset_env_vars()
+        assert "CLAUDE_CODE_AUTO_MODE_MODEL" in launch_env(p, p.env_vars(),
+                                                           model, {})[1]
 
     @pytest.mark.parametrize("model", UNPINNED)
     def test_unpinned_route_drops_another_routes_inherited_value(
@@ -341,7 +349,8 @@ class TestClassifierRoute:
     def test_pinned_route_does_not_also_unset_it(self):
         p = ProviderConfig(name=ROUTE, type="router", api_base="http://x:1",
                            model=MODEL)
-        assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in p.unset_env_vars()
+        assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in launch_env(
+            p, p.env_vars(), MODEL, {})[1]
 
     @pytest.mark.parametrize("model", [None, "claude-opus-5-5"])
     def test_main_account_session_drops_an_inherited_value(
@@ -379,12 +388,22 @@ class TestClassifierRoute:
         _, _, run_env = _resolve_provider(provider=ROUTE)
         assert run_env["CLAUDE_CODE_AUTO_MODE_MODEL"] == self.CLASSIFIER
 
-    def test_local_provider_keeps_the_callers_value(self):
-        # A user's own endpoint: pm neither sets nor removes it.
+    def test_local_provider_sets_only_its_own_alias_models(self):
+        # The launch environment comes from pm's selection for every
+        # provider type (user decision 2026-10-26): a local endpoint gets no
+        # inherited classifier pin, and its own alias_models are what it
+        # sets.
         p = ProviderConfig(name="ollama", type="local",
                            api_base="http://localhost:11434", model="qwen")
-        assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in p.unset_env_vars()
-        assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in p.env_vars()
+        assert "CLAUDE_CODE_AUTO_MODE_MODEL" in launch_env(
+            p, p.env_vars(), "qwen", {})[1]
+        p.alias_models = {"CLAUDE_CODE_AUTO_MODE_MODEL": "qwen-small",
+                          "ANTHROPIC_SMALL_FAST_MODEL": "qwen-small"}
+        assign, unset = launch_env(p, p.env_vars(), "qwen", {})
+        assert assign["CLAUDE_CODE_AUTO_MODE_MODEL"] == "qwen-small"
+        assert assign["ANTHROPIC_SMALL_FAST_MODEL"] == "qwen-small"
+        assert not {"CLAUDE_CODE_AUTO_MODE_MODEL",
+                    "ANTHROPIC_SMALL_FAST_MODEL"} & set(unset)
 
     def test_provider_list_names_the_classifier_route(self, pm_home_dir):
         from pm_core.cli.provider import _router_detail_lines
@@ -400,6 +419,160 @@ class TestClassifierRoute:
             "CLAUDE_CODE_AUTO_MODE_MODEL": "work/other"})
         lines = _router_detail_lines(get_provider(ROUTE, strict=True))
         assert "auto-mode classifier: work/other" in lines
+
+
+class TestInheritedRoutingEnv:
+    """pm builds each launch's routing environment from its own selection.
+
+    Review c189 i6: a pm process started inside a work-routed session
+    inherits everything that session's launch set (model aliases, subagent
+    and classifier pins, the route's ANTHROPIC_BASE_URL).  A no-model
+    session then ran its whole main loop as ``work/claude-opus-5-5`` (the
+    CLI default resolves through ANTHROPIC_DEFAULT_OPUS_MODEL), and a main
+    session's fable/haiku/background calls followed the route.  User
+    decision 2026-10-26: set what the selection needs, unset every other
+    pm-controlled routing variable, keep everything else.
+    """
+
+    _build = TestBuildShellCmd._build
+    WORK_URL = "http://127.0.0.1:8790"
+
+    @pytest.fixture
+    def routed_parent(self, pm_home_dir, monkeypatch):
+        """The environment a work-routed session's launch exported."""
+        _write_providers(pm_home_dir, api_base=self.WORK_URL,
+                         model=f"{MODEL}[1m]")
+        cfg = get_provider(ROUTE, strict=True)
+        assign, _ = launch_env(cfg, cfg.env_vars(), cfg.model, {})
+        for k, v in assign.items():
+            monkeypatch.setenv(k, v)
+        monkeypatch.setenv("UNRELATED_SETTING", "kept")
+        return assign
+
+    @staticmethod
+    def _claude_env(cmd: str) -> dict[str, str]:
+        """claude's environment when *cmd* runs in a real shell."""
+        import re
+        exe = re.search(r" (claude|\S*fake-claude)(?= |$)", cmd)
+        probe = cmd[:exe.start()] + " env -0"
+        out = subprocess.run(["sh", "-c", probe], capture_output=True,
+                             check=True).stdout.decode()
+        return dict(e.split("=", 1) for e in out.split("\0") if "=" in e)
+
+    def _assert_no_route(self, env):
+        leaked = {v: env[v] for v in (*LAUNCH_ROUTING_ENV_VARS,
+                                      "ANTHROPIC_BASE_URL")
+                  if v in env and not v.startswith("CLAUDE_CODE_SUBAGENT")}
+        assert leaked == {}
+        assert env["UNRELATED_SETTING"] == "kept"
+
+    def test_routed_launch_records_its_url(self, routed_parent):
+        assert routed_parent["PM_ROUTE_BASE_URL"] == self.WORK_URL
+        assert routed_parent["ANTHROPIC_DEFAULT_OPUS_MODEL"] == f"{MODEL}[1m]"
+
+    @pytest.mark.parametrize("resume", [False, True])
+    def test_no_model_session_runs_on_the_cli_default(self, routed_parent,
+                                                      resume):
+        cmd = self._build(session_id="abc", resume=resume)
+        env = self._claude_env(cmd)
+        self._assert_no_route(env)
+        assert "CLAUDE_CODE_SUBAGENT_MODEL" not in env
+        assert "CLAUDE_CODE_SUBAGENT_MODEL_FORCE" not in env
+
+    def test_plain_model_session_is_main_only(self, routed_parent):
+        env = self._claude_env(self._build(model="claude-opus-5-5"))
+        self._assert_no_route(env)
+        assert env["CLAUDE_CODE_SUBAGENT_MODEL"] == "claude-opus-5-5"
+
+    def test_routed_launch_sets_its_own_values(self, routed_parent,
+                                               pm_home_dir):
+        # Another route over the work parent: its URL, its pins, no
+        # work/ value left behind (its classifier is left to Claude).
+        _write_providers(pm_home_dir, api_base="http://127.0.0.1:8791",
+                         model="deepseek/deepseek-v4.1-flash-1017")
+        env = self._claude_env(self._build(provider=ROUTE))
+        assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8791"
+        assert env["PM_ROUTE_BASE_URL"] == "http://127.0.0.1:8791"
+        assert {env[v] for v in ROUTER_ALIAS_ENV_VARS} == {
+            "deepseek/deepseek-v4.1-flash-1017"}
+        assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in env
+        assert not any(v.startswith("work/") for v in env.values())
+
+    def test_container_launches(self, routed_parent, pm_home_dir):
+        # The route's in-container URL is the parent's too; a main session's
+        # container gets the host's ANTHROPIC_BASE_URL and SMALL_FAST by
+        # name (container._CLAUDE_ENV_VARS), so its command drops them.
+        cmd = self._build(model="claude-opus-5-5", container=True)
+        assert "-u ANTHROPIC_BASE_URL " in cmd
+        assert "-u ANTHROPIC_SMALL_FAST_MODEL " in cmd
+        cmd = self._build(provider=ROUTE, container=True)
+        assert _cmd_env(cmd)["PM_ROUTE_BASE_URL"] == "http://127.0.0.1:8790"
+
+    def test_users_own_endpoint_stays(self, pm_home_dir, monkeypatch):
+        # Not a route's URL (no marker, no router configured there): the
+        # user's own setting, e.g. a proxy or a QA main stub.
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:19611")
+        env = self._claude_env(self._build(model="claude-opus-5-5"))
+        assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:19611"
+
+    @pytest.mark.parametrize("url", [WORK_URL, WORK_URL + "/",
+                                     "http://localhost:8790"])
+    def test_configured_route_url_is_recognised_without_the_marker(
+            self, pm_home_dir, monkeypatch, url):
+        # A parent from before the marker, or the host claude-mixed
+        # launcher: its URL is a router configured here (host form, or the
+        # in-container forwarder at the same port).
+        _write_providers(pm_home_dir, api_base="http://localhost:8790/")
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", url)
+        env = self._claude_env(self._build(model="claude-opus-5-5"))
+        assert "ANTHROPIC_BASE_URL" not in env
+
+    def test_provider_with_its_own_endpoint_keeps_it(self, routed_parent,
+                                                     pm_home_dir):
+        import yaml
+        (pm_home_dir / "providers.yaml").write_text(yaml.safe_dump(
+            {"providers": {"proxy": {"type": "claude",
+                                     "api_base": "http://127.0.0.1:2",
+                                     "model": "claude-opus-5-5"}}}))
+        env = self._claude_env(self._build(provider="proxy"))
+        assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:2"
+        assert "ANTHROPIC_DEFAULT_FABLE_MODEL" not in env
+
+    def test_print_launchers(self, routed_parent):
+        from pm_core.claude_launcher import _resolve_provider
+        _, _, run_env = _resolve_provider()
+        self._assert_no_route(run_env)
+        _, _, run_env = _resolve_provider(model="claude-opus-5-5")
+        self._assert_no_route(run_env)
+        _, _, run_env = _resolve_provider(provider=ROUTE)
+        assert run_env["ANTHROPIC_DEFAULT_FABLE_MODEL"] == f"{MODEL}[1m]"
+
+    def test_fake_claude_gets_the_same_env(self, routed_parent):
+        from pm_core.claude_launcher import build_claude_shell_cmd
+        with patch("pm_core.paths.fake_claude_config_for_type",
+                   return_value={"verdicts": {"PASS": 1}}), \
+             patch("pm_core.claude_launcher.log_shell_command"):
+            cmd = build_claude_shell_cmd(session_type="qa_scenario")
+        assert "fake-claude" in cmd
+        self._assert_no_route(self._claude_env(cmd))
+
+    def test_bridge_turn_drops_the_parents_routing(self, routed_parent,
+                                                   monkeypatch, tmp_path):
+        import asyncio
+        from pm_core import bridge
+        seen = {}
+
+        async def fake_exec(*cmd, env=None, **kw):
+            seen.update(env)
+            raise RuntimeError("stop")
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+        monkeypatch.setattr("shutil.which", lambda name: "/bin/claude")
+        b = bridge.Bridge.__new__(bridge.Bridge)
+        b.session_id, b.cwd = None, str(tmp_path)
+        with pytest.raises(RuntimeError):
+            asyncio.run(b._invoke_claude("hi"))
+        self._assert_no_route(seen)
 
 
 class TestSubagentPin:
@@ -458,9 +631,13 @@ class TestSubagentPin:
     def test_no_model_selected_sets_nothing(self, pm_home_dir):
         # The CLI default model: pm has no selection to enforce, and only
         # removes a pin the caller's environment may carry.
-        assert self._build() == ("env -u CLAUDE_CODE_AUTO_MODE_MODEL "
-                                 "-u CLAUDE_CODE_SUBAGENT_MODEL "
-                                 "-u CLAUDE_CODE_SUBAGENT_MODEL_FORCE claude")
+        assert self._build() == ("env -u ANTHROPIC_DEFAULT_OPUS_MODEL "
+                                 "-u ANTHROPIC_DEFAULT_SONNET_MODEL "
+                                 "-u ANTHROPIC_DEFAULT_HAIKU_MODEL "
+                                 "-u ANTHROPIC_DEFAULT_FABLE_MODEL "
+                                 "-u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_SUBAGENT_MODEL "
+                                 "-u CLAUDE_CODE_SUBAGENT_MODEL_FORCE "
+                                 "-u CLAUDE_CODE_AUTO_MODE_MODEL -u PM_ROUTE_BASE_URL claude")
 
     def test_no_model_drops_an_inherited_pin(self, pm_home_dir, monkeypatch):
         # S61: pm running inside a routed session (its own pin exported)
@@ -571,7 +748,8 @@ class TestSubagentPin:
         # A routed caller's classifier pin, which main sessions also drop
         # (TestClassifierRoute); set when the suite runs in a routed session.
         monkeypatch.delenv("CLAUDE_CODE_AUTO_MODE_MODEL", raising=False)
-        # Nothing to drop: the process environment is used as is.
+        # Nothing to drop (conftest clears the routing variables): the
+        # process environment is used as is.
         assert _resolve_provider()[2] is None
         monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", f"{MODEL}[1m]")
         monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "1")

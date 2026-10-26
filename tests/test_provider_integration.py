@@ -19,9 +19,13 @@ class TestBuildClaudeShellCmdProvider:
         result = build_claude_shell_cmd(prompt="hello")
         # Only inherited classifier and subagent pins are dropped (main
         # account, no model selected).
-        assert result == ("env -u CLAUDE_CODE_AUTO_MODE_MODEL "
-                          "-u CLAUDE_CODE_SUBAGENT_MODEL "
-                          "-u CLAUDE_CODE_SUBAGENT_MODEL_FORCE claude 'hello'")
+        assert result == ("env -u ANTHROPIC_DEFAULT_OPUS_MODEL "
+                          "-u ANTHROPIC_DEFAULT_SONNET_MODEL "
+                          "-u ANTHROPIC_DEFAULT_HAIKU_MODEL "
+                          "-u ANTHROPIC_DEFAULT_FABLE_MODEL "
+                          "-u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_SUBAGENT_MODEL "
+                          "-u CLAUDE_CODE_SUBAGENT_MODEL_FORCE "
+                          "-u CLAUDE_CODE_AUTO_MODE_MODEL -u PM_ROUTE_BASE_URL claude 'hello'")
 
     @patch("pm_core.claude_launcher.log_shell_command")
     @patch("pm_core.paths.skip_permissions_enabled", return_value=False)

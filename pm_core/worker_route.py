@@ -45,7 +45,8 @@ from urllib.parse import urlparse
 
 from pm_core import route_bridge
 from pm_core.paths import configure_logger, pm_home
-from pm_core.providers import ProviderConfig, ProviderNotFoundError, get_provider
+from pm_core.providers import (ProviderConfig, ProviderNotFoundError, get_provider,
+                               launch_env)
 
 _log = configure_logger("pm.worker_route")
 
@@ -521,7 +522,8 @@ def _probe_shell_cmd(cfg: ProviderConfig, session_id: str, *,
                      container: bool) -> str:
     """Tools-disabled one-shot claude call through the route."""
     prefix, env, exe = launch_parts(cfg, container=container)
-    unset = "".join(f"-u {v} " for v in cfg.unset_env_vars())
+    env, unset_vars = launch_env(cfg, env, cfg.model)
+    unset = "".join(f"-u {v} " for v in unset_vars)
     assigns = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
     return (f"{prefix}env {unset}{assigns} {exe} -p {shlex.quote(PROBE_PROMPT)}"
             f" --model {shlex.quote(cfg.model)} --tools '' --output-format json"

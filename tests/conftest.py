@@ -35,6 +35,20 @@ def _isolated_claude_config(tmp_path_factory, monkeypatch):
                        str(tmp_path_factory.mktemp("claude-config")))
 
 
+@pytest.fixture(autouse=True)
+def _no_inherited_routing_env(monkeypatch):
+    """Run every test as if from a plain shell, not a routed session.
+
+    The suite often runs inside a pm session whose launch set the route's
+    model aliases, pins and ANTHROPIC_BASE_URL (providers.launch_env), and
+    launch builders react to such inherited values.  Tests that exercise
+    that set them themselves.
+    """
+    from pm_core.providers import LAUNCH_ROUTING_ENV_VARS
+    for var in (*LAUNCH_ROUTING_ENV_VARS, "ANTHROPIC_BASE_URL"):
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.fixture
 def fake_github():
     """Install a pure-metadata FakeGitHubBackend as the `gh` transport.

@@ -194,12 +194,19 @@ class Bridge:
             "message": {"role": "user", "content": message},
         })
 
+        # No model is selected here, so no routing variable a caller's
+        # environment carries (pm run inside a routed session) may pick one.
+        from pm_core.providers import BUILTIN_CLAUDE, ProviderConfig, launch_env
+        _, unset = launch_env(ProviderConfig(name=BUILTIN_CLAUDE), {}, None)
+        env = {k: v for k, v in os.environ.items() if k not in unset}
+
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=self.cwd,
+            env=env,
         )
 
         proc.stdin.write(stdin_msg.encode() + b"\n")

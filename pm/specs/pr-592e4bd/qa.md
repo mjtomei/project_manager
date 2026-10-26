@@ -797,6 +797,33 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
   review loop c189 i3 ran with `CLAUDE_CODE_AUTO_MODE_MODEL=work/claude-sonnet-5`
   (`/pm-captures/review-c189-i3/session-env-models.txt`, model names only);
   that is launch env, not classifier traffic.
+- **RQ44** (user decision 2026-10-26, review loop c189 i6; impl.md R9)
+  Given a pm process (CLI or TUI) started inside a work-routed session,
+  so its environment holds the route's `ANTHROPIC_DEFAULT_*_MODEL` and
+  `ANTHROPIC_SMALL_FAST_MODEL` aliases, its subagent and classifier pins,
+  `PM_ROUTE_BASE_URL` and the route's `ANTHROPIC_BASE_URL`. When it
+  launches sessions, Then each one's environment comes from that
+  session's own selection:
+  - A main session with no model requests Claude's CLI default (not
+    `work/…`) for its main loop and its children.
+  - A main session with a plain model keeps its `--model`, and its Fable
+    and haiku switches and background calls request plain Claude models.
+  - A main session's auto-mode classifier stays unprefixed.
+  - None of these sessions carries the route's `ANTHROPIC_BASE_URL`, and
+    none reaches the router or relay.
+  - A routed session sets its own route's values, including
+    `PM_ROUTE_BASE_URL`, and leaves no other route's `work/` value
+    behind.
+  - A user's own `ANTHROPIC_BASE_URL` (one that is not a route's, such as
+    a QA main stub) and unrelated variables are kept.
+  This holds for TUI-launched panes, CLI launches, `--resume`, the
+  `claude -p` helpers, and host and container sessions. A main container
+  session's command removes the host route `ANTHROPIC_BASE_URL` and
+  `ANTHROPIC_SMALL_FAST_MODEL` that the container got by name. Review
+  evidence (host `claude -p` against local stubs, pm-built commands,
+  pre-fix vs post-fix):
+  `/pm-captures/review-c189-i6/live-inherited/`. That evidence does not
+  include a live container run or interactive panes.
 
 ## 2. Setup
 
@@ -1265,6 +1292,18 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     Done: S59 INPUT_REQUIRED (RQ42 held on every path; fix ff65f489;
     classifier decision on pr-1071c5a), S60 NEEDS_WORK (RQ42 held; spec
     0e13c5f8 only), S61 NEEDS_WORK (fixes 3ee69236, 79b6ddd7).
+  - Twenty-fifth pass (S62+), delta-only, for review loop c189 i6
+    (impl.md R9, RQ44: launch environment built from pm's selection; user
+    decision 2026-10-26). S62: start the TUI (`pm session`) from a shell
+    holding a work-routed launch's exported env. Then start a no-model PR,
+    a plain-model PR and a routed PR, each with impl, review and QA. Do
+    this in host mode and in container mode, with a main stub on the
+    user's own `ANTHROPIC_BASE_URL` and the work route behind a
+    work/-only relay. Record each pane's environ, using variable names
+    and models only. Record the requested models of the main loop,
+    children, Fable/haiku switches, background calls and classifier
+    calls. Include one `--resume`. A pre-fix control on ee82dc0c shows
+    the leak.
 
 ## 3. Edge cases
 

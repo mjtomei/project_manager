@@ -89,9 +89,13 @@ class TestBuildClaudeShellCmd:
     def test_basic_prompt(self, mock_sp, mock_log):
         result = build_claude_shell_cmd(prompt="hello world")
         # No model selected: an inherited subagent pin is dropped.
-        assert result == ("env -u CLAUDE_CODE_AUTO_MODE_MODEL "
-                          "-u CLAUDE_CODE_SUBAGENT_MODEL "
-                          "-u CLAUDE_CODE_SUBAGENT_MODEL_FORCE claude 'hello world'")
+        assert result == ("env -u ANTHROPIC_DEFAULT_OPUS_MODEL "
+                          "-u ANTHROPIC_DEFAULT_SONNET_MODEL "
+                          "-u ANTHROPIC_DEFAULT_HAIKU_MODEL "
+                          "-u ANTHROPIC_DEFAULT_FABLE_MODEL "
+                          "-u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_SUBAGENT_MODEL "
+                          "-u CLAUDE_CODE_SUBAGENT_MODEL_FORCE "
+                          "-u CLAUDE_CODE_AUTO_MODE_MODEL -u PM_ROUTE_BASE_URL claude 'hello world'")
 
     @patch("pm_core.claude_launcher.log_shell_command")
     @patch("pm_core.paths.skip_permissions_enabled", return_value=True)
@@ -123,9 +127,13 @@ class TestBuildClaudeShellCmd:
     @patch("pm_core.paths.skip_permissions_enabled", return_value=False)
     def test_no_prompt_no_session(self, mock_sp, mock_log):
         result = build_claude_shell_cmd()
-        assert result == ("env -u CLAUDE_CODE_AUTO_MODE_MODEL "
-                          "-u CLAUDE_CODE_SUBAGENT_MODEL "
-                          "-u CLAUDE_CODE_SUBAGENT_MODEL_FORCE claude")
+        assert result == ("env -u ANTHROPIC_DEFAULT_OPUS_MODEL "
+                          "-u ANTHROPIC_DEFAULT_SONNET_MODEL "
+                          "-u ANTHROPIC_DEFAULT_HAIKU_MODEL "
+                          "-u ANTHROPIC_DEFAULT_FABLE_MODEL "
+                          "-u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_SUBAGENT_MODEL "
+                          "-u CLAUDE_CODE_SUBAGENT_MODEL_FORCE "
+                          "-u CLAUDE_CODE_AUTO_MODE_MODEL -u PM_ROUTE_BASE_URL claude")
 
     @patch("pm_core.claude_launcher.log_shell_command")
     @patch("pm_core.paths.skip_permissions_enabled", return_value=False)
