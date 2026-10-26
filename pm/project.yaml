@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T02:52:39.651184+00:00'
+  updated_at: '2026-10-26T04:35:28.518206+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34113,6 +34113,40 @@ prs:
       (README). impl.md a5a3 i1 record.'
     created_at: '2026-10-26T03:07:08Z'
     last_edited: '2026-10-26T03:07:08Z'
+  - id: note-b214443
+    text: 'S65 refine (RQ46/3e9f6b19): the planner, verifier and finalizer stay fake-claude
+      (S64 harness), so the "planner reaches the main stub" check is now "s0 reaches
+      the main stub". The fake planner still goes through the strict get_provider
+      before its fake check. Risk for the sign-off qa hop story: _cleanup_stale_scenario_windows
+      keeps the main qa-<id> window after a run, and only the driver closes it. After
+      the refused hop tick the PR is status=qa with an old qa_status (older than signoff_return.ts)
+      and the old qa-<id> window still open. The next tick then takes the "qa window
+      exists -> running: qa" branch and never relaunches. No unit test covers it (test_worker_route
+      3e9f6b19 has no hop or window case). If S65 sees the post-fix hop tick print
+      "running: qa" with no driver, it is a real defect, not a harness issue.'
+    created_at: '2026-10-26T03:40:37Z'
+    last_edited: '2026-10-26T03:40:37Z'
+  - id: note-f4dd8d3
+    text: 'QA S65 (2026-10-26, RQ46 host, stubs; captures /pm-captures/scenarios/65,
+      REPORT.md): 3e9f6b19 held live for the review-PASS and no-status qa sites, every
+      gate-less role and failure form (B nosuch s0, C invalid api_base/routr, D tab/chmod
+      000 never "not configured"), with model show/provider list agreeing and one
+      launch per fix; the router-down E/F runs were not refused and recovered by themselves;
+      the 9d046874 control reproduced (advanced: qa / running: qa (launched), driver
+      dies, QA crashed+Traceback only in the pm log). CODE CHANGE 72614e5d needs normal
+      re-review: the sign-off qa hop tick refused by the provider check had already
+      applied the hop (qa, awaiting qa), and the judged run qa-<pr> window satisfied
+      the "window exists -> running: qa" guard, so QA never relaunched after the fix
+      (live, 3 ticks). Now while awaiting == qa the qa tick launches over that window,
+      claiming claim_return_launch(qa) only after the provider check; the hop tick
+      claims too. 2 regressions, 4 mutations caught; suite 3855 passed (pytest 8.4.2;
+      pytest 9 double-counts caplog in 6 pre-existing tests). Failed Then (pre-existing,
+      filed pr-05543f0): qa-run-bg never writes a QA note (pm pr show does not exist;
+      note list empty). Observation: on the detached path the route-wait remedy is
+      only in the pm log (not qa_status/status pane). Open point (a) at the review-PASS
+      site (stale earlier qa_status/window after a refused tick) not exercised; S66/S67.'
+    created_at: '2026-10-26T04:35:28Z'
+    last_edited: '2026-10-26T04:35:28Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -34870,3 +34904,27 @@ prs:
       this PR can be closed once that lands.'
     created_at: '2026-10-25T22:00:22Z'
     last_edited: '2026-10-25T22:00:22Z'
+- id: pr-05543f0
+  plan: bugs
+  title: 'Bug: auto-sequence QA runs (pm pr qa-run-bg) never record a QA result note
+    on the PR'
+  branch: pm/pr-05543f0-bug-auto-sequence-qa-runs-pm-pr-qa-run-bg-never-re
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py pr_qa_run_bg (the detached driver pm pr
+    auto-sequence spawns); QA notes are written only by the TUI completion path (pm_core/tui/qa_loop_ui.py
+    _record_qa_note). Repro (QA S65 pr-592e4bd, host, fake planner/verifier/finalizer):
+    drive a PR with pm pr auto-sequence ticks through review PASS -> qa -> run ends
+    overall PASS (finalize=FINALIZE_DONE) -> advanced: sign_off; pm pr note list <pr>
+    prints "No notes on <pr>." The TUI t path records one QA note per run. Same on
+    origin/master. Later sessions (sign-off, review after NEEDS_WORK) therefore get
+    no QA result in ## PR Notes for auto-sequence-driven PRs.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T04:26:43.144125+00:00'
+  updated_at: '2026-10-26T04:26:43.144125+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
