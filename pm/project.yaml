@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-26T02:50:58.644044+00:00'
+  updated_at: '2026-10-26T03:12:42.258708+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -12556,6 +12556,27 @@ prs:
       sign-off remain required.'
     created_at: '2026-10-26T02:50:24Z'
     last_edited: '2026-10-26T02:50:58Z'
+  - id: note-f3da04a
+    text: 'Review-loop 6427 i25 (main and inherited core reviewer chatgpt/gpt-6-astra-high):
+      fixed stopped-allocation recreation ignoring live/unknown owners; automatic
+      cleanup errors lacking allocation IDs and following same-name replacements;
+      and explicit PR/session cleanup hiding partial failures. Bulk cleanup now persists
+      diagnostics through bounded serialized reaper state writes, preserves newer
+      failures against old inventories, and reports partial failures/nonzero CLI status
+      without granting force-release authority. Existing lifecycle architecture retained;
+      R5/R7 clarified. Before-fix assertions reproduced (4 diagnostic failures, 2
+      destructive stopped-owner failures plus owner-check control, 6 explicit cleanup
+      behavioral failures plus 2 new-API TypeErrors). Focused integration 639 passed;
+      final regressions 164 passed; full sanitized suite 3944 passed, 2 skipped, 5
+      existing-class warnings (3 AsyncMock, 2 Click). Source/spec/tests 9048f651 pushed.
+      Declared dependencies installed; stale stopped-container fixture mocks corrected
+      with failed logs preserved. Evidence and all per-file notes /pm-captures/review-6427-i25-per-file.md;
+      full log /pm-captures/review-6427-i25-full-suite-final.log. Existing project.yaml
+      routing/handoff/manual-gate edits preserved outside source commit. No real-container
+      QA claim or waiver; outstanding runtime scenarios and independent sign-off remain
+      required.'
+    created_at: '2026-10-26T03:12:42Z'
+    last_edited: '2026-10-26T03:12:42Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
