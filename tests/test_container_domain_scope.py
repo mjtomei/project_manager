@@ -140,6 +140,7 @@ def test_create_uses_one_successful_domain_probe(monkeypatch, tmp_path):
 
     _domain_probe(monkeypatch, probe)
     monkeypatch.setattr(cm, "_ensure_reusable", lambda *args, **kwargs: "cid")
+    monkeypatch.setattr(cm, "current_container_id", lambda _: "cid")
     monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
     identity = {}
     assert cm.create_container("pm-impl-pr-a", cm.ContainerConfig(), tmp_path,

@@ -76,4 +76,4 @@ def test_fresh_publication_cancellation_discards_allocation(tmp_path, monkeypatc
     monkeypatch.setattr(cm, "discard_container", discard)
     with pytest.raises(error):
         cm.create_container("pm-t-review-pr-aaaa", cm.ContainerConfig(), tmp_path)
-    discard.assert_called_once_with("pm-t-review-pr-aaaa")
+    discard.assert_called_once_with("pm-t-review-pr-aaaa", container_id="fresh-id")

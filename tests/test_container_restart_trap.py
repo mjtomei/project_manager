@@ -85,6 +85,7 @@ def test_restart_refuses_if_cleanup_generation_cannot_be_written(tmp_path, monke
     blocked = tmp_path / "not-a-directory"
     blocked.write_text("keep")
     monkeypatch.setenv("PM_CONTAINER_STATE_DIR", str(blocked))
+    monkeypatch.setattr(container, "current_container_id", lambda _: "exact-id")
     called = []
     monkeypatch.setattr(container, "_run_runtime", lambda *a, **k: called.append(a))
     with pytest.raises(container.ContainerError, match="Cannot protect"):

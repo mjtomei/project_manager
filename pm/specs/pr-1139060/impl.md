@@ -132,7 +132,9 @@ operations do not take PM's launch lock.
   release the allocation; failed pane discovery preserves live or unknown
   owners. Unexpected concretizer-poll exceptions use that same failed-launch
   path on host and container workers, rather than escaping the preparation
-  thread and synthesizing an INPUT_REQUIRED human-wait verdict.
+  thread and synthesizing an INPUT_REQUIRED human-wait verdict. Workdir clone
+  and instruction/artifact preparation failures also preserve their actual cause
+  as launch failures without an agent verdict on both host and container paths.
   A failed worker split releases its concretizer-only allocation unless
   retained or viewed, and is not polled as a worker. A missing split pane ID is
   not proof that the worker never attached: locked cleanup must confirm the
@@ -299,7 +301,12 @@ intact to protect concurrent waiters and delayed releases.
   proxy startup and pre-run setup-script preparation, so an already-started
   unshared proxy is not stranded before a container exists. Cancellation during
   final fresh-allocation generation/identity publication also discards that
-  allocation while its launch lock is held.
+  allocation while its launch lock is held. Once the allocation ID is captured,
+  setup/config writes, reuse probes, recovery, proxy-mount inspection and failed
+  setup cleanup target that immutable ID, never a same-name replacement. Ownership
+  publication refuses a changed or unknown name-to-ID mapping. Optional hook mounts
+  are not prerequisites for ownership repair: create the in-container ~/.pm directory
+  before its required chown, and propagate either command's failure.
 
 ### R6 — Real launch errors
 `ContainerLaunchError(ContainerError)` carries `kind`

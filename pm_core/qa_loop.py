@@ -513,6 +513,16 @@ def _record_launch_failure(state: QALoopState, scenario: QAScenario,
     state.scenario_verdict_reasons[scenario.index] = LAUNCH_FAILED_PREFIX + detail
 
 
+def _run_scenario_preparation(state: QALoopState, scenario: QAScenario,
+                              prepare: Callable[[QAScenario], None]) -> None:
+    """Keep preparation-thread errors on the same path as failed worker launches."""
+    try:
+        prepare(scenario)
+    except Exception as exc:
+        _log.exception("Failed to prepare scenario %d", scenario.index)
+        _record_launch_failure(state, scenario, exc)
+
+
 def _is_launch_failure(state: QALoopState, index: int) -> bool:
     return (state.scenario_verdict_reasons.get(index) or "").startswith(
         LAUNCH_FAILED_PREFIX)
@@ -2044,8 +2054,7 @@ def _launch_scenarios_in_tmux(
         except Exception as exc:
             _log.warning("Failed to create workdir for scenario %d, "
                          "skipping: %s", scenario.index, exc)
-            state.scenario_verdict_reasons[scenario.index] = (
-                f"workdir setup failed: {exc}")
+            _record_launch_failure(state, scenario, f"workdir setup failed: {exc}")
             return
         scenario.worktree_path = str(clone_path)
         if state.stop_requested:
@@ -2108,7 +2117,8 @@ def _launch_scenarios_in_tmux(
                             instruction_content))
 
     prep_threads = [
-        threading.Thread(target=_prepare_scenario, args=(sc,), daemon=True,
+        threading.Thread(target=_run_scenario_preparation,
+                         args=(state, sc, _prepare_scenario), daemon=True,
                          name=f"prepare-s{sc.index}")
         for sc in state.scenarios
     ]
@@ -2285,8 +2295,7 @@ def _launch_scenarios_in_containers(
         except Exception as exc:
             _log.warning("Failed to create workdir for scenario %d, "
                          "skipping: %s", scenario.index, exc)
-            state.scenario_verdict_reasons[scenario.index] = (
-                f"workdir setup failed: {exc}")
+            _record_launch_failure(state, scenario, f"workdir setup failed: {exc}")
             return
         scenario.worktree_path = str(clone_path)
         if state.stop_requested:
@@ -2384,7 +2393,8 @@ def _launch_scenarios_in_containers(
                             clone_path, instruction_content))
 
     prep_threads = [
-        threading.Thread(target=_prepare_scenario, args=(sc,), daemon=True,
+        threading.Thread(target=_run_scenario_preparation,
+                         args=(state, sc, _prepare_scenario), daemon=True,
                          name=f"prepare-s{sc.index}")
         for sc in state.scenarios
     ]

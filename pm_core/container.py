@@ -1154,7 +1154,7 @@ def create_container(
                 if allocation_identity is not None:
                     allocation_identity.update(id=container_id, generation=cleanup_generation(name))
             except BaseException:
-                discard_container(name)
+                discard_container(name, container_id=container_id)
                 raise
             return container_id
 
@@ -1273,6 +1273,10 @@ def _renew_launch(name: str, container_id: str = "") -> None:
     Called under the launch lock after successful create/reuse. Previous EXIT
     releases must not authorize deletion of this new ownership epoch.
     """
+    if container_id and current_container_id(name) != container_id:
+        raise launch_error(name, "runtime",
+                           "container identity changed during setup; retry the launch",
+                           stage="record launch ownership")
     try:
         marker = _restart_generation_path(name, for_write=True)
         marker.parent.mkdir(parents=True, exist_ok=True)
@@ -1310,7 +1314,7 @@ def recent_launch(name: str, grace: float, container_id: str | None = None) -> b
 
 
 @_runtime_domain_operation
-def restart_container(name: str) -> None:
+def restart_container(name: str, *, container_id: str | None = None) -> None:
     """Restart *name* in place: ends every process inside (clearing PID or
     memory exhaustion) but keeps the container's filesystem, id and mounts.
 
@@ -1322,13 +1326,14 @@ def restart_container(name: str) -> None:
     # not remove the very filesystem this recovery is meant to preserve.
     # Keep the new generation after restart: an old trap can arrive much later.
     try:
+        current = current_container_id(name)
+        if not current or container_id is not None and current != container_id:
+            raise OSError("container identity unavailable or changed before restart")
+        container_id = current
         marker = _restart_generation_path(name, for_write=True)
         marker.parent.mkdir(parents=True, exist_ok=True)
         generation = uuid.uuid4().hex
         marker.write_text(generation)
-        container_id = current_container_id(name)
-        if not container_id:
-            raise OSError("container identity unavailable before restart")
         _write_identity_generation(container_id, generation)
     except OSError as exc:
         raise ContainerError(f"Cannot protect '{name}' from EXIT cleanup during restart: {exc}") from exc
@@ -1448,7 +1453,7 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
         raise launch_error(name, "runtime", "existing container identity unavailable",
                            stage="be reused")
 
-    complete, wedged, probe_err = _probe_setup(name)
+    complete, wedged, probe_err = _probe_setup(container_id)
     retained = container_reaper.is_retained(name, container_id)
     if retained and wedged in ("pids", "memory"):
         raise launch_error(name, wedged, f"{probe_err}\nContainer is explicitly retained; restart it explicitly.",
@@ -1471,7 +1476,7 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
         _log.warning("Container %s is exhausted (%s) and unowned — restarting "
                      "it in place", name, wedged)
         try:
-            restart_container(name)
+            restart_container(name, container_id=container_id)
             complete = True
         except ContainerError:
             _log.warning("Restart of %s failed — preserving its filesystem", name, exc_info=True)
@@ -1483,11 +1488,11 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
     if not complete:
         _log.warning("Container %s is running but its setup never completed", name)
         finished = False
-        base = _run_runtime("exec", name, "test", "-f", _READY_SENTINEL,
+        base = _run_runtime("exec", container_id, "test", "-f", _READY_SENTINEL,
                             check=False, timeout=10)
         if base.returncode == 0:
-            _post_setup(name, workdir, "podman" in _get_runtime())
-            finished = _setup_complete(name)
+            _post_setup(container_id, workdir, "podman" in _get_runtime())
+            finished = _setup_complete(container_id)
         elif base.returncode != 1 or (base.stderr or "").strip():
             raise launch_error(name, "runtime", (base.stderr or "").strip()
                                or f"readiness probe exited {base.returncode}",
@@ -1502,7 +1507,7 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
                     "container setup is incomplete and a live pane still uses it",
                     stage="be reused")
             _log.warning("Removing incomplete container %s before recreating", name)
-            remove_container(name)
+            remove_container(name, container_id=container_id)
             return None
         _log.info("Finished incomplete setup of container %s in place", name)
 
@@ -1521,12 +1526,12 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
             # when a healthy socket already exists. Serialize dead-socket repair.
             if session_tag and pr_id:
                 from pm_core.push_proxy import validate_shared_proxy_mount
-                validate_shared_proxy_mount(name, session_tag, pr_id)
+                validate_shared_proxy_mount(container_id, session_tag, pr_id)
                 sock = start_push_proxy(name, str(workdir), allowed_push_branch,
                                         session_tag=session_tag, pr_id=pr_id)
             else:
                 from pm_core.push_proxy import repair_unshared_proxy
-                sock = repair_unshared_proxy(name, str(workdir), allowed_push_branch)
+                sock = repair_unshared_proxy(container_id, str(workdir), allowed_push_branch)
             if not proxy_is_alive(sock):
                 raise launch_error(name, "proxy",
                                    f"push proxy at {sock} is not accepting connections",
@@ -1844,8 +1849,8 @@ def _create_fresh(
     container_id = result.stdout.strip()
 
     try:
-        _wait_for_setup(name)
-        _post_setup(name, workdir, _is_podman)
+        _wait_for_setup(container_id)
+        _post_setup(container_id, workdir, _is_podman)
         if allowed_push_branch:
             from pm_core.push_proxy import proxy_is_alive
             if not proxy_is_alive(sock_path):
@@ -1855,7 +1860,7 @@ def _create_fresh(
     except BaseException:
         _log.error("Container %s setup failed — removing the partial container",
                    name, exc_info=True)
-        discard_container(name)
+        discard_container(name, container_id=container_id)
         raise
 
     _log.info("Created container %s (id=%s)", name, container_id[:12])
@@ -1938,13 +1943,17 @@ def _post_setup(name: str, workdir: Path, is_podman: bool) -> None:
         exec_args = ["exec"]
         if is_podman:
             exec_args.extend(["--user", "0"])
-        exec_args.extend([
-            name, "chown", f"{host_uid}:{host_gid}",
-            f"{_CONTAINER_HOME}/.pm",
-        ])
-        ownership = _run_runtime(*exec_args, timeout=5, check=False)
+        # The hooks bind mount is optional; without it the runtime may not
+        # have created this parent directory at all.
+        ownership = _run_runtime(
+            *exec_args, name, "mkdir", "-p", f"{_CONTAINER_HOME}/.pm",
+            timeout=5, check=False)
+        if ownership.returncode == 0:
+            ownership = _run_runtime(
+                *exec_args, name, "chown", f"{host_uid}:{host_gid}",
+                f"{_CONTAINER_HOME}/.pm", timeout=5, check=False)
     except subprocess.TimeoutExpired as exc:
-        raise launch_error(name, "timeout", "chown of ~/.pm timed out",
+        raise launch_error(name, "timeout", "creating ~/.pm or repairing its ownership timed out",
                            stage="repair ~/.pm ownership") from exc
     except OSError as exc:
         raise launch_error(name, "runtime", str(exc),
@@ -1952,7 +1961,7 @@ def _post_setup(name: str, workdir: Path, is_podman: bool) -> None:
     if ownership.returncode != 0:
         stderr = (ownership.stderr or "").strip()
         raise launch_error(name, classify_runtime_error(stderr),
-                           stderr or "chown of ~/.pm failed",
+                           stderr or "creating ~/.pm or repairing its ownership failed",
                            stage="repair ~/.pm ownership")
 
     # Copy .claude.json into the container (not bind-mounted — see note above)
@@ -2026,13 +2035,16 @@ def _discard_on_failure(name: str):
         raise
 
 
-def discard_container(name: str) -> None:
+def discard_container(name: str, *, container_id: str | None = None) -> None:
     """Best-effort removal of a container whose launch failed or was abandoned
     before a pane attached to it (never raises)."""
     if not name:
         return
     try:
-        remove_container(name)
+        if container_id is None:
+            remove_container(name)
+        else:
+            remove_container(name, container_id=container_id)
     except Exception:
         _log.warning("Could not remove container %s", name, exc_info=True)
 
@@ -2279,7 +2291,7 @@ def remove_container(name: str, *, container_id: str | None = None) -> bool:
     _log.info("remove_container: name=%s", name)
     target = container_id or name
     proxy = capture_unshared_proxy(target)
-    pending = defer_unshared_release(proxy, name) if proxy else None
+    pending = defer_unshared_release(proxy, target) if proxy else None
     _run_runtime("rm", "-f", target, check=False, timeout=30)
     # Wait for the container to be fully gone.  When another rm is already in
     # flight the daemon returns "removal already in progress" and our rm returns

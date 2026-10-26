@@ -608,12 +608,11 @@ def live_owner_panes(name: str, container_id: str = "", *, strict: bool = False)
     """
     if not strict and container_mod.activity_owner(name):
         return ["interactive client"]
-    found = _inspect([name], timeout=10)
+    found = _inspect([container_id or name], timeout=10)
     if not found:
         raise container_mod.ContainerError(
             f"Container '{name}' ownership unknown: could not inspect ownership metadata")
     info = found[0]
-    info.id = container_id or info.id
     if info.session_tag is None:
         parsed = container_mod.parse_container_name(name)
         if parsed:

@@ -146,6 +146,7 @@ def test_session_proxy_cleanup_preserves_unknown_or_foreign_domain(monkeypatch, 
 @pytest.mark.parametrize("legacy", [False, True])
 def test_owner_release_follows_renamed_allocation(monkeypatch, legacy):
     old, new, cid = "pm-qa-pr-1234-loop-s1", "renamed-worker", "original-id"
+    monkeypatch.setattr(cm, "current_container_id", lambda _: cid)
     cm._renew_launch(old, "" if legacy else cid)
     generation = cm.cleanup_generation(old)
     info = reaper.ContainerInfo(new, id=cid, running=True, created=0)
@@ -176,6 +177,7 @@ def test_owner_release_follows_renamed_allocation(monkeypatch, legacy):
 def test_renamed_restart_invalidates_original_release(monkeypatch, legacy):
     import subprocess
     old, new, cid = "pm-qa-pr-1234-loop-s1", "renamed-worker", "original-id"
+    monkeypatch.setattr(cm, "current_container_id", lambda _: cid)
     cm._renew_launch(old, "" if legacy else cid)
     original = cm.cleanup_generation(old)
     reaper._record_release(old, cid, original, "finished")
@@ -202,9 +204,11 @@ def test_renamed_restart_invalidates_original_release(monkeypatch, legacy):
 
 def test_renamed_release_does_not_authorize_original_name_replacement(monkeypatch):
     old, new, cid = "pm-qa-pr-1234-loop-s1", "renamed-worker", "original-id"
+    monkeypatch.setattr(cm, "current_container_id", lambda _: cid)
     cm._renew_launch(old, cid)
     generation = cm.cleanup_generation(old)
     reaper._record_release(old, cid, generation, "finished")
+    monkeypatch.setattr(cm, "current_container_id", lambda _: "replacement-id")
     cm._renew_launch(old, "replacement-id")
     monkeypatch.setattr(reaper, "list_containers", lambda: [
         reaper.ContainerInfo(old, id="replacement-id", running=True),
@@ -219,6 +223,7 @@ def test_renamed_release_does_not_authorize_original_name_replacement(monkeypatc
 
 def test_identity_generation_isolated_across_runtime_domains(monkeypatch):
     name, cid = "pm-review-pr-1234", "cloned-id"
+    monkeypatch.setattr(cm, "current_container_id", lambda _: cid)
     domain = {"id": "first"}
     monkeypatch.setattr(reaper, "_runtime_domain", lambda: dict(domain))
     cm._renew_launch(name, cid)

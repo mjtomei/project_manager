@@ -49,6 +49,7 @@ def test_marker_write_waits_for_removal_lock(monkeypatch):
 
 def test_reuse_invalidates_old_release_and_protects_attach_gap(monkeypatch):
     reaper._record_release(NAME, "cid", "", "old-owner")
+    monkeypatch.setattr(cm, "current_container_id", lambda n: "cid")
     monkeypatch.setattr(cm, "_ensure_reusable", lambda *a, **kw: "cid")
     monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
     assert cm.create_container(NAME, cm.ContainerConfig(), Path("/w")) == "cid"

@@ -115,6 +115,46 @@ def test_concretizer_launch_failure_keeps_real_error(scenario_state, monkeypatch
         discard.assert_not_called()
 
 
+@pytest.mark.parametrize("failure", ["clone", "instruction", "artifact"])
+@pytest.mark.parametrize("containers", [True, False])
+def test_preparation_failure_keeps_real_error_without_verdict(
+        scenario_state, monkeypatch, failure, containers):
+    state, scenario = scenario_state
+    scenario.window_name = None
+    scenario.container_name = None
+    clone = Path(scenario.worktree_path)
+    prepare = MagicMock(return_value=(clone, clone.parent / "scratch"))
+    instruction = MagicMock()
+    artifact = MagicMock()
+    scenario.instruction_path = "instructions/check.md"
+    scenario.artifact_paths = ["artifacts/capture.md"]
+    error = OSError(f"{failure} disk full")
+    {"clone": prepare, "instruction": instruction, "artifact": artifact}[failure].side_effect = error
+    monkeypatch.setattr(qa_loop, "create_scenario_workdir", prepare)
+    monkeypatch.setattr(qa_loop, "_install_instruction_file", instruction)
+    monkeypatch.setattr(qa_loop, "_install_artifact_files", artifact)
+    window = MagicMock()
+    create = MagicMock()
+    monkeypatch.setattr(tmux, "new_window_get_pane", window)
+    monkeypatch.setattr(container, "create_qa_container", create)
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+
+    launch = (qa_loop._launch_scenarios_in_containers if containers
+              else qa_loop._launch_scenarios_in_tmux)
+    launch(state, {}, {"id": state.pr_id}, "pm-t", None, str(clone),
+           pm_root=Path(state.qa_workdir))
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {"id": state.pr_id}, "pm-t", str(clone),
+        Path(state.qa_workdir) / "status.json", lambda: None)
+
+    assert qa_loop._is_launch_failure(state, 1)
+    assert f"{failure} disk full" in state.scenario_verdict_reasons[1]
+    assert not state.scenario_verdicts
+    window.assert_not_called()
+    create.assert_not_called()
+
+
 @pytest.mark.parametrize("viewed", [{"@5"}, {"@other"}, set()])
 def test_pre_worker_status_failure_preserves_viewed_concretizer(
         scenario_state, monkeypatch, viewed):

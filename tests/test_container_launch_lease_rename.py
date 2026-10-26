@@ -18,8 +18,8 @@ CID = "allocation-id"
 
 @pytest.fixture
 def renamed(monkeypatch):
-    cm._renew_launch(OLD, CID)
     monkeypatch.setattr(cm, "current_container_id", lambda name: CID)
+    cm._renew_launch(OLD, CID)
     monkeypatch.setattr(reaper, "_owner_panes", lambda *a, **kw: ([], False))
     monkeypatch.setattr(reaper, "live_owner_panes", lambda *a, **kw: [])
     return reaper.ContainerInfo(name=NEW, id=CID, created=time.time() - 1000)
