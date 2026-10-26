@@ -40,10 +40,14 @@ from pathlib import Path
 from pm_core import store
 from pm_core import tmux as tmux_mod
 from pm_core import prompt_gen
+from pm_core import integration
 from pm_core.cli.helpers import (
     _log,
     _pr_display_id,
     _record_status_timestamp,
+)
+from pm_core.prompt_bounds import (
+    INTEGRATION_LIST_BUDGET, INTEGRATION_MAX_PATHS, bounded_join,
 )
 
 # --- Routing verdicts ------------------------------------------------------
@@ -707,6 +711,14 @@ def build_return_record(pr: dict, verdict: str, hop: str, *,
         integ = {k: rec.get(k) for k in (
             "target_repo", "base_branch", "base_sha", "merge_base", "status",
             "conflicts", "overlap", "error")}
+        # ``compact`` caps each list at _YAML_LIST_LIMIT and records the real
+        # length separately; the return block's omission marker reports how
+        # many paths of the record are not shown, so carry the totals too.
+        # Absent on a legacy/hand-written record — the marker then falls back
+        # to its list-relative count.
+        for key in ("conflicts_total", "overlap_total"):
+            if rec.get(key) is not None:
+                integ[key] = rec[key]
     now = datetime.now(timezone.utc).isoformat()
     out = {
         "verdict": verdict, "hop": hop,
@@ -843,12 +855,40 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 f"`{(integ.get('base_sha') or '?')[:12]}` from "
                 f"`{integ.get('target_repo')}`")
         lines.append(f"Integration with {base}: **{integ.get('status')}**.")
+        # Built lazily: the marker is only needed when a list is actually
+        # abbreviated.  (The pointer is runtime-resolved — it names
+        # `pm qa captures-path` / `pm pr show` rather than resolving a path —
+        # so this no longer touches the filesystem, but the note is still
+        # only useful when something was dropped.)
+        # No leading space in the marker: bounded_join appends it after
+        # ``separator`` (", "), so one here would render as a double space.
+        # The count is the *record's* remainder: project.yaml stores at most
+        # _YAML_LIST_LIMIT paths and keeps the real total beside them, so a
+        # 200-path record must not read as "(+20 more)".
+        def _integ_note(vals: list, total):
+            def note(n: int) -> str:
+                omitted = integration.omitted_path_count(vals, total, n)
+                return (f"(+{omitted} more; "
+                        f"{integration.integration_pointer(pr.get('id', '???'))})")
+            return note
+
+        # Byte-bounded as well as count-capped: the lines are filesystem
+        # paths, so 20 long ones blow the argv budget on their own (this
+        # block feeds the impl / review / QA-planner prompts).
         if integ.get("conflicts"):
-            lines.append("Conflicting paths: "
-                         + ", ".join(f"`{c}`" for c in integ["conflicts"]))
+            vals = integ["conflicts"]
+            lines.append("Conflicting paths: " + bounded_join(
+                vals, lambda c: f"`{c}`",
+                max_items=INTEGRATION_MAX_PATHS,
+                max_bytes=INTEGRATION_LIST_BUDGET, separator=", ",
+                omitted_note=_integ_note(vals, integ.get("conflicts_total"))))
         if integ.get("overlap"):
-            lines.append("Changed on both sides: "
-                         + ", ".join(f"`{c}`" for c in integ["overlap"]))
+            vals = integ["overlap"]
+            lines.append("Changed on both sides: " + bounded_join(
+                vals, lambda c: f"`{c}`",
+                max_items=INTEGRATION_MAX_PATHS,
+                max_bytes=INTEGRATION_LIST_BUDGET, separator=", ",
+                omitted_note=_integ_note(vals, integ.get("overlap_total"))))
     applied = rec.get("applied") or {}
     if applied.get("merge_sha"):
         lines.append(
