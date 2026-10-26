@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T16:57:00.928438+00:00'
+  updated_at: '2026-10-26T17:44:43.539883+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33138,6 +33138,39 @@ prs:
       (2026-10-26T16:35:00Z)'
     created_at: '2026-10-26T16:57:00Z'
     last_edited: '2026-10-26T16:57:00Z'
+  - id: note-95869be
+    text: 'review-loop aa73 i2: closed the remaining malformed-state holes in the
+      resolution *list members* (i1 filtered non-mapping entries but still iterated
+      a hand-edited scalar) and hardened the apply/carry paths. (1) `resolution.paths`/`unresolved`
+      that is not a list (`paths: 5`) raised TypeError from every reader that iterated
+      it — the sign-off prompt, `format_signoff_return`, `effective_verdict`, `merge_gate_refusal`,
+      `summary`, `unresolved_paths`, `compact` and `_apply_resolution` (the last inside
+      the driver bounce apply). New `integration.resolution_entries(resolution, key)`
+      is the single reader (non-list reads as absent, non-mapping entries skipped)
+      and every surface uses it; the "is this resolution unresolved?" checks keep
+      truthiness, so a malformed value still REFUSES a merge instead of becoming evidence
+      of a clean one. (2) `_compact_resolution` built the four per-entry id lists
+      with `list(x or [])[:20]` — `list(5)` raised, `list("abc")` became characters
+      — now `_as_list`; non-string `path`/`resolver`/`blob` read as absent. (3) `_carry_forward`
+      called `Path(resolution.diff_path)`; a non-string value made every later integration
+      check raise (the sign-off launch only said "Integration check failed"), so it
+      reads as absent and is dropped while the rest of the provenance is carried;
+      `write_resolution_delta` only writes a string diff. (4) the apply paths sliced
+      a non-string `candidate_tree` in their mismatch messages (now `revision_of`);
+      the CLI prints conflicts/overlap/ids only from a list. (5) `_prepare_bounce`
+      wraps its apply, recording an apply bug as the bounce `apply_error` instead
+      of taking the driver tick down (same contract as `prepare`). Tests: 2 new in
+      test_signoff_resolution.py (131 focused; both mutation-checked — they fail on
+      the pre-fix HEAD). Full suite 3500 passed, 1 skipped, 1 pre-existing env failure
+      (test_hook_events installer fails on an origin/master worktree too — verified
+      this iteration); the venv markdown dep was installed, so the 12 markdown-module
+      failures i1 reported now pass. Spec R5/R9 synced. Evidence: /pm-captures/review-aa73-i2/.
+      MERGE RISK unchanged: branch behind origin/master (211a6128); `_signoff_integration_block`
+      changed on both sides — keep both the PR resolution/candidate/applied rendering
+      AND master bounded lists (bounded_join + omitted_path_count + integration_pointer);
+      do not take this branch block wholesale. (2026-10-26T17:40:00Z)'
+    created_at: '2026-10-26T17:44:43Z'
+    last_edited: '2026-10-26T17:44:43Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
