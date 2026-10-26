@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T09:24:14.467047+00:00'
+  updated_at: '2026-10-26T10:18:14.540403+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32896,6 +32896,21 @@ prs:
       1 known hook-receiver env failure deselected).'
     created_at: '2026-10-26T09:24:14Z'
     last_edited: '2026-10-26T09:24:14Z'
+  - id: note-fecdd07
+    text: 'QA scenario 10 (hostile project.yaml) concretization context: (1) integration
+      checks need real git first on PATH — put /usr/bin before /home/pm/.local/bin,
+      or the push-proxy wrapper makes `git fetch <project>` fail and the check records
+      status: error / base_sha: null. (2) A failed metadata resolution is authoritative
+      in the summary (`CONFLICTS ... (metadata resolution not possible)`), the `unresolved:`
+      stderr line, and the recorded `status: conflict` with no diff_path; the CLI
+      still prints a per-path `resolved: <path> (by record id)` line for the failed
+      attempt — do not read that line as a resolution. (3) `pm pr signoff record`
+      refuses a SIGNOFF_MERGE report on a conflicted check (no coercion at that surface);
+      `pm pr merge` then refuses with no verdict. (4) Use `pm qa captures-path <pr>`
+      to locate report.html/integration.json; the test PR is not PM_CAPTURES_PR, so
+      it returns the host path.'
+    created_at: '2026-10-26T10:18:14Z'
+    last_edited: '2026-10-26T10:18:14Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
