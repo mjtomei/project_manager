@@ -1763,6 +1763,28 @@ def test_nested_duplicate_ids_are_ambiguous():
     assert any("duplicate record id" in c for c in details["conflicts"])
 
 
+def test_nested_duplicate_ids_are_refused_even_when_taken_wholesale():
+    """A nested duplicate is refused even when the list is not merged.
+
+    Both sides carrying the same duplicated note id, or one side adding such
+    a list unchanged, would otherwise carry the ambiguity into the merged
+    document unnoticed.  It must be refused like a top-level duplicate.
+    """
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+    dup = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+           "  notes:\n  - id: note-1\n    text: a\n"
+           "  - id: note-1\n    text: a\n")
+    # Identical on both sides; the file only conflicts on an unrelated PR.
+    merged, details = integration.resolve_project_yaml(
+        base, dup, dup + "- id: pr-9\n  status: pending\n")
+    assert merged is None
+    assert any("duplicate record id" in c for c in details["conflicts"])
+    # Added by one side only (the other side has no notes).
+    merged, details = integration.resolve_project_yaml(base, dup, base)
+    assert merged is None
+    assert any("duplicate record id" in c for c in details["conflicts"])
+
+
 @pytest.mark.parametrize("base,ours,theirs,needle", [
     # A status that is a list/dict cannot be a set member: it must read as an
     # invalid status, not raise (the resolver's contract is a refusal).

@@ -358,21 +358,36 @@ def _is_id_list(value) -> bool:
 
 
 def _duplicate_id_problems(data, label: str) -> list[str]:
-    """A document whose id-keyed list repeats an id is ambiguous."""
-    if not isinstance(data, dict):
-        return []
+    """Every id-keyed list that repeats an id is ambiguous.
+
+    This walks nested lists too: a duplicate note id inside a PR record is
+    exactly as ambiguous as a duplicate top-level record id, and taking such
+    a list wholesale (identical on both sides, or added by one side) would
+    otherwise carry the ambiguity into the merged document unnoticed.
+    """
     problems: list[str] = []
-    for path, value in data.items():
-        if not _is_id_list(value):
-            continue
-        seen: set = set()
-        for entry in value:
-            rec_id = entry["id"]
-            if rec_id in seen:
-                problems.append(
-                    f"{path}: duplicate record id {rec_id!r} on the {label} "
-                    "side (ambiguous)")
-            seen.add(rec_id)
+
+    def walk(value, path: str) -> None:
+        if isinstance(value, list):
+            if _is_id_list(value):
+                seen: set = set()
+                for entry in value:
+                    rec_id = entry["id"]
+                    if rec_id in seen:
+                        problems.append(
+                            f"{path}: duplicate record id {rec_id!r} on the "
+                            f"{label} side (ambiguous)")
+                    seen.add(rec_id)
+                for entry in value:
+                    walk(entry, f"{path}[{entry['id']}]")
+            else:
+                for index, entry in enumerate(value):
+                    walk(entry, f"{path}[{index}]")
+        elif isinstance(value, dict):
+            for key, child in value.items():
+                walk(child, f"{path}.{key}" if path else str(key))
+
+    walk(data, "")
     return problems
 
 

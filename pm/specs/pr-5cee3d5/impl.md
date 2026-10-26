@@ -38,7 +38,9 @@ theirs_text)`:
   by field; a field changed differently on both sides is a conflict; a record
   deleted on one side and edited on the other is a conflict; the same id added
   independently on both sides with different content is an ambiguous record
-  and a conflict; duplicate ids within one side are ambiguous and a conflict.
+  and a conflict; duplicate ids within one side are ambiguous and a conflict —
+  including inside a nested list (e.g. two notes with one id), even when that
+  list is taken wholesale because the other side did not touch it.
   Ordering changes are preserved when only one side reordered; conflicting
   reorders are a conflict. A list absent from the merge base (a PR record
   that never had a `notes` key) merges like an empty one — independent
