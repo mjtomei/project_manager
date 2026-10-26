@@ -12444,6 +12444,25 @@ prs:
       outstanding runtime scenarios and independent sign-off remain required.'
     created_at: '2026-10-26T00:33:07Z'
     last_edited: '2026-10-26T00:33:07Z'
+  - id: note-214fcd3
+    text: 'Review-loop 6427 i19 (main and inherited read-only reviewer chatgpt/gpt-6-astra-high):
+      fixed cancellation during dead-worker retry allocation/command preparation,
+      shared reuse accepting an unrelated or missing proxy mount, new unknown-domain
+      proxy ownership being treated as legacy permission, and session teardown prefix
+      matching another session/missing renamed allocations. Reused existing lock/identity/reaper
+      architecture and extracted shared mount inspection; spec clarified. Pre-fix
+      regressions: QA 3 failures; core 8 failures/8 controls passed. Fixed QA 56 passed/2
+      inapplicable host-create skips; focused lifecycle/proxy/launchers 642 passed.
+      Final sanitized full suite 3817 passed, 2 skipped, 5 existing-class warnings
+      (3 AsyncMock, 2 Click). Declared dependencies installed. Source commit 813e91b9
+      pushed. Evidence and all per-file notes: /pm-captures/review-6427-i19-per-file.md;
+      full suite /pm-captures/review-6427-i19-full-suite-final.log. Session-prefix
+      defect also existed on master; now fixed in this lifecycle scope. Existing project.yaml
+      model/handoff/manual-gate edits preserved outside source commit. No real-container
+      QA claim or waiver; outstanding runtime scenarios and independent sign-off remain
+      required.'
+    created_at: '2026-10-26T00:54:53Z'
+    last_edited: '2026-10-26T00:54:53Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
