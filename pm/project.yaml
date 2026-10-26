@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T02:45:45.876680+00:00'
+  updated_at: '2026-10-26T02:52:39.651184+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34078,6 +34078,25 @@ prs:
       routing).'
     created_at: '2026-10-26T02:45:45Z'
     last_edited: '2026-10-26T02:45:45Z'
+  - id: note-df06706
+    text: 'QA S64 (2026-10-26, RQ45 host, stubs; captures /pm-captures/scenarios/64,
+      REPORT.md): every RQ45 Then held live on 09a23249: junk entries never break
+      launches; an invalid selected claude-work entry (api_base 8790, type routr)
+      gives one Error: line rc 1 for impl/review/sign-off, the refiner gate waits
+      and launches by itself 12-13 s after the fix, model show INVALID ENTRY, provider
+      test rc 1; five unreadable states (tab, list, providers list, directory, chmod
+      000) refuse add/remove/default byte-identical and say "cannot be looked up",
+      never "not configured"; race of 40 provider add/default over live QA/impl/review:
+      80/80 rc 0, 303 concurrent reads, no mid-write read or lost update. CODE CHANGE
+      bad02547 needs normal re-review: a QA run stopped by a provider setup error
+      showed QA stopped on the TUI but logged "QA background thread crashed" with
+      a Traceback in the pm log; now one WARNING line (other crashes keep the traceback);
+      mutation-checked, full suite 3839 passed. Spec note (qa.md): for a non-Claude
+      router with no pin, Claude 2.1.310 sent its classifier request on the route
+      model ds/deepseek-v4 (pm pins the sonnet alias), not claude-sonnet-5 as predicted;
+      touch in the project needed no classifier, a curl POST did.'
+    created_at: '2026-10-26T02:52:39Z'
+    last_edited: '2026-10-26T02:52:39Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs

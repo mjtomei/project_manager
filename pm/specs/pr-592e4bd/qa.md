@@ -1384,7 +1384,7 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     `touch` in the project was allowed without a classifier call; a curl
     POST was classified. Also S64: a QA run stopped by a provider setup
     error (`QA stopped: …`) logged "QA background thread crashed" with a
-    traceback in the pm log; it is one warning line now (03ebfb4a).
+    traceback in the pm log; it is one warning line now (bad02547).
 
 ## 3. Edge cases
 
