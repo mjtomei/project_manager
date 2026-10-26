@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T15:14:43.849059+00:00'
+  updated_at: '2026-10-26T15:31:42.237477+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16328,6 +16328,32 @@ prs:
       overrides and verify-s15-followup.md preserved.'
     created_at: '2026-10-26T15:14:43Z'
     last_edited: '2026-10-26T15:14:43Z'
+  - id: note-56e9fc5
+    text: 'Review 1eaf i8: reproduced/fixed incidental multiline/control-character
+      title rendering: title continuations could become extra fzf items identical
+      to real action rows. Titles now remain one printable non-actionable row without
+      changing stored data; impl and QA E6 updated. Also fixed remaining PM_POPUP_SESSION
+      leak in the direct parse-error test and indexed local identities plus nav membership
+      so bulk navigation replacement avoids quadratic scans. All 10 added regression
+      cases failed before fixes; popup/session/tmux subset now 397 passed. Full final
+      validation pending. No architectural blocker or standalone follow-up; no live
+      QA PASS claimed. Fresh review/live QA/sign-off remain required, including expanded
+      E6 and prior E11/C1/R13/E10. Transfer stash, all-role Astra overrides and verify-s15-followup.md
+      preserved.'
+    created_at: '2026-10-26T15:27:53Z'
+    last_edited: '2026-10-26T15:27:53Z'
+  - id: note-4ec17fd
+    text: 'Review 1eaf i8 final validation: full suite after final code/test edits
+      passed, 3677 passed, 1 skipped, 3 warnings in 165.15s. Focused popup/session/tmux
+      suite 397 passed. Used real git PATH, scratch-only declared markdown dependency,
+      PM_HOST_HOME unset for known installer-fixture environment issue. Evidence:
+      /pm-captures/review-1eaf-i8-full-final.txt, review-1eaf-i8-targeted-final-verified.txt,
+      review-1eaf-i8-repro.txt, review-1eaf-i8-scale.txt and review-1eaf-i8-summary.txt.
+      Earlier full.txt stopped before fixes and superseded. NEEDS_WORK because fixes
+      applied; fresh review/live QA/sign-off required. No live QA PASS claimed; prior
+      E11/C1/R13/E10 plus expanded E6 remain required.'
+    created_at: '2026-10-26T15:31:42Z'
+    last_edited: '2026-10-26T15:31:42Z'
   model: provider:chatgpt-astra
   session_models:
     impl: provider:chatgpt-astra

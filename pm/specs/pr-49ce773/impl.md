@@ -117,6 +117,9 @@
    rather than adding one subprocess per grouped session on each keypress.
    Index QA window suffix boundaries once per snapshot so matching scenario
    windows does not rescan all windows for every PR on every keypress.
+   Index local PR identities in the same snapshot and use set membership when
+   scanning former neighbours, so a bulk removal/replacement of navigable PRs
+   does not perform a full PR/list scan for every old entry.
    h/l/←/→ (and 0 with a home PR) stay in `--expect` even when the list has
    one entry — unadvertised,
    they act as a reload, so a PR that is reopened or gains a window after
@@ -186,7 +189,10 @@ number must show the lookup-failure notice, not another PR's actions.
   no fresh-start command is built for the merged PR.
 - A null or numeric title loaded from YAML must not crash rendering: coerce
   presentation titles to text (only null renders blank, zero renders `0`)
-  before truncation.
+  before truncation. Replace non-printable title characters with spaces before
+  truncation as well: fzf's newline-delimited row stream must contain exactly
+  one non-actionable title row, never title continuations that resemble actions
+  or terminal control sequences. Preserve the original title in project data.
 - QA scenario-only windows (`qa-#N-s1`) count as open windows for the nav
   list, matching `_build_picker_lines`' `[open]` matching.
 

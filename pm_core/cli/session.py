@@ -1294,6 +1294,9 @@ def _build_picker_lines(
     lines: list[tuple[str, str, str]] = []
     title = pr.get("title")
     title = "" if title is None else str(title)
+    # fzf consumes newline-delimited rows; title text must never become a
+    # separate selectable item or emit terminal control sequences.
+    title = "".join(ch if ch.isprintable() else " " for ch in title)
     max_title = 40
     short_title = (title[:max_title - 1] + "…") if len(title) > max_title else title
 
@@ -1959,6 +1962,7 @@ def popup_picker_cmd(session: str, window_name: str):
     try:
         nav_pr_ids, pr_by_disp, home_pr = _build_nav_entries(
             prs, window_pr_id, open_windows)
+        pr_by_local = {p["id"]: p for p in prs}
     except (ValueError, TypeError, KeyError) as e:
         _log.warning("popup-picker: initial navigation failed (root=%s): %s", root, e)
         click.echo(f"Could not load PR actions: {e}")
@@ -2038,7 +2042,7 @@ def popup_picker_cmd(session: str, window_name: str):
         Keeps the previous state if the reload fails, returning False so
         dispatch can refuse to act on that stale snapshot.
         """
-        nonlocal prs, nav_pr_ids, pr_by_disp, home_pr, window_pr_id
+        nonlocal prs, nav_pr_ids, pr_by_disp, pr_by_local, home_pr, window_pr_id
         nonlocal open_windows, name_to_wid, caller_wid, other_wids
         try:
             fresh_prs = store.load(root, validate=False).get("prs") or []
@@ -2047,6 +2051,7 @@ def popup_picker_cmd(session: str, window_name: str):
             fresh_name_to_wid = {w["name"]: w["id"] for w in fresh_windows}
             fresh_nav, fresh_by_disp, fresh_home = _build_nav_entries(
                 fresh_prs, window_pr_id, fresh_open)
+            fresh_by_local = {p["id"]: p for p in fresh_prs}
             fresh_active = _session_active_windows(base)
             fresh_caller = fresh_active.get(session)
             fresh_others = {wid for s, wid in fresh_active.items() if s != session}
@@ -2055,7 +2060,7 @@ def popup_picker_cmd(session: str, window_name: str):
             return False
         # Publish only a complete snapshot; malformed entries must not
         # replace part of the last-good state before nav construction fails.
-        prs = fresh_prs
+        prs, pr_by_local = fresh_prs, fresh_by_local
         open_windows = fresh_open
         name_to_wid = fresh_name_to_wid
         caller_wid, other_wids = fresh_caller, fresh_others
@@ -2077,7 +2082,7 @@ def popup_picker_cmd(session: str, window_name: str):
 
         local_id = previous_ids.get(pr_disp)
         if local_id is not None:
-            p = next((p for p in prs if p["id"] == local_id), None)
+            p = pr_by_local.get(local_id)
             return _pr_display_id(p) if p is not None else local_id
         p = _find_pr_for_window_id(prs, pr_disp)
         return _pr_display_id(p) if p is not None else pr_disp
@@ -2115,11 +2120,14 @@ def popup_picker_cmd(session: str, window_name: str):
             i = nav_pr_ids.index(cur)
             return nav_pr_ids[(i + delta) % len(nav_pr_ids)]
         if old_cur in old_list:
+            # A bulk window/status change may remove every old neighbour.
+            # Keep identity and membership checks constant-time per candidate.
+            nav_ids = set(nav_pr_ids)
             k = old_list.index(old_cur)
             for n in range(1, len(old_list) + 1):
                 cand = _canonical_id(
                     old_list[(k + delta * n) % len(old_list)], previous_ids)
-                if cand in nav_pr_ids:
+                if cand in nav_ids:
                     return cand
         return nav_pr_ids[0]
 
@@ -2140,7 +2148,7 @@ def popup_picker_cmd(session: str, window_name: str):
             return False
         from pm_core.cli.helpers import _pr_display_id
 
-        selected = next((p for p in prs if p["id"] == selected_id), None)
+        selected = pr_by_local.get(selected_id)
         current_pr = (_pr_display_id(selected) if selected is not None
                       else selected_id or current_pr)
         nav_index = _sync_index(current_pr, nav_index)

@@ -150,6 +150,10 @@ fzf dispatch and the no-fzf selection, then repair to merged and verify its
 notice. Also use YAML-escaped control characters (NUL/newline/escape) in
 `gh_pr_number`: reject the snapshot before fzf launches, retain the last-good
 view on reload, and show the readable error on initial load, without a traceback.
+Repeat title rendering with YAML multiline titles and escaped newline, carriage
+return, tab, NUL and escape characters. The title remains a single printable,
+non-actionable row (controls replaced with spaces); Enter on that row is a no-op,
+even if a title continuation resembles an action. The stored title is unchanged.
 E7. **Given** the home PR's windows are all closed while the popup is open,
 **When** user presses home, **Then** home PR still shown.
 E8. **Given** a live PR is shown, **When** the user moves to an action row and

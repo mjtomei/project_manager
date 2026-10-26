@@ -1158,6 +1158,63 @@ class TestPopupPickerRefreshFailures:
         run_cmd.assert_not_called()
 
 
+class TestPopupPickerPresentation:
+    @pytest.mark.parametrize("separator", ["\n", "\r", "\t", "\x00", "\x1b", chr(0x2028)])
+    def test_title_stays_one_printable_row(self, tmp_path, monkeypatch, separator):
+        prs = [_pr("pr-a", title=f"Title{separator}continued")]
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["pr-a"], "pr-a", [(130, "")])
+        rows = fzf.calls[0]["input"].splitlines()
+        assert len(rows) == 6
+        assert all(row.isprintable() for row in rows)
+        assert "Title continued" in rows[0]
+        run_cmd.assert_not_called()
+
+    def test_multiline_title_cannot_add_an_action_row(self, tmp_path, monkeypatch):
+        action_row = "    start              [open]"
+        title = "Title\n" + action_row
+        prs = [_pr("pr-a", title=title)]
+        title_row = "  pr-a  (in_progress)  " + title.replace("\n", " ")
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["pr-a"], "pr-a",
+            [(0, f"\n{title_row}\n"), (130, "")])
+        # Only the real action row may carry this text in fzf's item stream.
+        assert fzf.calls[0]["input"].splitlines().count(action_row) == 1
+        assert fzf.calls[0]["input"].splitlines()[0] == title_row
+        assert len(fzf.calls) == 2
+        assert prs[0]["title"] == title
+        run_cmd.assert_not_called()
+
+    @pytest.mark.parametrize("direction", ["h", "l"])
+    def test_disjoint_navigation_refresh_uses_linear_identity_lookups(
+            self, tmp_path, monkeypatch, direction):
+        class CountedPR(dict):
+            reads = 0
+
+            def __getitem__(self, key):
+                if key == "id":
+                    type(self).reads += 1
+                return super().__getitem__(key)
+
+        size = 100
+        prs = [_pr(f"pr-old{i}") for i in range(size)]
+        replacement = [CountedPR(_pr(f"pr-new{i}")) for i in range(size)]
+        windows = [p["id"] for p in prs + replacement]
+
+        def on_launch(n):
+            if n == 1:
+                prs[:] = replacement
+                CountedPR.reads = 0
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, windows, "tui",
+            [(0, f"{direction}\n"), (130, "")], on_launch=on_launch,
+            load_project=lambda *a, **k: {"prs": list(prs)})
+        assert _shown(fzf.calls[1]) == "PR Actions — pr-new0  (1/100)"
+        assert CountedPR.reads < 30 * size
+        run_cmd.assert_not_called()
+
+
 class TestPopupPickerActiveWindows:
     def test_navigation_refreshes_selected_session_indicators(self, tmp_path, monkeypatch):
         from pm_core.cli import session as sess
@@ -1358,9 +1415,19 @@ class TestPopupPickerIdentity:
         ]
         run_cmd.assert_called_once_with("pr review pr-a", "pm-x")
 
+    def test_parse_error_test_restores_popup_environment(self, tmp_path, monkeypatch, capsys):
+        import os
+        from pm_core.cli import session as sess
+
+        monkeypatch.delenv(sess.tmux_mod.POPUP_SESSION_ENV, raising=False)
+        with monkeypatch.context() as isolated:
+            self.test_initial_parse_error_waits_for_dismissal(tmp_path, isolated, capsys)
+        assert sess.tmux_mod.POPUP_SESSION_ENV not in os.environ
+
     def test_initial_parse_error_waits_for_dismissal(self, tmp_path, monkeypatch, capsys):
         from pm_core.cli import session as sess
 
+        monkeypatch.setenv(sess.tmux_mod.POPUP_SESSION_ENV, "pm-x")
         reg = tmp_path / "registry.json"
         reg.write_text("{}")
         with patch.object(sess.pane_registry, "registry_path", return_value=reg), \
