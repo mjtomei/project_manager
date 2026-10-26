@@ -155,17 +155,37 @@ def _is_route_base_url(url: str | None, environ) -> bool:
     url = url.rstrip("/")
     if url == (environ.get(ROUTE_BASE_URL_ENV) or "").rstrip("/"):
         return True
+    return url in _configured_router_urls()
+
+
+def _configured_router_urls() -> set[str]:
+    """Host and in-container addresses of the routers configured here.
+
+    Read on every launch that inherits an ANTHROPIC_BASE_URL, so the
+    entries are read raw and one that is not a well-formed router
+    (hand-edited providers.yaml: a null entry, a non-string api_base) is
+    skipped: it names no address to recognise, and it must not fail a
+    launch that does not use it (list_providers would raise on it).
+    """
     from pm_core import worker_route
-    for p in list_providers():
-        if p.type != "router" or not p.api_base:
+    config = load_providers()
+    entries = config.get("providers") if isinstance(config, dict) else None
+    if not isinstance(entries, dict):
+        return set()
+    urls = set()
+    for name, entry in entries.items():
+        if not isinstance(entry, dict) or entry.get("type") != "router":
             continue
+        base = entry.get("api_base")
+        if not isinstance(base, str) or not base:
+            continue
+        urls.add(base)
         try:
-            urls = {p.api_base, worker_route.container_base_url(p)}
+            urls.add(worker_route.container_base_url(
+                ProviderConfig(name=str(name), type="router", api_base=base)))
         except ValueError:
-            urls = {p.api_base}
-        if url in {u.rstrip("/") for u in urls}:
-            return True
-    return False
+            pass
+    return {u.rstrip("/") for u in urls}
 
 
 def launch_env(provider: "ProviderConfig", env: dict[str, str],

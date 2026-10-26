@@ -200,7 +200,9 @@ subagent pin and FORCE, `CLAUDE_CODE_AUTO_MODE_MODEL` and
   none and it is a route's: equal to that marker, or to a router
   configured here, in its host or in-container form. The second case
   covers a parent from before the marker, and the host `claude-mixed`
-  launcher.
+  launcher. A providers.yaml entry that is not a well-formed router (a
+  null entry, a non-string `api_base`) names no address and is skipped;
+  it never fails a launch that does not use it (review loop c189 i8).
 - Any other `ANTHROPIC_BASE_URL` is the user's own (a proxy, a QA stub)
   and stays. So do all non-routing variables, the provider's own
   variables and Claude's own `settings.json` `env`.
@@ -1533,5 +1535,22 @@ ran in a routed review container launched with `PM_ROUTE_BASE_URL`, so the
 production launcher runs R9. pm's own no-model build there dropped every
 routing variable, and a plain-model build kept only its own pin
 (`live-routed-parent-env.txt`).
-Latest full suite: 3812 passed, rc 0, run inside a routed review session
+Full suite 3812 passed, rc 0, run inside a routed review session
 (`/pm-captures/review-c189-i7/full-suite.log`).
+Review loop c189 i8 found a regression from R9. To recognise an inherited
+route URL, `_is_route_base_url` built every providers.yaml entry through
+`list_providers`. One hand-edited entry that is not a provider (a null or
+string entry, a non-string `api_base`, a list `alias_models`, a list
+`providers:` block) then made launches raise `AttributeError`. That hit
+every launch that sets no `ANTHROPIC_BASE_URL` of its own (every
+main-account role) while an endpoint was inherited, such as a user's proxy,
+a QA stub or the host `claude-mixed` env. Those launches built fine before
+R9 (`/pm-captures/review-c189-i8/malformed-providers-repro.txt`: HEAD vs
+ee82dc0c). Router addresses are now read raw (`_configured_router_urls`),
+and an entry that is not a well-formed router is skipped.
+`test_malformed_provider_entries_do_not_break_launches[5 cases]` and
+`test_router_beside_a_malformed_entry_is_still_recognised`; 8 mutations
+caught (`/pm-captures/review-c189-i8/mutation-checks.log`).
+Latest full suite: 3818 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
+PYTHONPATH=/workspace, markdown 3.10.3 installed first;
+`/pm-captures/review-c189-i8/full-suite.log`).

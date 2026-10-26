@@ -588,6 +588,45 @@ class TestInheritedRoutingEnv:
         env = self._claude_env(self._build(model="claude-opus-5-5"))
         assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:19611"
 
+    @pytest.mark.parametrize("providers", [
+        {"broken": None},
+        {"r": "router"},
+        {"r": {"type": "router", "api_base": 8790, "model": MODEL}},
+        {"r": {"type": "router", "api_base": "http://127.0.0.1:8790",
+               "alias_models": ["x"]}},
+        ["a", "b"],
+    ], ids=["null_entry", "string_entry", "int_api_base", "list_aliases",
+            "list_block"])
+    def test_malformed_provider_entries_do_not_break_launches(
+            self, pm_home_dir, monkeypatch, providers):
+        # Review c189 i8: recognising an inherited route URL read every
+        # entry through list_providers, so one hand-edited entry that is
+        # not a provider made every launch without its own
+        # ANTHROPIC_BASE_URL raise (AttributeError), while the user's own
+        # endpoint was inherited; such launches built before R9.
+        import yaml
+        (pm_home_dir / "providers.yaml").write_text(
+            yaml.safe_dump({"providers": providers}))
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:19611")
+        for kw in ({}, {"model": "claude-opus-5-5"}):
+            env = self._claude_env(self._build(**kw))
+            assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:19611"
+        from pm_core.claude_launcher import _resolve_provider
+        run_env = _resolve_provider()[2]  # None: os.environ unchanged
+        assert (run_env or os.environ)["ANTHROPIC_BASE_URL"] == (
+            "http://127.0.0.1:19611")
+
+    def test_router_beside_a_malformed_entry_is_still_recognised(
+            self, pm_home_dir, monkeypatch):
+        import yaml
+        (pm_home_dir / "providers.yaml").write_text(yaml.safe_dump(
+            {"providers": {"broken": None,
+                           ROUTE: {"type": "router", "model": MODEL,
+                                   "api_base": "http://127.0.0.1:8790"}}}))
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8790")
+        env = self._claude_env(self._build(model="claude-opus-5-5"))
+        assert "ANTHROPIC_BASE_URL" not in env
+
     def test_launch_env_reads_the_given_environment(self, pm_home_dir):
         # The caller's environment is a parameter: os.environ is clean
         # here (conftest), the passed one is a routed parent's.
