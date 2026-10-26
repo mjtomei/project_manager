@@ -2335,7 +2335,11 @@ def remove_container(name: str, *, container_id: str | None = None) -> bool:
     target = container_id or name
     proxy = capture_unshared_proxy(target)
     pending = defer_unshared_release(proxy, target) if proxy else None
-    _run_runtime("rm", "-f", target, check=False, timeout=30)
+    removal = _run_runtime("rm", "-f", target, check=False, timeout=30)
+    removal_error = ""
+    if removal.returncode != 0:
+        diagnostic = (removal.stderr or "").strip() or "without an error diagnostic"
+        removal_error = f"; rm failed (rc={removal.returncode}): {diagnostic}"
     # Wait for the container to be fully gone.  When another rm is already in
     # flight the daemon returns "removal already in progress" and our rm returns
     # immediately, but the container still exists for a brief moment.
@@ -2350,11 +2354,12 @@ def remove_container(name: str, *, container_id: str | None = None) -> bool:
                 break
             raise ContainerError(
                 f"could not confirm removal of container {name}: "
-                f"{error or 'runtime inspect failed without an absence diagnostic'}")
+                f"{error or 'runtime inspect failed without an absence diagnostic'}"
+                f"{removal_error}")
         time.sleep(0.1)
     if not gone:
-        _log.warning("remove_container: %s still present after 10 s", name)
-        raise ContainerError(f"container {name} still present after 10 s")
+        _log.warning("remove_container: %s still present after 10 s%s", name, removal_error)
+        raise ContainerError(f"container {name} still present after 10 s{removal_error}")
     # Release the push proxy only after the container is gone.  Failed
     # removal must leave the surviving container's push access intact.
     if proxy:

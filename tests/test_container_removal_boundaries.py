@@ -57,6 +57,46 @@ def test_replacement_after_final_check_survives_removal(monkeypatch, bulk):
     assert allocations == {replacement_id: NAME}
 
 
+@pytest.mark.parametrize("verification", ["present", "inspect-error", "absent"])
+@pytest.mark.parametrize("stderr", [f"S12 exact-ID removal refusal: {CID}", ""])
+def test_nonzero_removal_preserves_cause_unless_absence_verified(monkeypatch, verification, stderr):
+    monkeypatch.setattr(push_proxy, "capture_unshared_proxy", lambda target: None)
+    stop = MagicMock()
+    monkeypatch.setattr(push_proxy, "stop_push_proxy", stop)
+    ticks = iter([0, 0, 11])
+    monkeypatch.setattr(cm.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(cm.time, "sleep", lambda seconds: None)
+    calls = []
+
+    def runtime(*args, **kwargs):
+        calls.append(args)
+        if args[0] == "rm":
+            return subprocess.CompletedProcess(args, 73, "", stderr)
+        assert args == ("inspect", CID)
+        if verification == "present":
+            return subprocess.CompletedProcess(args, 0, "[]", "")
+        error = "no such container" if verification == "absent" else "inspection permission denied"
+        return subprocess.CompletedProcess(args, 1, "", error)
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    if verification == "absent":
+        assert cm.remove_container(NAME, container_id=CID) is False
+        stop.assert_called_once_with(NAME)
+    else:
+        with pytest.raises(cm.ContainerError) as exc:
+            cm.remove_container(NAME, container_id=CID)
+        message = str(exc.value)
+        assert "rm failed (rc=73)" in message
+        if stderr:
+            assert stderr in message
+        else:
+            assert "without an error diagnostic" in message
+        assert ("still present after 10 s" if verification == "present"
+                else "inspection permission denied") in message
+        stop.assert_not_called()
+    assert calls == [("rm", "-f", CID), ("inspect", CID)]
+
+
 @pytest.mark.parametrize("replacement", [False, True])
 def test_named_pass_preserves_release_for_renamed_allocation(monkeypatch, replacement):
     reaper._record_release(NAME, CID, "", "pane-exit")
