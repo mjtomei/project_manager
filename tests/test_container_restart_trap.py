@@ -56,8 +56,9 @@ def test_delayed_exit_trap_preserves_restarted_container(tmp_path, monkeypatch, 
         if restart:
             monkeypatch.setattr(container, "current_container_id", lambda _: "exact-id")
             monkeypatch.setattr(container, "_run_runtime", lambda *a, **k:
-                                subprocess.CompletedProcess(a, 0, "", ""))
-            monkeypatch.setattr(container, "_wait_for_setup", lambda *a: None)
+                                subprocess.CompletedProcess(a, 0,
+                                    '"2026-10-26T00:00:00Z"' if a[0] == "inspect" else "", ""))
+            monkeypatch.setattr(container, "_wait_for_setup", lambda *a, **k: None)
             monkeypatch.setattr(container, "_setup_complete", lambda *a: True)
             container.restart_container("pm-t-review-pr-aaaa")
         if retain:
@@ -72,9 +73,12 @@ def test_delayed_exit_trap_preserves_restarted_container(tmp_path, monkeypatch, 
         if not restart and not retain:
             assert removed.read_text().strip() in (name, "exact-id")
     finally:
+        # The interactive-owner child can outlive its shell on an assertion
+        # failure. Release the stub before draining inherited output pipes.
+        release.touch()
         if proc.poll() is None:
             proc.kill()
-            proc.communicate()
+            proc.communicate(timeout=5)
 
 
 def test_restart_refuses_if_cleanup_generation_cannot_be_written(tmp_path, monkeypatch):

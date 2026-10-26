@@ -275,6 +275,22 @@ def fake_env(monkeypatch):
 
 
 class TestReaperOwnership:
+    def test_before_count_reuses_full_inventory(self, fake_env, monkeypatch):
+        fake_env["containers"] = [
+            _info("pm-repo-ab12-review-pr-aaaa"),
+            _info("pm-repo-ab12-review-pr-bbbb"),
+            _info("pm-repo-ab12-review-pr-cccc", running=False),
+        ]
+        count = MagicMock(return_value=0)
+        monkeypatch.setattr(cm, "running_container_count", count)
+        scope = Scope(pr_id="pr-aaaa")
+        preview = reaper.reconcile(scope, dry_run=True)
+        assert preview.running_before == 2  # global, not just scoped decisions
+        count.assert_not_called()
+        outcome = reaper.reconcile(scope)
+        assert outcome.running_before == 2
+        count.assert_called_once_with()  # fresh post-removal count
+
     def test_exact_pane_match_no_scenario_suffix_collision(self, fake_env):
         """A live qa-*-s1 pane of ANOTHER PR/loop must not keep s1 alive,
         and the s1 container's pane must not keep s10."""
@@ -659,7 +675,8 @@ class TestEnsureReusable:
         def _restart(*args):
             state["restarted"] = True
             return _cp(0)
-        rt = _Runtime(exec=_exec, restart=_restart)
+        rt = _Runtime(exec=_exec, restart=_restart, inspect=lambda *a:
+                      _cp(out='"2026-10-26T00:00:00Z"' if "{{json .State.StartedAt}}" in a else "cid"))
         removed = self._setup(monkeypatch, rt)
         assert cm._ensure_reusable("c", Path("/w"), None,
                                    session_tag=None, pr_id=None) == "cid"
@@ -691,9 +708,11 @@ class TestEnsureReusable:
         assert not rt.ran("restart") and removed == []
 
     def test_restart_timeout_does_not_claim_removal(self, monkeypatch):
-        monkeypatch.setattr(cm, "_run_runtime", _Runtime())
+        monkeypatch.setattr(cm, "current_container_id", lambda _: "cid")
+        monkeypatch.setattr(cm, "_run_runtime", lambda *a, **k:
+                            _cp(out='"2026-10-26T00:00:00Z"' if a[0] == "inspect" else ""))
 
-        def _timeout(name):
+        def _timeout(name, **kwargs):
             raise cm.launch_error(name, "timeout", "sentinel missing",
                                   stage="finish setup")
         monkeypatch.setattr(cm, "_wait_for_setup", _timeout)

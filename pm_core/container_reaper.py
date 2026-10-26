@@ -1036,7 +1036,7 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
         out.dry_run = dry_run
         if out.error:
             return out
-        out.running_before = container_mod.running_container_count()
+        out.running_before = sum(info.running for info in out.inventory)
         out.keyring_before = container_mod.keyring_summary()
         if dry_run:
             if scope.names is None:

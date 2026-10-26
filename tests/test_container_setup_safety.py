@@ -33,9 +33,11 @@ def test_restart_alias_uses_canonical_lock_and_generation(monkeypatch, alias):
     from pm_core.cli import cli
     name = "pm-t-review-pr-aaaa"
     monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw:
-                        subprocess.CompletedProcess(a, 0, "/" + name + "\n", ""))
+                        subprocess.CompletedProcess(a, 0,
+                            '\"2026-10-26T00:00:00Z\"' if "{{json .State.StartedAt}}" in a
+                            else "/" + name + "\n", ""))
     monkeypatch.setattr(cm, "pids_usage", lambda: {})
-    monkeypatch.setattr(cm, "_wait_for_setup", lambda n: None)
+    monkeypatch.setattr(cm, "_wait_for_setup", lambda *a, **k: None)
     monkeypatch.setattr(cm, "_setup_complete", lambda n: True)
     result = CliRunner().invoke(cli, ["container", "restart", alias, "--force"])
     assert result.exit_code == 0, result.output

@@ -185,8 +185,9 @@ def test_renamed_restart_invalidates_original_release(monkeypatch, legacy):
     decision, = reaper.plan().decisions
     assert decision.released
     monkeypatch.setattr(cm, "current_container_id", lambda _: cid)
-    monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw: subprocess.CompletedProcess(a, 0, "", ""))
-    monkeypatch.setattr(cm, "_wait_for_setup", lambda _: None)
+    monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw: subprocess.CompletedProcess(
+        a, 0, '"2026-10-26T00:00:00Z"' if a[0] == "inspect" else "", ""))
+    monkeypatch.setattr(cm, "_wait_for_setup", lambda *a, **k: None)
     monkeypatch.setattr(cm, "_setup_complete", lambda _: True)
     with cm.launch_lock(new):
         cm.restart_container(new)

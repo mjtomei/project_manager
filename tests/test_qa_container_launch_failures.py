@@ -144,7 +144,7 @@ def test_pre_worker_status_failure_preserves_viewed_concretizer(
     assert scenario.pane_id == "%5"
 
 
-@pytest.mark.parametrize("failure", [None, "exception", "build"])
+@pytest.mark.parametrize("failure", [None, "exception", "build", "poll"])
 @pytest.mark.parametrize("viewed", [set(), {"@5"}, None])
 @pytest.mark.parametrize("containers", [True, False])
 def test_worker_split_failure_keeps_real_launch_error(scenario_state, monkeypatch, failure, viewed, containers):
@@ -164,6 +164,9 @@ def test_worker_split_failure_keeps_real_launch_error(scenario_state, monkeypatc
     elif failure == "build":
         monkeypatch.setattr(qa_loop, "_build_scenario_run_cmd",
                             MagicMock(side_effect=RuntimeError("command build failed")))
+    elif failure == "poll":
+        monkeypatch.setattr(qa_loop, "_concretize_scenario",
+                            MagicMock(side_effect=OSError("concretizer polling failed")))
     monkeypatch.setattr(tmux, "split_pane_at", split)
     release = MagicMock(return_value=False)
     monkeypatch.setattr(qa_loop, "_release_scenario_containers", release)
@@ -192,6 +195,9 @@ def test_worker_split_failure_keeps_real_launch_error(scenario_state, monkeypatc
         assert "can't find pane: %5" in state.scenario_verdict_reasons[1]
     elif failure == "build":
         assert "command build failed" in state.scenario_verdict_reasons[1]
+    elif failure == "poll":
+        assert "concretizer polling failed" in state.scenario_verdict_reasons[1]
+        split.assert_not_called()
     monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
     qa_loop._poll_tmux_verdicts(
         state, {}, {"id": state.pr_id}, "pm-t", str(clone),

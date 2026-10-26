@@ -130,7 +130,10 @@ operations do not take PM's launch lock.
   partial container immediately. QA worker-split and relaunch failures (including
   missing pane IDs) keep the actual tmux error, create no agent verdict, and
   release the allocation; failed pane discovery preserves live or unknown
-  owners. A failed worker split releases its concretizer-only allocation unless
+  owners. Unexpected concretizer-poll exceptions use that same failed-launch
+  path on host and container workers, rather than escaping the preparation
+  thread and synthesizing an INPUT_REQUIRED human-wait verdict.
+  A failed worker split releases its concretizer-only allocation unless
   retained or viewed, and is not polled as a worker. A missing split pane ID is
   not proof that the worker never attached: locked cleanup must confirm the
   concretizer is the only owner, preserving additional or unknown owners.
@@ -294,7 +297,9 @@ intact to protect concurrent waiters and delayed releases.
   discard the partial allocation after releasing the proxy lock, preserving
   the original cause or cancellation. The same cleanup covers failures during
   proxy startup and pre-run setup-script preparation, so an already-started
-  unshared proxy is not stranded before a container exists.
+  unshared proxy is not stranded before a container exists. Cancellation during
+  final fresh-allocation generation/identity publication also discards that
+  allocation while its launch lock is held.
 
 ### R6 — Real launch errors
 `ContainerLaunchError(ContainerError)` carries `kind`
@@ -404,7 +409,12 @@ container cleared it and kept its files.  Running state is not health.
   command waited for a concurrent launch. Ordinary restart also respects the
   pending attachment lease; only `--force` can override it. Prints PIDs before → after.
   Runtime ID/short-ID/slash-name aliases resolve to the canonical name before
-  taking the launch lock. Before restart, advance a host-side per-name cleanup
+  taking the launch lock. After capture, restart and readiness probes target
+  the immutable allocation ID, not the reusable name. The readiness marker
+  must have been touched at or after the runtime's current boot start time
+  (nanosecond precision), since old sentinels survive restart while PID 1
+  reruns setup. Unknown start times fail closed without deleting the container.
+  Before restart, advance a host-side per-name cleanup
   generation; pane EXIT traps capture that generation before exec and skip container/proxy removal if
   it changed. This protects the restarted filesystem even when an old EXIT trap
   arrives after restart returns. Failure to write the generation refuses restart.

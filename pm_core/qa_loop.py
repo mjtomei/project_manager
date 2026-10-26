@@ -2140,31 +2140,31 @@ def _launch_scenarios_in_tmux(
             win_name: str,
             instruction_content: str | None = None,
     ) -> None:
-        refined_steps, reject_reason = _concretize_scenario(
-            scenario, pr_data, data, concretize_pane,
-            session_id=scenario.concretize_session_id,
-            scenario_cwd=scenario_cwd,
-            instruction_content=instruction_content,
-            stop_check=lambda: state.stop_requested,
-        )
-        if state.stop_requested:
-            return
-        if reject_reason:
-            state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-            state.scenario_verdict_reasons[scenario.index] = (
-                _concretize_failure_label(reject_reason)
-            )
-            state.latest_output = (
-                f"Scenario {scenario.index} ({scenario.title}): "
-                f"{VERDICT_INPUT_REQUIRED} — {_concretize_failure_label(reject_reason)}"
-            )
-            _log.info("Refiner rejected scenario %d — skipping worker launch: %s",
-                      scenario.index, reject_reason)
-            return
-        if refined_steps:
-            scenario.steps = refined_steps
-
         try:
+            refined_steps, reject_reason = _concretize_scenario(
+                scenario, pr_data, data, concretize_pane,
+                session_id=scenario.concretize_session_id,
+                scenario_cwd=scenario_cwd,
+                instruction_content=instruction_content,
+                stop_check=lambda: state.stop_requested,
+            )
+            if state.stop_requested:
+                return
+            if reject_reason:
+                state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                state.scenario_verdict_reasons[scenario.index] = (
+                    _concretize_failure_label(reject_reason)
+                )
+                state.latest_output = (
+                    f"Scenario {scenario.index} ({scenario.title}): "
+                    f"{VERDICT_INPUT_REQUIRED} — {_concretize_failure_label(reject_reason)}"
+                )
+                _log.info("Refiner rejected scenario %d — skipping worker launch: %s",
+                          scenario.index, reject_reason)
+                return
+            if refined_steps:
+                scenario.steps = refined_steps
+
             child_cmd, pane_cwd = _build_scenario_run_cmd(
                 scenario, state, data, transcript, _qa_resolution,
                 session=session, workdir_path=workdir_path,
@@ -2185,7 +2185,7 @@ def _launch_scenarios_in_tmux(
             except Exception:
                 scenario.session_id = None
         except Exception as exc:
-            _log.warning("Failed to split scenario pane for scenario %d",
+            _log.warning("Failed to prepare or launch worker for scenario %d",
                          scenario.index, exc_info=True)
             _record_launch_failure(state, scenario, exc)
             scenario.pane_id = None
@@ -2415,33 +2415,33 @@ def _launch_scenarios_in_containers(
             clone_path: Path,
             instruction_content: str | None = None,
     ) -> None:
-        refined_steps, reject_reason = _concretize_scenario(
-            scenario, pr_data, data, concretize_pane,
-            session_id=scenario.concretize_session_id,
-            scenario_cwd=container_workdir,
-            instruction_content=instruction_content,
-            stop_check=lambda: state.stop_requested,
-        )
-        # A superseded run must not launch a worker or acquire human-wait
-        # retention after its cancellation. Finalization releases this allocation.
-        if state.stop_requested:
-            return
-        if reject_reason:
-            state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-            state.scenario_verdict_reasons[scenario.index] = (
-                _concretize_failure_label(reject_reason)
-            )
-            state.latest_output = (
-                f"Scenario {scenario.index} ({scenario.title}): "
-                f"{VERDICT_INPUT_REQUIRED} — {_concretize_failure_label(reject_reason)}"
-            )
-            _log.info("Refiner rejected scenario %d — skipping worker launch: %s",
-                      scenario.index, reject_reason)
-            return
-        if refined_steps:
-            scenario.steps = refined_steps
-
         try:
+            refined_steps, reject_reason = _concretize_scenario(
+                scenario, pr_data, data, concretize_pane,
+                session_id=scenario.concretize_session_id,
+                scenario_cwd=container_workdir,
+                instruction_content=instruction_content,
+                stop_check=lambda: state.stop_requested,
+            )
+            # A superseded run must not launch a worker or acquire human-wait
+            # retention after its cancellation. Finalization releases this allocation.
+            if state.stop_requested:
+                return
+            if reject_reason:
+                state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                state.scenario_verdict_reasons[scenario.index] = (
+                    _concretize_failure_label(reject_reason)
+                )
+                state.latest_output = (
+                    f"Scenario {scenario.index} ({scenario.title}): "
+                    f"{VERDICT_INPUT_REQUIRED} — {_concretize_failure_label(reject_reason)}"
+                )
+                _log.info("Refiner rejected scenario %d — skipping worker launch: %s",
+                          scenario.index, reject_reason)
+                return
+            if refined_steps:
+                scenario.steps = refined_steps
+
             exec_cmd, pane_cwd = _build_scenario_run_cmd(
                 scenario, state, data, transcript, _qa_resolution,
                 session=None, workdir_path=workdir_path,
@@ -2462,7 +2462,7 @@ def _launch_scenarios_in_containers(
             except Exception:
                 scenario.session_id = None
         except Exception as exc:
-            _log.warning("Failed to split scenario pane for scenario %d",
+            _log.warning("Failed to prepare or launch worker for scenario %d",
                          scenario.index, exc_info=True)
             _record_launch_failure(state, scenario, exc)
             # A split can attach its worker before pane discovery fails.

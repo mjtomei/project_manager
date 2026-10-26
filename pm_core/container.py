@@ -40,11 +40,13 @@ Requirements:
 
 import contextlib
 import contextvars
+import datetime
 import functools
 import fcntl
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -1151,7 +1153,7 @@ def create_container(
                 _renew_launch(name, container_id)
                 if allocation_identity is not None:
                     allocation_identity.update(id=container_id, generation=cleanup_generation(name))
-            except ContainerError:
+            except BaseException:
                 discard_container(name)
                 raise
             return container_id
@@ -1312,8 +1314,8 @@ def restart_container(name: str) -> None:
     """Restart *name* in place: ends every process inside (clearing PID or
     memory exhaustion) but keeps the container's filesystem, id and mounts.
 
-    Setup state lives in the container filesystem, so a restarted container
-    is still fully set up; this re-verifies that before returning.
+    Host setup state persists, but PID 1 reruns its setup command on each boot.
+    Wait for a freshly touched ready marker before accepting that state.
     """
     # Callers hold the canonical name's launch lock (CLI resolves ID aliases).
     # Restart terminates attached exec clients. Their delayed EXIT traps must
@@ -1330,13 +1332,32 @@ def restart_container(name: str) -> None:
         _write_identity_generation(container_id, generation)
     except OSError as exc:
         raise ContainerError(f"Cannot protect '{name}' from EXIT cleanup during restart: {exc}") from exc
-    r = _run_runtime("restart", "-t", "5", name, check=False, timeout=90)
+    r = _run_runtime("restart", "-t", "5", container_id, check=False, timeout=90)
     if r.returncode != 0:
         stderr = (r.stderr or "").strip()
         raise launch_error(name, classify_runtime_error(stderr), stderr,
                            stage="restart")
+    started = _run_runtime("inspect", "--format", "{{json .State.StartedAt}}",
+                           container_id, check=False, timeout=10)
     try:
-        _wait_for_setup(name)
+        # Go's RFC3339Nano output can have 0–9 fractional digits. Avoid float
+        # timestamps: a quick restart can touch the marker in the same second.
+        stamp = json.loads(started.stdout)
+        match = re.fullmatch(
+            r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})",
+            stamp if isinstance(stamp, str) else "")
+        if started.returncode or not match:
+            raise ValueError("invalid runtime timestamp")
+        seconds, fraction, zone = match.groups()
+        when = datetime.datetime.fromisoformat(seconds + zone.replace("Z", "+00:00"))
+        started_ns = int(when.timestamp()) * 1_000_000_000 + int(((fraction or "") + "000000000")[:9])
+        if started_ns <= 0:
+            raise ValueError("container has no start time")
+    except (ValueError, OverflowError) as exc:
+        raise launch_error(name, "runtime", started.stderr or "container start time unavailable",
+                           stage="verify restart start time") from exc
+    try:
+        _wait_for_setup(container_id, started_ns=started_ns)
     except ContainerLaunchError as e:
         if e.kind != "timeout":
             raise
@@ -1344,7 +1365,7 @@ def restart_container(name: str) -> None:
         # true for a fresh create, not here: the restarted container stays.
         raise launch_error(name, "runtime", e.stderr,
                            stage="come back up after restart") from e
-    if not _setup_complete(name):
+    if not _setup_complete(container_id):
         raise launch_error(name, "incomplete",
                            "setup markers missing after restart", stage="restart")
 
@@ -1845,7 +1866,7 @@ _SETUP_TIMEOUT = 30  # seconds — needs headroom under memory pressure
 _SETUP_POLL_INTERVAL = 0.2
 
 
-def _wait_for_setup(name: str) -> None:
+def _wait_for_setup(name: str, *, started_ns: int | None = None) -> None:
     """Wait for the in-container setup script to write its sentinel.
 
     The setup installs the git push-proxy wrapper and configures the
@@ -1854,11 +1875,21 @@ def _wait_for_setup(name: str) -> None:
     A probe failure the runtime classifies (keyring, memory) fails fast
     with the real error instead of waiting out the timeout.
     """
+    probe = ["test", "-f", _READY_SENTINEL]
+    if started_ns is not None:
+        # Restart cannot clear the old marker using exec before stopping: PID
+        # exhaustion is precisely why exec may be unavailable. The existing
+        # startup command touches it every boot, including legacy containers.
+        probe = ["python3", "-c",
+                 "import os,sys; "
+                 "sys.exit(0 if os.path.isfile(sys.argv[1]) and "
+                 "os.stat(sys.argv[1]).st_mtime_ns >= int(sys.argv[2]) else 1)",
+                 _READY_SENTINEL, str(started_ns)]
     last_err = ""
     deadline = time.monotonic() + _SETUP_TIMEOUT
     while time.monotonic() < deadline:
         check = _run_runtime(
-            "exec", name, "test", "-f", _READY_SENTINEL,
+            "exec", name, *probe,
             check=False, timeout=5,
         )
         if check.returncode == 0:
