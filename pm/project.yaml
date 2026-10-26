@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T01:28:09.730663+00:00'
+  updated_at: '2026-10-26T02:32:39.671938+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34033,6 +34033,25 @@ prs:
       a superseded first run).'
     created_at: '2026-10-26T01:28:09Z'
     last_edited: '2026-10-26T01:28:09Z'
+  - id: note-c58c2b3
+    text: 'QA S62 (2026-10-26, host, real Claude 2.1.310, main stub + work/-only relay
+      to the real work route + refusing CONNECT proxy; captures /pm-captures/scenarios/62,
+      REPORT.md): RQ44/R9 and RQ43 held live on 09a23249 with no code change. Variant
+      A TUI (BASE_URL=main stub, PM_ROUTE_BASE_URL=relay): N/P impl, review, QA s0
+      and planner panes had no inherited alias, SMALL_FAST, AUTO_MODE or route marker;
+      P had only its own claude-opus-5-5 pin; R had the full work/ set. N/P traffic
+      was unprefixed on the stub (P /model fable/haiku gave claude-fable-5-1/claude-haiku-5-5;
+      classifier claude-sonnet-5 allowed). R main/children/classifier were work/ (children
+      and classifier forwarded 200, one org a95ea673). Isolation: 0 violations. Variant
+      B (BASE_URL=route URL): BASE_URL and marker dropped, traffic went only to api.anthropic.com
+      via the proxy. Plain terminal: --resume reused the same session id/transcript/hooks
+      file; the spec helper was unprefixed. Pre-fix ee82dc0c reproduced the leak (work/
+      requests from N/P, 404). Harness: Claude 2.1.310 classifier wants a "<block>no</block>"
+      reply (S60 "<severity>" format is stale); /model persists into ~/.claude/settings.json.
+      Spec slip: plain pm pr start after d prints "is now in_progress", not "already
+      in_progress, reusing".'
+    created_at: '2026-10-26T02:32:39Z'
+    last_edited: '2026-10-26T02:32:39Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
