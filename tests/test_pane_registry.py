@@ -19,6 +19,7 @@ from pm_core.pane_registry import (
     kill_and_unregister,
     find_live_pane_by_role,
     _reconcile_registry,
+    prune_dead_windows,
     locked_read_modify_write,
 )
 
@@ -601,3 +602,56 @@ class TestLockedReadModifyWrite:
 
         locked_read_modify_write(path, bump)
         assert json.loads(path.read_text()) == {"v": 2}
+
+
+class TestPruneDeadWindows:
+    """QA R3: a killed qa window must not keep its panes under a stale @id."""
+
+    @patch("pm_core.tmux.session_exists", return_value=True)
+    @patch("pm_core.tmux.list_windows")
+    def test_removes_windows_tmux_no_longer_has(
+            self, mock_windows, mock_session, registry_dir):
+        _save_registry("sess", {
+            "session": "sess",
+            "windows": {
+                "@0": {"panes": [{"id": "%0", "role": "tui"}],
+                       "user_modified": False},
+                "@4": {"panes": [{"id": "%4", "role": "qa-scenario-s1"}],
+                       "user_modified": False},
+            },
+        })
+        mock_windows.return_value = [{"id": "@0", "index": "0", "name": "main"}]
+
+        removed = prune_dead_windows("sess")
+
+        assert removed == ["@4"]
+        saved = load_registry("sess")
+        assert list(saved["windows"]) == ["@0"]
+
+    @patch("pm_core.tmux.session_exists", return_value=True)
+    @patch("pm_core.tmux.list_windows")
+    def test_live_windows_are_left_alone(
+            self, mock_windows, mock_session, registry_dir):
+        _save_registry("sess", {
+            "session": "sess",
+            "windows": {"@0": {"panes": [{"id": "%0", "role": "tui"}],
+                               "user_modified": False}},
+        })
+        mock_windows.return_value = [{"id": "@0", "index": "0", "name": "main"}]
+
+        assert prune_dead_windows("sess") == []
+        assert list(load_registry("sess")["windows"]) == ["@0"]
+
+    @patch("pm_core.tmux.session_exists", return_value=False)
+    @patch("pm_core.tmux.list_windows")
+    def test_absent_session_never_wipes_the_registry(
+            self, mock_windows, mock_session, registry_dir):
+        _save_registry("sess", {
+            "session": "sess",
+            "windows": {"@0": {"panes": [{"id": "%0", "role": "tui"}],
+                               "user_modified": False}},
+        })
+        mock_windows.return_value = []
+
+        assert prune_dead_windows("sess") == []
+        assert list(load_registry("sess")["windows"]) == ["@0"]

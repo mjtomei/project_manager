@@ -3529,6 +3529,36 @@ def _verify_single_scenario(
 # Core orchestration
 # ---------------------------------------------------------------------------
 
+# Placeholder command for the main pane of a QA window that has no planner
+# (execution-only `pm qa run`, or a run restarted after its window was killed).
+# It must stay alive: the pane anchors the status-pane split and the
+# qa-planner registry entry, and a command that exits takes the window with it.
+_QA_MAIN_PANE_CMD = "echo 'QA execution'; exec sleep infinity"
+
+
+def _ensure_qa_main_pane(session: str, window_name: str,
+                         workdir_path: str | None) -> str | None:
+    """Return the QA window's main pane, creating the window when it is gone.
+
+    Execution-only runs (no planner pane) and windows recreated after the
+    previous one was killed land here. The main pane anchors the status-pane
+    split and the qa-planner registry entry, so the window has to outlive the
+    pane lookup: a bare ``echo`` exits at once (there is no remain-on-exit),
+    the window vanished before its pane could be found, and the run ended with
+    no QA window, no status pane and no registration.
+    """
+    from pm_core import tmux as tmux_mod
+
+    win = tmux_mod.find_window_by_name(session, window_name)
+    if win:
+        panes = tmux_mod.get_pane_indices(session, win["index"])
+        return panes[0][0] if panes else None
+    return tmux_mod.new_window_get_pane(
+        session, window_name, _QA_MAIN_PANE_CMD, cwd=workdir_path,
+        switch=False,
+    )
+
+
 def _register_qa_planner(session: str, planner_pane: str) -> None:
     """Register the main pane once, without making layout failures fatal to QA."""
     from pm_core import tmux as tmux_mod, pane_layout, pane_registry
@@ -3537,6 +3567,10 @@ def _register_qa_planner(session: str, planner_pane: str) -> None:
         qa_win_id = tmux_mod.pane_window_id(planner_pane)
         if not qa_win_id:
             return
+        # Registration only reconciles the window it writes, so panes of a QA
+        # window killed between runs (the execution-only restart path) would
+        # linger under their old @id. Drop those entries as we register.
+        pane_registry.prune_dead_windows(session)
         data = pane_registry.load_registry(session)
         panes = pane_registry.get_window_data(data, qa_win_id)["panes"]
         if not any(p["id"] == planner_pane for p in panes):
@@ -4080,16 +4114,7 @@ def run_qa_sync(
     repo_root = Path(workdir_path) if workdir_path and Path(workdir_path).is_dir() else None
 
     # Ensure the main QA window exists (has the planner pane)
-    win = tmux_mod.find_window_by_name(session, window_name)
-    planner_pane = None
-    if not win:
-        planner_pane = tmux_mod.new_window_get_pane(
-            session, window_name, "echo 'QA execution'", cwd=workdir_path,
-            switch=False,
-        )
-    else:
-        panes = tmux_mod.get_pane_indices(session, win["index"])
-        planner_pane = panes[0][0] if panes else None
+    planner_pane = _ensure_qa_main_pane(session, window_name, workdir_path)
 
     # Write initial status file and add the status pane before launching
     # scenarios — scenario launch blocks until all concretizers finish, so
