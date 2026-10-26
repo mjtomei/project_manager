@@ -824,7 +824,7 @@ def _owner_domain_matches(sock_dir: str) -> bool:
         return False
     domain = owner.get("runtime_domain")
     if domain is None:
-        return True
+        return "runtime_domain" not in owner  # only pre-domain records are legacy
     from pm_core.container_reaper import _runtime_domain
     return domain == _runtime_domain()
 
@@ -840,12 +840,15 @@ def _write_owner_file(sock_dir: str, session_tag: str, pr_id: str,
     import tempfile
     from pm_core.container import ContainerError
     from pm_core.container_reaper import _runtime_domain
+    domain = _runtime_domain()
+    if domain is None:
+        raise ContainerError("Cannot record push proxy owner: runtime identity unavailable")
     temporary = None
     try:
         fd, temporary = tempfile.mkstemp(dir=sock_dir, prefix=".owner-")
         with os.fdopen(fd, "w") as stream:
             json.dump({"session_tag": session_tag, "pr_id": pr_id,
-                       "workdir": workdir, "runtime_domain": _runtime_domain()}, stream)
+                       "workdir": workdir, "runtime_domain": domain}, stream)
         os.replace(temporary, Path(sock_dir, _OWNER_FILE))
     except OSError as exc:
         raise ContainerError(f"Cannot record push proxy owner in {sock_dir}: {exc}") from exc
@@ -944,8 +947,8 @@ def release_proxy_if_unused(session_tag: str, pr_id: str,
         return existed
 
 
-def mounted_unshared_proxy(name: str) -> tuple[str, str, str] | None:
-    """Resolve the authoritative unshared mount, even when its socket is absent."""
+def _proxy_container_info(name: str) -> dict | None:
+    """Read authoritative proxy mounts, distinguishing absence from failed inspection."""
     from pm_core import container as cm
     try:
         result = cm._run_runtime("inspect", name, check=False, timeout=10)
@@ -956,7 +959,38 @@ def mounted_unshared_proxy(name: str) -> tuple[str, str, str] | None:
         rows = json.loads(result.stdout)
         if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
             raise ValueError("incomplete container mount inspection")
-        info = rows[0]
+        return rows[0]
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError) as exc:
+        raise cm.ContainerError(f"Cannot inspect mounted push proxy for '{name}': {exc}") from exc
+
+
+def validate_shared_proxy_mount(name: str, session_tag: str, pr_id: str) -> None:
+    """Do not repair an unrelated host socket while reusing an old allocation."""
+    from pm_core import container as cm
+    info = _proxy_container_info(name)
+    try:
+        if info is None:
+            raise ValueError("container absent")
+        labels = (info.get("Config") or {}).get("Labels") or {}
+        if labels.get(cm.LABEL_MANAGED) == "1" and (
+                labels.get(cm.LABEL_SESSION) != session_tag or labels.get(cm.LABEL_PR) != pr_id):
+            raise ValueError("container belongs to a different session/PR")
+        expected = os.path.realpath(_shared_sock_dir_path(session_tag, pr_id))
+        mounts = [m for m in info.get("Mounts") or []
+                  if m.get("Destination") == _CONTAINER_SOCKET_DIR]
+        if len(mounts) != 1 or os.path.realpath(mounts[0].get("Source", "")) != expected:
+            raise ValueError("shared socket directory is missing or belongs to another allocation")
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise cm.ContainerError(f"Cannot verify mounted push proxy for '{name}': {exc}") from exc
+
+
+def mounted_unshared_proxy(name: str) -> tuple[str, str, str] | None:
+    """Resolve the authoritative unshared mount, even when its socket is absent."""
+    from pm_core import container as cm
+    try:
+        info = _proxy_container_info(name)
+        if info is None:
+            return None
         labels = (info.get("Config") or {}).get("Labels") or {}
         current_name = (info.get("Name") or name).lstrip("/")
         parsed = cm.parse_container_name(current_name)

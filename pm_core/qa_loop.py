@@ -2638,6 +2638,8 @@ def _relaunch_scenario_window(
 
     Returns True if the window was recreated successfully.
     """
+    if state.stop_requested:
+        return False
     from pm_core import tmux as tmux_mod
     from pm_core.container import is_container_mode_enabled, _runtime_available
     _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
@@ -2653,6 +2655,10 @@ def _relaunch_scenario_window(
         # down) or left half set up — verified reuse, else recreate.
         if not _ensure_scenario_container(scenario, state, pr_data):
             return False
+    # Re-ensure may block on setup or a launch lock. Keep its captured identity
+    # for final release, but never attach a worker after this run was stopped.
+    if state.stop_requested:
+        return False
 
     try:
         run_cmd, pane_cwd = _build_scenario_run_cmd(
@@ -2660,6 +2666,8 @@ def _relaunch_scenario_window(
             session=None if (use_containers and scenario.container_name) else session,
             workdir_path=workdir_path,
         )
+        if state.stop_requested:
+            return False
         pane_id = tmux_mod.new_window_get_pane(session, win_name, run_cmd,
                                                cwd=pane_cwd, switch=False)
         if not pane_id:

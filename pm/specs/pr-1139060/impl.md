@@ -177,7 +177,9 @@ and the renamed allocation's lock; do not report removal or prune its release.
   Unshared proxy directories carry runtime-domain ownership too; another runtime
   cannot start, repair, or unlink their sockets based on its own empty inventory.
   Existing unreadable or malformed proxy owner records fail closed rather than
-  acting as missing legacy records. Owner metadata is published atomically before
+  acting as missing legacy records. Explicit null runtime domains also fail closed;
+  new owner publication requires a known runtime identity rather than creating
+  unknown-domain records that another runtime could adopt. Owner metadata is published atomically before
   starting a proxy; publication failure aborts startup without spawning a daemon.
   Unknown runtime identity defers removal before deleting an allocation whose
   mounted proxy needs a durable release. Recognized legacy unlabeled containers
@@ -218,13 +220,18 @@ and the renamed allocation's lock; do not report removal or prune its release.
   launch a subsequent worker or convert an unlaunched scenario into human-wait
   retention. The dequeue caller also checks cancellation after preparation returns,
   before assigning a fallback verdict; this applies to host and container workers.
+  Dead-worker retries also check cancellation before re-ensure, after allocation
+  returns, and before opening the replacement pane; a blocking retry must not
+  attach a new worker after the run was stopped.
   Allocations already created retain their captured identity for the
   normal final release, with existing human/viewed/retained exceptions preserved.
   Temporary launch-batch slicing must
   restore the full scenario list even when launch/status persistence raises.
   PR resource orchestration must not stop a removed container's proxy a second
   time after cleanup returns: a concurrent launch may already own its replacement.
-  Session shutdown's remaining-proxy sweep likewise uses exact session/runtime
+  Session shutdown selects containers by exact label-first session ownership,
+  including renamed allocations, never a session-name prefix that can match a
+  different session. Its remaining-proxy sweep likewise uses exact session/runtime
   records and locked runtime-user checks, preserving failed removals and replacements.
   Workdirs, captures, transcripts, QA workdirs are never touched.
 
@@ -259,7 +266,10 @@ intact to protect concurrent waiters and delayed releases.
   not stamp completed setup. After post-setup the host writes `/tmp/.pm-setup-complete`.
 - Reuse requires: running **and** `/tmp/.pm-setup-complete` **and**
   `/home/pm/.claude.json` present (when the host has one) **and**, when a push
-  branch is set, the proxy socket alive.  If incomplete: if `/tmp/.pm-ready`
+  branch is set, the proxy socket alive. Shared reuse verifies the actual mounted
+  directory and managed session/PR labels under the proxy lock before starting
+  or accepting a socket; a missing or unrelated mount fails without recreation.
+  If incomplete: if `/tmp/.pm-ready`
   exists, finish post-setup in place (idempotent) and re-verify; otherwise
   remove and recreate only when missing readiness is confirmed by a successful
   exec of `test` returning 1 without runtime errors. Failed exec/post-setup

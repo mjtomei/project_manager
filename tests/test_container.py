@@ -1042,16 +1042,17 @@ class TestCleanupContainers:
         count = cleanup_qa_containers("pr1", "loop1")
         assert count == 0
 
-    @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_runtime")
-    def test_cleanup_session(self, mock_docker, mock_rm):
-        mock_docker.return_value = MagicMock(
-            returncode=0,
-            stdout="pm-repo-abc-impl-pr1\npm-repo-abc-qa-pr1-loop1-s1\n",
-        )
+    @patch("pm_core.container.remove_containers")
+    @patch("pm_core.container_reaper.list_containers")
+    def test_cleanup_session(self, mock_inventory, mock_rm):
+        from pm_core.container_reaper import ContainerInfo
+        names = ["pm-repo-abc-impl-pr1", "pm-repo-abc-qa-pr1-loop1-s1"]
+        mock_inventory.return_value = [
+            ContainerInfo(name=name, session_tag="repo-abc") for name in names]
+        mock_rm.return_value = (names, {})
         count = cleanup_session_containers("repo-abc")
         assert count == 2
-        mock_rm.assert_any_call("pm-repo-abc-impl-pr1")
+        mock_rm.assert_called_once_with(names)
 
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")

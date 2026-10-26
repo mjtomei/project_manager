@@ -78,6 +78,58 @@ def test_cancelled_preparation_does_not_launch_or_record_verdict(tmp_path, monke
         window.assert_not_called()
 
 
+@pytest.mark.parametrize("stage", ["before", "create", "command"])
+def test_cancelled_retry_does_not_attach_worker(tmp_path, monkeypatch, stage):
+    state = qa_loop.QALoopState(pr_id="pr-aaaa", session_tag="t", loop_id="L")
+    state.qa_workdir = str(tmp_path)
+    scenario = qa_loop.QAScenario(
+        index=1, title="s1", focus="", container_name="pm-t-qa-pr-aaaa-L-s1",
+        container_id="old-id", container_generation="old-epoch",
+        worktree_path=str(tmp_path), window_name="qa-pr-aaaa-s1")
+    state.scenarios = [scenario]
+    state.stop_requested = stage == "before"
+
+    def create(**kwargs):
+        kwargs["allocation_identity"].update(id="new-id", generation="new-epoch")
+        if stage == "create":
+            state.stop_requested = True
+        return "new-id"
+
+    def command(*args, **kwargs):
+        state.stop_requested = True
+        return "worker", str(tmp_path)
+
+    monkeypatch.setattr(qa_loop, "_resolve_qa_model", MagicMock())
+    monkeypatch.setattr(container, "is_container_mode_enabled", lambda: True)
+    monkeypatch.setattr(container, "_runtime_available", lambda: True)
+    monkeypatch.setattr(container, "load_container_config", MagicMock())
+    allocation = MagicMock(side_effect=create)
+    monkeypatch.setattr(container, "create_qa_container", allocation)
+    monkeypatch.setattr(qa_loop, "_build_scenario_run_cmd", command)
+    window = MagicMock(return_value="%6")
+    monkeypatch.setattr(tmux, "new_window_get_pane", window)
+    monkeypatch.setattr(tmux, "pane_window_id", lambda *a: None)
+    monkeypatch.setattr(qa_loop, "_viewed_window_ids", lambda *a: set())
+    release = MagicMock(return_value=container_reaper.Outcome())
+    monkeypatch.setattr(container_reaper, "release_containers", release)
+
+    assert not qa_loop._relaunch_scenario_window(
+        scenario, state, {}, {"id": state.pr_id}, "pm-t", str(tmp_path))
+    window.assert_not_called()
+    assert not state.scenario_verdicts
+    assert not state.scenario_verdict_reasons
+    if stage == "before":
+        allocation.assert_not_called()
+    else:
+        assert scenario.container_id == "new-id"
+        assert scenario.container_generation == "new-epoch"
+        qa_loop._release_scenario_containers(state, "pm-t")
+        release.assert_called_once_with(
+            [scenario.container_name], reason="qa-run-end", owner_release=True,
+            expected_ids={scenario.container_name: "new-id"},
+            expected_generations={scenario.container_name: "new-epoch"})
+
+
 def test_concretizer_poll_observes_cancellation(monkeypatch, tmp_path):
     from pm_core import claude_launcher
 

@@ -312,6 +312,9 @@ def test_proxy_repair_and_validation_hold_shared_lock(monkeypatch):
     def start(*args, **kwargs):
         assert held
         return "/sock"
+    def validate(*args):
+        assert held
+    monkeypatch.setattr(pp, "validate_shared_proxy_mount", validate)
     monkeypatch.setattr(pp, "start_push_proxy", start)
     monkeypatch.setattr(pp, "proxy_is_alive", lambda p: True)
     assert cm._ensure_reusable(NAME, Path("/w"), "branch", session_tag="tag", pr_id="pr-aaaa") == "cid"

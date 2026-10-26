@@ -1494,6 +1494,8 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
             # Always pass through start_push_proxy's domain validation, even
             # when a healthy socket already exists. Serialize dead-socket repair.
             if session_tag and pr_id:
+                from pm_core.push_proxy import validate_shared_proxy_mount
+                validate_shared_proxy_mount(name, session_tag, pr_id)
                 sock = start_push_proxy(name, str(workdir), allowed_push_branch,
                                         session_tag=session_tag, pr_id=pr_id)
             else:
@@ -2594,14 +2596,16 @@ def cleanup_orphaned_qa_containers(session: str, pr_id: str,
 
 
 def cleanup_session_containers(session_tag: str) -> int:
-    """Remove all containers belonging to a session.
-
-    Filters by ``pm-{session_tag}-`` which matches every container whose
-    name was generated with this session tag embedded.
+    """Remove containers with this exact session owner, including renamed ones.
 
     Returns the number of containers removed.
     """
-    names = _list_names(f"{CONTAINER_PREFIX}{session_tag}-")
+    from pm_core import container_reaper
+    inventory = container_reaper.list_containers()
+    if inventory is None:
+        _log.warning("Cannot inspect containers for session %s; cleanup deferred", session_tag)
+        return 0
+    names = [info.name for info in inventory if info.session_tag == session_tag]
     if not names:
         return 0
     removed, _failures = remove_containers(names)

@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from pm_core import container, push_proxy
+from pm_core import container, container_reaper, push_proxy
 
 
 @pytest.mark.parametrize("contents", ['{"runtime_domain":', '[]', 'null'])
@@ -25,6 +25,18 @@ def test_invalid_owner_preserves_proxy(tmp_path, monkeypatch, contents):
 
 def test_unreadable_owner_is_not_legacy(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "read_text", Mock(side_effect=PermissionError("denied")))
+    assert not push_proxy._owner_domain_matches(str(tmp_path))
+
+
+def test_unknown_domain_cannot_publish_new_owner(tmp_path, monkeypatch):
+    monkeypatch.setattr(container_reaper, "_runtime_domain", lambda: None)
+    with pytest.raises(container.ContainerError, match="runtime identity"):
+        push_proxy._write_owner_file(str(tmp_path), "tag", "pr-aaaa", "/work")
+    assert not (tmp_path / "owner.json").exists()
+
+
+def test_explicit_unknown_domain_is_not_legacy(tmp_path):
+    (tmp_path / "owner.json").write_text(json.dumps({"runtime_domain": None}))
     assert not push_proxy._owner_domain_matches(str(tmp_path))
 
 
