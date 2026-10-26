@@ -12408,6 +12408,24 @@ prs:
       scenarios and independent sign-off remain required.'
     created_at: '2026-10-26T00:03:15Z'
     last_edited: '2026-10-26T00:03:54Z'
+  - id: note-daf5df0
+    text: 'Review-loop 6427 i17 (main and inherited read-only helper chatgpt/gpt-6-astra-high):
+      fixed cancelled QA preparation/concretizer polling launching late workers or
+      inventing human-wait retention; rename-after-inventory cleanup retiring a still-live
+      allocation release; and missing/exited unshared socket cleanup stranding runtime
+      owner metadata. Existing identity/lock/release architecture retained; impl spec
+      clarified. Before-fix cancellation: 4 behavioral failures plus new-argument
+      TypeError; core: 6 failures/14 controls passed; independent isolated repros
+      confirmed both core defects. QA focused 105 passed; integrated lifecycle/proxy/launchers
+      668 passed; final regressions 28 passed/1 inapplicable host-create skip. Final
+      sanitized full suite 3790 passed, 1 skipped, 3 existing-class AsyncMock warnings.
+      Installed declared markdown dependency. Evidence and complete per-file notes:
+      /pm-captures/review-6427-i17-per-file.md; full suite /pm-captures/review-6427-i17-full-suite-final.log.
+      Existing project.yaml handoff/model/manual-gate edits preserved outside source
+      commit. No real-container QA claim or waiver; outstanding runtime scenarios
+      and independent sign-off remain required.'
+    created_at: '2026-10-26T00:20:30Z'
+    last_edited: '2026-10-26T00:20:30Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
