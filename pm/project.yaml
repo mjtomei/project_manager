@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T10:18:14.540403+00:00'
+  updated_at: '2026-10-26T10:47:17.324098+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32911,6 +32911,20 @@ prs:
       it returns the host path.'
     created_at: '2026-10-26T10:18:14Z'
     last_edited: '2026-10-26T10:18:14Z'
+  - id: note-8af3fba
+    text: 'QA scenario 11 (decision surface) PASS: all 7 stories held on 20b6123c
+      — evidence-statement refusal, recorded evidence block (review.sha null), review
+      inference from a no-code-change QA resume + prior_signoff, SIGNOFF_REVIEW return
+      to review with the applied base retained, stale-head refusal with H2 provenance
+      (candidate/resolved_from null), malformed/unreadable QA status (error: unreadable
+      / malformed), and the 21-30/35 behaviour boundary (25 changes with no base_behavior_count;
+      30 + count 35 after --fresh). No code change. Harness notes: agg is not preinstalled
+      (download agg-aarch64 1.9.0); the generated sign-off prompt is not observable
+      because the fake backend deletes pm/prompts/pm_prompt_*.txt after the agent
+      reads it, so "… 15 more" can only be inferred from the record; story 6 review
+      inference needs planner_code_changes empty. Captures: /pm-captures/scenarios/11/.'
+    created_at: '2026-10-26T10:47:17Z'
+    last_edited: '2026-10-26T10:47:17Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
