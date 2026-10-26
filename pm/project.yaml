@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T20:33:52.665157+00:00'
+  updated_at: '2026-10-26T21:16:05.602799+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16676,6 +16676,42 @@ prs:
       superseded by this note.'
     created_at: '2026-10-26T20:33:52Z'
     last_edited: '2026-10-26T20:33:52Z'
+  - id: note-92d0c33
+    text: 'Review 32f9 i1 (HEAD 02e5a126; master 211a6128 already merged): fresh full-diff
+      review. Fixed two defects and resolved the QA S28 S5 INPUT_REQUIRED as a spec
+      correction. (1) pm_core/tmux.py attached_group_active_windows used a TAB-separated
+      list-sessions format; tmux rewrites control chars in format output to "_" under
+      a non-UTF-8 locale (LC_ALL=C), so every line split into one field and the function
+      returned {} — the picker ●/○ per-session indicators silently never rendered.
+      Verified live on tmux 3.2a ("base\t0\t@0" -> "base_0_@0" under LC_ALL=C; tabs
+      survive only in UTF-8 locales). Now uses a printable "|" separator with the
+      session name last (maxsplit=2); verified against real tmux with an attached
+      client in both C and C.UTF-8. The old test mocked _run with real tabs and hid
+      it; added a separator regression test. (2) pm_core/cli/session.py _display_id:
+      with an explicit prs: [] the collapsed home named the raw tmux window name,
+      so opening from review-#12 / qa-#12-s1 showed "PR Actions — review-#12" instead
+      of "#12"; now names the PR id extracted from the invoking window (window_pr_id).
+      Added a regression test that fails on the old code. (3) QA S28 S5 was INPUT_REQUIRED
+      (A drops out of nav after its gh_pr_number is removed and reassigned). Resolved
+      as a spec correction, no code change: a removed gh_pr_number is not recoverable
+      without a persisted window->PR association (impl.md already documented that);
+      impl.md/qa.md E11 now state that A is not navigable from a non-PR window once
+      no window name matches its remaining ids, that navigation from A old position
+      must reach the surviving neighbours in both directions and never retarget the
+      new owner, and that opening from a window still named for A local id pins A
+      as home. Also committed the pending QA harness-trap notes and E12 (popup failure
+      handler) left uncommitted on the branch. Full suite after final edits: 3719
+      passed, 1 skipped; focused popup/session/tmux 403 passed. Non-blocking, left
+      unchanged: pr_sync/startup_github_sync still index pr["id"] for GitHub-backend
+      projects (an id-less entry logs "GitHub sync error" with a traceback but the
+      TUI stays up; the in-scope do_normal_sync/tech_tree paths are fixed); _refresh_state
+      still cannot distinguish a tmux list-windows error from an empty list (pre-existing,
+      self-heals next key). Sibling #216 (pr-9b96145, self-heal by re-linking gh_pr_number)
+      can extend the new _find_pr_for_window_id helper directly. No live QA PASS claimed:
+      QA must re-cover the two fixed cases (C-locale ●/○, review-window prs:[] naming)
+      plus prior E6/E11/C1/R13/E10. No new standalone follow-up PRs created. (2026-10-26T21:15:00Z)'
+    created_at: '2026-10-26T21:16:05Z'
+    last_edited: '2026-10-26T21:16:05Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
