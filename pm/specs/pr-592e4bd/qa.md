@@ -824,6 +824,38 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
   pre-fix vs post-fix):
   `/pm-captures/review-c189-i6/live-inherited/`. That evidence does not
   include a live container run or interactive panes.
+- **RQ45** (review loop c189 i8–i11; impl.md R3/R9) Given a hand-edited
+  `~/.pm/providers.yaml`, When pm launches sessions or the user runs the
+  provider/model commands, Then:
+  - An entry that is not a well-formed router (a null or string entry, a
+    non-string `api_base`, a list `alias_models`, `capabilities: 5`) never
+    breaks a launch that does not use it, including main-account launches
+    while an endpoint is inherited (i8).
+  - When the selected provider's entry is such an entry, every surface
+    reports it like a missing provider: one `Error:` line for
+    impl/review/sign-off, the refiner/worker route gate's wait with its
+    remedy (the launch goes ahead by itself once the entry is fixed),
+    `QA stopped: …` for planner/s0/verifier/finalizer, `(INVALID ENTRY in
+    providers.yaml)` in `pm model show`, `INVALID ENTRY: <problem>` in
+    `pm provider list` beside the valid entries. Never a traceback, a
+    "QA thread crashed", or a launch on plain claude (i9).
+  - `pm provider add/remove/default` fill a blank `providers:` block and
+    refuse a file they cannot read (not valid YAML, not a mapping, a
+    non-mapping `providers` block) with one `Error: <path> cannot be
+    changed: …` line, rc 1, the file byte-identical (i10).
+  - A named provider in a file pm cannot read (one stray tab, not a
+    mapping, a directory, permission denied) is named as unreadable on
+    every launch surface ("cannot be looked up in <path>: <why>; fix the
+    file by hand"), `(providers.yaml UNREADABLE)` in `pm model show` and
+    `NOT READ: <path>: <problem>` in `pm provider list`, never "not
+    configured, add it with pm provider add". An unopenable file is "it
+    cannot be read (<reason>)", not "not valid YAML". A readable file
+    without the provider still says "add it" (i11).
+  - Concurrent use: `pm provider add`/`default` rewrite the file in place
+    (`save_providers`, not an atomic replace) while QA and other launches
+    read it. A launch that reads it mid-write must end in one of the
+    states above (gate wait then launch, or a clean `Error:`), never a
+    traceback, a verdict, or a main-account launch for a routed role.
 
 ## 2. Setup
 
@@ -1308,6 +1340,20 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     route URL (review loop c189 i7 saw it in its own routed review
     container: a no-model build dropped every routing variable). Include
     one nested launch from inside a container session.
+    Recovery planner (2026-10-26, run 7bedb3d9d6eac0ee) split S62 by mode
+    and added the c189 i8–i11 changes (RQ45), which landed after this
+    pass was written:
+    - S62: host mode (TUI and plain-terminal CLI, `--resume`, `claude -p`
+      helpers, ee82dc0c control), RQ44 + RQ43 classifier in interactive
+      host panes.
+    - S63: container mode (nested slirp4netns), the same three PRs, the
+      container-by-name `ANTHROPIC_BASE_URL`/`ANTHROPIC_SMALL_FAST_MODEL`
+      removal, the marker-only case and one nested launch from inside a
+      container session; RQ43 in container panes.
+    - S64: RQ45 on stubs only (no real work account): hand-edited
+      providers.yaml across launch surfaces, QA gate wait and recovery,
+      the provider CLI, a non-Claude router (no classifier pin), and
+      `pm provider add` racing live launches.
 
 ## 3. Edge cases
 
