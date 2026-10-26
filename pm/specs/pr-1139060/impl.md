@@ -152,7 +152,9 @@ operations do not take PM's launch lock.
   A failed worker split releases its concretizer-only allocation unless
   retained or viewed, and is not polled as a worker. A missing split pane ID is
   not proof that the worker never attached: locked cleanup must confirm the
-  concretizer is the only owner, preserving additional or unknown owners. Once
+  concretizer is the only owner, preserving additional or unknown owners. The
+  concretizer exception is scoped to the caller's tmux socket as well as its pane
+  ID: an identically numbered pane on another server is a separate owner. Once
   that locked check authorizes ending the concretizer, persist an identity-bound
   owner release before removal so a transient removal failure remains visible
   and retryable despite the surviving concretizer pane. Unknown runtime identity

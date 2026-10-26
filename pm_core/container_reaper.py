@@ -674,8 +674,14 @@ def _token_re(token: str) -> re.Pattern:
 
 
 def _owner_panes(info: ContainerInfo, cache: _PaneCache,
-                 fresh: bool = False) -> tuple[list[str], bool]:
-    """(owning pane ids, indeterminate) for *info*."""
+                 fresh: bool = False, *, qualify_foreign: bool = False) -> tuple[list[str], bool]:
+    """(owning pane ids, indeterminate) for *info*.
+
+    Strict handoffs accept bare pane IDs only on the caller's tmux server.
+    Other servers can reuse those IDs, so retain their socket identity.
+    """
+    local_socket = os.path.realpath(
+        container_mod._current_tmux_socket() or _default_server().socket_file)
     pats = [_token_re(info.name)]
     if info.id:
         pats.append(_token_re(info.id))
@@ -705,7 +711,9 @@ def _owner_panes(info: ContainerInfo, cache: _PaneCache,
                               and info.id.startswith(word)
                               for target in targets for word in target.split())
             if matched:
-                owners.append(pane_id)
+                socket = os.path.realpath(server.socket_file)
+                owners.append(f"{socket}:{pane_id}" if qualify_foreign and socket != local_socket
+                              else pane_id)
     return owners, indeterminate
 
 
@@ -716,6 +724,8 @@ def live_owner_panes(name: str, container_id: str = "", *, strict: bool = False)
     launched from (``pm.tmux_socket``) is searched even when that isn't
     this process's server. Raises ContainerError when ownership cannot be
     established; destructive recovery must not interpret unknown as unowned.
+    Strict lookups qualify foreign-server pane IDs so a local concretizer
+    exception cannot authorize a different server's identically numbered pane.
     """
     if not strict and container_mod.activity_owner(name):
         return ["interactive client"]
@@ -728,7 +738,8 @@ def live_owner_panes(name: str, container_id: str = "", *, strict: bool = False)
         parsed = container_mod.parse_container_name(name)
         if parsed:
             info.session_tag = parsed.session_tag
-    owners, indeterminate = _owner_panes(info, _PaneCache(), fresh=True)
+    owners, indeterminate = _owner_panes(info, _PaneCache(), fresh=True,
+                                         qualify_foreign=strict)
     if indeterminate and (strict or not owners):
         raise container_mod.ContainerError(
             f"Container '{name}' ownership unknown: tmux server unreachable or pane process inspection unavailable")
