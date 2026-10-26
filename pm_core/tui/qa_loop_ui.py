@@ -568,13 +568,13 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                         "press i to sign off"
                     )
             else:
-                # Hold the pass count against start_qa's same-frame
-                # "Starting QA for ..." so the user actually sees it.
+                # Override any sticky line, then hold the pass count against
+                # start_qa's same-frame "Starting QA for ...".
                 from pm_core.tui import auto_start as _auto_start
                 app.log_message(
                     f"[green]QA PASS[/] for {pr_id} "
                     f"({sd['pass_count']}/{required} consecutive) — restarting QA",
-                    hold=_auto_start.CONFIRM_HOLD_SECONDS,
+                    force=True, hold=_auto_start.CONFIRM_HOLD_SECONDS,
                 )
                 _log.info("QA self-driving: %d/%d passes, restarting QA",
                           sd["pass_count"], required)
@@ -591,12 +591,12 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                     f"[green bold]QA PASS[/] for {pr_id} — press i to sign off"
                 )
     elif verdict == VERDICT_NEEDS_WORK:
-        # Issues found or changes committed → back to review.  Held so the
-        # review loop's same-frame "Review loop started" doesn't hide it.
+        # Issues found or changes committed → back to review.  Override any
+        # sticky line and hold against the same-frame "Review loop started".
         from pm_core.tui import auto_start as _auto_start
         app.log_message(
             f"[yellow bold]QA NEEDS_WORK[/] for {pr_id} — returning to review",
-            hold=_auto_start.CONFIRM_HOLD_SECONDS,
+            force=True, hold=_auto_start.CONFIRM_HOLD_SECONDS,
         )
         _transition_pr_status(app, pr_id, "qa", "in_review")
         # Clear the stale review loop entry from the previous review pass
@@ -604,8 +604,12 @@ def _on_qa_complete(app, state: QALoopState) -> None:
         # Reload in-memory state and repaint, so the tree shows in_review
         # even when nothing else (auto-start, a review loop) refreshes it.
         # Not _load_state(): its scheduler hook would duplicate the
-        # check_and_start below.
+        # check_and_start below.  Preserve its flush-before-reload invariant
+        # so a debouncing navigation write isn't replaced by stale disk state.
         if app._root:
+            wq = getattr(app, "_write_queue", None)
+            if wq is not None:
+                wq.flush_sync()
             try:
                 app._data = store.load(app._root)
             except store.ProjectYamlParseError:

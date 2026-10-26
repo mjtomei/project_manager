@@ -143,13 +143,16 @@ only after the first restart.
 
 **R11: A plain-`t` NEEDS_WORK with auto-start off repaints the tree
 (976b6f6a).** The PR shows in_review as soon as the verdict lands, without a
-manual refresh.
+manual refresh. If the user navigated to another PR while a write is still
+pending, the repaint must preserve that newer selection rather than restore
+the on-disk selection.
 
 **R12: QA verdicts get processed and the pass count can be seen (8b793611,
 59254fe1).** A QA start on a PR with no workdir at the last refresh still
 has its verdict handled, so the self-driving restart happens without `r`.
 "QA PASS (N/M consecutive) — restarting QA" stays on screen for about 3 s
-instead of being overwritten in the same frame by "Starting QA".
+instead of being overwritten in the same frame by "Starting QA". It also
+appears if another PR's sticky review-completion message is already showing.
 
 **R13: Pane-launch confirmations show over a sticky message (af42a1d9).**
 `L` pressed while "Review loop done ✓ PASS" (or another sticky message) holds
@@ -159,7 +162,8 @@ the status line still paints "Launched/Focused existing log pane".
 for <pr> — returning to review" is held for about 3 s (CONFIRM_HOLD_SECONDS)
 instead of being replaced in the same frame by "Review loop started". This
 applies to both the self-driving bounce and the plain-`t` / auto-start bounce,
-which goes back through auto-start's check_and_start.
+which goes back through auto-start's check_and_start. An existing sticky
+review-completion message must not suppress this confirmation either.
 
 Out of scope, filed separately: pr-064fe5b (user `zz t` over a leftover
 `qa-<pr>` window replaces it without focusing). R6 for `zz t` applies only

@@ -6,6 +6,7 @@ sticky "Review loop done … PASS" message was up, so the TUI never showed
 """
 
 import time
+import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -38,6 +39,34 @@ def _stub_app():
 
 def _log(app, msg, **kw):
     ProjectManagerApp.log_message(app, msg, **kw)
+
+
+@pytest.mark.parametrize("verdict, expected", [
+    ("PASS", "(1/2 consecutive) — restarting QA"),
+    ("NEEDS_WORK", "returning to review"),
+])
+def test_qa_confirmation_visible_over_sticky_review(verdict, expected):
+    from pm_core.qa_loop import QALoopState
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = None
+    app._review_loops = {}
+    app._self_driving_qa = {"pr-001": {"pass_count": 0, "required_passes": 2}}
+    _log(app, "Review loop done for pr-other: PASS", sticky=10)
+    state = QALoopState(pr_id="pr-001", latest_verdict=verdict)
+
+    def followup(*args):
+        app.log_message("Starting follow-up")
+
+    with patch.object(qa_loop_ui, "_record_qa_note"), \
+         patch.object(qa_loop_ui, "_transition_pr_status"), \
+         patch.object(qa_loop_ui, "start_qa", side_effect=followup), \
+         patch.object(qa_loop_ui, "_start_self_driving_review", side_effect=followup):
+        qa_loop_ui._on_qa_complete(app, state)
+
+    assert expected in shown[-1]
+    assert app._log_hold_until > time.monotonic()
 
 
 def test_plain_message_dropped_while_sticky():

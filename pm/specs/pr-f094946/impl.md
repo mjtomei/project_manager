@@ -5,8 +5,8 @@
 1. **Background QA launches are focus-safe.** `pm_core/qa_loop.py::run_qa_sync`
    (planning phase, first-time creation of the `qa-<pr>` window — the
    `elif not existing_win:` branch after `tmux_mod.new_window(..., switch=False)`)
-   calls `tmux_mod.select_window(session, window_name)` unless
-   `runtime_state.consume_suppress_switch(pr_id, "qa")` returns True.
+   previously called `tmux_mod.select_window(session, window_name)` unless
+   `runtime_state.consume_suppress_switch(pr_id, "qa")` returned True.
    `tmux.select_window` targets `current_or_base_session(session)`, i.e. the
    attached client's (possibly grouped `$SESS~N`) session, so every
    scheduler-driven QA start yanks that client off the TUI window.
@@ -20,6 +20,27 @@
    `pr_view` command handling and the popup/command bar — still select the
    new window on first-time creation, still honour the popup
    `suppress_switch` flag.
+
+3. **Preserve the incidental fixes added during QA rounds 1–3.** These
+   extend the original focus-only scope and are required by the PR notes
+   and QA spec (R10–R14):
+   * The first `zz t` on an `in_review` PR transitions it to `qa`, using
+     the same locked status-update helper as `start_qa`. If the update
+     fails, do not launch QA.
+   * Both QA start paths arm the existing shared 1 s poll timer, even if
+     no workdir existed at the last refresh. Reuse the review-loop timer
+     helper rather than creating a separate timer per QA run.
+   * A plain-`t` NEEDS_WORK result repaints the tree after reloading the
+     `in_review` status, without requiring a manual refresh. Flush pending
+     navigation writes before this reload, as `_load_state` does, without
+     invoking that method's scheduler hook a second time.
+   * The self-driving PASS-count/restart message and the NEEDS_WORK
+     return-to-review message use `force=True` and `CONFIRM_HOLD_SECONDS`,
+     so existing sticky lines and same-frame start messages do not hide
+     them. The latter applies to both
+     self-driving and auto-start bounces.
+   * Pane-launch/focus confirmations use the existing `force=True`
+     convention so user-key replies are visible over a sticky message.
 
 ## Design
 
@@ -38,7 +59,7 @@
 
 ## Implicit Requirements
 
-* The "replacement window" path (`sessions_on_qa` non-empty → 
+* The "replacement window" path (`sessions_on_qa` non-empty →
   `switch_sessions_to_window`) is unchanged for both kinds of launch: it only
   moves clients that were *already viewing* the old `qa-<pr>` window, so it
   is focus-preserving, not focus-stealing.
@@ -60,6 +81,10 @@
   window (replacement path) anyway.
 * **`pm qa run` CLI** (`cli/qa.py`) uses `planning_phase=False`, never
   reaching the branch — no change.
+* **User `zz t` over a leftover QA window** remains the unchanged
+  replacement-window behavior, tracked separately by pr-064fe5b. The
+  first-start focus requirement applies when no QA window exists; do not
+  broaden this fix to change replacement-window selection.
 
 ## Edge Cases
 

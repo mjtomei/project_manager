@@ -29479,7 +29479,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-22T18:41:25.464821+00:00'
+  updated_at: '2026-10-26T13:31:41.623346+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29582,6 +29582,19 @@ prs:
       (drive.sh runs all triples unattended).'
     created_at: '2026-10-22T18:41:25Z'
     last_edited: '2026-10-22T18:41:25Z'
+  - id: note-7b1e0ce
+    text: 'Review 8e01 i1 on merged e05a50cf (master 211a6128): reproduced and fixed
+      two QA-round regressions: NEEDS_WORK repaint now flushes pending navigation
+      writes before reloading, and held PASS-count / NEEDS_WORK confirmations now
+      override existing sticky review lines. Three new behavioral cases failed before
+      the fixes; focused tests pass (92). Original focus regression also fails for
+      the right reason when only the old select condition is restored in memory. Impl/QA
+      specs synchronized. Evidence: /pm-captures/review-8e01-i1/. Historical captures
+      validate the original bug, not approval of the merged result; native QA remains
+      required. Preserved the transfer stash and all dirty Astra role settings; no
+      standalone follow-ups created.'
+    created_at: '2026-10-26T13:31:41Z'
+    last_edited: '2026-10-26T13:31:41Z'
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge

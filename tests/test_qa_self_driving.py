@@ -218,6 +218,32 @@ class TestPassCountAndAutoMerge:
 class TestNeedsWorkStrict:
     """NEEDS_WORK resets pass_count, transitions to in_review, starts review loop."""
 
+    def test_repaint_preserves_pending_navigation(self, tmp_path):
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+
+        app = _make_app(tmp_path, auto_start=False)
+        app._data["prs"].append({"id": "pr-002", "title": "Other", "status": "qa"})
+        app._data["project"]["active_pr"] = "pr-001"
+        store.save(app._data, app._root)
+        app._data["project"]["active_pr"] = "pr-002"
+        app._write_queue = store.WriteQueue(app._root)
+        app._write_queue.enqueue(
+            ("set", "active_pr"),
+            lambda d: d["project"].__setitem__("active_pr", "pr-002"),
+        )
+        painted = []
+        app._update_display.side_effect = lambda: painted.append(
+            app._data["project"]["active_pr"])
+        state = QALoopState(pr_id="pr-001", latest_verdict=VERDICT_NEEDS_WORK)
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note"):
+            _on_qa_complete(app, state)
+
+        assert painted == ["pr-002"]
+        assert app._data["project"]["active_pr"] == "pr-002"
+        assert store.load(app._root)["project"]["active_pr"] == "pr-002"
+        assert store.get_pr(app._data, "pr-001")["status"] == "in_review"
+
     def test_needs_work_resets_pass_count(self, tmp_path):
         """Step 7: NEEDS_WORK resets pass_count to 0."""
         from pm_core.tui.qa_loop_ui import _on_qa_complete
