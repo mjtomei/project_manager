@@ -259,8 +259,10 @@ labelled "Not applied" even when pm recorded no apply error (a
 `--record`-only check): the agent must not read a resolved candidate as
 already integrated, because a MERGE is blocked until it is. A carried applied
 resolution on a `conflict`/`error` record is labelled an *earlier*, already
-applied resolution and the current conflict is described as separate — the
-same qualification the CLI and the return text carry
+applied resolution and the current problem is described as separate — "the
+conflict above" on a `conflict` record, "the failed check above" on an
+`error` record (it reports a failed check, not a conflict) — the same
+qualification the CLI and the return text carry
 (`integration.carried_applied_resolution`). The behaviour-change list's total
 falls back to the stored list's length when `compact` kept 21-30 changes
 without a `base_behavior_count` (indexing the absent key would crash the
@@ -294,7 +296,12 @@ does not contain, and keeps the newest by ancestry — the last check's
 recorded `merge_base` (which survives a later check replacing the
 `up_to_date` record) is one candidate, but only when a base merge is known;
 without one it is just the branch point and the usual base-branch diff
-stays. The same newest-base rule drives the sign-off prompt's
+stays. A later bounce can replace `signoff_return` (and with it the
+`applied` block that recorded the merge), so when the workdir is visible the
+merge base is also recognised by ancestry: a base the branch merged sits on
+a merge commit's non-first parent side and is absent from HEAD's
+first-parent chain, while the branch point is on it. The same newest-base
+rule drives the sign-off prompt's
 "PR's own changes remain" line and the return text's `git diff <base> HEAD`
 hint.
 

@@ -1664,6 +1664,19 @@ def carried_applied_resolution(record: dict | None) -> bool:
         and rec.get("status") in (CONFLICT, ERROR)
 
 
+def _on_first_parent_chain(workdir: str, sha: str) -> bool:
+    """Whether *sha* is on HEAD's first-parent chain.
+
+    A base the branch merged sits on a merge commit's non-first parent side,
+    so it never appears on HEAD's first-parent chain; the branch point (where
+    the PR forked) does.  That tells "the branch already carries this base"
+    from "this is just where the PR branched" without relying on an apply that
+    a later bounce may have overwritten.
+    """
+    chain = _out(_git("rev-list", "--first-parent", "HEAD", cwd=workdir))
+    return bool(chain) and sha in set(chain.splitlines())
+
+
 def contained_base(pr: dict) -> str | None:
     """The newest base revision the PR branch already contains, or ``None``.
 
@@ -1693,16 +1706,25 @@ def contained_base(pr: dict) -> str | None:
         candidates.append(record["base_sha"])
     if applied.get("merge_sha") and applied.get("base_sha"):
         candidates.append(applied["base_sha"])
+    workdir = pr.get("workdir")
+    have_workdir = bool(workdir) and Path(workdir).is_dir()
     # The last check's merge base is the newest base revision the branch
     # shares with the checked base, and it survives a later check replacing
-    # the ``up_to_date`` record that named the applied base.  Only when a
-    # base merge is known: without one, the merge base is just the branch
-    # point and the usual base-branch diff stays (the workdir ref is not
-    # stale in that case).
+    # the ``up_to_date`` record that named the applied base.  Without one, the
+    # merge base is just the branch point and the usual base-branch diff stays
+    # (the workdir ref is not stale in that case).  A later bounce can replace
+    # ``signoff_return`` — dropping the ``applied`` block that recorded the
+    # merge — so when the workdir is visible, ask git instead: a base the
+    # branch merged sits on a merge commit's non-first parent side and is
+    # absent from HEAD's first-parent chain, while the branch point is on it.
     carries_base = bool(resolution.get("applied_merge_sha")) \
         or bool(applied.get("merge_sha"))
-    if carries_base and record.get("merge_base"):
-        candidates.append(record["merge_base"])
+    merge_base = record.get("merge_base")
+    if merge_base and (
+            carries_base
+            or (have_workdir and is_ancestor(workdir, merge_base, "HEAD")
+                and not _on_first_parent_chain(workdir, merge_base))):
+        candidates.append(merge_base)
     if resolution.get("applied_merge_sha"):
         resolved_from = resolution.get("resolved_from") or {}
         base = resolved_from.get("base_sha") or record.get("base_sha")
@@ -1711,8 +1733,6 @@ def contained_base(pr: dict) -> str | None:
     candidates = list(dict.fromkeys(c for c in candidates if c))
     if not candidates:
         return None
-    workdir = pr.get("workdir")
-    have_workdir = bool(workdir) and Path(workdir).is_dir()
     if len(candidates) > 1 and have_workdir:
         # A revision HEAD does not contain (the branch was rewritten, or a
         # recorded merge base from another repository) cannot be what the

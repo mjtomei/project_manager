@@ -24,7 +24,7 @@ from click.testing import CliRunner
 from pm_core import integration, prompt_gen, signoff, store
 from pm_core.cli import pr as pr_mod
 from pm_core.signoff import (SIGNOFF_BLOCKED, SIGNOFF_IMPL, SIGNOFF_MERGE,
-                             SIGNOFF_REVIEW)
+                             SIGNOFF_REQA, SIGNOFF_REVIEW)
 
 PR = "pr-200"
 BRANCH = "pm/pr-200"
@@ -1596,6 +1596,64 @@ def test_signoff_prompt_names_the_newest_base_after_a_bounce_merged_it(w):
         text = prompt_gen.generate_signoff_prompt(data, PR)
     assert f"git diff {b2[:12]}...HEAD" in text
     assert f"git diff {b1[:12]}...HEAD" not in text
+
+
+def test_signoff_prompt_names_a_merged_base_after_the_return_record_is_replaced(
+        w):
+    """A merged base stays the diff base after a later bounce replaced the
+    return record that named it.
+
+    A clean bounce merges base B1, recording it only in
+    ``signoff_return.applied``.  A later QA bounce replaces that record (an
+    up-to-date check applies nothing, so the new record carries no ``applied``
+    block).  Once the base moves to B2, the last check's merge base (B1) is the
+    newest base the branch contains; the sign-off prompt must diff against it
+    rather than the workdir's stale ``master`` ref, which lists B1's commits as
+    the PR's own changes.
+    """
+    commit(w.repo, "base_only.txt", "base\n", "base moves ahead")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN, rec
+    b1 = rec["base_sha"]
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, rec["head"], rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    assert pr_entry(w)["signoff_return"]["applied"]["base_sha"] == b1
+
+    # Review finishes: the next sign-off check is up to date and routes QA,
+    # replacing the return record with one that carries no ``applied`` block.
+    head = git(w.wd, "rev-parse", "HEAD")
+    up = integration.prepare(w.pm_dir, PR)
+    assert up["status"] == integration.UP_TO_DATE, up
+
+    def _to_qa(d):
+        p = store.get_pr(d, PR)
+        p["status"] = "sign_off"
+        p["signoff_return"] = signoff.build_return_record(
+            dict(p), SIGNOFF_REQA, "qa", reviewed_head=head)
+    store.locked_update(w.pm_dir, _to_qa)
+    assert not (pr_entry(w)["signoff_return"].get("applied"))
+
+    # The base moves on; the next check is clean and names b1 as its merge
+    # base — the newest base the branch already contains.
+    commit(w.repo, "base_only2.txt", "base\n", "base moves again")
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["status"] == integration.CLEAN, again
+    assert again["merge_base"] == b1
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+        review = prompt_gen.generate_review_prompt(data, PR)
+    assert f"git diff {b1[:12]}...HEAD" in text
+    assert "git diff master...HEAD" not in text
+    # The review and QA prompts share the same diff base.
+    assert f"git diff {b1[:12]}...HEAD" in review
+    assert "git diff master...HEAD" not in review
 
 
 def test_signoff_prompt_counts_behavior_changes_stored_without_a_total(w):

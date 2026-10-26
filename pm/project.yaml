@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T14:06:32.135075+00:00'
+  updated_at: '2026-10-26T14:46:47.279046+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33042,6 +33042,29 @@ prs:
       (2026-10-26T14:06:28Z)'
     created_at: '2026-10-26T14:06:32Z'
     last_edited: '2026-10-26T14:06:32Z'
+  - id: note-4b1702e
+    text: 'review-loop 0eef i5: closed the last stale-diff-base gap. A clean bounce
+      merges a base and records it only in `signoff_return.applied`; a later QA/impl
+      bounce replaces that record (an up-to-date check applies nothing, so the new
+      record has no `applied`), and once the base moves the last check''s `merge_base`
+      is the newest base the branch contains — but `contained_base` used it only while
+      an apply was still recorded, so the review/QA-planner/sign-off prompts fell
+      back to the workdir''s stale `master`/`origin/master` and listed the merged
+      base commits as the PR''s own changes. `contained_base` now also recognises
+      a merged base by ancestry when the workdir is visible: a base the branch merged
+      sits on a merge commit''s non-first parent side and is absent from HEAD''s first-parent
+      chain, while the branch point is on it (new `_on_first_parent_chain`), and the
+      candidate is used only when it is actually contained in HEAD — so the branch-point
+      fallback still applies when nothing was merged. Test: `test_signoff_prompt_names_a_merged_base_after_the_return_record_is_replaced`
+      (sign-off + review prompts). Spec R6 synced, plus the error-record wording from
+      i4. Tests: 119 in test_signoff_resolution.py; full suite 3474 passed, 1 skipped,
+      13 pre-existing env failures (12 markdown module absent, 1 hook receiver fails
+      on master too). MERGE RISK unchanged: branch is 76 commits behind origin/master,
+      which changed all five files; `prompt_gen._signoff_integration_block` is changed
+      on both sides (master bounded the conflict/overlap listings with `integration.omitted_path_count`
+      + `integration_pointer`) — preserve both behaviours in the resolution.'
+    created_at: '2026-10-26T14:46:47Z'
+    last_edited: '2026-10-26T14:46:47Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
