@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T22:21:31.458991+00:00'
+  updated_at: '2026-10-26T22:54:58.152676+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16771,6 +16771,36 @@ prs:
       required.'
     created_at: '2026-10-26T22:21:31Z'
     last_edited: '2026-10-26T22:21:31Z'
+  - id: note-3cbf7c9
+    text: 'Review 32f9 i4 (HEAD 38cef032, base master 211a6128): fixed one defect
+      — the collapsed-home notice on the dispatch-refusal path. With an explicit `prs:
+      []` on disk (or the PR deleted and no entries left) pressing an action key ran
+      `_still_has_action` → refresh (succeeds: `prs: []` is valid) → `selected is
+      None`, and that branch built the notice from the retained LOCAL id, so the popup
+      showed "PR Actions — #12" above "Could not load actions for pr-a." while the
+      diagnostics log already said #12 (qa.md E6 requires header and notice to name
+      the invoking window id). It now computes `_display_id(current_pr)` once for
+      the notice row, the row tuple and `_log_no_actions`. Scoped: a deleted home
+      with other PRs still present keeps its local id, unchanged. Two regression tests
+      fail on the pre-fix code: `test_action_refused_after_collapse_names_home_window`
+      (fzf shortcut refusal) and `..._no_fzf` (numbered/shortcut fallback, which prints
+      the same rows). Also corrected impl.md req 6 (helper is `_build_nav_entries(prs,
+      window_pr_id, open_windows, *, home_local_id=None)`) and recorded two pre-existing
+      boundaries so QA does not file them as regressions: the collapsed-home naming
+      now explicitly covers the refusal notice, and auto-start (`tui/auto_start.py`)
+      plus the remaining `graph.ready_prs` callers in `cli/pr.py`/`guide.py` still
+      index ids directly (an id-less entry can still raise there when auto-start is
+      enabled; same on master — needs a separate change, no follow-up filed). No other
+      defect found: re-reviewed the whole diff (picker state machine, `_build_nav_entries`,
+      `usable_prs` sync filter, batched `attached_group_active_windows`, POSIX popup
+      failure handler); the real 494-entry project.yaml still passes the strict snapshot
+      rules; pyflakes unchanged vs master. Full suite after final edits: 3734 passed,
+      1 skipped; focused popup/session/tmux/sync suite 458 passed. Evidence /pm-captures/review-32f9-i4/{summary,repro-fixed,pre-fix-control,full-suite,targeted}.txt.
+      No live QA PASS claimed — QA must re-cover E6 (including the collapsed-home
+      refusal notice in fzf and the numbered fallback) plus E11/C1/R13/E10, then fresh
+      sign-off.'
+    created_at: '2026-10-26T22:54:58Z'
+    last_edited: '2026-10-26T22:54:58Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -16782,7 +16812,7 @@ prs:
     qa_verification: provider:deepseek-flash
     qa_finalize: provider:deepseek-flash
     qa_interactive: provider:deepseek-flash
-    signoff: provider:deepseek-flash
+    signoff: provider:claude-work
     merge: provider:deepseek-flash
 - id: pr-562d71d
   plan: null
