@@ -3238,6 +3238,57 @@ def _build_scenario_run_cmd(
 # Scenario retry helpers
 # ---------------------------------------------------------------------------
 
+def _ensure_scenario_container(
+    scenario: QAScenario,
+    state: QALoopState,
+    data: dict,
+    pr_data: dict,
+) -> bool:
+    """Make sure a dead worker's container is running before its relaunch.
+
+    QA containers are never recreated by the loop itself, so one removed
+    (``pm container cleanup``) or stopped (a podman restart) under a live
+    run made every relaunch ``exec`` into a missing container and die at
+    once, through the whole retry ladder (S78).  Recreate it from the
+    scenario's host clone and scratch dir under the same name, which
+    :func:`container.create_container` does for a stopped one too.
+
+    If that fails, record INPUT_REQUIRED with the reason and return False
+    so the caller stops retrying.
+    """
+    from pm_core import container as container_mod
+
+    cname = scenario.container_name
+    if container_mod.container_is_running(cname):
+        return True
+    clone = scenario.worktree_path
+    scratch = Path(state.qa_workdir) / f"s-{scenario.index}" / "scratch"
+    try:
+        if not clone or not Path(clone).is_dir():
+            raise RuntimeError(f"scenario clone {clone or '(none)'} is gone")
+        container_mod.create_qa_container(
+            name=cname,
+            config=container_mod.load_container_config(),
+            workdir=Path(clone),
+            scratch_path=scratch,
+            allowed_push_branch=pr_data.get("branch") or None,
+            session_tag=state.session_tag,
+            pr_id=state.pr_id,
+            route_mounts=_route_mounts(pr_data, data, state.session_tag),
+        )
+    except Exception as exc:
+        _log.warning("Scenario %d container %s is gone and could not be "
+                     "recreated", scenario.index, cname, exc_info=True)
+        state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+        state.scenario_verdict_reasons[scenario.index] = (
+            f"worker exited before any verdict; its container {cname} is "
+            f"gone and could not be recreated: {exc}")
+        return False
+    _log.warning("Scenario %d container %s was gone — recreated it",
+                 scenario.index, cname)
+    return True
+
+
 def _relaunch_scenario_window(
     scenario: QAScenario,
     state: QALoopState,
@@ -3264,6 +3315,10 @@ def _relaunch_scenario_window(
 
     # New transcript for the relaunched session (old one is stale)
     transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
+
+    if (use_containers and scenario.container_name
+            and not _ensure_scenario_container(scenario, state, data, pr_data)):
+        return False
 
     try:
         run_cmd, pane_cwd = _build_scenario_run_cmd(
@@ -3728,6 +3783,11 @@ def _poll_tmux_verdicts(
                         "(backoff %.0fs)",
                         scenario.index, retries + 1,
                         _SCENARIO_MAX_RETRIES, backoff)
+                    state.latest_output = (
+                        f"Scenario {scenario.index} window died — retry "
+                        f"{retries + 1}/{_SCENARIO_MAX_RETRIES} "
+                        f"(backoff {backoff:.0f}s)")
+                    _notify()
                     time.sleep(backoff)
                     if state.stop_requested:
                         # A stop (e.g. ``z t`` fresh start) killed the
@@ -3751,6 +3811,17 @@ def _poll_tmux_verdicts(
                         # A new worker session: fresh API-error resume
                         # budget, and no stalled pane from the dead one.
                         _route_watches.pop(scenario.index, None)
+                        continue
+                    if scenario.index in state.scenario_verdicts:
+                        # Its container could not be recreated: the
+                        # verdict says why, and retrying cannot help.
+                        state.latest_output = (
+                            f"Scenario {scenario.index} ({scenario.title}): "
+                            f"INPUT_REQUIRED (container gone)")
+                        pending.discard(scenario.index)
+                        verdicts_changed = True
+                        _notify()
+                        _launch_next_queued()
                         continue
                     # Relaunch failed — will retry on next poll iteration
                     continue

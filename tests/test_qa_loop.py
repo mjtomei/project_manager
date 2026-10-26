@@ -1941,6 +1941,110 @@ class TestScenarioRetryLogic:
         assert mock_relaunch.call_count == 2
         assert state.scenario_verdicts[1] == VERDICT_PASS
 
+    def _container_relaunch(self, tmp_path, running, create=None):
+        """_relaunch_scenario_window in container mode with the scenario's
+        container *running* or not; returns (result, scenario, state, mock)."""
+        from pm_core import qa_loop
+        clone = tmp_path / "s-5" / "repo"
+        clone.mkdir(parents=True)
+        sc = QAScenario(index=5, title="S78 one", focus="f")
+        sc.window_name = "qa-pr-001-s5"
+        sc.worktree_path = str(clone)
+        sc.container_name = "pm-tag-qa-pr-001-l1-s5"
+        state = QALoopState(pr_id="pr-001")
+        state.qa_workdir = str(tmp_path)
+        state.session_tag = "tag"
+        state.scenario_verdicts = {}
+        pr_data = {"id": "pr-001", "branch": "pm/pr-001-x"}
+        with patch("pm_core.container.is_container_mode_enabled", return_value=True), \
+             patch("pm_core.container._runtime_available", return_value=True), \
+             patch("pm_core.container.container_is_running", return_value=running), \
+             patch("pm_core.container.load_container_config", return_value="cfg"), \
+             patch("pm_core.container.create_qa_container",
+                   side_effect=create) as mock_create, \
+             patch("pm_core.qa_loop._route_mounts",
+                   return_value={Path("/b"): "/run/pm-route"}), \
+             patch("pm_core.qa_loop._resolve_qa_model"), \
+             patch("pm_core.qa_loop._build_scenario_run_cmd",
+                   return_value=("podman exec -it x claude", str(clone))), \
+             patch("pm_core.tmux.find_window_by_name", return_value=None), \
+             patch("pm_core.tmux.new_window_get_pane", return_value="%9") as mock_win, \
+             patch("pm_core.tmux.pane_window_id", return_value=None):
+            ok = qa_loop._relaunch_scenario_window(
+                sc, state, {}, pr_data, "sess", str(tmp_path))
+        return ok, sc, state, mock_create, mock_win
+
+    def test_relaunch_recreates_a_removed_container(self, tmp_path):
+        """S78: ``pm container cleanup`` removed the scenario's container
+        under a live run.  The relaunch recreates it (same name, clone,
+        scratch, push branch and route mounts) before exec'ing into it,
+        instead of exec'ing into a missing container on every retry."""
+        ok, sc, state, mock_create, mock_win = self._container_relaunch(
+            tmp_path, running=False)
+        assert ok and sc.pane_id == "%9"
+        mock_create.assert_called_once_with(
+            name="pm-tag-qa-pr-001-l1-s5", config="cfg",
+            workdir=tmp_path / "s-5" / "repo",
+            scratch_path=tmp_path / "s-5" / "scratch",
+            allowed_push_branch="pm/pr-001-x", session_tag="tag",
+            pr_id="pr-001", route_mounts={Path("/b"): "/run/pm-route"})
+        mock_win.assert_called_once()
+        assert 5 not in state.scenario_verdicts
+
+    def test_relaunch_leaves_a_running_container_alone(self, tmp_path):
+        ok, sc, state, mock_create, _ = self._container_relaunch(
+            tmp_path, running=True)
+        assert ok
+        mock_create.assert_not_called()
+
+    def test_unrecreatable_container_fails_fast(self, tmp_path):
+        """When the container cannot be recreated the relaunch records
+        INPUT_REQUIRED with the reason and launches nothing."""
+        ok, sc, state, _, mock_win = self._container_relaunch(
+            tmp_path, running=False, create=RuntimeError("image gone"))
+        assert not ok
+        mock_win.assert_not_called()
+        assert state.scenario_verdicts[5] == VERDICT_INPUT_REQUIRED
+        reason = state.scenario_verdict_reasons[5]
+        assert "before any verdict" in reason
+        assert "pm-tag-qa-pr-001-l1-s5 is gone" in reason
+        assert "image gone" in reason
+
+    def test_failed_recreate_stops_the_retry_ladder(self, tmp_path):
+        """The poll loop takes the relaunch's INPUT_REQUIRED as final: one
+        relaunch attempt, no further retries, and the retry and outcome
+        are surfaced as latest_output for the TUI."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=5, title="S78 one", focus="t")
+        scenario.window_name = "qa-test-s5"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+        outputs = []
+
+        def relaunch(sc, st, *a, **kw):
+            st.scenario_verdicts[sc.index] = VERDICT_INPUT_REQUIRED
+            st.scenario_verdict_reasons[sc.index] = "container gone"
+            return False
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window",
+                   side_effect=relaunch) as mock_relaunch, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", return_value=100), \
+             patch("pm_core.qa_loop._write_status_file"):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", tmp_path / "status.json",
+                lambda *a: outputs.append(state.latest_output),
+            )
+
+        assert mock_relaunch.call_count == 1
+        assert state.scenario_verdicts[5] == VERDICT_INPUT_REQUIRED
+        assert "Scenario 5 window died — retry 1/10 (backoff 5s)" in outputs
+        assert state.latest_output == (
+            "Scenario 5 (S78 one): INPUT_REQUIRED (container gone)")
+
     def test_backoff_formula(self):
         """Verify exponential backoff: 5 * 2^retries = 5, 10, 20, 40..."""
         from pm_core.qa_loop import _SCENARIO_RETRY_BASE
