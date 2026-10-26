@@ -857,6 +857,33 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     states above (gate wait then launch, or a clean `Error:`), never a
     traceback, a verdict, or a main-account launch for a routed role.
 
+- **RQ46** (review loop a5a3 i1, 3e9f6b19; QA S64 bad02547) Given a PR
+  driven by `pm pr auto-sequence` ticks, When a tick launches QA (review
+  PASS -> qa, a qa tick with no status and no qa window, or a sign-off
+  `qa` hop) while the provider of a QA role without a route gate
+  (planner, s0, verifier, finalizer) cannot be looked up (not configured,
+  invalid entry, unreadable providers.yaml; PR `session_models`, PR
+  `model` or project setting), Then:
+  - The tick prints one `Error:` line naming the problem and remedy,
+    rc 1, spawns no `pm pr qa-run-bg` driver, opens no qa window and
+    makes no request to any endpoint. Every later tick says the same
+    until the setting or file is fixed; the first tick after the fix
+    launches QA once and the run reaches its normal verdict.
+  - A broken routed refiner/worker provider is not checked here: the
+    driver launches and the route gate waits with its remedy, as RQ45.
+  - A driver that still meets a provider setup error after launch (the
+    file broken mid-run) logs one `QA stopped for <pr>: …` warning in the
+    pm log, no traceback; the same for the TUI `t` path (bad02547).
+  - Open points from code reading (the twenty-sixth pass decides them):
+    (a) the review-PASS path moves the PR to `qa` before the check, so
+    after a failed launch a later qa tick reads the newest
+    `qa_status.json`, which may be an earlier run (a stale NEEDS_WORK
+    bounces back to review; a lingering earlier `qa-<pr>` window reads
+    as "running: qa" and no tick retries the launch). (b) The check
+    resolves the verifier provider even with `qa-verify-pass` off, where
+    the TUI `t` run never launches a verifier. (c) Two concurrent ticks
+    after the fix may each spawn a driver (pre-existing check-then-spawn).
+
 ## 2. Setup
 
 - Install pm from this PR's clone (`./install.sh --local` or venv per
@@ -1385,6 +1412,21 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     POST was classified. Also S64: a QA run stopped by a provider setup
     error (`QA stopped: …`) logged "QA background thread crashed" with a
     traceback in the pm log; it is one warning line now (bad02547).
+  - Twenty-sixth pass (S65+), delta-only, for review loop a5a3 i1
+    (3e9f6b19, RQ46): the auto-sequence QA launch checks the planner, s0,
+    verifier and finalizer providers before spawning its detached driver.
+    Stubs only (main stub + router stub), host mode, scratch TUI where a
+    TUI is needed. Pre-fix control on 9d046874 (bad02547 included, check
+    absent: the driver dies unseen and each tick relaunches it).
+    - S65: each launch site (review PASS, qa with no status, sign-off
+      `qa` hop) x each gate-less role and each failure form, recovery on
+      the next tick, routed refiner/worker still gated, pre-fix control.
+    - S66: open points (a) and (b), a mid-run provider failure in the
+      driver, and the TUI `t` path replay of bad02547.
+    - S67: concurrent use: two PRs ticked together (one broken, one not),
+      two ticks of one PR at once after the fix (open point c), and
+      `pm provider add/default` rewriting providers.yaml while ticks and
+      a TUI QA run read it.
 
 ## 3. Edge cases
 
