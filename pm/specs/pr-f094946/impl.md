@@ -21,9 +21,9 @@
    new window on first-time creation, still honour the popup
    `suppress_switch` flag.
 
-3. **Preserve the incidental fixes added during QA rounds 1–3.** These
+3. **Preserve the incidental fixes added during QA and review rounds.** These
    extend the original focus-only scope and are required by the PR notes
-   and QA spec (R10–R14):
+   and QA spec (R3, R10–R14):
    * The first `zz t` on an `in_review` PR transitions it to `qa`, using
      the same locked status-update helper as `start_qa`. If the update
      fails, do not launch QA.
@@ -41,9 +41,23 @@
      return-to-review message use `force=True` and `CONFIRM_HOLD_SECONDS`,
      so existing sticky lines and same-frame start messages do not hide
      them. The latter applies to both
-     self-driving and auto-start bounces.
+     self-driving and auto-start bounces. A displayed forced hold replaces
+     obsolete sticky protection, allowing deferred progress to appear when
+     the approximately 3 s hold expires rather than waiting for the prior
+     sticky deadline.
+   * The initial `zz t` confirmation, including its required pass count,
+     uses `force=True` with `sticky=3` so an existing setup confirmation
+     cannot hide it.
    * Pane-launch/focus confirmations use the existing `force=True`
-     convention so user-key replies are visible over a sticky message.
+     convention so user-key replies are visible over a sticky message,
+     including launches into a new per-plan window.
+   * Register the live planner as `qa-planner` in its own QA window before
+     polling its result. An early `L` must leave the log pane registered in
+     the TUI window and the planner identifiable while planning continues.
+     Status-pane setup ensures the main pane is registered for execution-only
+     runs or recreated windows, without registering the same planner twice.
+     Registration/layout failures are logged rather than aborting healthy
+     planning; status-pane setup retries missing early registration.
 
 ## Design
 
@@ -93,7 +107,11 @@
 
 * Existing `qa-<pr>` window + background restart: clients already on the old
   QA window follow to the replacement (unchanged); clients elsewhere stay.
-* Grouped view sessions (`$SESS~N`): no select at all → no client in any
-  grouped session moves.
+* Grouped view sessions (`$SESS~N`): background first-time creation does
+  not select any session. On replacement, only sessions viewing the old
+  QA window follow it; unrelated windows remain selected.
+* A user start selects a session, not an individual client. All clients
+  attached to that same session share its current window; use separate
+  grouped sessions to assert independent focus.
 * Tests that patch `qa_loop_ui.start_qa` and assert `(app, pr_id)` keep
   passing since background call sites are unchanged.

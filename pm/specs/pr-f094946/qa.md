@@ -59,8 +59,12 @@ Given auto-start has just launched QA for a PR and the user's client is still
 on the TUI window,
 When the user presses `L` in the TUI,
 Then the log pane opens in the TUI window, not in `qa-<pr>`, and the QA
-planner pane in `qa-<pr>` is still the planner. The log pane is not
-registered as `qa-planner`, and the QA loop goes on to produce scenarios.
+planner pane in `qa-<pr>` is registered as `qa-planner` before its planning
+result is polled. The log pane is not registered as `qa-planner`, and the QA
+loop goes on to produce scenarios. Execution-only `pm qa run` and recreated
+QA windows also retain main-pane registration when the status pane is added,
+without duplicate planner entries. Transient registry/layout failures must
+not abort a healthy planner; status setup retries missing registration.
 
 **R4: Plain `t` still switches to a new QA window.**
 Given a PR in review or QA with no `qa-<pr>` window, and the user on the TUI,

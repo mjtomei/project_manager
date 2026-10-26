@@ -97,14 +97,45 @@ class TestRunQaSyncWindowFocus:
                     tmp_path, monkeypatch, QALoopState(pr_id="pr-001"),
                     planner_pane="%9")
 
-    def test_status_split_does_not_duplicate_planner_registration(self):
+    @pytest.mark.parametrize("registered", [False, True])
+    def test_status_split_registers_missing_planner_only(self, registered):
+        registry = {"windows": {"@8": {"panes": (
+            [{"id": "%9", "role": "qa-planner"}] if registered else [])}}}
         with patch("pm_core.tmux.split_pane_at", return_value="%10"), \
                 patch("pm_core.tmux.pane_window_id", return_value="@8"), \
+                patch("pm_core.pane_registry.load_registry", return_value=registry), \
                 patch("pm_core.pane_layout.register_and_rebalance") as register:
             qa_loop._add_status_pane("pm-test", "%9", "/qa/status.json")
-        panes = register.call_args.args[2]
-        assert [(pane, role) for pane, role, _ in panes] == [
+        panes = [pane for call in register.call_args_list for pane in call.args[2]]
+        expected = [] if registered else [("%9", "qa-planner")]
+        assert [(pane, role) for pane, role, _ in panes] == expected + [
             ("%10", "qa-status")]
+
+    def test_planner_registration_is_idempotent(self, tmp_path, monkeypatch):
+        from pm_core import pane_registry
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        with patch("pm_core.tmux.pane_window_id", return_value="@8"), \
+                patch("pm_core.pane_layout.rebalance"):
+            qa_loop._register_qa_planner("pm-test", "%9")
+            qa_loop._register_qa_planner("pm-test", "%9")
+        panes = pane_registry.load_registry("pm-test")["windows"]["@8"]["panes"]
+        assert [(p["id"], p["role"]) for p in panes] == [("%9", "qa-planner")]
+
+    def test_planner_registry_timeout_does_not_abort_polling(self, tmp_path, monkeypatch):
+        class PollStarted(Exception):
+            pass
+
+        with patch("pm_core.tmux.pane_window_id", return_value="@8"), \
+                patch("pm_core.pane_registry.load_registry", return_value={}), \
+                patch("pm_core.pane_layout.register_and_rebalance",
+                      side_effect=TimeoutError("registry lock held")), \
+                patch("pm_core.claude_launcher.WorkspacePromptWatch",
+                      side_effect=PollStarted):
+            with pytest.raises(PollStarted):
+                _run_to_window_creation(
+                    tmp_path, monkeypatch, QALoopState(pr_id="pr-001"),
+                    planner_pane="%9")
 
     def test_background_start_does_not_select_window(
             self, tmp_path, monkeypatch):

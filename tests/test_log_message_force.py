@@ -612,3 +612,25 @@ def test_launch_pane_confirmation_shown_while_sticky(monkeypatch):
                         lambda *a, **k: "%8")
     pane_ops.launch_pane(app, "tail -f log", "log")
     assert shown[-1] == " Focused existing log pane"
+
+
+def test_new_plan_pane_confirmation_shown_while_sticky():
+    from pm_core.tui import pane_ops
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    _log(app, "Review loop done: PASS", sticky=10)
+    with patch.object(pane_ops.tmux_mod, "in_tmux", return_value=True), \
+         patch.object(pane_ops.tmux_mod, "get_session_name", return_value="sess"), \
+         patch.object(pane_ops.tmux_mod, "find_window_by_name",
+                      side_effect=[None, {"id": "@8"}]), \
+         patch.object(pane_ops.tmux_mod, "new_window_get_pane", return_value="%8"), \
+         patch.object(pane_ops, "_wrap_pane_cmd", return_value="wrapped"), \
+         patch.object(pane_ops.pane_layout, "register_and_rebalance") as register, \
+         patch.object(pane_ops, "_focus_plans_window") as focus:
+        pane_ops._launch_in_plans_window(app, "plan-001", "less plan.md", "plan")
+
+    register.assert_called_once_with(
+        "sess", "@8", [("%8", "plan", "less plan.md")])
+    focus.assert_called_once_with(app, "plan-001")
+    assert shown[-1] == " Launched plan pane"
