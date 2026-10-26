@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-089af69
+  active_pr: pr-fd581ec
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -34903,6 +34903,36 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
   updated_at: '2026-10-25T21:27:23.093198+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-fd581ec
+  plan: bugs
+  title: 'Bug: TUI background sync raises KeyError ''id'' on a project.yaml PR entry
+    with no id'
+  branch: pm/pr-fd581ec-bug-tui-background-sync-raises-keyerror-id-on-a-pr
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/sync.py do_normal_sync — the old_statuses dict
+    comprehension (pr["id"]: pr.get("status") for pr in (app._data.get("prs") or []))
+    and the apply_merged loop index pr["id"] without a guard. Repro: with a TUI session
+    running, replace pm/project.yaml (atomic temp + mv -f) with a snapshot whose prs
+    list has an entry that has status but no id (e.g. after a partial/external write),
+    let the TUI reload it, then wait for the 5-minute background sync. Observed 2026-10-26
+    in QA S26 (popup-picker bad-data scenario) at 19:28:00: "ERROR [tui.sync] Sync
+    error" + Traceback ... File "/workspace/pm_core/tui/sync.py", line 131, in <dictcomp>
+    pr["id"]: pr.get("status") KeyError: ''id''. The TUI keeps running but that sync
+    cycle is aborted (merged-PR detection skipped). The popup picker itself rejects
+    the same snapshot cleanly ("Picker PR entry requires a non-empty, command-safe
+    string id"), so this is a separate leniency gap in the TUI sync path. Fix: skip/normalize
+    entries without a usable string id (or validate on load) so a malformed project.yaml
+    cannot break the sync loop.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T19:37:53.759555+00:00'
+  updated_at: '2026-10-26T19:37:53.759555+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
