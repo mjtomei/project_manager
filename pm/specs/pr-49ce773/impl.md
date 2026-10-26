@@ -35,10 +35,12 @@
    `No actions — PR is merged.`, and nav keys reach the other PRs.
 6. **Lookup-divergence removed** — extract the nav-list construction into a
    pure helper `_build_nav_entries(prs, home_window_id, open_windows)` that
-   returns `(nav_pr_ids, pr_by_disp, home_pr)`; `_resolve_for` uses the
-   resolved dict from `pr_by_disp` rather than an independent re-lookup.
-   `_build_picker_lines` is given a one-element `[pr]` list so it can't
-   diverge either.
+   returns `(nav_pr_ids, pr_by_disp, home_pr)` in display form. The popup
+   converts these entries to stable local-identity navigation keys and indexes
+   all PRs by local ID; `_resolve_for` uses that index, never a display-number
+   re-lookup. Display numbers are derived only when rendering. This keeps a
+   retained selected terminal PR distinct from a terminal home sharing its
+   number. `_build_picker_lines` receives a one-element `[pr]` list.
 
 7. **Navigation to/from retained merged entries never exits (note-40057f4)**
    — the user reported that after moving off the PR they opened from, the
@@ -58,19 +60,23 @@
    - on every nav key (`_step_target`): step from the current PR within the
      *rebuilt* list; if the PR being left dropped out (merged/closed or lost
      its windows), step to its nearest surviving neighbour in the requested
-     direction from the old order, canonicalizing each old neighbour id
-     so a simultaneous GitHub-number assignment does not skip it; `0` goes
-     to home.
+     direction from the old order, matching stable local identities so a
+     simultaneous GitHub-number assignment does not skip it; `0` goes to home.
    - right before dispatching any action (shortcut, Enter on a row, a
      `z`/`zz` chord key, or a no-fzf numbered/shortcut selection) via
      `_still_has_action(label)`: if the shown PR
      no longer has that action (merged/closed meanwhile), don't run
      anything — re-render it with its notice. If refresh fails, refuse the
      action rather than dispatch from the stale snapshot; navigation may still
-     use the last-good snapshot and a later key can retry after repair.
-   After each reload the shown id is canonicalized (`_canonical_id`, via
-   `_find_pr_for_window_id`) so a PR whose display id changed while open
-   (`gh_pr_number` assigned: `pr-abc` → `#12`) is not listed twice.
+     use the last-good snapshot and a later key can retry after repair. Both
+     fzf and the numbered fallback show an explicit refresh-failure/refusal
+     notice; without fzf the user reopens the picker after repair.
+   After each reload presentation derives the current display ID from the
+   selected local identity, so changing `gh_pr_number` does not duplicate or
+   redirect the selection. Only initially unresolved home window identifiers
+   use `_find_pr_for_window_id`; once pinned, home is looked up by exact local
+   ID, even for legacy numeric IDs after deletion. It must never fall through
+   to another PR's GitHub number.
    `_sync_index(shown, prev)` keeps `nav_index` consistent: a PR that is on
    screen but dropped out of the rebuilt list is re-inserted at its old
    position until the user navigates away, so the header `(i/n)` never
@@ -78,8 +84,10 @@
    are recomputed every render since `n` can change.  A failed reload logs
    a warning and keeps the complete previous state: build the replacement
    window maps and navigation inside the error handler before assigning any
-   state, including when YAML parses but a PR entry is malformed. Load without
-   the store's status-repair normalization and require a raw status from
+   state, including when YAML parses but a PR entry is malformed. Require an
+   explicit list-valued `prs` field: missing/null/false/zero/string/mapping
+   values are invalid rather than an empty snapshot; `prs: []` is valid.
+   Load without the store's status-repair normalization and require a raw status from
    `VALID_PR_STATES`: missing/truncated statuses must not become actionable
    `pending` entries during a partial write. Reject non-printable display IDs
    (including NUL, newline and terminal escapes in `gh_pr_number`) before they
@@ -194,9 +202,9 @@ number must show the lookup-failure notice, not another PR's actions.
   no fresh-start command is built for the merged PR.
 - A null or numeric title loaded from YAML must not crash rendering: coerce
   presentation titles to text (only null renders blank, zero renders `0`)
-  before truncation. Replace non-printable title characters with spaces before
-  truncation as well: fzf's newline-delimited row stream must contain exactly
-  one non-actionable title row, never title continuations that resemble actions
+  before truncation. Replace non-printable title characters with spaces in the
+  bounded display prefix, not the full unbounded title: fzf's row stream must
+  contain exactly one non-actionable title row, never continuations that resemble actions
   or terminal control sequences. Preserve the original title in project data.
 - QA scenario-only windows (`qa-#N-s1`) count as open windows for the nav
   list, matching `_build_picker_lines`' `[open]` matching.

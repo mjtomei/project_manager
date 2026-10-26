@@ -1148,6 +1148,7 @@ def _build_nav_entries(
     prs: list[dict],
     window_pr_id: str | None,
     open_windows: set[str],
+    *, home_local_id: str | None = None,
 ) -> tuple[list[str], dict[str, dict], str | None]:
     """Build the picker's PR navigation list.
 
@@ -1168,6 +1169,8 @@ def _build_nav_entries(
     # A GitHub number can provide a display id even when the local id is
     # missing or malformed. Commands still require the local id, so reject
     # such snapshots here, inside the refresh transaction, before rendering.
+    if not isinstance(prs, list):
+        raise ValueError("Picker snapshot requires a prs list (use [] for no PRs)")
     local_ids: set[str] = set()
     display_terminal: dict[str, bool] = {}
     for pr in prs:
@@ -1190,8 +1193,16 @@ def _build_nav_entries(
         local_ids.add(pr_id)
         display_terminal[display_id] = terminal
 
-    home = _find_pr_for_window_id(prs, window_pr_id) if window_pr_id else None
-    home_pr = _pr_display_id(home) if home is not None else window_pr_id
+    # A pinned local identity must never fall through to numeric GitHub lookup
+    # after deletion. Only an unresolved window name is eligible for that lookup.
+    if home_local_id is not None:
+        home = next((p for p in prs if p["id"] == home_local_id), None)
+        home_pr = home_local_id
+    else:
+        home = _find_pr_for_window_id(prs, window_pr_id) if window_pr_id else None
+        home_pr = window_pr_id
+    if home is not None:
+        home_pr = _pr_display_id(home)
 
     # Index all QA suffix boundaries once, preserving the existing arbitrary
     # suffix match even for hyphenated local ids. Navigation reloads on each key.
@@ -1296,9 +1307,9 @@ def _build_picker_lines(
     title = "" if title is None else str(title)
     # fzf consumes newline-delimited rows; title text must never become a
     # separate selectable item or emit terminal control sequences.
-    title = "".join(ch if ch.isprintable() else " " for ch in title)
     max_title = 40
     short_title = (title[:max_title - 1] + "…") if len(title) > max_title else title
+    short_title = "".join(ch if ch.isprintable() else " " for ch in short_title)
 
     lines.append((f"  {display_id}  ({status})  {short_title}", "", display_id))
 
@@ -1935,7 +1946,7 @@ def popup_picker_cmd(session: str, window_name: str):
     # up from the popup's cwd (which may be outside the repo or deleted).
     os.environ["PM_PROJECT"] = str(root)
 
-    prs = data.get("prs") or []
+    prs = data.get("prs")
     current_pr = _current_window_pr_id(window_name)
 
     # Gather open windows to annotate the picker.  One list_windows call
@@ -1959,10 +1970,21 @@ def popup_picker_cmd(session: str, window_name: str):
     # home_pr is None and navigation cycles through whichever active PRs
     # have live windows.
     window_pr_id = current_pr
+    home_local_id = None
+
+    def _navigation(prs, windows):
+        # Display IDs are presentation only: two terminal records may share one.
+        # Internally use local IDs, retaining raw window IDs only until resolved.
+        displays, by_display, home_display = _build_nav_entries(
+            prs, window_pr_id, windows, home_local_id=home_local_id)
+        entries = {p["id"]: p for p in prs}
+        nav = [by_display[d]["id"] if d in by_display else d for d in displays]
+        home = (by_display[home_display]["id"] if home_display in by_display
+                else home_display)
+        return nav, entries, home
+
     try:
-        nav_pr_ids, pr_by_disp, home_pr = _build_nav_entries(
-            prs, window_pr_id, open_windows)
-        pr_by_local = {p["id"]: p for p in prs}
+        nav_pr_ids, pr_by_local, home_pr = _navigation(prs, open_windows)
     except (ValueError, TypeError, KeyError) as e:
         _log.warning("popup-picker: initial navigation failed (root=%s): %s", root, e)
         click.echo(f"Could not load PR actions: {e}")
@@ -1982,12 +2004,18 @@ def popup_picker_cmd(session: str, window_name: str):
 
     # Once resolved, home is a local identity, not a reusable GitHub number.
     # Keep unresolved window ids verbatim so later repair can still resolve them.
-    if home_pr in pr_by_disp:
-        window_pr_id = pr_by_disp[home_pr]["id"]
+    if home_pr in pr_by_local:
+        home_local_id = home_pr
 
     invoking_phase = _current_window_phase(window_name)
 
-    def _resolve_for(pr_disp: str, picked: dict | None = None):
+    def _display_id(identity: str) -> str:
+        from pm_core.cli.helpers import _pr_display_id
+
+        picked = pr_by_local.get(identity)
+        return _pr_display_id(picked) if picked is not None else identity
+
+    def _resolve_for(identity: str):
         """Return (lines, picked_pr, label_to_cmd) for the given PR.
 
         When the PR has no actions (merged/closed, or its lookup failed)
@@ -1995,25 +2023,18 @@ def popup_picker_cmd(session: str, window_name: str):
         ``label_to_cmd`` is empty — the picker stays open so navigation
         to other PRs still works.
         """
-        if picked is None:
-            picked = pr_by_disp.get(pr_disp)
-        if picked is None:
-            # Shown but not in the nav list (e.g. it became merged while
-            # displayed) — still resolve it so the notice is accurate.
-            picked = _find_pr_for_window_id(prs, pr_disp)
+        picked = pr_by_local.get(identity)
+        pr_disp = _display_id(identity)
         label_to_cmd: dict[str, str] = {}
         pr_lines: list[tuple[str, str, str]] = []
         if picked is not None:
-            # Retained on-screen entries also need an identity in this map.
-            # Terminal display numbers may be duplicated in historical data.
-            pr_by_disp[pr_disp] = picked
             for lbl, tpl in _actions_for_status(picked.get("status", "")):
                 label_to_cmd[lbl] = tpl.format(pr_id=picked["id"])
             # Phase indicator only meaningful for the invoking PR — when
             # navigating to a different PR the user isn't "in" any of its
             # phases.  Pass "" (not None) so _build_picker_lines treats it
             # as "no phase" rather than falling back to status-derived.
-            phase = invoking_phase if pr_disp == home_pr else ""
+            phase = invoking_phase if identity == home_pr else ""
             pr_lines = _build_picker_lines(
                 [picked], pr_disp, open_windows, current_phase=phase,
                 caller_wid=caller_wid, other_wids=other_wids,
@@ -2046,16 +2067,14 @@ def popup_picker_cmd(session: str, window_name: str):
         Keeps the previous state if the reload fails, returning False so
         dispatch can refuse to act on that stale snapshot.
         """
-        nonlocal prs, nav_pr_ids, pr_by_disp, pr_by_local, home_pr, window_pr_id
+        nonlocal prs, nav_pr_ids, pr_by_local, home_pr, home_local_id
         nonlocal open_windows, name_to_wid, caller_wid, other_wids
         try:
-            fresh_prs = store.load(root, validate=False).get("prs") or []
+            fresh_prs = store.load(root, validate=False).get("prs")
             fresh_windows = tmux_mod.list_windows(base)
             fresh_open = {w["name"] for w in fresh_windows}
             fresh_name_to_wid = {w["name"]: w["id"] for w in fresh_windows}
-            fresh_nav, fresh_by_disp, fresh_home = _build_nav_entries(
-                fresh_prs, window_pr_id, fresh_open)
-            fresh_by_local = {p["id"]: p for p in fresh_prs}
+            fresh_nav, fresh_by_local, fresh_home = _navigation(fresh_prs, fresh_open)
             fresh_active = _session_active_windows(base)
             fresh_caller = fresh_active.get(session)
             fresh_others = {wid for s, wid in fresh_active.items() if s != session}
@@ -2068,28 +2087,12 @@ def popup_picker_cmd(session: str, window_name: str):
         open_windows = fresh_open
         name_to_wid = fresh_name_to_wid
         caller_wid, other_wids = fresh_caller, fresh_others
-        nav_pr_ids, pr_by_disp, home_pr = fresh_nav, fresh_by_disp, fresh_home
+        nav_pr_ids, home_pr = fresh_nav, fresh_home
         # An initially unresolved home can acquire an identity after repair.
         # Pin it only after the complete refresh succeeds, just as on startup.
-        if home_pr in pr_by_disp:
-            window_pr_id = pr_by_disp[home_pr]["id"]
+        if home_local_id is None and home_pr in pr_by_local:
+            home_local_id = home_pr
         return True
-
-    def _canonical_id(pr_disp: str, previous_ids: dict[str, str]) -> str:
-        """Map a previous nav entry to its current display id by local identity.
-
-        Resolve known entries by their saved local id so removing/reassigning
-        a GitHub number cannot move the cursor to that number's new owner.
-        Unresolved window ids can still resolve after a later state repair.
-        """
-        from pm_core.cli.helpers import _pr_display_id
-
-        local_id = previous_ids.get(pr_disp)
-        if local_id is not None:
-            p = pr_by_local.get(local_id)
-            return _pr_display_id(p) if p is not None else local_id
-        p = _find_pr_for_window_id(prs, pr_disp)
-        return _pr_display_id(p) if p is not None else pr_disp
 
     def _sync_index(shown: str, prev_index: int) -> int:
         """Return the nav index of `shown`, keeping it in the list.
@@ -2110,18 +2113,16 @@ def popup_picker_cmd(session: str, window_name: str):
         left dropped out of the rebuilt list, step to the nearest surviving
         neighbour in the requested direction in the old order.
         """
-        old_list, old_cur = list(nav_pr_ids), current_pr
-        previous_ids = {did: p["id"] for did, p in pr_by_disp.items()}
-        if _picked_pr is not None:
-            previous_ids[old_cur] = _picked_pr["id"]
+        old_list, old_cur, old_home = list(nav_pr_ids), current_pr, home_pr
+        unresolved_home = home_local_id is None
         _refresh_state()
-        cur = _canonical_id(old_cur, previous_ids)
+        # A formerly unresolved home may have acquired its local identity.
+        if unresolved_home and home_local_id is not None:
+            old_list = [home_pr if key == old_home else key for key in old_list]
+            if old_cur == old_home:
+                old_cur = home_pr
+        cur = old_cur
         if not nav_pr_ids:
-            # No destination survived. Keep the shown PR's local identity,
-            # not the first historical terminal record with its display number.
-            retained = pr_by_local.get(previous_ids.get(old_cur))
-            if retained is not None:
-                pr_by_disp[cur] = retained
             return cur
         if delta is None:
             return home_pr if home_pr in nav_pr_ids else nav_pr_ids[0]
@@ -2134,8 +2135,7 @@ def popup_picker_cmd(session: str, window_name: str):
             nav_ids = set(nav_pr_ids)
             k = old_list.index(old_cur)
             for n in range(1, len(old_list) + 1):
-                cand = _canonical_id(
-                    old_list[(k + delta * n) % len(old_list)], previous_ids)
+                cand = old_list[(k + delta * n) % len(old_list)]
                 if cand in nav_ids:
                     return cand
         return nav_pr_ids[0]
@@ -2154,19 +2154,21 @@ def popup_picker_cmd(session: str, window_name: str):
         # never to whichever PR now owns the old display number.
         selected_id = _picked_pr["id"] if _picked_pr is not None else None
         if not _refresh_state():
+            # Keep last-good navigation, but explain why the action was refused.
+            lines = [("  Could not refresh PR actions; no action was run. "
+                      "Repair project.yaml and retry (reopen the picker without fzf).", "", current_pr)]
+            fzf_input_lines = [d for d, _, _ in lines]
             return False
-        from pm_core.cli.helpers import _pr_display_id
 
         selected = pr_by_local.get(selected_id)
-        current_pr = (_pr_display_id(selected) if selected is not None
-                      else selected_id or current_pr)
+        current_pr = selected_id or current_pr
         nav_index = _sync_index(current_pr, nav_index)
         if selected is None:
             _picked_pr, _label_to_cmd = None, {}
             lines = [(f"  {_no_actions_notice(current_pr, None)}", "", current_pr)]
             _log.warning("popup-picker: selected PR %r disappeared before dispatch", selected_id)
         else:
-            lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr, selected)
+            lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
         fzf_input_lines = [d for d, _, _ in lines]
         return label in _label_to_cmd
 
@@ -2262,12 +2264,12 @@ def popup_picker_cmd(session: str, window_name: str):
                 # out of --expect binds them to fzf's ignore.
                 has_actions = bool(_label_to_cmd)
                 if has_actions:
-                    header_lines = [f"PR Actions — {current_pr}{pr_pos}",
+                    header_lines = [f"PR Actions — {_display_id(current_pr)}{pr_pos}",
                                     f"q/Esc: quit  {shortcut_hint}",
                                     chord_hint]
                     expect = list(_SHORTCUT_KEYS.keys()) + ["z"]
                 else:
-                    header_lines = [f"PR Actions — {current_pr}{pr_pos}",
+                    header_lines = [f"PR Actions — {_display_id(current_pr)}{pr_pos}",
                                     "q/Esc: quit"]
                     expect = []
                 if nav_hint:
@@ -2280,13 +2282,13 @@ def popup_picker_cmd(session: str, window_name: str):
                 if home_pr:
                     expect.append("0")
             elif chord_state == "z":
-                header = (f"z — fresh start for {current_pr}\n"
+                header = (f"z — fresh start for {_display_id(current_pr)}\n"
                           f"s=fresh impl   d=fresh review   t=fresh qa   "
                           f"i=fresh signoff   z again for loop   "
                           f"q/Esc cancels")
                 expect = ["z", "s", "d", "t", "i"]
             else:  # 'zz'
-                header = (f"zz — loop for {current_pr}\n"
+                header = (f"zz — loop for {_display_id(current_pr)}\n"
                           f"d=review-loop   t=qa-loop   "
                           f"q/Esc cancels")
                 expect = ["d", "t"]
@@ -2403,7 +2405,7 @@ def popup_picker_cmd(session: str, window_name: str):
         # Fallback: numbered list with shortcut keys
         click.echo("Tip: install fzf for a better experience"
                     " (brew install fzf / apt install fzf)\n")
-        click.echo(f"PR Actions — {current_pr}\n")
+        click.echo(f"PR Actions — {_display_id(current_pr)}\n")
 
         numbered: list[tuple[int, str]] = []  # (num, command)
         num = 0

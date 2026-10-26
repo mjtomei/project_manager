@@ -130,7 +130,12 @@ E5. **Given** a qa-scenario-only window (`qa-#N-s1`) is the PR's only window,
 E6. **Given** project.yaml is momentarily unparsable while the popup is open,
 **When** the user navigates, **Then** the popup keeps the complete last-good
 snapshot (warning in log), does not crash, and navigation still works within
-that snapshot. Repeat with syntactically valid YAML containing a PR mapping
+that snapshot. Repeat with a missing `prs` field and `prs: null`, `false`,
+`0`, an empty string or a mapping: these must not replace the last-good list.
+An explicit `prs: []` is a valid empty project. Failed dispatch refreshes must
+show an explicit "Could not refresh PR actions; no action was run" notice in
+both fzf and the numbered fallback (reopen the latter after repair).
+Repeat with syntactically valid YAML containing a PR mapping
 with `status` but no `id`, including a numbered home PR whose `gh_pr_number`
 still resolves its display id. Also try null, empty and non-string local ids;
 none may replace the last-good snapshot or be used in a command. Include quoted,
@@ -198,6 +203,15 @@ with `0`, next or prev, then remove A's number (with and without assigning it to
 B). `0` must still return to A under its local ID, and an action there must target
 A, not B. A home first resolved during refresh needs the same identity retention
 as one resolved when the popup opened.
+Also open from closed home H=#13 with live A=#12 and C=#14, navigate to A,
+then change H to #12 and A to merged. Previous reaches H, next reaches C,
+and home reaches H; repeat after a pending action first retains A's merged
+notice. H's closed notice and A's merged notice must not overwrite each other,
+and wraparound/home navigation still reaches C and dispatches its actions.
+Finally, open from #13 whose local ID is the legacy numeric string `12`;
+remove that PR while another live PR owns GitHub #12. Home must show the missing
+local `12` notice with no actions, not reinterpret it as GitHub #12. Navigation
+may explicitly reach the other live PR and dispatch there.
 
 ## Concurrent use / shared resources
 

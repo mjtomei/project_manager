@@ -904,6 +904,68 @@ class TestPopupPickerMergedNavigation:
 
 
 class TestPopupPickerRefreshFailures:
+    @pytest.mark.parametrize("bad_prs", [None, False, 0, "", {}, "missing"])
+    @pytest.mark.parametrize("key", ["l", "d"])
+    def test_invalid_pr_list_keeps_last_good_snapshot(
+            self, tmp_path, monkeypatch, bad_prs, key):
+        from pm_core.cli import session as sess
+
+        prs = [_pr("pr-a"), _pr("pr-b")]
+        snapshot = {"prs": prs}
+
+        def on_launch(n):
+            if n == 1:
+                snapshot.clear()
+                if bad_prs != "missing":
+                    snapshot["prs"] = bad_prs
+            elif n == 2:
+                snapshot["prs"] = [dict(prs[0], status="merged"), prs[1]]
+
+        with patch.object(sess, "_log") as log:
+            fzf, run_cmd = _run_picker(
+                tmp_path, monkeypatch, prs, ["pr-a", "pr-b"], "pr-a",
+                [(0, f"{key}\n"), (0, "0\n"), (130, "")],
+                on_launch=on_launch, load_project=lambda *a, **k: snapshot.copy())
+        expected = "PR Actions — pr-b  (2/2)" if key == "l" else "PR Actions — pr-a  (1/2)"
+        assert _shown(fzf.calls[1]) == expected
+        if key == "d":
+            assert "Could not refresh PR actions; no action was run." in fzf.calls[1]["input"]
+        assert "No actions — PR is merged." in fzf.calls[2]["input"]
+        assert any("refresh failed" in c.args[0] for c in log.warning.call_args_list)
+        run_cmd.assert_not_called()
+
+    @pytest.mark.parametrize("snapshot", [{}, {"prs": None}, {"prs": False},
+                                           {"prs": 0}, {"prs": ""}, {"prs": {}}])
+    def test_invalid_initial_pr_list_waits_with_error(
+            self, tmp_path, monkeypatch, capsys, snapshot):
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, [], [], "tui", [],
+            load_project=lambda *a, **k: snapshot)
+        assert "Could not load PR actions:" in capsys.readouterr().out
+        assert not fzf.calls
+        run_cmd.assert_not_called()
+
+    @pytest.mark.parametrize("has_fzf", [False, True])
+    def test_failed_refresh_explains_refused_action(
+            self, tmp_path, monkeypatch, capsys, has_fzf):
+        prs = [_pr("pr-a")]
+        loads = iter([{"prs": prs}, {"prs": False}])
+        with patch("builtins.input", return_value="d"):
+            fzf, run_cmd = _run_picker(
+                tmp_path, monkeypatch, prs, ["pr-a"], "pr-a",
+                [(0, "d\n"), (130, "")], has_fzf=has_fzf,
+                load_project=lambda *a, **k: next(loads))
+        shown = fzf.calls[-1]["input"] if has_fzf else capsys.readouterr().out
+        assert "Could not refresh PR actions; no action was run." in shown
+        assert "Repair project.yaml and retry" in shown
+        run_cmd.assert_not_called()
+
+    def test_explicit_empty_pr_list_is_valid(self, tmp_path, monkeypatch, capsys):
+        fzf, run_cmd = _run_picker(tmp_path, monkeypatch, [], [], "tui", [])
+        assert "No active PR windows open." in capsys.readouterr().out
+        assert not fzf.calls
+        run_cmd.assert_not_called()
+
     @pytest.mark.parametrize("bad_status", [None, "merg", ""])
     @pytest.mark.parametrize("key", ["s", "l"])
     def test_raw_invalid_status_is_not_normalized_into_actions(
@@ -1159,6 +1221,18 @@ class TestPopupPickerRefreshFailures:
 
 
 class TestPopupPickerPresentation:
+    def test_title_sanitization_only_visits_visible_prefix(self):
+        class LargeTitle(str):
+            def __str__(self):
+                return self
+
+            def __iter__(self):
+                raise AssertionError("must truncate before iterating the title")
+
+        title = LargeTitle("A\n" * 100000)
+        rows = _build_picker_lines([_pr("pr-a", title=title)], "pr-a")
+        assert rows[0][0].endswith("A " * 19 + "A…")
+
     @pytest.mark.parametrize("separator", ["\n", "\r", "\t", "\x00", "\x1b", chr(0x2028)])
     def test_title_stays_one_printable_row(self, tmp_path, monkeypatch, separator):
         prs = [_pr("pr-a", title=f"Title{separator}continued")]
@@ -1234,6 +1308,51 @@ class TestPopupPickerActiveWindows:
 
 
 class TestPopupPickerIdentity:
+    @pytest.mark.parametrize("key", ["h", "l", "0"])
+    @pytest.mark.parametrize("pending_action", [False, True])
+    def test_terminal_collision_with_home_preserves_navigation_identity(
+            self, tmp_path, monkeypatch, key, pending_action):
+        prs = [_pr("pr-home", status="closed", gh_pr_number=13),
+               _pr("pr-a", gh_pr_number=12), _pr("pr-c", gh_pr_number=14)]
+
+        def on_launch(n):
+            if n == 2:
+                prs[0]["gh_pr_number"] = 12
+                prs[1]["status"] = "merged"
+
+        action = [(0, "d\n")] if pending_action else []
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["pr-home", "#12", "#14"], "pr-home",
+            [(0, "l\n")] + action + [(0, f"{key}\n"), (0, "0\n"),
+                                     (0, "l\n"), (0, "d\n")],
+            on_launch=on_launch)
+        if pending_action:
+            assert "No actions — PR is merged." in fzf.calls[2]["input"]
+            assert "(2/3)" in _header(fzf.calls[2])
+        destination = fzf.calls[2 + int(pending_action)]
+        if key == "l":
+            assert _shown(destination) == "PR Actions — #14  (2/2)"
+        else:
+            assert "No actions — PR is closed." in destination["input"]
+        assert "No actions — PR is closed." in fzf.calls[-2]["input"]
+        run_cmd.assert_called_once_with("pr review pr-c", "pm-x")
+
+    def test_deleted_numeric_local_home_never_resolves_as_github_number(
+            self, tmp_path, monkeypatch):
+        prs = [_pr("12", gh_pr_number=13), _pr("pr-b", gh_pr_number=12)]
+
+        def on_launch(n):
+            if n == 1:
+                prs.pop(0)
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["#13", "#12"], "#13",
+            [(0, "0\n"), (0, "d\n"), (0, "l\n"), (0, "d\n")],
+            on_launch=on_launch)
+        assert "Could not load actions for 12." in fzf.calls[1]["input"]
+        assert "Could not load actions for 12." in fzf.calls[2]["input"]
+        run_cmd.assert_called_once_with("pr review pr-b", "pm-x")
+
     @pytest.mark.parametrize("mode", ["shortcut", "enter", "fresh", "loop", "fallback"])
     @pytest.mark.parametrize("removed", [False, True])
     def test_reassigned_number_does_not_retarget_action(
