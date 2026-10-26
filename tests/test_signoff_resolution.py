@@ -638,6 +638,17 @@ def test_malformed_qa_evidence_does_not_crash_the_record(w):
         integration=integration.binding(rec))
     assert pr_entry(w)["signoff"]["evidence"]["qa"]["planner_code_changes"] == []
 
+    # An unparseable qa_status.json must not discard the revision the
+    # sibling resume snapshot records: it is still the evidence's revision.
+    (qa_dir / "qa_status.json").write_text("{not json")
+    evidence = signoff.qa_evidence(PR)
+    assert evidence["error"] == "unreadable"
+    assert evidence["planner_head"] == "f" * 40
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(store.load(w.pm_dir), PR)
+    assert f"qa@{'f' * 12}" in text
+
 
 def test_behavioral_changes_are_focused_on_this_pr_and_its_dependencies(w):
     data = store.load(w.base_pm)
@@ -794,6 +805,38 @@ def test_resolution_digest_survives_a_benign_recheck(w):
     # The artifact keeps the human-readable delta through a re-check.
     artifact = json.loads((w.croot / PR / "integration.json").read_text())
     assert "resolved" in artifact["resolution"]["diff"]
+
+
+def test_prepare_records_the_recheck_once_with_the_resolution(w, monkeypatch):
+    """The post-apply re-check is written once, already carrying the
+    resolution.
+
+    An intermediate record without the resolution would lose the applied
+    provenance (and with it the explicit-reuse requirement) if pm died
+    between the two writes.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    calls = []
+    real = integration._record_check
+
+    def spy(root, pr_id, record):
+        # Keep the object: ``_record_check`` adds the digest it writes.
+        calls.append(record)
+        return real(root, pr_id, record)
+
+    monkeypatch.setattr(integration, "_record_check", spy)
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.UP_TO_DATE
+    assert [c["status"] for c in calls] == [integration.RESOLVED,
+                                            integration.UP_TO_DATE]
+    assert calls[-1]["resolution"]["applied_merge_sha"]
+    assert calls[-1]["resolution_digest"] == rec["resolution_digest"]
 
 
 def test_carry_forward_uses_the_checkout_the_check_used(w, monkeypatch):
@@ -1715,6 +1758,7 @@ def test_a_bounce_that_applies_the_resolution_records_the_provenance(w):
     append_records(w.wd / "pm", w.repo, ["pr-300"])
     git(w.wd, "add", ".")
     git(w.wd, "commit", "-q", "-m", "feature records")
+    original_head = git(w.wd, "rev-parse", "HEAD")
     append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
     git(w.repo, "add", ".")
     git(w.repo, "commit", "-q", "-m", "base records")
@@ -1738,6 +1782,10 @@ def test_a_bounce_that_applies_the_resolution_records_the_provenance(w):
     assert stored["status"] == integration.UP_TO_DATE
     assert stored["head"] == applied_sha
     assert stored["resolution"]["applied_merge_sha"] == applied_sha
+    # The revisions the resolution combined stay visible at the top level,
+    # where the evidence block and the prompt read them.
+    assert stored["resolved_from"]["head"] == original_head
+    assert stored["resolved_from"]["base_sha"] == rec["base_sha"]
 
     # The next sign-off check carries it forward instead of dropping it.
     again = integration.prepare(w.pm_dir, PR)

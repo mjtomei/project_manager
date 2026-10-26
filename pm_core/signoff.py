@@ -317,29 +317,34 @@ def qa_evidence(pr_id: str) -> dict | None:
     path = latest_qa_status_path(pr_id)
     if path is None:
         return None
+    error = None
     try:
         status = json.loads(path.read_text())
     except (OSError, ValueError):
-        return {"status_file": str(path), "error": "unreadable"}
+        status, error = None, "unreadable"
     resume = None
     try:
         resume = json.loads((path.parent / "qa_resume.json").read_text())
     except (OSError, ValueError):
         resume = None
     # Malformed evidence must not crash the sign-off record write: record
-    # what is readable and leave the rest empty.
+    # what is readable and leave the rest empty.  A corrupt qa_status.json
+    # still leaves qa_resume.json's revision usable evidence.
     if not isinstance(status, dict):
-        status = {}
+        status, error = {}, error or "malformed"
     if not isinstance(resume, dict):
         resume = {}
     changes = resume.get("planner_code_changes")
-    return {
+    out = {
         "overall": status.get("overall"),
         "planner_head": resume.get("planner_head"),
         "planner_code_changes": (
             changes if isinstance(changes, list) else []),
         "status_file": str(path),
     }
+    if error:
+        out["error"] = error
+    return out
 
 
 def _report_evidence(pr_id: str, reviewed_head: str | None) -> dict:
@@ -1279,6 +1284,11 @@ def _record_applied_integration(root: Path, pr_id: str, rec: dict,
     """
     from pm_core import integration as integ
     updated = dict(rec, head=merge_sha, status=integ.UP_TO_DATE)
+    resolution = updated.get("resolution") or {}
+    if resolution.get("resolved_from"):
+        # Keep the revisions the resolution combined visible at the top
+        # level, where the evidence block and the prompt read them.
+        updated["resolved_from"] = resolution["resolved_from"]
     updated["resolution_digest"] = integ._resolution_digest(
         updated.get("resolution"))
     compact = integ.compact(updated)

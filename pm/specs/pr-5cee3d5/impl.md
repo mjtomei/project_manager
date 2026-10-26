@@ -131,7 +131,13 @@ published. So the sign-off launch
    different merge) and records it with the resolution provenance carried
    forward (`resolution.applied_merge_sha`,
    `resolution.resolved_from = {head, base_sha, merge_base, status}`,
-   `resolution_digest`, and the pre-apply `base_behavior_changes`).
+   `resolution_digest`, and the pre-apply `base_behavior_changes`). The
+   re-check is written **once**, already carrying the resolution (it is
+   computed with `run_check` and persisted by a single `_record_check`): an
+   intermediate record without the resolution would drop the applied
+   provenance — and with it the explicit-reuse requirement — if pm died
+   between the two writes. `resolved_from` is also kept at the top level of
+   the record so the evidence block and the prompt read it directly.
    A later re-check carries the compact resolution (and those behavioural
    changes) forward whenever the applied merge is an ancestor of its HEAD —
    including a check that comes back `error`/`conflict` — so a transient

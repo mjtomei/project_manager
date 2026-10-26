@@ -460,7 +460,8 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
                 "includes the base merge, so review/verify the integrated "
                 "result. The PR's own changes remain "
                 f"`git diff {base_sha[:12] if base_sha else '<base>'}...HEAD`; "
-                f"`git diff {resolved_from.get('head', '<old head>')[:12]} "
+                f"`git diff "
+                f"{(resolved_from.get('head') or '<old head>')[:12]} "
                 "HEAD` shows exactly what the resolution added.")
         elif rec.get("apply_error"):
             lines.append(f"- **Not applied**: {rec['apply_error']}. A "
@@ -507,10 +508,12 @@ def _evidence_revision_lines(pr_id: str) -> list[str]:
     lines = ["**Existing evidence revisions** (name these when reusing it):"]
     head = qa.get("planner_head")
     if not head:
-        lines.append("- QA: no recorded revision (qa_resume.json missing)")
+        why = ("qa_status.json unreadable" if qa.get("error")
+               else "qa_resume.json missing")
+        lines.append(f"- QA: no recorded revision ({why})")
         return lines
-    lines.append(f"- QA: `qa@{head[:12]}` "
-                 f"(overall {qa.get('overall') or '?'})")
+    overall = qa.get("overall") or "?"
+    lines.append(f"- QA: `qa@{head[:12]}` (overall {overall})")
     if qa.get("planner_code_changes"):
         lines.append("- Review: pm does not record the revision the review ran "
                      "on (QA committed changes after it).")

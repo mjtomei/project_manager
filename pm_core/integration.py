@@ -1391,8 +1391,17 @@ def prepare(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
     # Re-check against the exact revision just applied, not a fresh fetch: a
     # base that moved during the apply must not silently make the recorded
     # candidate describe a different merge (the merge gate re-fetches and
-    # returns the PR to sign-off if the base is no longer current).
-    record = check_integration(root, pr_id, base_sha=previous.get("base_sha"))
+    # returns the PR to sign-off if the base is no longer current).  This
+    # uses ``run_check`` + a single ``_record_check`` instead of
+    # ``check_integration`` so the re-check is written once *with* the
+    # resolution: an intermediate record without it would lose the applied
+    # provenance (and the explicit-reuse requirement with it) if pm died
+    # between the two writes.
+    fresh = store.load(root)
+    pr_now = store.get_pr(fresh, pr_id)
+    if pr_now is None:
+        raise ValueError(f"PR {pr_id} not found")
+    record = run_check(fresh, pr_now, root, base_sha=previous.get("base_sha"))
     resolution = dict(previous.get("resolution") or {})
     resolution["applied_merge_sha"] = merged
     resolution["resolved_from"] = {
@@ -1570,7 +1579,8 @@ def _apply_resolution(record: dict, workdir: str, head: str, base_sha: str,
             # discard that merge.  Report the current head; the caller
             # re-checks and binds that revision.
             return _out(_git("rev-parse", "HEAD", cwd=workdir)) or None, None
-        commit = _git(*no_hooks, "-c", "user.name=pm", "-c", "user.email=pm@localhost",
+        commit = _git(*no_hooks, "-c", "user.name=pm",
+                      "-c", "user.email=pm@localhost",
                       "commit", "--no-edit", cwd=workdir)
         if commit.returncode != 0:
             _git("merge", "--abort", cwd=workdir)
