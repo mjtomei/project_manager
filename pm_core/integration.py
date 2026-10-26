@@ -606,6 +606,13 @@ def _shape_problems(data) -> list[str]:
     if not isinstance(data, dict):
         return ["merged project.yaml is not a mapping"]
     problems: list[str] = []
+    # ``store`` only ever sees a mapping here (it would raise on load), but a
+    # hand-edited or generated side can carry anything: refuse it as a
+    # problem instead of letting the serializer raise (``_yaml_dumper`` reads
+    # ``project.libyaml``) and losing the readable conflict.
+    project = data.get("project")
+    if project is not None and not isinstance(project, dict):
+        problems.append("merged project is not a mapping")
     prs = data.get("prs")
     pr_ids: set = set()
     if prs is not None:
@@ -622,10 +629,14 @@ def _shape_problems(data) -> list[str]:
                     problems.append(f"merged project.yaml has duplicate PR "
                                     f"id {entry['id']}")
                 pr_ids.add(entry["id"])
-                if entry.get("status") not in VALID_PR_STATES:
+                # Membership in a set needs a hashable value: a list/dict
+                # status must read as an invalid one, not raise.
+                status = entry.get("status")
+                if not isinstance(status, str) \
+                        or status not in VALID_PR_STATES:
                     problems.append(
                         f"merged PR {entry['id']} has invalid status "
-                        f"{entry.get('status')!r}")
+                        f"{status!r}")
     plans = data.get("plans")
     plan_ids: set = set()
     parents: dict = {}
@@ -643,20 +654,29 @@ def _shape_problems(data) -> list[str]:
                     problems.append(f"merged project.yaml has duplicate plan "
                                     f"id {entry['id']}")
                 plan_ids.add(entry["id"])
-                if entry.get("status") not in VALID_PLAN_STATUSES:
+                status = entry.get("status")
+                if not isinstance(status, str) \
+                        or status not in VALID_PLAN_STATUSES:
                     problems.append(
                         f"merged plan {entry['id']} has invalid status "
-                        f"{entry.get('status')!r}")
-                parents[entry["id"]] = entry.get("parent")
+                        f"{status!r}")
+                parent = entry.get("parent")
+                if parent is not None and not isinstance(parent, str):
+                    problems.append(
+                        f"merged plan {entry['id']} has an invalid parent "
+                        f"{parent!r}")
+                parents[entry["id"]] = parent
             for plan_id, parent in parents.items():
-                if parent is not None and parent not in plan_ids:
+                if isinstance(parent, str) and parent not in plan_ids:
                     problems.append(
                         f"merged plan {plan_id} references missing parent "
                         f"{parent!r}")
             for plan_id in plan_ids:
                 seen: set = set()
                 current = plan_id
-                while current is not None:
+                # A non-string parent was already refused above; do not walk
+                # through it (it may be unhashable).
+                while isinstance(current, str):
                     if current in seen:
                         problems.append(
                             f"merged plans have a cycle involving {plan_id}")
@@ -758,8 +778,13 @@ def _project_yaml_behavior_changes(workdir: str, merge_base: str,
     if not isinstance(old, dict) or not isinstance(new, dict):
         return [f"`{path}` changed on the base"]
     out: list[str] = []
-    old_project = old.get("project") or {}
-    new_project = new.get("project") or {}
+    # A malformed side (``project`` not a mapping) must not raise here: this
+    # summary is what makes the agent weigh behaviour-relevant base changes,
+    # so losing it silently would drop the justification requirement.
+    old_project = old.get("project")
+    new_project = new.get("project")
+    old_project = old_project if isinstance(old_project, dict) else {}
+    new_project = new_project if isinstance(new_project, dict) else {}
     for key in _PROJECT_BEHAVIOR_KEYS:
         if old_project.get(key) != new_project.get(key):
             if key == "model_config":
@@ -772,7 +797,8 @@ def _project_yaml_behavior_changes(workdir: str, merge_base: str,
                     f"({_short(old_project.get(key))} -> "
                     f"{_short(new_project.get(key))})")
     focus = (pr or {}).get("id")
-    deps = set((pr or {}).get("depends_on") or [])
+    deps = {d for d in ((pr or {}).get("depends_on") or [])
+            if isinstance(d, str)}
     focus_plan = (pr or {}).get("plan")
 
     def relevant(rec_id) -> bool:
@@ -780,10 +806,12 @@ def _project_yaml_behavior_changes(workdir: str, merge_base: str,
         # can gate or change this PR's run.
         return focus is None or rec_id == focus or rec_id in deps
 
-    old_prs = {p.get("id"): p for p in old.get("prs") or []
-               if isinstance(p, dict)}
-    new_prs = {p.get("id"): p for p in new.get("prs") or []
-               if isinstance(p, dict)}
+    # Ids are used as dict keys: skip a malformed entry (a non-string id)
+    # instead of raising on an unhashable one.
+    old_prs = {p["id"]: p for p in old.get("prs") or []
+               if isinstance(p, dict) and isinstance(p.get("id"), str)}
+    new_prs = {p["id"]: p for p in new.get("prs") or []
+               if isinstance(p, dict) and isinstance(p.get("id"), str)}
     for pr_id, entry in new_prs.items():
         if not pr_id or not relevant(pr_id):
             continue
@@ -800,10 +828,10 @@ def _project_yaml_behavior_changes(workdir: str, merge_base: str,
     for pr_id in old_prs:
         if pr_id not in new_prs and relevant(pr_id):
             out.append(f"`{path}`: base removed PR {pr_id}")
-    old_plans = {p.get("id"): p for p in old.get("plans") or []
-                 if isinstance(p, dict)}
-    new_plans = {p.get("id"): p for p in new.get("plans") or []
-                 if isinstance(p, dict)}
+    old_plans = {p["id"]: p for p in old.get("plans") or []
+                 if isinstance(p, dict) and isinstance(p.get("id"), str)}
+    new_plans = {p["id"]: p for p in new.get("plans") or []
+                 if isinstance(p, dict) and isinstance(p.get("id"), str)}
     for plan_id, entry in new_plans.items():
         if focus is not None and plan_id != focus_plan:
             continue
@@ -1395,9 +1423,13 @@ def _record_check(root: Path, pr_id: str, record: dict) -> dict:
     # ignores that host-specific path.
     record["resolution_digest"] = _resolution_digest(record.get("resolution"))
     resolution = record.get("resolution")
-    if resolution and not resolution.get("diff_path"):
+    if resolution and not resolution.get("diff_path") \
+            and resolution.get("diff"):
         # Set it before compaction so the compact record carries the pointer;
-        # the file itself is written with the artifact below.
+        # the file itself is written with the artifact below.  Only a record
+        # with an actual delta gets a pointer: a failed attempt retains its
+        # unresolved conflicts but has nothing to write, and naming a file
+        # that does not exist would send the agent to an empty path.
         path = resolution_diff_path(pr_id)
         if path is not None:
             resolution["diff_path"] = str(path)

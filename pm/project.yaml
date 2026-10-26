@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T07:29:22.691927+00:00'
+  updated_at: '2026-10-26T08:02:52.322963+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32855,6 +32855,24 @@ prs:
       on master too), 1 skipped. Evidence: /pm-captures/review-2013-i1/.'
     created_at: '2026-10-26T07:29:22Z'
     last_edited: '2026-10-26T07:29:22Z'
+  - id: note-8ad0723
+    text: 'review-loop 2013 i2: hardened the resolver and the base summary against
+      malformed project.yaml values, and stopped naming a delta that was never written.
+      _shape_problems raised TypeError/AttributeError (set membership on a list/dict
+      status, the parent-key walk, and _yaml_dumper''s project.libyaml lookup) instead
+      of refusing; it now reports a non-string status/parent and a non-mapping project
+      as problems, so the caller gets the readable conflict the resolver promises.
+      _project_yaml_behavior_changes keyed dicts by raw record ids and did set(depends_on),
+      so a malformed base entry raised inside compute_candidate''s try/except and
+      silently dropped base_behavior_changes - losing the merge gate''s evidence requirement;
+      it now skips malformed entries and keeps the summary. A failed metadata resolution
+      no longer records resolution.diff_path for a file it never writes, so the prompt
+      cannot point the agent at a missing delta. Spec R1/R2/R5/R6/R9 updated. Tests:
+      100 in test_signoff_resolution.py; full suite 3455 passed (13 pre-existing env
+      failures: 12 markdown module missing, 1 hook receiver fails on master too),
+      1 skipped.'
+    created_at: '2026-10-26T08:02:52Z'
+    last_edited: '2026-10-26T08:02:52Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work

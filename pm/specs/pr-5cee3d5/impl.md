@@ -61,9 +61,14 @@ theirs_text)`:
   that side's value (or the same value both sides chose). Any violation fails
   the resolution.
 - Validate the merged document's shape read-only: top-level mapping,
-  `prs`/`plans` id-keyed with unique ids, valid PR statuses
-  (`pr_utils.VALID_PR_STATES`), valid plan statuses/parents/no cycles. Invalid
-  shape fails the resolution.
+  `project` a mapping when present, `prs`/`plans` id-keyed with unique ids,
+  valid PR statuses (`pr_utils.VALID_PR_STATES`), valid plan
+  statuses/parents/no cycles. Invalid shape fails the resolution. Validation
+  must *refuse* malformed values, never raise: a non-string status or plan
+  parent (which cannot be a set member or be walked as a key) and a
+  non-mapping `project` (which the serializer's `libyaml` lookup would
+  otherwise dereference) are reported as problems so the caller gets a
+  readable conflict instead of a resolver exception.
 - Serialize with pm's writer (`store._YAML_HEADER` + `yaml.dump(...,
   Dumper=store._yaml_dumper(data), default_flow_style=False,
   sort_keys=False, allow_unicode=True)`) so output is deterministic and
@@ -81,10 +86,15 @@ returns, for a successful resolution:
   merged_fields, removed, records, blob}], unresolved: [], diff: <text>,
   base_tree, head_tree}`,
 - `base_behavior_changes` (R3).
-`compact()` keeps a bounded resolution summary and a `resolution_digest`
-(sha256 over canonical resolution JSON). The full record (including the diff)
-goes to `$CAP/<pr>/integration.json`; the human-readable delta goes to
-`$CAP/<pr>/integration-resolution.diff`.
+`compact()` keeps a bounded resolution summary, a `resolution_digest`
+(sha256 over canonical resolution JSON) and, when there is an actual delta,
+the `resolution.diff_path` pointer (the digest excludes the host-specific
+path, so a re-compaction hashes identically; a failed attempt has nothing to
+write, so it names no file). The full record (including the diff) goes to
+`$CAP/<pr>/integration.json`; the human-readable delta goes to
+`$CAP/<pr>/integration-resolution.diff`. The read-only
+`pm pr signoff integrate` writes the same delta (it records nothing on the
+PR) so the path it prints is inspectable.
 
 `added_ours`/`added_theirs`/`merged_fields`/`removed` name nested-list ids
 with their list path (`prs[pr-200].notes:note-1`), so a resolution that only
@@ -166,7 +176,11 @@ tree. When the bounce is the first successful apply (sign-off launch could
 not touch a dirty workdir), the applied record is persisted on the PR
 (`up_to_date` at the merge commit, resolution bound) so a later check carries
 the provenance forward instead of dropping it — and with it the explicit
-reuse requirement. The return record (`build_return_record`,
+reuse requirement. That write yields only to a concurrent record of a
+different revision, except for a bare up-to-date check of the merge it just
+made: that check describes the same revision but cannot know about the apply
+(it carried from a record without `applied_merge_sha`), so letting it stand
+would silently drop the provenance. The return record (`build_return_record`,
 `format_signoff_return`) adds the resolution summary, `applied_merge_sha`,
 and the original `resolved_from` revisions; the prompt tells the next stage
 to verify the integrated result, not only the PR's own diff. When the launch
@@ -192,6 +206,10 @@ merged base commits as PR changes.
   report's `pm-signoff-head` matches the reviewed head):
   `pm-signoff-evidence` (`stage@sha,…`), `pm-signoff-evidence-reason`,
   `pm-signoff-checks`, `pm-signoff-candidate`.
+The block's `candidate_tree`/`resolved_from` come from the bound check or,
+failing that, from the PR's stored check only when that check names the
+reviewed HEAD — a check of another revision (or a failed one with no HEAD)
+must not lend its candidate/resolution to this decision.
 The block is rewritten into `project.yaml` on every record, so its lists
 (`reused`, `planner_code_changes`) are bounded at 20 entries with a
 `*_total` count when truncated.
@@ -295,6 +313,10 @@ tests):
     status or a plan cycle, a nested duplicate id, and a merge that loses a
     side's change (scalar or id-keyed record) are all refused (a one-sided
     field deletion is kept; a record both sides deleted is removed).
+    Malformed values — a list/dict status or plan parent, a non-mapping
+    `project`, and a base `project.yaml` with a non-string record id — are
+    refused as readable conflicts rather than raising (and a malformed base
+    entry must not silently drop the behaviour-change summary).
 13. Apply/merge guards: a re-resolution whose blob differs from the recorded
     one is refused and the workdir left untouched; an apply that hits a
     conflict outside the recorded resolution aborts; a clean or re-resolved

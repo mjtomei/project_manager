@@ -1449,6 +1449,10 @@ def test_a_failed_resolution_is_not_reported_as_resolved(w):
     rec = _status_conflict(w)
     assert rec["status"] == integration.CONFLICT
     assert rec["resolution"]["unresolved"]
+    # A failed attempt has no delta to point at: naming a file that was never
+    # written would send the next step to an empty path.
+    assert not (rec.get("resolution") or {}).get("diff_path")
+    assert not (w.croot / PR / "integration-resolution.diff").exists()
     head = rec["head"]
     pr = dict(pr_entry(w))
     ret = signoff.build_return_record(pr, SIGNOFF_IMPL, "impl",
@@ -1466,6 +1470,7 @@ def test_a_failed_resolution_is_not_reported_as_resolved(w):
     assert "NOT resolved" in prompt
     assert "changed differently on both sides" in prompt
     assert "Metadata conflict resolution (pm, by record id)" not in prompt
+    assert "Resolution delta" not in prompt
 
 
 def test_signoff_prompt_survives_a_null_resolved_from_head(w):
@@ -1686,6 +1691,64 @@ def test_nested_duplicate_ids_are_ambiguous():
     merged, details = integration.resolve_project_yaml(base, ours, theirs)
     assert merged is None
     assert any("duplicate record id" in c for c in details["conflicts"])
+
+
+@pytest.mark.parametrize("base,ours,theirs,needle", [
+    # A status that is a list/dict cannot be a set member: it must read as an
+    # invalid status, not raise (the resolver's contract is a refusal).
+    ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n",
+     "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+     "- id: pr-2\n  status: {a: b}\n",
+     "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n",
+     "invalid status"),
+    ("project:\n  name: p\nplans:\n- id: plan-1\n  status: draft\n",
+     "project:\n  name: p\nplans:\n- id: plan-1\n  status: [a]\n",
+     "project:\n  name: p\nplans:\n- id: plan-1\n  status: draft\n",
+     "invalid status"),
+    # A plan parent that is not a string is refused, not walked as a key.
+    ("project:\n  name: p\nplans:\n- id: plan-1\n  status: draft\n",
+     "project:\n  name: p\nplans:\n- id: plan-1\n  status: draft\n"
+     "  parent: {x: 1}\n",
+     "project:\n  name: p\nplans:\n- id: plan-1\n  status: draft\n",
+     "invalid parent"),
+    # A one-sided change to a non-mapping ``project`` must be refused before
+    # the serializer reads ``project.libyaml``.
+    ("project:\n  name: p\nprs: []\n",
+     "project: oops\nprs: []\n",
+     "project:\n  name: p\nprs: []\n",
+     "project is not a mapping"),
+    ("project:\n  name: p\nprs: []\n",
+     "project:\n  name: p\nprs: []\n",
+     "project:\n- a\n- b\nprs: []\n",
+     "project is not a mapping"),
+])
+def test_malformed_documents_are_refused_not_raised(base, ours, theirs,
+                                                    needle):
+    """Malformed sides are a readable conflict, never an uncaught error."""
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None, details
+    assert any(needle in c for c in details.get("conflicts") or []), details
+
+
+def test_a_malformed_base_entry_does_not_drop_the_behaviour_summary(w):
+    """A malformed record on the base must not suppress the base summary.
+
+    ``compute_candidate`` swallows a summary failure into a log warning, so a
+    raise here would silently drop the behaviour changes the sign-off agent
+    has to assess (and, with them, the justification requirement).
+    """
+    path = w.base_pm / "project.yaml"
+    doc = yaml.safe_load(path.read_text())
+    doc["project"]["model_config"] = {"review": "opus"}
+    doc["prs"].append({"id": {"not": "a string"}, "status": "pending"})
+    path.chmod(0o644)
+    path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base malformed entry")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec.get("base_behavior_error") is None, rec
+    assert any("model_config" in c for c in rec["base_behavior_changes"]), rec
 
 
 def test_bookkeeping_timestamps_both_bumped_do_not_block_the_merge():
