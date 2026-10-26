@@ -164,6 +164,25 @@ class TestZZTStart:
         pr = store.get_pr(store.load(app._root), "pr-001")
         assert pr["status"] == "qa"
 
+    def test_status_update_failure_does_not_launch(self, tmp_path):
+        """zz t on an in_review PR whose status can't move to qa starts nothing."""
+        from pm_core.tui.qa_loop_ui import start_or_stop_qa_loop
+
+        app = _make_app(tmp_path, pr_status="in_review")
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background") as bg, \
+             patch("pm_core.tui.qa_loop_ui.store.locked_update",
+                   side_effect=store.StoreLockTimeout("lock busy")), \
+             patch("pm_core.tui.qa_loop_ui._get_qa_pass_count", return_value=3):
+            start_or_stop_qa_loop(app, "pr-001")
+
+        bg.assert_not_called()
+        assert "pr-001" not in app._qa_loops
+        assert "pr-001" not in app._self_driving_qa
+        app.log_message.assert_called_once_with("Error: lock busy")
+        pr = store.get_pr(store.load(app._root), "pr-001")
+        assert pr["status"] == "in_review"
+
     def test_start_qa_arms_poll_timer(self, tmp_path):
         from pm_core.tui.qa_loop_ui import start_qa
 
