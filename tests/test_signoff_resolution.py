@@ -849,3 +849,300 @@ def test_integrate_cli_apply_exits_nonzero_when_it_cannot_apply(w):
     assert "not applied" in r.output
     assert not (pr_entry(w)["integration"].get("resolution") or {}).get(
         "applied_merge_sha")
+
+
+# --- resolver safety rails the merge gate depends on ------------------------
+
+def test_conflicting_reorders_are_refused():
+    """Both sides reordering the same records differently is ambiguous."""
+    base = ("project:\n  name: p\nprs:\n"
+            "- id: pr-1\n  status: pending\n"
+            "- id: pr-2\n  status: pending\n"
+            "- id: pr-3\n  status: pending\n")
+    ours = ("project:\n  name: p\nprs:\n"
+            "- id: pr-2\n  status: pending\n"
+            "- id: pr-1\n  status: pending\n"
+            "- id: pr-3\n  status: pending\n")
+    theirs = ("project:\n  name: p\nprs:\n"
+              "- id: pr-3\n  status: pending\n"
+              "- id: pr-2\n  status: pending\n"
+              "- id: pr-1\n  status: pending\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("reordered" in c for c in details["conflicts"])
+
+
+def test_field_deletion_vs_edit_is_refused_and_one_sided_deletion_is_kept():
+    """A scalar key is a field: never silently pick a side, but honour a
+    deletion the other side left alone."""
+    base = ("project:\n  name: p\n  skip_qa: true\n"
+            "prs:\n- id: pr-1\n  status: pending\n")
+    ours = "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+    theirs = ("project:\n  name: p\n  skip_qa: false\n"
+              "prs:\n- id: pr-1\n  status: pending\n")
+
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("skip_qa" in c and "deleted" in c
+               for c in details["conflicts"])
+    # The other direction is symmetric, and names the same conflict.
+    merged, details = integration.resolve_project_yaml(base, theirs, ours)
+    assert merged is None
+    assert any("skip_qa" in c and "deleted on the new base" in c
+               for c in details["conflicts"])
+    # Deleting a field the other side did not touch is the PR's change.
+    merged, details = integration.resolve_project_yaml(base, ours, base)
+    assert merged is not None, details
+    assert "skip_qa" not in merged
+
+
+def test_invalid_merged_shape_is_refused():
+    """A merge that produces an invalid project.yaml is not a resolution."""
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+    ours = base.rstrip() + "\n- id: pr-2\n  status: not-a-status\n"
+    theirs = base.rstrip() + "\n- id: pr-3\n  status: pending\n"
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("invalid status" in c for c in details["conflicts"])
+
+    # A plan cycle that both sides carry is likewise not mergeable.
+    base = ("project:\n  name: p\n"
+            "prs:\n- id: pr-1\n  status: pending\n"
+            "plans:\n"
+            "- id: plan-a\n  status: active\n  parent: plan-b\n"
+            "- id: plan-b\n  status: active\n  parent: plan-a\n")
+    ours = base.replace(
+        "- id: pr-1\n  status: pending\n",
+        "- id: pr-1\n  status: pending\n- id: pr-2\n  status: pending\n")
+    theirs = base.replace(
+        "- id: pr-1\n  status: pending\n",
+        "- id: pr-1\n  status: pending\n- id: pr-3\n  status: pending\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("cycle" in c for c in details["conflicts"])
+
+
+def test_nested_duplicate_ids_are_ambiguous():
+    """A duplicate id inside a nested list (notes) is a conflict too."""
+    base = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+            "  notes:\n  - id: note-1\n    text: a\n")
+    ours = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+            "  notes:\n  - id: note-1\n    text: a\n"
+            "  - id: note-1\n    text: dup\n")
+    theirs = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+              "  notes:\n  - id: note-1\n    text: a\n"
+              "  - id: note-2\n    text: b\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("duplicate record id" in c for c in details["conflicts"])
+
+
+def test_a_merge_that_loses_a_side_change_is_refused(monkeypatch):
+    """The preservation check is the safety net under the merge rules.
+
+    Force the merge to silently drop the PR branch's edit: the resolution
+    must fail rather than publish a candidate that lost it.
+    """
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+    ours = base.replace("name: p", "name: ours")
+    theirs = base.rstrip() + "\n- id: pr-2\n  status: pending\n"
+    real = integration._merge_value
+
+    def lossy(b, o, t, path, actions):
+        value, conflicts = real(b, o, t, path, actions)
+        if path == "project":
+            return b, []        # pretend the PR branch's edit vanished
+        return value, conflicts
+
+    monkeypatch.setattr(integration, "_merge_value", lossy)
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("PR branch change not preserved" in c
+               for c in details["conflicts"])
+
+
+# --- apply / merge-gate guards ---------------------------------------------
+
+def test_apply_refuses_a_non_deterministic_resolution(w):
+    """The applied merge must reproduce the candidate exactly.
+
+    A re-resolution whose blob differs from the recorded one (e.g. a resolver
+    change, or a base that moved under the check) is refused and the workdir
+    is left untouched.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    head = git(w.wd, "rev-parse", "HEAD")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+    entry = dict(rec["resolution"]["paths"][0])
+    entry["blob"] = "0" * 40
+    tampered = dict(rec, resolution=dict(rec["resolution"], paths=[entry]))
+    merged, err = integration.apply_integration(w.pm_dir, PR, tampered)
+    assert merged is None and "not deterministic" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "status", "--porcelain") == ""
+    assert "pr-250" not in (w.wd / "pm" / "project.yaml").read_text()
+
+
+def test_apply_refuses_conflicts_outside_the_recorded_resolution(w):
+    """The apply step never makes a new substantive conflict resolution."""
+    commit(w.wd, "shared.txt", "pr\n", "pr edits shared")
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    commit(w.repo, "shared.txt", "base\nmore\n", "base edits shared")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    head = git(w.wd, "rev-parse", "HEAD")
+    # The workdir must know the base commit (a sign-off check fetches it).
+    git(w.wd, "fetch", "-q", "origin")
+    base = git(w.wd, "rev-parse", "origin/master")
+    record = {"status": integration.RESOLVED, "head": head, "base_sha": base,
+              "base_branch": "master", "candidate_tree": "0" * 40,
+              "resolution": {"paths": [{"path": "pm/project.yaml"}]}}
+    merged, err = integration.apply_integration(w.pm_dir, PR, record)
+    assert merged is None
+    assert "unexpected conflict in shared.txt" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "status", "--porcelain") == ""
+
+
+def test_apply_refuses_when_head_moved_under_the_resolution(w):
+    """HEAD is re-verified immediately before touching the worktree."""
+    head = git(w.wd, "rev-parse", "HEAD")
+    base = git(w.repo, "rev-parse", "master")
+    record = {"status": integration.RESOLVED, "head": "0" * 40,
+              "base_sha": base, "candidate_tree": "0" * 40,
+              "resolution": {"paths": []}}
+    merged, err = integration._apply_resolution(
+        record, str(w.wd), "0" * 40, base, "Integrate master")
+    assert merged is None and "HEAD moved" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+
+
+def test_valid_for_rejects_an_unresolved_resolved_record():
+    head, base, tree = "a" * 40, "b" * 40, "c" * 40
+    ok = {"status": integration.RESOLVED, "head": head, "base_sha": base,
+          "candidate_tree": tree, "resolution": {"paths": []}}
+    assert integration.valid_for(ok, head)
+    assert not integration.valid_for(
+        dict(ok, resolution={"paths": [], "unresolved": [{"path": "x"}]}),
+        head)
+    assert not integration.valid_for(dict(ok, resolution=None), head)
+
+
+def test_merge_gate_refuses_a_changed_resolution_digest(w):
+    """A re-check that resolved differently invalidates the approval."""
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+
+    def _tamper(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"], applied_merge_sha="f" * 40)
+        integ["resolution"] = resolution
+        integ["resolution_digest"] = integration._resolution_digest(resolution)
+    store.locked_update(w.pm_dir, _tamper)
+    refusal = signoff.merge_gate_refusal(
+        pr_entry(w), signoff.head_sha(str(w.wd)), "master")
+    assert refusal and "metadata resolution changed" in refusal
+
+
+def test_merge_gate_refuses_a_resolution_that_lost_its_digest(w):
+    """A resolution edited without its digest is not the approved one."""
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+
+    def _tamper(d):
+        store.get_pr(d, PR)["integration"]["resolution_digest"] = "0" * 64
+    store.locked_update(w.pm_dir, _tamper)
+    refusal = signoff.merge_gate_refusal(
+        pr_entry(w), signoff.head_sha(str(w.wd)), "master")
+    assert refusal and "does not match its digest" in refusal
+
+
+def test_a_failed_recheck_keeps_the_applied_resolution(w, monkeypatch):
+    """A transient check failure must not lose what was applied.
+
+    The failed check cannot verify the candidate, so the merge is (rightly)
+    blocked until a check succeeds again — but the recorded resolution stays
+    bound, and the next successful check restores the approval.
+    """
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+
+    real_fetch = integration.fetch_base
+    monkeypatch.setattr(integration, "fetch_base",
+                        lambda *a, **k: (None, "network down"))
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.ERROR
+    assert again["resolution"]["applied_merge_sha"] == \
+        rec["resolution"]["applied_merge_sha"]
+    assert again["resolution_digest"] == rec["resolution_digest"]
+
+    # Only the fetch is restored; the fixture's environment stays patched.
+    monkeypatch.setattr(integration, "fetch_base", real_fetch)
+    ok = integration.check_integration(w.pm_dir, PR)
+    assert ok["status"] == integration.UP_TO_DATE
+    assert ok["candidate_tree"] == rec["candidate_tree"]
+    refusal = signoff.merge_gate_refusal(pr_entry(w), ok["head"], "master")
+    assert refusal is None, refusal
+
+
+def test_behavior_changes_survive_a_benign_recheck(w):
+    """An applied resolution's base interactions keep requiring a statement.
+
+    After the apply the branch contains the base, so a re-check sees no base
+    diff; the recorded behavioural changes must not silently disappear (that
+    would let an unstated reuse pass the merge gate).
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    data = store.load(w.base_pm)
+    data["project"]["model_config"] = {"session_models": {"impl": "model-new"}}
+    store.save(data, w.base_pm)
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records and model")
+
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.UP_TO_DATE
+    assert rec["resolution"]["applied_merge_sha"]
+    assert any("model_config" in c for c in rec["base_behavior_changes"])
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    assert any("model_config" in c for c in again["base_behavior_changes"])
+
+    record_merge(w, again)
+    assert signoff.merge_gate_refusal(
+        pr_entry(w), again["head"], "master") is None
+    # A report that no longer states the evidence re-blocks the merge.
+    write_report(w, again, evidence=False)
+    refusal = signoff.merge_gate_refusal(
+        pr_entry(w), again["head"], "master")
+    assert refusal and "evidence" in refusal
+
+
+def test_config_path_base_change_requires_justification(w):
+    """Dependency/config files are behavioural too, not just project.yaml."""
+    commit(w.repo, "pyproject.toml", "[project]\nname = 'p'\n",
+           "base adds pyproject")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    assert any("pyproject.toml" in c for c in rec["base_behavior_changes"])
+    write_report(w, rec, evidence=False)
+    problem = signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"])
+    assert problem and "evidence" in problem
+    write_report(w, rec)
+    assert signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"]) is None

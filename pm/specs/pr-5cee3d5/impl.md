@@ -121,6 +121,11 @@ published. So the sign-off launch
    forward (`resolution.applied_merge_sha`,
    `resolution.resolved_from = {head, base_sha, merge_base, status}`,
    `resolution_digest`, and the pre-apply `base_behavior_changes`).
+   A later re-check carries the compact resolution (and those behavioural
+   changes) forward whenever the applied merge is an ancestor of its HEAD —
+   including a check that comes back `error`/`conflict` — so a transient
+   failure never loses what was applied. The merge itself is still blocked
+   until a check can verify the candidate again.
 Dirty workdirs are never touched: apply refuses and the record keeps
 `RESOLVED` with `apply_error`; a MERGE on it is blocked (R6).
 
@@ -181,7 +186,9 @@ affected stage.
   invalidates the approval);
 - for a bound `resolution_digest`: the current record carries the same digest,
   `resolution.applied_merge_sha` is set, `resolution.unresolved` is empty, and
-  the report justification of R6 is present;
+  the report justification of R6 is present. The digest is also recomputed
+  from the current record's resolution and must agree with the stored value,
+  so a resolution edited without its digest cannot ride an old approval;
 - for `base_behavior_changes`: the report justification of R6 is present.
 `BINDING_KEYS` gains `resolution_digest`.
 `_publish_candidate` recomputes the candidate with `resolve=False` and
@@ -228,6 +235,18 @@ tests):
 11. Approval guards: a too-short `pm-signoff-candidate` is not accepted, an
     unapplied resolution cannot be justified, and a concurrent apply that
     already integrated the base is not committed over or reset away.
+12. Resolver safety rails: conflicting reorders, field (scalar-key)
+    deletion-vs-edit in both directions, a merged document with an invalid
+    status or a plan cycle, a nested duplicate id, and a merge that loses a
+    side's change are all refused (a one-sided field deletion is kept).
+13. Apply/merge guards: a re-resolution whose blob differs from the recorded
+    one is refused and the workdir left untouched; an apply that hits a
+    conflict outside the recorded resolution aborts; a HEAD moved under the
+    apply is refused; an unresolved `RESOLVED` record is not mergeable; a
+    changed (or digest-inconsistent) resolution invalidates the approval; an
+    applied resolution's behavioural changes survive a benign re-check and a
+    failed check keeps the bound resolution; a config-file base change (e.g.
+    `pyproject.toml`) requires the same justification as `project.yaml`.
 
 ## Implicit requirements
 

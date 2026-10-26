@@ -587,8 +587,17 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
                 f"--fresh {pr_id}`.")
     bound_resolution = bound.get("resolution_digest")
     if bound_resolution:
-        current_digest = current.get("resolution_digest") \
-            or integ._resolution_digest(current.get("resolution"))
+        # Recompute the digest from the record instead of trusting the stored
+        # value alone: a resolution that changed without its digest (a
+        # partially applied update, a hand-edited state file) must not look
+        # like the approved one.
+        recomputed = integ._resolution_digest(current.get("resolution"))
+        stored = current.get("resolution_digest")
+        if stored and recomputed and stored != recomputed:
+            return (f"PR {pr_id}: the recorded metadata resolution does not "
+                    f"match its digest; re-run `pm pr signoff --fresh "
+                    f"{pr_id}`.")
+        current_digest = stored or recomputed
         if current_digest != bound_resolution:
             return (f"PR {pr_id}: the metadata resolution changed since "
                     f"sign-off; re-run `pm pr signoff --fresh {pr_id}`.")
