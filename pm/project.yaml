@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-089af69
+  active_pr: pr-a49bb25
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -32809,3 +32809,25 @@ prs:
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
+- id: pr-a49bb25
+  plan: bugs
+  title: 'Bug: `pm tui keys` omits the `i` (Sign-off) keybinding from its PR Actions
+    list'
+  branch: pm/pr-a49bb25-bug-pm-tui-keys-omits-the-i-sign-off-keybinding-fr
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/tui.py:245-250 hardcodes the "PR Actions" list
+    (s/d/g/e/t) while pm_core/tui/app.py:172 binds Binding("i", "signoff_pr", "Sign-off",
+    show=True). Repro: run `pm tui keys` in any pm project — Sign-off is absent, so
+    the CLI help does not tell a user how to open the sign-off pane from the TUI (the
+    in-TUI `?` help does show it, since it is generated from the Textual bindings).
+    Expected: list `i  Sign-off` alongside the other PR actions.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T06:13:28.826475+00:00'
+  updated_at: '2026-10-26T06:13:28.826475+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
