@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T05:09:51.553771+00:00'
+  updated_at: '2026-10-26T05:40:07.553151+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34167,6 +34167,28 @@ prs:
       ticks inside tmux panes (outside tmux the driver dies "No pm session found").'
     created_at: '2026-10-26T05:09:51Z'
     last_edited: '2026-10-26T05:09:51Z'
+  - id: note-946c13c
+    text: 'QA S66 (2026-10-26, RQ46 open points a/b, provider broken mid-run, TUI
+      t; host, stubs; captures /pm-captures/scenarios/66, REPORT.md). Every predicted
+      failure reproduced live on 5a43ca75. CODE CHANGE e123fb27 needs normal re-review.
+      (a) The review-PASS tick checked providers only after moving the PR to qa: the
+      next tick bounced A to review on the earlier NEEDS_WORK on every other tick,
+      and B stuck at running: qa over the earlier qa window. The check now runs before
+      the move; live, the PR stays in_review with the same Error each tick, and the
+      first tick after the fix launches once. (b) qa-verify-pass off: auto-sequence
+      refused over the verifier while TUI t passed; the check now skips the verifier.
+      Mid-run: a removed verifier provider crashed verification threads, flagged workers
+      and ended NEEDS_WORK; a removed finalizer published PASS with finalize=None,
+      which went on to sign_off. Both now stop the run: one QA stopped warning, no
+      verdict, no pane of that role. TUI: QA finished: ERROR replaced the QA stopped
+      remedy within 1 s and an empty QA ERROR note was recorded; now kept/none. The
+      S66 sign-off qa hop fix was dropped for S65 72614e5d. 7 mutations caught, full
+      suite 3862 passed. Observations: after a mid-run stop the TUI resume scan adopts
+      the run once (2nd QA stopped line), and ticks then say running: qa until the
+      qa window is closed. Filed pr-b80d7df: a tick run in a closing tmux window leaves
+      qa-run-bg with no pm session.'
+    created_at: '2026-10-26T05:40:07Z'
+    last_edited: '2026-10-26T05:40:07Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -35054,6 +35076,35 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-26T05:09:15.878235+00:00'
   updated_at: '2026-10-26T05:09:15.878235+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-b80d7df
+  plan: bugs
+  title: 'Bug: pm pr auto-sequence QA driver (qa-run-bg) dies with "No pm session
+    found" when the calling tmux pane closes, and every tick reports "running: qa
+    (launched)"'
+  branch: pm/pr-b80d7df-bug-pm-pr-auto-sequence-qa-driver-qa-run-bg-dies-w
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py _launch_qa_detached spawns `pm pr qa-run-bg` detached,
+    and qa_loop.run_qa_sync resolves its pm session with get_pm_session(), i.e. from
+    the inherited $TMUX_PANE of the caller. When the tick runs in a tmux window that
+    closes as soon as the tick exits (e.g. `tmux new-window -t <pm session> -n tickN
+    "pm pr auto-sequence <pr> ..."`), that pane is gone before the driver looks it
+    up: the pm log gets `ERROR [qa_loop] No pm session found`, no qa window or qa_status.json
+    is written, and every later tick prints `running: qa (launched)` and spawns another
+    doomed driver (seen 30+ ticks in QA S66, /pm-captures/scenarios/66/story1/ticks-harness-slip).
+    Production ticks from the watcher pane only work because that pane stays alive.
+    Fix idea: resolve the session in the tick (_get_pm_session falls back to the cwd)
+    and hand it to the driver explicitly (argument or env), and/or have the driver
+    write a status the next tick can report instead of dying silently.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T05:39:58.795172+00:00'
+  updated_at: '2026-10-26T05:39:58.795172+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
