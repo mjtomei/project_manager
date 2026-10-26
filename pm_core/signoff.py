@@ -641,6 +641,18 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
                     f"report does not state the evidence/checks relied on — "
                     f"{problem}. Fix report.html and run `pm pr signoff "
                     f"record {pr_id}`, or re-run sign-off.")
+    if current and not current.get("candidate_tree") \
+            and current.get("status") != integ.IN_BASE:
+        # The approval names a candidate tree; a re-check that can no longer
+        # record one (a failed fetch, an aborted merge) cannot justify it,
+        # even when the record carries no resolution or behavioural changes.
+        # An absent record is left to the bound approval (publication
+        # revalidates it); a present-but-candidate-less one supersedes it.
+        # ``in_base`` is exempt: the approved head is already published, and
+        # the merge step's recovery path finalizes that merge instead.
+        return (f"PR {pr_id}: the latest integration check does not record a "
+                f"candidate tree (it may have failed or been superseded); "
+                f"re-run `pm pr signoff --fresh {pr_id}`.")
     recorded_hash = (pr.get("signoff") or {}).get("report_hash")
     if recorded_hash:
         import hashlib

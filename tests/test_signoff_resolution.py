@@ -1217,21 +1217,93 @@ def test_signoff_prompt_diffs_against_the_applied_base(w):
         text = prompt_gen.generate_signoff_prompt(data, PR)
     assert f"git diff {rec['base_sha'][:12]}...HEAD" in text
     assert "git diff master...HEAD" not in text
+    # The base is inside HEAD now: never an empty `base..base` range that
+    # claims the base changed nothing.
+    assert "0 file(s)" not in text
 
-    # Without an applied resolution the usual base-branch diff is right (the
-    # merge-base is the fork point, so a stale base ref does not matter).
-    def _drop_applied(d):
-        integ = store.get_pr(d, PR)["integration"]
-        resolution = dict(integ.get("resolution") or {})
-        resolution.pop("applied_merge_sha", None)
-        integ["resolution"] = resolution
-        integ["resolution_digest"] = integration._resolution_digest(resolution)
-    store.locked_update(w.pm_dir, _drop_applied)
+
+def test_signoff_prompt_diffs_against_the_base_after_a_clean_bounce(w):
+    """A clean base merged by a bounce is inside the branch too.
+
+    The bounce applied the base, so the next sign-off's ``<base>...HEAD``
+    diff against the workdir's stale base ref would list the merged base
+    commits as PR changes.
+    """
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, rec["head"], rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+
+    # Sign-off re-runs after the review: prepare re-checks the integrated
+    # branch (up to date) and the prompt must diff against the recorded base.
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    assert again["base_sha"] == rec["base_sha"]
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert f"git diff {again['base_sha'][:12]}...HEAD" in text
+    assert "git diff master...HEAD" not in text
+
+
+def test_signoff_prompt_falls_back_to_the_base_branch_for_an_unmerged_base(w):
+    """A base that is not in the branch keeps the usual base-branch diff."""
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN
     data = store.load(w.pm_dir)
     with patch("pm_core.prompt_gen.store.find_project_root",
                side_effect=FileNotFoundError):
         text = prompt_gen.generate_signoff_prompt(data, PR)
     assert "git diff master...HEAD" in text
+    assert "0 file(s)" not in text
+
+
+def test_merge_gate_refuses_a_clean_approval_whose_recheck_lost_the_candidate(
+        w, monkeypatch):
+    """A re-check that cannot name a candidate cannot justify the approval.
+
+    This holds even without a resolution or behavioural base change: the
+    gate must not pass an approval it cannot tie to the approved tree.
+    """
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.UP_TO_DATE
+    record_merge(w, rec)
+
+    monkeypatch.setattr(integration, "fetch_base",
+                        lambda *a, **k: (None, "network down"))
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.ERROR
+    assert not again.get("candidate_tree")
+    refusal = signoff.merge_gate_refusal(
+        pr_entry(w), signoff.head_sha(str(w.wd)), "master")
+    assert refusal and "does not record a candidate tree" in refusal
+
+
+def test_merge_gate_allows_recovery_when_the_head_is_already_in_the_base(w):
+    """``in_base`` carries no candidate tree but is not a lost approval.
+
+    The approved head is already published, so the merge step's recovery
+    path finalizes that merge rather than returning to sign-off.
+    """
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.UP_TO_DATE
+    record_merge(w, rec)
+
+    def _in_base(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["status"] = integration.IN_BASE
+        integ.pop("candidate_tree", None)
+    store.locked_update(w.pm_dir, _in_base)
+    assert signoff.merge_gate_refusal(
+        pr_entry(w), signoff.head_sha(str(w.wd)), "master") is None
 
 
 def test_a_failed_resolution_is_not_reported_as_resolved(w):

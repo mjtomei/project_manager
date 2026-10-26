@@ -417,6 +417,27 @@ def _applied_resolution_base(pr: dict) -> str | None:
     return resolved_from.get("base_sha") or integ.get("base_sha") or None
 
 
+def _diff_base(pr: dict) -> str | None:
+    """The exact base revision the branch already contains, or ``None``.
+
+    Once the branch carries the recorded base — a metadata resolution applied
+    at sign-off, or a clean base merged by a bounce — the workdir's own base
+    ref (``origin/<base>``, or the local branch) may still point before that
+    merge: pm fetches the base into its own ref, never ``origin/<base>``.  A
+    ``<base>...HEAD`` diff would then list the merged base commits as PR
+    changes.  An ``up_to_date`` check means the recorded base is an ancestor
+    of HEAD, so diffing against that exact revision is correct.
+    """
+    from pm_core import integration as integ
+    resolution_base = _applied_resolution_base(pr)
+    if resolution_base:
+        return resolution_base
+    record = pr.get("integration") or {}
+    if record.get("status") == integ.UP_TO_DATE and record.get("base_sha"):
+        return record["base_sha"]
+    return None
+
+
 def _signoff_integration_block(pr: dict, pr_id: str) -> str:
     """The integration check sign-off reviews (see pm_core.integration)."""
     from pm_core import integration as integ
@@ -427,6 +448,7 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
                 f"integrate {pr_id}` before routing; {SIGNOFF_MERGE} is "
                 "impossible without one._\n")
     base_sha = rec.get("base_sha") or ""
+    resolution = rec.get("resolution") or {}
     lines = [
         f"- Target: `{rec.get('base_branch')}` of `{rec.get('target_repo')}`",
         f"- Fetched base revision: `{base_sha or '?'}`",
@@ -435,18 +457,28 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         f"- Result: **{rec.get('status')}** — {integ.summary(rec)}",
     ]
     if rec.get("merge_base") and base_sha:
-        lines.append(
-            f"- Base changes since this PR branched: `git log --oneline "
-            f"{rec['merge_base'][:12]}..{base_sha[:12]}` / `git diff "
-            f"{rec['merge_base'][:12]} {base_sha[:12]}` "
-            f"({rec.get('base_files_count', 0)} file(s))")
+        # An applied resolution (and a clean base merged by a bounce) puts the
+        # base inside HEAD, so the recorded merge base equals the base and the
+        # range would be empty — say nothing rather than "0 file(s)".  For an
+        # applied resolution show the pre-apply range: that is what the base
+        # brought (the resolution block names the same revisions).
+        range_base = rec["merge_base"]
+        pre = resolution.get("resolved_from") or {}
+        if resolution.get("applied_merge_sha") and pre.get("merge_base"):
+            range_base = pre["merge_base"]
+        if range_base != base_sha:
+            count = rec.get("base_files_count", 0)
+            lines.append(
+                f"- Base changes since this PR branched: `git log --oneline "
+                f"{range_base[:12]}..{base_sha[:12]}` / `git diff "
+                f"{range_base[:12]} {base_sha[:12]}`"
+                + (f" ({count} file(s))" if count else ""))
     if rec.get("overlap"):
         lines.append("- Files changed on both sides: "
                      + ", ".join(f"`{f}`" for f in rec["overlap"]))
     if rec.get("conflicts"):
         lines.append("- Conflicting paths: "
                      + ", ".join(f"`{f}`" for f in rec["conflicts"]))
-    resolution = rec.get("resolution") or {}
     if resolution:
         lines.append("")
         if resolution.get("unresolved"):
@@ -575,14 +607,14 @@ def generate_signoff_prompt(data: dict, pr_id: str,
         diff_cmd = f"git diff {base_branch}...HEAD"
     else:
         diff_cmd = f"git diff origin/{base_branch}...HEAD"
-    # A resolved metadata conflict is applied at sign-off launch: the branch now
-    # carries the base merge.  The workdir's own base ref may predate that merge
-    # (pm fetches the base into its own ref), so `<base>...HEAD` would list the
-    # merged base commits as PR changes — diff against the exact base the
-    # resolution was applied on instead.
-    applied_base = _applied_resolution_base(pr)
-    if applied_base:
-        diff_cmd = f"git diff {applied_base[:12]}...HEAD"
+    # A resolved metadata conflict is applied at sign-off launch, and a clean
+    # base may have been merged by a bounce: the branch then carries the base
+    # merge.  The workdir's own base ref may predate that merge (pm fetches the
+    # base into its own ref), so `<base>...HEAD` would list the merged base
+    # commits as PR changes — diff against the exact base the branch contains.
+    branch_base = _diff_base(pr)
+    if branch_base:
+        diff_cmd = f"git diff {branch_base[:12]}...HEAD"
 
     # Plan / sibling context (scope awareness for the router).
     plan_ref = pr.get("plan")

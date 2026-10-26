@@ -215,15 +215,24 @@ affected stage. The pre-existing base-interaction guidance stays in step 0
 tests changed on both sides — line/file counts alone are not the rule), and
 the applied-resolution diff is described accurately: `git diff <old head>
 HEAD` shows the whole base merge, not only the resolution (the delta file
-lists just the resolution changes).
+lists just the resolution changes). The prompt's primary diff command names
+the exact base revision the branch contains — an applied resolution or a
+clean base merged by a bounce — instead of `origin/<base>`, which pm never
+updates and which would list the merged base commits as PR changes; the
+base-changes range is shown as the pre-apply range for an applied
+resolution, and omitted (rather than printed empty as "0 file(s)") when the
+base is inside HEAD with no recorded pre-apply range.
 
 ### R7. Merge gate / publication identity
 `merge_gate_refusal` additionally requires:
-- the PR's current `integration` record still has the bound `head` and
-  `candidate_tree` (a re-check that produced a different candidate
+- the PR's current `integration` record, when present, still has the bound
+  `head` and `candidate_tree` (a re-check that produced a different candidate
   invalidates the approval; a re-check that can no longer name a candidate
   tree — e.g. a failed fetch — cannot justify the approval, and the refusal
-  says so instead of blaming report.html);
+  says so instead of blaming report.html). An absent record is left to the
+  bound approval: it is authoritative and publication revalidates it against
+  a fresh fetch, so absence alone is not a refusal (the same reading the
+  existing merge-gate tests encode);
 - for a bound `resolution_digest`: the current record carries the same digest,
   `resolution.applied_merge_sha` is set, `resolution.unresolved` is empty, and
   the report justification of R6 is present. The digest is also recomputed
