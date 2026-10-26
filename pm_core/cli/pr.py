@@ -1267,9 +1267,9 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             # interpolated values (a sha never needs it, but never trust it).
             diff_ref = shell_quote(contained)
         elif backend_name == "local":
-            diff_ref = base_branch
+            diff_ref = shell_quote(base_branch)
         else:
-            diff_ref = f"origin/{base_branch}"
+            diff_ref = shell_quote(f"origin/{base_branch}")
         # User-controlled values (workdir, title via header) MUST be
         # shell_quote'd. An apostrophe in a PR title would otherwise
         # break the surrounding single-quote and turn the rest of the
@@ -1747,8 +1747,12 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
         click.echo(f"  unresolved: {entry.get('path')}: "
                    f"{entry.get('conflicts')}", err=True)
     if applied_clean:
+        # ``prepare`` can return the stored record when a concurrent apply won:
+        # hand-edited state, so a non-string revision reads as absent instead
+        # of raising out of the CLI.
+        applied_base = integration.revision_of(rec.get("base_sha")) or ""
         click.echo(f"Merged {rec.get('base_branch')}@"
-                   f"{(rec.get('base_sha') or '')[:12]} into the PR branch as "
+                   f"{applied_base[:12]} into the PR branch as "
                    f"{applied_clean[:12]}.")
     applied_merge = integration.revision_of(resolution.get("applied_merge_sha"))
     if applied_merge:
@@ -2397,6 +2401,13 @@ def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
     """Check GitHub's merge commit is the approved candidate; record if not."""
     from pm_core import integration
     pr_id = pr_entry["id"]
+
+    def _short(value) -> str:
+        # The approval is hand-editable state: a non-string revision/tree is
+        # rendered as "?", never sliced (this runs on the recovery path, which
+        # does not go through the merge gate).
+        return value[:12] if isinstance(value, str) and value else "?"
+
     tip, err = integration.fetch_base(workdir, target_repo, base_branch)
     if err or not tip:
         click.echo(f"WARNING: could not verify GitHub's merge of {pr_id}: "
@@ -2428,27 +2439,27 @@ def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
         if published:
             merge_sha = published[0]
             problem = (f"GitHub merged {pr_id} at {published[1][:12]}, not "
-                       f"the approved head {head[:12]} (its branch had "
+                       f"the approved head {_short(head)} (its branch had "
                        f"commits that were not signed off); merge "
                        f"{merge_sha[:12]} on {base_branch}")
         else:
-            problem = (f"no merge commit of the approved head {head[:12]} on "
-                       f"{base_branch} {tip[:12]}; GitHub did not publish the "
-                       f"signed-off candidate")
+            problem = (f"no merge commit of the approved head {_short(head)} "
+                       f"on {base_branch} {tip[:12]}; GitHub did not publish "
+                       f"the signed-off candidate")
     else:
         merge_sha, first_parent, tree = found[0], found[1], found[-1]
         if first_parent == base_sha and tree == bound.get("candidate_tree"):
             return
         if first_parent != base_sha:
             problem = (f"GitHub merged {pr_id} onto {first_parent[:12]}, not "
-                       f"the signed-off base {base_sha[:12]} (the base moved "
-                       f"during publication)")
+                       f"the signed-off base {_short(base_sha)} (the base "
+                       f"moved during publication)")
         else:
             problem = (f"GitHub merged {pr_id} onto the signed-off base "
-                       f"{base_sha[:12]}, but its merge result differs from "
-                       f"the approved candidate")
+                       f"{_short(base_sha)}, but its merge result differs "
+                       f"from the approved candidate")
         problem += (f"; published tree {tree[:12]}, approved "
-                    f"{(bound.get('candidate_tree') or '?')[:12]}")
+                    f"{_short(bound.get('candidate_tree'))}")
 
     # Recorded and noted on the PR (notes reach every later session and
     # `pm pr note list`), not only printed.  Verification re-runs on every
@@ -2524,12 +2535,17 @@ def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
         approved = approved if isinstance(approved, dict) else {}
         bound = approved.get("integration")
         bound = bound if isinstance(bound, dict) else {}
+        # The approval is hand-editable state: a non-string revision cannot
+        # name the candidate that was signed off (and slicing it below would
+        # raise), so it reads as absent — verification is skipped, not crashed.
+        approved_sha = integration.revision_of(approved.get("sha"))
+        bound_base = integration.revision_of(bound.get("base_sha"))
         if (approved.get("verdict") == signoff_mod.SIGNOFF_MERGE
-                and approved.get("sha") and bound.get("base_sha")):
+                and approved_sha and bound_base):
             target_repo, _ = integration.target_for(data, pr_entry, root)
             _verify_github_merge(root, pr_entry, cwd, target_repo,
-                                 base_branch, bound["base_sha"],
-                                 approved["sha"], bound)
+                                 base_branch, bound_base,
+                                 approved_sha, bound)
     _sync_main_repo_and_finalize(data, root, pr_entry, base_branch,
                                  resolve_window=resolve_window,
                                  background=background,

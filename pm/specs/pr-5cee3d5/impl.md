@@ -340,7 +340,10 @@ hint, and every other surface that tells an agent or a person to inspect the
 PR's own diff — the review / QA-planner / QA-interactive prompts, the QA
 *spec* prompt (`pm pr spec <pr> qa`, `spec_gen._build_spec_prompt`) and the
 review window's diff pane (`_launch_review_window`) — names the exact base
-the branch contains instead of the stale workdir ref.
+the branch contains instead of the stale workdir ref. The pane's fallback ref
+(`<base>` for the local backend, `origin/<base>` otherwise) is shell-quoted
+like every other interpolated value: `base_branch` is project.yaml state, and
+an unquoted value with shell metacharacters would run in the pane's shell.
 
 ### R7. Merge gate / publication identity
 `merge_gate_refusal` additionally requires:
@@ -450,9 +453,14 @@ tests):
     refused as readable conflicts rather than raising (and a malformed base
     entry must not silently drop the behaviour-change summary).
 13. Apply/merge guards: a re-resolution whose blob differs from the recorded
-    one is refused and the workdir left untouched; an apply that hits a
+    one is refused and the workdir left untouched (a hand-edited non-string
+    `blob` reads as absent rather than raising out of the unattended apply);
+    an apply that hits a
     conflict outside the recorded resolution aborts; a clean or re-resolved
-    merge whose tree differs from the candidate is aborted; a HEAD moved
+    merge whose tree differs from the candidate is aborted before it is
+    committed (the clean apply merges with `--no-commit` and verifies
+    `write-tree` equals the candidate, so no destructive reset is needed and a
+    record with no candidate tree is refused the same way); a HEAD moved
     under the apply is refused; an unresolved `RESOLVED` record is not
     mergeable (and never looks approved without its provenance); a changed
     (or digest-inconsistent) resolution invalidates the approval; an applied
@@ -513,7 +521,15 @@ tests):
     another: `prepare` can return the *stored* record when a concurrent apply
     won, so `stamp_signoff_launch` receives a hand-editable `base_sha`; a
     non-string value stamps nothing instead of raising `TypeError` out of the
-    launch before the sign-off window is created.
+    launch before the sign-off window is created. The same stale record reaches
+    the `integrate --apply` output, so the applied-merge line reads
+    `base_sha` through `revision_of` (it printed with an empty revision
+    instead of slicing an int). The GitHub recovery path
+    (`pm pr merge --no-signoff-check` / `--propagation-only`) skips the merge
+    gate, so it reads a non-string approved `sha`/`base_sha` as absent (no
+    verification, not a crash) and `_verify_github_merge` renders every
+    revision/tree through a short helper, so a hand-edited `candidate_tree`
+    records the mismatch instead of raising `TypeError`.
 
 ## Implicit requirements
 

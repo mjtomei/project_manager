@@ -2040,10 +2040,12 @@ def apply_integration(root: Path, pr_id: str, record: dict | None = None,
                       *, data: dict | None = None) -> tuple[str | None, str | None]:
     """Merge the recorded base revision into the PR branch.
 
-    For a ``clean`` record this is a plain merge.  For a ``resolved`` record
-    the same deterministic record-aware resolution is re-applied to the
-    conflicted ``project.yaml`` files and the resulting tree must equal the
-    recorded candidate tree before the merge is committed.
+    For a ``clean`` record this is a plain merge, and for a ``resolved``
+    record the same deterministic record-aware resolution is re-applied to the
+    conflicted ``project.yaml`` files.  Either way the resulting tree must
+    equal the recorded candidate tree before the merge is committed (a clean
+    merge can differ from the isolated candidate, e.g. a merge driver); on a
+    mismatch the merge is aborted and nothing is committed.
 
     Only for a record of the workdir's current HEAD, on the PR branch, with a
     clean tree and no merge in progress.  Returns ``(merge_sha, None)`` or
@@ -2085,18 +2087,45 @@ def apply_integration(root: Path, pr_id: str, record: dict | None = None,
     if status == RESOLVED:
         return _apply_resolution(record, workdir, head, base_sha, msg)
 
-    m = _git("merge", "--no-ff", "-m", msg, base_sha, cwd=workdir)
+    # The clean merge must reproduce the approved candidate exactly, like the
+    # resolved one (``_apply_resolution``): publication and the review/QA a
+    # bounce sends to the integrated branch rely on the branch tree being the
+    # candidate sign-off checked.  A different tree (a merge driver or hook
+    # altering the result, or a record whose candidate is stale) is refused
+    # before it is committed, so the workdir is left exactly as it was.
+    # ``--no-commit`` is what makes that possible: after a plain ``git merge``
+    # the commit already exists and only a destructive reset could undo it.
+    no_hooks = ("-c", "core.hooksPath=/dev/null")
+    m = _git(*no_hooks, "-c", "rerere.enabled=false", "merge", "--no-commit",
+             "--no-ff", base_sha, cwd=workdir)
     if m.returncode != 0:
         _git("merge", "--abort", cwd=workdir)
         return None, f"merge failed: {_detail(m)}"
-    merged = _out(_git("rev-parse", "HEAD", cwd=workdir))
-    tree = _out(_git("rev-parse", "HEAD^{tree}", cwd=workdir))
+    merging = _git("rev-parse", "-q", "--verify", "MERGE_HEAD",
+                   cwd=workdir).returncode == 0
+    tree = _out(_git("write-tree", cwd=workdir))
     # A hand-edited non-string tree is not a tree (slicing it would raise).
     expected = revision_of(record.get("candidate_tree"))
-    if expected and tree != expected:
-        _log.warning("integration apply %s: tree %s != candidate %s",
-                     pr_id, tree[:8], expected[:8])
-    return merged or None, None
+    if not expected or tree != expected:
+        # Undo only this merge: ``merge --abort`` restores the state before
+        # it, while ``reset --hard head`` could discard a commit another
+        # process made between the HEAD check and this merge.
+        if merging:
+            _git("merge", "--abort", cwd=workdir)
+        return None, ("the clean merge produced a different tree "
+                      f"({(tree or '?')[:12]} != {(expected or '?')[:12]})")
+    if not merging:
+        # The branch already carries the base (a concurrent apply won the
+        # race): there is nothing to commit, and resetting would discard that
+        # merge.  Report the current head; the caller re-checks it.
+        return _out(_git("rev-parse", "HEAD", cwd=workdir)) or None, None
+    commit = _git(*no_hooks, "-c", "user.name=pm",
+                  "-c", "user.email=pm@localhost",
+                  "commit", "-m", msg, cwd=workdir)
+    if commit.returncode != 0:
+        _git("merge", "--abort", cwd=workdir)
+        return None, f"merge commit failed: {_detail(commit)}"
+    return _out(_git("rev-parse", "HEAD", cwd=workdir)) or None, None
 
 
 def _apply_resolution(record: dict, workdir: str, head: str, base_sha: str,
@@ -2179,11 +2208,14 @@ def _apply_resolution(record: dict, workdir: str, head: str, base_sha: str,
             _git("merge", "--abort", cwd=workdir)
             return None, f"git add {path} failed: {_detail(add)}"
         blob = _out(_git("rev-parse", f":{path}", cwd=workdir))
-        if entry.get("blob") and blob != entry["blob"]:
+        # Hand-edited state: a non-string blob is not the recorded one
+        # (slicing it in the message would raise out of an unattended apply).
+        recorded_blob = revision_of(entry.get("blob"))
+        if recorded_blob and blob != recorded_blob:
             _git("merge", "--abort", cwd=workdir)
             return None, (f"the resolution of {path} is not deterministic "
                           f"(blob {blob[:12]} != recorded "
-                          f"{entry['blob'][:12]})")
+                          f"{recorded_blob[:12]})")
     left = _out(_git("diff", "--name-only", "--diff-filter=U", cwd=workdir))
     if left:
         _git("merge", "--abort", cwd=workdir)

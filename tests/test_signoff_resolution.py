@@ -2453,6 +2453,27 @@ def test_integrate_cli_apply_applies_a_clean_recheck_of_a_resolved_check(w):
     assert applied == {"status": integration.CLEAN}
 
 
+def test_integrate_cli_apply_reports_a_stale_record_with_a_bad_base(w):
+    """``prepare`` can return the stored record when a concurrent apply won.
+
+    That record is hand-editable state: a non-string base revision must not
+    crash the applied-merge line (it prints without a revision).
+    """
+    stale = {"status": integration.CLEAN, "head": "b" * 40, "base_sha": 123,
+             "base_branch": "master", "candidate_tree": "c" * 40}
+    with patch.object(integration, "check_integration",
+                      return_value=dict(stale)), \
+         patch.object(integration, "prepare", return_value=dict(stale)), \
+         patch.object(integration, "apply_integration",
+                      return_value=("d" * 40, None)), \
+         patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(
+            pr_mod.pr, ["signoff", "integrate", PR, "--apply"])
+    assert r.exit_code == 0, r.output
+    assert "Merged master@ into the PR branch as dddddddddddd." in r.output
+
+
 def test_integrate_cli_apply_applies_a_resolved_candidate(w):
     """`--apply` on a metadata-only conflict applies and records the merge."""
     append_records(w.wd / "pm", w.repo, ["pr-300"])
@@ -2793,6 +2814,66 @@ def test_apply_refuses_a_clean_merge_with_another_candidate_tree(w):
     assert merged is None and "different tree" in err
     assert git(w.wd, "rev-parse", "HEAD") == head
     assert git(w.wd, "status", "--porcelain") == ""
+
+
+def test_apply_refuses_a_clean_apply_with_another_candidate_tree(w):
+    """A CLEAN record's apply must reproduce the candidate before committing.
+
+    The isolated candidate is what sign-off reviewed; a merge driver (or a
+    stale record) that produces another tree must not be committed into the
+    branch, or review/QA and publication would see a tree nobody approved.
+    """
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN, rec
+    head = rec["head"]
+
+    merged, err = integration.apply_integration(
+        w.pm_dir, PR, dict(rec, candidate_tree="0" * 40))
+    assert merged is None and "different tree" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "status", "--porcelain") == ""
+    assert not (w.wd / "base.txt").exists()
+
+
+def test_apply_refuses_a_clean_record_without_a_candidate_tree(w):
+    """A record pm cannot tie to a tree cannot be applied to the branch."""
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN, rec
+    head = rec["head"]
+    tampered = dict(rec)
+    tampered.pop("candidate_tree")
+
+    merged, err = integration.apply_integration(w.pm_dir, PR, tampered)
+    assert merged is None and "different tree" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "status", "--porcelain") == ""
+
+
+def test_apply_reads_a_non_string_recorded_blob_as_absent(w):
+    """A hand-edited blob is not a recorded blob (and must not raise).
+
+    ``apply_integration`` runs unattended (sign-off launch, ``--apply``, a
+    bounce); a non-string ``blob`` in project.yaml used to make its mismatch
+    message slice an int.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED, rec
+    entry = dict(rec["resolution"]["paths"][0], blob=123)
+    merged, err = integration.apply_integration(
+        w.pm_dir, PR,
+        dict(rec, resolution=dict(rec["resolution"], paths=[entry])))
+    assert err is None, err
+    assert merged == git(w.wd, "rev-parse", "HEAD")
+    assert git(w.wd, "rev-parse", "HEAD^{tree}") == rec["candidate_tree"]
 
 
 def test_apply_refuses_a_resolved_merge_with_another_candidate_tree(w):
@@ -3553,3 +3634,52 @@ def test_a_resolved_candidate_never_applied_keeps_the_base_summary(w):
         prompt = prompt_gen.generate_signoff_prompt(data, PR)
     assert "Files changed on both sides: `pm/project.yaml`" in prompt
     assert "(1 file(s))" in prompt
+
+
+# --- the recovery path reads a hand-edited approval as absent --------------
+
+def test_github_merge_verification_renders_a_malformed_candidate_safely(
+        w, monkeypatch):
+    """The recovery path skips the merge gate, so it must not slice bad state.
+
+    ``--no-signoff-check`` / ``--propagation-only`` verify an already-published
+    GitHub merge against the recorded approval without running the merge gate.
+    A hand-edited ``candidate_tree`` used to raise ``TypeError`` there instead
+    of recording the mismatch.
+    """
+    head, base = "a" * 40, "b" * 40
+    log_line = f"{'d' * 40} {base} {head} {'e' * 40}"
+    monkeypatch.setattr(integration, "fetch_base",
+                        lambda *a, **k: ("c" * 40, None))
+    monkeypatch.setattr(
+        pr_mod.git_ops, "run_git",
+        lambda *a, **k: SimpleNamespace(returncode=0, stdout=log_line,
+                                        stderr=""))
+
+    pr_mod._verify_github_merge(
+        w.pm_dir, pr_entry(w), str(w.wd), "repo", "master", base, head,
+        {"status": "clean", "candidate_tree": 123})
+
+    stored = pr_entry(w)["merge_integrity"]
+    assert "approved ?" in stored["problem"]
+
+
+def test_recovery_skips_verification_for_a_malformed_approval(w, monkeypatch):
+    """A non-string approved sha/base is not a revision to verify against."""
+    calls = []
+    monkeypatch.setattr(pr_mod, "_verify_github_merge",
+                        lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(pr_mod, "_sync_main_repo_and_finalize",
+                        lambda *a, **k: None)
+    monkeypatch.setattr(integration, "fetch_base",
+                        lambda *a, **k: ("c" * 40, None))
+    monkeypatch.setattr(integration, "is_ancestor", lambda *a, **k: True)
+
+    entry = dict(pr_entry(w), signoff={
+        "verdict": SIGNOFF_MERGE, "sha": 123,
+        "integration": {"base_sha": 456}})
+    pr_mod._recover_completed_merge(
+        store.load(w.pm_dir), w.pm_dir, entry, "github", "master",
+        resolve_window=False, background=False, transcript=None,
+        companion=False)
+    assert calls == []
