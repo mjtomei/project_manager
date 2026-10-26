@@ -2715,20 +2715,32 @@ def test_unconfigured_provider_is_a_clean_cli_error(pm_home_dir, monkeypatch, ca
 
 
 @pytest.mark.parametrize("starter", ["start_qa_background", "resume_qa_background"])
-def test_unconfigured_provider_explains_a_stopped_qa_run(pm_home_dir, starter):
+def test_unconfigured_provider_explains_a_stopped_qa_run(pm_home_dir, starter, caplog):
     """Planner, s0, verifier and finalizer launch without a route gate, so
-    a missing provider ended the run with a bare "QA thread crashed"."""
+    a missing provider ended the run with a bare "QA thread crashed".
+
+    QA S64: the pm log still recorded it as "QA background thread crashed"
+    with a full traceback; it is one warning line now."""
+    import logging
     from pm_core import qa_loop
     state = qa_loop.QALoopState(pr_id="pr-001")
     sync = "run_qa_sync" if starter == "start_qa_background" else "resume_qa_sync"
-    with patch.object(qa_loop, sync, side_effect=lambda *a, **k:
-                      _launch_on_missing_provider(session_type="qa_planning")):
+    with patch.object(qa_loop._log, "handlers",
+                      qa_loop._log.handlers + [caplog.handler]), \
+            caplog.at_level(logging.DEBUG, logger="pm.qa_loop"), \
+            patch.object(qa_loop, sync, side_effect=lambda *a, **k:
+                         _launch_on_missing_provider(session_type="qa_planning")):
         getattr(qa_loop, starter)(state, Path("/nonexistent"), {"id": "pr-001"}).join(5)
     assert (state.running, state.latest_verdict) == (False, "ERROR")
     assert state.latest_output.startswith(
         "QA stopped: provider 'missing-route' is not configured")
     assert "'pm model show' lists them" in state.latest_output
     assert state.latest_output.endswith("then start QA again")
+    ends = [r for r in caplog.records if "pr-001" in r.getMessage()]
+    assert [(r.levelname, r.exc_info) for r in ends] == [("WARNING", None)]
+    assert ends[0].getMessage().startswith(
+        "QA stopped for pr-001: provider 'missing-route' is not configured")
+    assert "crashed" not in caplog.text
 
 
 # Review c189 i9: a hand-edited entry for the *selected* provider used to
@@ -2951,10 +2963,16 @@ def test_readable_file_without_the_provider_still_says_add_it(pm_home_dir):
 @pytest.mark.parametrize("starter,default", [
     ("start_qa_background", "QA thread crashed"),
     ("resume_qa_background", "QA resume thread crashed")])
-def test_other_qa_thread_crashes_keep_their_message(starter, default):
+def test_other_qa_thread_crashes_keep_their_message(starter, default, caplog):
+    import logging
     from pm_core import qa_loop
     state = qa_loop.QALoopState(pr_id="pr-001")
     sync = "run_qa_sync" if starter == "start_qa_background" else "resume_qa_sync"
-    with patch.object(qa_loop, sync, side_effect=RuntimeError("boom")):
+    with patch.object(qa_loop._log, "handlers",
+                      qa_loop._log.handlers + [caplog.handler]), \
+            caplog.at_level(logging.DEBUG, logger="pm.qa_loop"), \
+            patch.object(qa_loop, sync, side_effect=RuntimeError("boom")):
         getattr(qa_loop, starter)(state, Path("/nonexistent"), {"id": "pr-001"}).join(5)
     assert (state.latest_verdict, state.latest_output) == ("ERROR", default)
+    crash = [r for r in caplog.records if "crashed for pr-001" in r.getMessage()]
+    assert len(crash) == 1 and crash[0].levelname == "ERROR" and crash[0].exc_info

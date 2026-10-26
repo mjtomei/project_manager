@@ -5227,6 +5227,20 @@ def _crash_output(exc: Exception, default: str) -> str:
     return default
 
 
+def _log_thread_end(exc: Exception, what: str, pr_id: str) -> None:
+    """Log why a QA thread ended.
+
+    A provider setup error (see :func:`_crash_output`) is expected input
+    with a remedy, so it is one warning line, not a crash traceback; any
+    other exception keeps its traceback.
+    """
+    from pm_core.providers import ProviderNotFoundError
+    if isinstance(exc, ProviderNotFoundError):
+        _log.warning("QA stopped for %s: %s", pr_id, exc)
+    else:
+        _log.exception("%s crashed for %s", what, pr_id)
+
+
 def start_qa_background(
     state: QALoopState,
     pm_root: Path,
@@ -5239,7 +5253,7 @@ def start_qa_background(
         try:
             run_qa_sync(state, pm_root, pr_data, on_update, max_scenarios)
         except Exception as exc:
-            _log.exception("QA background thread crashed for %s", state.pr_id)
+            _log_thread_end(exc, "QA background thread", state.pr_id)
             state.running = False
             state.latest_verdict = "ERROR"
             state.latest_output = _crash_output(exc, "QA thread crashed")
@@ -5262,7 +5276,7 @@ def resume_qa_background(
         try:
             resume_qa_sync(state, pm_root, pr_data, on_update)
         except Exception as exc:
-            _log.exception("QA resume thread crashed for %s", state.pr_id)
+            _log_thread_end(exc, "QA resume thread", state.pr_id)
             state.running = False
             state.latest_verdict = "ERROR"
             state.latest_output = _crash_output(exc, "QA resume thread crashed")
