@@ -2358,9 +2358,11 @@ def popup_picker_cmd(session: str, window_name: str):
                         continue
                     label = next((lbl for lbl, c in _label_to_cmd.items()
                                   if c == selected_cmd), None)
-                    if label and not _still_has_action(label):
+                    # Every dispatch goes through the refresh check; a row
+                    # with no known action label is never run unchecked.
+                    if label is None or not _still_has_action(label):
                         continue
-                    cmd_to_run = _label_to_cmd.get(label, selected_cmd)
+                    cmd_to_run = _label_to_cmd[label]
                     break
                 # No actionable input — bail.
                 break
