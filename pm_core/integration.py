@@ -1633,6 +1633,23 @@ def unresolved_paths(record: dict | None) -> set[str]:
     return paths
 
 
+def carried_applied_resolution(record: dict | None) -> bool:
+    """Whether the record's resolution is an *earlier*, already-applied merge.
+
+    ``_carry_forward`` keeps an applied resolution on a later record so the
+    provenance (and the explicit-reuse requirement) survives a re-check.  When
+    that later record is a ``conflict``/``error``, the conflict it reports is a
+    different, current problem: the resolution's paths were already reconciled
+    and applied.  Every surface that labels the paths (the CLI, the sign-off
+    launch, the return text and the prompt) must say so instead of presenting
+    them as this check's outcome.
+    """
+    rec = record or {}
+    resolution = rec.get("resolution") or {}
+    return bool(resolution.get("applied_merge_sha")) \
+        and rec.get("status") in (CONFLICT, ERROR)
+
+
 def _added_count(entry: dict, key: str) -> int:
     """Added-record count for one resolved path, nested lists included.
 

@@ -343,8 +343,10 @@ def qa_evidence(pr_id: str) -> dict | None:
         "planner_head": planner_head if isinstance(planner_head, str) else None,
         "planner_code_changes": (
             changes if isinstance(changes, list) else []),
-        "status_file": str(path),
     }
+    # No path is recorded: the block is written into the git-tracked
+    # project.yaml, where a host-specific absolute path is dead weight that is
+    # wrong in every other clone.  The revisions identify the evidence.
     if error:
         out["error"] = error
     return out
@@ -792,11 +794,17 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             print(f"Integration: {integration.summary(rec)}")
             if rec.get("resolution"):
                 unresolved = integration.unresolved_paths(rec)
+                carried = integration.carried_applied_resolution(rec)
                 for entry in (rec["resolution"].get("paths") or []):
                     path = entry.get("path")
                     if path in unresolved:
                         print(f"  attempted {path} by record id "
                               "— NOT resolved")
+                    elif carried:
+                        # An earlier merge applied this path; the conflict
+                        # this check reports is elsewhere.
+                        print(f"  resolved earlier {path} by record id "
+                              "(already applied)")
                     else:
                         print(f"  resolved {path} by record id")
                 if rec["resolution"].get("applied_merge_sha"):
@@ -1153,6 +1161,12 @@ def clear_return_awaiting(root: Path, pr_id: str, hop: str) -> None:
         _log.warning("clear sign-off return for %s: %s", pr_id, e)
 
 
+def _carried_applied_resolution(record: dict | None) -> bool:
+    """See :func:`pm_core.integration.carried_applied_resolution`."""
+    from pm_core import integration as integ_mod
+    return integ_mod.carried_applied_resolution(record)
+
+
 def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
     """Prompt block for a PR sign-off sent back (empty when there is none)."""
     rec = open_return(pr)
@@ -1189,6 +1203,7 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                      if p.get("path")]
             paths_text = ", ".join(f"`{p}`" for p in paths or ["project.yaml"])
             unresolved = resolution.get("unresolved") or []
+            carried = _carried_applied_resolution(integ)
             if unresolved:
                 # A failed attempt is retained on the record (never applied).
                 # Say so: claiming a resolution here would mislead the step
@@ -1200,6 +1215,15 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 for entry in unresolved[:5]:
                     lines.append(f"- `{entry.get('path')}`: "
                                  f"{entry.get('conflicts')}")
+            elif carried:
+                # The record carries a resolution an *earlier* merge applied
+                # (``_carry_forward``); the conflict above is a different,
+                # current problem.  Calling it "the" resolution would tell the
+                # step that pm already reconciled the conflict it must fix.
+                lines.append(
+                    "pm resolved an *earlier* metadata conflict by record id "
+                    f"in {paths_text} (already applied; the conflict above is "
+                    "separate and is never auto-resolved).")
             else:
                 lines.append(
                     "pm resolved the metadata conflict by record id in "

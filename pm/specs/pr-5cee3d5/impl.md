@@ -169,6 +169,14 @@ published. So the sign-off launch
    visible), so a check run from the fallback does not drop the provenance.
    The merge itself is still blocked until a check can verify the candidate
    again.
+   Concurrent applies cannot lose the applied record. When the apply loses the
+   HEAD race (`HEAD_MOVED`/`HEAD_MOVED_APPLYING`), `prepare` re-checks the
+   revision the branch now has (against the same base) and records that
+   instead, so the loser never writes its stale `resolved` check over the
+   winner's applied one. `_record_check` additionally refuses, inside the
+   locked read-modify-write, to write a check computed before HEAD moved when
+   the stored record already describes the branch's current revision
+   (`_check_is_stale`) — the loser's record is then dropped, not written.
 Dirty workdirs are never touched: apply refuses and the record keeps
 `RESOLVED` with `apply_error`; a MERGE on it is blocked (R6).
 
@@ -210,7 +218,9 @@ merged base commits as PR changes.
 - `qa` (latest `qa_status.json` `overall`, plus `planner_head` and
   `planner_code_changes` from its sibling `qa_resume.json`; malformed evidence
   is recorded as unreadable/absent, never raised — a non-string
-  `planner_head` is no revision, so the block and the prompt do not slice it),
+  `planner_head` is no revision, so the block and the prompt do not slice it;
+  no host path is recorded — the block travels to master in the tracked
+  project.yaml, where a per-host absolute path is dead weight),
 - `prior_signoff` (previous record's sha/verdict/ts, if any),
 - `required_return_stage` (the verdict mapped to its stage),
 - agent-declared reuse from `report.html` meta tags (only trusted when the
@@ -239,7 +249,17 @@ renders the resolution (paths, ids added/changed/removed, unresolved), the
 delta file path, the applied merge, the base behavior changes, the available
 evidence revisions, and instructions: metadata-only conflicts are not an
 automatic exemption; state reuse or the targeted checks; choose the earliest
-affected stage. The pre-existing base-interaction guidance stays in step 0
+affected stage. A resolution the record carries but has *not* applied is
+labelled "Not applied" even when pm recorded no apply error (a
+`--record`-only check): the agent must not read a resolved candidate as
+already integrated, because a MERGE is blocked until it is. A carried applied
+resolution on a `conflict`/`error` record is labelled an *earlier*, already
+applied resolution and the current conflict is described as separate — the
+same qualification the CLI and the return text carry
+(`integration.carried_applied_resolution`). The behaviour-change list's total
+falls back to the stored list's length when `compact` kept 21-30 changes
+without a `base_behavior_count` (indexing the absent key would crash the
+prompt). The pre-existing base-interaction guidance stays in step 0
 (read the base diff, judge semantic overlap — the same behaviour/APIs/data/
 tests changed on both sides — line/file counts alone are not the rule), and
 the applied-resolution diff is described accurately: `git diff <old head>
@@ -306,8 +326,9 @@ invalidates and returns to sign-off.
   forward* from an earlier applied merge (R4) is not an attempt at the
   current conflict: its paths were reconciled and applied, and the conflict
   the record now reports is elsewhere, so they are not labelled "attempted —
-  NOT resolved" (the prompt calls it an earlier, already-applied resolution
-  and says the current conflict is separate);
+  NOT resolved", and the per-path line says "resolved earlier … (already
+  applied)" (the sign-off launch, the prompt and the return text say the same:
+  an earlier, already-applied resolution, with the current conflict separate);
 - `--apply` applies a `CLEAN` or `RESOLVED` candidate (the existing clean
   behavior is preserved), including a `RESOLVED` check whose re-check in
   `prepare` comes back `CLEAN` because the base moved between the two checks.
@@ -376,7 +397,10 @@ tests):
     the `integrate` CLI (and the launch) label a failed attempt's paths as
     attempted, never resolved, while a resolution carried forward from an
     earlier applied merge is not labelled an attempt (the current conflict is
-    separate); the review and QA prompts diff against the
+    separate) — in the CLI, the sign-off launch, the prompt and the return
+    text; a resolved candidate pm has not applied says "Not applied" in the
+    prompt even with no recorded apply error; the review and QA prompts diff
+    against the
     exact base the branch contains — the applied resolution, a newer
     `up_to_date` check, or the merge a clean bounce recorded — so the merged
     base commits never read as the PR's own changes.

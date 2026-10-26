@@ -1703,10 +1703,16 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
     # path it could not reconcile as "resolved" (the unresolved line below is
     # the authoritative one).
     unresolved = integration.unresolved_paths(rec)
+    # A resolution an earlier merge applied is not this check's outcome: the
+    # conflict the record now reports is elsewhere (``_carry_forward``).
+    carried = integration.carried_applied_resolution(rec)
     for entry in resolution.get("paths") or []:
         path = entry.get("path")
         if path in unresolved:
             click.echo(f"  attempted: {path} (by record id — NOT resolved)")
+        elif carried:
+            click.echo(f"  resolved earlier: {path} (by record id — "
+                       "already applied)")
         else:
             click.echo(f"  resolved: {path} (by record id)")
         for key, label in (("added_ours", "added from PR"),

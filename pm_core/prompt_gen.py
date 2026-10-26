@@ -511,8 +511,7 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         if resolution.get("unresolved"):
             lines.append("**Metadata conflict resolution attempted (pm, by "
                          "record id) — NOT resolved:**")
-        elif rec.get("status") in (integ.CONFLICT, integ.ERROR) \
-                and resolution.get("applied_merge_sha"):
+        elif integ.carried_applied_resolution(rec):
             # The record carries a resolution an earlier merge applied (see
             # integration._carry_forward); the conflict/error above is a
             # different, current problem.  Do not present the applied
@@ -554,10 +553,17 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
                 "HEAD` shows the whole base merge as applied to this branch "
                 "(the resolution is only its project.yaml part; the delta "
                 "file below lists just the resolution changes).")
-        elif rec.get("apply_error"):
-            lines.append(f"- **Not applied**: {rec['apply_error']}. A "
-                         f"{SIGNOFF_MERGE} is blocked until the resolution can "
-                         "be applied to the branch (clean the workdir).")
+        elif not resolution.get("unresolved"):
+            # A mergeable resolved candidate pm has not applied.  Say it even
+            # when pm recorded no apply error (e.g. a `--record`-only check):
+            # the agent must not read it as already integrated.  A failed
+            # attempt (``unresolved``) is listed below instead — it was never
+            # applied and is not a candidate.
+            why = rec.get("apply_error") or "it has not been applied yet"
+            lines.append(f"- **Not applied**: {why}. A "
+                         f"{SIGNOFF_MERGE} is blocked until the resolution is "
+                         "applied to the branch (clean the workdir and re-run "
+                         "sign-off, which applies it).")
         for entry in resolution.get("unresolved") or []:
             lines.append(f"- **Unresolved** `{entry.get('path')}`: "
                          f"{entry.get('conflicts')}")

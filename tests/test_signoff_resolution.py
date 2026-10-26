@@ -1802,7 +1802,10 @@ def test_a_carried_applied_resolution_is_not_labelled_a_failed_attempt(w):
     assert r.exit_code != 0
     assert "conflicts: shared.txt" in r.output
     assert "NOT resolved" not in r.output
-    assert "resolved: pm/project.yaml (by record id)" in r.output
+    # The path line says the resolution was already applied, not that it is
+    # this check's resolution of the current conflict.
+    assert ("resolved earlier: pm/project.yaml (by record id — already "
+            "applied)") in r.output
 
     # The sign-off prompt names the current conflict and qualifies the earlier
     # resolution instead of presenting it as this check's outcome.
@@ -1812,6 +1815,18 @@ def test_a_carried_applied_resolution_is_not_labelled_a_failed_attempt(w):
         text = prompt_gen.generate_signoff_prompt(data, PR)
     assert "Conflicting paths: `shared.txt`" in text
     assert "already applied" in text
+    assert "**Metadata conflict resolution (pm, by record id):**" not in text
+
+    # The return text the routed step reads must not claim pm resolved *this*
+    # conflict either (the same honesty the prompt and the CLI carry).
+    head = git(w.wd, "rev-parse", "HEAD")
+    ret = signoff.build_return_record(
+        pr_entry(w), signoff.SIGNOFF_IMPL, "impl", reviewed_head=head)
+    text = signoff.format_signoff_return(dict(pr_entry(w), signoff_return=ret))
+    assert "Conflicting paths: `shared.txt`" in text
+    assert "pm resolved an *earlier* metadata conflict" in text
+    assert "pm resolved the metadata conflict by record id" not in text
+    assert "Reconcile it in this branch" in text
 
 
 def test_integrate_cli_apply_applies_a_clean_recheck_of_a_resolved_check(w):
@@ -2705,3 +2720,32 @@ def test_a_bounce_does_not_overwrite_a_check_of_another_revision(w):
     signoff._record_applied_integration(
         w.pm_dir, PR, rec, rec["head"], "e" * 40)
     assert pr_entry(w)["integration"]["head"] == other
+
+
+def test_the_prompt_says_a_resolution_was_not_applied(w):
+    """A resolved candidate that pm has not applied must say so.
+
+    ``pm pr signoff integrate --record`` resolves the conflict in the isolated
+    candidate but applies nothing, so the record carries a resolution with no
+    ``applied_merge_sha`` and no ``apply_error``.  The prompt must not read as
+    if the branch were already integrated: a MERGE is blocked until it is.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+    assert not rec["resolution"].get("applied_merge_sha")
+    assert not rec.get("apply_error")
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "**Not applied**" in text
+    assert "has not been applied yet" in text
+    assert "Applied to the PR branch as" not in text

@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T12:58:12.308432+00:00'
+  updated_at: '2026-10-26T13:23:46.974794+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32988,6 +32988,29 @@ prs:
       env failure).'
     created_at: '2026-10-26T12:58:12Z'
     last_edited: '2026-10-26T12:58:12Z'
+  - id: note-f3fa16b
+    text: 'review-loop 0eef i3: (1) a resolution carried forward from an earlier applied
+      merge is no longer described as resolving the current conflict — `integration.carried_applied_resolution()`
+      now drives the CLI per-path line ("resolved earlier … (already applied)"), the
+      sign-off launch, the prompt heading and the *return text* (i2 fixed only the
+      prompt/CLI attempt label; `format_signoff_return` still said "pm resolved the
+      metadata conflict by record id" next to "Reconcile it in this branch"). (2)
+      The sign-off prompt now says "Not applied" for a resolved candidate with no
+      `applied_merge_sha` even when no `apply_error` was recorded (`--record`-only
+      checks previously read as already integrated). (3) Dropped the dead, host-specific
+      `evidence.qa.status_file` from the block written into the tracked project.yaml
+      (nothing read it). Tests: 1 new + 1 extended in test_signoff_resolution.py (113
+      focused); full suite 3468 passed, 1 skipped, 13 pre-existing env failures (12
+      markdown module absent, 1 hook receiver fails on master too). Spec R4/R6/R8/R9
+      synced. Evidence: /pm-captures/review-0eef-i3/. MERGE RISK for the next stage:
+      the branch is 76 commits behind origin/master, which changed all five files
+      this PR touches; `prompt_gen._signoff_integration_block` is changed on both
+      sides (master bounded the conflict/overlap listings with `integration.omitted_path_count`
+      + `integration_pointer`, which this rewritten block does not carry), so expect
+      a code conflict at sign-off and preserve both behaviours in the resolution.
+      (2026-10-26T13:20:00Z)'
+    created_at: '2026-10-26T13:23:46Z'
+    last_edited: '2026-10-26T13:23:46Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
