@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -802,6 +803,30 @@ def test_qa_launch_claim_outlives_awaiting(tmp_path):
     assert signoff.claim_return_launch(tmp_path, PR, "qa") is False
     p["signoff_return"]["launch_claim"]["at"] = "2000-01-01T00:00:00+00:00"
     assert signoff.return_launch_claimed(p, "qa") is False
+
+
+def test_claim_waiting_on_the_lock_sees_a_claim_written_meanwhile(
+        tmp_path, monkeypatch):
+    """QA S71: the hop tick and a qa tick both waited on project.yaml's lock
+    (an editor saving it).  The qa tick got it first and claimed; the hop
+    tick, which had read the clock before waiting, saw that claim as from
+    the future, took it over and launched a second driver."""
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "backend": "local"},
+                "prs": [_returned("qa", "qa")]}, tmp_path)
+    real = store.locked_update
+    other = []
+
+    def other_tick_first(root, fn, *a, **kw):
+        if not other:
+            other.append(None)
+            time.sleep(0.01)
+            other.append(signoff.claim_return_launch(root, PR, "qa"))
+        return real(root, fn, *a, **kw)
+
+    monkeypatch.setattr(store, "locked_update", other_tick_first)
+    assert signoff.claim_return_launch(tmp_path, PR, "qa") is False
+    assert other == [None, True]
 
 
 def test_claim_return_launch_expires(tmp_path):

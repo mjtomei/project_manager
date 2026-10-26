@@ -779,10 +779,13 @@ def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
     whose launcher died expires after RETURN_LAUNCH_CLAIM_SECONDS.
     """
     from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
     won = {"ok": False}
 
     def _apply(data):
+        # Read the clock under the lock: a claimant that waited on it would
+        # otherwise date its check before a claim written while it waited,
+        # see that claim as from the future (not fresh), and launch too.
+        now = datetime.now(timezone.utc)
         pr = store.get_pr(data, pr_id)
         rec = (pr or {}).get("signoff_return")
         if not isinstance(rec, dict) or rec.get("awaiting") != hop:
