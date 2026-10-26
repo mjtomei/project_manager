@@ -71,6 +71,10 @@ Given a PR in review or QA with no `qa-<pr>` window, and the user on the TUI,
 When the user presses `t` on that PR (or runs `/pr qa <pr>` from the command
 bar),
 Then the user's client is switched to the new `qa-<pr>` window.
+Also cover a background run already accepted but still preparing its first
+window: `t` reuses that run and requests focus when the window is created,
+without starting a second worker. Dismissing its popup before creation must
+still suppress that selection.
 
 **R5: Dismissing the popup spinner still keeps focus.**
 Given the user starts QA from the popup or picker, which shows a spinner,

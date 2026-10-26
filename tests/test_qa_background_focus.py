@@ -249,6 +249,41 @@ class TestEntryPointFocus:
             focus_or_start_qa(app, "pr-001")
         assert _started_state(bg).focus_on_create is True
 
+    @pytest.mark.parametrize("suppress", [False, True])
+    def test_t_adopts_pending_background_start(self, tmp_path, monkeypatch, suppress):
+        """An explicit t promotes the accepted run, without a duplicate worker.
+
+        Popup dismissal must still suppress the eventual first-window select.
+        """
+        from pm_core.tui.qa_loop_ui import focus_or_start_qa
+        app = _make_app(tmp_path)
+        state = QALoopState(pr_id="pr-001", running=True)
+        app._qa_loops["pr-001"] = state
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background") as bg, \
+                patch("pm_core.tui.qa_loop_ui.get_pm_session", return_value="pm-test"), \
+                patch("pm_core.tmux.find_window_by_name", return_value=None):
+            focus_or_start_qa(app, "pr-001")
+        bg.assert_not_called()
+        assert app._qa_loops["pr-001"] is state
+        assert state.focus_on_create is True
+        mocks = _run_to_window_creation(
+            tmp_path, monkeypatch, state, suppress=suppress)
+        mocks["consume_suppress_switch"].assert_called_once_with("pr-001", "qa")
+        if suppress:
+            mocks["select_window"].assert_not_called()
+        else:
+            mocks["select_window"].assert_called_once_with("pm-test", "qa-pr-001")
+
+    def test_background_dedup_keeps_existing_focus_intent(self, tmp_path):
+        from pm_core.tui.qa_loop_ui import start_qa
+        app = _make_app(tmp_path)
+        state = QALoopState(pr_id="pr-001", running=True, focus_on_create=True)
+        app._qa_loops["pr-001"] = state
+        with patch("pm_core.tui.qa_loop_ui.start_qa_background") as bg:
+            start_qa(app, "pr-001")
+        bg.assert_not_called()
+        assert state.focus_on_create is True
+
     def test_z_t_fresh_start_requests_focus(self, tmp_path):
         from pm_core.tui.qa_loop_ui import fresh_start_qa
         app = _make_app(tmp_path)

@@ -29733,6 +29733,22 @@ prs:
       follow-up created.'
     created_at: '2026-10-26T15:57:33Z'
     last_edited: '2026-10-26T15:58:17Z'
+  - id: note-d9e8c44
+    text: 'Review fef8 i2: found and fixed explicit t losing its focus request when
+      a background QA run was already accepted but had not created its first window.
+      The running-state dedup guard now promotes focus_on_create for the user request
+      without launching another worker; popup suppression is still consumed at creation
+      and background dedup never clears user intent. Two parameterized regression
+      cases failed before; 97 focused tests pass after. Final full suite: 3543 passed,
+      1 skipped, 3 AsyncMock warnings, real Git PATH and PM_HOST_HOME unset with declared
+      markdown dependency in scratchpad. Impl R2 and QA R4 specify this ordering.
+      Original pre/post captures verified and old-condition mutation still fails on
+      unwanted select_window. Evidence: /pm-captures/review-fef8-i2. Native QA should
+      exercise the accepted-background/no-window user start with and without popup
+      dismissal. Existing QA edits, drafts and stashes preserved; no standalone follow-up
+      created.'
+    created_at: '2026-10-26T16:10:05Z'
+    last_edited: '2026-10-26T16:13:33Z'
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge

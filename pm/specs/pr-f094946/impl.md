@@ -19,7 +19,10 @@
    (`start_or_stop_qa_loop`) — reached from `app.action_start_qa_on_pr`,
    `pr_view` command handling and the popup/command bar — still select the
    new window on first-time creation, still honour the popup
-   `suppress_switch` flag.
+   `suppress_switch` flag. If a background run is already accepted but has
+   not created its window, an explicit user start reuses that worker and
+   promotes its first-creation focus intent; it does not silently discard
+   the request or launch a duplicate worker.
 
 3. **Preserve the incidental fixes added during QA and review rounds.** These
    extend the original focus-only scope and are required by the PR notes

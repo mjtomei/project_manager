@@ -132,6 +132,11 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
     if pr_id in app._qa_loops:
         existing = app._qa_loops[pr_id]
         if existing.running:
+            # A user can ask to view a background run before its first window
+            # exists. Reuse that worker, but retain the explicit focus request;
+            # popup suppression is still consumed at window creation.
+            if focus:
+                existing.focus_on_create = True
             app.log_message(f"QA already running for {pr_id}")
             return
 
