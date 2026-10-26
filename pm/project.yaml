@@ -12625,6 +12625,39 @@ prs:
     created_at: '2026-10-26T04:25:58Z'
     last_edited: '2026-10-26T04:25:58Z'
 
+  - id: note-0078512
+    text: 'QA S18 (2026-10-26, chatgpt/gpt-6-astra-high) partial runtime coverage,
+      not PASS. d53b8fd2 synced. Private /scratch/s18-story1 HOME/state/tmux/rootless
+      VFS; pm which=/workspace/pm_core; real nested-enabled build failed Chromium
+      inotify errno24, documented smoke-RUN-only recovery built. Public impl launch,
+      exec and proxy push qualified with matching origin SHA. Real TUI planned8, saved
+      cap4, queued4; all8 allocation attempts advanced; measured run-through-setup
+      overlap2 in PM PID1776. Three un-injected setup exec timeouts (5s readiness
+      /10s setup sentinel) plus sampling errors prevent clean load acceptance. Driver
+      errors preserved: missing host fake executable corrected by fixture symlink;
+      concretizer hold5 below15s grace caused s3/s5/s6 split failures, changed via
+      CLI to hold180 for s7/s8, which then native PASS/VERIFIED and released. Aggregate
+      ERROR retained six launch errors without agent verdicts. Four unowned allocations
+      remained after run-end; scoped reap removed4/kept0/failed0 with real four-way
+      rm overlap, empty runtime afterward. Not the six-target fault story. Competing
+      B, targeted middle fault, resume and independent trial sequence NOT executed.
+      Need clean rerun with fake available before TUI startup, holds180 for all roles,
+      and runtime stable under concurrent creation; do not waive remaining stories.
+      No source fix/quota change. All12 casts have validated H264 MP4, native transcripts/hashes
+      and exact drivers under /pm-captures/scenarios/18; known build bug note-df3f3b6
+      on pr-af2418a. Final baseline check recorded separately; no keyring recovery
+      claim.'
+    created_at: '2026-10-26T04:33:55Z'
+    last_edited: '2026-10-26T04:33:55Z'
+  - id: note-3e39d53
+    text: 'S18 cleanup follow-up: 26 real inventory samples over125+ seconds all empty,
+      unused A proxy socket absent throughout, all20 saved native-transcript/clone-source
+      hashes unchanged. /pm-captures/scenarios/18/story1-retry/{baseline-observation.json,evidence-after-cleanup.json}.
+      Keyring uid0 remained333/4096, shared/namespace telemetry only; no recovery
+      attribution. This confirms cleanup of the partial attempt, not acceptance of
+      unexecuted concurrent/resume/fault trials.'
+    created_at: '2026-10-26T04:34:25Z'
+    last_edited: '2026-10-26T04:34:25Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -32272,7 +32305,16 @@ prs:
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-df3f3b6
+    text: 'Scenario18 prerequisite reproduction on d53b8fd2 (2026-10-26): real pm
+      container build-base from nested_podman-enabled disposable A, --uts host verified,
+      private rootless Podman3.4.4 VFS storage. STEP17 Chromium smoke failed inotify_init
+      errno24 / GPU process unusable, rc1. Full original recording/transcript at /pm-captures/scenarios/18/qualification/build-base;
+      proceeding only with previously authorized smoke-RUN-only omission, not claiming
+      standard build success. No quota changes.'
+    created_at: '2026-10-26T04:17:15Z'
+    last_edited: '2026-10-26T04:17:15Z'
 - id: pr-b28e042
   plan: bugs
   title: 'Bug: manual fake-agent launchers do not create transcripts and ignore configured
