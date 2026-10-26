@@ -34250,6 +34250,17 @@ prs:
       at start).'
     created_at: '2026-10-26T08:05:49Z'
     last_edited: '2026-10-26T08:05:49Z'
+  - id: note-ae8852f
+    text: 'Review e932 i1 (eab55cc9, notes-only, no product change): S68 109bca54
+      (qa hop launch claim outlives awaiting; qa tick honours a fresh qa claim) and
+      S69 75708c0b (resume snapshot written before the finalizer provider check) reviewed
+      independently, sound; a new sign-off return record replaces the old claim, so
+      a leftover qa claim never blocks the next hop. 3 mutations caught (tick ignores
+      claim, clear drops qa claim, snapshot after check). Full suite 3865 passed rc
+      0 on 1680f380. Only fix: note-90a9c93 on pr-7a83b6d cited nonexistent 21bacfef,
+      now 109bca54. Evidence /pm-captures/review-e932-i1/README.md.'
+    created_at: '2026-10-26T08:20:37Z'
+    last_edited: '2026-10-26T08:20:37Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
