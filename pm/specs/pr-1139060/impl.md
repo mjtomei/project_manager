@@ -95,7 +95,9 @@ recheck preserves the container, just as during initial candidate selection.
 create/verify/reuse, so a concurrent launch/relaunch and a reap of the same
 name are serialized. Failure to acquire or create a lifecycle lock never grants
 permission to proceed unlocked. An unknown identity at final recheck is a failed,
-retryable cleanup rather than permission to delete by name.
+retryable cleanup rather than permission to delete by name. If the old name
+has disappeared but its captured ID still exists, defer to a fresh inventory
+and the renamed allocation's lock; do not report removal or prune its release.
 
 ### R3 — Release on finish / supersede / cancel / launch failure
 - **impl / review / sign-off**: the pane EXIT trap releases the captured container
@@ -178,6 +180,9 @@ retryable cleanup rather than permission to delete by name.
   mounted proxy needs a durable release. Recognized legacy unlabeled containers
   still resolve their actual unshared mounts for repair and release. Removal drops
   matching process-local proxy bookkeeping without a second name-based unlink.
+  A missing or exited socket still requires guarded retirement of its owner
+  metadata; immediate cleanup and durable retries must not report success while
+  stranding a runtime-domain owner file. A replacement socket remains untouched.
   Failed shared-proxy socket removal preserves its owner record for retry; proxy
   sweep failures and unavailable user inventories appear in CLI/TUI outcomes and
   persisted diagnostics, and successful retry clears those failures.
@@ -205,6 +210,11 @@ retryable cleanup rather than permission to delete by name.
   a viewed window before the worker pane exists. QA debug also releases its
   captured allocation if command preparation or foreground shell exec fails;
   tmux failure reporting must retain stderr even with an explicit `--branch`.
+  Cancellation is checked after workdir/container preparation and after concretization;
+  concretizer polling receives the run's stop callback. A cancelled run cannot
+  launch a subsequent worker or convert an unlaunched scenario into human-wait
+  retention. Allocations already created retain their captured identity for the
+  normal final release, with existing human/viewed/retained exceptions preserved.
   Temporary launch-batch slicing must
   restore the full scenario list even when launch/status persistence raises.
   PR resource orchestration must not stop a removed container's proxy a second

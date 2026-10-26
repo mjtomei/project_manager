@@ -746,8 +746,10 @@ def _kill_proxy_socket(sock_path: str, expected_identity: tuple[int, int, int] |
             try:
                 stat = os.stat(sock_path)
             except FileNotFoundError:
-                return
-            if (stat.st_dev, stat.st_ino, stat.st_ctime_ns) != expected_identity:
+                # No socket remains to protect, but matching ownership metadata
+                # still needs retiring. Callers hold the launch/user guards.
+                stat = None
+            if stat is not None and (stat.st_dev, stat.st_ino, stat.st_ctime_ns) != expected_identity:
                 return
         sock_dir = str(Path(sock_path).parent)
         # Resolve the real directory if sock_dir is a symlink
@@ -1074,7 +1076,9 @@ def retry_unshared_releases(scope, failures: dict[str, str]) -> list[str]:
                     stat = os.stat(path)
                     same = (stat.st_dev, stat.st_ino, stat.st_ctime_ns) == tuple(identity)
                 except FileNotFoundError:
-                    same = False
+                    # Socket exit does not retire owner.json. Retry the guarded
+                    # metadata cleanup too, rather than losing the request.
+                    same = True
                 if same:
                     owner = cm.current_container_id(current)
                     if owner is None:

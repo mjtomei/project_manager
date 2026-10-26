@@ -155,4 +155,35 @@ def test_name_fallback_preserves_live_mount(monkeypatch, tmp_path, local):
     assert socket.exists()
 
 
+@pytest.mark.parametrize("retry", [False, True])
+@pytest.mark.parametrize("socket_state", ["missing", "disappeared", "replaced"])
+def test_missing_socket_cleanup_retires_owner(monkeypatch, tmp_path, retry, socket_state):
+    name = "pm-qa-debug-original"
+    directory = tmp_path / ("pm-push-proxy-" + name)
+    directory.mkdir()
+    owner = directory / "owner.json"
+    owner.write_text(json.dumps({"runtime_domain": reaper._runtime_domain()}))
+    socket = directory / "push.sock"
+    identity = (0, 0, 0)
+    if socket_state == "disappeared":
+        socket.touch()
+        stat = socket.stat()
+        identity = (stat.st_dev, stat.st_ino, stat.st_ctime_ns)
+        socket.unlink()
+    elif socket_state == "replaced":
+        socket.touch()  # new socket must not match the captured absence
+    proxy = (name, str(socket), identity, name)
+    monkeypatch.setattr(cm, "current_container_id", lambda _: "")
+    if retry:
+        record = push_proxy.defer_unshared_release(proxy)
+        failures = {}
+        push_proxy.retry_unshared_releases(reaper.Scope(), failures)
+        assert not failures
+        assert not record.exists()
+    else:
+        assert push_proxy.release_captured_unshared_proxy(proxy)
+    assert owner.exists() == (socket_state == "replaced")
+    assert socket.exists() == (socket_state == "replaced")
+
+
 _real_mount_inventory = push_proxy.unshared_proxy_in_use

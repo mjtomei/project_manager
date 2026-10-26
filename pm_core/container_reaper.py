@@ -874,6 +874,18 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
                 return False, "error: container identity unknown during removal re-check"
             if current and current != info.id:
                 return False, "skipped: replaced by a newer launch"
+            if current == "":
+                # Missing by name does not prove the allocation is gone: an
+                # external runtime rename can race the inventory. Keep its
+                # release until a fresh pass acquires the new name's lock.
+                try:
+                    remaining = container_mod.current_container_id(info.id)
+                except (OSError, subprocess.TimeoutExpired) as e:
+                    return False, f"error: could not re-check allocation id: {e}"
+                if remaining is None:
+                    return False, "error: allocation identity unknown after name disappeared"
+                if remaining:
+                    return False, "skipped: container renamed since inventory"
         if d.release_generation is not None:
             generation = allocation_generation(d.release_name or info.name, info.id)
             if generation is None:

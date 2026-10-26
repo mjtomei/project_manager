@@ -1702,6 +1702,7 @@ def _concretize_scenario(
     session_id: str,
     scenario_cwd: str,
     instruction_content: str | None = None,
+    stop_check: Callable[[], bool] | None = None,
 ) -> tuple[str | None, str | None]:
     """Poll a concretization pane and return its outcome.
 
@@ -1728,6 +1729,7 @@ def _concretize_scenario(
             grace_period=_CONCRETIZE_GRACE,
             log_prefix=f"qa-concretize-{scenario.index}",
             workdir=scenario_cwd,
+            stop_check=stop_check,
         )
     except WorkspaceTrustBlocked as e:
         return None, _TRUST_BLOCKED_PREFIX + str(e)
@@ -2046,6 +2048,8 @@ def _launch_scenarios_in_tmux(
                 f"workdir setup failed: {exc}")
             return
         scenario.worktree_path = str(clone_path)
+        if state.stop_requested:
+            return
 
         if repo_root:
             _setup_clone_override(clone_path)
@@ -2140,7 +2144,10 @@ def _launch_scenarios_in_tmux(
             session_id=scenario.concretize_session_id,
             scenario_cwd=scenario_cwd,
             instruction_content=instruction_content,
+            stop_check=lambda: state.stop_requested,
         )
+        if state.stop_requested:
+            return
         if reject_reason:
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
             state.scenario_verdict_reasons[scenario.index] = (
@@ -2274,6 +2281,8 @@ def _launch_scenarios_in_containers(
                 f"workdir setup failed: {exc}")
             return
         scenario.worktree_path = str(clone_path)
+        if state.stop_requested:
+            return
 
         # Read instruction content from source before installing
         instruction_content: str | None = None
@@ -2301,6 +2310,8 @@ def _launch_scenarios_in_containers(
             state.pr_id, state.loop_id, scenario.index,
             session_tag=_session_tag,
         )
+        if state.stop_requested:
+            return
         allocation_identity: dict[str, str] = {}
         try:
             scenario.container_id = container_mod.create_qa_container(
@@ -2323,6 +2334,10 @@ def _launch_scenarios_in_containers(
             _record_launch_failure(state, scenario, str(exc))
             return
 
+        # Creation can wait on launch backpressure or runtime setup. Keep its
+        # captured identity for finalization, but do not attach after a stop.
+        if state.stop_requested:
+            return
         win_name = _scenario_window_name(pr_data, scenario.index)
 
         import uuid as _uuid
@@ -2395,7 +2410,12 @@ def _launch_scenarios_in_containers(
             session_id=scenario.concretize_session_id,
             scenario_cwd=container_workdir,
             instruction_content=instruction_content,
+            stop_check=lambda: state.stop_requested,
         )
+        # A superseded run must not launch a worker or acquire human-wait
+        # retention after its cancellation. Finalization releases this allocation.
+        if state.stop_requested:
+            return
         if reject_reason:
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
             state.scenario_verdict_reasons[scenario.index] = (
@@ -2758,6 +2778,8 @@ def _poll_tmux_verdicts(
     # (but skip queued scenarios — they don't have windows yet by design)
     has_failed_creation = False
     for scenario in state.scenarios:
+        if state.stop_requested:
+            break
         if (not scenario.window_name and scenario.index not in _queued_indices
                 and scenario.index not in state.scenario_verdicts):
             if _is_launch_failure(state, scenario.index):
@@ -2829,7 +2851,7 @@ def _poll_tmux_verdicts(
                 if _release_scenario_containers(state, session, scenarios=settled):
                     _notify()
                 released_indices.update(s.index for s in settled)
-        if not _launch_queue:
+        if not _launch_queue or state.stop_requested:
             return
         # Count currently active (pending + verifying)
         active = len(pending) + len(verifying)
