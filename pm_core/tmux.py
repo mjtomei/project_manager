@@ -294,14 +294,27 @@ def apply_layout(session: str, window: str, layout_string: str) -> bool:
     return True
 
 
+# Set by the popup dispatchers to the session of the client that opened
+# the popup; read by get_session_name().
+POPUP_SESSION_ENV = "PM_POPUP_SESSION"
+
+
 def get_session_name() -> str:
     """Get the current tmux session name (must be called from within tmux).
 
     Uses $TMUX_PANE to target the specific pane, which is more reliable
     than display-message without a target (which uses "current client"
     and can return wrong session in background processes).
+
+    Popups have no pane, so the popup dispatchers (prefix+P / prefix+M)
+    export the opening client's session as $PM_POPUP_SESSION; without
+    it, "current client" is whichever client was active last, which is
+    another client's session when two clients use popups at once.
     """
     pane = os.environ.get("TMUX_PANE")
+    popup_session = os.environ.get(POPUP_SESSION_ENV)
+    if not pane and popup_session:
+        return popup_session
     if pane:
         # Target the specific pane to get accurate session name
         result = _run(
