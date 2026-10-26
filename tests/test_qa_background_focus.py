@@ -12,6 +12,8 @@ clients off the TUI window.  Only user-initiated starts (``t``, ``z t``,
 from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from pm_core import qa_loop, store
 from pm_core.qa_loop import QALoopState
 
@@ -22,7 +24,7 @@ from pm_core.qa_loop import QALoopState
 
 def _run_to_window_creation(tmp_path, monkeypatch, state, *,
                             existing_win=None, watchers=(),
-                            suppress=False):
+                            suppress=False, planner_pane=None):
     """Drive run_qa_sync's planning phase up to the window-focus step.
 
     ``find_claude_pane`` returns None so the run stops right after the
@@ -64,7 +66,7 @@ def _run_to_window_creation(tmp_path, monkeypatch, state, *,
               mocks["switch_sessions_to_window"]),
         patch("pm_core.runtime_state.consume_suppress_switch",
               mocks["consume_suppress_switch"]),
-        patch("pm_core.qa_loop.find_claude_pane", return_value=None),
+        patch("pm_core.qa_loop.find_claude_pane", return_value=planner_pane),
         patch("pm_core.qa_loop.time.sleep"),
     ]
     with ExitStack() as stack:
@@ -77,6 +79,33 @@ def _run_to_window_creation(tmp_path, monkeypatch, state, *,
 
 
 class TestRunQaSyncWindowFocus:
+    def test_planner_registered_before_polling(self, tmp_path, monkeypatch):
+        class PollStarted(Exception):
+            pass
+
+        def start_poll(*args, **kwargs):
+            register.assert_called_once_with(
+                "pm-test", "@8", [("%9", "qa-planner", "planner")])
+            raise PollStarted
+
+        with patch("pm_core.tmux.pane_window_id", return_value="@8"), \
+                patch("pm_core.pane_layout.register_and_rebalance") as register, \
+                patch("pm_core.claude_launcher.WorkspacePromptWatch",
+                      side_effect=start_poll):
+            with pytest.raises(PollStarted):
+                _run_to_window_creation(
+                    tmp_path, monkeypatch, QALoopState(pr_id="pr-001"),
+                    planner_pane="%9")
+
+    def test_status_split_does_not_duplicate_planner_registration(self):
+        with patch("pm_core.tmux.split_pane_at", return_value="%10"), \
+                patch("pm_core.tmux.pane_window_id", return_value="@8"), \
+                patch("pm_core.pane_layout.register_and_rebalance") as register:
+            qa_loop._add_status_pane("pm-test", "%9", "/qa/status.json")
+        panes = register.call_args.args[2]
+        assert [(pane, role) for pane, role, _ in panes] == [
+            ("%10", "qa-status")]
+
     def test_background_start_does_not_select_window(
             self, tmp_path, monkeypatch):
         """The repro: a default (scheduler-built) state must stay focus-safe."""
