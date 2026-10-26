@@ -16520,6 +16520,22 @@ prs:
       --status`. (2026-10-26T17:21:00Z)'
     created_at: '2026-10-26T17:21:25Z'
     last_edited: '2026-10-26T17:21:25Z'
+  - id: note-0ac3981
+    text: 'QA S25 (2026-10-26, ece16459) PASS: 30 nav-key pairs (h/l/Left/Right, 10
+      ms inside a pair, 0.3 s between) against a writer loop cycling B-merged, C→#77
+      and an unparsable write, plus 6 mid-pair captures: popup never closed, no blank
+      frame, every header (i/n) valid with the title row id equal to the header id;
+      #77 showed in both header and title row; M never appeared and no "0: home" hint;
+      25 "refresh failed, keeping state" warnings, no traceback. Story 2: one nav
+      key gave (2/3), a +5 counted burst landed on (1/3) as predicted and e dispatched
+      tui:edit to that PR (spinner exit reason=edit_skip). Harness trap for future
+      runs: build the v3 "C gains gh_pr_number 77" file by REPLACING C block gh_pr_number:
+      null — appending a second gh_pr_number key is silently overridden by the null
+      below it (YAML last-wins) and the renumber case never fires. Opening the picker
+      exactly inside an unparsable write still shows the designed "Could not load
+      PR actions … Press q/Esc/Enter to close" screen; a reopen works. Captures: /pm-captures/scenarios/25/{story1-typeahead,story2-counted-burst}.'
+    created_at: '2026-10-26T17:00:45Z'
+    last_edited: '2026-10-26T17:00:45Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
