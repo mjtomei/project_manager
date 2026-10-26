@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T16:22:35.796202+00:00'
+  updated_at: '2026-10-26T17:21:26.119153+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34443,6 +34443,33 @@ prs:
       by this QA.'
     created_at: '2026-10-26T16:22:35Z'
     last_edited: '2026-10-26T16:22:35Z'
+  - id: note-2c677ca
+    text: 'QA S78 (2026-10-26, container mode, podman 3.4.4, real claude vs work/
+      router stub + main stub, fake planner/verifier/finalizer; captures /pm-captures/scenarios/78/REPORT.md):
+      CODE CHANGE 50b5bd91 needs normal re-review. Story 1 (cleanup --pr A while B
+      runs) held on 1f122df9: control 07520c1b printed "Removing: <name>  Up ... ()"/"Removed
+      2" and left both containers (rm -f on name+status, rc=1); fixed build printed
+      "Removing: <name> (Up ...)", removed both, B Up, bridge inode/pid and B proxy
+      unchanged; A proxy survives (CLI cannot stop it, observation); B finished PASS
+      after release; router saw only work/ refiner+worker, main only s0. Story 2 held:
+      empty state "No pm containers found." rc 0; two concurrent unfiltered cleanups
+      over Up+Exited both rc 0, each listed all 4 with own status, nothing left (overlap:
+      Removed 4+4, 2 rc=1 rm lines). Story 3 FOUND (pre-existing): cleanup --pr A
+      under a held live worker -> each relaunch podman exec-ed into the removed container
+      ("no such container") through the whole 10-step ladder, 15:43:28 -> 17:09:36
+      (86 min), then INPUT_REQUIRED "killed/crashed mid-run"; retry lines only in
+      the pm log, not the TUI. Fix 50b5bd91: relaunch recreates a gone/stopped scenario
+      container (same name, clone, scratch, push branch, route mounts), else INPUT_REQUIRED
+      at once with the reason; retry line surfaced to the TUI; 4 tests in test_qa_loop.py
+      (3 fail without the fix). Post-fix live: retry 1/10 -> "container ... was gone
+      — recreated it" after 6 s, worker reached the router via the same bridge inode,
+      run PASS 2m52s after cleanup. Suite 3863 passed + 12 env-only markdown failures
+      (13/13 with markdown). No leaks. Harness: after a fake-claude QA run, q in the
+      status pane leaves the qa-<pr> window (fake panes stay) so t only refocuses
+      it: close the window first; nested test pm writes worker prompt.md into the
+      shared /pm-captures/scenarios/<n>/ (overwrote 5..8).'
+    created_at: '2026-10-26T17:21:26Z'
+    last_edited: '2026-10-26T17:21:26Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
