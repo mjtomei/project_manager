@@ -1255,7 +1255,18 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         #   local:   merge-base between base_branch and HEAD (no remote)
         #   vanilla/github: origin/{base_branch}...HEAD
         backend_name = data.get("project", {}).get("backend", "vanilla")
-        if backend_name == "local":
+        # A bounce integrates the base into the branch (a resolved metadata
+        # conflict, or a clean base), while the workdir's own base ref may
+        # predate that merge: pm fetches the base into its own ref, never
+        # origin/<base>.  Diff against the exact base the branch contains, or
+        # the pane lists the merged base commits as the PR's changes.
+        from pm_core import integration as _integration
+        contained = _integration.contained_base(pr_entry)
+        if contained:
+            # project.yaml is user-controlled state: quote like the other
+            # interpolated values (a sha never needs it, but never trust it).
+            diff_ref = shell_quote(contained)
+        elif backend_name == "local":
             diff_ref = base_branch
         else:
             diff_ref = f"origin/{base_branch}"

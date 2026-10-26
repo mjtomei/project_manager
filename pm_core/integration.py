@@ -1698,15 +1698,26 @@ def contained_base(pr: dict) -> str | None:
     survives a later check replacing an ``up_to_date`` record), and the base
     an applied resolution merged.
     """
-    record = pr.get("integration") or {}
-    applied = (pr.get("signoff_return") or {}).get("applied") or {}
-    resolution = record.get("resolution") or {}
+    # project.yaml is hand-editable state: a malformed record must read as
+    # absent instead of crashing a prompt or a review-window launch (the same
+    # contract the resolver and ``signoff.qa_evidence`` follow).  A non-string
+    # revision is not a revision — passing it to git would raise.
+    def _mapping(value) -> dict:
+        return value if isinstance(value, dict) else {}
+
+    def _sha(value) -> str | None:
+        return value if isinstance(value, str) and value else None
+
+    record = _mapping(pr.get("integration"))
+    applied = _mapping(_mapping(pr.get("signoff_return")).get("applied"))
+    resolution = _mapping(record.get("resolution"))
     candidates: list[str] = []
-    if record.get("status") == UP_TO_DATE and record.get("base_sha"):
+    if record.get("status") == UP_TO_DATE and _sha(record.get("base_sha")):
         candidates.append(record["base_sha"])
-    if applied.get("merge_sha") and applied.get("base_sha"):
+    if applied.get("merge_sha") and _sha(applied.get("base_sha")):
         candidates.append(applied["base_sha"])
     workdir = pr.get("workdir")
+    workdir = workdir if isinstance(workdir, str) else None
     have_workdir = bool(workdir) and Path(workdir).is_dir()
     # The last check's merge base is the newest base revision the branch
     # shares with the checked base, and it survives a later check replacing
@@ -1719,18 +1730,20 @@ def contained_base(pr: dict) -> str | None:
     # absent from HEAD's first-parent chain, while the branch point is on it.
     carries_base = bool(resolution.get("applied_merge_sha")) \
         or bool(applied.get("merge_sha"))
-    merge_base = record.get("merge_base")
+    merge_base = _sha(record.get("merge_base"))
     if merge_base and (
             carries_base
             or (have_workdir and is_ancestor(workdir, merge_base, "HEAD")
                 and not _on_first_parent_chain(workdir, merge_base))):
         candidates.append(merge_base)
     if resolution.get("applied_merge_sha"):
-        resolved_from = resolution.get("resolved_from") or {}
-        base = resolved_from.get("base_sha") or record.get("base_sha")
+        resolved_from = _mapping(resolution.get("resolved_from"))
+        base = _sha(resolved_from.get("base_sha")) \
+            or _sha(record.get("base_sha"))
         if base:
             candidates.append(base)
-    candidates = list(dict.fromkeys(c for c in candidates if c))
+    candidates = list(dict.fromkeys(
+        c for c in candidates if isinstance(c, str) and c))
     if not candidates:
         return None
     if len(candidates) > 1 and have_workdir:

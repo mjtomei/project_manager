@@ -303,7 +303,11 @@ a merge commit's non-first parent side and is absent from HEAD's
 first-parent chain, while the branch point is on it. The same newest-base
 rule drives the sign-off prompt's
 "PR's own changes remain" line and the return text's `git diff <base> HEAD`
-hint.
+hint, and every other surface that tells an agent or a person to inspect the
+PR's own diff — the review / QA-planner / QA-interactive prompts, the QA
+*spec* prompt (`pm pr spec <pr> qa`, `spec_gen._build_spec_prompt`) and the
+review window's diff pane (`_launch_review_window`) — names the exact base
+the branch contains instead of the stale workdir ref.
 
 ### R7. Merge gate / publication identity
 `merge_gate_refusal` additionally requires:
@@ -421,10 +425,11 @@ tests):
     earlier applied merge is not labelled an attempt (the current conflict is
     separate) — in the CLI, the sign-off launch, the prompt and the return
     text; a resolved candidate pm has not applied says "Not applied" in the
-    prompt even with no recorded apply error; the review and QA prompts diff
-    against the
-    exact base the branch contains — the applied resolution, a newer
-    `up_to_date` check, or the merge a clean bounce recorded — so the merged
+    prompt even with no recorded apply error; the review, QA-planner,
+    QA-interactive and QA-spec prompts, and the review window's diff pane,
+    diff against the exact base the branch contains — the applied resolution,
+    a newer `up_to_date` check, or the merge a clean bounce recorded — so the
+    merged
     base commits never read as the PR's own changes; when the branch carries
     two bases (a resolution applied at sign-off, then a newer base merged by
     a later bounce), the review prompt, the sign-off prompt's "PR's own

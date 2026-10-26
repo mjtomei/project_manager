@@ -208,8 +208,17 @@ include it in the QA spec.""",
 
     diff_instruction = ""
     if phase == "qa" and workdir:
+        # The branch may already contain the base (a metadata resolution
+        # applied at sign-off, or a clean base merged by a bounce), while the
+        # workdir's own base ref predates that merge — pm fetches the base
+        # into its own ref, never ``origin/<base>``.  A ``<base>...HEAD``
+        # diff would then list the merged base commits as the PR's own
+        # changes; name the exact base the branch contains instead.
+        from pm_core import integration
+        contained = integration.contained_base(pr)
+        diff_base = contained[:12] if contained else base_branch
         diff_instruction = f"""
-Run `git diff {base_branch}...HEAD` in the workdir to see what changed.
+Run `git diff {diff_base}...HEAD` in the workdir to see what changed.
 Read source files as needed to understand the implementation.
 """
 

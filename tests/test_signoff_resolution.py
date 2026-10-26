@@ -1499,6 +1499,56 @@ def test_review_and_qa_prompts_diff_against_the_applied_base(w):
     assert "git diff master...HEAD" not in planner
 
 
+def test_qa_spec_prompt_diffs_against_the_base_the_branch_contains(w):
+    """The QA *spec* prompt is another PR-diff surface.
+
+    ``pm pr spec <pr> qa`` (and the spec-approve flow) tells the agent to run
+    ``git diff <base>...HEAD``.  Once the branch carries the base — a
+    resolution applied at sign-off, or a clean base merged by a bounce — the
+    workdir's own base ref is stale, so that command would list the merged
+    base commits as the PR's own changes.  It must name the exact base the
+    branch contains, like the review / QA-planner / sign-off prompts.
+    """
+    from pm_core import spec_gen
+    rec = _metadata_conflict(w)
+    applied_base = rec["resolution"]["resolved_from"]["base_sha"]
+    assert git(w.wd, "rev-parse", "master") != applied_base
+    data = store.load(w.pm_dir)
+    pr = store.get_pr(data, PR)
+    with patch("pm_core.spec_gen.get_global_setting_value",
+               return_value="prompt"):
+        prompt = spec_gen._build_spec_prompt(data, pr, "qa")
+    assert f"git diff {applied_base[:12]}...HEAD" in prompt
+    assert "git diff master...HEAD" not in prompt
+
+
+def test_contained_base_reads_malformed_state_as_absent(w):
+    """A hand-edited record must not crash a prompt or the review window.
+
+    ``contained_base`` is called by every prompt that names the PR's diff and
+    by the review window's diff pane.  A malformed ``integration`` /
+    ``signoff_return`` value (or a non-string revision) reads as absent — the
+    usual base-branch diff — instead of raising out of the launch.
+    """
+    assert integration.contained_base(
+        {"id": PR, "workdir": str(w.wd), "integration": "garbage",
+         "signoff_return": ["not", "a", "mapping"]}) is None
+    assert integration.contained_base(
+        {"id": PR, "workdir": ["not", "a", "path"],
+         "integration": "garbage"}) is None
+    assert integration.contained_base(
+        {"id": PR, "workdir": str(w.wd),
+         "integration": {"status": "up_to_date",
+                         "base_sha": ["not", "a", "sha"],
+                         "resolution": "garbage", "merge_base": {"x": 1}},
+         "signoff_return": {"applied": "garbage"}}) is None
+    # The well-formed shape still resolves (the normal path is not weakened).
+    assert integration.contained_base(
+        {"id": PR, "workdir": str(w.wd),
+         "integration": {"status": "up_to_date", "base_sha": "a" * 40}}) \
+        == "a" * 40
+
+
 def test_review_prompt_diffs_against_the_base_a_clean_bounce_merged(w):
     """A clean bounce leaves the CLEAN check, but the branch has the base.
 

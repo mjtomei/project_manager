@@ -107,6 +107,36 @@ def fake_tmux(tmp_path, monkeypatch):
     return {"workdir": str(workdir), "captured": captured}
 
 
+# --- pr-5cee3d5: the diff pane names the base the branch contains ---
+
+def test_diff_pane_uses_the_base_the_branch_contains(fake_tmux, monkeypatch):
+    """After a bounce integrated the base, the workdir's own base ref is stale.
+
+    The human diff pane must show the PR's changes on top of the exact base
+    the branch contains — the same rule the review / sign-off prompts follow —
+    or it lists the merged base commits as the PR's own changes.
+    """
+    import pm_core.integration as integration_mod
+    base = "b" * 40
+    monkeypatch.setattr(integration_mod, "contained_base", lambda pr: base)
+    pr_mod._launch_review_window(_make_data(),
+                                 _make_pr("Demo PR", fake_tmux["workdir"]))
+    diff_cmd = fake_tmux["captured"]["diff_cmd"]
+    assert f"{base}...HEAD" in diff_cmd
+    assert "origin/master...HEAD" not in diff_cmd
+
+
+def test_diff_pane_falls_back_to_the_base_branch_without_a_merged_base(
+        fake_tmux, monkeypatch):
+    """An unmerged base keeps the usual backend ref (origin/<base>)."""
+    import pm_core.integration as integration_mod
+    monkeypatch.setattr(integration_mod, "contained_base", lambda pr: None)
+    pr_mod._launch_review_window(_make_data(),
+                                 _make_pr("Demo PR", fake_tmux["workdir"]))
+    diff_cmd = fake_tmux["captured"]["diff_cmd"]
+    assert "origin/master...HEAD" in diff_cmd
+
+
 @pytest.mark.parametrize("title", HOSTILE_TITLES)
 def test_diff_cmd_is_shell_safe(fake_tmux, title):
     """diff_cmd must be syntactically valid bash for any PR title."""
