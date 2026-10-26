@@ -35036,11 +35036,18 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-26T04:56:16.944073+00:00'
-  updated_at: '2026-10-26T04:56:16.944073+00:00'
+  updated_at: '2026-10-26T07:50:16.077054+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-90a9c93
+    text: 'QA S68 (pr-592e4bd): the sign-off qa hop variant of this race (tick in
+      the gap after the driver clears awaiting and kills the judged qa window) is
+      fixed on pr-592e4bd in 21bacfef by keeping the qa launch claim; the plain concurrent
+      qa-tick race (no sign-off return, no claim) is unchanged.'
+    created_at: '2026-10-26T07:50:16Z'
+    last_edited: '2026-10-26T07:50:16Z'
 - id: pr-f1d825b
   plan: bugs
   title: 'Bug: pm pr auto-sequence advances a QA PASS to sign_off while the QA finalizer
@@ -35061,11 +35068,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-26T04:56:17.963363+00:00'
-  updated_at: '2026-10-26T04:56:17.963363+00:00'
+  updated_at: '2026-10-26T07:50:14.158810+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-7a3c83c
+    text: 'QA S68 (pr-592e4bd, 2026-10-26): concrete consequence seen live. With a
+      fast sign-off (fake SIGNOFF_REQA) the sign-off session launched by the early
+      advanced: sign_off tick answers before the finalizer returns; the next tick
+      applies the re-qa hop and the new qa-run-bg kills the old run stale windows
+      (incl. the finalize pane), so the old run logs "QA complete ... PASS (finalize=None)"
+      and two drivers overlap for ~15 s. 7 such runs on PRs B/C in /pm-captures/scenarios/68
+      (pm log 07:16-07:25).'
+    created_at: '2026-10-26T07:50:14Z'
+    last_edited: '2026-10-26T07:50:14Z'
 - id: pr-ad4af06
   plan: bugs
   title: 'Bug: QA runs driven by pm pr auto-sequence (qa-run-bg) record no QA note
@@ -35145,11 +35162,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-26T05:39:58.795172+00:00'
-  updated_at: '2026-10-26T05:39:58.795172+00:00'
+  updated_at: '2026-10-26T07:50:15.106623+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5c4bdec
+    text: 'QA S68 (pr-592e4bd, 2026-10-26): same failure from a second cause. _get_current_pm_session
+      reads the session name of $TMUX_PANE and strips only a ~N suffix; once a user
+      groups their own session onto the pm session (tmux new-session -t pm-x -s view)
+      the pane can resolve to that name, so the detached driver logs "No pm session
+      found" and exits while the tick printed "running: qa (launched)" (live 06:56:53/06:58:30,
+      /pm-captures/scenarios/68/story2/harness-incident.txt). Naming the group pm-x~something
+      avoids it.'
+    created_at: '2026-10-26T07:50:15Z'
+    last_edited: '2026-10-26T07:50:15Z'
 - id: pr-242ebdd
   plan: bugs
   title: 'Bug: pm pr auto-sequence reports "running: qa" forever after its detached
