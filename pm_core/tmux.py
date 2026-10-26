@@ -656,6 +656,28 @@ def pane_window_id(pane_id: str) -> str | None:
     return result.stdout.strip() or None
 
 
+def attached_group_active_windows(base: str, socket_path: str | None = None) -> dict[str, str]:
+    """Map attached sessions in a group to active windows in one tmux query."""
+    result = _run(
+        _tmux_cmd("list-sessions", "-F",
+                  "#{session_name}\t#{session_attached}\t#{window_id}",
+                  socket_path=socket_path),
+        text=True,
+    )
+    if result.returncode != 0:
+        return {}
+    active = {}
+    for line in result.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        name, attached, wid = parts
+        if (name == base or name.startswith(base + "~")) and attached.isdigit():
+            if int(attached) > 0 and wid:
+                active[name] = wid
+    return active
+
+
 def attached_active_window(session: str, socket_path: str | None = None) -> str | None:
     """Return *session*'s active window id, but only if a client is attached.
 

@@ -82,6 +82,14 @@
    every entry has a command-safe string local `id` before building navigation
    (`[A-Za-z0-9][A-Za-z0-9_.-]*`, covering generated and legacy IDs):
    `gh_pr_number` alone can provide a display id but cannot support dispatch.
+   Local IDs must be unique across the snapshot. Canonical display IDs must
+   also be unique whenever any matching entry is non-terminal. Historical
+   terminal-only duplicates (present in project.yaml) are safe to keep because
+   they have no actions. A partial number reassignment that leaves two PRs
+   displaying the same `#N` (including int/string equivalents) with either live
+   is ambiguous: reject it before publication, retain the last-good navigation
+   state and refuse pending actions until repair. Duplicate local IDs are
+   always unsafe because command dispatch cannot distinguish those records.
    Malformed initial data must show a logged, readable error and wait for
    dismissal rather than raising a traceback. There is no last-good snapshot
    on initial load.
@@ -89,8 +97,15 @@
    GitHub number is removed or reassigned to another PR. If that local ID is
    gone, refuse dispatch and show a lookup-failure notice; never retarget the
    action to the new owner of the old display number.
+   Preserve the resolved home PR's local identity across reloads, and use the
+   previous snapshot's local identities to locate the current PR and its old
+   neighbours when stepping. Number removal/reassignment must not make `0`
+   return to a different PR or make next/prev step from the new number owner.
+   An initially unresolved home window id remains eligible for later repair.
    Refresh the caller/other-session active-window indicators in the same
    transaction as the window-name map so navigation redraws current dots.
+   Query all attached session/window pairs in one tmux `list-sessions` call
+   rather than adding one subprocess per grouped session on each keypress.
    h/l/←/→ (and 0 with a home PR) stay in `--expect` even when the list has
    one entry — unadvertised,
    they act as a reload, so a PR that is reopened or gains a window after

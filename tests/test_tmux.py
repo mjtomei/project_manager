@@ -32,12 +32,35 @@ from pm_core.tmux import (
     find_unattached_grouped_session,
     sessions_on_window,
     attached_active_window,
+    attached_group_active_windows,
 )
 
 
 # ---------------------------------------------------------------------------
 # has_tmux / in_tmux
 # ---------------------------------------------------------------------------
+
+class TestAttachedGroupActiveWindows:
+    @patch("pm_core.tmux._run")
+    def test_single_query_filters_group_and_attachment(self, run):
+        run.return_value = MagicMock(returncode=0, stdout=(
+            "base\t1\t@1\nbase~1\t2\t@2\nbase~2\t0\t@3\n"
+            "other\t1\t@4\nbase-extra\t1\t@5\n"
+            "base~3\t\t@6\nbase~4\t1\t\nmalformed\n"))
+        assert attached_group_active_windows("base", socket_path="/socket") == {
+            "base": "@1", "base~1": "@2"}
+        run.assert_called_once()
+        cmd = run.call_args.args[0]
+        assert "list-sessions" in cmd
+        assert "#{session_name}\t#{session_attached}\t#{window_id}" in cmd
+        assert cmd[cmd.index("-S") + 1] == "/socket"
+
+    @patch("pm_core.tmux._run")
+    def test_error_returns_empty_map(self, run):
+        run.return_value = MagicMock(returncode=1, stdout="")
+        assert attached_group_active_windows("base") == {}
+        run.assert_called_once()
+
 
 class TestHasTmux:
     @patch("shutil.which", return_value="/usr/bin/tmux")

@@ -1104,20 +1104,12 @@ def _format_action_status(pr_id: str, action: str) -> str:
 
 
 def _session_active_windows(base: str) -> dict[str, str]:
-    """Map each *attached* session in the group to its active window id.
+    """Map attached sessions to active windows for the picker's ●/○ marks.
 
-    Iterates ``[base] + list_grouped_sessions(base)`` and queries each
-    session's active window via ``tmux display-message``.  Sessions with no
-    client attached (or that error) are omitted — see
-    ``tmux.attached_active_window``.  Drives the picker's ●/○ per-session
-    window-selected indicators.
+    One batched query keeps per-key refresh costs independent of the number
+    of grouped sessions, including detached sessions left by earlier clients.
     """
-    result: dict[str, str] = {}
-    for name in [base] + tmux_mod.list_grouped_sessions(base):
-        wid = tmux_mod.attached_active_window(name)
-        if wid:
-            result[name] = wid
-    return result
+    return tmux_mod.attached_group_active_windows(base)
 
 
 def _action_window_matches(label: str, win_name: str, name: str) -> bool:
@@ -1175,11 +1167,23 @@ def _build_nav_entries(
     # A GitHub number can provide a display id even when the local id is
     # missing or malformed. Commands still require the local id, so reject
     # such snapshots here, inside the refresh transaction, before rendering.
+    local_ids: set[str] = set()
+    display_terminal: dict[str, bool] = {}
     for pr in prs:
         pr_id = pr.get("id") if isinstance(pr, dict) else None
         if (not isinstance(pr_id, str)
                 or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", pr_id) is None):
             raise ValueError("Picker PR entry requires a non-empty, command-safe string id")
+        display_id = _pr_display_id(pr)
+        # Partial state repairs can temporarily assign a number to two PRs.
+        # Historical terminal-only duplicates are harmless (no actions), but
+        # any collision involving a live PR makes display lookup unsafe.
+        terminal = pr.get("status") in _TERMINAL_STATUSES
+        if (pr_id in local_ids or (display_id in display_terminal
+                and not (terminal and display_terminal[display_id]))):
+            raise ValueError("Picker PR entries have ambiguous local or display ids")
+        local_ids.add(pr_id)
+        display_terminal[display_id] = terminal
 
     home = _find_pr_for_window_id(prs, window_pr_id) if window_pr_id else None
     home_pr = _pr_display_id(home) if home is not None else window_pr_id
@@ -1959,6 +1963,11 @@ def popup_picker_cmd(session: str, window_name: str):
     except ValueError:
         nav_index = 0
 
+    # Once resolved, home is a local identity, not a reusable GitHub number.
+    # Keep unresolved window ids verbatim so later repair can still resolve them.
+    if home_pr in pr_by_disp:
+        window_pr_id = pr_by_disp[home_pr]["id"]
+
     invoking_phase = _current_window_phase(window_name)
 
     def _resolve_for(pr_disp: str):
@@ -2040,15 +2049,19 @@ def popup_picker_cmd(session: str, window_name: str):
         nav_pr_ids, pr_by_disp, home_pr = fresh_nav, fresh_by_disp, fresh_home
         return True
 
-    def _canonical_id(pr_disp: str) -> str:
-        """Map a shown PR id to the PR's current display id.
+    def _canonical_id(pr_disp: str, previous_ids: dict[str, str]) -> str:
+        """Map a previous nav entry to its current display id by local identity.
 
-        The display id changes when ``gh_pr_number`` is assigned while the
-        popup is open (``pr-abc`` → ``#12``); without this the rebuilt nav
-        list would hold the PR twice.  Unresolvable ids are returned as-is.
+        Resolve known entries by their saved local id so removing/reassigning
+        a GitHub number cannot move the cursor to that number's new owner.
+        Unresolved window ids can still resolve after a later state repair.
         """
         from pm_core.cli.helpers import _pr_display_id
 
+        local_id = previous_ids.get(pr_disp)
+        if local_id is not None:
+            p = next((p for p in prs if p["id"] == local_id), None)
+            return _pr_display_id(p) if p is not None else local_id
         p = _find_pr_for_window_id(prs, pr_disp)
         return _pr_display_id(p) if p is not None else pr_disp
 
@@ -2072,8 +2085,11 @@ def popup_picker_cmd(session: str, window_name: str):
         neighbour in the requested direction in the old order.
         """
         old_list, old_cur = list(nav_pr_ids), current_pr
+        previous_ids = {did: p["id"] for did, p in pr_by_disp.items()}
+        if _picked_pr is not None:
+            previous_ids[old_cur] = _picked_pr["id"]
         _refresh_state()
-        cur = _canonical_id(old_cur)
+        cur = _canonical_id(old_cur, previous_ids)
         if not nav_pr_ids:
             return cur
         if delta is None:
@@ -2084,7 +2100,8 @@ def popup_picker_cmd(session: str, window_name: str):
         if old_cur in old_list:
             k = old_list.index(old_cur)
             for n in range(1, len(old_list) + 1):
-                cand = _canonical_id(old_list[(k + delta * n) % len(old_list)])
+                cand = _canonical_id(
+                    old_list[(k + delta * n) % len(old_list)], previous_ids)
                 if cand in nav_pr_ids:
                     return cand
         return nav_pr_ids[0]

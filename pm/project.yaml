@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T14:24:06.459538+00:00'
+  updated_at: '2026-10-26T14:41:59.783242+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16255,6 +16255,34 @@ prs:
       No live QA PASS claimed.'
     created_at: '2026-10-26T14:24:06Z'
     last_edited: '2026-10-26T14:24:06Z'
+  - id: note-26067a2
+    text: 'Review 1eaf i5: reproduced/fixed ambiguous number snapshots retargeting
+      actions (shortcut, Enter, fresh/loop, fallback) and display-number removal/reassignment
+      retargeting home/directional navigation. Snapshot validation rejects duplicate
+      local IDs and display-number collisions involving any live PR; historical terminal-only
+      duplicates remain allowed/actionless (actual project has two closed #163 records).
+      Home/current/old neighbours retain local identity across reloads. Batched active-window
+      indicator lookup into one tmux list-sessions call per refresh; isolated real-tmux
+      smoke matches individual query. Added 23 regression/control cases; 17 identity
+      cases failed before fixes. Targeted popup/session/tmux suite 359 passed. Impl/QA
+      E11 updated. Full final suite pending. No architectural blocker, no standalone
+      follow-up, no live picker QA PASS claimed; fresh native review/live QA/sign-off
+      required, including updated E11 and prior E6/C1/R13/E10. Transfer stash, all-role
+      Astra configuration and verify-s15-followup.md preserved. Evidence /pm-captures/review-1eaf-i5-{repro,nav-repro,targeted-final,tmux-smoke,summary}.txt.'
+    created_at: '2026-10-26T14:39:57Z'
+    last_edited: '2026-10-26T14:39:57Z'
+  - id: note-aec6db3
+    text: 'Review 1eaf i5 final validation: full suite after final code edits passed,
+      3639 passed, 1 skipped, 3 warnings in 165.49s. Targeted popup/session/tmux suite:
+      359 passed. Isolated real-tmux attached-session query smoke passed. Real git
+      via PATH=/usr/bin:/bin, scratch-only declared markdown dependency, PM_HOST_HOME
+      unset for the previously verified installer-fixture issue. Evidence: /pm-captures/review-1eaf-i5-full-final-verified.txt,
+      review-1eaf-i5-targeted-final.txt, review-1eaf-i5-tmux-smoke.txt, review-1eaf-i5-summary.txt.
+      Earlier full.txt/full-final.txt runs stopped before subsequent edits are superseded.
+      NEEDS_WORK because fixes were applied; fresh native review/live QA/sign-off
+      required. No live picker QA PASS claimed.'
+    created_at: '2026-10-26T14:41:59Z'
+    last_edited: '2026-10-26T14:41:59Z'
   model: provider:chatgpt-astra
   session_models:
     impl: provider:chatgpt-astra

@@ -360,17 +360,13 @@ class TestSessionActiveWindows:
     def test_builds_map_over_group_skipping_unattached(self):
         from pm_core.cli.session import _session_active_windows
 
-        def fake_active(name):
-            # base unattached → None; two grouped sessions attached.
-            return {"base~1": "@2", "base~2": "@5"}.get(name)
-
         with patch("pm_core.cli.session.tmux_mod") as tmux:
-            tmux.list_grouped_sessions.return_value = ["base~1", "base~2"]
-            tmux.attached_active_window.side_effect = fake_active
+            tmux.attached_group_active_windows.return_value = {
+                "base~1": "@2", "base~2": "@5"}
             result = _session_active_windows("base")
 
         assert result == {"base~1": "@2", "base~2": "@5"}
-        tmux.list_grouped_sessions.assert_called_once_with("base")
+        tmux.attached_group_active_windows.assert_called_once_with("base")
 
 
 class TestPickerMergeDispatch:
@@ -1100,6 +1096,127 @@ class TestPopupPickerIdentity:
             assert run_cmd.call_count == 1
             assert "pr-a" in run_cmd.call_args.args[0]
             assert "pr-b" not in run_cmd.call_args.args[0]
+
+    @pytest.mark.parametrize("reassign", [False, True])
+    def test_home_keeps_local_identity_when_number_removed(
+            self, tmp_path, monkeypatch, reassign):
+        prs = [_pr("pr-a", gh_pr_number=12), _pr("pr-b")]
+
+        def on_launch(n):
+            if n == 1:
+                prs[0].pop("gh_pr_number")
+                if reassign:
+                    prs[1]["gh_pr_number"] = 12
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["#12", "pr-b"], "#12",
+            [(0, "0\n"), (0, "d\n")], on_launch=on_launch)
+        assert _shown(fzf.calls[1]) == "PR Actions — pr-a  (1/2)"
+        run_cmd.assert_called_once_with("pr review pr-a", "pm-x")
+
+    @pytest.mark.parametrize("direction", ["h", "l"])
+    def test_navigation_steps_from_local_identity_after_number_reassignment(
+            self, tmp_path, monkeypatch, direction):
+        prs = [_pr("pr-a", gh_pr_number=12), _pr("pr-b"), _pr("pr-c")]
+
+        def on_launch(n):
+            if n == 1:
+                prs[0].pop("gh_pr_number")
+                prs[1]["gh_pr_number"] = 12
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["pr-a", "pr-b", "pr-c", "#12"], "tui",
+            [(0, f"{direction}\n"), (0, "d\n")], on_launch=on_launch)
+        target = "pr-b" if direction == "l" else "pr-c"
+        run_cmd.assert_called_once_with(f"pr review {target}", "pm-x")
+
+    @pytest.mark.parametrize("mode", ["shortcut", "enter", "fresh", "loop", "fallback"])
+    @pytest.mark.parametrize("duplicate", ["display", "local"])
+    def test_ambiguous_reload_refuses_pending_action(
+            self, tmp_path, monkeypatch, mode, duplicate):
+        from pm_core.cli import session as sess
+
+        # B precedes A so a display-id lookup would choose the wrong PR.
+        prs = [_pr("pr-b", gh_pr_number=13), _pr("pr-a", gh_pr_number=12)]
+        prefix = [(0, "z\n")] * {"fresh": 1, "loop": 2}.get(mode, 0)
+        row = next(d for d, c, _ in sess._build_picker_lines(prs, "#12")
+                   if c == "pr review pr-a")
+
+        def duplicate_identity():
+            if duplicate == "display":
+                prs[0]["gh_pr_number"] = "12"
+            else:
+                prs[0]["id"] = "pr-a"
+
+        def on_launch(n):
+            if n == len(prefix) + 1:
+                duplicate_identity()
+
+        def choose(prompt):
+            duplicate_identity()
+            return "d"
+
+        selection = f"\n{row}\n" if mode == "enter" else "d\n"
+        with patch("builtins.input", side_effect=choose):
+            _, run_cmd = _run_picker(
+                tmp_path, monkeypatch, prs, ["#13", "#12"], "#12",
+                prefix + [(0, selection), (130, "")],
+                on_launch=on_launch, has_fzf=mode != "fallback")
+        run_cmd.assert_not_called()
+
+    @pytest.mark.parametrize("duplicate", ["display", "local"])
+    def test_ambiguous_initial_snapshot_waits_for_dismissal(
+            self, tmp_path, monkeypatch, capsys, duplicate):
+        prs = [_pr("pr-b", gh_pr_number=13), _pr("pr-a", gh_pr_number=12)]
+        prs[0]["gh_pr_number" if duplicate == "display" else "id"] = (
+            "12" if duplicate == "display" else "pr-a")
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["#13", "#12"], "#12", [(130, "")])
+        assert "Could not load PR actions" in capsys.readouterr().out
+        assert not fzf.calls
+        run_cmd.assert_not_called()
+
+    @pytest.mark.parametrize("statuses", [("merged", "closed"), ("closed", "merged")])
+    def test_terminal_only_duplicate_numbers_do_not_block_live_prs(
+            self, tmp_path, monkeypatch, statuses):
+        prs = [_pr("pr-a", status=statuses[0], gh_pr_number=12),
+               _pr("pr-b", status=statuses[1], gh_pr_number=12), _pr("pr-c")]
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["#12", "pr-c"], "#12",
+            [(0, "l\n"), (0, "d\n")])
+        assert "No actions — PR is" in fzf.calls[0]["input"]
+        run_cmd.assert_called_once_with("pr review pr-c", "pm-x")
+
+    @pytest.mark.parametrize("statuses", [("merged", "in_review"), ("in_review", "merged")])
+    def test_live_terminal_number_collision_is_rejected(
+            self, tmp_path, monkeypatch, capsys, statuses):
+        prs = [_pr("pr-a", status=statuses[0], gh_pr_number=12),
+               _pr("pr-b", status=statuses[1], gh_pr_number=12)]
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["#12"], "#12", [(130, "")])
+        assert "Could not load PR actions" in capsys.readouterr().out
+        assert not fzf.calls
+        run_cmd.assert_not_called()
+
+    def test_duplicate_number_reload_keeps_snapshot_and_recovers(
+            self, tmp_path, monkeypatch):
+        prs = [_pr("pr-b", gh_pr_number=13), _pr("pr-a", gh_pr_number=12)]
+
+        def on_launch(n):
+            if n == 1:
+                prs[0]["gh_pr_number"] = 12
+            elif n == 2:
+                prs[0]["gh_pr_number"] = 13
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["#13", "#12"], "#12",
+            [(0, "l\n"), (0, "h\n"), (0, "d\n")], on_launch=on_launch)
+        assert [_shown(c) for c in fzf.calls] == [
+            "PR Actions — #12  (2/2)",
+            "PR Actions — #13  (1/2)",
+            "PR Actions — #12  (2/2)",
+        ]
+        run_cmd.assert_called_once_with("pr review pr-a", "pm-x")
 
     def test_initial_parse_error_waits_for_dismissal(self, tmp_path, monkeypatch, capsys):
         from pm_core.cli import session as sess

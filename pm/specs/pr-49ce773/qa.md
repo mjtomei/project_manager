@@ -163,6 +163,19 @@ A's GitHub number and assigns #12 to B before action dispatch, **Then** the
 pending action still targets A's local ID, never B. Repeat with shortcut,
 Enter-on-action, fresh/loop chords and the no-fzf menu. If A itself was removed,
 no command runs and a lookup-failure notice is shown.
+Repeat with a partial repair that assigns #12 to B while A still has #12
+(also try integer `12` versus string `"12"`). The ambiguous snapshot must be
+rejected, all pending action routes must refuse dispatch, and navigation must
+retain the last-good list until repair. Duplicate local IDs must be rejected too.
+Opening on either kind of duplicate snapshot shows a readable error and waits
+for dismissal. Historical display-number duplicates where every matching PR is
+merged/closed remain permitted and actionless; they must not block navigation
+to unrelated live PRs. A collision between live and terminal PRs still fails
+closed. Repair unsafe duplicates, then navigate and dispatch normally.
+Also remove/reassign A's number while its popup is open, then press `0`:
+home must remain A under its current local/display ID, not become B or an
+unresolvable old-number entry. From a non-PR window, next/prev must step from
+A's identity in both directions, not from the new owner of its former number.
 
 ## Concurrent use / shared resources
 
