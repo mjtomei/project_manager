@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T10:49:22.121056+00:00'
+  updated_at: '2026-10-26T10:59:08.671057+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32944,6 +32944,17 @@ prs:
       is i10 behaving correctly).'
     created_at: '2026-10-26T10:49:22Z'
     last_edited: '2026-10-26T10:49:22Z'
+  - id: note-12fff70
+    text: 'QA scenario 9 (concurrent actors) PASS at head 5f6e681c — no code change.
+      Harness facts for future runs: (1) the scenario story-3 check `git rev-list
+      --count --merges <base_sha>..master` also counts the integration merge that
+      --apply created on the PR branch (so it reads 2); the base gains exactly one
+      publication merge — use `--first-parent` (same interpretation as scenario 6).
+      (2) The fake planner skips Step 0, so write pm/specs/<pr-id>/qa.md before pressing
+      `t`, and give test panes ~/.local/bin on PATH for the fake-claude shim (with
+      real /usr/bin/git first).'
+    created_at: '2026-10-26T10:59:08Z'
+    last_edited: '2026-10-26T10:59:08Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
