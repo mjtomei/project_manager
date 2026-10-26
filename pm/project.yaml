@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T07:12:36.818431+00:00'
+  updated_at: '2026-10-26T08:05:49.614062+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34230,6 +34230,26 @@ prs:
       only work/, no verifier/400; 0 secrets.'
     created_at: '2026-10-26T07:12:36Z'
     last_edited: '2026-10-26T07:12:36Z'
+  - id: note-6e8aa47
+    text: 'QA S68 (2026-10-26, host, stubs; captures /pm-captures/scenarios/68, REPORT.md).
+      Held live on 914a4c3c: story 1 (A qa_finalize provider:nosuch: refused hop one
+      Error line rc 1, awaiting qa, no launch_claim, 3 more ticks same, no running:
+      qa over the judged window, fix -> one launch over it, next sN, PASS FINALIZE_DONE),
+      story 2 (B two ticks per round after a refused hop: 5/5 HEAD and 4/4 control
+      e123fb27 rounds one driver, no difference), story 4 (D driver killed 0.15 s
+      after the hop: running: qa until claim age 182 s, then one launch). CODE CHANGE
+      109bca54 (needs normal re-review): story 3 found duplicate drivers on HEAD.
+      The qa driver cleared awaiting (and dropped launch_claim) before it killed the
+      judged qa window, so a tick in that gap launched a second qa-run-bg (1 of 6
+      offset rounds at 300 ms; 3/3 rounds with tick 2 fired when the driver cleared
+      awaiting or killed the window). Now the qa claim outlives awaiting (expires
+      180 s) and the qa tick treats it like the window; post-fix 5/5 rounds one driver,
+      stories 1/2/4 re-run held. 2 tests, 3 mutations, suite 3865. The 8edbe269 race
+      (tick claiming between hop and hop claim) was not reproduced. Observation: a
+      PR session_models override added mid-run does not stop that run (pr_data loaded
+      at start).'
+    created_at: '2026-10-26T08:05:49Z'
+    last_edited: '2026-10-26T08:05:49Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
