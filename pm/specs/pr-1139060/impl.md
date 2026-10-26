@@ -65,8 +65,12 @@ removed by automatic or scoped cleanup) when any of:
    socket, the default server, and the shared-session socket for its tag —
    has a `#{pane_start_command}` or current pane-root/descendant process command
    containing the exact container name (token-boundary match, so `…-s1` ≠ `…-s10`)
-   or its full id. Query the current process tree with a bounded, non-truncated
-   process listing and refresh it at the locked deletion check; failed/malformed
+   or its full id. Current process commands must be runtime exec/attach clients,
+   not arbitrary diagnostic commands or host-agent prompts mentioning the target:
+   `pm container restart NAME` must not identify itself as an attached owner.
+   Ambiguous runtime global-option syntax remains conservatively protected.
+   Query the current process tree with a bounded, non-truncated process listing
+   and refresh it at the locked deletion check; failed/malformed
    listings or missing live pane roots mean unknown ownership, never absence.
    This covers runtime execs started later from an existing shell or script (S13);
    foreground QA debug instead holds host activity locks for the lifetime

@@ -580,9 +580,25 @@ def _query_server(server: _Server) -> _PaneSnapshot:
     if processes is None:
         return _PaneSnapshot(panes=None)
     return _PaneSnapshot(panes=[
-        (pane, session, "\n".join([command, *processes[pid]]))
+        (pane, session, "\n".join([
+            command, *(cmd for cmd in processes[pid] if _runtime_owner_command(cmd))]))
         for pane, session, pid, command in panes
     ])
+
+
+def _runtime_owner_command(command: str) -> bool:
+    """Only runtime clients, not diagnostic argv references, imply attachment."""
+    words = command.split()
+    if not words or os.path.basename(words[0]) not in {"podman", "docker"}:
+        return False
+    words = words[1:]
+    # ps args is flattened, not shell-quoted argv. Do not try to parse arbitrary
+    # global option values: preserve ambiguous runtime clients conservatively.
+    if words and words[0].startswith("-"):
+        return True
+    if words and words[0] == "container":
+        words = words[1:]
+    return bool(words and words[0] in {"exec", "attach"})
 
 
 def _pane_process_commands(pids: list[int]) -> dict[int, list[str]] | None:

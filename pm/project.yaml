@@ -13049,6 +13049,23 @@ prs:
       QA waiver or independent sign-off claim.'
     created_at: '2026-10-26T05:36:45Z'
     last_edited: '2026-10-26T05:36:45Z'
+  - id: note-b12cfc0
+    text: 'Review-loop 0b6f i2 (main and inherited read-only reviewer chatgpt/gpt-6-astra-high):
+      fixed i1 current-process ownership false positives: pm container restart NAME,
+      host-agent prompts and runtime inspect argv no longer count as attachments.
+      New descendant matching selects Podman/Docker exec/attach clients, preserves
+      ambiguous runtime global-option syntax conservatively, and keeps historical
+      pane-start/activity/lease/unknown-owner protection. Same assertions pre-fix:
+      7 failures/17 controls passed. Fixed focused lifecycle/proxy suite684 passed;
+      separate QA integration100 passed/2 skipped; final sanitized full suite3997
+      passed/2 skipped/4 existing-class warnings,190.62s. Real isolated tmux3.2a probe
+      rejected suspected multiline-command issue; no unnecessary fix. Existing lifecycle
+      architecture retained; R2 clarified. Evidence/all per-file notes /pm-captures/review-0b6f-i2-per-file.md;
+      full suite /pm-captures/review-0b6f-i2-full-suite-final.log. Pre-existing project
+      routing/handoff/manual-gate and qa.md edits preserved outside commit. No real-container
+      QA or independent sign-off claim; outstanding coverage remains required.'
+    created_at: '2026-10-26T06:00:34Z'
+    last_edited: '2026-10-26T06:00:34Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID

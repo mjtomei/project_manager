@@ -86,6 +86,41 @@ def test_final_recheck_refreshes_process_tree(monkeypatch, tmp_path):
     assert reaper._owner_panes(info, cache, fresh=True) == (["%7"], False)
 
 
+@pytest.mark.parametrize("command", [
+    f"/usr/bin/python -m pm_core.wrapper container restart {NAME}",
+    f"pm container retain {NAME}",
+    f"bash -c pm container restart {NAME}",
+    f"agent investigate container {CID}",
+    f"podman inspect {NAME}",
+    f"docker container inspect {CID}",
+    f"podman inspect --format exec {NAME}",
+])
+def test_diagnostic_commands_do_not_claim_ownership(monkeypatch, tmp_path, command):
+    info = _snapshot(monkeypatch, tmp_path, "0\t%7\tpm-project-a\t100\tbash\n",
+                     f"100 1 Ss bash\n101 100 S {command}\n")
+    assert reaper._owner_panes(info, reaper._PaneCache()) == ([], False)
+
+
+@pytest.mark.parametrize("command", [
+    f"/usr/bin/podman exec -it {NAME} sh",
+    f"docker attach {CID}",
+    f"docker container exec -it {CID} sh",
+    f"podman --root /private/store exec -it {NAME} sh",
+])
+def test_runtime_clients_still_own_from_diagnostic_pane(monkeypatch, tmp_path, command):
+    info = _snapshot(monkeypatch, tmp_path, "0\t%7\tpm-project-a\t100\tbash\n",
+                     f"100 1 Ss bash\n101 100 S pm container restart {NAME}\n"
+                     f"102 100 S {command}\n")
+    assert reaper._owner_panes(info, reaper._PaneCache()) == (["%7"], False)
+
+
+def test_start_command_owner_is_preserved(monkeypatch, tmp_path):
+    info = _snapshot(monkeypatch, tmp_path,
+                     f"0\t%7\tpm-project-a\t100\tbash wrapper {NAME}\n",
+                     "100 1 Ss bash\n")
+    assert reaper._owner_panes(info, reaper._PaneCache()) == (["%7"], False)
+
+
 def test_real_shell_descendant_commands():
     # Real ps traversal, without creating a container or contacting a runtime.
     child = subprocess.Popen(
