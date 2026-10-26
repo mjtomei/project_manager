@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T19:33:51.108013+00:00'
+  updated_at: '2026-10-26T19:49:49.122049+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16601,6 +16601,35 @@ prs:
       + story-core recording.mp4 + story3-7 text captures). No follow-ups filed.'
     created_at: '2026-10-26T19:33:51Z'
     last_edited: '2026-10-26T19:33:51Z'
+  - id: note-438c963
+    text: 'QA S26 (2026-10-26, HEAD ba948cab; only project.yaml changed since, by
+      other QA notes) PASS — malformed/partial project.yaml while the popup is open
+      and at popup start. Live on the real 80-col popup with fzf 0.56.3: unparsable
+      YAML + d keeps the last-good list and shows the two refusal rows (one log line
+      per key, no dispatch, no traceback); no prs / null / false / 0 / "" / {a:1}
+      are all rejected with "Picker snapshot requires a prs list (use [] for no PRs)";
+      prs: [] is a successful refresh that collapses to the pinned home (l keeps the
+      row, d ignored, TUI shows "No active PR windows open." and exits 0); 19 structural
+      snapshots (missing/null/int/quote/backslash/whitespace ids, missing/null/empty/truncated
+      status, duplicate local ids, shared #12 int/str/mixed, NUL/newline/ESC gh_pr_number)
+      are all rejected with the matching reason and the four dispatch routes (d, Down+Enter,
+      z d, z z d) are refused; initial-load failures show "Could not load PR actions:
+      <reason>" and need two dismissals (pm popup failed (exit 1).); null/0/3.5/multiline/control-char
+      titles each render as one non-actionable row, Enter is a no-op and the stored
+      title is unchanged (md5); no-fzf refusal uses the "reopen the picker" copy and
+      still dispatches after repair; the exit-7 stub shows "pm popup failed (exit
+      7)." for prefix+P and prefix+M and stays until a key. Two notes: (1) with prs:
+      [] the collapsed home names the retained LOCAL id ("PR Actions — pr-90c877f"
+      / "Could not load actions for pr-90c877f.") where the S26 scenario text says
+      the window id "#12" — that is the pinned home identity from review i6, qa.md
+      E6 only requires prs: [] to be a valid empty project, so it is recorded as a
+      benign spec-text deviation, not a defect; (2) incidental PRE-EXISTING bug filed
+      as pr-fd581ec: while an id-less PR entry was on disk the TUI 5-minute background
+      sync raised KeyError: id at pm_core/tui/sync.py:131 (file unchanged by this
+      PR, TUI stays up, picker unaffected). Captures /pm-captures/scenarios/26 (README
+      + per-story manifests, 4 recordings).'
+    created_at: '2026-10-26T19:49:49Z'
+    last_edited: '2026-10-26T19:49:49Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
