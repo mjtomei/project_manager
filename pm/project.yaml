@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T04:35:28.518206+00:00'
+  updated_at: '2026-10-26T05:09:51.553771+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34147,6 +34147,26 @@ prs:
       site (stale earlier qa_status/window after a refused tick) not exercised; S66/S67.'
     created_at: '2026-10-26T04:35:28Z'
     last_edited: '2026-10-26T04:35:28Z'
+  - id: note-31da6e9
+    text: 'QA S67 (2026-10-26, RQ46 concurrency, host, stubs; captures /pm-captures/scenarios/67,
+      REPORT.md): RQ46 held under concurrent use on 3e9f6b19 (smoke on d000bf78 incl.
+      S65 72614e5d): A (qa_planning provider:nosuch) ticked together with B for 5
+      min: 20/20 A ticks one Error: line rc 1, no driver/qa window/workdir/request,
+      TUI A at qa throughout; B one driver, QA PASS FINALIZE_DONE, qa->sign_off. providers.yaml
+      rewritten 80x (provider add spare/default claude, 80/80 rc 0) while C1-C3 (qa_finalize
+      provider:mainstub) launched by ticks and D ran TUI QA: 0 refusals in 3 launch
+      ticks (valid), no QA stopped, all PASS FINALIZE_DONE, file = before + spare.
+      Open point (c) decided: pre-existing, 4/4 duplicate-driver rounds post-fix and
+      4/4 on control 9d046874 (filed pr-7a83b6d). Thens failed as written, all pre-existing
+      on the control, no product change: auto-sequence QA records no PR note (pr-ad4af06);
+      sign_off advances when overall is published, before the finalizer returns (pr-f1d825b);
+      a type claude provider api_key ${VAR} is inlined as its value in the logged
+      launch command and tmux pane command (pr-84ebabf, a secret leak like the container
+      -e fix). Spec clarification in qa.md (RQ46 c + twenty-sixth pass) needs independent
+      review. Harness: fake-claude must be linked into the scratch ~/.local/bin; run
+      ticks inside tmux panes (outside tmux the driver dies "No pm session found").'
+    created_at: '2026-10-26T05:09:51Z'
+    last_edited: '2026-10-26T05:09:51Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -34924,6 +34944,116 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-26T04:26:43.144125+00:00'
   updated_at: '2026-10-26T04:26:43.144125+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7a83b6d
+  plan: bugs
+  title: 'Bug: two concurrent pm pr auto-sequence ticks of one PR each spawn a qa-run-bg
+    driver (duplicate QA runs)'
+  branch: pm/pr-7a83b6d-bug-two-concurrent-pm-pr-auto-sequence-ticks-of-on
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py pr_auto_sequence: both the in_review PASS branch
+    (locked_update to qa, then _launch_qa_detached) and the qa branch with no qa_status.json
+    (find_window_by_name qa-<pr>, then _launch_qa_detached) check then spawn without
+    a claim, so two ticks of the same PR started together (two watchers, a watcher
+    plus a manual tick, overlapping cron ticks) each spawn a pm pr qa-run-bg driver.
+    Repro (QA S67 story 2, /pm-captures/scenarios/67/story2 and control/): drive a
+    PR to review PASS with single ticks, then run `pm pr auto-sequence <pr>` from
+    two tmux panes at the same second: both print advanced: qa (or running: qa (launched)
+    for a qa PR with no status), two drivers, two qa-<pr> and two qa-<pr>-s0 windows,
+    both loops take the same planner pane, then two sets of scenario windows, two
+    qa workdirs, router requests doubled, two finalizers. 4/4 rounds on 3e9f6b19 and
+    4/4 on 9d046874 (pre-existing, not from the a5a3 provider check). signoff.claim_return_launch
+    already guards the sign-off qa return the same way a fix could guard these two
+    launch sites.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T04:56:16.944073+00:00'
+  updated_at: '2026-10-26T04:56:16.944073+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f1d825b
+  plan: bugs
+  title: 'Bug: pm pr auto-sequence advances a QA PASS to sign_off while the QA finalizer
+    is still running'
+  branch: pm/pr-f1d825b-bug-pm-pr-auto-sequence-advances-a-qa-pass-to-sign
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py run_qa_sync writes qa_status.json with overall
+    before the blocking post-QA finalizer (which confirms scenario pushes reached
+    origin and fast-forwards the PR workdir); pr_auto_sequence advances to sign_off
+    as soon as overall == PASS, so the sign-off window opens up to the finalizer timeout
+    before FINALIZE_DONE/FINALIZE_BLOCKED, possibly reviewing a workdir the finalizer
+    has not fast-forwarded yet. The TUI path waits for the run to end. Live (QA S67,
+    /pm-captures/scenarios/67/story1): B finalizer polling 04:09:20, advanced: sign_off
+    04:09:22, QA complete (finalize=FINALIZE_DONE) 04:09:50; same in every other S67
+    run and on 9d046874. Related: pr-0f85376 (driver dies mid-finalizer).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T04:56:17.963363+00:00'
+  updated_at: '2026-10-26T04:56:17.963363+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ad4af06
+  plan: bugs
+  title: 'Bug: QA runs driven by pm pr auto-sequence (qa-run-bg) record no QA note
+    on the PR'
+  branch: pm/pr-ad4af06-bug-qa-runs-driven-by-pm-pr-auto-sequence-qa-run-b
+  status: pending
+  depends_on: []
+  description: 'Only the TUI completion path (pm_core/tui/qa_loop_ui._record_qa_note)
+    records the "QA <verdict>: ... (workdir: ...)" PR note. A run driven by pm pr
+    auto-sequence (pm pr qa-run-bg) that finishes normally deletes its qa_resume.json
+    and records no note, while the same run recovered by a TUI after its driver died
+    does get one (Recovered completed QA). Live (QA S67, /pm-captures/scenarios/67):
+    10 auto-sequence QA runs reached PASS FINALIZE_DONE with `pm pr note list <pr>`
+    = No notes; the TUI t run on D got note-1ddd05e. Same on 9d046874. Decide whether
+    qa-run-bg should record the note (with the TUI workdir dedupe) or document that
+    auto-sequence relies on qa_status.json only.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T04:56:18.957500+00:00'
+  updated_at: '2026-10-26T04:56:18.957500+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-84ebabf
+  plan: bugs
+  title: 'Bug: a claude-type provider api_key (even a ${VAR} reference) is written
+    as ANTHROPIC_API_KEY=<value> into the logged launch command and the tmux pane
+    command'
+  branch: pm/pr-84ebabf-bug-a-claude-type-provider-api-key-even-a-var-refe
+  status: pending
+  depends_on: []
+  description: 'pm_core/providers.py ProviderConfig.env_vars resolves api_key (_resolve_env_ref)
+    and pm_core/claude_launcher.py build_claude_shell_cmd inlines every provider env
+    value as NAME=<value> in the shell command (pre-existing on master: claude_launcher.py:937,
+    providers.py:75). log_shell_command then writes it at INFO to ~/.pm/debug/<tag>.log,
+    and tmux keeps it as the pane_start_command (tmux list-panes -F "#{pane_start_command}").
+    Live (QA S67 story 3, /pm-captures/scenarios/67/story3/secret-in-launch-cmd.txt):
+    provider mainstub (type claude, api_key ${ANTHROPIC_API_KEY}) as a PR qa_finalize
+    override; the three finalizer launches logged ANTHROPIC_API_KEY=<the dummy value>
+    and their panes carried it; ps after exec did not. Same class as the container
+    -e NAME=value leak this PR fixed (env values via the process env, not argv). Decide
+    how host panes get secret provider env (process env of the tmux client, a shell
+    reference for ${VAR} keys when the pane inherits the var, or redaction at least
+    in the log) and keep openai OPENAI_API_KEY the same.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T05:09:15.878235+00:00'
+  updated_at: '2026-10-26T05:09:15.878235+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

@@ -882,7 +882,8 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     as "running: qa" and no tick retries the launch). (b) The check
     resolves the verifier provider even with `qa-verify-pass` off, where
     the TUI `t` run never launches a verifier. (c) Two concurrent ticks
-    after the fix may each spawn a driver (pre-existing check-then-spawn).
+    after the fix may each spawn a driver (pre-existing check-then-spawn;
+    S67 confirmed it at the same rate on the pre-fix control, pr-7a83b6d).
 
 ## 2. Setup
 
@@ -1427,6 +1428,26 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
       two ticks of one PR at once after the fix (open point c), and
       `pm provider add/default` rewriting providers.yaml while ticks and
       a TUI QA run read it.
+    QA S67 (2026-10-26, captures /pm-captures/scenarios/67): open point
+    (c) is pre-existing. Two ticks of one PR started in the same second
+    each spawned a `qa-run-bg` driver in 4/4 rounds on 3e9f6b19 and 4/4
+    on the 9d046874 control, at both launch sites (review PASS -> qa, and
+    qa with no status). Both loops took the same planner pane, then ran
+    two sets of scenario windows, two finalizers and two workdirs. This is
+    the check-then-spawn race (pr-7a83b6d), not the provider check. Three
+    facts the S67 Thens assumed otherwise, all the same on the control:
+    a run driven by auto-sequence records no QA PR note, because only the
+    TUI completion path writes one (pr-ad4af06). Auto-sequence moves to
+    `sign_off` as soon as `qa_status.json` has `overall`, which
+    `run_qa_sync` publishes before the blocking finalizer, so the sign-off
+    window opens while the finalizer still runs (pr-f1d825b). A
+    `type: claude` provider whose `api_key` is a `${VAR}` reference is
+    launched with the resolved value inline: it is in the logged launch
+    command and in the tmux pane command (pr-84ebabf). Held: the broken PR
+    got one `Error:` line, rc 1, and no driver, window or workdir on every
+    tick, and the other PR was unaffected. Rewrites of providers.yaml
+    racing ticks and a TUI run gave no refusal in 3 launch ticks and no
+    `QA stopped`.
 
 ## 3. Edge cases
 
