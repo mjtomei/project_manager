@@ -517,6 +517,18 @@ container cleared it and kept its files.  Running state is not health.
   not changed by pm.
 - A6 *Bound defaults* — launch concurrency 4; max running unlimited (opt-in),
   because a safe universal ceiling depends on the host quota.
+- A7 *External name-targeted attachment across runtime rename* — resolved with
+  user guidance in review 0b6f i5: renaming is not an expected operation; prefer
+  inexpensive durable identity without adding substantial external-client tracking.
+  PM already attaches by captured immutable ID, and foreground debug additionally
+  holds ID/domain-based activity locks. Keep those protections and the existing
+  rename-safe retention, lease, release and proxy behavior. Arbitrary external
+  `podman/docker exec OLDNAME ...` followed by runtime rename is not guaranteed
+  to remain identifiable: its argv keeps OLDNAME. Use immutable-ID attachment or
+  explicitly retain the allocation before such manual operations. Do not infer
+  identity from obsolete names, which a replacement can reuse. QA's rename-safe
+  attachment checks cover immutable-ID clients and PM-managed activity locks;
+  this exception does not waive other rename or runtime acceptance requirements.
 
 ## 4. Edge cases
 
