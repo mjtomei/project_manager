@@ -957,7 +957,10 @@ class TestPopupPickerRefreshFailures:
                 load_project=lambda *a, **k: next(loads))
         shown = fzf.calls[-1]["input"] if has_fzf else capsys.readouterr().out
         assert "Could not refresh PR actions; no action was run." in shown
-        assert "Repair project.yaml and retry" in shown
+        # fzf stays open for a retry; the one-shot fallback must be reopened.
+        retry = "retry." if has_fzf else "reopen the picker."
+        assert f"Repair project.yaml and {retry}" in shown
+        assert "without fzf" not in shown
         run_cmd.assert_not_called()
 
     def test_explicit_empty_pr_list_is_valid(self, tmp_path, monkeypatch, capsys):

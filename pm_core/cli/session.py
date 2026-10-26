@@ -2155,13 +2155,14 @@ def popup_picker_cmd(session: str, window_name: str):
         selected_id = _picked_pr["id"] if _picked_pr is not None else None
         if not _refresh_state():
             # Keep last-good navigation, but explain why the action was refused.
+            # Without fzf the menu is one-shot, so retrying means reopening it.
+            retry = "retry" if has_fzf else "reopen the picker"
             lines = [("  Could not refresh PR actions; no action was run. "
-                      "Repair project.yaml and retry (reopen the picker without fzf).", "", current_pr)]
+                      f"Repair project.yaml and {retry}.", "", current_pr)]
             fzf_input_lines = [d for d, _, _ in lines]
             return False
 
         selected = pr_by_local.get(selected_id)
-        current_pr = selected_id or current_pr
         nav_index = _sync_index(current_pr, nav_index)
         if selected is None:
             _picked_pr, _label_to_cmd = None, {}

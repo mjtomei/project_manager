@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T16:11:52.831672+00:00'
+  updated_at: '2026-10-26T16:29:48.535210+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16411,19 +16411,50 @@ prs:
       Astra overrides, transfer stash and verify-s15-followup.md retained.'
     created_at: '2026-10-26T16:11:52Z'
     last_edited: '2026-10-26T16:11:52Z'
-  model: provider:chatgpt-astra
+  - id: note-account-switch-20261026
+    text: Account transition / controller reload handoff 2026-10-26T16:24:40.272624+00:00.
+      User authorized October29 reset and bug PRs241/242/243 -> provider:claude-work/work
+      Opus/high ALL roles/helpers/signoff; do not restore historical Astra settings.
+      Work Opus (all roles). Last reviewer was running full suite over uncommitted
+      fixes; preserve and finish its dirty changes rather than discard/reimplement.
+      Controller restart recovered current QA snapshots but native autostart attempted
+      fresh review launches; those failed during container removal, so original review
+      windows are now gone. Original source/workdir/dirty files, stashes and mounted
+      captures/transcript remain. Read /pm-captures/account-transition-20261026/prior-review-6480db58-71a1-4665-b524-0995a47264d1.jsonl
+      in chunks for exact progress; do not invent completion or waive any pending
+      QA. Original ephemeral review-container processes cannot be assumed live after
+      native cleanup. Reproduce any missing unfinished tests honestly. The new review
+      is recovery of authorized existing work, not a new PR. Manual merge/spec-review-OFF
+      gates remain unchanged. No standalone followup/autostart or master merge is
+      newly authorized.
+    created_at: '2026-10-26T16:24:40.272624+00:00'
+    last_edited: '2026-10-26T16:24:40.272624+00:00'
+  - id: note-118da10
+    text: 'Review 7217 i1 (work Opus, recovery of interrupted i11): finished i11 dirty
+      nits — failed-refresh copy now says "retry" under fzf and "reopen the picker"
+      in the one-shot fallback (test asserts both, no stale "without fzf"); dropped
+      redundant current_pr = selected_id (nav keys are already local ids; _resolve_for
+      picks pr_by_local[identity]). Full suite after final edits: 3701 passed, 1 skipped,
+      12 failed = test_markdown_render missing venv markdown dep only; rerun with
+      scratch markdown 13 passed. Evidence /pm-captures/review-7217-i1/{full-final,markdown}.txt.
+      PR model/session_models are provider:claude-work (user-authorized), kept. verify-s15-followup.md
+      and Astra transfer stash untouched. No live QA PASS claimed; fresh QA/sign-off
+      still required (E6/E11/C1/R13/E10).'
+    created_at: '2026-10-26T16:29:48Z'
+    last_edited: '2026-10-26T16:29:48Z'
+  model: provider:claude-work
   session_models:
-    impl: provider:chatgpt-astra
-    review: provider:chatgpt-astra
-    qa: provider:chatgpt-astra
-    qa_planning: provider:chatgpt-astra
-    qa_scenario: provider:chatgpt-astra
-    qa_concretize: provider:chatgpt-astra
-    qa_verification: provider:chatgpt-astra
-    qa_finalize: provider:chatgpt-astra
-    qa_interactive: provider:chatgpt-astra
-    signoff: provider:chatgpt-astra
-    merge: provider:chatgpt-astra
+    impl: provider:claude-work
+    review: provider:claude-work
+    qa: provider:claude-work
+    qa_planning: provider:claude-work
+    qa_scenario: provider:claude-work
+    qa_concretize: provider:claude-work
+    qa_verification: provider:claude-work
+    qa_finalize: provider:claude-work
+    qa_interactive: provider:claude-work
+    signoff: provider:claude-work
+    merge: provider:claude-work
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
