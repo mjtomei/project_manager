@@ -1928,7 +1928,16 @@ def _wait_for_setup(name: str, *, started_ns: int | None = None) -> None:
             kind = classify_runtime_error(err)
             if kind in ("keyring", "memory", "pids"):
                 raise launch_error(name, kind, err, stage="finish setup")
-            if "is not running" in err.lower() or "no such container" in err.lower():
+            exited = "is not running" in err.lower() or "no such container" in err.lower()
+            if not exited:
+                # Wording varies (Podman 3.x: "container state improper"); ask
+                # the runtime rather than waiting out the timeout on a
+                # container whose startup command already failed.
+                try:
+                    exited = not container_is_running(name)
+                except ContainerError:
+                    exited = False
+            if exited:
                 logs = _run_runtime("logs", "--tail", "20", name,
                                     check=False, timeout=10)
                 raise launch_error(
