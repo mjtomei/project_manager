@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-25T17:00:08.798077+00:00'
+  updated_at: '2026-10-26T02:27:04.227306+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -12520,6 +12520,23 @@ prs:
       independent sign-off remain required.'
     created_at: '2026-10-26T02:11:57Z'
     last_edited: '2026-10-26T02:11:57Z'
+  - id: note-17c33b0
+    text: 'Review-loop 6427 i23 (main and inherited read-only core reviewer chatgpt/gpt-6-astra-high):
+      fixed mandatory Docker setup ownership repair assuming root despite USER pm,
+      including copied config chown; both runtimes now explicitly exec ownership repair
+      as UID 0. Removed false timeout claim that the container was deleted, since
+      reused/restarted allocations are preserved and fresh cleanup may fail. Existing
+      lifecycle architecture retained; impl spec clarified. Baseline regressions:
+      3 behavioral failures, 19 controls passed; corrected initial missing-keyword
+      test fixture with original log retained. Focused integration 775 passed, 2 skipped;
+      final sanitized full suite 3894 passed, 2 skipped, 4 existing-class warnings
+      (2 AsyncMock, 2 Click). Source/spec/tests commit 78054c13 pushed. Evidence and
+      complete per-file notes: /pm-captures/review-6427-i23/per-file.md; final suite
+      full-suite-final.log there. Existing project.yaml routing/handoff/manual-gate
+      edits preserved outside source commit. No real-container QA claim or waiver;
+      next review, outstanding runtime scenarios and independent sign-off remain required.'
+    created_at: '2026-10-26T02:27:04Z'
+    last_edited: '2026-10-26T02:27:04Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
