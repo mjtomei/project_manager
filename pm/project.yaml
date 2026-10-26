@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T01:08:50.071977+00:00'
+  updated_at: '2026-10-26T01:28:09.730663+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34014,6 +34014,25 @@ prs:
       3834 passed, rc 0; /pm-captures/review-c189-i10.'
     created_at: '2026-10-26T01:08:50Z'
     last_edited: '2026-10-26T01:08:50Z'
+  - id: note-82fc428
+    text: 'Review c189 i11 (35c64f1e, CODE CHANGE, small, needs normal re-review):
+      i10 16ad911e (provider add/remove/default on a blank or unreadable providers.yaml)
+      reviewed independently and sound. Gap fixed on the launch side of the same files:
+      pm reads a providers.yaml it cannot read (one stray tab, a list file or providers
+      block, an unopenable path) as having no providers, so every routed launch, the
+      QA route gate and pm provider test said the route is not configured, add it
+      with pm provider add. The entry may well be in the file, and since i10 that
+      command refuses such a file, while pm provider list showed nothing wrong. A
+      named lookup now raises ProvidersFileUnreadableError (a ProviderNotFoundError):
+      cannot be looked up in <path>: <why>; fix the file by hand. Route-gate remedy:
+      fix <path> by hand. describe/pm model show: providers.yaml UNREADABLE. pm provider
+      list: NOT READ line. OSError is no longer called invalid YAML. A readable file
+      without the entry still says add it, and the no-provider default lookup is unchanged.
+      8 mutations caught. Venv lacked markdown (3.10.3 installed). Full suite 3839
+      passed, rc 0; impl.md i11 record; /pm-captures/review-c189-i11 (README labels
+      a superseded first run).'
+    created_at: '2026-10-26T01:28:09Z'
+    last_edited: '2026-10-26T01:28:09Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
