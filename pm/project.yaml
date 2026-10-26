@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T22:54:58.152676+00:00'
+  updated_at: '2026-10-26T23:31:46.048105+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16801,6 +16801,48 @@ prs:
       sign-off.'
     created_at: '2026-10-26T22:54:58Z'
     last_edited: '2026-10-26T22:54:58Z'
+  - id: note-89f5a2a
+    text: 'Review 32f9 i5 (HEAD 9145eadf, base master 211a6128 already merged; merge-base
+      == master): fresh full-diff review. Fixed two defects in the picker''s snapshot-validation
+      and home-identity paths. (1) `_build_nav_entries` hashed the raw status: a YAML
+      list/mapping `status` (e.g. `[in_review]`, `{state: qa}`) raised `TypeError:
+      unhashable type` out of the `VALID_PR_STATES` membership test, so the popup
+      printed "Could not load PR actions: unhashable type: ''list''" with no entry
+      named — the spec requires the rejected entry (1-based position plus id/gh_pr_number/status)
+      because a single bad entry fails the whole snapshot closed. Status is now checked
+      with `isinstance(status, str)` first and still rejected through "Picker PR entry
+      requires a valid status: entry #N (...)". Refresh behaviour is unchanged (last-good
+      kept either way). (2) Home anchoring was lost or pointed at the wrong PR for
+      window names the `_current_window_pr_id` grammar cannot read. A window is named
+      by its PR''s display id, i.e. the local id when there is no `gh_pr_number`,
+      and the snapshot validation deliberately accepts legacy numeric (`12`), dotted/underscored
+      (`pr-a_b`) and `-s<digits>`-suffixed local ids; the grammar only knows `#N`
+      / `pr-<alnum>` and strips `-s<N>`. So a live PR whose only id is `12` opened
+      the picker on the first live PR in file order (no home, no `0`, phase dot gone),
+      and a `pr-a-s1` window next to a live `pr-a` anchored home to `pr-a` and dispatched
+      `pr start pr-a` from the `pr-a-s1` window. `popup_picker_cmd` now resolves the
+      raw window name against the snapshot first and lets an exact match win; the
+      grammar stays the fallback for `review-#N` / `qa-#N-sN` scenario windows, and
+      non-PR windows (`tui`, `pm-meta`) match no PR so they are unaffected. `_find_pr_for_window_id`
+      now skips non-mapping and id-less entries, because it runs on the raw snapshot
+      before validation. Six regression tests (unhashable status at helper and popup
+      level, both unreadable-window-name cases) fail on the pre-fix code. impl.md
+      records the type-safe status rule, the grammar-is-only-a-fallback rule, and
+      the inherent limitation that a window named for a display number shared by two
+      terminal records anchors to the first such record (no persisted window->PR association;
+      both are actionless, so no misdispatch). qa.md E6/E11 extended with the unhashable-status
+      message and the two unreadable-window-name cases. No other defect found: the
+      picker state machine (h/l/left/right/0/Enter/shortcuts/z/zz/q interleaved with
+      merges, deletions, gh-number add/remove/reassign, prs: [], refresh failures
+      and terminal duplicates) has no sequence yielding an index error, a merged/closed
+      dispatch or a header/notice mismatch; the real 494-entry project.yaml still
+      passes the strict snapshot rules and every PR''s own window name resolves; pyflakes
+      unchanged vs master. Full suite after final code/test edits: 3740 passed, 1
+      skipped. Evidence /pm-captures/review-32f9-i5/. No live QA PASS claimed — QA
+      must re-cover E6 (including the unhashable-status message) and E11 (including
+      both unreadable-window-name cases) plus C1/R13/E10, then fresh sign-off.'
+    created_at: '2026-10-26T23:31:45Z'
+    last_edited: '2026-10-26T23:31:45Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
