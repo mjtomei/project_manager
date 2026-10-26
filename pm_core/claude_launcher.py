@@ -578,11 +578,7 @@ def _bootstrap_prompt(path: str) -> str:
     text is written to *path* and claude reads it on startup.  This preserves
     every instruction (no truncation) while keeping argv small.
     """
-    return (
-        f"Your complete instructions are in the file at {path}. "
-        f"Read that file now and follow it exactly — it is your full task "
-        f"prompt."
-    )
+    return f"Your complete instructions are in the file at {path}."
 
 
 def _materialize_oversized_prompt(

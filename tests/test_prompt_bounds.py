@@ -113,7 +113,7 @@ def _assert_preserved_over_limit(prompt, tmp_path, *needles):
                                      session_id="s")
     # argv stays small and points at the file; the prompt itself is not argv.
     assert prompt_bytes(cmd) < PROMPT_ARG_LIMIT, prompt_bytes(cmd)
-    assert "Read that file" in cmd
+    assert "Your complete instructions are in the file at" in cmd
     files = list((tmp_path / "pm" / "prompts").glob("pm_prompt_*.txt"))
     assert files, "no prompt file was written"
     assert files[0].read_text() == prompt, "the prompt file is not the prompt"
@@ -1519,7 +1519,7 @@ class TestLauncherGuard:
              patch("pm_core.paths.skip_permissions_enabled", return_value=False):
             cmd = build_claude_shell_cmd(prompt=huge, cwd=str(tmp_path))
         assert "$(cat" not in cmd
-        assert "Read that file" in cmd
+        assert "Your complete instructions are in the file at" in cmd
         files = list((tmp_path / "pm" / "prompts").glob("pm_prompt_*.txt"))
         assert files and files[0].read_text() == huge
 
@@ -1540,7 +1540,7 @@ class TestLauncherGuard:
              patch("pm_core.paths.skip_permissions_enabled", return_value=False):
             cmd = build_claude_shell_cmd(prompt=huge, cwd="/workspace",
                                          write_dir=str(host), session_id="sid")
-        assert "Read that file" in cmd
+        assert "Your complete instructions are in the file at" in cmd
         # The command names the container path, never the host path.
         assert "/workspace/pm/prompts/pm_prompt_sid.txt" in cmd
         assert str(host) not in cmd
@@ -1571,7 +1571,7 @@ class TestLauncherGuard:
         argv, tmp = _materialize_oversized_prompt(huge, cwd=str(tmp_path))
         assert tmp is not None
         assert Path(tmp).read_text() == huge
-        assert "Read that file" in argv
+        assert "Your complete instructions are in the file at" in argv
         assert prompt_bytes(argv) < 1000
         Path(tmp).unlink()
 
@@ -1687,7 +1687,7 @@ print("ok")
         # No oversized argv entry, no bootstrap, no prompt file.
         assert all(prompt_bytes(a) <= PROMPT_ARG_LIMIT
                    for a in cmd if isinstance(a, str))
-        assert not any("Read that file" in a for a in cmd if isinstance(a, str))
+        assert not any("Your complete instructions are in the file at" in a for a in cmd if isinstance(a, str))
         assert not (tmp_path / "pm" / "prompts").exists()
 
     def test_launch_claude_fresh_over_limit_bootstraps_then_removes_file(
@@ -1717,7 +1717,7 @@ print("ok")
         assert all(prompt_bytes(a) < 1000 for a in seen["cmd"]
                    if isinstance(a, str))
         assert huge not in seen["cmd"]
-        assert any("Read that file" in a for a in seen["cmd"]
+        assert any("Your complete instructions are in the file at" in a for a in seen["cmd"]
                    if isinstance(a, str))
         # ... and the file is gone once the process has exited.
         assert not seen["path"].exists()
@@ -1736,8 +1736,8 @@ print("ok")
         seen = {}
 
         def fake_run(cmd, **kwargs):
-            boot = next(a for a in cmd if "Read that file" in a)
-            path = Path(boot.split("the file at ", 1)[1].split(". ", 1)[0])
+            boot = next(a for a in cmd if "Your complete instructions are in the file at" in a)
+            path = Path(boot.split("the file at ", 1)[1].removesuffix("."))
             seen["path"] = path
             seen["existed"] = path.exists()
             seen["content"] = path.read_text()
@@ -1798,7 +1798,7 @@ print("ok")
         assert all(prompt_bytes(a) < 1000 for a in seen[1]
                    if isinstance(a, str))
         assert huge not in seen[1]
-        assert any("Read that file" in a for a in seen[1]
+        assert any("Your complete instructions are in the file at" in a for a in seen[1]
                    if isinstance(a, str))
         # ... and the complete prompt was on disk for the retry, then removed.
         assert len(files_seen[1]) == 1

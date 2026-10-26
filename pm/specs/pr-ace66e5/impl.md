@@ -186,8 +186,7 @@ Defense in depth for builders we did not audit and for future ones. In
     `<host_dir>/pm/prompts/pm_prompt_<session_id>.txt` mechanism; for
     direct/print launches without a host dir, use a temp file).
   - Pass a short bootstrap as the argv prompt instead of `"$(cat file)"`:
-    e.g. `"Your complete instructions are in <path>. Read that file first and
-    follow it exactly; it is your full task prompt."`
+    `"Your complete instructions are in the file at <path>."`
   - Log a warning naming the size and the file path.
 - If no writable location exists for the file, raise `PromptTooLargeError`
   with the measured size, the limit, and remediation guidance — never let a
