@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T16:29:48.535210+00:00'
+  updated_at: '2026-10-26T16:36:33.598449+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16442,6 +16442,17 @@ prs:
       still required (E6/E11/C1/R13/E10).'
     created_at: '2026-10-26T16:29:48Z'
     last_edited: '2026-10-26T16:29:48Z'
+  - id: note-7a80c34
+    text: 'Review 7217 i2 (bad525e5): removed tmux.attached_active_window (dead since
+      the picker moved to the batched attached_group_active_windows; docstring rationale
+      moved over, tests dropped, migration-map plan updated); Enter on a row whose
+      command maps to no action label now does nothing instead of dispatching without
+      the _still_has_action refresh check. Full suite after final edits 3708 passed,
+      1 skipped (/pm-captures/review-7217-i2/full-final.txt); targeted popup/tmux
+      394 passed. No live QA PASS claimed; fresh QA (E6/E11/C1/R13/E10) and sign-off
+      still required.'
+    created_at: '2026-10-26T16:36:33Z'
+    last_edited: '2026-10-26T16:36:33Z'
   model: provider:claude-work
   session_models:
     impl: provider:claude-work
