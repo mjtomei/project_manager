@@ -42,6 +42,32 @@ Changed behavior (pm_core/cli/session.py `popup_picker_cmd` and helpers):
 5. Live harness known to work (from impl note): scratch HOME with
    `~/.pm/pane-registry/<session>.json` = `{}`, project dir as cwd,
    `PM_TMUX_SOCKET` scratch socket, PYTHONPATH unset.
+6. Harness traps from earlier rounds (all observed live):
+   - The container ships no fzf, and apt only offers 0.29. Install the
+     fzf 0.56.3 release binary (linux arm64/amd64) to `/usr/local/bin`.
+     For the no-fzf story, move `/usr/local/bin/fzf` aside and restore it
+     afterwards — the prefix+P popup shell takes PATH from the tmux server,
+     so a per-shell PATH strip does not reach it.
+   - `pm/project.yaml` is 0444 in a fresh project. Set status with
+     `pm pr edit --status`; to change other fields, `chmod u+w` first (or
+     write a temp file and `mv -f` it over the original).
+   - `pm pr start` refuses unless the PR is in the committed project.yaml,
+     so `git add -A && git commit` after bootstrapping statuses.
+   - No vi/nano is installed and EDITOR is unset, so the `e` (tui:edit)
+     pane exits at once. Install nano and
+     `tmux set-environment -g EDITOR nano` if the story needs `e`.
+   - To add `gh_pr_number` to an existing PR, REPLACE its
+     `gh_pr_number: null` line; appending a second key is silently
+     overridden by the null below it (YAML last-wins).
+   - A real prefix+P works by attaching an outer client:
+     `tmux -u -L rec new-session -d -s rec -x 160 -y 45 "env -u TMUX tmux attach -t <base>~1"`,
+     then `tmux -L rec send-keys -t rec C-b P`.
+   - Pre-existing on master, not this PR: Enter/double-click on a live
+     action row used to close the popup without dispatching (fixed here by
+     the `--expect` key-line handling); the popup shell failure handler
+     adds a second dismissal after the picker's own error pause; and `e`
+     opens the edit pane as a split of the client's current window rather
+     than the invoking window.
 
 Action windows: start=`<id>`, review=`review-<id>`, qa=`qa-<id>[-sN]`,
 signoff=`signoff-<id>`, merge=`merge-<id>`. Shortcut keys: s start, e edit,
@@ -167,6 +193,10 @@ Repeat title rendering with YAML multiline titles and escaped newline, carriage
 return, tab, NUL and escape characters. The title remains a single printable,
 non-actionable row (controls replaced with spaces); Enter on that row is a no-op,
 even if a title continuation resembles an action. The stored title is unchanged.
+Known limitation (review 8d08 i1, non-blocking): a tmux `list-windows` error is
+indistinguishable from an empty window list, so a transient tmux error can
+briefly show fewer nav entries; it self-heals on the next key. Do not file it
+as a regression unless it persists or loses project.yaml state.
 E7. **Given** the home PR's windows are all closed while the popup is open,
 **When** user presses home, **Then** home PR still shown.
 E8. **Given** a live PR is shown, **When** the user moves to an action row and
@@ -206,6 +236,13 @@ Also remove/reassign A's number while its popup is open, then press `0`:
 home must remain A under its current local/display ID, not become B or an
 unresolvable old-number entry. From a non-PR window, next/prev must step from
 A's identity in both directions, not from the new owner of its former number.
+When A's only window was named for the removed number and no window matches
+A's remaining display or local id, A is not navigable from a non-PR window
+(impl.md: a removed `gh_pr_number` is not recovered — there is no persisted
+window→PR association). The header count shrinks accordingly; assert the
+reached PRs are the surviving neighbours in both directions and that no
+action ever targets the new owner. Opening the picker from A's own window
+still pins A when the window name matches A's local id.
 Repeat starting from an unresolved `#12` home: repair it to resolve to A, reload
 with `0`, next or prev, then remove A's number (with and without assigning it to
 B). `0` must still return to A under its local ID, and an action there must target
@@ -220,6 +257,15 @@ Finally, open from #13 whose local ID is the legacy numeric string `12`;
 remove that PR while another live PR owns GitHub #12. Home must show the missing
 local `12` notice with no actions, not reinterpret it as GitHub #12. Navigation
 may explicitly reach the other live PR and dispatch there.
+
+E12. **Given** the popup body cannot run pm (e.g. `pm` is missing from the
+tmux server's PATH, or pm exits non-zero without its own pause), **When** the
+user presses prefix+P, **Then** the popup prints `pm popup failed (exit N).`
+with the command's real exit status and `Press any key to close...`, stays
+open until a key is pressed, and then closes — no instant flash-close and no
+`Illegal option` error (tmux 3.2 runs popup bodies under `/bin/sh`/dash).
+After the picker's own error pause the handler may ask for a second
+dismissal; that is pre-existing and not a regression.
 
 ## Concurrent use / shared resources
 
@@ -243,7 +289,11 @@ client session), the pm log file (warnings).
   guard that it is honoured only while that session exists).  Re-run after
   the master merge, plus one live action dispatch from a PR window.
   Open the two popups one after the other, not in the same instant (known
-  race, pr-b511dcf).
+  race, pr-b511dcf).  When the dispatched action is the start fast path for
+  a PR that already has a window, the popup's confirmation line must name
+  the grouped session the window was actually switched in (e.g.
+  `<base>~1`), not the bare base session (fix 9d687e29).  Drive this with
+  `s`/Enter on a start row (or `z s`), never `e`.
 - C4. Type-ahead while the picker reloads (impl QA check 9, fix 634c82da):
   with ≥2 navigable PRs, send nav keys in pairs ~10 ms apart (the second
   lands while the picker reloads between fzf runs).  The popup never closes,
@@ -255,11 +305,15 @@ client session), the pm log file (warnings).
   37637456): both the picker's direct route and the `pm>` command popup
   (`_popup-cmd`) now run `_session_pm_argv(session, ...)` with
   PM_POPUP_SESSION exported.  A live action dispatched from a PR window
-  (cwd = PR workdir) must run under the tmux session's tag: pm log lines
-  land in the session's debug log and a review/qa pane obeys the session's
-  fake-claude config (re-check pr-f98ac63, likely fixed by #240).  After a
-  client's grouped session goes away, a later popup on another client must
-  still dispatch into that other client's session.
+  (cwd = PR workdir) must obey the tmux session's fake-claude config.
+  Observed live (S24): that gate is fixed, but popup/picker/dispatch log
+  lines from a PR-workdir window still key off cwd and land in
+  `~/.pm/debug/pm-pr-<id>-…-<hash>.log` rather than the session-tag log.
+  Treat the log location as the known pr-f98ac63 gap, not a regression of
+  this PR; the pane behaviour (fake-claude honoured, right window) is what
+  this scenario must hold. After a client's grouped session goes away, a
+  later popup on another client must still dispatch into that other
+  client's session.
 
 ## Before/after evidence of the original symptom (sign-off request)
 

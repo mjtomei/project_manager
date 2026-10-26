@@ -664,10 +664,16 @@ def attached_group_active_windows(base: str, socket_path: str | None = None) -> 
     the TUI runs in grouped sessions) has an "active window" in tmux's
     bookkeeping but no client focusing it, so it is omitted.  Returns an
     empty map on any tmux error.
+
+    The separator must be printable: tmux rewrites control characters in
+    format output to ``_`` when the server runs under a non-UTF-8 locale
+    (``LC_ALL=C``), which silently turned a tab-separated query into one
+    unparsable field.  The session name comes last (``maxsplit=2``) so it
+    may itself contain the separator.
     """
     result = _run(
         _tmux_cmd("list-sessions", "-F",
-                  "#{session_name}\t#{session_attached}\t#{window_id}",
+                  "#{session_attached}|#{window_id}|#{session_name}",
                   socket_path=socket_path),
         text=True,
     )
@@ -675,10 +681,10 @@ def attached_group_active_windows(base: str, socket_path: str | None = None) -> 
         return {}
     active = {}
     for line in result.stdout.splitlines():
-        parts = line.split("\t")
+        parts = line.split("|", 2)
         if len(parts) != 3:
             continue
-        name, attached, wid = parts
+        attached, wid, name = parts
         if (name == base or name.startswith(base + "~")) and attached.isdigit():
             if int(attached) > 0 and wid:
                 active[name] = wid

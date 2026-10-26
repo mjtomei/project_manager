@@ -2024,12 +2024,13 @@ def popup_picker_cmd(session: str, window_name: str):
             return _pr_display_id(picked)
         # Home identity that no longer resolves: with no PR entries left at
         # all (an explicit `prs: []`) nothing can supply a display id, so
-        # name the window the picker was opened from.  While other PRs
-        # remain, keep the retained local id — it is the only unambiguous
-        # name for a deleted home, since the window name may now belong to
-        # a different PR.
-        if identity == home_pr and not prs and window_name:
-            return window_name
+        # name the PR id taken from the window the picker was opened from
+        # (``review-#12`` -> ``#12``, not the raw window name).  While other
+        # PRs remain, keep the retained local id — it is the only
+        # unambiguous name for a deleted home, since the window name may now
+        # belong to a different PR.
+        if identity == home_pr and not prs:
+            return window_pr_id or identity
         return identity
 
     def _log_no_actions(pr_disp: str, picked: dict | None) -> None:

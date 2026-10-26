@@ -130,6 +130,10 @@
    transaction as the window-name map so navigation redraws current dots.
    Query all attached session/window pairs in one tmux `list-sessions` call
    rather than adding one subprocess per grouped session on each keypress.
+   The format string must use a printable field separator: tmux rewrites
+   control characters (e.g. a tab) to `_` when the server runs under a
+   non-UTF-8 locale (`LC_ALL=C`), which silently made every line unparsable
+   and hid the ●/○ indicators.
    Index QA window suffix boundaries once per snapshot so matching scenario
    windows does not rescan all windows for every PR on every keypress.
    Index local PR identities in the same snapshot and use set membership when
@@ -170,6 +174,13 @@ display-id match).  Canonicalize home_pr to the PR's current display id.
 both the display id and the local id. This does not recover a removed
 `gh_pr_number`: a window named `#193` with no remaining PR carrying that
 number must show the lookup-failure notice, not another PR's actions.
+The same limitation applies to navigation: once A's number is removed and
+no window name matches A's remaining ids, A is not navigable from a non-PR
+window (there is no persisted window→PR association). Navigation from A's
+old position still steps to its surviving neighbours in both directions
+and never retargets the new owner of A's former number. A window still
+named for A's local id keeps A reachable as the pinned home; a window named
+for the removed number resolves to whichever PR now owns that number.
 
 ## Implicit requirements
 

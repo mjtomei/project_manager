@@ -739,6 +739,27 @@ class TestPopupPickerEmptyProject:
         assert "d" not in _expect(collapsed)
         assert run_cmd.call_count == 0
 
+    def test_empty_project_from_review_window_names_pr_id(self, tmp_path, monkeypatch):
+        """The collapsed home names the PR id taken from the invoking window.
+
+        A review/qa window is named ``review-#12``/``qa-#12-s1``; the
+        collapsed notice must read ``#12``, not the raw tmux window name.
+        """
+        prs = [_pr("pr-a", status="in_review", gh_pr_number=12)]
+
+        def on_launch(n):
+            if n == 1:
+                prs.clear()
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["review-#12"], "review-#12",
+            [(0, "l\n"), (130, "")], on_launch=on_launch)
+        collapsed = fzf.calls[1]
+        assert _header(collapsed).splitlines() == ["PR Actions — #12", "q/Esc: quit"]
+        assert "Could not load actions for #12." in collapsed["input"]
+        assert "review-#12" not in collapsed["input"]
+        assert run_cmd.call_count == 0
+
 class TestPopupPickerMergedNavigation:
     """note-40057f4: moving to/from retained merged entries must never
     exit the picker, and live PRs stay reachable in both directions."""
