@@ -1292,6 +1292,28 @@ def _renew_launch(name: str, container_id: str = "") -> None:
                            stage="record launch ownership") from exc
 
 
+def _conclude_launch_lease(name: str, container_id: str) -> None:
+    """End the create-to-pane lease once its launch has attached (best effort).
+
+    Called under the launch lock after the generation check, so only the
+    launch that owns the current generation concludes it.  The pane (or the
+    foreground activity lock) owns the allocation from here; a leftover lease
+    would make ``--fresh`` within LAUNCH_GRACE refuse its own predecessor.
+    The generation is kept, so old EXIT releases stay valid.
+    """
+    from pm_core.container_reaper import LAUNCH_GRACE
+    expired = time.time() - LAUNCH_GRACE - 1
+    try:
+        markers = [_restart_generation_path(name), _identity_generation_path(container_id)]
+    except OSError:
+        return
+    for marker in markers:
+        try:
+            os.utime(marker, (expired, expired))
+        except OSError:
+            pass
+
+
 def recent_launch(name: str, grace: float, container_id: str | None = None) -> bool:
     """Protect attachment by name and by rename-stable allocation identity."""
     now = time.time()
@@ -2255,6 +2277,7 @@ def run_interactive_exec(name: str, cid: str, generation: str,
                 raise ContainerError(f"Container '{name}' changed before interactive attachment")
             if cleanup_generation(name) != generation:
                 raise ContainerError(f"Container '{name}' was recovered before interactive attachment")
+            _conclude_launch_lease(name, cid)
             if hold_activity != "0":
                 # Keep the legacy name lock for older readers, and an ID/domain
                 # lock so a runtime rename cannot hide an active foreground exec.
