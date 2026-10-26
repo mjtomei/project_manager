@@ -1500,6 +1500,54 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
       session` restart), with verification on and off: one `QA stopped`
       per process, no re-verify, no request after the stop, no verdict,
       overall, note or `sign_off`; after the fix one normal run.
+  - Twenty-ninth pass (S74+), recovered planner 2026-10-26, for bd62bc0d
+    (S71: `claim_return_launch` reads the clock inside the locked update,
+    so a claimant that waited on the project.yaml lock sees a claim
+    written while it waited) and for master moving under the branch.
+    bd62bc0d was checked live only by S71, which wrote it, and only for
+    the `qa` hop. The same function guards the `impl` and `review`
+    returns: the TUI catch-up (restart and the claim-expiry re-check),
+    and the `awaiting` tick of `pm pr auto-sequence`. Two `--fresh`
+    launchers there kill each other's session. Pre-fix control:
+    4efb40e0 with only bd62bc0d reverted, or 251763f8.
+    - S74: the `qa` hop under real lock contention: other pm commands
+      writing project.yaml (notes, edits, a second PR's ticks) and an
+      editor-style holder of 0.5, 1.5 and 1.9 s, both tick orders, and a
+      holder over the 2 s lock timeout. Expected: one driver per round.
+      A claim is stamped no earlier than the winner got the lock. Over
+      the timeout: one warning per tick, no launch, then one driver on
+      the next tick. Open point (decided as an observation): a claim
+      dated in the future (clock stepped back a few seconds) counts as
+      stale (`0 <= age`), so a second claimant launches. libfaketime,
+      if it is available.
+    - S75: the `review` and `impl` returns. The hop driver dies before
+      launching, the 180 s claim expires, and then the TUI re-check
+      (185 s) and an `awaiting` tick race under a lock holder. A TUI
+      restart right after the hop also races a tick. Expected: one fresh
+      review iteration and one impl session, and no session killed by a
+      second `--fresh` launch.
+    - S76: merge smoke. origin/master (211a6128) adds #250 (an oversized
+      prompt goes through a file-backed bootstrap: `pm/prompts/`, then
+      `; rm -f` after claude exits; bridge `--prompt-file`) and #251. A
+      merge into this branch conflicts in one hunk of
+      `launch_claude_print`. Keep the branch's
+      `_, effective_model, run_env = _resolve_provider(provider, model)`
+      and add master's `cleanup_path: str | None = None`. The rest
+      merges cleanly (project.yaml: keep ours). With that resolution the
+      planner's full suite gave 4018 passed and 1 failed. The failure,
+      test_dedup `test_returns_none_when_missing`, also fails on HEAD in
+      the planner's environment. Run it with TMUX/PM_* unset: inherited
+      pane variables also fail
+      `test_reqa_hop_refused_then_fixed_launches_over_judged_window` on
+      HEAD. Then run routed and
+      unrouted launches with prompts over 120 KB, host and container:
+      the bootstrap path is valid where claude runs, the routed
+      env/marker/pin is unchanged, the file is gone after exit, a route
+      outage relaunch delivers the prompt again, concurrent launches in
+      one workdir do not delete each other's files, and no secret is in
+      any prompt file. Harness: a stub that sees only the bootstrap line
+      must answer with a Read tool call for that path and choose its
+      canned reply from the tool result.
 
 ## 3. Edge cases
 
