@@ -35064,7 +35064,7 @@ prs:
   - id: note-90a9c93
     text: 'QA S68 (pr-592e4bd): the sign-off qa hop variant of this race (tick in
       the gap after the driver clears awaiting and kills the judged qa window) is
-      fixed on pr-592e4bd in 21bacfef by keeping the qa launch claim; the plain concurrent
+      fixed on pr-592e4bd in 109bca54 by keeping the qa launch claim; the plain concurrent
       qa-tick race (no sign-off return, no claim) is unchanged.'
     created_at: '2026-10-26T07:50:16Z'
     last_edited: '2026-10-26T07:50:16Z'
