@@ -12684,6 +12684,31 @@ prs:
       fix or unit-test substitute.'
     created_at: '2026-10-26T04:34:48Z'
     last_edited: '2026-10-26T04:34:48Z'
+  - id: note-9817629
+    text: 'QA S13 2026-10-26 (actual model chatgpt/gpt-6-astra-high, HEAD d53b8fd2):
+      real isolated Podman qualification succeeded after preserving original Chromium
+      inotify errno24/GPU smoke failure and applying authorized smoke-RUN-only omission.
+      Ordered real races succeeded for inventory-before-retain (exact ID and hashes
+      preserved), forced in-place restart before delayed genuine old exec return (same
+      ID, new generation, mounts/files preserved; proxy push origin SHA verified),
+      and different-ID replacement before delayed old EXIT (replacement survives;
+      proxy push SHA verified). Retained rename plus live same-name replacement also
+      survives stale and fresh scoped inventories. Concrete live-owner failure: a
+      responsive real podman exec -it FULL_ID sh started via a shell script in a second
+      test-session pane was removed by resumed scoped reap as no owning pane; snapshot
+      and responsive hash read both preceded removal. Tracked pr-b6c9f6a; _owner_panes
+      only sees pane_start_command, not running exec hidden by script/existing shell.
+      No source fix; process ownership design/fail-closed review required. Evidence
+      /pm-captures/scenarios/13/pre-fix/exact-id-owner/ and top-level manifest. Remaining
+      unexecuted: three launch competitors, rename attachment lease/prevalidation/abandonment
+      controls, retained abandoned replacement non-inheritance, renamed release/stale-marker
+      control, setup/reuse/restart decoy identity/failure trials, and >3600s lock
+      pruning/contention. A real unused lock was recorded after genuine launch/exit,
+      but not aged one hour or contended; no timestamp edits or claimed coverage.
+      Original harness focus-only attempts retained and excluded. Scenario cannot
+      pass with observed deletion and remaining coverage.'
+    created_at: '2026-10-26T04:32:20Z'
+    last_edited: '2026-10-26T04:32:20Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -32400,3 +32425,32 @@ prs:
       same-root-cause fixes carried by pr-1139060.'
     created_at: '2026-10-25T16:41:35Z'
     last_edited: '2026-10-25T16:41:35Z'
+- id: pr-b6c9f6a
+  plan: bugs
+  title: 'Bug: container reaper deletes a live exec started from an existing shell
+    or script'
+  branch: pm/pr-b6c9f6a-bug-container-reaper-deletes-a-live-exec-started-f
+  status: pending
+  depends_on: []
+  description: Observed during pr-1139060 scenario 13 on d53b8fd2. An independently
+    qualified PM allocation was genuinely abandoned before attachment and aged >120s.
+    Scoped reap was held after genuine inventory snapshot; a second test-session pane
+    ran a shell script that execs /usr/bin/podman exec -it FULL_ID sh, and returned
+    the real sentinel SHA before reap resumed. Reap then removed that full ID with
+    no owning pane (attempt ended), terminating the responsive shell. pm_core/container_reaper.py
+    _owner_panes only matches pane_start_command; the script pathname does not expose
+    the running exec ID, and external exec has no PM activity record. Need safe actual-process
+    ownership detection or a supported registration mechanism; do not merely infer
+    ownership from pane names. Evidence /pm-captures/scenarios/13/pre-fix/exact-id-owner/recording.cast
+    and recording.mp4, plus /pm-captures/scenarios/13/owner/. No fix attempted because
+    process-tree/platform and fail-closed behavior need design/review. This is within
+    current lifecycle acceptance coverage and must block scenario acceptance.
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T04:30:50.538365+00:00'
+  updated_at: '2026-10-26T04:30:50.538365+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
