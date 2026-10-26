@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-26T03:30:16.429692+00:00'
+  updated_at: '2026-10-26T04:57:18.221223+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -12305,19 +12305,21 @@ prs:
     created_at: '2026-10-25T21:31:06Z'
     last_edited: '2026-10-25T21:33:40Z'
   - id: note-095973e
-    text: 'Review-loop 6427 i11 (chatgpt/gpt-6-astra-high): fixed recovery running before the
-      attachment-lease guard (restart/recreate could destroy a concurrent attaching allocation),
-      retention lost on runtime rename (now runtime-domain/ID keyed with legacy lookup and ID-aware
-      pruning), and detached proxy children left running after readiness timeout/interruption
-      (terminate/reap before failure). Captured QA recovery handoff remains valid across its
-      own generation change. Before-fix regressions reproduced: 9 ownership/retention failures
-      and 2 proxy-start failures. Focused container/proxy suite 437 passed; final new regressions
-      27 passed, including a real delayed proxy subprocess cancellation; launcher/QA integration
-      143 passed. Final sanitized full suite completed successfully; exact count/warnings in
-      /pm-captures/review-6427-i11/full-suite-final.log. Evidence and per-file review: /pm-captures/review-6427-i11/README.md.
-      Existing lifecycle architecture retained; spec clarified. Existing model/handoff/manual-gate
-      edits preserved outside this review commit. No real-container QA claim or waiver; outstanding
-      runtime scenarios and independent sign-off remain required.'
+    text: 'Review-loop 6427 i11 (chatgpt/gpt-6-astra-high): fixed recovery running
+      before the attachment-lease guard (restart/recreate could destroy a concurrent
+      attaching allocation), retention lost on runtime rename (now runtime-domain/ID
+      keyed with legacy lookup and ID-aware pruning), and detached proxy children
+      left running after readiness timeout/interruption (terminate/reap before failure).
+      Captured QA recovery handoff remains valid across its own generation change.
+      Before-fix regressions reproduced: 9 ownership/retention failures and 2 proxy-start
+      failures. Focused container/proxy suite 437 passed; final new regressions 27
+      passed, including a real delayed proxy subprocess cancellation; launcher/QA
+      integration 143 passed. Final sanitized full suite completed successfully; exact
+      count/warnings in /pm-captures/review-6427-i11/full-suite-final.log. Evidence
+      and per-file review: /pm-captures/review-6427-i11/README.md. Existing lifecycle
+      architecture retained; spec clarified. Existing model/handoff/manual-gate edits
+      preserved outside this review commit. No real-container QA claim or waiver;
+      outstanding runtime scenarios and independent sign-off remain required.'
     created_at: '2026-10-25T21:47:53Z'
     last_edited: '2026-10-25T21:48:52Z'
   - id: note-a542eff
@@ -12337,20 +12339,21 @@ prs:
     created_at: '2026-10-25T22:03:42Z'
     last_edited: '2026-10-25T22:03:42Z'
   - id: note-bef786b
-    text: 'Review-loop 6427 i13 (main and inherited helper chatgpt/gpt-6-astra-high): fixed
-      generic missing-socket/empty-ID inspection falsely proving absence; owner releases lost
-      after runtime rename (ID/domain recovery epochs and ID-based scope/matching/pruning);
-      renamed unshared proxy cleanup (actual mount plus socket-generation guard); renamed
-      managed allocations missing from PR cleanup/running counts; shared proxy unlink failure
-      erasing owner metadata and sweep errors hidden from CLI/persisted diagnostics. Existing
-      lifecycle architecture retained; spec clarified. Before-fix regressions reproduced:
-      3 proxy failures, 5 inventory failures/2 controls, 5 rename-release failures. Focused
-      integration 201 passed; integrated core 482 passed; final regressions 102 passed. Final
-      sanitized full suite 3734 passed, 2 existing-class AsyncMock warnings. Installed declared
-      markdown dependency. Evidence/per-file review /pm-captures/review-6427-i13/README.md;
-      full suite /pm-captures/review-6427-i13-full-suite-final.log. Existing model/handoff/manual-gate
-      edits preserved outside commit. No new real-container QA claim or waiver; next review,
-      outstanding runtime scenarios and independent sign-off remain required.'
+    text: 'Review-loop 6427 i13 (main and inherited helper chatgpt/gpt-6-astra-high):
+      fixed generic missing-socket/empty-ID inspection falsely proving absence; owner
+      releases lost after runtime rename (ID/domain recovery epochs and ID-based scope/matching/pruning);
+      renamed unshared proxy cleanup (actual mount plus socket-generation guard);
+      renamed managed allocations missing from PR cleanup/running counts; shared proxy
+      unlink failure erasing owner metadata and sweep errors hidden from CLI/persisted
+      diagnostics. Existing lifecycle architecture retained; spec clarified. Before-fix
+      regressions reproduced: 3 proxy failures, 5 inventory failures/2 controls, 5
+      rename-release failures. Focused integration 201 passed; integrated core 482
+      passed; final regressions 102 passed. Final sanitized full suite 3734 passed,
+      2 existing-class AsyncMock warnings. Installed declared markdown dependency.
+      Evidence/per-file review /pm-captures/review-6427-i13/README.md; full suite
+      /pm-captures/review-6427-i13-full-suite-final.log. Existing model/handoff/manual-gate
+      edits preserved outside commit. No new real-container QA claim or waiver; next
+      review, outstanding runtime scenarios and independent sign-off remain required.'
     created_at: '2026-10-25T22:40:45Z'
     last_edited: '2026-10-25T22:40:45Z'
   - id: note-ac46915
@@ -12624,7 +12627,6 @@ prs:
       failures retained. No shared containers/quotas touched.'
     created_at: '2026-10-26T04:25:58Z'
     last_edited: '2026-10-26T04:25:58Z'
-
   - id: note-0078512
     text: 'QA S18 (2026-10-26, chatgpt/gpt-6-astra-high) partial runtime coverage,
       not PASS. d53b8fd2 synced. Private /scratch/s18-story1 HOME/state/tmux/rootless
@@ -12709,6 +12711,51 @@ prs:
       pass with observed deletion and remaining coverage.'
     created_at: '2026-10-26T04:32:20Z'
     last_edited: '2026-10-26T04:32:20Z'
+  - id: note-69a1571
+    text: 'S12 concretization (2026-10-26): verified reap/session-cleanup and PR --resources
+      CLI surfaces. Manual reap calls serialize (120s lock wait), so overlapping callers
+      test queueing plus failure preservation; use a separate full-reap vs explicit-cleanup
+      interleaving to exercise stale inventory/newer failure. Unavailable running/keyring
+      metrics are omitted, not printed as unavailable; annotate missing metrics in
+      QA evidence. session kill prints no removal count and must run from a surviving
+      control session with --dir TARGET, because it kills target panes; retry leftovers
+      via reap, not another kill. PR --resources must run inside the intended PM session.
+      No PM_SESSION_TAG override exists; use actual computed tags and a separately
+      seeded TAG-extra session/container fixture for prefix collision. Rename gate
+      must pause after identity capture but before removal recheck; a gate immediately
+      at rm-by-ID can legitimately delete the original ID. Runtime is available but
+      current store has no images; prior real S3 bootstrap and narrowly authorized
+      Chromium-smoke-only workaround are documented in /pm-captures/scenarios/3/manifest.md
+      and /pm-captures/infrastructure-recovery-20261025.md. Rebuild fresh isolated
+      fixtures; prior captures are setup leads, not S12 evidence. No lifecycle QA
+      was executed by this concretizer.'
+    created_at: '2026-10-26T04:05:18Z'
+    last_edited: '2026-10-26T04:05:18Z'
+  - id: note-88654d2
+    text: 'QA S12 (2026-10-26, main/inherited helper chatgpt/gpt-6-astra-high): real
+      private Podman native launch, mounted writes and proxy origin access qualified;
+      original Chromium inotify/GPU smoke failure retained, authorized smoke-RUN-only
+      recovery used. Found/fixed dropped rm stderr/status: baf0c683 pushed, tracking
+      pr-103aca4; same exact-ID refusal now visible in reap/status/explicit PR/session/legacy
+      errors, verified absence tolerance retained. Full3954 passed/2 skipped/5 warnings
+      before rebase; post-rebase focused180 passed (upstream S19/S10 fixes integrated,
+      note conflicts preserved both sides). Runtime evidence covers three preview
+      scopes/grouped base scope, exact intersection removal, live/retained protection,
+      six inventory faults, unknown ownership keep, serialized manual partial failures,
+      scoped retry, acknowledged old-snapshot/new-explicit-failure persistence, explicit
+      PR/session/legacy partial errors, later live owners/replacements, acknowledged
+      rename-before-recheck and fresh-name retry preserving old-name replacement.
+      Fixed hashes/actor/proxy held; both private stores empty after inventoried teardown.
+      Limitations: reused main fixture across distinct subtrials rather than rebuilding
+      each; early age/PATH/TMUX harness attempts excluded and retained; unknown fault-cleared
+      retry hit real inspect timeout after deletion (honest failure, later reconciled),
+      so clean independent retry still needed; explicit raw fixtures did not each
+      have their own proxy/workdir; legacy stopped target was configured via create.
+      NEEDS_WORK, not blanket acceptance; no other blocked QA waived. Evidence /pm-captures/scenarios/12/run-9f8c85b3/manifest.md
+      (45 validated cast/H264 pairs), pre-fix/removal-cause and post-fix/removal-cause.
+      Existing older S12 fixture/captures untouched.'
+    created_at: '2026-10-26T04:57:18Z'
+    last_edited: '2026-10-26T04:57:18Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -32039,7 +32086,6 @@ prs:
       and post-fix; manifest records remaining scenario coverage limits.'
     created_at: '2026-10-26T04:25:59Z'
     last_edited: '2026-10-26T04:25:59Z'
-
 - id: pr-3f52b15
   plan: bugs
   title: 'Bug: pm-home window created from a PR workdir shows that clone''s stale
@@ -32454,3 +32500,32 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-103aca4
+  plan: bugs
+  title: Container removal failure drops the runtime refusal diagnostic
+  branch: pm/pr-103aca4-container-removal-failure-drops-the-runtime-refusa
+  status: pending
+  depends_on: []
+  description: 'Found in pr-1139060 QA scenario 12: pm_core/container.py remove_container
+    ignores the nonzero rm result. With a real private Podman allocation and exact-ID
+    rm forwarding refusal (rc73, distinctive stderr), pm container reap and status
+    report only still present after 10 s, losing the actionable cause. Fixed in pr-1139060
+    by preserving rm status/stderr on unconfirmed removal while allowing concurrent
+    removal that verifies absence. Paired runtime evidence /pm-captures/scenarios/12/pre-fix/removal-cause
+    and post-fix/removal-cause; six focused regression cases.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T04:44:07.307725+00:00'
+  updated_at: '2026-10-26T04:44:27.347450+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-6507c58
+    text: 'Fixed during pr-1139060 QA S12: retain nonzero runtime rm status/stderr
+      whenever removal remains unconfirmed, while accepting verified absence after
+      a concurrent rm. Runtime pre/post recordings under /pm-captures/scenarios/12/{pre-fix,post-fix}/removal-cause;
+      regression validation and source commit will be recorded on pr-1139060.'
+    created_at: '2026-10-26T04:44:27Z'
+    last_edited: '2026-10-26T04:44:27Z'
