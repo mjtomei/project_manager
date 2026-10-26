@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T18:13:16.644535+00:00'
+  updated_at: '2026-10-26T23:23:21.416132+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33195,6 +33195,25 @@ prs:
       wholesale.'
     created_at: '2026-10-26T18:13:16Z'
     last_edited: '2026-10-26T18:13:16Z'
+  - id: note-74bd9f7
+    text: 'review-loop aa73 i4: closed the last base-interaction carry gap — a stored
+      resolution attempt that was never applied (a failed attempt, or a resolved candidate
+      a dirty workdir kept pm from applying) blocked `_carry_forward`''s base-interaction
+      carry, so when implementation reconciled the conflict by hand (the return text
+      tells it to fetch and merge the base) the next check saw the same base inside
+      HEAD with no base diff of its own and the file count/overlap/behaviour changes
+      vanished from the sign-off prompt, and the merge gate stopped requiring the
+      explicit evidence statement. `_carry_forward` now falls back to `_carry_base_interaction`
+      when it could not carry an applied resolution. Tests: 2 new in test_signoff_resolution.py
+      (136 focused; both mutation-checked against the pre-fix HEAD); full suite 3492
+      passed, 1 skipped, 1 deselected (known pre-existing hook-receiver installer
+      env failure, excluded — fails on an origin/master worktree too). Evidence: /pm-captures/review-aa73-i4/.
+      MERGE RISK unchanged: branch behind origin/master (211a6128); `_signoff_integration_block`
+      changed on both sides — keep both this PR''s resolution/candidate/applied rendering
+      AND master''s bounded lists (bounded_join + omitted_path_count + integration_pointer);
+      do not take this branch''s block wholesale. (2026-10-26T23:30:00Z)'
+    created_at: '2026-10-26T23:23:21Z'
+    last_edited: '2026-10-26T23:23:21Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
