@@ -1203,7 +1203,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 # before the echo, which fails (EPIPE) when the TUI that
                 # launched this restarted meanwhile (see _launch_review_window).
                 from pm_core.signoff import clear_return_awaiting
-                clear_return_awaiting(root, pr_id, "impl")
+                clear_return_awaiting(root, pr_id, "impl", session_opened=True)
                 click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
                 return
             except Exception as e:
@@ -1216,7 +1216,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         clear_session(root, session_key)
     click.echo("Launching Claude...")
     from pm_core.signoff import clear_return_awaiting
-    clear_return_awaiting(root, pr_id, "impl")
+    clear_return_awaiting(root, pr_id, "impl", session_opened=True)
     launch_claude(prompt, cwd=str(work_path), session_key=session_key, pm_root=root, resume=not fresh,
                   provider=resolved_provider, model=resolved_model, effort=_resolution.effort,
                   session_type="impl")
@@ -1507,7 +1507,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         # while the window runs (S75), so a tick after the claim expired
         # would launch a second --fresh review over it.
         from pm_core.signoff import clear_return_awaiting
-        clear_return_awaiting(state_root(), pr_entry["id"], "review")
+        clear_return_awaiting(state_root(), pr_entry["id"], "review",
+                              session_opened=True)
         click.echo(f"Opened review window '{window_name}'")
     except Exception as e:
         _log.warning("Failed to launch review window: %s", e)
@@ -4002,7 +4003,7 @@ def pr_qa_run_bg(pr_id: str):
         return
 
     from pm_core.signoff import clear_return_awaiting
-    clear_return_awaiting(root, pr_id, "qa")
+    clear_return_awaiting(root, pr_id, "qa", session_opened=True)
     state = QALoopState(pr_id=pr_id)
     try:
         run_qa_sync(state, root, pr_entry, on_update=None, max_scenarios=None)

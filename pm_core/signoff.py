@@ -842,15 +842,18 @@ def return_launch_claimed(pr: dict | None, hop: str) -> bool:
 
 
 def clear_return_awaiting(root: Path, pr_id: str, hop: str,
-                          timeout: float = store.LOCK_TIMEOUT_SECONDS) -> bool:
+                          timeout: float = store.LOCK_TIMEOUT_SECONDS,
+                          *, session_opened: bool = False) -> bool:
     """The routed *hop* launched a fresh session: stop forcing a relaunch.
 
     False when the lock was not acquired within *timeout* (a caller that
-    must not wait passes ``store.NO_WAIT`` and retries), else True.  Any
-    other caller has opened the session: past *timeout* it keeps waiting,
-    up to RETURN_CLEAR_WAIT_SECONDS, rather than leave ``awaiting`` and the
-    hop's claim behind that session (the first driver after the claim
-    expired would launch a second --fresh session over it).
+    must not wait passes ``store.NO_WAIT`` and retries), else True.  A
+    *session_opened* caller (a CLI launch or detached driver whose session
+    runs regardless) keeps waiting past *timeout*, up to
+    RETURN_CLEAR_WAIT_SECONDS, rather than leave ``awaiting`` and the hop's
+    claim behind that session (the first driver after the claim expired
+    would launch a second --fresh session over it).  Other callers (the
+    TUI's start_qa, on its main thread) give up after *timeout*.
     """
     def _apply(data):
         pr = store.get_pr(data, pr_id)
@@ -871,6 +874,8 @@ def clear_return_awaiting(root: Path, pr_id: str, hop: str,
         except store.StoreLockTimeout as e:
             if timeout == store.NO_WAIT:
                 return False
+            if not session_opened:
+                raise
             _log.warning("clear sign-off return for %s: %s; waiting up to "
                          "%ss more", pr_id, e, RETURN_CLEAR_WAIT_SECONDS)
             store.locked_update(root, _apply,

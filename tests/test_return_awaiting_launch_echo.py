@@ -63,7 +63,8 @@ def review_env(tmp_path, monkeypatch):
     monkeypatch.setattr(pr_mod, "state_root", lambda: tmp_path)
     cleared = []
     monkeypatch.setattr(signoff, "clear_return_awaiting",
-                        lambda root, pr_id, hop, **k: cleared.append((pr_id, hop)))
+                        lambda root, pr_id, hop, **k: cleared.append(
+                            (pr_id, hop, k.get("session_opened"))))
     data = {"project": {"name": "demo", "base_branch": "master", "backend": "vanilla"},
             "prs": [], "plans": []}
     pr_entry = {"id": PR, "title": "T", "branch": "pm/pr-001",
@@ -80,13 +81,13 @@ def test_review_return_cleared_when_launch_echo_hits_a_broken_pipe(review_env, m
         pr_mod._launch_review_window(data, pr_entry, fresh=True)
     except BrokenPipeError:
         pass
-    assert cleared == [(PR, "review")]
+    assert cleared == [(PR, "review", True)]
 
 
 def test_review_return_cleared_on_a_normal_launch(review_env):
     data, pr_entry, cleared = review_env
     pr_mod._launch_review_window(data, pr_entry, fresh=True)
-    assert cleared == [(PR, "review")]
+    assert cleared == [(PR, "review", True)]
 
 
 def test_impl_return_cleared_when_launch_echo_hits_a_broken_pipe(tmp_path, monkeypatch):
@@ -129,10 +130,11 @@ def test_impl_return_cleared_when_launch_echo_hits_a_broken_pipe(tmp_path, monke
     monkeypatch.setattr(git_ops, "checkout_branch", lambda *a, **k: None)
     cleared = []
     monkeypatch.setattr(signoff, "clear_return_awaiting",
-                        lambda root, pr_id, hop, **k: cleared.append((pr_id, hop)))
+                        lambda root, pr_id, hop, **k: cleared.append(
+                            (pr_id, hop, k.get("session_opened"))))
     monkeypatch.setattr(pr_mod.click, "echo", _broken_echo("Launched Claude in tmux window"))
 
     CliRunner().invoke(pr_mod.pr, ["start", PR, "--fresh", "--background"])
 
     assert windows, "the impl window was not opened"
-    assert cleared == [(PR, "impl")]
+    assert cleared == [(PR, "impl", True)]

@@ -833,11 +833,24 @@ def test_clear_waits_out_a_lock_holder_past_its_timeout(tmp_path, status, hop):
     t.join()
     assert signoff.return_awaiting(store.get_pr(store.load(tmp_path), PR)) == hop
 
+    # A caller whose session did not open (the TUI's start_qa, on its main
+    # thread) still gives up after its timeout, leaving ``awaiting`` set.
     held.clear()
     t = threading.Thread(target=hold, args=(0.6,))
     t.start()
     held.wait()
+    t0 = time.monotonic()
     assert signoff.clear_return_awaiting(tmp_path, PR, hop, timeout=0.2) is True
+    assert time.monotonic() - t0 < 0.5
+    t.join()
+    assert signoff.return_awaiting(store.get_pr(store.load(tmp_path), PR)) == hop
+
+    held.clear()
+    t = threading.Thread(target=hold, args=(0.6,))
+    t.start()
+    held.wait()
+    assert signoff.clear_return_awaiting(tmp_path, PR, hop, timeout=0.2,
+                                         session_opened=True) is True
     t.join()
     ret = store.get_pr(store.load(tmp_path), PR)["signoff_return"]
     assert ret["awaiting"] is None and "launch_claim" not in ret
