@@ -19,6 +19,7 @@ def provider_list():
     """List all configured providers."""
     from pm_core.providers import (
         get_default_provider, invalid_provider_entries, list_providers,
+        providers_file_problem,
     )
 
     default = get_default_provider()
@@ -40,6 +41,9 @@ def provider_list():
                 click.echo(f"    capabilities: {', '.join(p.capabilities)}")
     for name, problem in invalid_provider_entries().items():
         click.echo(f"  {name}  INVALID ENTRY: {problem}")
+    problem = providers_file_problem()
+    if problem:  # read as no providers: say why rather than list nothing
+        click.echo(f"  NOT READ: {problem}; fix it by hand")
 
 
 def _router_detail_lines(p) -> list[str]:

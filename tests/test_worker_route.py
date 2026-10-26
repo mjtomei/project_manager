@@ -2829,7 +2829,8 @@ def test_valid_entries_with_null_fields_still_load(pm_home_dir):
 def test_non_mapping_providers_file_is_ignored(pm_home_dir, text):
     (pm_home_dir / "providers.yaml").write_text(text)
     assert get_provider().name == "claude"
-    with pytest.raises(ProviderNotFoundError, match="is not configured"):
+    # Named, it is not found -- and the error says why (review c189 i11).
+    with pytest.raises(ProviderNotFoundError, match="is not a mapping"):
         get_provider(ROUTE, strict=True)
 
 
@@ -2881,6 +2882,70 @@ def test_provider_edits_leave_an_unreadable_file_alone(pm_home_dir, monkeypatch,
     with pytest.raises(ProvidersFileError):
         set_default_provider("claude")
     assert path.read_text() == text
+
+
+# Review c189 i11: pm reads a providers.yaml it cannot read (one stray tab,
+# a list block) as having no providers, so every routed launch, the QA route
+# gate and `pm provider test` said the route "is not configured ... (add it
+# with 'pm provider add ...')" -- an entry the file may well hold, and a
+# command i10 makes refuse such a file -- while `pm provider list` showed
+# nothing wrong.  They now name the file's problem.
+_UNREADABLE = {
+    "bad_yaml": (f"providers:\n  {ROUTE}:\n    type: router\n"
+                 f"\tmodel: {MODEL}\n", "it is not valid YAML (line 4)"),
+    "list_block": (f"providers: [{ROUTE}]\n",
+                   "its 'providers' block is not a mapping"),
+    "list_file": (f"- {ROUTE}\n", "it is not a mapping"),
+    "directory": (None, "it cannot be read (Is a directory)"),
+}
+
+
+@pytest.mark.parametrize("case", list(_UNREADABLE))
+def test_unreadable_providers_file_is_named_not_reported_missing(
+        pm_home_dir, case):
+    from pm_core.claude_launcher import _resolve_provider, build_claude_shell_cmd
+    from pm_core.providers import ProvidersFileUnreadableError
+    text, why = _UNREADABLE[case]
+    path = pm_home_dir / "providers.yaml"
+    if text is None:
+        path.mkdir()
+    else:
+        path.write_text(text)
+    for launch in (lambda: get_provider(ROUTE, strict=True),
+                   lambda: build_claude_shell_cmd(prompt="hi", provider=ROUTE),
+                   lambda: _resolve_provider(ROUTE)):
+        with pytest.raises(ProvidersFileUnreadableError) as exc:
+            launch()
+        assert str(exc.value) == (f"provider '{ROUTE}' cannot be looked up "
+                                  f"in {path}: {why}; fix the file by hand")
+    assert get_provider().name == "claude"  # nothing selected: unchanged
+    res = ModelResolution(provider=ROUTE, effort="high")
+    st = worker_route.check_route(res)  # the QA gates wait on this
+    assert not st.ok and why in st.problem
+    assert st.remedy.startswith(f"fix {path} by hand, or ")
+    assert worker_route.describe(res) == (
+        f"route={ROUTE} (providers.yaml UNREADABLE) effort=high")
+    assert worker_route.container_mounts(res) == {}
+    cli = TestProviderCLI()
+    r = cli._run("list")
+    assert r.exit_code == 0, r.output
+    assert f"  NOT READ: {path}: {why}; fix it by hand" in r.output
+    r = cli._run("test", ROUTE)
+    assert r.exit_code == 1 and why in r.output
+    assert "pm provider add" not in r.output
+
+
+def test_readable_file_without_the_provider_still_says_add_it(pm_home_dir):
+    from pm_core.providers import ProvidersFileUnreadableError
+    for text in ("providers:\n  # claude-work: ...\n",
+                 "providers:\n  other: {type: local, api_base: http://x}\n"):
+        (pm_home_dir / "providers.yaml").write_text(text)
+        with pytest.raises(ProviderNotFoundError,
+                           match=f"add it with 'pm provider add {ROUTE}") as exc:
+            get_provider(ROUTE, strict=True)
+        assert not isinstance(exc.value, ProvidersFileUnreadableError)
+        r = TestProviderCLI()._run("list")
+        assert r.exit_code == 0 and "NOT READ" not in r.output
 
 
 @pytest.mark.parametrize("starter,default", [

@@ -226,6 +226,15 @@ class ProviderEntryError(ProviderNotFoundError):
     """
 
 
+class ProvidersFileUnreadableError(ProviderNotFoundError):
+    """A named provider was not found because pm cannot read providers.yaml
+    (not valid YAML, not a mapping, a ``providers`` block that is not a
+    mapping), which it then reads as having no providers.  The message
+    names the file's problem: "add it with 'pm provider add'" would be
+    wrong (the entry may well be there) and that command refuses such a
+    file (:class:`ProvidersFileError`)."""
+
+
 # The other way out of a ProviderNotFoundError (its message names the
 # first: adding the provider), quoted where a launch reports one.
 PROVIDER_SETTING_HINT = ("or change the model setting that selects it "
@@ -424,6 +433,9 @@ def _read_providers_file() -> tuple[dict[str, Any], str | None]:
     try:
         import yaml
         data = yaml.safe_load(path.read_text()) or {}
+    except OSError as e:
+        _log.warning("Failed to read %s: %s", path, e)
+        return {}, f"it cannot be read ({e.strerror or e})"
     except Exception as e:
         _log.warning("Failed to load %s: %s", path, e)
         mark = getattr(e, "problem_mark", None)
@@ -444,6 +456,26 @@ def load_providers() -> dict[str, Any]:
     return _read_providers_file()[0]
 
 
+def _provider_block(data: dict[str, Any]) -> tuple[dict, str | None]:
+    """``(entries, problem)`` for the ``providers`` block of a read file: a
+    blank block (every entry commented out) is empty, one that is not a
+    mapping is ``({}, why)``."""
+    entries = data.get("providers")
+    if entries is None:
+        return {}, None
+    if not isinstance(entries, dict):
+        return {}, "its 'providers' block is not a mapping"
+    return entries, None
+
+
+def providers_file_problem() -> str | None:
+    """``"<path>: <why>"`` when pm reads providers.yaml as having no
+    providers although the file is there, else None."""
+    data, problem = _read_providers_file()
+    problem = problem or _provider_block(data)[1]
+    return f"{_providers_path()}: {problem}" if problem else None
+
+
 class ProvidersFileError(ValueError):
     """providers.yaml cannot be changed: pm cannot read it as a mapping."""
 
@@ -459,11 +491,7 @@ def load_providers_for_edit() -> dict[str, Any]:
     """
     data, problem = _read_providers_file()
     if problem is None:
-        entries = data.get("providers")
-        if entries is None:
-            data["providers"] = {}
-        elif not isinstance(entries, dict):
-            problem = "its 'providers' block is not a mapping"
+        data["providers"], problem = _provider_block(data)
     if problem:
         raise ProvidersFileError(
             f"{_providers_path()} cannot be changed: {problem}. Fix it by "
@@ -524,11 +552,14 @@ def get_provider(name: str | None = None, *,
         return ProviderConfig(name=BUILTIN_CLAUDE)
 
     # Look up the named provider in config
-    providers = config.get("providers")
-    if not isinstance(providers, dict):
-        providers = {}
+    providers = _provider_block(config)[0]
     if resolved not in providers:
         if strict and name:
+            unreadable = providers_file_problem()  # "<path>: <why>"
+            if unreadable:
+                raise ProvidersFileUnreadableError(
+                    f"provider {name!r} cannot be looked up in {unreadable}; "
+                    "fix the file by hand")
             raise ProviderNotFoundError(
                 f"provider {name!r} is not configured in {_providers_path()} "
                 f"(add it with 'pm provider add {name} ...')")
@@ -559,8 +590,7 @@ def invalid_provider_entries() -> dict[str, str]:
 
 
 def _provider_entries() -> dict:
-    entries = load_providers().get("providers")
-    return entries if isinstance(entries, dict) else {}
+    return _provider_block(load_providers())[0]
 
 
 def set_session_provider(provider_name: str, session_tag: str | None = None) -> None:

@@ -46,7 +46,8 @@ from urllib.parse import urlparse
 from pm_core import route_bridge
 from pm_core.paths import configure_logger, pm_home
 from pm_core.providers import (ProviderConfig, ProviderEntryError,
-                               ProviderNotFoundError, get_provider,
+                               ProviderNotFoundError,
+                               ProvidersFileUnreadableError, get_provider,
                                launch_env)
 
 _log = configure_logger("pm.worker_route")
@@ -183,6 +184,9 @@ def describe(resolution, *, container: bool = False) -> str:
     except ProviderEntryError:
         return (f"route={resolution.provider} (INVALID ENTRY in "
                 f"providers.yaml) effort={effort}")
+    except ProvidersFileUnreadableError:
+        return (f"route={resolution.provider} (providers.yaml UNREADABLE) "
+                f"effort={effort}")
     except ProviderNotFoundError:
         return (f"route={resolution.provider} (NOT CONFIGURED) "
                 f"effort={effort}")
@@ -439,8 +443,10 @@ def check_route(resolution, *, container: bool = False,
     except ProviderNotFoundError as exc:
         return RouteStatus(
             False, getattr(resolution, "provider", None), problem=str(exc),
-            remedy=("configure the provider on this host, or "
-                    f"{_main_account_remedy(session_type)}"))
+            remedy=((f"fix {pm_home() / 'providers.yaml'} by hand"
+                     if isinstance(exc, ProvidersFileUnreadableError) else
+                     "configure the provider on this host")
+                    + f", or {_main_account_remedy(session_type)}"))
     if cfg is None:
         return RouteStatus(True)
 

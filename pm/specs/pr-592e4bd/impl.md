@@ -68,7 +68,9 @@ it always runs plain `claude`, with `ANTHROPIC_BASE_URL` rewritten to
 ensure step). An explicitly named provider that is not configured raises
 `ProviderNotFoundError` (strict `get_provider`) instead of silently falling
 back to the built-in claude provider. So does an entry that is there but is
-not a provider (`ProviderEntryError`, a subclass; review loop c189 i9).
+not a provider (`ProviderEntryError`, a subclass; review loop c189 i9), and
+a providers.yaml pm cannot read, whose problem the error names
+(`ProvidersFileUnreadableError`, a subclass; review loop c189 i11).
 
 R4. **Container connectivity without exposing the router.** Stdlib-only
 `pm_core/route_bridge.py`:
@@ -1609,6 +1611,34 @@ See `/pm-captures/review-c189-i10/providers-file-cli-repro-{before,after}.txt`
 `test_provider_edits_leave_an_unreadable_file_alone[3]`, plus an
 `int_capabilities` case in the i9 tests. 8 mutations caught
 (`/pm-captures/review-c189-i10/mutation-checks.log`).
-Latest full suite: 3834 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
+Full suite 3834 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
 PYTHONPATH=/workspace, markdown 3.10.3 installed first;
 `/pm-captures/review-c189-i10/full-suite.log`).
+Review loop c189 i11 found i10 sound and fixed the launch side of the same
+file problems:
+- pm reads a providers.yaml it cannot read (not valid YAML, e.g. one stray
+  tab; not a mapping; a `providers` block that is not a mapping) as having
+  no providers. So every routed launch, the QA route gate and `pm provider
+  test` said the route "is not configured … (add it with 'pm provider add
+  …')". That is wrong when the entry is in the file, and since i10 that
+  command refuses such a file. `pm provider list` showed only the built-in
+  provider, with nothing wrong.
+- A named provider looked up in such a file now raises
+  `ProvidersFileUnreadableError` (a `ProviderNotFoundError`, so every
+  surface reports it as before): "provider '<name>' cannot be looked up in
+  <path>: <problem>; fix the file by hand". The route gate's remedy says
+  "fix <path> by hand", `describe` (`pm model show`) says `(providers.yaml
+  UNREADABLE)`, and `pm provider list` adds `NOT READ: <path>: <problem>`.
+- A file pm cannot open (e.g. a directory, permission denied) is "it cannot
+  be read (<reason>)", not "not valid YAML", here and in i10's edit error.
+- Unchanged: a readable file without the provider still says "add it", and
+  a launch with no provider selected still reads the file as empty (the
+  pre-existing `default` lookup).
+See `/pm-captures/review-c189-i11/unreadable-providers-file-{before,after}.txt`.
+Tests: `test_unreadable_providers_file_is_named_not_reported_missing[4]`,
+`test_readable_file_without_the_provider_still_says_add_it`, and
+`test_non_mapping_providers_file_is_ignored` now names the problem. 8
+mutations caught (`/pm-captures/review-c189-i11/mutation-checks.log`).
+Latest full suite: 3839 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
+PYTHONPATH=/workspace, markdown 3.10.3 installed first;
+`/pm-captures/review-c189-i11/full-suite.log`).
