@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T02:32:39.671938+00:00'
+  updated_at: '2026-10-26T02:45:45.876680+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34052,6 +34052,32 @@ prs:
       in_progress, reusing".'
     created_at: '2026-10-26T02:32:39Z'
     last_edited: '2026-10-26T02:32:39Z'
+  - id: note-6b249e4
+    text: 'QA S63 (2026-10-26, container mode, three PRs N no-model / P claude-opus-5-5
+      / R provider:claude-work-relay from a work-routed TUI shell, real claude 2.1.310,
+      main stub + work/-only relay to the real work route + refusing CONNECT recorder;
+      captures /pm-captures/scenarios/63, REPORT.md): RQ44/R9 held live on 09a23249,
+      no product change. N/P impl/review/refiner/worker containers: no mount, BASE_URL/SMALL_FAST/CLOUD_ML_REGION
+      received by name, commands env -u aliases/SMALL_FAST/AUTO_MODE/PM_ROUTE_BASE_URL
+      (N also the pin, no --model; P own pin + --model) and assign the mainstub BASE_URL;
+      running environs and host s0 panes clean (control vars kept). R: mount, ensure,
+      route URL + marker, work/ pin; 86/86 R relay requests work/ 200 (one org), 0
+      at the stub; N/P 0 at the relay; Fable/Haiku switches claude-fable-5-1/claude-haiku-5-5,
+      classifier unprefixed. Nested pm pr start inside R review container (no providers.yaml):
+      BASE_URL dropped on the PM_ROUTE_BASE_URL marker alone, no routing var, only
+      refused CONNECTs; plain-model nested keeps only its own pin. Bridge SIGTERM
+      with an R worker request open: route watch restarted it (same path, new pid)
+      and resumed the worker; z d removed before create, new mounted session; N/P
+      unchanged; all three QA PASS FINALIZE_DONE; 0 secrets. NEEDS_WORK only because
+      the N nested traffic sub-Then failed as written: Claude sends an http BASE_URL
+      through HTTPS_PROXY, so NO_PROXY must include the stub host (re-run held). Also:
+      real-model R turns never trigger a client-side classifier request (S59); an
+      extra relay-scripted fresh R review gave 14 work/claude-sonnet-5 classifier
+      calls, 200. qa.md clarified in 3e6f3e1b (needs independent review). Observation:
+      nested claude inherits the parent pane CLAUDE_CODE_SESSION_ID/MESSAGING_* (not
+      routing).'
+    created_at: '2026-10-26T02:45:45Z'
+    last_edited: '2026-10-26T02:45:45Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
