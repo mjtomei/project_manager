@@ -29479,7 +29479,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-26T17:10:38.318366+00:00'
+  updated_at: '2026-10-26T17:38:23.150003+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29768,6 +29768,23 @@ prs:
       install -e /workspace pyte` (and pytest for focused tests). Evidence: /pm-captures/scenarios/24/{manifest.md,story1,story2}.'
     created_at: '2026-10-26T17:10:38Z'
     last_edited: '2026-10-26T17:10:38Z'
+  - id: note-5b5c4e8
+    text: 'QA S26 (2026-10-26) NEEDS_WORK, fixed: the scenario''s "every PR has its
+      own ~/.pm/runtime/<id>.json" Then failed for the PR whose QA was launched by
+      the CLI driver — `pm pr qa-run-bg` ran `run_qa_sync` without mirroring anything
+      into runtime_state, so D had no runtime entry at all (pre-fix snapshots: null
+      in all 229 samples) while TUI-owned runs (A, B, C, E) did. Fix 9a46d187: the
+      driver now records qa running before the loop (keeping a pending suppress_switch
+      that belongs to a user start), done+verdict on completion, failed on exception;
+      the merged/closed guard still returns before any write. Tests tests/test_pr_auto_sequence.py::TestQaRunBgRuntimeState
+      (3, failed before) plus 283 focused tests pass. Re-ran the full five-PR story
+      on the fixed build: every PR has runtime/<id>.json (D qa done PASS), still exactly
+      one select_window (the user t on qa-E), grouped clients on main in all 772 samples,
+      21 s quiet with identical windows/clients. Focus behavior itself was clean pre-
+      and post-fix. Evidence: /pm-captures/scenarios/26/{manifest.md,story1,story2,post-fix}.
+      No standalone follow-up.'
+    created_at: '2026-10-26T17:38:23Z'
+    last_edited: '2026-10-26T17:38:23Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
