@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T17:21:26.119153+00:00'
+  updated_at: '2026-10-26T18:26:35.849299+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34470,6 +34470,43 @@ prs:
       shared /pm-captures/scenarios/<n>/ (overwrote 5..8).'
     created_at: '2026-10-26T17:21:26Z'
     last_edited: '2026-10-26T17:21:26Z'
+  - id: note-19b1ae9
+    text: 'QA S77 (2026-10-26, host, all fake-claude; HEAD c161f2cc vs control 07520c1b
+      side by side, post-fix on cd125898 = origin aaefb0e7 + fix; captures /pm-captures/scenarios/77/REPORT.md):
+      CODE CHANGE cd125898 needs normal re-review. Story 3 FOUND (both builds, R and
+      I): with project.yaml.lock held 3 s from the moment the relaunched window is
+      created, clear_return_awaiting logged "clear sign-off return for <pr>: Could
+      not acquire lock ... within 2.0s" and gave up. awaiting and the hop claim outlived
+      the session, and the first tick after hop+180 s printed "sign_off: returning
+      to review (iteration N)" / "returning to impl (relaunched)", killed the live
+      pane and opened a second --fresh (HEAD R 17:45:56, I 18:00:25; control R 17:42:41,
+      I 18:02:39). Fix: a waiting caller retries the clear for up to RETURN_CLEAR_WAIT_SECONDS
+      (= claim lifetime); NO_WAIT callers unchanged. Post-fix R and I rounds held:
+      cleared ~0.1 s after the 3 s hold, one session each, no relaunch. Incidental,
+      pre-existing (control identical): a tick that moves an idle SIGNOFF_IMPL rework
+      to in_review used fresh=False when its own transcript dir had no review iteration
+      (the TUI ran them), switched to the pre-return review window and stalled in_review;
+      now fresh for any open return. Tests: test_clear_waits_out_a_lock_holder_past_its_timeout[review|impl],
+      test_cli_impl_rework_review_replaces_window_of_tui_reviews (mutation-checked).
+      Story 1 (TUI hop + pm tui restart --breadcrumb at 0/0.25/0.5/1/2 s): HEAD R
+      5/5 and I 5 valid (r1,r3-r6) held; only offset 0 hit the launch (R1 EPIPE after
+      the window, awaiting cleared; I1 died on the "Killed existing window" echo before
+      any window: claim kept, ticks "running: impl", exactly one tick relaunch at
+      hop+181 s). Story 2 (CLI relaunch with stdout closed after the last pre-window
+      line): aa1f5c32 held on HEAD (cleared within 0.35 s, exit 1, review stderr empty,
+      impl stderr only "Failed to create tmux window: [Errno 32] Broken pipe"); control
+      stranded both and ticks replaced them at hop+182 s. Pre-fix HEAD R was replaced
+      by the respawned TUI review loop (S79 class, fixed by 2ad57eff); post-fix rerun
+      held fully. Spec slips: after a review hop the status is already in_review,
+      so pm pr review prints "is already in_review." (not "marked as in_review"),
+      so the reader must quit on /in_review\.$/; ctrl+q to an unattached TUI pane
+      only prints tmux "no current client", so kill the TUI window instead; tmux after-new-window
+      hooks need #{window_name} (hook_window_name is empty), and the impl clear lands
+      ~10 ms after new_window, so the lock helper must exec flock straight from run-shell
+      -b. Full suite: 3883 passed, 6 failed (same test_worker_route caplog failures
+      on parent aaefb0e7).'
+    created_at: '2026-10-26T18:26:35Z'
+    last_edited: '2026-10-26T18:26:35Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
