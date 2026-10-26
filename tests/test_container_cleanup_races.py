@@ -25,7 +25,11 @@ def test_renamed_removal_preserves_original_names_proxy(monkeypatch, tmp_path, o
     def runtime(*args, **kwargs):
         nonlocal removed
         if args[0] == "ps":
-            return subprocess.CompletedProcess(args, 0, "", "")
+            return subprocess.CompletedProcess(args, 0,
+                "new-id\n" if owner == "replacement" else "", "")
+        if args[0] == "inspect" and "{{json .Mounts}}" in args:
+            return subprocess.CompletedProcess(args, 0,
+                json.dumps(inspected[0]["Mounts"]), "")
         if args[0] == "rm":
             removed = True
             return subprocess.CompletedProcess(args, 0, "", "")
