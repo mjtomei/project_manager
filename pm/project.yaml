@@ -29798,6 +29798,17 @@ prs:
       send it repeatedly once the spinner frame paints.'
     created_at: '2026-10-26T17:51:15Z'
     last_edited: '2026-10-26T17:51:15Z'
+  - id: note-c139492
+    text: 'S25 refine (code read + tmux probe on 66325e40): a fresh `pm qa run <instr>
+      --pr P` with no qa-<P> window never gets a main pane. run_qa_sync creates it
+      with new_window_get_pane(..., "echo ''QA execution''"); that command exits at
+      once, there is no remain-on-exit, so the call returns None (reproduced on a
+      scratch tmux socket). _add_status_pane is then skipped: no qa-<P> window, no
+      status pane, no qa-planner registration. fef8 i1 _register_qa_planner only takes
+      effect when a qa-<P> window already exists (panes[0][0]). Likely predates this
+      PR; compare against /opt/pm-src before classifying.'
+    created_at: '2026-10-26T16:43:38Z'
+    last_edited: '2026-10-26T16:43:38Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
