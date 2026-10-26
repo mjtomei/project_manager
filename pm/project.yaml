@@ -34097,6 +34097,22 @@ prs:
       touch in the project needed no classifier, a curl POST did.'
     created_at: '2026-10-26T02:52:39Z'
     last_edited: '2026-10-26T02:52:39Z'
+  - id: note-558c3ba
+    text: 'Review a5a3 i1 (3e9f6b19, CODE CHANGE, small, needs normal re-review):
+      QA S64 bad02547 (QA-stopped provider error logs one warning, no traceback) and
+      QA-spec 3e6f3e1b/ab1f801e reviewed, sound. Gap fixed on the auto-sequence path:
+      pm pr auto-sequence runs QA in a detached pm pr qa-run-bg driver whose output
+      goes to /dev/null and which writes no qa_status.json before the planner; a provider
+      setup error of a gate-less QA role (planner, s0, verifier, finalizer) killed
+      the driver with a traceback in the pm log only, and every later tick relaunched
+      it ("running: qa (launched)"), no remedy anywhere. _launch_qa_detached now runs
+      qa_loop.check_ungated_qa_providers first: one Error: line rc 1, no driver spawned,
+      next tick launches once fixed; routed refiner/worker still wait at their gate.
+      The driver logs via _log_thread_end. 12 new tests, 6 mutations caught; full
+      suite 3853 passed rc 0 (markdown via --target); /pm-captures/review-a5a3-i1
+      (README). impl.md a5a3 i1 record.'
+    created_at: '2026-10-26T03:07:08Z'
+    last_edited: '2026-10-26T03:07:08Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
