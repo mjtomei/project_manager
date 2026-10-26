@@ -78,8 +78,14 @@
    are recomputed every render since `n` can change.  A failed reload logs
    a warning and keeps the complete previous state: build the replacement
    window maps and navigation inside the error handler before assigning any
-   state, including when YAML parses but a PR entry is malformed. Validate that
-   every entry has a command-safe string local `id` before building navigation
+   state, including when YAML parses but a PR entry is malformed. Load without
+   the store's status-repair normalization and require a raw status from
+   `VALID_PR_STATES`: missing/truncated statuses must not become actionable
+   `pending` entries during a partial write. Reject non-printable display IDs
+   (including NUL, newline and terminal escapes in `gh_pr_number`) before they
+   reach fzf arguments or rows. Apply these checks to initial load as well as
+   refresh. Validate that every entry has a command-safe string local `id`
+   before building navigation
    (`[A-Za-z0-9][A-Za-z0-9_.-]*`, covering generated and legacy IDs):
    `gh_pr_number` alone can provide a display id but cannot support dispatch.
    Local IDs must be unique across the snapshot. Canonical display IDs must
@@ -109,6 +115,8 @@
    transaction as the window-name map so navigation redraws current dots.
    Query all attached session/window pairs in one tmux `list-sessions` call
    rather than adding one subprocess per grouped session on each keypress.
+   Index QA window suffix boundaries once per snapshot so matching scenario
+   windows does not rescan all windows for every PR on every keypress.
    h/l/←/→ (and 0 with a home PR) stay in `--expect` even when the list has
    one entry — unadvertised,
    they act as a reload, so a PR that is reopened or gains a window after

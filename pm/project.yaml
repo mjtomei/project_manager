@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T14:55:41.074716+00:00'
+  updated_at: '2026-10-26T15:14:43.849059+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16310,6 +16310,24 @@ prs:
       and sign-off remain required.'
     created_at: '2026-10-26T14:55:41Z'
     last_edited: '2026-10-26T14:55:41Z'
+  - id: note-d802f68
+    text: 'Review 1eaf i7: reproduced/fixed raw snapshot gaps: store.load normalized
+      missing/truncated status to actionable pending, so picker now loads without
+      normalization and validates VALID_PR_STATES; non-printable display IDs (including
+      YAML-escaped NUL in gh_pr_number) are rejected before fzf launch. Fixed incidental
+      test harness PM_POPUP_SESSION leakage. Indexed QA window suffix boundaries once
+      per snapshot rather than scanning all windows per PR; same output on a 1500-PR/400-window
+      comparison, 57ms baseline vs 3ms indexed. Added 22 regression/control cases
+      and expanded impl/QA E6. Final targeted popup/session/tmux: 387 passed. Full
+      suite after final code/test edits: 3667 passed, 1 skipped, 3 warnings in 166.87s
+      (real git PATH, scratch declared markdown dependency, PM_HOST_HOME unset for
+      known fixture environment issue). Evidence /pm-captures/review-1eaf-i7-{repro,env-repro,display-and-scale,targeted-final,full-final-verified,summary}.txt.
+      Earlier full-final.txt stopped before fixes and superseded. No architectural
+      blocker, standalone follow-up, or live QA PASS claimed. Fresh review/live QA/sign-off
+      required, updated E6 plus prior E11/C1/R13/E10. Transfer stash, all-role Astra
+      overrides and verify-s15-followup.md preserved.'
+    created_at: '2026-10-26T15:14:43Z'
+    last_edited: '2026-10-26T15:14:43Z'
   model: provider:chatgpt-astra
   session_models:
     impl: provider:chatgpt-astra

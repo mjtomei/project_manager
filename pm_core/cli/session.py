@@ -1161,6 +1161,7 @@ def _build_nav_entries(
     couldn't load it), or None for a non-PR window.
     """
     from pm_core.cli.helpers import _pr_display_id
+    from pm_core.pr_utils import VALID_PR_STATES
 
     import re
 
@@ -1174,7 +1175,11 @@ def _build_nav_entries(
         if (not isinstance(pr_id, str)
                 or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", pr_id) is None):
             raise ValueError("Picker PR entry requires a non-empty, command-safe string id")
+        if pr.get("status") not in VALID_PR_STATES:
+            raise ValueError("Picker PR entry requires a valid status")
         display_id = _pr_display_id(pr)
+        if not display_id.isprintable():
+            raise ValueError("Picker PR entry requires a printable display id")
         # Partial state repairs can temporarily assign a number to two PRs.
         # Historical terminal-only duplicates are harmless (no actions), but
         # any collision involving a live PR makes display lookup unsafe.
@@ -1188,6 +1193,14 @@ def _build_nav_entries(
     home = _find_pr_for_window_id(prs, window_pr_id) if window_pr_id else None
     home_pr = _pr_display_id(home) if home is not None else window_pr_id
 
+    # Index all QA suffix boundaries once, preserving the existing arbitrary
+    # suffix match even for hyphenated local ids. Navigation reloads on each key.
+    qa_window_prefixes = set()
+    for name in open_windows:
+        if name.startswith("qa-"):
+            qa_window_prefixes.update(name[:i] for i, ch in enumerate(name)
+                                      if ch == "-" and i > 2)
+
     def _has_open_window(pr: dict) -> bool:
         ids = {_pr_display_id(pr), pr.get("id")}
         for label, pat in _ACTION_WINDOW_PATTERNS.items():
@@ -1199,9 +1212,7 @@ def _build_nav_entries(
                 win_name = pat.format(display_id=i)
                 if win_name in open_windows:
                     return True
-                if label == "qa" and any(
-                        _action_window_matches(label, win_name, w)
-                        for w in open_windows):
+                if label == "qa" and win_name in qa_window_prefixes:
                     return True
         return False
 
@@ -1907,7 +1918,9 @@ def popup_picker_cmd(session: str, window_name: str):
     saved_root = _resolve_root_from_session(session)
     try:
         root = saved_root if saved_root is not None else state_root()
-        data = store.load(root)
+        # Validate the raw snapshot below: the general loader repairs invalid
+        # statuses to pending, which could make a partially written PR actionable.
+        data = store.load(root, validate=False)
     except FileNotFoundError:
         click.echo("No project.yaml found.")
         _pause_and_exit(1)
@@ -2028,7 +2041,7 @@ def popup_picker_cmd(session: str, window_name: str):
         nonlocal prs, nav_pr_ids, pr_by_disp, home_pr, window_pr_id
         nonlocal open_windows, name_to_wid, caller_wid, other_wids
         try:
-            fresh_prs = store.load(root).get("prs") or []
+            fresh_prs = store.load(root, validate=False).get("prs") or []
             fresh_windows = tmux_mod.list_windows(base)
             fresh_open = {w["name"] for w in fresh_windows}
             fresh_name_to_wid = {w["name"]: w["id"] for w in fresh_windows}

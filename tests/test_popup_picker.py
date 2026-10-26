@@ -446,6 +446,19 @@ class TestFindPrForWindowId:
 
 
 class TestBuildNavEntries:
+    @pytest.mark.parametrize("window, expected", [
+        ("qa-pr-a-s1", ["pr-a"]),
+        ("qa-pr-a-custom-suffix", ["pr-a"]),
+        ("qa-pr-a", ["pr-a"]),
+        ("qa-pr-ab-s1", []),
+        ("review-pr-a-s1", []),
+        ("qa-#12-s1", ["#12"]),
+    ])
+    def test_qa_suffix_index_preserves_matching(self, window, expected):
+        prs = [_pr("pr-a"), _pr("pr-b", gh_pr_number=12)]
+        nav, _, _ = _build_nav_entries(prs, None, {window})
+        assert nav == expected
+
     def test_non_pr_window_skips_merged(self):
         prs = [_pr("pr-a", status="merged", gh_pr_number=238),
                _pr("pr-b", status="in_review", gh_pr_number=240),
@@ -545,7 +558,7 @@ def _expect(call):
 
 
 def _run_picker(tmp_path, monkeypatch, prs, windows, window_name, script,
-                on_launch=None, has_fzf=True):
+                on_launch=None, has_fzf=True, load_project=None):
     """Drive popup_picker_cmd end to end with a fake fzf.
 
     ``prs`` is re-read on every project.yaml load, so a test can mutate it
@@ -557,12 +570,14 @@ def _run_picker(tmp_path, monkeypatch, prs, windows, window_name, script,
     reg = tmp_path / "registry.json"
     reg.write_text("{}")
     monkeypatch.setenv("PM_PROJECT", str(tmp_path))
+    monkeypatch.setenv(sess.tmux_mod.POPUP_SESSION_ENV, "pm-x")
     fzf = _FakeFzf(script, on_launch)
     run_cmd = MagicMock()
     with patch.object(sess.pane_registry, "registry_path", return_value=reg), \
          patch.object(sess, "_resolve_root_from_session", return_value=tmp_path), \
          patch.object(sess.store, "load",
-                      side_effect=lambda *a, **k: {"prs": [dict(p) for p in prs]}), \
+                      side_effect=load_project or (
+                          lambda *a, **k: {"prs": [dict(p) for p in prs]})), \
          patch.object(sess.tmux_mod, "list_windows",
                       return_value=[{"name": n, "id": f"@{i}"}
                                     for i, n in enumerate(windows)]), \
@@ -889,6 +904,109 @@ class TestPopupPickerMergedNavigation:
 
 
 class TestPopupPickerRefreshFailures:
+    @pytest.mark.parametrize("bad_status", [None, "merg", ""])
+    @pytest.mark.parametrize("key", ["s", "l"])
+    def test_raw_invalid_status_is_not_normalized_into_actions(
+            self, tmp_path, monkeypatch, bad_status, key):
+        import yaml
+        from pm_core.cli import session as sess
+
+        prs = [_pr("pr-a"), _pr("pr-b")]
+        path = tmp_path / "project.yaml"
+        path.write_text(yaml.safe_dump({"prs": prs}))
+        real_load = sess.store.load
+
+        def on_launch(n):
+            if n == 1:
+                broken = dict(prs[0], status=bad_status)
+                if bad_status is None:
+                    broken.pop("status")
+                path.write_text(yaml.safe_dump({"prs": [broken, prs[1]]}))
+            elif n == 2:
+                prs[0]["status"] = "merged"
+                path.write_text(yaml.safe_dump({"prs": prs}))
+
+        with patch.object(sess, "_log") as log:
+            fzf, run_cmd = _run_picker(
+                tmp_path, monkeypatch, prs, ["pr-a", "pr-b"], "pr-a",
+                [(0, f"{key}\n"), (0, "0\n"), (130, "")],
+                on_launch=on_launch, load_project=real_load)
+        run_cmd.assert_not_called()
+        assert any("refresh failed" in c.args[0]
+                   for c in log.warning.call_args_list)
+        assert "No actions — PR is merged." in fzf.calls[-1]["input"]
+
+    @pytest.mark.parametrize("invalid", [
+        {"status": "merg"}, {"status": None}, {"gh_pr_number": "12\x00"},
+    ])
+    def test_invalid_raw_initial_snapshot_reports_error_without_launch(
+            self, tmp_path, monkeypatch, capsys, invalid):
+        import yaml
+        from pm_core.cli import session as sess
+
+        prs = [dict(_pr("pr-a"), **invalid)]
+        (tmp_path / "project.yaml").write_text(yaml.safe_dump({"prs": prs}))
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["pr-a"], "pr-a", [],
+            load_project=sess.store.load)
+        assert "Could not load PR actions:" in capsys.readouterr().out
+        assert not fzf.calls
+        run_cmd.assert_not_called()
+
+    @pytest.mark.parametrize("choice", ["1", "s"])
+    def test_raw_invalid_status_blocks_fallback(
+            self, tmp_path, monkeypatch, choice):
+        import yaml
+        from pm_core.cli import session as sess
+
+        prs = [_pr("pr-a")]
+        path = tmp_path / "project.yaml"
+        path.write_text(yaml.safe_dump({"prs": prs}))
+
+        def choose(prompt):
+            path.write_text(yaml.safe_dump({"prs": [dict(prs[0], status="merg")]}))
+            return choice
+
+        with patch("builtins.input", side_effect=choose):
+            _, run_cmd = _run_picker(
+                tmp_path, monkeypatch, prs, ["pr-a"], "pr-a", [],
+                has_fzf=False, load_project=sess.store.load)
+        run_cmd.assert_not_called()
+
+    @pytest.mark.parametrize("bad_number", ["12\x00", "12\n13", "12\x1b[2J"])
+    def test_control_character_display_id_rejects_snapshot(self, bad_number):
+        with pytest.raises(ValueError, match="display id"):
+            _build_nav_entries([_pr("pr-a", gh_pr_number=bad_number)],
+                               "pr-a", {"pr-a"})
+
+    def test_control_character_number_keeps_last_good_snapshot(
+            self, tmp_path, monkeypatch):
+        prs = [_pr("pr-a", gh_pr_number=12), _pr("pr-b")]
+
+        def on_launch(n):
+            if n == 1:
+                prs[0]["gh_pr_number"] = "12\x00"
+            elif n == 2:
+                prs[0]["gh_pr_number"] = 12
+                prs[0]["status"] = "merged"
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["#12", "pr-b"], "pr-a",
+            [(0, "s\n"), (0, "0\n"), (130, "")], on_launch=on_launch)
+        assert "PR Actions — #12" in _header(fzf.calls[1])
+        assert "No actions — PR is merged." in fzf.calls[-1]["input"]
+        run_cmd.assert_not_called()
+
+    def test_harness_restores_popup_environment(self, tmp_path):
+        import os
+        from pm_core.cli import session as sess
+
+        before = os.environ.get(sess.tmux_mod.POPUP_SESSION_ENV)
+        with pytest.MonkeyPatch.context() as mp:
+            _run_picker(tmp_path, mp, [_pr("pr-a")], ["pr-a"], "pr-a",
+                        [(130, "")])
+        assert os.environ.get(sess.tmux_mod.POPUP_SESSION_ENV) == before
+
     @pytest.mark.parametrize("bad_id", [None, "", 123, ["pr-a"], "missing",
                                        "pr-a'", "pr-a b", "pr-a\n", "pr-a\\b"])
     @pytest.mark.parametrize("key", ["s", "0", "l"])

@@ -143,7 +143,13 @@ actions. Repair the file with
 the selected PR merged/closed; the next fzf action attempt shows its notice
 without dispatch. Also try `title: null` and numeric titles (including `0`)
 on a live PR: navigation remains usable and titles render as blank/text rather
-than crashing; zero must render as `0`, not blank.
+than crashing; zero must render as `0`, not blank. Repeat valid-YAML partial
+writes with a missing, null, empty or truncated status (`merg`): the picker must
+reject the snapshot, not normalize it to actionable pending. Exercise navigation,
+fzf dispatch and the no-fzf selection, then repair to merged and verify its
+notice. Also use YAML-escaped control characters (NUL/newline/escape) in
+`gh_pr_number`: reject the snapshot before fzf launches, retain the last-good
+view on reload, and show the readable error on initial load, without a traceback.
 E7. **Given** the home PR's windows are all closed while the popup is open,
 **When** user presses home, **Then** home PR still shown.
 E8. **Given** a live PR is shown, **When** the user moves to an action row and
