@@ -1548,6 +1548,58 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
       any prompt file. Harness: a stub that sees only the bootstrap line
       must answer with a Read tool call for that path and choose its
       canned reply from the tool result.
+  - Thirtieth pass (S77+), recovered planner, no spec commit at the time
+    (note-e7b62e8). S77 found and fixed cd125898: a waiting
+    `clear_return_awaiting` caller retries past the 2 s lock timeout for
+    up to RETURN_CLEAR_WAIT_SECONDS (180 s), and an idle SIGNOFF_IMPL
+    rework tick reviews `--fresh`. S78 found and fixed 50b5bd91: a
+    relaunched worker whose scenario container is gone gets the container
+    recreated, or INPUT_REQUIRED at once with the reason. S79 found and
+    fixed 2ad57eff, on a scratch master merge that did not have 50b5bd91:
+    the TUI adopts a review return that a tick launched, and impl idle is
+    judged only from the pane's own session.
+  - Thirty-first pass (S80+), delta-only, planner 2026-10-26. Product
+    changes since run d672c8b886d7dec3: the master merge is now committed
+    (62ba5b0f, origin/master 211a6128, unchanged since). Review 6bbd i1
+    0f4ecbf2 has never run live. It makes the 180 s wait opt-in
+    (`session_opened=True`): the CLI `pm pr review` / `pm pr start`
+    return launches and the detached `qa-run-bg` driver opt in. The TUI's
+    `start_qa` gives up after 2 s again, as on 07520c1b. It runs on the
+    TUI main thread, from the `signoff_ui.step` REQA hop and from the
+    auto_start REQA relaunch. Pre-fix control: 62ba5b0f, which freezes
+    the TUI for up to 182 s.
+    - S80: the TUI `qa` hop with a project.yaml holder of 1.5, 3 and
+      10 s at `start_qa`. Expected: the TUI keeps painting and accepting
+      keys, with one `clear sign-off return` warning past 2 s, and the
+      re-run starts. The control freezes until the holder is released.
+      Open points from code reading (S80 decides each one, against the
+      control). After the give-up, `awaiting: qa` stays set and the TUI
+      took no claim. (a) `_auto_start_qa_loops` relaunches QA over a
+      held verdict while `return_awaiting(pr) == "qa"`. So a re-run that
+      ends INPUT_REQUIRED would be re-run once more, without a human,
+      after `_qa_loops` drops it. (b) A re-run that ends PASS is handed
+      on by the completion `_trigger_signoff`, which ignores `awaiting`.
+      If the completion is missed, for example by a TUI restart before
+      the hand-off, `advance_all` refuses the PASS while `awaiting` is
+      `qa`, and auto_start re-runs QA instead. (c) Any `pm pr
+      auto-sequence` tick while the re-run is in flight launches a
+      driver over it. This is pr-bddda0f and counts as an observation.
+    - S81: the opted-in callers still wait, with a concurrent workload:
+      tick- and TUI-launched review and impl returns and a tick REQA
+      `qa-run-bg`, for two PRs at once, under 3 s and 10 s holders and
+      other pm commands writing project.yaml. Expected: one session per
+      return, `awaiting` cleared after the release, no relaunch after
+      the claim expires, and the TUI responsive throughout. The TUI
+      review loop runs `pm pr review` with a 120 s subprocess timeout,
+      which is shorter than the 180 s wait. A single holder over 120 s
+      is recorded as an observation.
+    - S82: smoke of the committed merge in container mode, with real
+      claude against the router and main stubs. Oversized file-backed
+      prompts on routed and unrouted roles. A worker whose container is
+      removed mid-run is recreated (50b5bd91) and gets its file-backed
+      prompt again. A routed review return is launched by a tick and
+      adopted by the TUI (2ad57eff). `pm container cleanup` under podman
+      3. The full suite runs on HEAD with TMUX/PM_* unset.
 
 ## 3. Edge cases
 
