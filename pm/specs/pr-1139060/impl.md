@@ -317,8 +317,11 @@ intact to protect concurrent waiters and delayed releases.
   exists, finish post-setup in place (idempotent) and re-verify; otherwise
   remove and recreate only when missing readiness is confirmed by a successful
   exec of `test` returning 1 without runtime errors. Failed exec/post-setup
-  preserves the existing filesystem and reports its cause for retry. If the
-  incomplete container has a live owning pane and cannot be finished, raise
+  preserves the existing filesystem and reports its cause for retry. This includes
+  verification after in-place completion: missing completion/config markers do not
+  authorize recreation, and PID/memory/keyring probe errors retain their real cause
+  both after completion and after restart. If the incomplete container has a live
+  owning pane and cannot be finished, raise
   instead of killing it. Explicit retention also blocks recreation of stopped
   or incomplete containers and automatic pressure-recovery restart; safe
   idempotent setup completion is still allowed.

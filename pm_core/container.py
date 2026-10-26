@@ -1170,7 +1170,10 @@ def _host_claude_json() -> Path:
 
 def _setup_complete(name: str) -> bool:
     """True when the host-side post-setup finished (config copied)."""
-    return _probe_setup(name)[0]
+    complete, kind, stderr = _probe_setup(name)
+    if kind:
+        raise launch_error(name, kind, stderr, stage="verify completed setup")
+    return complete
 
 
 def _probe_setup(name: str) -> tuple[bool, str, str]:
@@ -1504,6 +1507,13 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
         if base.returncode == 0:
             _post_setup(container_id, workdir, "podman" in _get_runtime())
             finished = _setup_complete(container_id)
+            if not finished:
+                # Finishing setup is non-destructive. A failed verification
+                # afterwards is not permission to discard the existing files.
+                raise launch_error(name, "incomplete",
+                                   "setup verification failed after in-place completion; "
+                                   "preserving existing container",
+                                   stage="be reused")
         elif base.returncode != 1 or (base.stderr or "").strip():
             raise launch_error(name, "runtime", (base.stderr or "").strip()
                                or f"readiness probe exited {base.returncode}",
