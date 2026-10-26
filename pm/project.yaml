@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-26T02:27:04.227306+00:00'
+  updated_at: '2026-10-26T02:50:58.644044+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -12537,6 +12537,25 @@ prs:
       next review, outstanding runtime scenarios and independent sign-off remain required.'
     created_at: '2026-10-26T02:27:04Z'
     last_edited: '2026-10-26T02:27:04Z'
+  - id: note-9f5d28b
+    text: 'Review-loop 6427 i24 (main and inherited core reviewer chatgpt/gpt-6-astra-high):
+      fixed failed-run/pre-run name-only cleanup by verifying attempt labels and pinning
+      immutable IDs; stopped-allocation cleanup captures ID before state probe and
+      fresh creation no longer pre-deletes a reusable name. Fixed transient QA concretizer-discard
+      failure becoming immortal: checked concretizer-only handoff now persists an
+      identity-bound release before removal, preserving other/unknown owners, retention,
+      restart and replacement. Existing lifecycle architecture retained; R3/R5 clarified.
+      Baseline new assertions: 19 fresh/preclean failures, 5 attachment failures/2
+      controls. Final focused core 603 passed; integration 198 passed/2 skipped; attachment
+      subset 105 passed. Final sanitized full suite 3920 passed, 2 skipped, 3 existing-class
+      AsyncMock warnings. Source/spec/tests c3b74a8f pushed. Declared markdown dependency
+      installed; intermediate fixture failures retained. Evidence and all per-file
+      notes /pm-captures/review-6427-i24-per-file.md; full log /pm-captures/review-6427-i24-full-suite-final.log.
+      Existing project.yaml routing/handoff/manual-gate edits preserved outside source
+      commit. No real-container QA claim or waiver; outstanding scenarios and independent
+      sign-off remain required.'
+    created_at: '2026-10-26T02:50:24Z'
+    last_edited: '2026-10-26T02:50:58Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
