@@ -505,6 +505,70 @@ class TestBuildNavEntries:
         assert nav == ["#5"]
 
 
+class TestBuildNavEntriesRejection:
+    """A rejected snapshot must name the entry to repair.
+
+    The picker fails closed on any malformed entry, so the message is the
+    user's only clue in a large project.
+    """
+
+    def test_bad_id_names_entry_and_ids(self):
+        prs = [_pr("pr-ok"), _pr("pr-a b", gh_pr_number=12)]
+        with pytest.raises(ValueError) as exc:
+            _build_nav_entries(prs, None, set())
+        msg = str(exc.value)
+        assert "command-safe string id" in msg
+        assert "entry #2" in msg
+        assert "id='pr-a b'" in msg
+        assert "gh_pr_number=12" in msg
+
+    def test_bad_status_names_entry(self):
+        prs = [_pr("pr-ok"), _pr("pr-a", status="merg")]
+        with pytest.raises(ValueError) as exc:
+            _build_nav_entries(prs, None, set())
+        msg = str(exc.value)
+        assert "valid status" in msg
+        assert "entry #2" in msg
+        assert "status='merg'" in msg
+
+    def test_non_mapping_entry_names_its_type(self):
+        with pytest.raises(ValueError) as exc:
+            _build_nav_entries(["pr-a"], None, set())
+        msg = str(exc.value)
+        assert "entry #1" in msg
+        assert "not a mapping: str" in msg
+
+    def test_control_characters_stay_escaped(self):
+        prs = [_pr("pr-a", gh_pr_number="12\x00")]
+        with pytest.raises(ValueError) as exc:
+            _build_nav_entries(prs, None, set())
+        msg = str(exc.value)
+        assert "printable display id" in msg
+        assert "entry #1" in msg
+        assert "\x00" not in msg
+        assert "\\x00" in msg
+
+    def test_ambiguous_display_names_both_sides(self):
+        prs = [_pr("pr-a", gh_pr_number=12), _pr("pr-b", gh_pr_number=12)]
+        with pytest.raises(ValueError) as exc:
+            _build_nav_entries(prs, None, set())
+        msg = str(exc.value)
+        assert "ambiguous local or display ids" in msg
+        assert "entry #2" in msg
+        assert "collides with an earlier entry" in msg
+
+    def test_popup_prints_the_rejected_entry(self, tmp_path, monkeypatch, capsys):
+        prs = [_pr("pr-ok"), _pr("pr-b", status="merg")]
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["pr-ok"], "pr-ok", [])
+        out = capsys.readouterr().out
+        assert "Could not load PR actions" in out
+        assert "entry #2" in out
+        assert "status='merg'" in out
+        assert not fzf.calls
+        run_cmd.assert_not_called()
+
+
 class TestNoActionsNotice:
     def test_merged(self):
         assert _no_actions_notice("#238", _pr("pr-a", status="merged")) == \

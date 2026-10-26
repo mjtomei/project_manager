@@ -181,7 +181,10 @@ still resolves its display id. Also try null, empty and non-string local ids;
 none may replace the last-good snapshot or be used in a command. Include quoted,
 backslash-containing and whitespace-containing IDs. Opening the popup with
 malformed initial data must show `Could not load PR actions: ...`, log the
-failure and wait for dismissal without a traceback. After repairing
+failure and wait for dismissal without a traceback; the message must name
+the rejected entry (its 1-based position plus the offending `id`,
+`gh_pr_number` and `status`, with control characters escaped) so a bad entry
+in a large project is locatable. After repairing
 the file, the next nav key reloads normally. While refresh is failing, shortcut,
 Enter-on-action, fresh/loop chord and no-fzf selections must not dispatch cached
 actions. Repair the file with

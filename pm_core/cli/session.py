@@ -1151,6 +1151,21 @@ def _find_pr_for_window_id(prs: list[dict], window_pr_id: str) -> dict | None:
     return _resolve_pr_id({"prs": prs}, wid)
 
 
+def _describe_pr_entry(index: int, pr) -> str:
+    """Identify one rejected project.yaml PR entry for an error message.
+
+    The picker fails closed on a malformed snapshot, so the message is the
+    user's only clue about which entry to repair in a large project.  Values
+    go through ``repr`` so control characters stay escaped on screen.
+    """
+    where = f"entry #{index + 1}"
+    if not isinstance(pr, dict):
+        return f"{where} (not a mapping: {type(pr).__name__})"
+    bits = [f"{key}={pr[key]!r}"
+            for key in ("id", "gh_pr_number", "status") if key in pr]
+    return f"{where} ({', '.join(bits)})" if bits else where
+
+
 def _build_nav_entries(
     prs: list[dict],
     window_pr_id: str | None,
@@ -1180,23 +1195,27 @@ def _build_nav_entries(
         raise ValueError("Picker snapshot requires a prs list (use [] for no PRs)")
     local_ids: set[str] = set()
     display_terminal: dict[str, bool] = {}
-    for pr in prs:
+    for index, pr in enumerate(prs):
+        where = _describe_pr_entry(index, pr)
         pr_id = pr.get("id") if isinstance(pr, dict) else None
         if (not isinstance(pr_id, str)
                 or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", pr_id) is None):
-            raise ValueError("Picker PR entry requires a non-empty, command-safe string id")
+            raise ValueError("Picker PR entry requires a non-empty, "
+                             f"command-safe string id: {where}")
         if pr.get("status") not in VALID_PR_STATES:
-            raise ValueError("Picker PR entry requires a valid status")
+            raise ValueError(f"Picker PR entry requires a valid status: {where}")
         display_id = _pr_display_id(pr)
         if not display_id.isprintable():
-            raise ValueError("Picker PR entry requires a printable display id")
+            raise ValueError("Picker PR entry requires a printable display id: "
+                             f"{where}")
         # Partial state repairs can temporarily assign a number to two PRs.
         # Historical terminal-only duplicates are harmless (no actions), but
         # any collision involving a live PR makes display lookup unsafe.
         terminal = pr.get("status") in _TERMINAL_STATUSES
         if (pr_id in local_ids or (display_id in display_terminal
                 and not (terminal and display_terminal[display_id]))):
-            raise ValueError("Picker PR entries have ambiguous local or display ids")
+            raise ValueError("Picker PR entries have ambiguous local or display "
+                             f"ids: {where} collides with an earlier entry")
         local_ids.add(pr_id)
         display_terminal[display_id] = terminal
 

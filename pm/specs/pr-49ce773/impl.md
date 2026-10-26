@@ -112,8 +112,12 @@
    state and refuse pending actions until repair. Duplicate local IDs are
    always unsafe because command dispatch cannot distinguish those records.
    Malformed initial data must show a logged, readable error and wait for
-   dismissal rather than raising a traceback. There is no last-good snapshot
-   on initial load.
+   dismissal rather than raising a traceback. Because a single bad entry
+   fails the whole snapshot closed, the error must name the offending entry
+   (1-based position plus its `id`, `gh_pr_number` and `status` when
+   present, values `repr`-escaped so control characters stay printable) —
+   otherwise the user cannot tell which entry to repair in a large project.
+   There is no last-good snapshot on initial load.
    Pending actions retain the selected local ID across refresh, even if its
    GitHub number is removed or reassigned to another PR. If that local ID is
    gone, refuse dispatch and show a lookup-failure notice; never retarget the
