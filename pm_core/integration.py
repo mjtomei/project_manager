@@ -1187,7 +1187,14 @@ def compact(record: dict) -> dict:
         out[k] = vals[:_YAML_LIST_LIMIT]
         if len(vals) > _YAML_LIST_LIMIT:
             out[f"{k}_total"] = len(vals)
-    out["base_files_count"] = len(record.get("base_files") or [])
+    # ``compact`` also runs on an already-compact record (a bounce re-records
+    # the applied candidate, see signoff._record_applied_integration): the
+    # full ``base_files`` list is gone there, so keep the recorded count
+    # instead of resetting it to 0.
+    if record.get("base_files") is not None:
+        out["base_files_count"] = len(record["base_files"])
+    else:
+        out["base_files_count"] = int(record.get("base_files_count") or 0)
     resolution = record.get("resolution")
     if resolution:
         out["resolution"] = _compact_resolution(resolution)

@@ -907,6 +907,25 @@ def test_approval_rejects_a_candidate_tag_for_another_tree(w):
     assert problem and "does not name the approved candidate" in problem
 
 
+def test_justification_is_honest_when_the_check_lost_its_candidate(w):
+    """A failed/superseded re-check cannot name the approved tree.
+
+    The refusal must say pm cannot confirm the candidate — not blame the
+    report for a tree the record no longer carries.
+    """
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+
+    def _drop(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ.pop("candidate_tree", None)
+        integ.pop("base_sha", None)
+    store.locked_update(w.pm_dir, _drop)
+    refusal = signoff.merge_gate_refusal(
+        pr_entry(w), signoff.head_sha(str(w.wd)), "master")
+    assert refusal and "does not record a candidate tree" in refusal
+
+
 def test_resolved_approval_is_stale_when_head_moves_after_the_apply(w):
     """A commit after the applied resolution needs a fresh sign-off."""
     rec = _metadata_conflict(w)
@@ -959,6 +978,20 @@ def test_compact_bounds_base_behavior_changes():
     out = integration.compact(record)
     assert len(out["base_behavior_changes"]) == integration._BEHAVIOR_LIMIT
     assert out["base_behavior_count"] == 50
+
+
+def test_recompacting_a_compact_record_keeps_the_base_file_count():
+    """A bounce re-compacts the compact record (see _record_applied_integration).
+
+    The full ``base_files`` list is gone there; resetting ``base_files_count``
+    to 0 would tell the prompt the base changed nothing.
+    """
+    record = {"status": integration.RESOLVED, "base_sha": "a" * 40,
+              "candidate_tree": "b" * 40, "base_files": ["x", "y"],
+              "pr_files": [], "resolution": {"paths": []}}
+    once = integration.compact(record)
+    assert once["base_files_count"] == 2
+    assert integration.compact(once)["base_files_count"] == 2
 
 
 def test_recorded_evidence_lists_are_bounded(w):
@@ -1077,6 +1110,28 @@ def test_bounce_to_review_applies_the_resolved_candidate(w):
     assert git(w.wd, "rev-parse", "--abbrev-ref", "HEAD") == BRANCH
     assert "pm resolved the metadata conflict" in \
         signoff.format_signoff_return(p)
+
+
+def test_a_review_bounce_after_the_launch_apply_gets_the_diff_hint(w):
+    """``prepare`` applied the base at launch, so the bounce has nothing left
+    to apply — but the routed step must still diff against the new base.
+
+    The workdir's own base refs are stale after the apply, so the usual
+    ``<base>...HEAD`` diff would list the merged base commits as PR changes.
+    """
+    rec = _metadata_conflict(w)
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, rec["head"], rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    ret = pr_entry(w)["signoff_return"]
+    assert not ret.get("applied")
+    assert ret["integration"]["resolution"]["applied_merge_sha"]
+    text = signoff.format_signoff_return(pr_entry(w))
+    assert f"git diff {rec['base_sha'][:12]} HEAD" in text
 
 
 def test_driver_blocks_a_resolved_merge_without_the_evidence_statement(w):

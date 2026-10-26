@@ -455,6 +455,13 @@ def approval_justification_problem(pr_id: str, integration: dict | None,
                 f"reviewed {(head or '?')[:12]}")
     if resolution:
         candidate = rec.get("candidate_tree") or ""
+        if not candidate:
+            # A failed or superseded re-check no longer names the tree the
+            # approval was bound to; the merge must not be justified against
+            # a candidate pm cannot confirm (a report tag cannot fix that).
+            return ("the latest integration check does not record a candidate "
+                    "tree (it may have failed or been superseded); re-run "
+                    "`pm pr signoff integrate --record` or a fresh sign-off")
         named = (meta.get("candidate") or "").strip()
         if len(named) < 7:
             # Same minimum as the head tag: a short value can match almost
@@ -1153,6 +1160,20 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                     f"branch as `{resolution['applied_merge_sha'][:12]}` — "
                     "review/verify the integrated result, not only the PR's "
                     "own diff.")
+                # The launch apply (prepare) leaves no ``applied`` block on
+                # the return record, so the routed step would otherwise use
+                # its usual ``<base>...HEAD`` diff against a stale base ref
+                # and see the merged base commits as PR changes.
+                if not (rec.get("applied") or {}).get("merge_sha"):
+                    applied_base = (resolved_from.get("base_sha")
+                                    or integ.get("base_sha"))
+                    if applied_base:
+                        lines.append(
+                            f"The PR's changes on top of that base: `git diff "
+                            f"{applied_base[:12]} HEAD` (your usual diff "
+                            "against "
+                            f"`{integ.get('base_branch') or 'the base'}` may "
+                            "be stale and include the merged base commits).")
         if integ.get("base_behavior_changes"):
             lines.append(
                 "The new base also changes behaviour-relevant configuration: "

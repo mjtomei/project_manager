@@ -140,12 +140,16 @@ published. So the sign-off launch
    the record so the evidence block and the prompt read it directly.
    A later re-check carries the compact resolution (and those behavioural
    changes) forward whenever the applied merge is an ancestor of its HEAD —
-   including a check that comes back `error`/`conflict` — so a transient
-   failure never loses what was applied. The ancestry is resolved from the
-   same checkout the check used (the recorded workdir, or the current
-   checkout when that path is not visible), so a check run from the fallback
-   does not drop the provenance. The merge itself is still blocked until a
-   check can verify the candidate again.
+   including a check that comes back `error`/`conflict` without a new
+   resolution attempt — so a transient failure never loses what was applied.
+   A check that *does* produce a new metadata-resolution attempt replaces it
+   instead: that attempt describes the current base, and the merge is blocked
+   either way (the changed digest / missing candidate tree makes the gate
+   refuse). The ancestry is resolved from the same checkout the check used
+   (the recorded workdir, or the current checkout when that path is not
+   visible), so a check run from the fallback does not drop the provenance.
+   The merge itself is still blocked until a check can verify the candidate
+   again.
 Dirty workdirs are never touched: apply refuses and the record keeps
 `RESOLVED` with `apply_error`; a MERGE on it is blocked (R6).
 
@@ -165,7 +169,12 @@ the provenance forward instead of dropping it — and with it the explicit
 reuse requirement. The return record (`build_return_record`,
 `format_signoff_return`) adds the resolution summary, `applied_merge_sha`,
 and the original `resolved_from` revisions; the prompt tells the next stage
-to verify the integrated result, not only the PR's own diff.
+to verify the integrated result, not only the PR's own diff. When the launch
+`prepare` already applied the resolution (so the bounce has nothing left to
+apply and no `applied` block), the return text also gives the corrected diff
+command (`git diff <applied base> HEAD`) — the workdir's own base refs are
+stale after the apply, so the usual `<base>...HEAD` diff would list the
+merged base commits as PR changes.
 
 ### R6. Evidence provenance and explicit reuse
 `record_signoff_verdict` gains an `evidence` block on `pr["signoff"]`:
@@ -212,7 +221,9 @@ lists just the resolution changes).
 `merge_gate_refusal` additionally requires:
 - the PR's current `integration` record still has the bound `head` and
   `candidate_tree` (a re-check that produced a different candidate
-  invalidates the approval);
+  invalidates the approval; a re-check that can no longer name a candidate
+  tree — e.g. a failed fetch — cannot justify the approval, and the refusal
+  says so instead of blaming report.html);
 - for a bound `resolution_digest`: the current record carries the same digest,
   `resolution.applied_merge_sha` is set, `resolution.unresolved` is empty, and
   the report justification of R6 is present. The digest is also recomputed
