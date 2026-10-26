@@ -712,8 +712,11 @@ def _owner_panes(info: ContainerInfo, cache: _PaneCache,
                               for target in targets for word in target.split())
             if matched:
                 socket = os.path.realpath(server.socket_file)
-                owners.append(f"{socket}:{pane_id}" if qualify_foreign and socket != local_socket
-                              else pane_id)
+                owner = (f"{socket}:{pane_id}" if qualify_foreign and socket != local_socket
+                         else pane_id)
+                # Grouped sessions list the same pane once per session.
+                if owner not in owners:
+                    owners.append(owner)
     return owners, indeterminate
 
 

@@ -68,3 +68,16 @@ def test_same_server_socket_alias_allows_concretizer(monkeypatch, tmp_path, sour
     monkeypatch.setattr(cm, "remove_container", MagicMock(return_value=True))
     assert cm.discard_unowned_container(
         NAME, container_id=CID, generation="", allowed_owner_panes={"%0"})
+
+
+def test_grouped_session_pane_reported_once(monkeypatch, tmp_path):
+    socket = str(tmp_path / "local.sock")
+    monkeypatch.setenv("PM_TMUX_SOCKET", socket)
+    info = reaper.ContainerInfo(NAME, id=CID, labels={cm.LABEL_TMUX_SOCKET: socket})
+    monkeypatch.setattr(reaper, "_servers_for", lambda _: [reaper._server_for_socket(socket)])
+    monkeypatch.setattr(cm, "activity_owner", lambda *a: False)
+    cmd = f"podman exec -it {CID} sh"
+    monkeypatch.setattr(reaper, "_query_server", lambda server: reaper._PaneSnapshot(
+        [("%13", "pm-tag", cmd), ("%13", "pm-tag~1", cmd)]))
+    owners, indeterminate = reaper._owner_panes(info, reaper._PaneCache(), fresh=True)
+    assert owners == ["%13"] and not indeterminate
