@@ -1448,6 +1448,30 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     tick, and the other PR was unaffected. Rewrites of providers.yaml
     racing ticks and a TUI run gave no refusal in 3 launch ticks and no
     `QA stopped`.
+  - Twenty-seventh pass (S68+), delta-only, for the fixes made during and
+    after QA run 61ece449fce8cd65: 72614e5d (S65: a sign-off `qa` hop
+    refused by the provider check relaunches over the judged run's qa
+    window on the first tick after the fix), e123fb27 (S66: the review-PASS
+    tick checks before moving the PR to `qa`; the verifier is not checked
+    with `qa-verify-pass` off; a verifier or finalizer provider that breaks
+    mid-run stops the run before any verdict or `overall`; the TUI keeps
+    the `QA stopped` line and records no `QA ERROR` note) and review d5f9
+    i1 8edbe269 (the hop tick launches only when it wins
+    `claim_return_launch`; never run live). Stubs only, host mode, S65–S67
+    harness. Pre-fix control for 8edbe269: e123fb27.
+    - S68: sign-off `qa` hop with a broken gate-less provider, recovery,
+      the hop tick racing a qa tick and two qa ticks racing in the
+      `awaiting: qa` state (one driver per round), a driver killed before
+      it clears `awaiting` (the claim expires after 180 s, then one
+      relaunch).
+    - S69: auto-sequence review-PASS site over stale earlier results,
+      `qa-verify-pass` off, and verifier/finalizer providers broken
+      mid-run in the detached driver (no `sign_off` advance; the later
+      "running: qa" ticks are pr-242ebdd).
+    - S70: TUI `t` for two PRs at once, one broken mid-run by a PR-level
+      override: the `QA stopped` line stays, no note, the other PR is
+      unaffected, `qa-verify-pass` switched on mid-run keeps the run's
+      own setting, and the restart after the fix records one note.
 
 ## 3. Edge cases
 
