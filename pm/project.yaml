@@ -12842,6 +12842,182 @@ prs:
       tracking bug pr-b1f2ee3 and PID1 note on pr-2111fa0 included.'
     created_at: '2026-10-26T05:00:50Z'
     last_edited: '2026-10-26T05:00:50Z'
+  - id: note-2ce0f1d
+    text: 'Scenario 10 concretization deferred: required foreground debug outside tmux
+      is not available through the current public surface. Verified with env -u TMUX
+      -u TMUX_PANE PYTHONPATH=/workspace pm qa debug tui-manual-test --branch master
+      --foreground: exit 1, "No pm session found. Run inside a pm tmux session." qa_debug
+      obtains loop_shared.get_pm_session before its foreground branch; cli/helpers._get_current_pm_session
+      rejects callers outside tmux. No worker was allocated by this probe. Unblock by
+      supporting explicit/discoverable PM session ownership for foreground debug outside
+      tmux, then rerun scenario 10; do not spoof TMUX/TMUX_PANE or replace this story
+      with an inside-tmux launch, which would not establish foreground-only ownership
+      protection. Other stories were not executed by this concretizer. Debug has no
+      native transcript option: retain the planned real terminal recording plus durable
+      files; impl/review/signoff accept hidden --transcript. Prior image recovery instructions
+      remain in /pm-captures/infrastructure-recovery-20261025.md; lack of a default-store
+      image alone is not a proven runtime blocker.'
+    created_at: '2026-10-26T04:03:56Z'
+    last_edited: '2026-10-26T04:03:56Z'
+  - id: note-e96dd7c
+    text: 'S11 concretization handoff (2026-10-26): use TUI command bar /pr qa ID to
+      start one-shot QA, /pr qa loop ID only while that run is active to stop, and /pr
+      qa fresh ID for supersession. Shell pm pr qa ID does not start QA. Finalization
+      is automatic, not a finalize command. Gate real git clone return or narrowly scoped
+      real podman run return with acknowledged bounded pass-through wrappers; stock
+      fake delays cannot test Python-only instruction-copy or command-builder boundaries.
+      Use retry allocation boundary instead of claiming command-builder coverage. Fake
+      sequences are session-type-wide, not per scenario; stabilize B before resetting
+      A config and capture actual assignments. A completed viewed allocation can remain
+      owned by its live pane after viewer leaves; end that actual owner before expecting
+      scoped reap to remove it. Current podman info succeeds and nested devices exist,
+      but image inventory is empty; qualify disposable local origin and build/run real
+      developer image with project.nested_podman true before lifecycle assertions. Do
+      not treat absence of image alone, prior unconfigured sethostname failures, source
+      review, or fake verdict emission as runtime QA evidence.'
+    created_at: '2026-10-26T04:05:45Z'
+    last_edited: '2026-10-26T04:05:45Z'
+  - id: note-f611964
+    text: 'S11 additional verified fixture correction: planner acceptance rejects sparse
+      SCENARIO 1 / SCENARIO 10 plans. To cover s1/s10, author ten contiguous scenarios
+      1..10 and set qa-max-scenarios 10 (or unlimited); record actual launched indices.
+      Empty qa_scenario verdicts with finite hold is valid no-verdict behavior; literal
+      NONE in a nonempty sequence is invalid. Fake FINALIZE_DONE does not reconcile
+      Git or perform rework: prepare/push real disposable fixture edits separately and
+      preserve their evidence. No runtime QA executed by this concretization.'
+    created_at: '2026-10-26T04:06:23Z'
+    last_edited: '2026-10-26T04:06:23Z'
+  - id: note-49e4dc0
+    text: 'Scenario 13 refinement (2026-10-26): source-verified public race surfaces;
+      no runtime QA PASS claimed. Use retention-aware pm container reap, not legacy
+      cleanup. Public pm pr start has deterministic impl names; --fresh does not promise
+      a new allocation and ordinary start focuses an existing impl window. Preserve
+      a delayed old EXIT shell by renaming its tmux window, not killing it. Gate genuine
+      exec return after the worker exits; forward real bytes/status/TTY and unique per-story
+      actor gates. Retain must complete before reap takes the per-name deletion lock
+      (holding deletion inspect and waiting for retain deadlocks); inventory-response
+      gate is valid, planning tmux gate has only 5s. Rename before attachment validation
+      may correctly refuse; only post-validation exec follows captured ID. Readiness
+      probes also have short timeouts. Lock pruning requires full unscoped reap in an
+      isolated runtime and real age >3600s, not scoped reap, backdated files or an inferred
+      PASS from overlapping commands. Reserve >1h aging plus setup/observation; absent
+      observed overlap/aging means unexecuted coverage, not PASS. Current podman info
+      succeeds but the local image store is empty; build/qualify the developer image
+      with disposable project nested_podman:true before execution. Prior S4 harness/gates
+      are evidence only, not reusable acknowledged coverage.'
+    created_at: '2026-10-26T04:04:42Z'
+    last_edited: '2026-10-26T04:04:42Z'
+  - id: note-efa4f23
+    text: 'Scenario 15 concretization deferred (2026-10-26): no qualified real-runtime
+      fixture in this run. Current read-only qualification: rootless podman info succeeds;
+      podman images lists zero images; direct inotify_init1 probe returns errno=24 Too
+      many open files. Prior actual image-build failures are recorded in notes 35c035a,
+      c12d254 and 558d7d0 (Chromium smoke/GPU launch), and this resource prerequisite
+      remains unavailable. No new build or scenario execution claimed. Startup/restart,
+      real 600-second periodic reconcile, actual merge/closed-PR cleanup, retention
+      reconnect and durable concurrent recovery assertions remain unexecuted; do not
+      replace them with mocks/code-reading or shorten timers. Unblock by providing a
+      verified working developer image in a private runtime store and sufficient inotify
+      resources/nested runtime support, then rerun concretization and real TUI QA. Preserve
+      isolated HOME/settings/PM_CONTAINER_STATE_DIR/tmux/runtime storage and use public
+      PM launch/transition/retain/reap actions, natural grace, ID-based inventories,
+      hashes and latency evidence. No shared quotas/settings/container resources changed.'
+    created_at: '2026-10-26T04:00:39Z'
+    last_edited: '2026-10-26T04:00:39Z'
+  - id: note-a9fedc5
+    text: 'Scenario 16 concretization deferred (2026-10-26, checkout d53b8fd2): the
+      independent Docker USER pm ownership-repair story cannot be driven in this run.
+      Read-only qualification found no docker or dockerd executable, no DOCKER_HOST,
+      and no /var/run/docker.sock, /run/docker.sock or /run/user/1000/docker.sock. Rootless
+      Podman info succeeds (graphRoot /home/pm/.local/share/containers/storage; runRoot
+      /tmp/podman-run-1000/containers), but its image inventory is empty; this is NOT
+      evidence that a qualified developer image cannot be built. Prior /pm-captures/infrastructure-recovery-20261025.md
+      remains applicable: bootstrap nested_podman in the disposable project before PM
+      build, qualify disposable-origin push with /usr/bin/git, retain original build
+      failures and label any permitted Chromium-smoke-only workaround. No Docker result
+      may be inferred from Podman. Unblock by supplying an accessible isolated Docker
+      daemon with a qualified USER pm developer image and both optional-hooks mount
+      fixtures, then rerun concretization; alternatively explicitly split the blocked
+      Docker story from the Podman scenario before rescheduling. No verified dedicated
+      kernel-keyring UID/VM or approved finite pressure budget was supplied here; do
+      not exhaust shared quotas. The draft permits boundary injection for diagnostics
+      only, never actual quota-relief credit. No launch/retry/cleanup assertions executed,
+      no pressure generated, no credentials captured, and no PASS or implementation-failure
+      claim.'
+    created_at: '2026-10-26T04:01:01Z'
+    last_edited: '2026-10-26T04:01:01Z'
+  - id: note-2d49f1d
+    text: 'S17 concretization deferred (2026-10-26, HEAD d53b8fd2): required safe per-container
+      PID-pressure fixture is not available in this run. Podman 3.4.4 rootless/cgroupfs
+      reports cgroup v2 and outer cpu,memory,pids controllers, but /sys/fs/cgroup/cgroup.subtree_control
+      is empty; an actual temporary empty child cgroup had empty cgroup.controllers
+      and no pids.* files, then was removed. Outer populated cgroup has pids.max=2048
+      (current=35 at snapshot); do not exhaust that QA-session boundary or move controller/session
+      processes to make the test work. No Docker executable/socket or alternate delegated
+      runtime was supplied; default Podman store has zero images. Need a disposable
+      runtime with delegated and verified per-container PID enforcement plus a qualified
+      PM developer image before rerunning pressure/status/refusal/forced restart/resume
+      stories. Existing infrastructure-recovery-20261025.md permits image-build recovery
+      but explicitly forbids shared outer quota exhaustion; it does not establish PID
+      delegation. Finite adopted-child reaping may be scheduled independently with a
+      qualified image, but cannot waive these blocked pressure stories; no reaping or
+      restart PASS claimed here. Probe details: /tmp/claude-1000/-workspace/21bcaac6-4a5c-424e-9171-c627a9ef664d/scratchpad/s17-runtime-prerequisites.txt.
+      No workload, controller/host quota changes, or source fixes performed.'
+    created_at: '2026-10-26T04:01:24Z'
+    last_edited: '2026-10-26T04:01:24Z'
+  - id: note-ec81078
+    text: 'S17 supplemental surface handoff (read-only verification; prior deferral
+      note-2d49f1d unchanged): safe cleanup preview is pm container reap --dry-run [--pr
+      ID] [--session TAG], not pm container cleanup (force removal, no dry-run). Status
+      pressure threshold is 80%; reaper warning is 90% for kept running allocations.
+      Ordinary restart refuses live/unknown owners and attachment leases; force still
+      checks readiness. There is no pm session resume command: qualify actual container
+      reuse via pm pr start ID rather than assuming conversation resume or merely selecting
+      an existing window. Release retention before testing automatic unowned PID recovery
+      because retention blocks recovery. Fresh PM-created containers install the PID1
+      reaper; restarting legacy sleep-PID1 allocations does not upgrade that startup
+      command. Deterministic held old-EXIT and delayed-readiness stories need a documented
+      external runtime-boundary fault fixture (qa.md setup item 5 permits one); ordinary
+      successful restart alone does not prove these race assertions, and monkeypatched
+      unit tests cannot replace public-action QA. These findings do not change the final
+      S17 rejection or claim any runtime coverage.'
+    created_at: '2026-10-26T04:02:36Z'
+    last_edited: '2026-10-26T04:02:36Z'
+  - id: note-d351854
+    text: 'Scenario 18 refinement (2026-10-26): public TUI start is selected PR + t
+      (shell pm pr qa does not launch); zt is fresh restart, zzt stops only while active.
+      Prepare PR status in_review so start transitions to qa; pm tui restart --session
+      <name> --breadcrumb automatically resumes the genuine saved QA snapshot, with
+      no qa resume command. Use independent fresh fixtures per story, eight explicit
+      fake QA_PLAN scenarios, pre-verdict delay plus finite post-verdict hold >30s,
+      and settings applied before fresh processes. container-launch-concurrency is per-process;
+      QA headroom is initial/persisted max(1, limit-running), not a global hard semaphore.
+      Ownership-aware reap uses four removal workers, launch grace 120s; do not substitute
+      destructive container cleanup. Runtime-boundary forwarding instrumentation may
+      timestamp real run/setup/rm and inject a single selected actual Podman invocation
+      failure; no private PM mocks or written resume/verdict state. Current podman info
+      succeeds but current store has zero images; qualify isolated real PM launch before
+      load. Prior documented recovery allows only Chromium smoke RUN omission when that
+      build failure recurs (infrastructure-recovery-20261025.md); original failure/deviation
+      must remain evidence. No runtime QA PASS claimed by refinement.'
+    created_at: '2026-10-26T04:04:18Z'
+    last_edited: '2026-10-26T04:04:18Z'
+  - id: note-cfe06d1
+    text: 'S19 concretization: drive actual tmux prefix+P/M through two attached client
+      PTYs, not hidden popup commands or target-pane send-keys. Use editable venv console-script
+      pm before /usr/local/bin/pm (-m launcher can import PR-cwd code prematurely).
+      Popup prompt takes which / pr start ID / session cleanup --dry-run without leading
+      pm. Group siblings share base config/code but retain separate window focus; test
+      distinct fake configs on distinct base sessions. pm meta is supported override
+      entry; preseed its disposable meta checkout at tested HEAD on meta/ branch to
+      avoid fetching unrelated master, keep fake meta alive until final teardown. NONE
+      fake ignores body: use preamble/display_bullet to distinguish impl output. Public
+      which paths distinguish code copies without editing implementation. Record attached-client
+      output because target-pane captures omit popup overlay. Container cleanup portion
+      still requires qualified isolated Podman/image and real PM-created workers; no
+      runtime pass claimed by refinement.'
+    created_at: '2026-10-26T04:04:55Z'
+    last_edited: '2026-10-26T04:04:55Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
