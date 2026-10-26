@@ -12463,6 +12463,24 @@ prs:
       required.'
     created_at: '2026-10-26T00:54:53Z'
     last_edited: '2026-10-26T00:54:53Z'
+  - id: note-1c19d17
+    text: 'Review-loop 6427 i20 (main and inherited read-only helper chatgpt/gpt-6-astra-high):
+      fixed reusable-name deletion after captured-ID recheck, scoped release pruning
+      losing renamed allocations, cancellation leaking pre-run proxies, renamed managed
+      PID-pressure omission, and initial QA command-preparation cancellation/host
+      launch-error gaps. Existing lock/identity/reaper architecture retained; fresh
+      full runtime inventories for proxy safety deliberately preserved. Final assertions
+      against original source: 26 behavioral failures, 46 controls passed, 2 skips.
+      Final focused integration 724 passed/2 skipped; full sanitized suite 3850 passed/2
+      skipped, 5 existing-class warnings (3 AsyncMock, 2 Click). Source/spec/tests
+      commit 60f61bfc. Evidence and all per-file notes /pm-captures/review-6427-i20-per-file.md;
+      full suite /pm-captures/review-6427-i20-full-suite-final.log. Intermediate stale
+      mocks and one generation fixture mismatch corrected with original logs retained.
+      Existing project.yaml model/handoff/manual-gate edits preserved outside source
+      commit. No real-container QA claim or waiver; next review, outstanding runtime
+      scenarios and independent sign-off remain required.'
+    created_at: '2026-10-26T01:22:07Z'
+    last_edited: '2026-10-26T01:22:07Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
