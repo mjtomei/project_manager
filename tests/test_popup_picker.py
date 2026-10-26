@@ -961,6 +961,12 @@ class TestPopupPickerRefreshFailures:
         retry = "retry." if has_fzf else "reopen the picker."
         assert f"Repair project.yaml and {retry}" in shown
         assert "without fzf" not in shown
+        if has_fzf:
+            # Each notice row must fit the 80-column popup (78 inner columns,
+            # minus fzf's pointer/marker gutter) or fzf clips the instruction.
+            rows = fzf.calls[-1]["input"].split("\n")
+            assert len(rows) == 2
+            assert all(len(r) <= 72 for r in rows)
         run_cmd.assert_not_called()
 
     def test_explicit_empty_pr_list_is_valid(self, tmp_path, monkeypatch, capsys):

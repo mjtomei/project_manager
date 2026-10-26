@@ -134,7 +134,9 @@ that snapshot. Repeat with a missing `prs` field and `prs: null`, `false`,
 `0`, an empty string or a mapping: these must not replace the last-good list.
 An explicit `prs: []` is a valid empty project. Failed dispatch refreshes must
 show an explicit "Could not refresh PR actions; no action was run" notice in
-both fzf and the numbered fallback (reopen the latter after repair).
+both fzf and the numbered fallback (reopen the latter after repair). The notice
+is two non-actionable rows (the second is "Repair project.yaml and retry.")
+so neither is clipped by the 80-column popup.
 Repeat with syntactically valid YAML containing a PR mapping
 with `status` but no `id`, including a numbered home PR whose `gh_pr_number`
 still resolves its display id. Also try null, empty and non-string local ids;

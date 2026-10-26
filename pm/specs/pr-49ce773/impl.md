@@ -70,7 +70,9 @@
      action rather than dispatch from the stale snapshot; navigation may still
      use the last-good snapshot and a later key can retry after repair. Both
      fzf and the numbered fallback show an explicit refresh-failure/refusal
-     notice; without fzf the user reopens the picker after repair.
+     notice; without fzf the user reopens the picker after repair. The notice
+     is split into two short rows because fzf clips rows at the 80-column
+     popup width, which would hide the repair instruction.
    After each reload presentation derives the current display ID from the
    selected local identity, so changing `gh_pr_number` does not duplicate or
    redirect the selection. Only initially unresolved home window identifiers

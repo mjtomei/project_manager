@@ -55,25 +55,32 @@ def _share_mode_options(f):
 # unreliable across versions, so we let the popup's shell call tmux
 # itself.  The trailing failure handler pauses on launch failure (e.g.
 # pm not on PATH) so the popup stays visible long enough to read the
-# error instead of vanishing instantly with display-popup -E.
+# error instead of vanishing instantly with display-popup -E.  tmux 3.2
+# runs popup bodies with /bin/sh (dash on Debian/Ubuntu), so the handler
+# must be POSIX: bash's ``read -n 1 -s -p`` fails there and the popup
+# closes at once.  Save $? before the first echo resets it.
 # The bare S/W queries resolve against tmux's "best" client (the most
 # recently active one), which is wrong when two clients open popups at
 # the same time.  When _popup-show knows the pressing client's session
 # it pins S and W to literal values instead (see _pin_popup_body).
 _POPUP_BODY_S = 'S=$(tmux display-message -p "#{session_name}");'
 _POPUP_BODY_W = ' W=$(tmux display-message -p "#{window_name}");'
+_POPUP_FAILURE_HANDLER = (
+    " || { rc=$?; echo; echo \"pm popup failed (exit $rc).\";"
+    " printf 'Press any key to close...'; t=$(stty -g);"
+    " stty -icanon -echo min 1 time 0; dd bs=1 count=1 >/dev/null 2>&1;"
+    " stty \"$t\"; }"
+)
 _POPUP_PICKER_BODY = (
     _POPUP_BODY_S
     + _POPUP_BODY_W
     + ' pm _popup-picker "$S" "$W"'
-    " || { echo; echo 'pm popup failed (exit '$?').';"
-    " read -n 1 -s -r -p 'Press any key to close...'; }"
+    + _POPUP_FAILURE_HANDLER
 )
 _POPUP_CMD_BODY = (
     _POPUP_BODY_S
     + ' pm _popup-cmd "$S"'
-    " || { echo; echo 'pm popup failed (exit '$?').';"
-    " read -n 1 -s -r -p 'Press any key to close...'; }"
+    + _POPUP_FAILURE_HANDLER
 )
 
 
@@ -2156,9 +2163,11 @@ def popup_picker_cmd(session: str, window_name: str):
         if not _refresh_state():
             # Keep last-good navigation, but explain why the action was refused.
             # Without fzf the menu is one-shot, so retrying means reopening it.
+            # Two rows: the 80-column popup clips (never wraps) a long fzf row,
+            # which would hide the repair instruction.
             retry = "retry" if has_fzf else "reopen the picker"
-            lines = [("  Could not refresh PR actions; no action was run. "
-                      f"Repair project.yaml and {retry}.", "", current_pr)]
+            lines = [("  Could not refresh PR actions; no action was run.", "", current_pr),
+                     (f"  Repair project.yaml and {retry}.", "", current_pr)]
             fzf_input_lines = [d for d, _, _ in lines]
             return False
 
