@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T16:36:33.598449+00:00'
+  updated_at: '2026-10-26T17:13:33.104994+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16453,19 +16453,41 @@ prs:
       still required.'
     created_at: '2026-10-26T16:36:33Z'
     last_edited: '2026-10-26T16:36:33Z'
-  model: provider:claude-work
+  - id: note-c40dacd
+    text: 'QA S21 (E6 atomic refresh, malformed/partial/odd project.yaml while the
+      popup is open and at popup start) ran live on ece16459 with fzf 0.56.3 in the
+      real 80-col popup; fix in 5ba232ac. Two defects found: (1) the failed-refresh
+      refusal row (~90 chars) was CLIPPED by fzf at the popup width, so the "Repair
+      project.yaml and retry." instruction never showed on screen for any of the four
+      dispatch routes — now two short non-actionable rows (impl.md/qa.md updated);
+      (2) the popup body failure handler used bash `read -n 1 -s -r -p`, but tmux
+      3.2 runs popup bodies with /bin/sh (dash), so it died with "Illegal option -n"
+      and the popup closed at once instead of showing "pm popup failed (exit N)."
+      + "Press any key to close..." — and $? was read after an echo, printing exit
+      0; replaced with a POSIX stty+dd handler that saves rc first. Held after the
+      fix: all 23 bad files keep the last-good list with exactly one log line per
+      key (no dispatch, no traceback); prs: [] is a successful refresh collapsing
+      to the pinned home notice and restoring; dispatch refused on shortcut/Enter/z/zz;
+      repair-to-merged shows the notice with no dispatch and nav/home still work;
+      prefix+P initial-load failures show the readable reason and the two-step dismissal
+      for q/Esc/Enter; null/numeric/CR-LF/tab-NUL-ESC titles render as one printable
+      row with Enter a no-op and project.yaml md5 unchanged. Popup/tmux/session suites
+      355 passed. Captures /pm-captures/scenarios/21 (README.md + per-triple manifests).'
+    created_at: '2026-10-26T17:13:33Z'
+    last_edited: '2026-10-26T17:13:33Z'
+  model: provider:deepseek-flash
   session_models:
-    impl: provider:claude-work
-    review: provider:claude-work
-    qa: provider:claude-work
-    qa_planning: provider:claude-work
-    qa_scenario: provider:claude-work
-    qa_concretize: provider:claude-work
-    qa_verification: provider:claude-work
-    qa_finalize: provider:claude-work
-    qa_interactive: provider:claude-work
-    signoff: provider:claude-work
-    merge: provider:claude-work
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    signoff: provider:deepseek-flash
+    merge: provider:deepseek-flash
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'
