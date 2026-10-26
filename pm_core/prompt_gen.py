@@ -494,6 +494,8 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
                      + ", ".join(f"`{f}`" for f in conflicts))
     if resolution:
         lines.append("")
+        # Truthiness, not the entry list: a malformed value is not evidence of
+        # a clean resolution, so it stays labelled as an attempt.
         if resolution.get("unresolved"):
             lines.append("**Metadata conflict resolution attempted (pm, by "
                          "record id) — NOT resolved:**")
@@ -511,9 +513,7 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
                          f"record id), already applied — {current}:**")
         else:
             lines.append("**Metadata conflict resolution (pm, by record id):**")
-        for entry in resolution.get("paths") or []:
-            if not isinstance(entry, dict):
-                continue
+        for entry in integ.resolution_entries(resolution, "paths"):
             bits = [f"`{entry.get('path')}`"]
             for key, label in (("added_ours", "added from the PR"),
                                ("added_theirs", "added from the base"),
@@ -564,9 +564,7 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
                          f"{SIGNOFF_MERGE} is blocked until the resolution is "
                          "applied to the branch (clean the workdir and re-run "
                          "sign-off, which applies it).")
-        for entry in resolution.get("unresolved") or []:
-            if not isinstance(entry, dict):
-                continue
+        for entry in integ.resolution_entries(resolution, "unresolved"):
             lines.append(f"- **Unresolved** `{entry.get('path')}`: "
                          f"{entry.get('conflicts')}")
         diff_path = resolution.get("diff_path")

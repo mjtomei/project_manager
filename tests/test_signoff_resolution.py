@@ -1649,6 +1649,97 @@ def test_malformed_resolution_state_reads_as_absent(w):
     signoff.merge_gate_refusal(pr, rec["head"], "master")
 
 
+def test_malformed_resolution_list_members_read_as_absent(w):
+    """A scalar ``paths``/``unresolved`` reads as absent, never raises.
+
+    The earlier hardening filtered non-mapping *entries*; a hand-edited scalar
+    in place of the list (``paths: 5``) still raised ``TypeError`` from every
+    reader that iterated it (the sign-off prompt, the return text, the merge
+    gate, the router and ``summary``), and a malformed member inside a
+    well-formed entry raised in ``compact`` (``list(5)``) or silently split a
+    string into characters (``list("abc")``).
+    """
+    for bad in (5, 7.5, "garbage", {"a": 1}):
+        rec = {"head": "a" * 40, "base_sha": "b" * 40, "status": "resolved",
+               "candidate_tree": "c" * 40, "merge_base": "b" * 40,
+               "resolution": {"paths": bad, "unresolved": bad}}
+        assert isinstance(integration.summary(rec), str)
+        assert integration.unresolved_paths(rec) == set()
+        compacted = integration.compact(rec)
+        assert compacted["resolution"]["paths"] == []
+        assert compacted["resolution"]["unresolved"] == []
+        signoff.effective_verdict(SIGNOFF_REVIEW, rec, "a" * 40)
+        signoff.merge_gate_refusal(
+            {"id": PR, "integration": rec,
+             "signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                         "integration": integration.binding(rec)}},
+            "a" * 40, "master")
+        signoff.format_signoff_return(
+            {"id": PR, "integration": rec,
+             "signoff_return": {"verdict": SIGNOFF_REVIEW, "hop": "review",
+                                "reason": "r", "reviewed_head": "a" * 40}})
+
+    # The justification check reads the member too (a report that matches the
+    # reviewed head/candidate, so it reaches the resolution branch).  A
+    # malformed value is a refusal, never evidence of a clean resolution.
+    rec = {"head": "a" * 40, "base_sha": "b" * 40, "status": "resolved",
+           "candidate_tree": "c" * 40, "merge_base": "b" * 40,
+           "resolution": {"paths": 5, "unresolved": 7,
+                          "applied_merge_sha": "d" * 40}}
+    write_report(w, rec)
+    problem = signoff.approval_justification_problem(PR, rec, "a" * 40)
+    assert problem and "unresolved" in problem
+
+    entry = {"path": "pm/project.yaml", "added_ours": 5,
+             "added_theirs": "abc", "merged_fields": 7.5,
+             "removed": {"k": 1}, "records": 5, "blob": 3}
+    item = integration._compact_resolution({"paths": [entry]})["paths"][0]
+    for key in ("added_ours", "added_theirs", "merged_fields", "removed"):
+        assert item[key] == [], (key, item)
+    assert item["records"] == {} and item["blob"] is None
+
+    # The real surfaces: a launch reads the record from the store, and a later
+    # re-check compacts it (the carry-forward path).
+    rec = _metadata_conflict(w)
+
+    def _blank(d):
+        resolution = store.get_pr(d, PR)["integration"]["resolution"]
+        resolution["paths"] = 5
+        resolution["unresolved"] = 7
+    store.locked_update(w.pm_dir, _blank)
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "Result:" in text
+    signoff.format_signoff_return(store.get_pr(data, PR))
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+
+
+def test_a_carried_resolution_with_a_malformed_delta_path_does_not_raise(w):
+    """A hand-edited ``diff_path`` must not take the integration check down.
+
+    ``_carry_forward`` reads the recorded delta back through that pointer; a
+    non-string value made ``Path(...)`` raise ``TypeError`` out of every later
+    check (the sign-off launch reported "Integration check failed" and the
+    merge was blocked without ever naming the real problem).  It now reads as
+    absent, and the resolution's other provenance is still carried.
+    """
+    _metadata_conflict(w)
+
+    def _blank(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["diff_path"] = [
+            "not", "a", "path"]
+    store.locked_update(w.pm_dir, _blank)
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    kept = pr_entry(w)["integration"]
+    assert kept["resolution"]["applied_merge_sha"], kept
+    assert kept["resolution"]["resolved_from"], kept
+    assert "diff_path" not in kept["resolution"], kept
+
+
 def test_malformed_return_state_does_not_crash_the_prompts(w):
     """A hand-edited ``signoff_return`` must not crash a prompt or the driver.
 

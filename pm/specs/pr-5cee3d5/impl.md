@@ -203,7 +203,10 @@ PR branch, or that has a merge in progress.
 allows MERGE / REVIEW / REQA for `RESOLVED` candidates that were applied.
 `_prepare_bounce` integrates a `RESOLVED` record the same way it integrates a
 `CLEAN` one (via `apply_integration`), so review/QA run on the integrated
-tree. When the bounce is the first successful apply (sign-off launch could
+tree. An apply that raises is recorded as the bounce's `apply_error` (the
+same "never crash the driver/launch on an apply bug" contract
+`integration.prepare` follows) instead of taking the tick down. When the
+bounce is the first successful apply (sign-off launch could
 not touch a dirty workdir), the applied record is persisted on the PR
 (`up_to_date` at the merge commit, resolution bound) so a later check carries
 the provenance forward instead of dropping it — and with it the explicit
@@ -448,14 +451,31 @@ tests):
     changes" line and the return text all name the *newest* one; a malformed
     `resolution` / `integration` / `signoff_return` / `signoff` value in the
     hand-editable project.yaml reads as absent across every surface
-    (`resolution_of`, `revision_of`, `_mapping`, `_as_list`): the sign-off and
+    (`resolution_of`, `resolution_entries`, `revision_of`, `_mapping`,
+    `_as_list`): the sign-off and
     review prompts still render (no `AttributeError` out of prompt
     generation), a non-string `reviewed_head` in the return record is not
     sliced, `pm pr merge` refuses instead of raising (a non-mapping `signoff`
     record and a binding whose `base_sha`/`candidate_tree` is not a string are
     refusals, not `TypeError`s, and the router/driver reads the same
     mapping), `compact`/`_compact_resolution` drop non-mapping and non-string
-    members, and `return_awaiting`/`open_return` still answer. A carry-forward
+    members, and `return_awaiting`/`open_return` still answer. A
+    `resolution.paths`/`unresolved` value that is not a list (a hand-edited
+    scalar) is no longer iterated at any reader (`resolution_entries`) — the
+    prompt, the return text, the router, the merge gate, `summary`,
+    `unresolved_paths`, the CLI and `_apply_resolution` all used to raise
+    `TypeError` on it — while the "is this resolution unresolved?" checks
+    stay conservative: a malformed value is still a refusal (it never grants
+    a merge), and the message falls back to "unresolved conflicts recorded
+    without details". A malformed member *inside* a well-formed entry (the
+    four id lists, `records`, `path`/`resolver`/`blob`) reads as absent in the
+    compact record instead of raising (`list(5)`) or splitting a string into
+    characters (`list("abc")`). The
+    delta pointer is one of those values: a non-string `resolution.diff_path`
+    must not make `_carry_forward` call `Path(...)` on it (that raised out of
+    every later integration check and the sign-off launch reported only
+    "Integration check failed"), so it is dropped and the rest of the
+    resolution's provenance is still carried. A carry-forward
     of an already-bounded list also keeps its recorded total
     (`overlap_total`, `base_behavior_count`), so the prompt does not
     under-report "… N more" after the re-check.

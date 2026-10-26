@@ -741,6 +741,22 @@ def resolution_of(record) -> dict:
     return resolution if isinstance(resolution, dict) else {}
 
 
+def resolution_entries(resolution, key: str) -> list[dict]:
+    """The mapping entries of a resolution's ``paths``/``unresolved`` list.
+
+    ``project.yaml`` is hand-editable state: a list member that is not a list
+    (a hand-edited scalar) must read as absent instead of raising out of a
+    prompt, the CLI or the merge gate, and a non-mapping entry is skipped for
+    the same reason.  Every reader of these two members goes through here, so
+    ``for entry in resolution.get(key) or []`` never iterates a scalar.
+    """
+    resolution = resolution if isinstance(resolution, dict) else {}
+    values = resolution.get(key)
+    if not isinstance(values, list):
+        return []
+    return [v for v in values if isinstance(v, dict)]
+
+
 def _resolution_digest(resolution: dict | None) -> str | None:
     """Canonical digest of a resolution's identity-bearing fields.
 
@@ -1314,11 +1330,7 @@ def _compact_resolution(resolution: dict) -> dict:
             # record and the digest as if it were one.
             out[key] = value
     paths = []
-    for entry in resolution.get("paths") or []:
-        if not isinstance(entry, dict):
-            # Hand-edited state: a malformed entry reads as absent instead of
-            # raising out of the prompt/merge-gate callers.
-            continue
+    for entry in resolution_entries(resolution, "paths"):
         records = entry.get("records")
         records = dict(records) if isinstance(records, dict) else {}
         # Bound the per-record counts too (a large conflict can touch every
@@ -1329,22 +1341,28 @@ def _compact_resolution(resolution: dict) -> dict:
             records_total = len(records)
         if records_total is not None:
             records = dict(list(records.items())[:_YAML_LIST_LIMIT])
+        path = entry.get("path")
+        resolver = entry.get("resolver")
+        blob = entry.get("blob")
         item = {
-            "path": entry.get("path"),
-            "resolver": entry.get("resolver"),
-            "blob": entry.get("blob"),
-            "added_ours": list(entry.get("added_ours") or [])[:20],
-            "added_theirs": list(entry.get("added_theirs") or [])[:20],
-            "merged_fields": list(entry.get("merged_fields") or [])[:20],
-            "removed": list(entry.get("removed") or [])[:20],
+            # Hand-edited state: a non-string identity value reads as absent
+            # instead of being carried into the compact record.
+            "path": path if isinstance(path, str) else None,
+            "resolver": resolver if isinstance(resolver, str) else None,
+            "blob": blob if isinstance(blob, str) else None,
+            # ``_as_list``: ``list(5)`` raises and ``list("x")`` splits the
+            # value into characters, so a malformed scalar must read as [].
+            "added_ours": _as_list(entry.get("added_ours"))[:20],
+            "added_theirs": _as_list(entry.get("added_theirs"))[:20],
+            "merged_fields": _as_list(entry.get("merged_fields"))[:20],
+            "removed": _as_list(entry.get("removed"))[:20],
             "records": records,
         }
         if records_total is not None:
             item["records_total"] = records_total
         paths.append(item)
     out["paths"] = paths[:_YAML_LIST_LIMIT]
-    unresolved = [u for u in (resolution.get("unresolved") or [])
-                  if isinstance(u, dict)]
+    unresolved = resolution_entries(resolution, "unresolved")
     unresolved_total = resolution.get("unresolved_total")
     if unresolved_total is None and len(unresolved) > _YAML_LIST_LIMIT:
         unresolved_total = len(unresolved)
@@ -1376,6 +1394,9 @@ def write_resolution_delta(pr_id: str, record: dict) -> str | None:
     """
     resolution = resolution_of(record)
     diff = resolution.get("diff")
+    # Hand-edited state: only a string is a diff (``write_text`` would raise on
+    # anything else, taking the artifact write down with it).
+    diff = diff if isinstance(diff, str) else ""
     diff_path = resolution_diff_path(pr_id)
     if diff_path is not None and (diff or resolution.get("diff_path")):
         try:
@@ -1473,13 +1494,18 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
                      or is_ancestor(workdir, applied, new_head)):
             carried = dict(old_resolution)
             carried.pop("diff", None)      # compact state never holds it
-            diff_path = carried.get("diff_path")
+            # Hand-edited state: a non-string path is not a path (``Path(5)``
+            # would raise out of the integration check), so it reads as absent
+            # instead of being carried into the record and its digest.
+            diff_path = revision_of(carried.get("diff_path"))
             if diff_path:
                 # Keep the full record's delta in integration.json: the
                 # artifact is rewritten below, and the compact state only
                 # carries the pointer.
                 with contextlib.suppress(OSError):
                     carried["diff"] = Path(diff_path).read_text()
+            else:
+                carried.pop("diff_path", None)
             record["resolution"] = carried
             record["resolution_digest"] = _resolution_digest(carried)
             record["resolved_from"] = carried.get("resolved_from")
@@ -1762,12 +1788,13 @@ def unresolved_paths(record: dict | None) -> set[str]:
     """
     record = _mapping(record)
     resolution = resolution_of(record)
-    paths = {e.get("path") for e in resolution.get("unresolved") or []
-             if isinstance(e, dict) and e.get("path")}
+    paths = {e.get("path") for e in resolution_entries(resolution, "unresolved")
+             if e.get("path")}
     if record.get("status") == CONFLICT \
             and not revision_of(resolution.get("applied_merge_sha")):
-        paths |= {p.get("path") for p in resolution.get("paths") or []
-                  if isinstance(p, dict) and p.get("path")}
+        paths |= {p.get("path")
+                  for p in resolution_entries(resolution, "paths")
+                  if p.get("path")}
     return paths
 
 
@@ -1912,8 +1939,7 @@ def summary(record: dict) -> str:
         return (f"merges cleanly with {base}"
                 + (f" ({n} file(s) changed on both sides)" if n else ""))
     if status == RESOLVED:
-        entries = [p for p in resolution_of(record).get("paths") or []
-                   if isinstance(p, dict)]
+        entries = resolution_entries(resolution_of(record), "paths")
         paths = [p.get("path") for p in entries
                  if isinstance(p.get("path"), str) and p.get("path")]
         ours = sum(_added_count(p, "added_ours") for p in entries)
@@ -1927,8 +1953,7 @@ def summary(record: dict) -> str:
         text = (f"CONFLICTS with {base}: "
                 + ", ".join(str(f) for f in files[:5])
                 + (" ..." if len(files) > 5 else ""))
-        unresolved = [u for u in resolution_of(record).get("unresolved") or []
-                      if isinstance(u, dict)]
+        unresolved = resolution_of(record).get("unresolved")
         if unresolved:
             text += " (metadata resolution not possible)"
         return text
@@ -1994,9 +2019,11 @@ def apply_integration(root: Path, pr_id: str, record: dict | None = None,
         return None, f"merge failed: {_detail(m)}"
     merged = _out(_git("rev-parse", "HEAD", cwd=workdir))
     tree = _out(_git("rev-parse", "HEAD^{tree}", cwd=workdir))
-    if record.get("candidate_tree") and tree != record["candidate_tree"]:
+    # A hand-edited non-string tree is not a tree (slicing it would raise).
+    expected = revision_of(record.get("candidate_tree"))
+    if expected and tree != expected:
         _log.warning("integration apply %s: tree %s != candidate %s",
-                     pr_id, tree[:8], record["candidate_tree"][:8])
+                     pr_id, tree[:8], expected[:8])
     return merged or None, None
 
 
@@ -2004,10 +2031,13 @@ def _apply_resolution(record: dict, workdir: str, head: str, base_sha: str,
                       msg: str):
     """Merge *base_sha* and re-apply the recorded project.yaml resolution."""
     no_hooks = ("-c", "core.hooksPath=/dev/null")
-    expected = record.get("candidate_tree")
+    # A hand-edited non-string tree cannot name the approved candidate (and
+    # slicing it in the mismatch message would raise).
+    expected = revision_of(record.get("candidate_tree"))
     resolution = resolution_of(record)
-    recorded = {p.get("path"): p for p in resolution.get("paths") or []
-                if isinstance(p, dict) and p.get("path")}
+    recorded = {p.get("path"): p
+                for p in resolution_entries(resolution, "paths")
+                if isinstance(p.get("path"), str) and p.get("path")}
     if _out(_git("rev-parse", "HEAD", cwd=workdir)) != head:
         # Re-check right before touching the worktree: the caller verified
         # HEAD, but another process may have moved it since.

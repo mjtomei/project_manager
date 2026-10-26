@@ -1710,9 +1710,14 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
     click.echo(f"  base:   {rec.get('base_sha')}")
     if rec.get("candidate_tree"):
         click.echo(f"  candidate tree: {rec['candidate_tree']}")
-    for label, key in (("conflicts", "conflicts"), ("changed on both sides", "overlap")):
-        if rec.get(key):
-            click.echo(f"  {label}: {', '.join(rec[key])}")
+    for label, key in (("conflicts", "conflicts"),
+                       ("changed on both sides", "overlap")):
+        # A stale stored record (``prepare`` can return it when a concurrent
+        # apply won) is hand-editable state: a non-list value reads as absent
+        # instead of raising out of the CLI.
+        values = rec.get(key)
+        if isinstance(values, list) and values:
+            click.echo(f"  {label}: {', '.join(map(str, values))}")
     resolution = integration.resolution_of(rec)
     # A failed attempt keeps its per-path details on the record; never label a
     # path it could not reconcile as "resolved" (the unresolved line below is
@@ -1721,11 +1726,7 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
     # A resolution an earlier merge applied is not this check's outcome: the
     # conflict the record now reports is elsewhere (``_carry_forward``).
     carried = integration.carried_applied_resolution(rec)
-    for entry in resolution.get("paths") or []:
-        if not isinstance(entry, dict):
-            # Hand-edited state: a malformed entry reads as absent instead of
-            # raising out of the CLI (the prompt does the same).
-            continue
+    for entry in integration.resolution_entries(resolution, "paths"):
         path = entry.get("path")
         if path in unresolved:
             click.echo(f"  attempted: {path} (by record id — NOT resolved)")
@@ -1738,12 +1739,11 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
                            ("added_theirs", "added from base"),
                            ("merged_fields", "merged fields"),
                            ("removed", "removed")):
-            values = entry.get(key) or []
+            values = entry.get(key)
+            values = values if isinstance(values, list) else []
             if values:
                 click.echo(f"    {label}: {', '.join(map(str, values[:10]))}")
-    for entry in resolution.get("unresolved") or []:
-        if not isinstance(entry, dict):
-            continue
+    for entry in integration.resolution_entries(resolution, "unresolved"):
         click.echo(f"  unresolved: {entry.get('path')}: "
                    f"{entry.get('conflicts')}", err=True)
     if applied_clean:

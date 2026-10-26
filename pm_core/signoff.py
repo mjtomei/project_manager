@@ -499,6 +499,8 @@ def approval_justification_problem(pr_id: str, integration: dict | None,
                     f"(pm-signoff-candidate {candidate[:12] or '?'})")
         if not integ.revision_of(resolution.get("applied_merge_sha")):
             return ("the resolved candidate was not applied to the PR branch")
+        # Truthiness, not a list read: a malformed ``unresolved`` value is not
+        # evidence that the resolution is clean, so it stays a refusal.
         if resolution.get("unresolved"):
             return "the integration resolution left unresolved conflicts"
     reused = (meta.get("evidence") or "").strip()
@@ -547,12 +549,12 @@ def effective_verdict(verdict: str | None, integration: dict | None,
         resolution = integ.resolution_of(rec)
         if resolution.get("unresolved") \
                 and verdict in (SIGNOFF_MERGE, SIGNOFF_REVIEW, SIGNOFF_REQA):
-            # Filter before slicing: malformed entries must not crowd the
-            # first three out of the message.
-            unresolved = [u for u in resolution["unresolved"]
-                          if isinstance(u, dict)]
+            # A malformed (non-list) value is still a refusal; the message is
+            # built from the entries that can be described.
+            unresolved = _resolution_entries(resolution, "unresolved")
             reasons = "; ".join(
-                str(u.get("conflicts")) for u in unresolved[:3])
+                str(u.get("conflicts")) for u in unresolved[:3]) \
+                or "unresolved conflicts recorded without details"
             return SIGNOFF_IMPL, (
                 f"{verdict} coerced to {SIGNOFF_IMPL}: pm could not resolve "
                 f"the metadata conflict safely ({reasons})")
@@ -667,6 +669,7 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
             return (f"PR {pr_id}: the metadata resolution changed since "
                     f"sign-off; re-run `pm pr signoff --fresh {pr_id}`.")
         resolution = integ.resolution_of(current)
+        # Truthiness: a malformed value is not evidence of a clean resolution.
         if resolution.get("unresolved"):
             return (f"PR {pr_id}: the integration resolution left unresolved "
                     f"conflicts; the candidate is not conflict-free. Re-run "
@@ -811,9 +814,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             if resolution:
                 unresolved = integration.unresolved_paths(rec)
                 carried = integration.carried_applied_resolution(rec)
-                for entry in resolution.get("paths") or []:
-                    if not isinstance(entry, dict):
-                        continue
+                for entry in integration.resolution_entries(
+                        resolution, "paths"):
                     path = entry.get("path")
                     if path in unresolved:
                         print(f"  attempted {path} by record id "
@@ -1197,6 +1199,12 @@ def _resolution_of(record) -> dict:
     return integ_mod.resolution_of(record)
 
 
+def _resolution_entries(resolution, key: str) -> list[dict]:
+    """See :func:`pm_core.integration.resolution_entries`."""
+    from pm_core import integration as integ_mod
+    return integ_mod.resolution_entries(resolution, key)
+
+
 def _carried_applied_resolution(record: dict | None) -> bool:
     """See :func:`pm_core.integration.carried_applied_resolution`."""
     from pm_core import integration as integ_mod
@@ -1247,13 +1255,16 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                          + ", ".join(f"`{c}`" for c in overlap))
         resolution = _resolution_of(integ)
         if resolution:
-            paths = [p.get("path") for p in resolution.get("paths") or []
-                     if isinstance(p, dict) and p.get("path")]
+            paths = [p.get("path")
+                     for p in _resolution_entries(resolution, "paths")
+                     if p.get("path")]
             paths_text = ", ".join(f"`{p}`" for p in paths or ["project.yaml"])
-            unresolved = [u for u in resolution.get("unresolved") or []
-                          if isinstance(u, dict)]
+            unresolved = _resolution_entries(resolution, "unresolved")
             carried = _carried_applied_resolution(integ)
-            if unresolved:
+            # Truthiness of the recorded value, not the entry list: a
+            # malformed (non-list) value is not evidence of a clean
+            # resolution, so it keeps the "could not resolve" wording.
+            if resolution.get("unresolved"):
                 # A failed attempt is retained on the record (never applied).
                 # Say so: claiming a resolution here would mislead the step
                 # that has to reconcile the conflict by hand.
@@ -1528,7 +1539,13 @@ def _prepare_bounce(root: Path, pr_id: str, verdict: str, hop: str,
     if pr.get("status") == "sign_off" and rec.get("head") == sha \
             and rec.get("status") in (integ.CLEAN, integ.RESOLVED):
         reviewed = rec.get("head")
-        merge_sha, apply_error = integ.apply_integration(root, pr_id, rec)
+        # An apply bug (or a state file that changed under the load above) must
+        # not crash the driver tick: it is recorded as the bounce's apply error
+        # instead, the same contract ``integration.prepare`` follows.
+        try:
+            merge_sha, apply_error = integ.apply_integration(root, pr_id, rec)
+        except Exception as e:
+            merge_sha, apply_error = None, f"applying the integration raised: {e}"
         if merge_sha:
             applied = {"from_head": sha, "merge_sha": merge_sha,
                        "base_sha": rec.get("base_sha")}
