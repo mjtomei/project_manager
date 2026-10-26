@@ -581,24 +581,54 @@ def _query_server(server: _Server) -> _PaneSnapshot:
         return _PaneSnapshot(panes=None)
     return _PaneSnapshot(panes=[
         (pane, session, "\n".join([
-            command, *(cmd for cmd in processes[pid] if _runtime_owner_command(cmd))]))
+            command, *(_runtime_owner_target(cmd) for cmd in processes[pid])]))
         for pane, session, pid, command in panes
     ])
 
 
-def _runtime_owner_command(command: str) -> bool:
-    """Only runtime clients, not diagnostic argv references, imply attachment."""
+def _runtime_owner_target(command: str) -> str:
+    """Match the attachment target, not container names in an exec payload."""
     words = command.split()
     if not words or os.path.basename(words[0]) not in {"podman", "docker"}:
-        return False
+        return ""
     words = words[1:]
     # ps args is flattened, not shell-quoted argv. Do not try to parse arbitrary
     # global option values: preserve ambiguous runtime clients conservatively.
     if words and words[0].startswith("-"):
-        return True
+        return command
     if words and words[0] == "container":
         words = words[1:]
-    return bool(words and words[0] in {"exec", "attach"})
+    if not words or words[0] not in {"exec", "attach"}:
+        return ""
+    verb, words = words[0], words[1:]
+    flags = {"--interactive", "--tty", "--detach", "--privileged"} if verb == "exec" else {
+        "--no-stdin", "--sig-proxy"}
+    index = 0
+    while index < len(words):
+        word = words[index]
+        if word == "--":
+            index += 1
+            break
+        if not word.startswith("-"):
+            break
+        if word in flags or (verb == "exec" and re.fullmatch(r"-[dit]+", word)):
+            index += 1
+            continue
+        # PM's Docker exec uses -u pm. User/group tokens cannot contain spaces;
+        # other option values (paths, env, detach keys) stay conservative.
+        if verb == "exec" and (word in {"-u", "--user"} or word.startswith("--user=")):
+            if "=" in word:
+                user = word.split("=", 1)[1]
+            else:
+                index += 1
+                user = words[index] if index < len(words) else ""
+            if re.fullmatch(r"[A-Za-z0-9_.-]+(?::[A-Za-z0-9_.-]+)?", user):
+                index += 1
+                continue
+        return command
+    if index < len(words) and re.fullmatch(r"/?[A-Za-z0-9][A-Za-z0-9_.-]*", words[index]):
+        return words[index]  # Everything after this is the in-container command.
+    return command
 
 
 def _pane_process_commands(pids: list[int]) -> dict[int, list[str]] | None:

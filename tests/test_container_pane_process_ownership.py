@@ -105,12 +105,37 @@ def test_diagnostic_commands_do_not_claim_ownership(monkeypatch, tmp_path, comma
     f"/usr/bin/podman exec -it {NAME} sh",
     f"docker attach {CID}",
     f"docker container exec -it {CID} sh",
+    f"docker exec -it -u pm {CID} sh",
+    f"docker exec --user=1000:1000 {NAME} sh",
+    f"podman exec --interactive --tty -- {NAME} sh",
+    f"docker attach --no-stdin {CID}",
     f"podman --root /private/store exec -it {NAME} sh",
 ])
 def test_runtime_clients_still_own_from_diagnostic_pane(monkeypatch, tmp_path, command):
     info = _snapshot(monkeypatch, tmp_path, "0\t%7\tpm-project-a\t100\tbash\n",
                      f"100 1 Ss bash\n101 100 S pm container restart {NAME}\n"
                      f"102 100 S {command}\n")
+    assert reaper._owner_panes(info, reaper._PaneCache()) == (["%7"], False)
+
+
+@pytest.mark.parametrize("client", [
+    "podman exec", "podman exec -it", "podman exec --interactive --tty --",
+    "docker container exec -it -u pm", "docker exec --user=1000:1000",
+    "docker attach --no-stdin",
+])
+@pytest.mark.parametrize("target", [NAME, CID])
+def test_runtime_payload_does_not_claim_another_container(monkeypatch, tmp_path, client, target):
+    info = _snapshot(monkeypatch, tmp_path, "0\t%7\tpm-project-a\t100\tbash\n",
+                     f"100 1 Ss bash\n101 100 S {client} other sh -c echo {target}\n")
+    assert reaper._owner_panes(info, reaper._PaneCache()) == ([], False)
+    info.name, info.id = "other", "b" * 64
+    assert reaper._owner_panes(info, reaper._PaneCache()) == (["%7"], False)
+
+
+@pytest.mark.parametrize("options", ["--workdir /path with spaces", "--unknown value"])
+def test_ambiguous_exec_options_preserve_possible_owner(monkeypatch, tmp_path, options):
+    info = _snapshot(monkeypatch, tmp_path, "0\t%7\tpm-project-a\t100\tbash\n",
+                     f"100 1 Ss bash\n101 100 S podman exec {options} {NAME} sh\n")
     assert reaper._owner_panes(info, reaper._PaneCache()) == (["%7"], False)
 
 

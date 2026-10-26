@@ -68,7 +68,9 @@ removed by automatic or scoped cleanup) when any of:
    or its full id. Current process commands must be runtime exec/attach clients,
    not arbitrary diagnostic commands or host-agent prompts mentioning the target:
    `pm container restart NAME` must not identify itself as an attached owner.
-   Ambiguous runtime global-option syntax remains conservatively protected.
+   Unambiguous runtime exec/attach commands match only their container target,
+   not another container name mentioned in the in-container command payload.
+   Ambiguous runtime global/exec-option syntax remains conservatively protected.
    Query the current process tree with a bounded, non-truncated process listing
    and refresh it at the locked deletion check; failed/malformed
    listings or missing live pane roots mean unknown ownership, never absence.

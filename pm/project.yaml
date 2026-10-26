@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-26T05:36:45.279731+00:00'
+  updated_at: '2026-10-26T06:31:47.188552+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -13066,6 +13066,22 @@ prs:
       QA or independent sign-off claim; outstanding coverage remains required.'
     created_at: '2026-10-26T06:00:34Z'
     last_edited: '2026-10-26T06:00:34Z'
+  - id: note-9127fa5
+    text: 'Review-loop 0b6f i3 (main chatgpt/gpt-6-astra-high; inherited read-only
+      helper, no model overrides): fixed current-process runtime exec payloads falsely
+      claiming another container mentioned only in command arguments. Unambiguous
+      exec/attach syntax now matches the container target; unknown/global/value options
+      retain conservative fallback and historical pane-start protection remains. Existing
+      lifecycle architecture retained; R2 clarified. Baseline regression12 failed/26
+      controls passed; fixed owner/lifecycle261 passed; earlier core674 passed and
+      launcher/QA202 passed/2 skipped. Final sanitized full suite4015 passed/2 skipped/5
+      existing-class warnings (2 Click,3 AsyncMock),195.59s. Evidence/all per-file
+      notes /pm-captures/review-0b6f-i3-per-file.md; full suite /pm-captures/review-0b6f-i3-full-suite-final.log.
+      Pre-existing project routing/handoff/manual-gate and qa.md edits preserved outside
+      source commit. No real-container QA or independent sign-off claimed; outstanding
+      coverage remains required.'
+    created_at: '2026-10-26T06:31:47Z'
+    last_edited: '2026-10-26T06:31:47Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
