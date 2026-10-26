@@ -22,6 +22,7 @@ def test_renamed_cleanup_preserves_already_published_proxy(monkeypatch, tmp_path
         captured = ("pm-qa-debug-original", path,
                     (stat.st_dev, stat.st_ino, stat.st_ctime_ns), "renamed")
         monkeypatch.setattr(cm, "current_container_id", lambda name: "replacement-id")
+        monkeypatch.setattr(push_proxy, "unshared_proxy_in_use", lambda path: True)
         push_proxy.release_captured_unshared_proxy(captured)
         assert push_proxy.proxy_is_alive(path)
         # Once the last allocation is gone, the same cleanup releases it.

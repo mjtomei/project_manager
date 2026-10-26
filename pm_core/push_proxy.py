@@ -1194,7 +1194,11 @@ def release_captured_unshared_proxy(
         current = cm.current_container_id(original_name)
         if current is None:
             raise cm.ContainerError(f"Cannot verify proxy owner '{original_name}' after removal")
-        if current or unshared_proxy_in_use(path):
+        # A separately created allocation can be renamed onto the original
+        # name while mounting its own distinct proxy. The locked name check
+        # excludes unknown identity; actual mounts decide whether this captured
+        # directory still has users, including any original-name replacement.
+        if unshared_proxy_in_use(path):
             return False
         _kill_proxy_socket(path, expected_identity=identity)
         return True

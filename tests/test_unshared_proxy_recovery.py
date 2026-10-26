@@ -186,4 +186,38 @@ def test_missing_socket_cleanup_retires_owner(monkeypatch, tmp_path, retry, sock
     assert socket.exists() == (socket_state == "replaced")
 
 
+@pytest.mark.parametrize("retry", [False, True])
+@pytest.mark.parametrize("mounted", [False, True])
+def test_original_name_replacement_uses_actual_proxy_mount(monkeypatch, tmp_path, retry, mounted):
+    original, renamed = "pm-qa-debug-original", "renamed-debug"
+    directory = tmp_path / ("pm-push-proxy-" + original)
+    directory.mkdir()
+    socket = directory / "push.sock"
+    socket.touch()
+    stat = socket.stat()
+    captured = (original, str(socket),
+                (stat.st_dev, stat.st_ino, stat.st_ctime_ns), renamed)
+    monkeypatch.setattr(cm, "current_container_id",
+                        lambda name: "replacement-id" if name == original else "")
+    monkeypatch.setattr(push_proxy, "unshared_proxy_in_use", _real_mount_inventory)
+
+    def runtime(*args, **kwargs):
+        if args[0] == "ps":
+            return subprocess.CompletedProcess(args, 0, "replacement-id\n", "")
+        mounts = [{"Source": str(directory if mounted else tmp_path / "other-proxy"),
+                   "Destination": push_proxy._CONTAINER_SOCKET_DIR}]
+        return subprocess.CompletedProcess(args, 0, json.dumps(mounts), "")
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    if retry:
+        record = push_proxy.defer_unshared_release(captured)
+        failures = {}
+        push_proxy.retry_unshared_releases(reaper.Scope(), failures)
+        assert bool(failures) == mounted
+        assert record.exists() == mounted
+    else:
+        assert push_proxy.release_captured_unshared_proxy(captured) == (not mounted)
+    assert socket.exists() == mounted
+
+
 _real_mount_inventory = push_proxy.unshared_proxy_in_use
