@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T23:23:21.416132+00:00'
+  updated_at: '2026-10-26T23:56:07.931892+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33214,6 +33214,33 @@ prs:
       do not take this branch''s block wholesale. (2026-10-26T23:30:00Z)'
     created_at: '2026-10-26T23:23:21Z'
     last_edited: '2026-10-26T23:23:21Z'
+  - id: note-1f26d34
+    text: 'review-loop aa73 i5: closed four residual apply/recovery gaps. (1) `apply_integration`
+      now applies a CLEAN record with `git merge --no-commit`, requires `write-tree`
+      == the recorded `candidate_tree` (a missing candidate is refused too), aborts
+      on mismatch via `merge --abort` (no destructive reset), and only then commits
+      with hooks off + pm identity, like `_apply_resolution` — previously it committed
+      first and merely logged a warning (spec R9 item 13). A branch that already carries
+      the base returns its current head instead of committing nothing. (2) `_apply_resolution`
+      reads a hand-edited non-string `resolution.paths[].blob` as absent instead of
+      slicing it (TypeError out of the unattended apply). (3) `pm pr signoff integrate
+      --apply` reads a stale stored record’s `base_sha` through `revision_of` (prepare
+      returns the stored record when a concurrent apply won). (4) The GitHub recovery
+      path (`pm pr merge --no-signoff-check`/`--propagation-only`, which skips the
+      merge gate) treats a non-string approved `sha`/`base_sha` as absent and `_verify_github_merge`
+      renders revisions/trees through a short helper, so a hand-edited `candidate_tree`
+      records the mismatch instead of raising. Also shell-quoted the review diff pane’s
+      fallback base ref (`base_branch` is project.yaml state and was interpolated
+      unquoted into the pane command). Tests: 7 new (6 in test_signoff_resolution.py
+      + 1 diff-pane quoting; clean-apply and blob tests mutation-checked against the
+      pre-fix HEAD); focused 157; full suite 3496 passed, 1 skipped, 17 deselected
+      (pre-existing hook-receiver env failure, fails on master too). Evidence: /pm-captures/review-aa73-i5/.
+      Spec R6/R9 synced. MERGE RISK unchanged: branch behind origin/master (211a6128);
+      `_signoff_integration_block` changed on both sides — keep both this PR’s resolution/candidate/applied
+      rendering AND master’s bounded lists (`bounded_join` + `omitted_path_count`
+      + `integration_pointer`); do not take this branch’s block wholesale.'
+    created_at: '2026-10-26T23:56:07Z'
+    last_edited: '2026-10-26T23:56:07Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
