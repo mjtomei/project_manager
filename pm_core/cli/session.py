@@ -1182,8 +1182,11 @@ def _build_nav_entries(
                 if not i:
                     continue
                 win_name = pat.format(display_id=i)
-                if any(_action_window_matches(label, win_name, w)
-                       for w in open_windows):
+                if win_name in open_windows:
+                    return True
+                if label == "qa" and any(
+                        _action_window_matches(label, win_name, w)
+                        for w in open_windows):
                     return True
         return False
 
@@ -1989,14 +1992,19 @@ def popup_picker_cmd(session: str, window_name: str):
         try:
             fresh_prs = store.load(root).get("prs") or []
             fresh_windows = tmux_mod.list_windows(base)
+            fresh_open = {w["name"] for w in fresh_windows}
+            fresh_name_to_wid = {w["name"]: w["id"] for w in fresh_windows}
+            fresh_nav, fresh_by_disp, fresh_home = _build_nav_entries(
+                fresh_prs, window_pr_id, fresh_open)
         except Exception as e:
             _log.warning("popup-picker: refresh failed, keeping state: %s", e)
             return
+        # Publish only a complete snapshot; malformed entries must not
+        # replace part of the last-good state before nav construction fails.
         prs = fresh_prs
-        open_windows = {w["name"] for w in fresh_windows}
-        name_to_wid = {w["name"]: w["id"] for w in fresh_windows}
-        nav_pr_ids, pr_by_disp, home_pr = _build_nav_entries(
-            prs, window_pr_id, open_windows)
+        open_windows = fresh_open
+        name_to_wid = fresh_name_to_wid
+        nav_pr_ids, pr_by_disp, home_pr = fresh_nav, fresh_by_disp, fresh_home
 
     def _canonical_id(pr_disp: str) -> str:
         """Map a shown PR id to the PR's current display id.
@@ -2042,13 +2050,26 @@ def popup_picker_cmd(session: str, window_name: str):
         if old_cur in old_list:
             k = old_list.index(old_cur)
             for n in range(1, len(old_list) + 1):
-                cand = old_list[(k + delta * n) % len(old_list)]
+                cand = _canonical_id(old_list[(k + delta * n) % len(old_list)])
                 if cand in nav_pr_ids:
                     return cand
         return nav_pr_ids[0]
 
     current_pr = nav_pr_ids[nav_index]
     lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
+
+    fzf_input_lines = [display for display, _, _ in lines]
+
+    def _still_has_action(label: str) -> bool:
+        """Refresh before either interface dispatches a selected action."""
+        nonlocal current_pr, nav_index, lines, _picked_pr, _label_to_cmd
+        nonlocal fzf_input_lines
+        _refresh_state()
+        current_pr = _canonical_id(current_pr)
+        nav_index = _sync_index(current_pr, nav_index)
+        lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
+        fzf_input_lines = [d for d, _, _ in lines]
+        return label in _label_to_cmd
 
     has_fzf = shutil.which("fzf") is not None
 
@@ -2065,8 +2086,6 @@ def popup_picker_cmd(session: str, window_name: str):
         "g": "merge",
     }
     if has_fzf:
-        fzf_input_lines = [display for display, _, _ in lines]
-
         shortcut_hint = "  ".join(
             f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
         )
@@ -2125,22 +2144,6 @@ def popup_picker_cmd(session: str, window_name: str):
             else:
                 cmd.extend(["--disabled", "--prompt="])
             return cmd
-
-        def _still_has_action(label: str) -> bool:
-            """Re-check the shown PR right before dispatching `label`.
-
-            Reloads state; if the PR was merged/closed (or otherwise lost
-            the action) since it was rendered, re-render it with its
-            notice instead of running a stale command.
-            """
-            nonlocal current_pr, nav_index, lines, _picked_pr, _label_to_cmd
-            nonlocal fzf_input_lines
-            _refresh_state()
-            current_pr = _canonical_id(current_pr)
-            nav_index = _sync_index(current_pr, nav_index)
-            lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
-            fzf_input_lines = [d for d, _, _ in lines]
-            return label in _label_to_cmd
 
         cmd_to_run: str | None = None
         chord_state = "main"  # 'main' | 'z' | 'zz'
@@ -2327,22 +2330,25 @@ def popup_picker_cmd(session: str, window_name: str):
         except (EOFError, KeyboardInterrupt):
             raise SystemExit(0)
 
-        # Check if it's a shortcut key
-        if choice in _SHORTCUT_KEYS:
-            target_label = _SHORTCUT_KEYS[choice]
-            cmd = _label_to_cmd.get(target_label)
-            if cmd:
-                _run_picker_command(cmd, session)
-        else:
+        target_label = _SHORTCUT_KEYS.get(choice)
+        if target_label is None:
             try:
                 choice_num = int(choice)
             except ValueError:
                 raise SystemExit(0)
+            selected_cmd = next((cmd for n, cmd in numbered if n == choice_num), None)
+            target_label = next((label for label, cmd in _label_to_cmd.items()
+                                 if cmd == selected_cmd), None)
 
-            for n, cmd in numbered:
-                if n == choice_num:
-                    _run_picker_command(cmd, session)
-                    break
+        if target_label:
+            if _still_has_action(target_label):
+                _run_picker_command(_label_to_cmd[target_label], session)
+            else:
+                # The numbered menu was displayed before this PR changed.
+                # Show its current notice and wait, just as on initial load.
+                for display, _, _ in lines:
+                    click.echo(display)
+                _pause_and_exit(0)
 
 
 @cli.command("_popup-cmd", hidden=True)

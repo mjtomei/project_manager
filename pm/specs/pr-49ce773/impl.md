@@ -56,9 +56,12 @@
    - on every nav key (`_step_target`): step from the current PR within the
      *rebuilt* list; if the PR being left dropped out (merged/closed or lost
      its windows), step to its nearest surviving neighbour in the requested
-     direction from the old order; `0` goes to home.
-   - right before dispatching any action (shortcut, Enter on a row, or a
-     `z`/`zz` chord key) via `_still_has_action(label)`: if the shown PR
+     direction from the old order, canonicalizing each old neighbour id
+     so a simultaneous GitHub-number assignment does not skip it; `0` goes
+     to home.
+   - right before dispatching any action (shortcut, Enter on a row, a
+     `z`/`zz` chord key, or a no-fzf numbered/shortcut selection) via
+     `_still_has_action(label)`: if the shown PR
      no longer has that action (merged/closed meanwhile), don't run
      anything — re-render it with its notice.
    After each reload the shown id is canonicalized (`_canonical_id`, via
@@ -69,7 +72,9 @@
    position until the user navigates away, so the header `(i/n)` never
    names a different PR or indexes past the list.  `multi_pr`/`nav_hint`
    are recomputed every render since `n` can change.  A failed reload logs
-   a warning and keeps the previous state.  h/l/←/→ (and 0 with a home
+   a warning and keeps the complete previous state: build the replacement
+   window maps and navigation inside the error handler before assigning any
+   state, including when YAML parses but a PR entry is malformed.  h/l/←/→ (and 0 with a home
    PR) stay in `--expect` even when the list has one entry — unadvertised,
    they act as a reload, so a PR that is reopened or gains a window after
    the list collapsed to one entry is still reachable (QA E4; observed by
@@ -96,7 +101,9 @@ Fix: resolve a window id to a PR by display id, else via the existing
 `gh_pr_number`; a string `gh_pr_number` is already covered by the
 display-id match).  Canonicalize home_pr to the PR's current display id.
 `_build_nav_entries`' open-window check matches window names built from
-both the display id and the local id.
+both the display id and the local id. This does not recover a removed
+`gh_pr_number`: a window named `#193` with no remaining PR carrying that
+number must show the lookup-failure notice, not another PR's actions.
 
 ## Implicit requirements
 

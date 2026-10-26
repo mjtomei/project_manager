@@ -12,7 +12,9 @@ Changed behavior (pm_core/cli/session.py `popup_picker_cmd` and helpers):
 - Nav list (h/l/←/→, 0 = home) holds non-merged/closed PRs with ≥1 open window,
   plus the home PR (invoking window's PR) whatever its status.
 - Window ids resolve to PRs by display id, then local id / `#N` against
-  `gh_pr_number` (window named `pr-abc` after the PR got `#12`, or vice versa).
+  `gh_pr_number`. A window named `pr-abc` still resolves after the PR gets
+  `#12`; a window named `#193` cannot resolve after that number is removed
+  from project.yaml and must show the lookup-failure notice.
 - project.yaml + tmux window list reload on every nav key and right before any
   action dispatch; a PR merged mid-popup loses its actions and drops out of
   navigation (stays on screen until navigated away, unless home).
@@ -81,11 +83,12 @@ key), **Then** nothing launches; A re-renders with `No actions — PR is merged.
 next then reaches B whose actions work; navigating away from A drops A from the
 list (unless A is home).
 
-R9. **Given** a window named `#193` whose PR has since lost `gh_pr_number` (or a
-window named `pr-abc` for a PR that has since gained `gh_pr_number: 12`),
-**When** the picker opens there, **Then** it resolves to the PR and shows its
-actions under its current display id (no duplicate nav entry); if the id truly
-matches no PR, the row reads `Could not load actions for #193.` (never
+R9. **Given** a window named `pr-abc` for a PR that has since gained
+`gh_pr_number: 12`, **When** the picker opens there, **Then** it resolves to the
+PR and shows its actions under `#12`, with no duplicate nav entry.
+**Given** a window named `#193` whose PR has since lost `gh_pr_number` and no
+other PR has that number, **When** the picker opens there, **Then** the id is
+unresolvable: the row reads `Could not load actions for #193.` (never
 "merged"), a warning appears in the pm log, and nav keys reach other PRs.
 
 R10. **Given** the nav list holds only one PR and it is merged (home), **When**
@@ -99,6 +102,11 @@ R12. **Given** fzf is not on PATH, **When** the picker opens on a merged home PR
 **Then** it prints the header and `No actions — PR is merged.` and waits for a
 keypress before exiting (no instant flash-exit); on a live PR the numbered menu
 works as before.
+
+R13. **Given** the no-fzf numbered menu is waiting on a live PR, **When** that
+PR becomes merged or closed before a number or shortcut is submitted, **Then**
+no command runs; the current terminal-status notice is printed and waits for
+dismissal. A selection on a still-live PR continues to dispatch normally.
 
 ## Edge cases
 
@@ -116,8 +124,11 @@ the nav hint is hidden).
 E5. **Given** a qa-scenario-only window (`qa-#N-s1`) is the PR's only window,
 **Then** the PR counts as navigable and its qa row is `[open]`.
 E6. **Given** project.yaml is momentarily unparsable while the popup is open,
-**When** the user navigates, **Then** the popup keeps prior state (warning in
-log), does not crash.
+**When** the user navigates, **Then** the popup keeps the complete last-good
+snapshot (warning in log), does not crash, and navigation still works within
+that snapshot. Repeat with syntactically valid YAML containing a PR mapping
+with `status` but no `id`; after repairing the file, the next nav key reloads
+normally.
 E7. **Given** the home PR's windows are all closed while the popup is open,
 **When** user presses home, **Then** home PR still shown.
 E8. **Given** a live PR is shown, **When** the user moves to an action row and
@@ -127,6 +138,12 @@ E9. **Given** a live PR is shown with the cursor on the PR title row (where fzf
 starts), **When** the user presses Enter (or double-clicks the title row),
 **Then** nothing is dispatched and the popup stays open on the same PR; only
 q/Esc quits (review 6b78 i3 — this used to close the popup).
+
+E10. **Given** navigation order A, B, C, the popup opened from the TUI and
+now displaying B, **When** B becomes closed and C gains a GitHub number while
+its local-id window remains, then next is pressed, **Then** C is shown under
+its new number rather than skipped in favour of A. Repeat in the other
+direction with A gaining the number and prev pressed; A must be reached.
 
 ## Concurrent use / shared resources
 

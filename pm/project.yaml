@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-22T18:52:52.574931+00:00'
+  updated_at: '2026-10-26T13:36:49.253815+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16128,6 +16128,64 @@ prs:
       is t, not a), pre-existing on master.'
     created_at: '2026-10-22T18:52:52Z'
     last_edited: '2026-10-22T18:52:52Z'
+  - id: note-astra-transfer-20261026
+    text: 'User-authorized transfer 2026-10-26: bring #242 and #243 from the main
+      session into pm-project_manager-5b29c418 and run with provider:chatgpt-astra
+      (chatgpt/gpt-6-astra-high) for ALL roles including helpers and sign-off. Preserve
+      existing branch/workdir/source/dirty files, drafts and QA evidence. Old main-session
+      autostart is off. Fresh Astra review is required at transfer, then native review/QA/sign-off
+      with wait_for_merge and spec review OFF. Existing QA findings remain required;
+      no invented verdicts or waived coverage. Existing main-session captures were
+      copied intact to this session before launch. No standalone follow-ups are authorized.'
+    created_at: '2026-10-26T13:21:44.912441+00:00'
+    last_edited: '2026-10-26T13:21:44.912441+00:00'
+  - id: note-4596343
+    text: 'Review 1eaf i1 (Astra, 2026-10-26): completed handed-off clean merge of
+      origin/master 211a6128 as c712805d; verified all 494 combined PR entries and
+      top-level metadata preserve parent intent. Restored exact Astra all-role settings
+      from named stash and retained stash; verify-s15-followup.md unchanged. Fresh
+      review reproduced/fixed stale no-fzf numbered/shortcut dispatch after merged/closed
+      transition, partial refresh crash on malformed PR entries, and skipping a simultaneously
+      renumbered neighbour when current PR drops out (both directions). Shared pre-dispatch
+      guard; atomic refresh; canonicalize old neighbours; exact window matches use
+      set membership. Added 11 regression cases (9 failed before fix, 2 controls passed);
+      expanded popup/session suite now 280 passed. Clarified removed-gh-number lookup
+      in impl/QA specs; added QA R13/E10 and strengthened E6. Full suite pending.
+      Historical QA/review is evidence only, NOT current approval after this base
+      merge; fresh native review, live QA (including these new cases) and sign-off
+      remain required. No standalone follow-ups created.'
+    created_at: '2026-10-26T13:33:56Z'
+    last_edited: '2026-10-26T13:33:56Z'
+  - id: note-411ad95
+    text: 'Review 1eaf i1 final validation: full suite after final code edits = 3488
+      passed, 55 failed, 17 errors, 1 skipped. Twelve failures were missing declared
+      markdown dependency; installed it only in review scratch dependencies and reran
+      tests/test_markdown_render.py: 13 passed. Remaining 43 failures + 17 errors
+      reproduce with EXACT identical test ids on clean origin/master 211a6128 (test_git_ops,
+      test_hook_events, test_merge_publish, test_signoff_integration); no branch-only
+      failures in those groups. Expanded popup/session suite: 280 passed. Evidence:
+      /pm-captures/review-1eaf-i1-repro.txt, review-1eaf-i1-integration-fixed.txt,
+      review-1eaf-i1-full-final.txt, review-1eaf-i1-markdown.txt, review-1eaf-i1-base-control.txt.
+      Earlier review-1eaf-i1-full.txt was stopped before fixes and is superseded.
+      This iteration is NEEDS_WORK because fixes were applied; fresh review/live QA/sign-off
+      required, including fallback terminal transition, malformed-entry recovery and
+      simultaneous removal/renumbering both directions. Existing copied QA artifacts
+      and named Astra transfer stash retained; no new live QA PASS claimed.'
+    created_at: '2026-10-26T13:36:49Z'
+    last_edited: '2026-10-26T13:36:49Z'
+  model: provider:chatgpt-astra
+  session_models:
+    impl: provider:chatgpt-astra
+    review: provider:chatgpt-astra
+    qa: provider:chatgpt-astra
+    qa_planning: provider:chatgpt-astra
+    qa_scenario: provider:chatgpt-astra
+    qa_concretize: provider:chatgpt-astra
+    qa_verification: provider:chatgpt-astra
+    qa_finalize: provider:chatgpt-astra
+    qa_interactive: provider:chatgpt-astra
+    signoff: provider:chatgpt-astra
+    merge: provider:chatgpt-astra
 - id: pr-562d71d
   plan: null
   title: 'Bug: selected PR still scrolls under bottom bars after #157''s fix'

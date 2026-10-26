@@ -2,6 +2,8 @@
 
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from pm_core.cli.session import (
     _actions_for_status,
     _status_phase,
@@ -547,7 +549,7 @@ def _expect(call):
 
 
 def _run_picker(tmp_path, monkeypatch, prs, windows, window_name, script,
-                on_launch=None):
+                on_launch=None, has_fzf=True):
     """Drive popup_picker_cmd end to end with a fake fzf.
 
     ``prs`` is re-read on every project.yaml load, so a test can mutate it
@@ -572,7 +574,7 @@ def _run_picker(tmp_path, monkeypatch, prs, windows, window_name, script,
          patch.object(sess, "_fzf_supports_no_input", return_value=True), \
          patch.object(sess, "_wait_dismiss"), \
          patch.object(sess, "_run_picker_command", run_cmd), \
-         patch("shutil.which", return_value="/usr/bin/fzf"), \
+         patch("shutil.which", return_value="/usr/bin/fzf" if has_fzf else None), \
          patch.object(sess.subprocess, "Popen", fzf):
         try:
             sess.popup_picker_cmd.callback("pm-x", window_name)
@@ -867,6 +869,72 @@ class TestPopupPickerMergedNavigation:
         assert "l" in _expect(fzf.calls[1])
         run_cmd.assert_called_once()
         assert "pr-q" in run_cmd.call_args.args[0]
+
+
+class TestPopupPickerRefreshFailures:
+    def test_malformed_reload_keeps_complete_previous_state(self, tmp_path, monkeypatch):
+        prs = [_pr("pr-a"), _pr("pr-b")]
+
+        def on_launch(n):
+            if n == 1:
+                prs[0]["status"] = "merged"
+                prs.append({"status": "in_review"})
+            elif n == 2:
+                prs.pop()
+
+        with patch("pm_core.cli.session._log") as log:
+            fzf, run_cmd = _run_picker(
+                tmp_path, monkeypatch, prs, ["pr-a", "pr-b"], "tui",
+                [(0, "l\n"), (0, "h\n"), (130, "")], on_launch=on_launch)
+        assert [_shown(c) for c in fzf.calls] == [
+            "PR Actions — pr-a  (1/2)",
+            "PR Actions — pr-b  (2/2)",
+            "PR Actions — pr-b",
+        ]
+        assert log.warning.called
+        run_cmd.assert_not_called()
+
+    @pytest.mark.parametrize("direction, target", [("l", "pr-c"), ("h", "pr-a")])
+    def test_removed_current_uses_renumbered_neighbor(self, tmp_path, monkeypatch,
+                                                    direction, target):
+        prs = [_pr("pr-a"), _pr("pr-b"), _pr("pr-c")]
+
+        def on_launch(n):
+            if n == 2:
+                prs[1]["status"] = "closed"
+                next(p for p in prs if p["id"] == target)["gh_pr_number"] = 12
+
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["pr-a", "pr-b", "pr-c"], "tui",
+            [(0, "l\n"), (0, f"{direction}\n"), (130, "")], on_launch=on_launch)
+        assert _shown(fzf.calls[1]) == "PR Actions — pr-b  (2/3)"
+        assert _shown(fzf.calls[2]).startswith("PR Actions — #12 ")
+        run_cmd.assert_not_called()
+
+
+class TestPopupPickerFallbackRefresh:
+    @pytest.mark.parametrize("choice", ["1", "s", "d"])
+    @pytest.mark.parametrize("status", ["merged", "closed"])
+    def test_terminal_pr_not_dispatched(self, tmp_path, monkeypatch, capsys,
+                                        choice, status):
+        prs = [_pr("pr-a")]
+
+        def choose(prompt):
+            prs[0]["status"] = status
+            return choice
+
+        with patch("builtins.input", side_effect=choose):
+            _, run_cmd = _run_picker(tmp_path, monkeypatch, prs, ["pr-a"],
+                                     "pr-a", [], has_fzf=False)
+        run_cmd.assert_not_called()
+        assert f"No actions — PR is {status}." in capsys.readouterr().out
+
+    @pytest.mark.parametrize("choice", ["1", "s"])
+    def test_live_pr_still_dispatches(self, tmp_path, monkeypatch, choice):
+        with patch("builtins.input", return_value=choice):
+            _, run_cmd = _run_picker(tmp_path, monkeypatch, [_pr("pr-a")],
+                                     ["pr-a"], "pr-a", [], has_fzf=False)
+        run_cmd.assert_called_once_with("pr start pr-a", "pm-x")
 
 
 class TestPopupPickerEnterSelection:
