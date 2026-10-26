@@ -986,6 +986,8 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
                           "claimed, skipping", pr_id)
                 _recheck_after_claim(app)
                 continue
+        elif _adopt_return_review(app, pr):
+            continue
         _log.info("auto_start: starting review loop for %s", pr_id)
         app.log_message(f"Auto-start: review loop for {pr_id}")
         from pm_core.tui.review_loop_ui import _start_loop
@@ -1095,6 +1097,67 @@ def _recheck_after_claim(app) -> None:
 
     app._return_claim_recheck = True
     set_timer(RETURN_LAUNCH_CLAIM_SECONDS + 5, _fire)
+
+
+def _adopt_return_review(app, pr: dict) -> bool:
+    """Adopt the live review window of an already-launched REVIEW return.
+
+    Once a sign-off REVIEW return has launched (``awaiting`` cleared), its
+    review window may belong to another driver: a ``pm pr auto-sequence``
+    tick, or this TUI before a restart dropped its in-memory loop.  A new
+    loop's ``--fresh`` launch would kill that window and review again (S79),
+    so poll it as the loop's in-flight iteration instead.  Only a session
+    active since the return is adopted: an older window reviewed the code
+    sign-off sent back.  Returns True when a loop was started on it.
+    """
+    from pm_core.claude_launcher import pane_transcript_path
+    from pm_core.review_loop import (
+        ReviewLoopState, _compute_review_window_name, _find_claude_pane,
+    )
+    from pm_core.signoff import open_return, parse_ts
+
+    pr_id = pr["id"]
+    try:
+        disk_pr = store.get_pr(store.load(app._root), pr_id) or {}
+    except Exception:
+        _log.debug("auto_start: reload for %s failed", pr_id, exc_info=True)
+        return False
+    rec = open_return(disk_pr)
+    session = getattr(app, "_session_name", None)
+    if not rec or rec.get("hop") != "review" or rec.get("awaiting") \
+            or not session:
+        return False
+    pane_id = _find_claude_pane(session, _compute_review_window_name(disk_pr))
+    if not pane_id:
+        return False
+    transcript = pane_transcript_path(pane_id, disk_pr.get("workdir"))
+    if transcript is None:
+        return False
+    try:
+        # Not written yet: the session was launched moments ago.
+        if transcript.exists() and \
+                transcript.stat().st_mtime < parse_ts(rec.get("ts")).timestamp():
+            return False
+    except (OSError, TypeError, ValueError):
+        return False
+    tdir = get_transcript_dir(app)
+    link = tdir / f"review-{pr_id}-i1.jsonl"
+    try:
+        tdir.mkdir(parents=True, exist_ok=True)
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(transcript)
+    except OSError as e:
+        _log.warning("auto_start: cannot adopt review window of %s: %s",
+                     pr_id, e)
+        return False
+    _log.info("auto_start: adopting the open review window of %s "
+              "(pane %s, session transcript %s)", pr_id, pane_id, transcript)
+    from pm_core.tui.review_loop_ui import _start_loop
+    state = ReviewLoopState(pr_id=pr_id, iteration=1,
+                            _transcript_dir=str(tdir))
+    _start_loop(app, pr_id, pr, transcript_dir=str(tdir), resume_state=state)
+    return True
 
 
 def _awaiting_on_disk(app, pr_id: str, hop: str) -> bool:

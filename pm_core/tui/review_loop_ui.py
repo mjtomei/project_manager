@@ -11,6 +11,8 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
              If a loop is already running, make this iteration the last one.
 """
 
+import os
+
 from pm_core.paths import configure_logger
 from rich.markup import escape
 
@@ -1093,6 +1095,15 @@ def _poll_impl_idle(app) -> None:
             if not tdir:
                 continue
             impl_transcript = str(tdir / f"impl-{pr_id}.jsonl")
+            from pm_core.claude_launcher import pane_runs_transcript
+            if os.path.lexists(impl_transcript) and not pane_runs_transcript(
+                    pane_id, pr.get("workdir"), impl_transcript):
+                # Another driver (a pm pr auto-sequence tick) launched this
+                # pane; the symlink is this TUI's earlier session, whose
+                # idle event would advance the PR mid-rework (S79).
+                _watch_untracked_trust(app, pane_id, pr.get("workdir"),
+                                       untracked_seen)
+                continue
             try:
                 tracker.register(pr_id, pane_id, impl_transcript)
             except ValueError:

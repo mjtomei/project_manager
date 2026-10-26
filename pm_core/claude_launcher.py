@@ -1020,6 +1020,22 @@ def pane_transcript_path(pane_id: str, workdir: str | None) -> Path | None:
     return transcript_path_for(cwd, m.group(1))
 
 
+def pane_runs_transcript(pane_id: str, workdir: str | None,
+                         transcript_path: str | Path) -> bool:
+    """Whether *pane_id* runs the session the *transcript_path* symlink names.
+
+    Drivers keep one ``impl-<pr>.jsonl`` symlink per run dir, so a pane
+    another driver launched meets this driver's symlink to an *earlier*
+    session.  A pane whose start command shows no session id cannot be
+    checked and counts as a match.
+    """
+    own = pane_transcript_path(pane_id, workdir)
+    if own is None:
+        return True
+    return session_id_from_transcript(own) == \
+        session_id_from_transcript(transcript_path)
+
+
 def finalize_transcript(transcript_path: Path) -> None:
     """Replace a transcript symlink with a copy of the target file.
 

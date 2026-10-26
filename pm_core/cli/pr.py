@@ -3394,6 +3394,11 @@ def _check_impl_idle(session: str, pr_entry: dict, tdir: Path) -> tuple[bool, bo
     transcript = tdir / f"impl-{pr_id}.jsonl"
     if not transcript.exists():
         return False, False
+    from pm_core.claude_launcher import pane_runs_transcript
+    if not pane_runs_transcript(pane_id, pr_entry.get("workdir"), transcript):
+        # Another driver (the TUI) launched this pane; the symlink is an
+        # earlier session's, whose idle event says nothing about it (S79).
+        return False, False
     tracker = PaneIdleTracker()
     try:
         tracker.register(pr_id, pane_id, str(transcript))
