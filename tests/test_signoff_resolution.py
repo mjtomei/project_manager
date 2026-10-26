@@ -612,8 +612,13 @@ def test_evidence_records_the_prior_decision_and_an_honest_review_revision(w):
         w.pm_dir, PR, SIGNOFF_MERGE, rec["head"], "manual",
         integration=integration.binding(pr_entry(w)["integration"]))
     ev = pr_entry(w)["signoff"]["evidence"]
+    stored_integ = pr_entry(w)["integration"]
     assert ev["reviewed_head"] == rec["head"]
     assert ev["required_return_stage"] == "merge"
+    # The block names the candidate the decision reviewed.
+    assert ev["candidate_tree"] == stored_integ["candidate_tree"]
+    resolved_from = rec["resolution"]["resolved_from"]
+    assert ev["resolved_from"]["head"] == resolved_from["head"]
     assert ev["prior_signoff"]["verdict"] == SIGNOFF_REVIEW
     assert ev["prior_signoff"]["sha"] == rec["head"]
     assert ev["prior_signoff"]["origin"] == "manual"
@@ -624,6 +629,28 @@ def test_evidence_records_the_prior_decision_and_an_honest_review_revision(w):
     assert "does not record" in ev["review"]["note"]
     assert ev["qa"]["planner_head"] == "f" * 40
     assert ev["qa"]["planner_code_changes"] == ["fix.py"]
+
+
+def test_evidence_does_not_attribute_another_revisions_candidate(w):
+    """A decision recorded for a revision the stored check does not describe
+    must not inherit that check's candidate tree or resolution.
+
+    Otherwise the recorded provenance would claim pm confirmed a candidate
+    for a HEAD it never checked.
+    """
+    rec = _metadata_conflict(w)
+    stored = pr_entry(w)["integration"]
+    assert stored["candidate_tree"] and stored["resolved_from"]
+    assert stored["head"] == rec["head"]
+
+    # A decision for another revision, recorded without an integration
+    # binding (the stored check is not of that revision).
+    signoff.record_signoff_verdict(w.pm_dir, PR, SIGNOFF_REVIEW, "a" * 40,
+                                   "manual")
+    ev = pr_entry(w)["signoff"]["evidence"]
+    assert ev["reviewed_head"] == "a" * 40
+    assert ev["candidate_tree"] is None
+    assert ev["resolved_from"] is None
 
 
 def test_malformed_qa_evidence_does_not_crash_the_record(w):
@@ -1843,6 +1870,21 @@ def test_apply_refuses_when_head_moved_under_the_resolution(w):
     assert git(w.wd, "rev-parse", "HEAD") == head
 
 
+def test_apply_refuses_a_record_without_a_base_revision(w):
+    """A partial record is refused, not crashed on.
+
+    ``apply_integration`` runs unattended at sign-off launch and from
+    ``--apply``; both promise a reason on failure, so a record that cannot
+    name the base to merge must come back as an error, not a traceback.
+    """
+    head = git(w.wd, "rev-parse", "HEAD")
+    merged, err = integration.apply_integration(
+        w.pm_dir, PR, {"status": integration.CLEAN, "head": head})
+    assert merged is None and "no base revision" in err
+    assert git(w.wd, "rev-parse", "HEAD") == head
+    assert git(w.wd, "status", "--porcelain") == ""
+
+
 def test_effective_verdict_coerces_an_unresolved_resolved_merge():
     """A RESOLVED record that still carries unresolved entries is not safe."""
     head = "a" * 40
@@ -2175,3 +2217,90 @@ def test_a_bounce_that_applies_clears_a_stale_apply_error(w):
     assert stored["status"] == integration.UP_TO_DATE
     assert stored["resolution"]["applied_merge_sha"]
     assert "apply_error" not in stored
+
+
+def test_a_bounce_keeps_the_provenance_when_a_check_recorded_the_merge(
+        w, monkeypatch):
+    """A concurrent check of the just-applied merge must not drop the
+    resolution provenance.
+
+    The window is between the apply and the bounce's record write: a check
+    that reads the merge commit records a bare up-to-date record, and it
+    cannot know about the apply (the record it carried from still said
+    ``resolved``).  That record describes the same revision, so the bounce's
+    record — same revision, with the provenance — must win; otherwise the
+    applied resolution silently disappears and a later approval no longer
+    needs the explicit-reuse statement.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+    assert not rec["resolution"].get("applied_merge_sha")
+
+    real_apply = integration.apply_integration
+
+    def racing_apply(root, pr_id, record=None, **kw):
+        merged, err = real_apply(root, pr_id, record, **kw)
+        if merged:
+            # Simulate a check that read the merge commit before this bounce
+            # recorded the resolution.
+            tree = git(w.wd, "rev-parse", "HEAD^{tree}")
+
+            def _bare(d):
+                p = store.get_pr(d, pr_id)
+                p["integration"] = {
+                    "head": merged, "status": integration.UP_TO_DATE,
+                    "base_sha": (record or {}).get("base_sha"),
+                    "candidate_tree": tree,
+                }
+            store.locked_update(root, _bare)
+        return merged, err
+
+    monkeypatch.setattr(integration, "apply_integration", racing_apply)
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(
+        transcript, git(w.wd, "rev-parse", "HEAD"), rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+
+    stored = pr_entry(w)["integration"]
+    applied = stored["resolution"]["applied_merge_sha"]
+    assert stored["status"] == integration.UP_TO_DATE
+    assert stored["head"] == applied
+    assert stored["resolution_digest"]
+    # The next sign-off check carries it forward and still demands reuse.
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["resolution"]["applied_merge_sha"] == applied
+    assert signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], again["head"])
+
+
+def test_a_bounce_does_not_overwrite_a_check_of_another_revision(w):
+    """The same-revision exception is narrow: any other record wins."""
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+
+    other = "c" * 40
+
+    def _other(d):
+        p = store.get_pr(d, PR)
+        p["integration"] = {"head": other, "status": integration.UP_TO_DATE,
+                            "candidate_tree": "d" * 40}
+    store.locked_update(w.pm_dir, _other)
+    signoff._record_applied_integration(
+        w.pm_dir, PR, rec, rec["head"], "e" * 40)
+    assert pr_entry(w)["integration"]["head"] == other

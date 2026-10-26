@@ -1638,6 +1638,11 @@ def apply_integration(root: Path, pr_id: str, record: dict | None = None,
     if _out(_git("status", "--porcelain", "--untracked-files=no", cwd=workdir)):
         return None, "workdir has uncommitted changes"
     base_sha = record.get("base_sha")
+    if not base_sha:
+        # A partial or hand-edited record cannot name the revision to merge;
+        # refuse instead of crashing (this runs unattended at sign-off launch
+        # and from `--apply`, both of which promise a reason, not a traceback).
+        return None, "the integration record has no base revision"
     msg = (f"Integrate {record.get('base_branch')}@{base_sha[:8]} into "
            f"{branch or 'PR branch'}")
     if status == RESOLVED:

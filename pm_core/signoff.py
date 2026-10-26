@@ -174,9 +174,8 @@ def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
             for k, v in (extra or {}).items():
                 if v is not None:
                     record[k] = v
-            record["evidence"] = _evidence_block(
-                pr, sha, integration or (pr.get("integration") or {}),
-                verdict=verdict)
+            record["evidence"] = _evidence_block(pr, sha, integration,
+                                                 verdict=verdict)
             pr["signoff"] = record
             # A new sign-off decision closes the previous return episode.
             ret = pr.get("signoff_return")
@@ -394,6 +393,13 @@ def _evidence_block(pr: dict, reviewed_head: str | None,
                                                   "origin", "invalidated")}
         prior_block["integration"] = prior.get("integration")
     full = pr.get("integration") or {}
+    if full.get("head") != reviewed_head:
+        # The stored check describes another revision (the branch moved after
+        # it ran, or it failed and recorded no HEAD).  Its candidate tree and
+        # resolution are not this decision's: recording them beside the
+        # reviewed HEAD would attribute provenance the decision never had.
+        full = {}
+    seen = integration or {}
     qa = qa_evidence(pr["id"])
     if qa:
         changes = list(qa.get("planner_code_changes") or [])
@@ -412,9 +418,9 @@ def _evidence_block(pr: dict, reviewed_head: str | None,
     return {
         "reviewed_head": reviewed_head,
         "required_return_stage": _VERDICT_STAGE.get(verdict, verdict),
-        "candidate_tree": (integration or {}).get("candidate_tree")
+        "candidate_tree": seen.get("candidate_tree")
         or full.get("candidate_tree"),
-        "resolved_from": (integration or {}).get("resolved_from")
+        "resolved_from": seen.get("resolved_from")
         or full.get("resolved_from"),
         "review": {
             "reviewed_at": pr.get("reviewed_at"),
@@ -1327,7 +1333,12 @@ def _record_applied_integration(root: Path, pr_id: str, rec: dict,
     the merge commit and keeps its resolution (with ``applied_merge_sha``);
     a later check then carries the provenance forward.  Guarded on the
     reviewed head: a concurrent check that already recorded another revision
-    wins.
+    wins — except for a bare up-to-date check of the merge this call just
+    made.  That check describes the same revision but cannot know about the
+    apply (the stored record it carried from still said ``resolved``, with
+    no ``applied_merge_sha``), so letting it stand would silently drop the
+    provenance and, with it, the explicit-reuse requirement for this
+    candidate.
     """
     from pm_core import integration as integ
     updated = dict(rec, head=merge_sha, status=integ.UP_TO_DATE)
@@ -1349,7 +1360,14 @@ def _record_applied_integration(root: Path, pr_id: str, rec: dict,
             return
         cur = p.get("integration") or {}
         if reviewed and cur.get("head") and cur["head"] != reviewed:
-            return
+            # A concurrent actor moved the branch (or already recorded another
+            # revision): its record describes what the branch now is.
+            bare_merge_check = (
+                cur["head"] == merge_sha
+                and cur.get("status") == integ.UP_TO_DATE
+                and not cur.get("resolution"))
+            if not bare_merge_check:
+                return
         p["integration"] = compact
     try:
         store.locked_update(root, _apply)
