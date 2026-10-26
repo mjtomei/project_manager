@@ -405,6 +405,16 @@ class TestClassifierRoute:
         assert not {"CLAUDE_CODE_AUTO_MODE_MODEL",
                     "ANTHROPIC_SMALL_FAST_MODEL"} & set(unset)
 
+    def test_openai_provider_sets_its_own_alias_models(self):
+        # Review c189 i7: alias_models is honoured for the openai type too.
+        p = ProviderConfig(name="vllm", type="openai",
+                           api_base="http://localhost:8000/v1", model="coder",
+                           alias_models={"ANTHROPIC_SMALL_FAST_MODEL": "small"})
+        assign, unset = launch_env(p, p.env_vars(), p.model_flag(), {})
+        assert assign["ANTHROPIC_SMALL_FAST_MODEL"] == "small"
+        assert "ANTHROPIC_SMALL_FAST_MODEL" not in unset
+        assert "ANTHROPIC_DEFAULT_OPUS_MODEL" in unset
+
     def test_provider_list_names_the_classifier_route(self, pm_home_dir):
         from pm_core.cli.provider import _router_detail_lines
         _write_providers(pm_home_dir)
@@ -537,6 +547,56 @@ class TestInheritedRoutingEnv:
         env = self._claude_env(self._build(provider="proxy"))
         assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:2"
         assert "ANTHROPIC_DEFAULT_FABLE_MODEL" not in env
+        # Not a route: no marker, so a pm run inside this session keeps
+        # the proxy as the user's own endpoint (review c189 i7).
+        assert "PM_ROUTE_BASE_URL" not in env
+
+    def test_non_router_provider_url_is_not_a_route(self, pm_home_dir,
+                                                    monkeypatch):
+        # Review c189 i7: only routers' addresses are recognised without
+        # the marker; a claude/local provider configured at the inherited
+        # URL is the user's own endpoint.
+        import yaml
+        (pm_home_dir / "providers.yaml").write_text(yaml.safe_dump(
+            {"providers": {"proxy": {"type": "claude",
+                                     "api_base": "http://127.0.0.1:2"},
+                           "ollama": {"type": "local",
+                                      "api_base": "http://127.0.0.1:3"}}}))
+        for url in ("http://127.0.0.1:2", "http://127.0.0.1:3"):
+            monkeypatch.setenv("ANTHROPIC_BASE_URL", url)
+            env = self._claude_env(self._build(model="claude-opus-5-5"))
+            assert env["ANTHROPIC_BASE_URL"] == url
+
+    def test_marker_alone_identifies_the_route(self, pm_home_dir,
+                                               monkeypatch):
+        # Review c189 i7: where no router is configured (a pm process in a
+        # container has no providers.yaml) the marker is the only signal,
+        # and the URL pm recorded may end in "/".
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8790/")
+        monkeypatch.setenv("PM_ROUTE_BASE_URL", "http://127.0.0.1:8790/")
+        env = self._claude_env(self._build(model="claude-opus-5-5"))
+        assert "ANTHROPIC_BASE_URL" not in env
+        assert "PM_ROUTE_BASE_URL" not in env
+
+    def test_malformed_router_address_does_not_break_launches(
+            self, pm_home_dir, monkeypatch):
+        # Review c189 i7: a router whose api_base has no host has no
+        # in-container form; launches with an inherited endpoint still
+        # build (and keep a URL that is not that router's).
+        _write_providers(pm_home_dir, api_base="not a url")
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:19611")
+        env = self._claude_env(self._build(model="claude-opus-5-5"))
+        assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:19611"
+
+    def test_launch_env_reads_the_given_environment(self, pm_home_dir):
+        # The caller's environment is a parameter: os.environ is clean
+        # here (conftest), the passed one is a routed parent's.
+        cfg = ProviderConfig(name="claude")
+        parent = {"ANTHROPIC_BASE_URL": "http://127.0.0.1:9",
+                  "PM_ROUTE_BASE_URL": "http://127.0.0.1:9"}
+        assert "ANTHROPIC_BASE_URL" in launch_env(cfg, {}, None, parent)[1]
+        assert "ANTHROPIC_BASE_URL" not in launch_env(
+            cfg, {}, None, {"ANTHROPIC_BASE_URL": "http://127.0.0.1:9"})[1]
 
     def test_print_launchers(self, routed_parent):
         from pm_core.claude_launcher import _resolve_provider

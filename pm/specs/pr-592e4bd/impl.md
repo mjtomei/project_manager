@@ -1519,5 +1519,19 @@ routing environment is now built from pm's selection
   - The plain `--model` and the routed launch were unchanged.
 - Not run live here: a container (no image in the review container) and
   interactive panes (qa.md twenty-fifth pass).
-Latest full suite: 3807 passed, rc 0, run inside a routed review session
-(`/pm-captures/review-c189-i6/full-suite-r9.log`).
+Review loop c189 i7 re-checked R9 with 10 new mutations. Six were missed and
+are now caught by new tests (test only, no product change):
+- an openai provider's `alias_models`;
+- no marker for a non-router endpoint;
+- a claude/local provider at the inherited URL is not a route;
+- the marker alone identifies a route, trailing `/` included (a pm process
+  in a container has no providers.yaml);
+- a router `api_base` with no host does not break launches;
+- `launch_env` reads the environment it is given.
+See `/pm-captures/review-c189-i7/mutation-checks.log`. Live: this review
+ran in a routed review container launched with `PM_ROUTE_BASE_URL`, so the
+production launcher runs R9. pm's own no-model build there dropped every
+routing variable, and a plain-model build kept only its own pin
+(`live-routed-parent-env.txt`).
+Latest full suite: 3812 passed, rc 0, run inside a routed review session
+(`/pm-captures/review-c189-i7/full-suite.log`).

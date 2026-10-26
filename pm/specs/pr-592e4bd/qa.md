@@ -1303,7 +1303,11 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     and models only. Record the requested models of the main loop,
     children, Fable/haiku switches, background calls and classifier
     calls. Include one `--resume`. A pre-fix control on ee82dc0c shows
-    the leak.
+    the leak. A pm process inside a container has no providers.yaml, so
+    there only the `PM_ROUTE_BASE_URL` marker identifies an inherited
+    route URL (review loop c189 i7 saw it in its own routed review
+    container: a no-model build dropped every routing variable). Include
+    one nested launch from inside a container session.
 
 ## 3. Edge cases
 
