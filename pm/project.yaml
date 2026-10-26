@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2a44020
+  active_pr: pr-33b88a7
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -31659,7 +31659,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T13:33:03.492684+00:00'
+  updated_at: '2026-10-26T14:26:46.836339+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34382,6 +34382,26 @@ prs:
       --transcript.'
     created_at: '2026-10-26T13:33:03Z'
     last_edited: '2026-10-26T13:33:03Z'
+  - id: note-ddc112f
+    text: 'QA S74 (2026-10-26, host, stubs, HEAD 07520c1b vs control 4efb40e0-minus-bd62bc0d;
+      captures /pm-captures/scenarios/74/REPORT.md): PASS, no product change. bd62bc0d
+      held live under real project.yaml lock contention. Story 1: 6 hop rounds (2
+      before, 3 set, 1 cleared) with an actor doing 1392 note/edit/B-tick commands
+      (all rc 0, notes all present, B title = last edit, B transitions only its own):
+      one A driver each, one window set/workdir/PASS FINALIZE_DONE, claim at inside
+      the launching tick, one A TUI node. Story 2 (flock H 0.5/1.5/1.9): HEAD 11 counted
+      rounds, both orders won at every H, always one driver, claim.at after hold-end
+      (+13..54 ms); control doubled in both qa-won rounds (H 1.5, 1.9; 0/6 qa wins
+      at 0.5), claims at pre-wait time. Story 3 (H=3): 2/2 two lock WARNINGs, no driver,
+      rc 0, next tick one driver. Story 4 (FAKETIME=+5; this libfaketime build rejects
+      +5s): a future-dated claim counts as stale (0 <= age), the normal tick launched
+      a second driver on HEAD (cleared path) and on the control at 100 ms (awaiting
+      path); pre-existing, filed pr-33b88a7. B runs end finalize=None when the actor
+      hops B back within seconds (pr-f1d825b, already noted). Harness: run actors
+      in panes without sourcing env.sh (it unsets TMUX); never bare wait with a background
+      reaper child.'
+    created_at: '2026-10-26T14:26:46Z'
+    last_edited: '2026-10-26T14:26:46Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -35504,6 +35524,40 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-26T12:35:42.944286+00:00'
   updated_at: '2026-10-26T12:35:42.944286+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-33b88a7
+  plan: bugs
+  title: 'Bug: a sign-off qa launch claim dated in the future (clock stepped back,
+    or a tick on a fast clock) counts as stale, so a second auto-sequence tick launches
+    a duplicate QA driver'
+  branch: pm/pr-33b88a7-bug-a-sign-off-qa-launch-claim-dated-in-the-future
+  status: pending
+  depends_on: []
+  description: 'pm_core/signoff.py _claim_fresh requires 0 <= age < RETURN_LAUNCH_CLAIM_SECONDS,
+    so a qa launch_claim whose at is later than the reader clock is treated as absent
+    by both guards: claim_return_launch (awaiting == qa path, pm pr auto-sequence
+    qa branch ~pm_core/cli/pr.py:3668) overwrites it and launches, and return_launch_claimed
+    (awaiting cleared, qa window not yet replaced) lets the tick launch. Repro (QA
+    S74 story 4, /pm-captures/scenarios/74/story4*, host, stubs): A at sign_off with
+    SIGNOFF_REQA; hop tick under libfaketime FAKETIME=+5 writes launch_claim.at ~5
+    s ahead; a normal-clock pm pr auto-sequence A tick 100-500 ms later prints "running:
+    qa (launched)" -> two live qa-run-bg drivers, two QA planning phase lines, two
+    workdirs, duplicate qa-<pr>/-s0 windows (HEAD 07520c1b at 500 ms via the cleared
+    path; pre-fix control 4efb40e0-minus-bd62bc0d at 100 ms via the awaiting path,
+    claim overwritten with the real clock; at 500 ms the control driver cleared awaiting
+    first and the window guard held, 2/2). The first driver also inherits the shifted
+    clock (its log lines and qa_run.json started_at 5 s ahead). Pre-existing since
+    the claim was introduced (8edbe269/109bca54), not bd62bc0d. Possible fix: treat
+    a claim from the future (negative age, maybe beyond a small skew) as fresh until
+    it expires relative to its own at, or clamp at to now on read.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T14:25:07.399461+00:00'
+  updated_at: '2026-10-26T14:25:07.399461+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
