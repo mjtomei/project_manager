@@ -380,6 +380,11 @@ def _signoff_qa_scenarios_block(pr_id: str) -> str:
         data = json.loads(latest.read_text())
     except (OSError, ValueError):
         return "\n_qa_status.json unreadable — read the captures dir directly._\n"
+    if not isinstance(data, dict):
+        # Valid JSON that is not an object (e.g. a list) is malformed
+        # evidence, not a status snapshot: report it instead of raising
+        # AttributeError while building the sign-off prompt.
+        return "\n_qa_status.json malformed — read the captures dir directly._\n"
     lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
     if data.get("error"):
         lines.append(f"QA error: {data['error']}")

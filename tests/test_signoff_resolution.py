@@ -682,6 +682,25 @@ def test_malformed_qa_evidence_does_not_crash_the_record(w):
     assert f"qa@{'f' * 12}" in text
 
 
+def test_malformed_qa_status_does_not_crash_the_signoff_prompt(w):
+    """A valid-JSON non-mapping qa_status.json must not raise out of the prompt.
+
+    The record path already treats such a file as malformed evidence; the
+    sign-off prompt's QA block must do the same instead of calling ``.get``
+    on a list.
+    """
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps(["not", "a", "mapping"]))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": "f" * 40, "planner_code_changes": []}))
+
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(store.load(w.pm_dir), PR)
+    assert "qa_status.json malformed" in text
+
+
 def test_behavioral_changes_are_focused_on_this_pr_and_its_dependencies(w):
     data = store.load(w.base_pm)
     data["prs"].append({"id": "pr-999", "title": "Other", "status": "merged"})
