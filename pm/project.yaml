@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T19:49:49.122049+00:00'
+  updated_at: '2026-10-26T19:59:21.124863+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16630,6 +16630,28 @@ prs:
       + per-story manifests, 4 recordings).'
     created_at: '2026-10-26T19:49:49Z'
     last_edited: '2026-10-26T19:49:49Z'
+  - id: note-4860192
+    text: 'QA S28 (2026-10-26, qa commit 051975e5) identity-retention live run on
+      a scratch project (A/B/C in_review, fzf 0.56.3, tmux 3.2a). S1, S3, S4, S6,
+      S7, S8 held. S2 held after qa fix 051975e5: the dispatch-refusal path for a
+      PR deleted while the popup is open rendered the notice but logged only "selected
+      PR ... disappeared before dispatch"; it now also logs "popup-picker: no actions
+      for <id>" with the window/root/loaded-count diagnostics (_log_no_actions shared
+      by both paths); frame/dispatch behavior unchanged. S5 FAILED its Then counters:
+      with A=#12 (window named #12), B,C live and the popup opened from a non-PR window,
+      removing A''s number and giving B #12 makes A drop out of nav (its only window
+      name matches neither its current display nor its local id), so l gives (1/2)
+      and h gives (2/2) where the Then expects (2/3)/(3/3); the reached PRs (B then
+      C) and the dispatched local ids are correct. impl.md explicitly says a removed
+      gh_pr_number is not recovered, so keeping A reachable needs a persisted window->PR
+      association (or a spec correction) — design call, no code change made. Harness:
+      on tmux 3.2a capture-pane returns blank screens for non-TUI windows unless a
+      client is attached; keep a recorder client (env -u TMUX tmux attach) attached
+      and select the picker window before capturing. Full suite 3711 passed, 1 skipped;
+      focused popup/session/tmux 334 passed. Captures /pm-captures/scenarios/28 (REPORT.md,
+      recording-story5 cast+mp4, pre-fix/, post-fix/).'
+    created_at: '2026-10-26T19:59:21Z'
+    last_edited: '2026-10-26T19:59:21Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
