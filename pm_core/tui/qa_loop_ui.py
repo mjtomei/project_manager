@@ -96,7 +96,8 @@ def focus_or_start_qa(app, pr_id: str) -> None:
                 app.log_message(f"Focused QA window for {pr_id}")
             else:
                 app.log_message(
-                    f"QA window for {pr_id} ready (focus suppressed)")
+                    f"QA window for {pr_id} ready (focus suppressed)",
+                    force=True)
             return
 
     # No existing window — start a new QA session.  qa_loop will
@@ -137,7 +138,11 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
             # popup suppression is still consumed at window creation.
             if focus:
                 existing.focus_on_create = True
-            app.log_message(f"QA already running for {pr_id}")
+            # A direct answer to the user's start must be visible even when
+            # an auto-start/setup confirmation is holding the log line —
+            # this lands in the gap where the scheduler's "targets +="
+            # confirmation is still sticky (QA s22).
+            app.log_message(f"QA already running for {pr_id}", force=True)
             return
 
     # A sign-off REQA return is now being re-verified.

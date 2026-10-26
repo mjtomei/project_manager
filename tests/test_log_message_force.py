@@ -634,3 +634,41 @@ def test_new_plan_pane_confirmation_shown_while_sticky():
         "sess", "@8", [("%8", "plan", "less plan.md")])
     focus.assert_called_once_with(app, "plan-001")
     assert shown[-1] == " Launched plan pane"
+
+
+# QA s22 (pr-f094946): a user `t` landing in the gap where a background QA
+# run is accepted but has no window yet answers "QA already running for X".
+# Auto-start's "targets += X" confirmation holds the log line, so the answer
+# was dropped and never painted.
+
+def test_qa_already_running_visible_during_autostart_confirmation():
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    state = SimpleNamespace(running=True, focus_on_create=False)
+    app._qa_loops = {"pr-001": state}
+    _log(app, "Auto-start: targets += pr-001 (1 total)", force=True, hold=3)
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr",
+                      return_value={"id": "pr-001", "status": "qa"}):
+        qa_loop_ui.start_qa(app, "pr-001", focus=True)
+    assert shown[-1] == " QA already running for pr-001"
+    assert state.focus_on_create is True
+
+
+def test_focus_suppressed_answer_visible_over_sticky():
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    _log(app, "Auto-start: targets += pr-001 (1 total)", force=True, hold=3)
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr",
+                      return_value={"id": "pr-001", "status": "qa"}), \
+         patch.object(qa_loop_ui, "get_pm_session", return_value="pm-x"), \
+         patch("pm_core.tmux.find_window_by_name", return_value="@3"), \
+         patch("pm_core.runtime_state.consume_suppress_switch",
+               return_value=True):
+        qa_loop_ui.focus_or_start_qa(app, "pr-001")
+    assert shown[-1] == " QA window for pr-001 ready (focus suppressed)"
