@@ -1246,6 +1246,12 @@ def _record_check(root: Path, pr_id: str, record: dict) -> dict:
     if not record.get("resolution") and old.get("resolution"):
         applied = (old.get("resolution") or {}).get("applied_merge_sha")
         workdir = old_pr.get("workdir")
+        if not workdir or not Path(workdir).is_dir():
+            # ``run_check`` may have computed this check from the current
+            # checkout when the recorded workdir is not visible (e.g. inside
+            # a container); resolve the ancestry from that same checkout so
+            # the applied resolution is not silently dropped.
+            workdir = _cwd_checkout_of(old_pr)
         new_head = record.get("head")
         if applied and workdir and new_head and Path(workdir).is_dir() \
                 and (applied == new_head

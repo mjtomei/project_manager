@@ -124,8 +124,11 @@ published. So the sign-off launch
    A later re-check carries the compact resolution (and those behavioural
    changes) forward whenever the applied merge is an ancestor of its HEAD —
    including a check that comes back `error`/`conflict` — so a transient
-   failure never loses what was applied. The merge itself is still blocked
-   until a check can verify the candidate again.
+   failure never loses what was applied. The ancestry is resolved from the
+   same checkout the check used (the recorded workdir, or the current
+   checkout when that path is not visible), so a check run from the fallback
+   does not drop the provenance. The merge itself is still blocked until a
+   check can verify the candidate again.
 Dirty workdirs are never touched: apply refuses and the record keeps
 `RESOLVED` with `apply_error`; a MERGE on it is blocked (R6).
 

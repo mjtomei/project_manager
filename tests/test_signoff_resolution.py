@@ -636,6 +636,22 @@ def test_resolution_digest_survives_a_benign_recheck(w):
     assert "resolved" in artifact["resolution"]["diff"]
 
 
+def test_carry_forward_uses_the_checkout_the_check_used(w, monkeypatch):
+    """A check from the current checkout (recorded workdir not visible) keeps
+    the applied resolution instead of silently dropping its provenance."""
+    rec = _metadata_conflict(w)
+
+    def _drop_workdir(d):
+        store.get_pr(d, PR)["workdir"] = "/nonexistent/pr-workdir"
+    store.locked_update(w.pm_dir, _drop_workdir)
+    monkeypatch.chdir(w.wd)
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    assert again["resolution_digest"] == rec["resolution_digest"]
+    assert again["resolution"]["applied_merge_sha"] == \
+        rec["resolution"]["applied_merge_sha"]
+
+
 def test_approval_rejects_a_head_tag_too_short_to_identify_the_head(w):
     rec = _metadata_conflict(w)
     (w.croot / PR).mkdir(parents=True, exist_ok=True)
