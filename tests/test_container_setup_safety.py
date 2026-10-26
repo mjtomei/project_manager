@@ -114,3 +114,47 @@ def test_qa_resume_preserves_release_identity():
                                  container_id="original", container_generation="g1")
     restored = qa_loop._scenario_from_resume_dict(qa_loop._scenario_to_resume_dict(scenario))
     assert (restored.container_id, restored.container_generation) == ("original", "g1")
+
+
+def test_slow_readiness_probe_keeps_polling_until_ready(monkeypatch):
+    calls = []
+
+    def runtime(*args, **kw):
+        calls.append(args)
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(["podman", *args], kw["timeout"])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    monkeypatch.setattr(cm.time, "sleep", lambda s: None)
+    cm._wait_for_setup("pm-x")
+    assert len(calls) == 2
+
+
+def test_readiness_probe_timeouts_until_deadline_raise_launch_error(monkeypatch):
+    clock = iter(range(0, 1000, 6))
+    monkeypatch.setattr(cm.time, "monotonic", lambda: next(clock))
+
+    def runtime(*args, **kw):
+        raise subprocess.TimeoutExpired(["podman", *args], kw["timeout"])
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    with pytest.raises(cm.ContainerError, match="did not return within 5s"):
+        cm._wait_for_setup("pm-x")
+
+
+def test_slow_running_state_check_keeps_polling(monkeypatch):
+    calls = []
+
+    def runtime(*args, **kw):
+        calls.append(args)
+        if args[0] == "inspect":
+            raise subprocess.TimeoutExpired(["podman", *args], kw["timeout"])
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(args, 125, "", "container state improper")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    monkeypatch.setattr(cm.time, "sleep", lambda s: None)
+    cm._wait_for_setup("pm-x")
+    assert [c[0] for c in calls] == ["exec", "inspect", "exec"]

@@ -1916,10 +1916,16 @@ def _wait_for_setup(name: str, *, started_ns: int | None = None) -> None:
     last_err = ""
     deadline = time.monotonic() + _SETUP_TIMEOUT
     while time.monotonic() < deadline:
-        check = _run_runtime(
-            "exec", name, *probe,
-            check=False, timeout=5,
-        )
+        try:
+            check = _run_runtime(
+                "exec", name, *probe,
+                check=False, timeout=5,
+            )
+        except subprocess.TimeoutExpired as exc:
+            # A slow exec under concurrent creates is "not ready yet", not a
+            # failed launch: keep polling until the setup deadline.
+            last_err = f"readiness probe did not return within {exc.timeout}s"
+            continue
         if check.returncode == 0:
             return
         err = (check.stderr or "").strip()
@@ -1935,7 +1941,7 @@ def _wait_for_setup(name: str, *, started_ns: int | None = None) -> None:
                 # container whose startup command already failed.
                 try:
                     exited = not container_is_running(name)
-                except ContainerError:
+                except (ContainerError, subprocess.TimeoutExpired):
                     exited = False
             if exited:
                 logs = _run_runtime("logs", "--tail", "20", name,
