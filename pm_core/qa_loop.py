@@ -1869,8 +1869,8 @@ def _resolve_qa_model(pr_data: dict, project_data: dict | None = None,
 # Worker routes (pm_core.worker_route)
 # ---------------------------------------------------------------------------
 
-def _require_scenario_setup(pr_data: dict, data: dict, *, container: bool,
-                            session_tag: str | None) -> None:
+def _require_scenario_setup(pr_data: dict, data: dict, *,
+                            container: bool) -> None:
     """Raise the provider setup error a refiner / worker launch would hit
     (:func:`check_qa_providers`), before any scenario is prepared, so it
     stops the run once instead of failing each scenario.
@@ -2441,8 +2441,7 @@ def _launch_scenarios_in_tmux(
     agent pane is split as soon as its concretizer finishes.
     """
     from pm_core import tmux as tmux_mod
-    _require_scenario_setup(pr_data, data, container=False,
-                            session_tag=state.session_tag)
+    _require_scenario_setup(pr_data, data, container=False)
     _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
 
     branch = pr_data.get("branch", "")
@@ -2674,8 +2673,7 @@ def _launch_scenarios_in_containers(
     """
     from pm_core import tmux as tmux_mod
     from pm_core import container as container_mod
-    _require_scenario_setup(pr_data, data, container=True,
-                            session_tag=state.session_tag)
+    _require_scenario_setup(pr_data, data, container=True)
     _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
 
     config = container_mod.load_container_config()
