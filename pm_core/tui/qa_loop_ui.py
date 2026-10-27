@@ -551,9 +551,7 @@ def _adopt_and_resume(app, to_resume: list) -> None:
             qa_loop.resume_qa_background(state, app._root, pr, cb)
         except Exception:
             _log.exception("Could not resume QA for %s", state.pr_id)
-            state.running = False
-            state.latest_verdict = "ERROR"
-            state.latest_output = "QA resume could not start"
+            qa_loop.abort_resume(state, "QA resume could not start")
             cb(state)
 
 

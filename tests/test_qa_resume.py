@@ -651,3 +651,55 @@ def test_resume_that_cannot_start_reports_error(tmp_path):
     assert not state.running
     assert state.latest_verdict == "ERROR"
     app.call_from_thread.assert_called()
+
+
+@pytest.mark.parametrize("failure", ["no_session", "thread_crash"])
+def test_resume_that_aborts_releases_adopted_entries(tmp_path, failure):
+    """The TUI adopts a resumed run's queue entries before resuming it.  A
+    resume that fails before its poll loop (no pm session, crash) has no
+    loop to renew or release them, so it must drop them itself rather than
+    leave them holding other launches' headroom until the TTL."""
+    from pm_core import launch_queue as lq
+
+    app = _make_app(tmp_path)
+    qa_dir = _seed_run(tmp_path)
+    state = build_resume_state(_load_resume_file(qa_dir))
+    _write_resume_file(state, use_containers=True, concurrency_cap=4,
+                       queued_indices={1, 2})
+    run = qa_loop._qa_run_key(state)
+    lq_home = tmp_path / "lqhome"
+    lq_home.mkdir()
+    with patch("pm_core.launch_queue.pm_home", return_value=lq_home):
+        lq.enqueue("qa_scenario", qa_run_id=run,
+                   keys=[f"{run}:s1", f"{run}:s2"])
+        lq.enqueue("impl", keys=["pm-other-impl"])
+        q = lq._load_queue()
+        for e in q["entries"]:
+            if e.get("qa_run_id") == run:
+                e["instance"] = "pre-restart"
+        lq._save_queue(q)
+
+        def _resume_bg(state, root, pr, cb):
+            # Inline stand-in for resume_qa_background's thread body.
+            if failure == "no_session":
+                with patch.object(qa_loop, "get_pm_session",
+                                  return_value=None):
+                    qa_loop.resume_qa_sync(state, root, pr, cb)
+            else:
+                with patch.object(qa_loop, "resume_qa_sync",
+                                  side_effect=RuntimeError("boom")), \
+                     patch.object(qa_loop.threading, "Thread") as thread:
+                    real_resume_bg(state, root, pr, cb)
+                    thread.call_args.kwargs["target"]()
+
+        real_resume_bg = qa_loop.resume_qa_background
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch.object(qa_loop, "resume_qa_background",
+                          side_effect=_resume_bg):
+            qa_loop_ui._resume_incomplete_qa(app)
+        keys = [e["key"] for e in lq._load_queue()["entries"]]
+
+    resumed = app._qa_loops["pr-001"]
+    assert not resumed.running
+    assert resumed.latest_verdict == "ERROR"
+    assert keys == ["pm-other-impl"]

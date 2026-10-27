@@ -66,7 +66,9 @@ queue access cleans pre-restart entries and would drop the other runs'
 (and its own non-head) entries (QA S44).  Adoption runs on a daemon
 thread (it can wait on the lock), and the resumed runs count as running
 from the moment they are found, so `t` / `zz t` cannot start a second loop
-meanwhile (review 05f6 i1, i2).  impl/review/signoff/QA all walk the
+meanwhile (review 05f6 i1, i2).  A resume that ends before its poll
+loop (no pm session, missing workdir, thread crash) releases the
+adopted entries itself (review 05f6 i3).  impl/review/signoff/QA all walk the
 same queue under the same lock (`enqueue_and_try_acquire` uses the full
 policy walk).
 

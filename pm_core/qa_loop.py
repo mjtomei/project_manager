@@ -4636,6 +4636,21 @@ def _execute_and_finalize(
     return state
 
 
+def abort_resume(state: QALoopState, output: str | None = None) -> QALoopState:
+    """End a resume that never reached the poll loop with ERROR.
+
+    The TUI adopted this run's launch-queue entries before resuming it
+    (qa_loop_ui._adopt_and_resume).  With no loop left to renew or release
+    them they would hold other launches' headroom until their TTL expires.
+    """
+    _release_run_entries(state)
+    state.running = False
+    state.latest_verdict = "ERROR"
+    if output is not None:
+        state.latest_output = output
+    return state
+
+
 def resume_qa_sync(
     state: QALoopState,
     pm_root: Path,
@@ -4656,10 +4671,7 @@ def resume_qa_sync(
     session = get_pm_session()
     if not session:
         _log.error("QA resume aborted: no pm session for %s", state.pr_id)
-        state.running = False
-        state.latest_verdict = "ERROR"
-        state.latest_output = "No pm session found"
-        return state
+        return abort_resume(state, "No pm session found")
     if not state.session_tag:
         state.session_tag = session.removeprefix("pm-")
 
@@ -4671,16 +4683,12 @@ def resume_qa_sync(
     workdir_path = (live_pr or {}).get("workdir")
     if not workdir_path or not Path(workdir_path).is_dir():
         _log.error("QA resume aborted: workdir for %s missing", state.pr_id)
-        state.running = False
-        state.latest_verdict = "ERROR"
-        state.latest_output = f"Workdir for {state.pr_id} missing — cannot resume QA"
-        return state
+        return abort_resume(
+            state, f"Workdir for {state.pr_id} missing — cannot resume QA")
 
     if not state.qa_workdir:
         _log.error("QA resume aborted: no qa_workdir for %s", state.pr_id)
-        state.running = False
-        state.latest_verdict = "ERROR"
-        return state
+        return abort_resume(state)
 
     status_path = Path(state.qa_workdir) / "qa_status.json"
     repo_root = Path(workdir_path) if Path(workdir_path).is_dir() else None
@@ -4765,9 +4773,7 @@ def resume_qa_background(
             resume_qa_sync(state, pm_root, pr_data, on_update)
         except Exception:
             _log.exception("QA resume thread crashed for %s", state.pr_id)
-            state.running = False
-            state.latest_verdict = "ERROR"
-            state.latest_output = "QA resume thread crashed"
+            abort_resume(state, "QA resume thread crashed")
             if on_update:
                 on_update(state)
 
