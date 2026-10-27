@@ -11230,9 +11230,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-11T21:03:47.534988+00:00'
-  updated_at: '2026-04-11T21:03:47.534988+00:00'
+  updated_at: '2026-10-27T05:25:57.422453+00:00'
   started_at: null
   reviewed_at: null
+  notes:
+  - id: note-3758e29
+    text: 'From pr-e040aeb (failed review-launch recovery): the loop now surfaces
+      each failed launch attempt in the TUI log ("Review launch retry for <pr> (attempt
+      k): <concise error>" + artifact path), keeps the complete child stderr in <transcript_dir>/launch-artifacts/,
+      and exposes launch_attempts / last_launch_error / last_launch_artifact / retry_ready_at
+      on ReviewLoopState and in pm autostart status ("review launch failed (retryable)
+      ... [artifact: ...]"). If you add launch visibility, consume those fields; do
+      not relaunch to make a failure visible.'
+    created_at: '2026-10-27T05:25:57Z'
+    last_edited: '2026-10-27T05:25:57Z'
 - id: pr-8719fee
   plan: bugs
   title: 'Bug: switching backend from local to github leaves existing PRs on local
@@ -11830,7 +11841,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-22T14:17:54.192707+00:00'
+  updated_at: '2026-10-27T05:25:49.895853+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -11866,6 +11877,17 @@ prs:
       WIP; preserve its work and finish integrations/tests.'
     created_at: '2026-10-22T15:34:41Z'
     last_edited: '2026-10-22T15:34:41Z'
+  - id: note-daeb892
+    text: 'From pr-e040aeb (failed review-launch recovery): the native review loop
+      now raises ReviewLaunchError when the `pm pr review --fresh --review-loop` child
+      exits non-zero, and retains the child''s complete stderr + the failed attempt''s
+      prompt under <transcript_dir>/launch-artifacts/. That means any low-level container
+      teardown/setup cause you surface or fix should keep reaching the child''s stderr
+      (or the exception it exits with) so the artifact names it; we do not change
+      container cleanup. A failure that leaves a half-created review window is rediscovered
+      before retry and replaced, not duplicated.'
+    created_at: '2026-10-27T05:25:49Z'
+    last_edited: '2026-10-27T05:25:49Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -15590,11 +15612,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T14:37:35.402123+00:00'
-  updated_at: '2026-05-04T14:37:35.402123+00:00'
+  updated_at: '2026-10-27T05:25:51.503809+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-667f47d
+    text: 'From pr-e040aeb (failed review-launch recovery): a failed authorized review
+      launch is now an explicit LAUNCH_FAILED loop outcome (with retryable/attempts/error/artifact/retry_ready_at
+      in runtime_state) or HOLD for workspace-trust/permission/auth. It never writes
+      a fabricated PASS/NEEDS_WORK, and runtime_state records state=failed so a popup
+      cannot report success. A retryable failure is re-armed after 60s and the entry
+      goes back to running with the same loop_id; please read those fields when you
+      fix stale done/success reporting rather than keying only on verdict text.'
+    created_at: '2026-10-27T05:25:51Z'
+    last_edited: '2026-10-27T05:25:51Z'
 - id: pr-3251c21
   plan: null
   title: 'Bug: TUI review-loop reads stale workdir from in-memory PR snapshot, bails
@@ -25584,11 +25616,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-05-23T03:14:54.863296+00:00'
+  updated_at: '2026-10-27T05:25:59.189527+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-c3eb1e0
+    text: 'From pr-e040aeb (failed review-launch recovery): the loop now distinguishes
+      (a) a failed launch with no transcript/session id (ReviewLaunchError, retryable,
+      artifact) from (b) a real verdict and (c) a pane that disappears while polling
+      (PaneKilledError, not retried). Before every retry, _discover_iteration adopts
+      a recovered transcript, a landed verdict, or another driver''s live pane. If
+      you add idle-agent/missing-output handling, route it through that discovery
+      / a classified outcome rather than relaunching blindly, so the two paths do
+      not duplicate or kill each other.'
+    created_at: '2026-10-27T05:25:59Z'
+    last_edited: '2026-10-27T05:25:59Z'
 - id: pr-cfb0b3a
   plan: improvements
   title: 'Improvement: prompt sessions to use pm PR notes for cross-session handoff
@@ -34907,7 +34950,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T17:46:12.660339+00:00'
+  updated_at: '2026-10-27T05:26:04.848995+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34923,6 +34966,18 @@ prs:
       preserving manual merge/spec gates.'
     created_at: '2026-10-22T17:46:12Z'
     last_edited: '2026-10-22T17:46:12Z'
+  - id: note-9b00f90
+    text: 'From pr-e040aeb (failed review-launch recovery): this branch adds a ReviewLaunchError
+      class to pm_core/review_loop.py (same name/intent as the S84 fix on pr-592e4bd)
+      but goes further: a failed launch is retried up to 3 times and then reported
+      as LAUNCH_FAILED (retryable) instead of a one-shot ERROR. Your test_launch_failure_is_an_error_verdict_without_traceback
+      expects a single attempt and latest_verdict == "ERROR"; after both merge, update
+      it to expect up to 3 attempts and LAUNCH_FAILED (retryable=True), or keep ERROR
+      as an alias. The no-traceback behavior is preserved (ReviewLaunchError is caught
+      with _log.error, not _log.exception), and _launch_review_window keeps the "Review
+      window launch failed (rc=N): <detail>" message shape.'
+    created_at: '2026-10-27T05:26:04Z'
+    last_edited: '2026-10-27T05:26:04Z'
 - id: pr-891fd39
   plan: plan-doc-eval
   title: Reader-model generation with interleaved reader annotations
@@ -36088,3 +36143,96 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-e040aeb
+  plan: bugs
+  title: 'Bug: failed review iteration launch strands an autostart target until a
+    manual loop restart'
+  branch: pm/pr-e040aeb-bug-failed-review-iteration-launch-strands-an-auto
+  status: in_progress
+  depends_on: []
+  description: 'Observed after otherwise successful verdict collection: the native
+    next review iteration closes the historical window, fails while removing/replacing
+    its container, exits nonzero before the new SID produces a transcript, and leaves
+    the target stopped until a shepherd sends native `review-loop start`. Reproductions:
+    #2432026-10-26T23:03 recovery; #241 d019i5 and #2421905i2 recovered2026-10-27T01:42-01:43.
+    Evidence: /home/matt/.local/state/pm-pr-shepherd/241-review-d019-i5-launch-recovery.json,
+    242-review-1905-i2-launch-recovery.json and check-20261027T013830Z. The exception
+    tail was truncated in the launch log, so the exact low-level teardown exception
+    is unconfirmed. Do NOT label these as E2BIG; prompt-size transport is already
+    fixed by merged#250.
+
+
+    Provide bounded, observable native retry of a genuinely failed authorized review
+    launch, preserving review-loop/iteration history, complete prompt, source, dirty
+    metadata, stashes, captures, assigned providers and manual merge gates. Retain
+    complete actionable child stderr in an artifact and a concise error in the UI.
+    Before every retry, rediscover native run identity and live panes/processes/transcripts;
+    if the attempt recovered or a new owner exists, adopt it rather than launch a
+    duplicate. Serialize retry ownership across TUI/background drivers and restarts,
+    use bounded nonblocking backoff, and stop on cancellation, closure, permission/auth
+    holds or real INPUT_REQUIRED. Exhaustion must leave an explicit retryable failure,
+    never a fabricated agent verdict. Do not kill retained discussion/QA sessions
+    or replay completed iterations.
+
+
+    Regressions: failure before pane creation; old-window removal followed by container
+    setup failure; route/native recovery racing a scheduled retry; TUI restart during
+    backoff; a healthy unrelated review continues; cancellation prevents retry; successful
+    replacement executes the original complete task on the assigned provider and collects
+    its own verdict. Test failure injection and one real launch/recovery path without
+    exhausting host resources. Coordinate low-level cleanup/error causes with active#241,
+    stale done/popup reporting with pr-55c265f, launch visibility with pr-8a56712
+    and idle-agent/missing-output handling with pr-6566901. Those existing bugs do
+    not provide this confirmed failed-launch recovery; do not duplicate their implementation
+    or broaden into user-triggered transfer duplicate sessions.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/259
+  gh_pr_number: 259
+  created_at: '2026-10-27T04:19:02.749373+00:00'
+  updated_at: '2026-10-27T05:25:36.474327+00:00'
+  started_at: '2026-10-27T04:26:41.499360+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-17247be
+    text: 'Implementation (0c3b1c3e): bounded native retry of a failed authorized
+      review launch.
+
+      - review_loop: ReviewLaunchError (full stderr/artifact/retryable), ReviewHoldError,
+      ReviewClosedError. Pre-attempt _discover_iteration adopts a recovered transcript/session,
+      another driver''s live pane, or a landed verdict; stands down for another loop;
+      replaces only the historical window. 3 attempts, 5s/20s backoff, budget persisted
+      on ReviewLoopState/breadcrumb (merge-restart mid-backoff continues it). Exhaustion
+      -> LAUNCH_FAILED (retryable), never a fabricated verdict; history gains no failed-iteration
+      entry. Complete child stderr + failed prompt copy under <transcript_dir>/launch-artifacts/.
+
+      - runtime_state: per-PR launch lease (loop:<loop_id>, 180s TTL, refreshed while
+      polling); supersede paths release it; pm pr auto-sequence yields to a live loop
+      lease.
+
+      - auto-start: retryable LAUNCH_FAILED re-arms the same loop after 60s (resume_state
+      preserves history/iteration; 5-episode cap); KILLED/HOLD/closure and manual
+      loops never re-arm. HOLD = workspace-trust/permission/auth.
+
+      - Tests: tests/test_review_launch_retry.py (32) + test_failed_launch_is_retried_not_terminal
+      (fails pre-fix). Full suite 3759 passed; only the base tree''s pre-existing
+      env failures remain. Pre/post captures: /pm-captures/impl/{pre,post}-fix.
+
+      - Not E2BIG; prompt transport unchanged. Container cleanup causes still belong
+      to pr-1139060.'
+    created_at: '2026-10-27T05:25:36Z'
+    last_edited: '2026-10-27T05:25:36Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-e040aeb-bug-failed-review-iteration-launch-s-b57b0f06
