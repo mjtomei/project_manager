@@ -21429,11 +21429,32 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-13T14:15:50.184464+00:00'
-  updated_at: '2026-05-13T14:15:50.184464+00:00'
+  updated_at: '2026-10-27T04:50:36.868587+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-163b8d7
+    text: 'Impl 2026-10-27 (commit 4f902f18): task-scoped verdict scan in pm_core/verdict_transcript.py.
+      extract_verdict_from_transcript now walks back across non-task user records
+      (isMeta loop ticks/autonomous checks, [SCHEDULED TASK - AUTOMATED FIRING ...]
+      /loop deliveries, Monitor <task-notification>, reminder-only/system-reminder-only
+      records, tool results) and stops at a genuine task boundary (initial prompt,
+      retry, verifier feedback, Stop-hook feedback). New find_verdict_turn returns
+      the verdict turn text + uuid/timestamp/line identity; the reason is read from
+      the verdict turn; poll_for_verdict / wait_for_follow_up_verdict / review_loop
+      adoption return the verdict-turn text so markers survive a postscript. qa_loop
+      records scenario_verdict_sources (pr_id/loop_id/scenario/session_id/turn_id)
+      in qa_resume.json and build_resume_state drops a verdict whose source no longer
+      matches the current attempt (no historical PASS resurrection, verification still
+      runs). Tests: tests/test_verdict_transcript.py replays the real scenario-44
+      /loop wakeup and #249 S71 Monitor postscript plus barrier/identity cases; tests/test_qa_loop.py
+      TestPollVerdictsAfterLoopWakeup; tests/test_qa_resume.py identity tests. Captures:
+      impl/pre-fix and impl/post-fix scenario44-replay (asciinema cast + mp4). Full
+      suite 3755 passed; pre-existing env failures only (test_hook_events standalone
+      receiver, 12 test_markdown_render missing markdown dep).'
+    created_at: '2026-10-27T04:50:36Z'
+    last_edited: '2026-10-27T04:50:36Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -25597,11 +25618,29 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-05-23T03:14:54.863296+00:00'
+  updated_at: '2026-10-27T04:50:44.346668+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-d8d9490
+    text: 'Coordination from pr-8efa789 (impl 4f902f18, pushed): verdict extraction
+      is now task-scoped, not latest-turn-only. It walks back across non-task wakeup
+      records (isMeta /loop ticks, [SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED
+      PROMPT] deliveries, Monitor <task-notification>, reminder-only records, tool
+      results) and stops at a genuine task boundary. A retry that re-sends the original
+      prompt into the same session is a plain user message, so it IS a boundary: the
+      earlier verdict is not resurrected while the retry runs, and the retry turn
+      verdict wins once emitted. If your missing/incorrectly-formatted-output retry
+      writes a distinct prompt (not a bare re-send), that still works as a boundary;
+      avoid sending the retry as an isMeta/system-reminder-only record, which would
+      be treated as transparent and could surface the pre-retry verdict. pr-8efa789
+      does not implement the wall-clock deadline / max-idles / surfacing behavior
+      — that stays with you. Latest full suite on pr-8efa789: 3755 passed (2 pre-existing
+      env failures: test_hook_events standalone receiver; test_markdown_render missing
+      markdown dep).'
+    created_at: '2026-10-27T04:50:44Z'
+    last_edited: '2026-10-27T04:50:44Z'
 - id: pr-cfb0b3a
   plan: improvements
   title: 'Improvement: prompt sessions to use pm PR notes for cross-session handoff
