@@ -19,16 +19,16 @@ No pause-before-sign-off and no re-arming after each manual merge.
 |---|---|
 | Policy constants, holds, target policy, breadcrumb parse, status builder, labels | `pm_core/autostart_state.py` |
 | Scheduler, target add/remove, `O`, breadcrumb save/consume, command handler | `pm_core/tui/auto_start.py` |
-| `_stop_before_merge` app state | `pm_core/tui/app.py:403-405` |
-| `O` binding | `pm_core/tui/app.py:184`, `action_auto_sequence_pr` at 1110 |
-| Merge decision + hold message | `pm_core/tui/review_loop_ui.py:588-670` |
-| Sign-off driver keys on effective policy | `pm_core/tui/signoff_ui.py:295` |
+| `_stop_before_merge` app state | **removed** (was `pm_core/tui/app.py`; R1) |
+| `O` binding | `pm_core/tui/app.py` (`Binding("O", "auto_sequence_pr")`, `action_auto_sequence_pr`) |
+| Merge decision + hold message | `pm_core/tui/review_loop_ui.py` (`_maybe_auto_merge`) |
+| Sign-off driver keys on effective policy | `pm_core/tui/signoff_ui.py` (`_acted` key) |
 | CLI group / `add` flags / docs | `pm_core/cli/autostart.py` |
-| `pm tui keys` help | `pm_core/cli/tui.py:230-270` |
-| Help screen + runs popup empty text/policy styles | `pm_core/tui/screens.py:252, 673, 774` |
-| README autostart section | `README.md:230-280` |
-| Regression help checklist | `pm/qa/regression/help-keybindings.md:72` |
-| Tests | `tests/test_autostart_merge_wait.py`, `test_autostart_multi_target.py`, `test_autostart_retarget_regression.py`, `test_log_message_force.py`, `test_tui_signoff_handoff.py` |
+| `pm tui keys` help | `pm_core/cli/tui.py` |
+| Help screen + runs popup empty text/policy styles | `pm_core/tui/screens.py` |
+| README autostart section | `README.md` |
+| Regression help checklist | `pm/qa/regression/help-keybindings.md` |
+| Tests | `tests/test_autostart_single_manual_policy.py` (new), `test_autostart_merge_wait.py`, `test_autostart_multi_target.py`, `test_autostart_retarget_regression.py`, `test_log_message_force.py`, `test_log_pane_backlog.py`, `test_tui_signoff_handoff.py` |
 
 Existing `wait_for_merge` machinery already provides the desired scheduler and
 hold semantics (`merge_holds` closure derivation, `_maybe_auto_merge` hold
@@ -96,6 +96,14 @@ and folds the legacy fields:
   `O` from `A`; fail closed and migrate it to a `wait_for_merge` target.
 - A bare-string entry in `targets` (no pm version wrote one) has an unknown
   policy; fail closed to `wait_for_merge` and report `migrated`.
+- Current-format keys without a usable `targets` list (`targets: null`, or
+  `all_mode` present with no `targets` key) are corrupt/mixed-version: honour
+  only a literal `all_mode: true` and never fall back to the legacy
+  "all ready PRs" inference, so a bad breadcrumb cannot enable whole-backlog
+  auto-merge. A non-list `targets` value fails closed the same way.
+- `add_targets` runs *both* `policy` and `default_policy` through the legacy
+  alias map and rejects an unknown value, so a bad default cannot fall
+  through to the no-flag branch and drop a manual gate.
 - Legacy record fields are normalised:
   - `wait_for_merge` truthy → `WAIT_KEY`; falsy → removed;
   - `policy` / `merge_policy` == `stop_before_merge`/`wait_for_merge` →

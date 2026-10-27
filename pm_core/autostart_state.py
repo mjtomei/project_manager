@@ -304,7 +304,20 @@ def targets_from_breadcrumb(data: dict, prs: list[dict] | None = None
                 rec.setdefault("source", "breadcrumb")
                 targets.setdefault(entry["pr_id"], rec)
         all_mode = data.get("all_mode") is True
-    elif raw is None:
+    elif raw is not None:
+        # Malformed ``targets`` (not a list): fail closed — no targets and
+        # no all-mode, so a corrupt breadcrumb can never auto-merge the
+        # whole backlog.
+        migrated = True
+    elif "targets" in data or "all_mode" in data:
+        # Current-format keys with no usable target list (``targets: null``
+        # or absent): a corrupt/mixed-version breadcrumb.  Honour the
+        # explicit ``all_mode`` flag (literal ``True`` only) and never fall
+        # back to the legacy "all ready PRs" inference, which would silently
+        # auto-merge the whole backlog.
+        migrated = True
+        all_mode = data.get("all_mode") is True
+    else:
         # Legacy single-target breadcrumb.  Older breadcrumbs always implied
         # auto-start; treat presence of target/run_id as enabled.
         had_auto = data.get("auto_start",
@@ -319,11 +332,6 @@ def targets_from_breadcrumb(data: dict, prs: list[dict] | None = None
                 targets[legacy] = rec
             else:
                 all_mode = True
-    else:
-        # Malformed ``targets`` (not a list): fail closed — no targets and
-        # no all-mode, so a corrupt breadcrumb can never auto-merge the
-        # whole backlog.
-        migrated = True
 
     # Removed per-PR stop marks.  Only meaningful when auto-start was active:
     # with it off there is no scheduler/merge path, and turning these into

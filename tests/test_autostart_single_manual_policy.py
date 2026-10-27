@@ -74,6 +74,23 @@ def test_legacy_policy_value_is_a_wait_alias():
     assert auto_start.merge_hold(app, "a") == {"targets": ["f"]}
 
 
+def test_legacy_default_policy_is_a_wait_alias():
+    app = _enabled()
+    res = auto_start.add_targets(app, ["f"], default_policy="stop_before_merge")
+    assert res["ok"]
+    assert res["changes"][0]["policy"] == POLICY_WAIT
+    assert auto_start.merge_hold(app, "a") == {"targets": ["f"]}
+
+
+def test_unknown_default_policy_is_rejected_not_auto_merged():
+    """A bad *default* must not fall through to the no-flag branch and
+    silently drop the manual gate on a new target."""
+    app = _enabled()
+    res = auto_start.add_targets(app, ["f"], default_policy="something_new")
+    assert res["ok"] is False and res["error"] == "usage"
+    assert auto_start.get_targets(app) == []
+
+
 def test_legacy_stop_flag_is_a_wait_alias():
     app = _enabled()
     assert auto_start.handle_command(
@@ -239,6 +256,26 @@ def test_breadcrumb_all_mode_must_be_literal_true():
     targets, all_mode, _mig = st.targets_from_breadcrumb(
         {"targets": [], "all_mode": "false", "stop_before_merge": ["a"]})
     assert targets == {} and all_mode is False
+
+
+@pytest.mark.parametrize("data", [
+    {"auto_start": True, "all_mode": False},
+    {"auto_start": True, "all_mode": "false"},
+    {"auto_start": True, "targets": None, "all_mode": False},
+    {"auto_start": True, "targets": None},
+])
+def test_breadcrumb_current_keys_without_targets_fail_closed(data):
+    """A mixed-version/corrupt breadcrumb carrying current-format keys but no
+    usable target list must not fall back to the legacy "all ready PRs"
+    inference (which would auto-merge the whole backlog)."""
+    targets, all_mode, migrated = st.targets_from_breadcrumb(data)
+    assert targets == {} and all_mode is False and migrated
+
+
+def test_breadcrumb_explicit_all_mode_without_targets_is_honored():
+    targets, all_mode, migrated = st.targets_from_breadcrumb(
+        {"auto_start": True, "all_mode": True, "run_id": "r"})
+    assert targets == {} and all_mode is True and migrated
 
 
 def test_breadcrumb_stop_field_as_string_keeps_one_id():

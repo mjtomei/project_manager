@@ -36153,7 +36153,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/261
   gh_pr_number: 261
   created_at: '2026-10-27T04:42:06.128850+00:00'
-  updated_at: '2026-10-27T06:12:37.323775+00:00'
+  updated_at: '2026-10-27T06:30:28.586744+00:00'
   started_at: '2026-10-27T04:42:19.589247+00:00'
   reviewed_at: null
   merged_at: null
@@ -36200,6 +36200,17 @@ prs:
       254 passed; full suite unchanged vs base (only pre-existing env failures: markdown/gh/git-push).'
     created_at: '2026-10-27T06:12:37Z'
     last_edited: '2026-10-27T06:12:37Z'
+  - id: note-244e1db
+    text: 'review-loop 82bf i3: fail-closed hardening. targets_from_breadcrumb no
+      longer falls back to the legacy "all ready PRs" inference when current-format
+      keys exist without a usable targets list (targets: null, or all_mode present
+      with no targets): only a literal all_mode:true is honored, so a corrupt/mixed-version
+      breadcrumb cannot enable whole-backlog auto-merge. add_targets now alias-maps
+      and validates default_policy too (a bad default could silently drop a manual
+      gate). New regressions (7); focused 261 passed; full suite 3769 passed with
+      only pre-existing env failures (missing markdown/gh, git push-proxy PATH trap).'
+    created_at: '2026-10-27T06:30:28Z'
+    last_edited: '2026-10-27T06:30:28Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

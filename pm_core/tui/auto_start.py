@@ -495,11 +495,17 @@ def add_targets(app, ids: list[str], policy: str | None = None,
                 "message": f"already merged/closed: {', '.join(closed)}",
                 "invalid": closed, "changes": []}
 
-    if policy is not None:
-        policy = autostart_state.LEGACY_POLICIES.get(policy, policy)
-    if policy is not None and policy not in autostart_state.POLICIES:
-        return {"ok": False, "error": "usage",
-                "message": f"unknown merge policy {policy!r}", "changes": []}
+    # Both policy inputs go through the same alias mapping and validation:
+    # an unknown/legacy *default* must not silently fall through to the
+    # no-flag branch and turn a manual gate into an auto-merge.
+    policy = autostart_state.LEGACY_POLICIES.get(policy, policy)
+    default_policy = autostart_state.LEGACY_POLICIES.get(default_policy,
+                                                        default_policy)
+    for value in (policy, default_policy):
+        if value is not None and value not in autostart_state.POLICIES:
+            return {"ok": False, "error": "usage",
+                    "message": f"unknown merge policy {value!r}",
+                    "changes": []}
 
     targets = _targets(app)
     if not isinstance(getattr(app, "_auto_start_targets", None), dict):
