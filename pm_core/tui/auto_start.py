@@ -367,6 +367,11 @@ async def consume_breadcrumb(app) -> None:
     if diagnostic:
         _log.warning("consume_breadcrumb: rejected saved state: %s",
                      diagnostic)
+        # Fail closed even if this app somehow had autostart state already:
+        # a rejected restore never leaves a previous/wildcard scope active.
+        app._auto_start = False
+        app._auto_start_targets = {}
+        app._auto_start_run_id = None
         _quarantine_breadcrumb(breadcrumb)
         app.log_message(f"Auto-start: {diagnostic}; auto-start remains off. "
                         "Re-add targets with `pm autostart add PR_ID...`.",

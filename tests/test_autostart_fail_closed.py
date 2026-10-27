@@ -17,7 +17,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pm_core import autostart_state as st
-from pm_core.autostart_state import POLICY_WAIT
 from pm_core.tui import auto_start
 
 
