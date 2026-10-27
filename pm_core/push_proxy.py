@@ -314,8 +314,11 @@ class PushProxy:
                         "stderr": f"git-proxy: unknown command '{cmd}'\n"}
         conn.sendall((json.dumps(response) + "\n").encode())
 
-    @staticmethod
-    def _check_dangerous_flags(args: list[str], cmd_name: str) -> dict | None:
+    # Long options git will resolve to a program-executing behaviour.
+    _DANGEROUS_GIT_OPTIONS = ("--upload-pack", "--receive-pack", "--exec")
+
+    @classmethod
+    def _check_dangerous_flags(cls, args: list[str], cmd_name: str) -> dict | None:
         """Reject flags that could execute arbitrary programs on the host.
 
         ``--upload-pack``, ``--receive-pack``, and ``--exec`` tell git to
@@ -323,14 +326,26 @@ class PushProxy:
         to /workspace (bind-mounted rw) and reference it here to escape
         the container sandbox.  Block these unconditionally.
 
+        git's option parser accepts any unambiguous *prefix* of a long
+        option, so ``--upl=/workspace/evil.sh`` (and even ``--e=``) is the
+        same escape as ``--upload-pack=…`` and must be rejected too.  Only
+        prefixes are affected: ``--rec…``/``--ref…`` are not prefixes of
+        ``--receive-pack``, so ordinary push/fetch options still pass.
+
         Returns an error response dict if a dangerous flag is found, or
         None if args are safe.
         """
         for arg in args:
             # Match both --flag=value and --flag (next arg is value)
             stripped = arg.split("=", 1)[0] if "=" in arg else arg
-            if stripped in ("--upload-pack", "--receive-pack", "--exec"):
-                msg = (f"git-proxy: rejected — '{stripped}' is not allowed "
+            if len(stripped) <= 2 or not stripped.startswith("--"):
+                continue  # bare "--" separator / short options
+            matched = next((opt for opt in cls._DANGEROUS_GIT_OPTIONS
+                            if opt.startswith(stripped)), None)
+            if matched is not None:
+                shown = (stripped if stripped == matched
+                         else f"{stripped} (abbreviation of {matched})")
+                msg = (f"git-proxy: rejected — '{shown}' is not allowed "
                        f"in {cmd_name} (security restriction)\n")
                 _log.warning("Proxy rejected dangerous flag: %s in %s",
                              stripped, cmd_name)

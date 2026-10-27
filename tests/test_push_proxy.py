@@ -236,6 +236,45 @@ class TestDangerousFlags:
                              {"cmd": "ls-remote", "args": ["--upload-pack=/evil"]})
         assert resp["exit_code"] == 1
 
+    @pytest.mark.parametrize("cmd", ["push", "fetch", "pull", "ls-remote"])
+    @pytest.mark.parametrize("flag", [
+        "--upl", "--upload-p", "--upload-pac", "--receive-p",
+        "--receive-pac", "--e", "--ex", "--exe",
+    ])
+    def test_rejects_abbreviated_dangerous_flags(self, proxy, sock_path, cmd, flag):
+        """git accepts any unambiguous prefix of a long option.
+
+        ``--upl=/workspace/evil.sh`` runs the container-written script on the
+        host exactly like ``--upload-pack=``, so the exact-name check is not
+        enough (verified against real git: ``git fetch --upl=<script>``
+        executes the script).
+        """
+        resp = _send_request(sock_path, {"cmd": cmd,
+                                         "args": [f"{flag}=/workspace/evil.sh"]})
+        assert resp["exit_code"] == 1, resp
+        assert "rejected" in resp["stderr"]
+        assert "security restriction" in resp["stderr"]
+
+    def test_abbreviated_flag_names_the_full_option(self, proxy, sock_path):
+        resp = _send_request(sock_path,
+                             {"cmd": "fetch",
+                              "args": ["--upl=/workspace/evil.sh"]})
+        assert "abbreviation of --upload-pack" in resp["stderr"]
+
+    @pytest.mark.parametrize("args", [
+        ["--recurse-submodules=no", "origin", "pm/pr-123-feature"],
+        ["--refetch"],
+        ["-u", "origin", "pm/pr-123-feature"],
+        ["--", "origin", "pm/pr-123-feature"],
+    ])
+    def test_ordinary_options_are_not_treated_as_dangerous(self, args):
+        """The prefix rule must not swallow options that merely look similar."""
+        assert PushProxy._check_dangerous_flags(args, "push") is None
+
+    def test_exact_dangerous_options_are_still_rejected(self):
+        for flag in ("--upload-pack", "--receive-pack", "--exec"):
+            assert PushProxy._check_dangerous_flags([flag, "/evil"], "push")
+
 
 class TestPushProxyProtocol:
     def test_rejects_non_string_args(self, proxy, sock_path):
