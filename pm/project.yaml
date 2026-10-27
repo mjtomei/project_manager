@@ -14384,6 +14384,54 @@ prs:
       stays decidable rather than unknown.'
     created_at: '2026-10-27T19:14:26Z'
     last_edited: '2026-10-27T19:14:26Z'
+  - id: note-0163244
+    text: 'S38 refine (2026-10-27, HEAD a44a70dc): (1) Retention locked-recheck gate:
+      a released container is decided WITHOUT any tmux/ps call, so the gate must be
+      a tmux PATH shim on the reap process holding the list-panes -a probe of a LATER-listed
+      decoy (podman 3.4 ps lists oldest first: create target A before decoy B with
+      a live worker). pm runs that probe with timeout=5s, so hold <=4.5s and fire
+      the retain immediately on ack; reason "skipped: retained concurrently" proves
+      the locked recheck (plan-time retain shows "explicitly retained" instead). Get
+      the surviving release record by retain -> kill worker window (trap keeps, record
+      persists) -> retain --release && gated reap back-to-back. (2) tmux kill-window
+      runs the pane EXIT trap immediately even if the child ignores HUP, so delayed-exit
+      stories must end the old exec without killing the window (podman exec shim that
+      holds its return) and launch the replacement in a renamed-away window. (3) pm
+      pr start needs a claude executable on PATH (find_claude) even with fake-claude
+      config. (4) Cross-domain lease: podman 3.4 local ignores CONTAINER_HOST but
+      pm records it in the runtime domain, so CONTAINER_HOST=unix:///nonexistent pm
+      container reap --dry-run is a second domain seeing the same ID (dry-run only).
+      (5) Likely R25 finding: pm container restart writes a fresh name generation
+      (mtime = attachment lease), so create_container refuses reuse for 120s afterwards
+      ("still owned by an attaching launch") although no launch is attaching; the
+      legacy-restart note says the next launch finishes setup. (6) Genuine pre-marker
+      container: create it with master pm (/opt/pm-src has no SETUP_COMPLETE_SENTINEL)
+      and SIGKILL its pane process group so the master rm -f trap never runs.'
+    created_at: '2026-10-27T19:18:39Z'
+    last_edited: '2026-10-27T19:18:39Z'
+  - id: note-30d12dc
+    text: 'QA S38 (a44a70dc, real rootless Podman 3.4.4 + tmux, fake-claude; unmodified
+      build-base PASSED): stories 1-4 held live. S1: a tmux list-panes -a gate on
+      a later-listed live decoy B let a concurrent retain land mid-reap; output "keep
+      ... — skipped: retained concurrently" rc=0, then "explicitly retained", release,
+      then "removed ... released by its run", B untouched. Attempt 1 was invalid:
+      the gate matched only argv[1], and pm passes -S <sock> first. S2: forced restart
+      kept ID; late held EXIT gave "(pane-exit): removed 0, kept 1". S3: legacy cleanup,
+      then replacement ID2 survived P1 late EXIT and its push reached origin. S4:
+      lease survived rename (reap launching / review attaching / restart awaiting
+      attachment); other-domain dry run said remove; failed attach printed "Container
+      preserved"; reaped after T+120. S5 FAILED pre-fix and is FIXED (3d291aeb): restart
+      wrote a generation (= the 120 s attachment lease), so the launch its legacy
+      note asks for was refused "still owned by an attaching launch" (also a repeat
+      restart: "awaiting attachment"). Restart now tags its generation restart-<hex>;
+      cleanup still honours it, reuse/restart may adopt it. Post-fix live rerun: launch
+      0.05 s after restart reused the same ID, finished setup in place, pushed. Full
+      suite 4223 passed/2 skipped. Harness notes: asciinema 2.1 has no --cols, so
+      casts were rebuilt from pipe-pane bytes (synthetic timing). `git -C /workspace
+      push` bypasses the container git wrapper (noted on pr-8cdbe60); used -w /workspace.
+      Evidence /pm-captures/scenarios/38/README.md'
+    created_at: '2026-10-27T19:52:20Z'
+    last_edited: '2026-10-27T19:52:20Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -31035,7 +31083,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T22:54:04.987012+00:00'
-  updated_at: '2026-10-25T16:43:48.536374+00:00'
+  updated_at: '2026-10-27T19:46:58.452221+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31059,6 +31107,19 @@ prs:
       include local-origin integration in proxy routing regression coverage.'
     created_at: '2026-10-25T16:43:48Z'
     last_edited: '2026-10-25T16:43:48Z'
+  - id: note-eee21db
+    text: 'Related wrapper gap (found in pr-1139060 QA S38, 2026-10-27; same on master
+      87fd093f): the in-container git wrapper (/home/pm/.local/bin/git, generated
+      in container.py) only proxies when the subcommand is $1 (case "$1" in push|fetch|pull|ls-remote).
+      Any global option before it — `git -C /workspace push origin BR`, `git -c x=y
+      push`, `git --git-dir ... fetch` — falls through to the real git inside the
+      container, which tries the host-path remote directly and fails ("/scratch/...
+      does not appear to be a git repository"). Repro: podman exec <ID> git -C /workspace
+      push origin <branch> fails, podman exec -w /workspace <ID> git push origin <branch>
+      succeeds. Fix needs care: the wrapper must parse global options (and keep -C
+      semantics for the workdir it forwards) without opening a new host-escape path.'
+    created_at: '2026-10-27T19:46:58Z'
+    last_edited: '2026-10-27T19:46:58Z'
 - id: pr-22c92ef
   plan: bugs
   title: 'Bug: status bar clips "AUTO ×N" to "AUTO …" when the TUI pane is ~40 cols
