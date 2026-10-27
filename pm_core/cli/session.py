@@ -1482,6 +1482,15 @@ def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None, bool]:
     return None, None, False
 
 
+# While the picker spinner runs, re-validate the TUI's pidfile so a TUI
+# that died after accepting the command aborts the spinner instead of
+# leaving it on "queued…" forever.  The owner must be continuously
+# invalid for a grace period so an exec/Ctrl+R restart (same PID) or a
+# pane respawn is not mistaken for death.
+_TUI_GONE_GRACE_S = 3.0
+_TUI_OWNER_CHECK_INTERVAL_S = 1.0
+
+
 def _wait_for_tui_command(session: str, tui_cmd: str,
                           tick_s: float = 0.15) -> None:
     """Show a spinner while a queued TUI command transitions states.
@@ -1496,6 +1505,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     import select
     import sys
     import termios
+    import time
     import tty
 
     from pm_core import runtime_state as _rs
@@ -1642,8 +1652,42 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     prev_cur_state = None
     prev_window_open = None
     prev_saw_disappear = False
+    # TUI liveness: a command accepted by a TUI that then died (or whose
+    # pidfile went stale) must not spin forever on "queued…".
+    owner_gone_since: float | None = None
+    next_owner_check = time.monotonic()
     try:
         while True:
+            now = time.monotonic()
+            if now >= next_owner_check:
+                next_owner_check = now + _TUI_OWNER_CHECK_INTERVAL_S
+                try:
+                    from pm_core.cli.helpers import tui_owner_problem
+                    owner_problem = tui_owner_problem(session)
+                except Exception:
+                    owner_problem = None
+                if owner_problem:
+                    if owner_gone_since is None:
+                        owner_gone_since = now
+                    elif now - owner_gone_since >= _TUI_GONE_GRACE_S:
+                        _log.info("spinner exit: reason=tui_gone problem=%s",
+                                  owner_problem)
+                        if old_attrs is not None:
+                            try:
+                                termios.tcsetattr(
+                                    fd, termios.TCSADRAIN, old_attrs)
+                            except termios.error:
+                                pass
+                            old_attrs = None
+                        click.echo(SHOW_CURSOR, nl=False)
+                        click.echo(
+                            f"\r✗ {action}: the TUI is no longer running "
+                            f"({owner_problem}); the command was not "
+                            f"applied{CLR_EOL}")
+                        _wait_dismiss()
+                        return
+                else:
+                    owner_gone_since = None
             entry = _rs.get_action_state(pr_id, action)
             cur_state = entry.get("state") if entry else None
             if fresh and not saw_state_change:
@@ -1858,11 +1902,13 @@ def _run_picker_command(cmd: str, session: str) -> None:
         # independent: doesn't depend on tmux send-keys timing, can't
         # be eaten by whichever widget has focus, and supports queuing
         # multiple commands across concurrent picker invocations.
-        from pm_core.cli.helpers import trigger_tui_command
+        from pm_core.cli.helpers import submit_tui_command
         tui_cmd = cmd[4:]
         base = pane_registry.base_session_name(session)
-        if not trigger_tui_command(base, tui_cmd):
-            click.echo("Could not reach the TUI (no pidfile or signal failed).")
+        result = submit_tui_command(base, tui_cmd)
+        if not result.ok:
+            _log.warning("picker dispatch failed: %s", result.message)
+            click.echo(result.message or "Could not reach the TUI.")
             _wait_dismiss()
             return
         # Brief progress display: poll runtime_state for the action to

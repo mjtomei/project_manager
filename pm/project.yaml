@@ -14639,7 +14639,29 @@ prs:
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-48e1ac9
+    text: 'Launch handoff from user-approved critical-bug review, 2026-10-27: current
+      numeric pidfile signaling remains unsafe. Cover capability/version skew and
+      exact process identity, including PID reuse; a matching command-line string
+      alone is not sufficient identity proof. Publish capabilities only after handlers
+      are ready. Use isolated test processes/sessions and preserve the live PM controller.
+      No global session takeover.'
+    created_at: '2026-10-27T18:43:30Z'
+    last_edited: '2026-10-27T18:43:30Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    signoff: provider:claude-work
+    merge: provider:deepseek-flash
 - id: pr-bc010f4
   plan: bugs
   title: 'Bug: create_container fails on name collision instead of reusing or recreating'

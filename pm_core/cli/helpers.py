@@ -6,14 +6,17 @@ HelpGroup, state management, PR ID resolution, TUI refresh, and session helpers.
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import textwrap
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 import click
 
+from pm_core import tui_pidfile
 from pm_core import store, git_ops
 from pm_core.paths import configure_logger
 from pm_core import tmux as tmux_mod
@@ -483,11 +486,132 @@ def _canonical_session(session: str) -> str:
 
 def _tui_pidfile_for_session(session: str) -> Path:
     """Path to the pidfile a TUI in ``session`` writes at startup."""
-    from pm_core.paths import pm_home
-    return pm_home() / f"tui-{_canonical_session(session)}.pid"
+    from pm_core import tui_pidfile
+    return tui_pidfile.pidfile_path(_canonical_session(session))
 
 
-def trigger_tui_reload(session: str | None = None) -> None:
+def _tui_command_queue_for_session(session: str) -> Path:
+    """Path to the per-session TUI command queue file."""
+    from pm_core import tui_pidfile
+    return tui_pidfile.command_queue_path(_canonical_session(session))
+
+
+@dataclass(frozen=True)
+class TuiIpcResult:
+    """Outcome of a TUI IPC attempt.
+
+    ``reason`` is a stable machine-readable code; ``message`` is a
+    user-facing explanation suitable for a popup.
+    """
+
+    ok: bool
+    reason: str = ""
+    message: str = ""
+
+
+def _validate_tui_owner(
+    session: str,
+) -> tuple[Path, str | None, tui_pidfile.TuiPidfile | None, TuiIpcResult | None]:
+    """Resolve the pidfile for *session* and validate its owner.
+
+    Returns ``(pidfile, raw_text, descriptor, error)``.  On success
+    ``error`` is ``None`` and the other three describe a live TUI.  On
+    failure ``error`` carries the result to hand back to the caller and
+    any stale pidfile has already been removed.
+    """
+    from pm_core import tui_pidfile
+
+    pidfile = _tui_pidfile_for_session(session)
+    raw = tui_pidfile.read_pidfile_text(pidfile)
+    if raw is None:
+        return pidfile, None, None, TuiIpcResult(
+            False, "no_pidfile",
+            f"No TUI is running for session {session}.")
+    desc = tui_pidfile.parse_pidfile(raw)
+    if desc is None:
+        tui_pidfile.unlink_if_unchanged(pidfile, raw)
+        return pidfile, raw, None, TuiIpcResult(
+            False, "stale_pidfile",
+            f"The TUI pidfile for session {session} is unreadable; "
+            f"restart the TUI.")
+    problem = tui_pidfile.identity_problem(desc)
+    if problem is not None:
+        tui_pidfile.unlink_if_unchanged(pidfile, raw)
+        return pidfile, raw, desc, TuiIpcResult(
+            False, "stale_pidfile",
+            f"The TUI for session {session} is not running ({problem}); "
+            f"restart the TUI.")
+    return pidfile, raw, desc, None
+
+
+def tui_owner_problem(session: str) -> str | None:
+    """Why *session* has no live TUI to signal, or ``None`` when it does.
+
+    Identity-only: capabilities are deliberately not checked, so this is
+    safe to poll while a TUI is starting up or restarting.
+    """
+    from pm_core import tui_pidfile
+
+    raw = tui_pidfile.read_pidfile_text(_tui_pidfile_for_session(session))
+    if raw is None:
+        return "no pidfile"
+    desc = tui_pidfile.parse_pidfile(raw)
+    if desc is None:
+        return "unreadable pidfile"
+    return tui_pidfile.identity_problem(desc)
+
+
+def _missing_cap_result(session: str, desc, cap: str) -> TuiIpcResult:
+    """Explain that the live TUI cannot handle *cap*."""
+    feature = ("command-queue" if cap == "sigusr2" else "reload")
+    if getattr(desc, "legacy", False):
+        return TuiIpcResult(
+            False, "missing_capability",
+            f"The TUI for session {session} predates the {feature} "
+            f"feature; restart the TUI (Ctrl+R) to use it.")
+    if not desc.caps:
+        # Claimed but no handler published yet: mid-startup.
+        return TuiIpcResult(
+            False, "starting",
+            f"The TUI for session {session} is still starting up; "
+            f"try again in a moment.")
+    return TuiIpcResult(
+        False, "missing_capability",
+        f"The TUI for session {session} does not advertise the "
+        f"{feature} capability; restart the TUI (Ctrl+R) to use it.")
+
+
+def _signal_tui(pid: int, sig: int) -> str | None:
+    """Send *sig* to *pid*; return an error reason or ``None``.
+
+    Where available, a pidfd pins the process across the final checks so
+    the PID cannot be recycled between validation and ``os.kill``.
+    """
+    from pm_core import tui_pidfile
+
+    pidfd = None
+    try:
+        try:
+            pidfd = tui_pidfile.open_pidfd(pid)
+        except ProcessLookupError:
+            return "process is not running"
+        os.kill(pid, sig)
+        return None
+    except ProcessLookupError:
+        return "process is not running"
+    except PermissionError:
+        return "permission denied"
+    except OSError as e:
+        return str(e)
+    finally:
+        if pidfd is not None:
+            try:
+                os.close(pidfd)
+            except OSError:
+                pass
+
+
+def trigger_tui_reload(session: str | None = None) -> bool:
     """Ask the TUI to reload state from disk via SIGUSR1.
 
     The TUI registers a SIGUSR1 handler at startup that runs
@@ -498,8 +622,12 @@ def trigger_tui_reload(session: str | None = None) -> None:
     Resolves the target TUI by session: if ``session`` is given it is
     used directly, otherwise we look up the TUI for the current
     cwd/tmux context (same logic as ``_find_tui_pane``).
+
+    The pidfile is validated before signaling: a dead/reused PID, a
+    non-TUI process, or a TUI that does not advertise ``sigusr1`` means
+    no signal is sent.  Returns True only when SIGUSR1 was delivered.
     """
-    import signal
+    from pm_core import tui_pidfile
     try:
         if session is None:
             _, session = _find_tui_pane()
@@ -514,40 +642,90 @@ def trigger_tui_reload(session: str | None = None) -> None:
             _log.debug("trigger_tui_reload: refresh_home failed",
                        exc_info=True)
         if not session:
-            return
-        pidfile = _tui_pidfile_for_session(session)
-        if not pidfile.exists():
-            _log.debug("No TUI pidfile for session %s", session)
-            return
-        try:
-            pid = int(pidfile.read_text().strip())
-        except (ValueError, OSError) as e:
-            _log.debug("Could not read TUI pidfile %s: %s", pidfile, e)
-            return
-        try:
-            os.kill(pid, signal.SIGUSR1)
-            _log.debug("Sent SIGUSR1 to TUI pid %d (session %s)", pid, session)
-        except ProcessLookupError:
-            _log.debug("TUI pid %d gone, removing stale pidfile", pid)
-            pidfile.unlink(missing_ok=True)
-        except PermissionError as e:
-            _log.debug("Cannot signal TUI pid %d: %s", pid, e)
+            return False
+        pidfile, raw, desc, error = _validate_tui_owner(session)
+        if error is not None:
+            _log.debug("trigger_tui_reload: %s", error.message)
+            return False
+        if tui_pidfile.CAP_RELOAD not in desc.caps:
+            _log.info("TUI pid %d (session %s) does not advertise %s; "
+                      "not signaling", desc.pid, session,
+                      tui_pidfile.CAP_RELOAD)
+            return False
+        problem = _signal_tui(desc.pid, signal.SIGUSR1)
+        if problem == "process is not running":
+            _log.debug("TUI pid %d gone, removing stale pidfile", desc.pid)
+            tui_pidfile.unlink_if_unchanged(pidfile, raw)
+            return False
+        if problem is not None:
+            _log.debug("Cannot signal TUI pid %d: %s", desc.pid, problem)
+            return False
+        _log.debug("Sent SIGUSR1 to TUI pid %d (session %s)",
+                   desc.pid, session)
+        return True
     except Exception as e:
         _log.debug("Could not trigger TUI reload: %s", e)
+        return False
 
 
 # Backwards-compatible alias for existing callers.
 trigger_tui_refresh = trigger_tui_reload
 
 
-def _tui_command_queue_for_session(session: str) -> Path:
-    """Path to the per-session TUI command queue file."""
-    from pm_core.paths import pm_home
-    return pm_home() / f"tui-{_canonical_session(session)}.cmd-queue"
+def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
+    """Queue *cmd* for the TUI and signal it, with a reason on failure.
+
+    Validation happens before anything is written: a missing/stale
+    pidfile, a PID that is dead, recycled, or not a pm TUI, or a TUI
+    that does not advertise ``sigusr2`` all return ``ok=False`` with a
+    user-facing message and leave the process untouched.  A stale
+    pidfile is removed so the next caller starts clean.
+    """
+    import fcntl
+    from pm_core import tui_pidfile
+
+    pidfile, raw, desc, error = _validate_tui_owner(session)
+    if error is not None:
+        return error
+    if tui_pidfile.CAP_COMMAND not in desc.caps:
+        return _missing_cap_result(session, desc, tui_pidfile.CAP_COMMAND)
+    queue = _tui_command_queue_for_session(session)
+    line = cmd.strip().replace("\n", " ") + "\n"
+    try:
+        with open(queue, "a") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                f.write(line)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except OSError as e:
+        _log.debug("Could not append to TUI command queue %s: %s", queue, e)
+        return TuiIpcResult(
+            False, "queue_error",
+            f"Could not write to the TUI command queue: {e}")
+    problem = _signal_tui(desc.pid, signal.SIGUSR2)
+    if problem == "process is not running":
+        _log.debug("TUI pid %d gone, removing stale pidfile", desc.pid)
+        tui_pidfile.unlink_if_unchanged(pidfile, raw)
+        return TuiIpcResult(
+            False, "stale_pidfile",
+            f"The TUI for session {session} is not running "
+            f"(process disappeared); restart the TUI.")
+    if problem is not None:
+        _log.debug("Cannot signal TUI pid %d: %s", desc.pid, problem)
+        return TuiIpcResult(
+            False, "signal_error",
+            f"Could not signal the TUI for session {session} ({problem}).")
+    _log.debug("Queued command %r and sent SIGUSR2 to TUI pid %d (%s)",
+               cmd, desc.pid, session)
+    return TuiIpcResult(True)
 
 
 def trigger_tui_command(session: str, cmd: str) -> bool:
     """Submit ``cmd`` to the TUI's command bar via SIGUSR2 + queue file.
+
+    Thin boolean wrapper around :func:`submit_tui_command`; callers that
+    want the failure reason use that instead.
 
     The TUI registers a SIGUSR2 handler at startup that drains the
     per-session queue file and dispatches each line through the same
@@ -562,41 +740,7 @@ def trigger_tui_command(session: str, cmd: str) -> bool:
 
     Returns True if the signal was sent, False otherwise.
     """
-    import fcntl
-    import signal
-    pidfile = _tui_pidfile_for_session(session)
-    if not pidfile.exists():
-        _log.debug("No TUI pidfile for session %s", session)
-        return False
-    try:
-        pid = int(pidfile.read_text().strip())
-    except (ValueError, OSError) as e:
-        _log.debug("Could not read TUI pidfile %s: %s", pidfile, e)
-        return False
-    queue = _tui_command_queue_for_session(session)
-    line = cmd.strip().replace("\n", " ") + "\n"
-    try:
-        with open(queue, "a") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
-                f.write(line)
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-    except OSError as e:
-        _log.debug("Could not append to TUI command queue %s: %s", queue, e)
-        return False
-    try:
-        os.kill(pid, signal.SIGUSR2)
-        _log.debug("Queued command %r and sent SIGUSR2 to TUI pid %d (%s)",
-                   cmd, pid, session)
-        return True
-    except ProcessLookupError:
-        _log.debug("TUI pid %d gone, removing stale pidfile", pid)
-        pidfile.unlink(missing_ok=True)
-        return False
-    except PermissionError as e:
-        _log.debug("Cannot signal TUI pid %d: %s", pid, e)
-        return False
+    return submit_tui_command(session, cmd).ok
 
 
 def trigger_tui_restart() -> None:

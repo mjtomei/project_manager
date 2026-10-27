@@ -33,6 +33,12 @@ def tui_cmd():
 
     log = configure_logger("pm.tui.crash")
 
+    # Protect the startup window from IPC signals: until the real asyncio
+    # handlers are installed, the default action for SIGUSR1/SIGUSR2 is
+    # terminate.  These no-ops are replaced on mount.
+    from pm_core.tui_pidfile import install_signal_guards
+    install_signal_guards()
+
     # Catch SystemExit raised in threads (e.g. run_in_executor callbacks)
     import threading
     _orig_excepthook = threading.excepthook
@@ -59,9 +65,32 @@ def tui_cmd():
             stderr_file.flush()
             log.error("hook install conflict: %s", e)
             raise
-        from pm_core.tui.app import ProjectManagerApp
-        app = ProjectManagerApp()
+        from pm_core.tui.app import ProjectManagerApp, current_session_name
+        from pm_core.tui_pidfile import (
+            TuiPidfileConflict, claim_tui_pidfile, pidfile_path,
+        )
+
+        # Claim the session's pidfile before the app starts so a second
+        # TUI for the same session is refused with a visible message
+        # (stderr is redirected to tui-stderr.log, so print to stdout).
+        claim = None
+        session = current_session_name()
+        if session:
+            try:
+                claim = claim_tui_pidfile(pidfile_path(session), session)
+            except TuiPidfileConflict as e:
+                log.error("TUI startup refused: %s", e)
+                print(str(e), flush=True)
+                raise SystemExit(2)
+            except OSError as e:
+                log.error("Could not claim TUI pidfile (continuing without "
+                          "external IPC): %s", e)
+        app = ProjectManagerApp(pidfile_claim=claim)
         app.run()
+        startup_error = getattr(app, "_startup_error", None)
+        if startup_error:
+            print(startup_error, flush=True)
+            raise SystemExit(2)
     except SystemExit as e:
         tb = traceback.format_exc()
         log.error("TUI exited with SystemExit(%s):\n%s", e.code, tb)

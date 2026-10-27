@@ -1,0 +1,213 @@
+# Implementation spec — pr-c3bf868
+
+Bug: stale TUI pidfile lets picker / reload IPC silently target a dead or
+wrong process.
+
+## Code map (current, pre-fix)
+
+| Concern | Location |
+| --- | --- |
+| Pidfile path + signal helpers | `pm_core/cli/helpers.py` — `_tui_pidfile_for_session` (L484), `trigger_tui_reload` (L490), `trigger_tui_command` (L549) |
+| Queue path | `pm_core/cli/helpers.py` — `_tui_command_queue_for_session` (L543) |
+| TUI writes pidfile + installs handlers | `pm_core/tui/app.py` — `_reload_pidfile` (L1270), `_command_queue_file` (L1278), `_install_reload_signal` (L1284), `on_unmount` (L1396) |
+| TUI mount order | `pm_core/tui/app.py` — `on_mount` (L486); session name resolved at L~495, `_install_reload_signal()` at L~512 |
+| TUI process entry | `pm_core/cli/tui.py` — `tui_cmd` (`pm _tui`, L~26); redirects **stderr** to `~/.pm/debug/tui-stderr.log`, stdout stays on the pane |
+| Exec restart | `pm_core/tui/pane_ops.py` — `restart_app` (L~739) sets `SIG_IGN` for SIGUSR1/2 across `execvp` |
+| Picker dispatch | `pm_core/cli/session.py` — `_run_picker_command` (L~1848), `_wait_for_tui_command` (L1485) |
+| Other pidfile reader | `pm_core/cli/autostart.py` — `_resolve_owner` (L65) reads the file with `int(...)` |
+
+Facts established from history: the numeric pidfile and the SIGUSR1
+handler were introduced in the **same** commit (`9c30b38a`), so a numeric
+pidfile proves SIGUSR1 support. SIGUSR2 was added later, which is exactly
+the version-skew failure in the report.
+
+## Requirements (grounded)
+
+R1. **Versioned descriptor.** The TUI writes JSON
+    `{"version":1,"pid":<pid>,"started_at":<iso>,"starttime":<proc starttime>,
+    "session":<name>,"caps":["sigusr1","sigusr2"]}` instead of a bare pid.
+    `starttime` is `/proc/<pid>/stat` field 22 (jiffies since boot) — a
+    PID-reuse-proof identity token. `started_at` is informational.
+    Implemented in a new neutral module `pm_core/tui_pidfile.py` so both
+    `pm_core/cli/helpers.py` and `pm_core/tui/app.py` can use it without an
+    import cycle.
+
+R2. **Capability gate.** `trigger_tui_reload` requires cap `sigusr1`;
+    `trigger_tui_command` requires `sigusr2`. A missing cap means the
+    signal is **never sent**; the caller gets a reason it can surface.
+    Legacy numeric pidfiles are parsed as a descriptor with
+    `caps={"sigusr1"}, legacy=True` (see Ambiguity A1).
+
+R3. **Publish capabilities only after handlers are ready.** The pidfile is
+    created at claim time with `caps: []`; `caps` are rewritten (atomically)
+    only after `loop.add_signal_handler` succeeded for each signal. A caller
+    that reads the file in between sees no caps and refuses to signal.
+
+R4. **TUI-side takeover.** Before installing handlers the TUI claims the
+    pidfile atomically (`O_CREAT|O_EXCL`):
+    - file absent → create ours;
+    - file present, parses to a **live** PID whose `/proc/<pid>/cmdline`
+      is a pm TUI → refuse to start with a clear message and exit non-zero
+      (`TuiPidfileConflict`);
+    - file present, PID is our own PID (exec restart) → take over;
+    - file present but stale/unreadable/PID dead/PID reused/non-TUI cmdline
+      → unlink and take over.
+
+R5. **Caller-side identity validation.** Before signaling, validate:
+    liveness (`kill(pid,0)`), not a zombie, `starttime` matches the
+    descriptor, and `/proc/<pid>/cmdline` has an exact `_tui` argv element
+    plus a pm entry-point element (`pm`, `pm_core`, `pm_core.cli`,
+    `pm_core.wrapper`). Any failure → no signal, remove the stale pidfile
+    (only if unchanged since read), return False with a reason.
+    Where `os.pidfd_open` exists (Linux 5.3+/py3.9+), open a pidfd before the
+    final check so the PID cannot be recycled between check and `os.kill`.
+    If procfs is unavailable, degrade to liveness only (documented).
+
+R6. **Picker aborts.** `_run_picker_command` uses a new
+    `submit_tui_command()` returning a `TuiIpcResult(ok, reason, message)`
+    and prints `message` + `_wait_dismiss()` on failure. Additionally
+    `_wait_for_tui_command` re-checks owner identity while spinning and
+    aborts after ~3 s of continuous invalidity (covers "TUI killed after the
+    signal was sent" and the original infinite `queued…` spinner).
+
+R7. **No-op bootstrap.** `pm _tui` installs no-op SIGUSR1/SIGUSR2 handlers
+    as the very first thing (before the claim, before Textual starts), so a
+    signal arriving during startup can never take the default-terminate
+    action. `restart_app`'s `SIG_IGN` across `execvp` stays.
+
+R8. **Tests** (see `## Tests`).
+
+## Implicit requirements
+
+I1. `pm_core/cli/autostart.py::_resolve_owner` must read the JSON
+    descriptor (it currently does `int(pidfile.read_text())`; after the
+    change every pidfile is JSON and autostart would report every TUI as
+    "stale pidfile"). It keeps its `kill(pid,0)` + zombie semantics so
+    existing autostart tests (which write bare numeric pidfiles) still pass;
+    the shared reader handles both formats.
+
+I2. `on_unmount` must not delete a successor's pidfile: unlink only when
+    the file still names our pid **and** our `starttime` (exec restarts and
+    respawns can overlap).
+
+I3. The command queue file must exist before caps are published (a caller
+    that sees `sigusr2` must not race a missing queue). Order in
+    `_install_reload_signal`: claim → create queue → install handlers →
+    publish caps.
+
+I4. `trigger_tui_reload` keeps its fire-and-forget `None` return and its
+    `refresh_home` side effect (existing tests assert the kick).
+
+I5. Backwards compatibility for an *older CLI* reading a JSON pidfile:
+    `int()` fails → it logs and does nothing. Safe (no signal), acceptable.
+
+I6. `_canonical_session` / `~N` grouped-session normalization must be
+    preserved on both sides (callers already normalize; the TUI stores the
+    `~`-stripped name).
+
+I7. The TUI session name must be resolvable before `app.run()` for the
+    pre-run claim. Factor the existing `on_mount` logic into
+    `current_session_name()` in `app.py` and reuse it in `pm_core/cli/tui.py`.
+
+## Ambiguities (resolved)
+
+A1. *Legacy numeric pidfiles: empty caps or `{"sigusr1"}`?* The task text
+    says "old TUIs implicitly have an empty caps list", but the numeric
+    pidfile and the SIGUSR1 handler shipped in one commit — a numeric
+    pidfile is positive evidence of SIGUSR1 support. **Resolution:** parse
+    legacy files as `caps={"sigusr1"}, legacy=True`. Reload keeps working
+    against a pre-upgrade TUI (no user-visible regression); SIGUSR2 — the
+    mode-1 killer — is refused with the "predates the cmd-queue feature"
+    message. Identity checks still apply, so PID reuse is still caught.
+
+A2. *How is "exclusive ownership" made atomic without a lock file?*
+    **Resolution:** `O_CREAT|O_EXCL` on the pidfile itself; on
+    `FileExistsError` re-read and either refuse (live TUI) or unlink+retry.
+    Two TUIs racing to start: one wins `O_EXCL`; the loser re-reads, sees a
+    live pm TUI (or a just-created descriptor) and refuses. No litter, no
+    stale-lock pathology. A file caught mid-write parses as `None` and is
+    re-checked rather than blindly deleted.
+
+A3. *Where does the "clear error" go?* `pm _tui` redirects stderr to
+    `tui-stderr.log`, so a stderr print is not visible in the pane.
+    **Resolution:** the claim runs in `tui_cmd` **before** `app.run()`, and
+    the conflict message is printed to stdout (the pane) and logged through
+    the pm logger. A conflict detected later (defensive path inside
+    `on_mount`) additionally calls `self.exit(return_code=2, message=...)`
+    and `tui_cmd` re-prints `app._startup_error` to stdout after `run()`.
+
+A4. *How long is "continuously invalid" for the spinner abort?* **Resolution:**
+    3 s (`_TUI_GONE_GRACE_S`), checked at most once per second; long enough
+    to ride out an exec/Ctrl+R restart, short enough to not strand the user.
+
+A5. *Should a JSON descriptor with `caps: []` (TUI starting) be retried
+    rather than errored?* **Resolution:** return False with "still starting
+    up; try again in a moment" — the picker pops a dismissable message;
+    the user re-runs the action. No blocking retry loop in the picker.
+
+No **[UNRESOLVED]** items.
+
+## Edge cases
+
+E1. **PID is ours on exec restart.** `claim` must short-circuit on
+    `desc.pid == os.getpid()` before the cmdline check (the pre-exec
+    descriptor's `starttime` is identical, since exec keeps the process).
+E2. **Zombie pidfile owner.** `kill(pid,0)` succeeds for a zombie; treat as
+    dead (existing `_is_zombie` logic moves into the shared module).
+E3. **Unreadable/empty pidfile.** Treated as "no TUI"; unlink only if the
+    content is unchanged since the read (do not delete a just-created file).
+E4. **Permission denied** (`EPERM`) on signal → return False with a message;
+    do **not** delete the pidfile (the process is alive, just not ours).
+E5. **Legacy live TUI + `trigger_tui_reload`** → signals SIGUSR1 (A1).
+E6. **Legacy live TUI + `trigger_tui_command`** → no signal, message
+    "predates the command-queue feature; restart the TUI (Ctrl+R)".
+E7. **`session=None`** in `trigger_tui_reload` → unchanged resolution path;
+    on any failure it logs and returns.
+E8. **Not in tmux** (`pm _tui` run directly): no session name → no claim,
+    no pidfile (unchanged).
+E9. **Queue append fails** → False (unchanged).
+E10. **TUI restarts while the picker spins** → pidfile briefly absent;
+    the 3 s grace prevents a false abort.
+E11. **autostart with a JSON pidfile** → works via the shared reader.
+E12. **A future signal** can be added safely: no-op guard + caps list.
+E13. **~/.pm unwritable.** Claim I/O errors (`OSError`) are distinct from
+    `TuiPidfileConflict`: the TUI logs a warning and keeps running without
+    external IPC (previous behavior for a pidfile write failure), rather
+    than refusing to start. `publish` failures are logged and swallowed.
+E14. **Startup refusal must not clean up the sibling's files.** `on_unmount`
+    removes the pidfile and queue only when this process holds the claim;
+    a refused second TUI never unlinks files it does not own.
+E15. **TUI entry-point names.** The cmdline marker accepts an exact `_tui`
+    argv element plus one of `pm`, `pm_core`, `pm_core.cli`,
+    `pm_core.wrapper` as an argv element — the shapes produced by the
+    console script, the container's `pm` shim, and `python -m` fallbacks.
+    Matching is per-element, never a substring of the joined command line.
+
+## Tests
+
+New `tests/test_tui_pidfile.py` (shared module + helper + app integration)
+and additions to `tests/test_popup_picker.py` / a spinner test:
+
+1. claim takes over a dead-PID pidfile; descriptor rewritten (pid ours,
+   caps empty).
+2. claim refuses when a live fake TUI (argv `…/pm _tui`) owns the session.
+3. claim takes over when the recorded PID is alive but its cmdline is not a
+   TUI (PID reuse).
+4. claim allows `pid == os.getpid()` (exec restart).
+5. `publish` rewrites caps atomically; `release` leaves a successor's
+   descriptor alone.
+6. `trigger_tui_command`: missing file → False; dead pid → False + file
+   removed; starttime mismatch → False + file removed + process untouched;
+   non-TUI cmdline → False + file removed; legacy → False with "predates"
+   and process untouched; JSON `caps=[]` → False "starting up"; full caps →
+   True, queue line written, child's SIGUSR2 handler fires.
+7. `trigger_tui_reload`: legacy → child SIGUSR1 handler fires; JSON without
+   `sigusr1` → False, child survives; dead pid → False + cleanup.
+8. no-op guard: install guards, `os.kill(os.getpid(), SIGUSR2)`, still
+   alive (handlers restored in `finally`).
+9. `_install_reload_signal` publishes both caps only after handlers are
+   installed (tmp pidfile/queue paths).
+10. picker: `submit_tui_command` failure → message echoed, spinner not
+    entered.
+11. spinner: `tui_owner_problem` continuously failing → aborts with a
+    message instead of spinning (patched grace, pipe stdin).

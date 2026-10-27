@@ -18,11 +18,11 @@ import json
 import os
 import secrets
 import time
-from pathlib import Path
 
 import click
 
 from pm_core import store
+from pm_core.tui_pidfile import is_zombie, read_pidfile
 from pm_core.autostart_state import (
     POLICY_AUTO, POLICY_FLAGS, POLICY_STOP, POLICY_WAIT, REPLY_DIR,
     TERMINAL_STATUSES, format_text,
@@ -74,31 +74,21 @@ def _resolve_owner(session: str | None) -> tuple[str, int]:
         raise _Fail(EXIT_OWNER, "owner_unavailable",
                     f"TUI for session {sess} is not running (no pidfile)",
                     session=sess)
+    desc = read_pidfile(pidfile)
+    if desc is None:
+        raise _Fail(EXIT_OWNER, "owner_unavailable",
+                    f"TUI for session {sess} is not running (stale pidfile)",
+                    session=sess)
+    pid = desc.pid
     try:
-        pid = int(pidfile.read_text().strip())
         os.kill(pid, 0)
-        if _is_zombie(pid):
+        if is_zombie(pid):
             raise ProcessLookupError(pid)
     except (ValueError, OSError):
         raise _Fail(EXIT_OWNER, "owner_unavailable",
                     f"TUI for session {sess} is not running (stale pidfile)",
                     session=sess)
     return sess, pid
-
-
-def _is_zombie(pid: int) -> bool:
-    """True when *pid* has exited but not been reaped yet.
-
-    ``kill(pid, 0)`` succeeds on a zombie, so a killed TUI whose tmux server
-    hasn't reaped it would look alive and the CLI would wait out the full
-    timeout before misreporting it as busy (``owner_timeout``).
-    """
-    try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
-    except OSError:
-        return False  # no procfs (macOS) — fall back to kill(pid, 0)
-    # State is the first field after the parenthesised comm.
-    return stat.rpartition(")")[2].split()[:1] == ["Z"]
 
 
 def _validate(ids: tuple[str, ...], *, for_add: bool) -> list[str]:
