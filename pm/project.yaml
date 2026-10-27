@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T15:22:46.246109+00:00'
+  updated_at: '2026-10-27T15:26:04.694009+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36987,6 +36987,36 @@ prs:
       merge wrote nothing.'
     created_at: '2026-10-27T15:22:46Z'
     last_edited: '2026-10-27T15:22:46Z'
+  - id: note-afb010f
+    text: 'QA scenario 32 (TUI decision surface: sign-off launch, blocked merge, allowed
+      merge, base-moved refusal, invalidated-approval re-run) PASS at 91011ee4 (no
+      code change; the branch has since gained only QA-note commits). All five triples
+      held live; captures in /pm-captures/scenarios/32/{story1-launch,story2-blocked-merge,story3-merge-allowed,story4-base-moved-refusal,story5-rerun-pointer}
+      (cast+mp4+evidence+manifest). Scenario-precision notes for the next run: (1)
+      the story-1 THEN "a non-empty base_range_from in $CAP/integration.json" does
+      not hold for an --apply fixture — base_range_from is recorded only for a clean
+      base merged by a bounce (or an attempt that was never applied), via _carry_base_interaction;
+      with an applied resolution the prompt derives the same range from resolution.resolved_from.merge_base
+      (5f1cf2b..ef0194d5, 2 files) and does show it, so the user-visible THEN holds.
+      To exercise base_range_from, build the hand-merged-base fixture instead (record
+      the conflict check first, then git merge the base by hand in the workdir — do
+      NOT --apply). (2) The story-3 THEN "Merging pm/<branch> into master (<head>
+      + <base> -> <merge>)..." is the CLI stdout of pm pr merge; the TUI g path surfaces
+      only the last stdout line ("PR <pr> marked as merged."). Verify publication
+      from the merge commit instead (tree == approved candidate 4b14192d, parents
+      == base ef0194d5 + approved head 616c12db) — both held. Harness facts: (a) tmux
+      windows created by the TUI inherit the TUI PROCESS environment, not the session/global
+      env set with tmux set-environment — a stub claude must be on the TUI PATH (restart
+      the session with PATH=/tmp/pm-s32-stub:...); setting the session env alone silently
+      ran the real claude (killed it; no side effects). (b) A non-sticky TUI message
+      (e.g. the g merge-refusal error) is suppressed while a sticky message (the 30
+      s "Sign-off BLOCKED") is up — the log annotates it "(hidden by sticky message)";
+      read the command log (L) / pm log grep rather than expecting it on screen. (c)
+      fake-claude is resolved by bare name from the pane PATH, so the fake branch
+      needs ~/.local/bin on the TUI PATH; the stub dir does not shadow it. (d) agg
+      aarch64 asset is agg-aarch64-unknown-linux-gnu (v1.9.0, no version in the name).'
+    created_at: '2026-10-27T15:26:04Z'
+    last_edited: '2026-10-27T15:26:04Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
