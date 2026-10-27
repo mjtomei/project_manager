@@ -1464,17 +1464,23 @@ def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
             pass
     if not remove_dir:
         return stopped
-    # Clean up the symlink if sock_dir is one
-    if os.path.islink(sock_dir):
-        try:
-            os.unlink(sock_dir)
-        except OSError:
-            pass
-    # Clean up the real directory and its start lock
+    # Clean up the real directory and its start lock.  The rmdir can fail: a
+    # container writes into the bind-mounted socket directory, and an
+    # unremovable socket or sidecar stays behind too.
     try:
         os.rmdir(real_dir)
     except OSError:
         pass
+    # Remove the long-name discovery link only when its directory is gone.
+    # The link is how a later process with an empty in-process registry finds
+    # the hashed directory to sweep, so unlinking it while the directory
+    # survives would leak both past teardown — the same rule
+    # _remove_proxy_dirs follows for a directory it keeps.
+    if not os.path.lexists(real_dir) and os.path.islink(sock_dir):
+        try:
+            os.unlink(sock_dir)
+        except OSError:
+            pass
     if lock_held:
         # The caller holds this directory's start lock, so no other process
         # can be using it — unlinking it here is safe (and necessary: the
@@ -1688,8 +1694,16 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
             if proxy_is_alive(os.path.join(real, "push.sock")):
                 _log.info("Leaving live proxy directory in place: %s", real)
                 continue
-            _unlink_link(path)
             shutil.rmtree(real, ignore_errors=True)
+            # rmtree is best-effort (a container can leave entries the host
+            # cannot remove), so only drop the discovery link once the
+            # directory is really gone — otherwise a later process with an
+            # empty registry has no way to find the hashed directory.
+            if os.path.lexists(real):
+                _log.warning("Proxy directory %s survived removal; keeping "
+                             "its discovery link", real)
+            else:
+                _unlink_link(path)
             # Safe: we hold the lock, so no other process is using it.
             try:
                 os.unlink(real + ".lock")

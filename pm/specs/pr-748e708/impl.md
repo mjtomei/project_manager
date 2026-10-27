@@ -932,3 +932,37 @@ user can connect and have the daemon run `git push`/`pull` as the host
 user.  R4 narrows it to the proxy's own workdir (previously any host
 path); closing it needs a private socket root and a decision on the
 container-uid assumption.
+
+## Review iteration 20 refinements
+
+Twentieth review pass (consistent with R6; no requirement changed).  The
+socket directory is bind-mounted *writable* into the container, so a
+teardown's `rmdir`/`rmtree` of it can legitimately fail; two paths then
+dropped the long-name discovery link while keeping the directory:
+
+- **`_kill_proxy_socket` dropped the link of a kept directory.** It
+  unlinked the discovery symlink *before* trying `os.rmdir(real_dir)`.
+  The socket directory is bind-mounted writable, so a container can leave
+  an entry in it (and an unremovable socket or a `proxy.json` directory
+  stays behind too), making the rmdir fail — the hashed directory then
+  survived with no link, so a later process with an empty in-process
+  registry had no way to find it and both leaked past teardown (the
+  iteration-12 leak, through the kill path instead of the sweep).  The
+  link is now unlinked only when the directory is actually gone.
+- **`_remove_proxy_dirs` had the same ordering.** `shutil.rmtree(...,
+  ignore_errors=True)` is best-effort; the link was unlinked before it
+  ran, so a removal the host could not complete left the directory with
+  no discovery link.  The link is now unlinked only after the directory
+  is confirmed gone (and the refusal is logged).
+
+Tests: `test_kill_keeps_the_discovery_link_when_the_dir_survives` (a
+leftover file, as a container can leave in the bind mount, keeps the
+directory; the link survives and the next registry-less sweep then
+removes both) and `test_sweep_keeps_the_link_when_rmtree_fails` (rmtree
+patched to a no-op) both fail at 15c41573 for the right reason
+(`os.path.islink(long_dir)` is False while the directory exists).
+
+Re-verified at HEAD: `/pm-captures/impl/post-fix/verify-proxy-key`
+passes with real subprocess daemons (distinct socket per workdir, the
+restarted impl proxy lands the new impl commit, QA stop leaves the impl
+socket directory intact).

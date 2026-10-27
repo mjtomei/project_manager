@@ -2311,6 +2311,80 @@ class TestWorkdirKeyedProxies:
             if os.path.lexists(long_dir):
                 os.unlink(long_dir)
 
+    def test_kill_keeps_the_discovery_link_when_the_dir_survives(self, tmp_path):
+        """A directory that survives its stop keeps its discovery link.
+
+        ``_kill_proxy_socket`` removes the socket and then ``rmdir``s the
+        directory.  A container writes into the bind-mounted socket
+        directory, so the rmdir can fail.  Unlinking the long-name link
+        anyway would leave the hashed directory unreachable for a later
+        process with an empty registry — the leak the link exists to
+        prevent.
+        """
+        tag = "k" * 80  # forces the hashed directory + discovery symlink
+        impl = self._workdir(tmp_path, "impl")
+        token = push_proxy_mod._workdir_token(str(impl))
+        short_dir = push_proxy_mod._shared_sock_dir_path(tag, self.PR, token)
+        long_dir = f"/tmp/{push_proxy_mod._SOCKET_DIR_PREFIX}{tag}-{self.PR}-{token}"
+        os.makedirs(short_dir, exist_ok=True)
+        if os.path.lexists(long_dir):
+            os.unlink(long_dir)
+        os.symlink(short_dir, long_dir)
+        Path(short_dir, "push.sock").write_text("stale\n")
+        # What a container can leave in the bind-mounted socket directory.
+        Path(short_dir, "leftover.txt").write_text("x\n")
+        try:
+            assert push_proxy_mod._stop_socket_under_lock(
+                os.path.join(long_dir, "push.sock")) is True
+            assert not os.path.exists(os.path.join(short_dir, "push.sock"))
+            assert os.path.isdir(short_dir), "a non-empty dir cannot be rmdir'd"
+            assert os.path.islink(long_dir), (
+                "discovery symlink removed while its directory was kept")
+
+            # The kept link is what lets a registry-less sweep finish the job.
+            push_proxy_mod._remove_proxy_dirs(
+                f"/tmp/{push_proxy_mod._SOCKET_DIR_PREFIX}{tag}-*")
+            assert not os.path.exists(short_dir)
+            assert not os.path.lexists(long_dir)
+        finally:
+            shutil.rmtree(short_dir, ignore_errors=True)
+            try:
+                os.unlink(short_dir + ".lock")
+            except OSError:
+                pass
+            if os.path.lexists(long_dir):
+                os.unlink(long_dir)
+
+    def test_sweep_keeps_the_link_when_rmtree_fails(self, tmp_path, monkeypatch):
+        """``rmtree`` is best-effort; a surviving directory keeps its link."""
+        tag = "m" * 80  # forces the hashed directory + discovery symlink
+        impl = self._workdir(tmp_path, "impl")
+        token = push_proxy_mod._workdir_token(str(impl))
+        short_dir = push_proxy_mod._shared_sock_dir_path(tag, self.PR, token)
+        long_dir = f"/tmp/{push_proxy_mod._SOCKET_DIR_PREFIX}{tag}-{self.PR}-{token}"
+        os.makedirs(short_dir, exist_ok=True)
+        if os.path.lexists(long_dir):
+            os.unlink(long_dir)
+        os.symlink(short_dir, long_dir)
+        try:
+            with monkeypatch.context() as m:
+                m.setattr(push_proxy_mod.shutil, "rmtree",
+                          lambda *a, **k: None)  # removal silently fails
+                push_proxy_mod._remove_proxy_dirs(
+                    f"/tmp/{push_proxy_mod._SOCKET_DIR_PREFIX}{tag}-*")
+
+            assert os.path.isdir(short_dir), "rmtree was patched to a no-op"
+            assert os.path.islink(long_dir), (
+                "discovery symlink removed while its directory was kept")
+        finally:
+            shutil.rmtree(short_dir, ignore_errors=True)
+            try:
+                os.unlink(short_dir + ".lock")
+            except OSError:
+                pass
+            if os.path.lexists(long_dir):
+                os.unlink(long_dir)
+
     def test_sweep_skips_a_dir_whose_start_lock_is_held(self, tmp_path):
         """A start in flight keeps its dir and lock file through teardown."""
         sock_dir = "/tmp/pm-push-proxy-lockguard-impl"
