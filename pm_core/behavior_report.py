@@ -47,6 +47,12 @@ class _DashRow:
     report_html_rel: str | None      # path served by the dashboard server
     verdict: str             # SIGNOFF_* keyword or "" when no report / no tag
     mtime: float | None      # report.html mtime (unix ts); None when no report
+    # QA run the report says it reviewed (``pm-signoff-qa-run``); "" for a
+    # legacy report written before the binding existed.
+    qa_run: str = ""
+    # True when the report is bound to a different run than the PR's current
+    # ``qa_manifest.json`` — the report's scenario evidence is superseded.
+    qa_run_stale: bool = False
 
 
 # Match a single ``<meta ...>`` tag, then pull ``name`` and ``content`` out of
@@ -122,6 +128,26 @@ def extract_signoff_meta(report_path: Path) -> dict[str, str]:
     return out
 
 
+def _qa_run_binding(pr_id: str, report_path: Path,
+                    captures_root_dir: Path) -> tuple[str, bool]:
+    """The QA run a report claims to have reviewed, and whether it is stale.
+
+    A report is *stale* when it names a run other than the PR's current
+    ``qa_manifest.json`` run: its scenario membership and verdicts describe
+    evidence a later QA run replaced (pr-1ae1d2d).  Legacy reports carry no
+    ``pm-signoff-qa-run`` tag and no manifest — neither side exists, so they
+    are never flagged.
+    """
+    from pm_core import captures
+
+    run = captures.report_qa_run(report_path)
+    if not run:
+        return "", False
+    manifest = captures.read_manifest(captures_root_dir / pr_id, pr_id=pr_id)
+    current = (manifest or {}).get("run_id", "")
+    return run, bool(current and current != run)
+
+
 def gather_dashboard_rows(data: dict,
                           captures_root_dir: Path) -> list[_DashRow]:
     """Build one row per PR from ``project.yaml`` + per-PR ``report.html``."""
@@ -135,6 +161,8 @@ def gather_dashboard_rows(data: dict,
         report_path = captures_root_dir / pr_id / "report.html"
         if report_path.is_file():
             verdict = _extract_verdict(report_path)
+            qa_run, qa_run_stale = _qa_run_binding(pr_id, report_path,
+                                                   captures_root_dir)
             try:
                 mtime = report_path.stat().st_mtime
             except OSError:
@@ -143,6 +171,7 @@ def gather_dashboard_rows(data: dict,
                 pr_id=pr_id, gh_label=gh_label, title=title, status=status,
                 has_report=True, report_html_rel=f"{pr_id}/report.html",
                 verdict=verdict, mtime=mtime,
+                qa_run=qa_run, qa_run_stale=qa_run_stale,
             ))
         else:
             rows.append(_DashRow(
@@ -274,6 +303,7 @@ th:nth-child(2), td:nth-child(2) { min-width: 12rem; }
 .table-wrap { overflow-x: auto; }
 .signoff-marker { font-weight: 600; white-space: nowrap; }
 .missing { color: #9a6700; font-weight: 600; white-space: nowrap; }
+.stale-run { color: #9a6700; font-weight: 600; white-space: nowrap; }
 .status { white-space: nowrap; font-size: .9rem; }
 .pr-id { white-space: nowrap; font-family: ui-monospace, SFMono-Regular,
   Menlo, monospace; font-size: .85rem; }
@@ -389,6 +419,14 @@ def render_dashboard_html(rows: list[_DashRow]) -> str:
         if r.has_report and r.report_html_rel:
             report_cell = f'<a href="{_href(r.report_html_rel)}">open report</a>'
             verdict_cell = _verdict_marker_html(r.verdict)
+            if r.qa_run_stale:
+                # The report's scenario evidence was produced by a QA run the
+                # PR has since replaced; say so rather than letting a stale
+                # verdict read as current coverage.
+                verdict_cell += (
+                    ' <span class="stale-run" title="report reviewed QA run '
+                    f'{_e(r.qa_run)}; the current QA run is different">'
+                    '⚠ QA run changed</span>')
         else:
             report_cell = _no_report_cell()
             verdict_cell = '<span class="muted">—</span>'

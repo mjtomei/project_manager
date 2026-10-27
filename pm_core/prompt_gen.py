@@ -638,12 +638,87 @@ def _qa_scenarios_pointer() -> str:
     return f"read {_QA_SCENARIOS_READER}"
 
 
+def _qa_run_binding(pr_id: str, status: dict,
+                    status_path) -> list[str]:
+    """Lines binding this QA listing to the run that produced the evidence.
+
+    The report's scenario membership must come from a real QA run, not from
+    "a directory exists under ``$CAP/scenarios/``" (pr-1ae1d2d): a nested
+    fake-Claude fixture inside an outer scenario container, or an earlier
+    verification run, leaves records that look exactly like coverage.  The
+    run manifest at ``$CAP/qa_manifest.json`` is the authoritative record;
+    here we name it, the run id, and any disagreement with the live
+    ``qa_status.json`` so the sign-off session can see the evidence is stale
+    before it writes the report.
+    """
+    from pm_core import captures
+    from pm_core.paths import captures_dir
+
+    lines: list[str] = []
+    status_run = status.get("run_id") if isinstance(status.get("run_id"), str) else ""
+    if not status_run and status_path is not None:
+        # Legacy status file: the run id is the workdir suffix
+        # (~/.pm/workdirs/qa/<pr>-<run_id>/qa_status.json).
+        status_run = status_path.parent.name.removeprefix(f"{pr_id}-")
+        if status_run == status_path.parent.name:
+            status_run = ""
+    try:
+        root = captures_dir(pr_id, create=False)
+    except Exception:
+        root = None
+    manifest = (captures.read_manifest(root, pr_id=pr_id,
+                                       run_id=status_run or None)
+                if root else None)
+    manifest_run = (manifest or {}).get("run_id", "")
+
+    run_id = manifest_run or status_run
+    if run_id:
+        lines.append(f"QA run: `{run_id}`")
+    if manifest is None:
+        lines.append(
+            "Scenario membership is **not run-bound**: no "
+            "`$CAP/qa_manifest.json` for this PR. Treat every "
+            "`$CAP/scenarios/<n>/` directory as unverified provenance and "
+            "cite only the scenarios listed above.")
+        return lines
+    if status_run and status_run != manifest_run:
+        lines.append(
+            f"**Warning:** the captures evidence belongs to QA run "
+            f"`{manifest_run}`, but the latest `qa_status.json` is run "
+            f"`{status_run}` — the scenario evidence may not match this "
+            f"run. Re-run QA before routing on it.")
+    members = [m for m in manifest.get("scenarios") or [] if isinstance(m, dict)]
+    lines.append(
+        f"Scenario membership: the {len(members)} scenario(s) listed in "
+        f"`$CAP/qa_manifest.json` — not whatever directories exist under "
+        f"`$CAP/scenarios/`.")
+    manifest_idx = [m.get("index") for m in manifest.get("scenarios") or []
+                    if isinstance(m, dict)]
+    listed_idx = [s.get("index") for s in (status.get("scenarios") or [])
+                  if isinstance(s, dict)]
+    if manifest_idx and listed_idx and set(manifest_idx) != set(listed_idx):
+        lines.append(
+            "**Warning:** `qa_manifest.json` lists scenarios "
+            f"{_idx_list(manifest_idx)} but `qa_status.json` lists "
+            f"{_idx_list(listed_idx)} — the evidence and the status "
+            "disagree about this run's membership.")
+    return lines
+
+
+def _idx_list(indices: list, limit: int = 20) -> str:
+    """Comma-joined scenario indices, capped with a count of the remainder."""
+    vals = [str(i) for i in indices[:limit]]
+    rest = len(indices) - len(vals)
+    out = ", ".join(vals)
+    return out + (f" (+{rest} more)" if rest > 0 else "")
+
+
 def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
     """Split the QA status block into ``(head, listing)``.
 
-    *head* is the overall verdict and the QA error.  Both are pm-generated
-    evidence, not enumerations, so they are inlined whole and never truncated:
-    the error's full text exists only in the QA run's host
+    *head* is the overall verdict, the QA error and the QA-run binding.  All
+    are pm-generated evidence, not enumerations, so they are inlined whole and
+    never truncated: the error's full text exists only in the QA run's host
     ``~/.pm/workdirs/qa/<pr>-*/qa_status.json``, which a containerised
     sign-off session cannot read (the reason the old 500-character cut was
     removed).  Keeping them out of the shrinkable block is what stops
@@ -676,6 +751,7 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
         # sign-off session cannot read.
         err = " ".join(str(data["error"]).split())
         head_lines.append(f"QA error: {err}")
+    head_lines.extend(_qa_run_binding(pr_id, data, latest))
     head = "\n" + "\n".join(head_lines) + "\n"
     scenarios = data.get("scenarios") or []
     if isinstance(scenarios, dict):
@@ -924,6 +1000,15 @@ isolated candidate (your worktree and the base branch were not touched):
    - `CAP="$(pm qa captures-path {pr_id})"`:
      - {impl_bullet}
      - `$CAP/scenarios/<n>/` — per-scenario QA captures, prompts, and verdicts.
+     - `$CAP/qa_manifest.json` — the authoritative record of the QA run that
+       owns this PR's evidence and of the scenarios it ran. **Scenario
+       membership comes from this manifest, not from the directories on
+       disk.** A `$CAP/scenarios/<n>/` directory outside it, or one whose
+       `scenario.json` names another `pr_id`/`run_id`, is stale or foreign
+       evidence — a nested fixture project or an earlier run — and **must
+       not be cited as coverage** for this PR. `pm qa evidence {pr_id}`
+       prints the manifest's membership and flags every directory that
+       disagrees.
    - **(a) BDD — does the captured behavior support the diff's claims?** For
      each scenario/step, does the evidence actually demonstrate the behavior the
      diff claims to deliver?
@@ -997,7 +1082,15 @@ isolated candidate (your worktree and the base branch were not touched):
    <meta name="pm-signoff-head" content="<PR HEAD sha you reviewed>">
    <meta name="pm-signoff-base" content="<base revision sha you integrated with>">
    <meta name="pm-signoff-reason" content="<one or two sentences: why this route>">
+   <meta name="pm-signoff-qa-run" content="<the QA run id you reviewed>">
    ```
+
+   `pm-signoff-qa-run` is the `run_id` from `$CAP/qa_manifest.json` (also
+   named in the QA scenarios block above). It binds the report's scenario
+   membership and verdicts to a real QA run, so a report built from
+   superseded or foreign evidence is detectable: the dashboard flags a
+   report whose run is not the PR's current one, and `pm pr merge` refuses
+   it.
 
    A human approval (`pm pr signoff record`) is refused unless these match
    the current HEAD and the recorded integration check. Include an

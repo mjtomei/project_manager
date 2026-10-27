@@ -89,7 +89,8 @@ def _resolve_session_tag(start_path: Path | None = None) -> str | None:
 
 def captures_dir(pr_id: str,
                  session_tag: str | None = None,
-                 start_path: Path | None = None) -> Path | None:
+                 start_path: Path | None = None,
+                 create: bool = True) -> Path | None:
     """Return the captures directory for *pr_id*.
 
     Single source of truth for captures-path resolution across every
@@ -110,6 +111,11 @@ def captures_dir(pr_id: str,
     in the canonical location; inside a container the host path
     doesn't exist and we fall through to the bind-mount.
 
+    *create* may be ``False`` for a **reader**: resolution then never
+    creates the host path, returning ``None`` when nothing exists yet.
+    Readers (prompt builders, ``pm qa evidence``) must not conjure a
+    captures dir as a side effect of looking for evidence in it.
+
     Returns None when no tag can be derived AND the bind-mount isn't
     present.
     """
@@ -128,7 +134,7 @@ def captures_dir(pr_id: str,
     mount_pr = os.environ.get(CAPTURES_PR_ENV)
     if mount.is_dir() and (not mount_pr or mount_pr == pr_id):
         return mount
-    if host_path is not None:
+    if host_path is not None and create:
         host_path.mkdir(parents=True, exist_ok=True)
         return host_path
     return None

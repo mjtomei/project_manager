@@ -217,6 +217,76 @@ def qa_captures_path(pr_id: str):
     click.echo(str(path))
 
 
+@qa.command("evidence")
+@click.argument("pr_id")
+def qa_evidence(pr_id: str):
+    """Show the authoritative QA evidence record for a PR.
+
+    Prints the QA run that owns this PR's captures (from
+    ``$CAP/qa_manifest.json``) and the scenarios that run ran, then every
+    ``$CAP/scenarios/<n>/`` directory that does *not* match: a foreign record
+    written by another PR's project (a nested QA fixture), a legacy record
+    with no PR/run identity, or a directory the current run never listed.
+
+    Scenario membership is the manifest's, never "the directory exists" —
+    this is the reader a sign-off session uses instead of walking the
+    captures tree by hand. Read-only: it never writes or quarantines.
+    """
+    from pm_core import captures, store
+    from pm_core.cli.helpers import _resolve_pr_id, state_root
+    from pm_core.paths import captures_dir, latest_qa_status_path
+
+    data = store.load(state_root())
+    pr_entry = _resolve_pr_id(data, pr_id)
+    if pr_entry is None:
+        click.echo(f"PR '{pr_id}' not found.", err=True)
+        raise click.exceptions.Exit(1)
+    canonical = pr_entry["id"]
+
+    status_run = ""
+    latest = latest_qa_status_path(canonical)
+    if latest is not None:
+        import json
+        try:
+            status_run = (json.loads(latest.read_text()).get("run_id") or "")
+        except (OSError, ValueError):
+            status_run = ""
+        if not status_run:
+            # Legacy status file: the run id is the workdir suffix.
+            status_run = latest.parent.name.removeprefix(f"{canonical}-")
+            if status_run == latest.parent.name:
+                status_run = ""
+
+    try:
+        root = captures_dir(canonical, create=False)
+    except Exception:
+        root = None
+    if root is None:
+        click.echo(f"PR {canonical}: no captures dir found.", err=True)
+        raise click.exceptions.Exit(1)
+
+    audit = captures.audit(root, pr_id=canonical, run_id=status_run)
+    click.echo(f"PR: {canonical}")
+    click.echo(f"Captures: {root}")
+    if audit.manifest is None:
+        click.echo("QA run: (no qa_manifest.json — membership not run-bound)")
+    else:
+        click.echo(f"QA run: {audit.manifest_run}")
+        if audit.manifest.get("overall"):
+            click.echo(f"Overall: {audit.manifest['overall']}")
+    if audit.members:
+        click.echo("Scenarios (authoritative membership):")
+        for m in audit.members:
+            click.echo(f"  Scenario {m.get('index', '?')} — "
+                       f"{m.get('title') or ''}: {m.get('verdict') or '(no verdict)'}")
+    else:
+        click.echo("Scenarios (authoritative membership): (none)")
+    if audit.anomalies:
+        click.echo("Anomalies:")
+        for line in audit.anomalies:
+            click.echo(f"  {line}")
+
+
 def _author_path(category: str, name: str) -> Path:
     from pm_core import qa_instructions
     root = state_root()
