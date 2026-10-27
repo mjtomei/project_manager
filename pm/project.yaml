@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-27T00:36:33.303113+00:00'
+  updated_at: '2026-10-27T00:46:01.761122+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16900,6 +16900,56 @@ prs:
       (REPORT.md + story1-4 with cast/mp4/txt/frames/manifests + pm-debug-evidence.txt).'
     created_at: '2026-10-27T00:36:33Z'
     last_edited: '2026-10-27T00:36:33Z'
+  - id: note-b7fe73e
+    text: 'S30 refine (malformed project.yaml; picker open and initial load): all
+      five draft stories are drivable from prefix+P with fzf. Picker paths use store.load(validate=False)
+      plus _build_nav_entries, so a bad entry is named and refresh failures keep the
+      last-good snapshot and refuse every dispatch route. Two QA caveats: (1) the
+      TUI''s validated load is not type-safe for an unhashable status - store._validate_pr_statuses
+      does ''status not in VALID_PR_STATES'' (a set), so a YAML list/mapping status
+      raises TypeError, and background_sync (300s interval) / _load_state catch only
+      ProjectYamlParseError, so a TUI reload while that file is on disk logs a traceback;
+      keep the malformed-status window brief and attribute any _background_sync traceback
+      to the TUI, not the popup. (2) Initial-load failures exit 1, so the popup body''s
+      || handler adds ''pm popup failed (exit 1).'' plus a one-key wait - two dismissals.
+      Also: install fzf 0.56.3 arm64 (container ships none), and the picker log is
+      ~/.pm/debug/<tag>.log.'
+    created_at: '2026-10-27T00:29:25Z'
+    last_edited: '2026-10-27T00:29:25Z'
+  - id: note-e6ba368
+    text: 'QA S30 (2026-10-27, HEAD a0fc12c3, workdir /workspace) PASS on all five
+      triples — no code change, no incidental bugs. Live on the real 80-col popup
+      with fzf 0.56.3: (1) unparsable project.yaml + d gives exactly the two non-actionable
+      rows ("Could not refresh PR actions; no action was run." / "Repair project.yaml
+      and retry.") under a header that still names A, zero dispatch, zero new windows,
+      exactly one "refresh failed, keeping state" warning per keypress (3 for d/l/h),
+      and l/h still walk the last-good list to B (2/2) and back; same for a missing
+      prs: key and prs: null. (2) A list/mapping status on entry #4 fails closed with
+      "Picker PR entry requires a valid status: entry #4 (id=..., gh_pr_number=None,
+      status=[''in_review''])" / status={''state'': ''qa''} — never "unhashable type",
+      no traceback anywhere — then the exit-1 body ("pm popup failed (exit 1)." +
+      one-key wait) and a repaired open from D''s window at (3/3). (3) Four partial
+      writes on the displayed A (deleted status:, null, "", "merg") are all rejected,
+      never normalised to pending: 0 keeps A''s last-good rows, d shows the two-row
+      notice with no dispatch, l/h still navigate, 16/16 keypresses log one warning,
+      and after restoring, s logs picker dispatch: cmd=''pr start pr-95325c4'' route=direct.
+      (4) All four dispatch routes (s, Down+Enter, z d, z z d) refuse while the file
+      is unparsable — no dispatch line, no new window, current window unchanged, notice
+      persists; the merged repair then shows the single "No actions — PR is merged."
+      row and l/0 still work. (5) Missing / null / numeric id on entry #3 each name
+      the position and only the present fields (entry #3 (gh_pr_number=None, status=''in_review'')
+      / (id=None, ...) / (id=123, ...)) with no traceback; after repairing to pr-c000001
+      the picker opens (3/4) from that window and l/h reach D (4/4) and B (2/4) and
+      back. Log for the whole run: 0 Traceback, 0 unexpected dispatch lines. Harness
+      for later runs: container has no fzf/agg — install fzf 0.56.3 linux_arm64 and
+      agg 1.4.3 aarch64 to /usr/local/bin; start the tmux server with LANG=C.UTF-8
+      LC_ALL=C.UTF-8 or tmux renders ACS and both — and ● become _, making the header/marker
+      checks unreadable; drive the popup from a second server pane running asciinema
+      wrapping tmux attach, and end a cast with tmux detach-client -s "=<session>"
+      (not C-b d, which fzf swallows into a dispatch). Captures /pm-captures/scenarios/30
+      (REPORT.md + 5 story dirs, each recording.cast/recording.mp4/pane captures/manifest.md).'
+    created_at: '2026-10-27T00:46:01Z'
+    last_edited: '2026-10-27T00:46:01Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
