@@ -402,6 +402,50 @@ def _epoch(iso: str | None) -> float:
         return 0.0
 
 
+def reconcile_idle_status(app, pr: dict, tracker) -> None:
+    """Keep the tracker's ``idle`` flag consistent with the transcript.
+
+    A resumed turn fires no hook at its start, so the tracker can still hold
+    an *earlier* turn's idle flag.  ``retire_in_memory`` clears it when the
+    pane is already tracked, but after a TUI restart the pane is registered
+    fresh and its newest hook event is the previous turn's ``idle_prompt`` —
+    so the status row would claim "turn complete; starting fresh review" for
+    the whole wait while the transcript says the turn is still running.
+
+    The transcript is authoritative for the handoff (``handoff_ready``), so
+    make the display agree with it: clear only a *stale* idle flag.  A gone
+    pane keeps its own status (``mark_active`` would resurrect it) and a live
+    permission prompt is never ``idle``.
+    """
+    if not fresh_awaiting(pr):
+        return
+    pr_id = pr.get("id")
+    if not pr_id:
+        return
+    try:
+        if tracker.is_gone(pr_id) or not tracker.is_idle(pr_id):
+            return
+    except Exception:
+        return
+    transcript = _impl_transcript(app, pr, tracker)
+    if not transcript:
+        return
+    from pm_core.verdict_transcript import latest_turn_state
+    try:
+        state = latest_turn_state(transcript)
+    except Exception:
+        _log.debug("autostart_fresh: idle reconcile read failed for %s",
+                   pr_id, exc_info=True)
+        return
+    if state != "in_progress":
+        return
+    try:
+        tracker.mark_active(pr_id)
+    except Exception:
+        _log.debug("autostart_fresh: idle reconcile failed for %s",
+                   pr_id, exc_info=True)
+
+
 def handoff_ready(app, pr: dict, tracker) -> bool:
     """Whether the current implementation turn has completed.
 
@@ -726,6 +770,7 @@ def fresh_start(app, ids: list[str], policy: str | None = None,
             except Exception:
                 _log.debug("autostart_fresh: pre-handoff poll failed for %s",
                            pr_id, exc_info=True)
+            reconcile_idle_status(app, pr, tracker)
         if tracker is not None and handoff_ready(app, pr, tracker):
             try:
                 from pm_core.tui.review_loop_ui import _auto_review_idle_prs

@@ -1006,6 +1006,11 @@ def _poll_impl_idle(app) -> None:
         # stale idle flag from the user's resumed turn (and must not be
         # advanced by an old hook event).
         if status == "in_progress" and fresh_awaiting(pr):
+            # A restarted TUI re-registers the pane and reads the *previous*
+            # turn's idle_prompt as its newest hook event, so the tracker can
+            # claim "idle" while the user's feedback turn is still running.
+            # Align the status row with the transcript (the handoff signal).
+            autostart_fresh.reconcile_idle_status(app, pr, tracker)
             # The check itself runs every tick (it is cheap and idempotent),
             # but a launch that fails to move the status must not be retried
             # on every tick — see ``handoff_attempt_due``.

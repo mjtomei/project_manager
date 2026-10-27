@@ -679,3 +679,23 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   ``_runtime_mirror_clear`` would otherwise wipe the freshly written qa
   entry.  Pinned by
   ``TestRetirement::test_qa_scenario_tracker_keys_are_dropped``.
+
+## Review-iteration notes (4e4d i1)
+
+* **The wait status now survives a TUI restart** — R6's status row reads the
+  idle tracker, and a restarted TUI re-registers the implementation pane
+  fresh: its newest hook event is the *previous* turn's ``idle_prompt``, so
+  the tracker reports ``idle`` while the user's feedback turn is still
+  running.  ``retire_in_memory``'s reset only covers a pane that was already
+  tracked at reset time, so for the whole wait the row said "fresh
+  autostart: implementation turn complete; starting fresh review".  A
+  genuinely complete turn hands off on that same tick (except behind the
+  spec/return gates), so that reason is otherwise shown only when the
+  transcript disagrees.  ``autostart_fresh.reconcile_idle_status`` now clears
+  the stale flag when the transcript (the authoritative handoff signal) says
+  ``in_progress``; it is called from ``_poll_impl_idle``'s fresh branch and
+  after ``fresh_start``'s pre-handoff poll.  A gone pane is left alone
+  (``mark_active`` would clear ``gone``) and a live permission prompt is
+  never ``idle``.  Pinned by ``TestIdleStatusReconcile`` and
+  ``TestPollRouting::test_a_stale_idle_flag_is_cleared_before_the_handoff_check``
+  (the latter fails without the call site).

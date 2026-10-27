@@ -389,6 +389,76 @@ class TestHandoff:
             assert autostart_fresh.handoff_ready(app, pr, _Tracker(path))
 
 
+class _IdleTracker:
+    """Tracker stub exposing only what ``reconcile_idle_status`` touches."""
+
+    def __init__(self, path, idle=True, gone=False, tracked=True):
+        self.path = path
+        self.idle = idle
+        self.gone = gone
+        self.tracked = tracked
+        self.marked: list[str] = []
+
+    def is_gone(self, key):
+        return self.gone
+
+    def is_idle(self, key):
+        return self.idle
+
+    def is_tracked(self, key):
+        return self.tracked
+
+    def get_transcript_path(self, key):
+        return str(self.path) if self.path else None
+
+    def mark_active(self, key):
+        self.marked.append(key)
+        self.idle = False
+
+
+class TestIdleStatusReconcile:
+    """A stale idle flag must not make the status row claim a finished turn."""
+
+    def test_running_turn_clears_the_stale_idle_flag(self, tmp_path):
+        # After a restart the pane is registered fresh and its newest hook
+        # event is the *previous* turn's idle_prompt, so the tracker reads
+        # idle while the user's feedback turn is still running.  R6's status
+        # row would then say "turn complete; starting fresh review" for the
+        # whole wait.
+        path = _transcript(tmp_path, [_complete(), _busy()])
+        tracker = _IdleTracker(path)
+        autostart_fresh.reconcile_idle_status(None, _marker_pr(st.now_iso()),
+                                              tracker)
+        assert tracker.marked == ["pr-a"]
+        assert tracker.idle is False
+
+    def test_complete_turn_keeps_the_idle_flag(self, tmp_path):
+        # The handoff fires on this same tick; the flag is accurate.
+        path = _transcript(tmp_path, [_complete()])
+        tracker = _IdleTracker(path)
+        autostart_fresh.reconcile_idle_status(None, _marker_pr(st.now_iso()),
+                                              tracker)
+        assert tracker.marked == []
+        assert tracker.idle is True
+
+    def test_gone_pane_is_left_alone(self, tmp_path):
+        # ``mark_active`` clears ``gone``; a dead pane must keep its own
+        # "implementation window missing" status.
+        path = _transcript(tmp_path, [_busy()])
+        tracker = _IdleTracker(path, gone=True)
+        autostart_fresh.reconcile_idle_status(None, _marker_pr(st.now_iso()),
+                                              tracker)
+        assert tracker.marked == []
+
+    def test_not_waiting_attempt_is_ignored(self, tmp_path):
+        path = _transcript(tmp_path, [_busy()])
+        tracker = _IdleTracker(path)
+        pr = _marker_pr(st.now_iso())
+        pr[FRESH_KEY]["awaiting_handoff"] = False
+        autostart_fresh.reconcile_idle_status(None, pr, tracker)
+        assert tracker.marked == []
+
+
 def _poll_app(tmp_path, pr):
     """A minimal app for ``_poll_impl_idle`` with one tracked impl pane."""
     from types import SimpleNamespace
@@ -460,6 +530,41 @@ class TestPollRouting:
             clock[0] += autostart_fresh._HANDOFF_RETRY_SECONDS + 1
             review_loop_ui._poll_impl_idle(app)  # window elapsed → retry
         assert len(calls) == 2
+
+    def test_a_stale_idle_flag_is_cleared_before_the_handoff_check(self, tmp_path):
+        # A restarted TUI registers the pane fresh; ``poll`` then reads the
+        # *previous* turn's idle_prompt as its newest event and reports idle
+        # while the user's feedback turn is still running.  The poll must
+        # reconcile that with the transcript (the handoff signal) so the
+        # status row does not claim "turn complete; starting fresh review".
+        from types import SimpleNamespace
+        from pm_core.pane_idle import PaneIdleTracker
+        from pm_core.tui import review_loop_ui
+
+        native = tmp_path / "11111111-2222-3333-4444-555555555555.jsonl"
+        native.write_text(json.dumps(_busy()) + "\n")
+        pr = _pr(status="in_progress",
+                 **{FRESH_KEY: {"requested_at": st.now_iso(),
+                                "awaiting_handoff": True}})
+        tracker = PaneIdleTracker()
+        tracker.register("pr-a", "%1", str(native))
+        app = SimpleNamespace(
+            _session_name="sess", _pane_idle_tracker=tracker,
+            _data={"prs": [pr]}, _review_loops={},
+            _pending_merge_prs=set(), _merge_input_required_prs=set(),
+            log_message=lambda *a, **k: None)
+        calls = []
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.hook_events.read_event",
+                   return_value={"event_type": "idle_prompt",
+                                 "timestamp": 1.0, "session_id": "s"}), \
+             patch("pm_core.tui.review_loop_ui._find_impl_pane",
+                   return_value=None), \
+             patch.object(review_loop_ui, "_auto_review_idle_prs",
+                          side_effect=lambda _a, pairs: calls.append(pairs)):
+            review_loop_ui._poll_impl_idle(app)
+        assert calls == []
+        assert tracker.is_idle("pr-a") is False
 
     def test_restart_recovers_the_native_transcript(self, tmp_path):
         # A restarted TUI has a new run dir, so ``impl-<pr>.jsonl`` is
