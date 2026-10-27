@@ -17,15 +17,18 @@
 # pipeline (e.g. `pytest ... | tail`) is not masked by the last command.
 # Add `set -e` inside the command string when every step must succeed.
 #
-# `--validate` runs only after a successful job; `$ARTIFACT` is exported to it.
-# On timeout only the job's own process group is signalled, so unrelated jobs
-# (including a deliberately persistent observer started by the caller) are
-# left alone. If the helper itself is signalled (Ctrl-C, or a supervisor killing
-# the waiting shell) it terminates the job's process group — escalating to
-# SIGKILL after a short grace period — and reports the interruption: a killed
-# wait is never passed off as a job failure, never hangs on a job that ignores
-# SIGTERM, and never leaves a renderer running behind it to race a later run
-# over the artifact.
+# `--validate` runs only after a successful job, with `$ARTIFACT` exported to
+# it, and is bounded by the same `--timeout`: a validator that hangs is a
+# failed validation, not an unbounded wait. On timeout only the job's own
+# process group is signalled, so unrelated jobs (including a deliberately
+# persistent observer started by the caller) are left alone. If the helper
+# itself is signalled (Ctrl-C, or a supervisor killing the waiting shell) it
+# terminates the running step's process group (the job, or the `--validate`
+# command once the job has finished) — escalating to SIGKILL after a short
+# grace period (`WAIT_FOR_JOB_KILL_GRACE`, default 5s) — and reports the
+# interruption: a killed wait is never passed off as a job failure, never
+# hangs on a job that ignores SIGTERM, and never leaves a renderer running
+# behind it to race a later run over the artifact.
 #
 # Exit status:
 #   0  job exited 0 and the artifact is fresh (and --validate passed)
@@ -126,7 +129,7 @@ on_signal() {
     kill "$escalator" 2>/dev/null || true
     wait "$escalator" 2>/dev/null || true
   fi
-  printf 'wait-for-job: interrupted before the job finished — this is a failure, not a result\n' >&2
+  printf 'wait-for-job: interrupted before the run finished — this is a failure, not a result\n' >&2
   exit 130
 }
 trap on_signal TERM INT HUP
@@ -155,7 +158,10 @@ else
 fi
 job_pid=$!
 
-wait "$job_pid"
+# `2>/dev/null` drops bash's "Killed timeout ..." job notice when `timeout`
+# SIGKILLs its own group after --kill-after; the diagnostics below say what
+# actually happened.
+wait "$job_pid" 2>/dev/null
 status=$?
 elapsed=$(( $(date +%s) - start_epoch ))
 
@@ -203,10 +209,29 @@ if [ "$mtime" -lt "$start_epoch" ]; then
   exit 4
 fi
 
+# Validation gets the same bound as the job: a validator that hangs (a stuck
+# ffprobe on a corrupt or network-mounted file, say) would otherwise stall the
+# helper forever — the very failure class this script exists to prevent.
 if [ -n "$validate_cmd" ]; then
   ARTIFACT=$artifact
   export ARTIFACT
-  if ! bash -o pipefail -c "$validate_cmd"; then
+  validate_start=$(date +%s)
+  # Run the validator as the *tracked* job so an interrupt during validation
+  # stops it too (a foreground child would make bash defer the trap until the
+  # validator finished — unbounded if the validator is the thing that hung).
+  timeout --signal=TERM --kill-after=10 "$timeout_secs" \
+      bash -o pipefail -c "$validate_cmd" &
+  job_pid=$!
+  wait "$job_pid" 2>/dev/null
+  vstatus=$?
+  validate_elapsed=$(( $(date +%s) - validate_start ))
+  if { [ "$vstatus" -eq 124 ] || [ "$vstatus" -eq 137 ]; } && \
+     [ "$validate_elapsed" -ge "$timeout_secs" ]; then
+    printf 'wait-for-job: artifact validation exceeded %ss and was killed — treating as failed validation: %s\n' \
+        "$timeout_secs" "$artifact" >&2
+    exit 4
+  fi
+  if [ "$vstatus" -ne 0 ]; then
     printf 'wait-for-job: artifact failed validation: %s\n' "$artifact" >&2
     exit 4
   fi

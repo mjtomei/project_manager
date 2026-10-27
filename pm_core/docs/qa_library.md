@@ -202,7 +202,9 @@ Use `wait-for-job.sh` for any renderer or long-running capture step.
 It starts the job as one background process, waits on that job's
 captured PID, bounds the wait, returns the real exit status, and
 requires a fresh (rewritten by this run), non-empty, optionally
-validated artifact before reporting success. It deliberately does not
+validated artifact before reporting success. The `--validate` step is
+bounded by the same `--timeout`, so a hung validator fails the check
+instead of stalling the worker. It deliberately does not
 poll process names: `until ! pgrep -f "<renderer>"` matches the
 waiting shell's own command line and never ends, and a bare `wait`
 blocks on every child, including a deliberately persistent observer.

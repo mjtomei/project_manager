@@ -34,7 +34,9 @@ R1. **Reusable, safe wait helper.** Add a checked-in helper
      `wait "$pid"`), never as live work;
    - validates the expected artifact before success: exists, regular file,
      non-empty, *fresh for this run* (not a stale leftover), plus an optional
-     `--validate` command (e.g. `ffprobe`);
+     `--validate` command (e.g. `ffprobe`) that is itself bounded by the same
+     `--timeout`, so a hanging validator fails the check instead of stalling
+     the helper;
    - if the helper itself is signalled (Ctrl-C, or a supervisor killing the
      waiting shell), terminates the job's own process group — escalating to
      SIGKILL after a short grace period (`WAIT_FOR_JOB_KILL_GRACE`, default
@@ -80,7 +82,9 @@ covering at minimum:
    - renderer failure (non-zero exit, even with an artifact present) → failure;
    - timeout → failure, job killed, diagnostic mentions timeout;
    - stale pre-existing artifact + job that does not rewrite it → failure;
-   - missing/empty artifact and failed `--validate` → failure;
+   - missing/empty artifact and failed `--validate` → failure; a hanging
+     `--validate` is killed at the bound (exit 4) and a failing stage in the
+     validator pipeline is not masked;
    - pipeline failure preserved (`false | true` → non-zero);
    - persistent observer child alongside a finite job → helper completes and
      leaves the observer alive (bare-`wait` deadlock);
@@ -134,9 +138,10 @@ A2. *Which prompts get the shared block?* → QA child, review (covers review
 loop), and impl. Scenario 0 (interactive) is left alone to keep the change
 small; it does not produce artifact captures and is user-driven.
 
-A3. *Do we update `web-ui-recording.md`?* → No helper adoption there (it has
-no agg→ffmpeg render step; Playwright records the video directly), and the
-task names the two recording recipes. Incidental hardening (review loop i4):
+A3. *Do we update `web-ui-recording.md`?* → No helper adoption there: its
+ffmpeg step (webm→H.264) runs synchronously in the foreground, so there is no
+background wait to replace, and the task names the two recording recipes.
+Incidental hardening (review loop i4):
 its unbounded `until curl ...; do sleep; done` readiness poll — and the
 matching `until tmux ls ...` poll in `tmux-screen-recording.md` — now carry a
 deadline and an actionable failure, because an unbounded poll stalls a worker
@@ -170,6 +175,8 @@ verifier's FLAGGED rule is asserted there too, not only the prose paragraph.
   path is explicitly bounded instead of depending on `timeout`'s own
   `--kill-after`.
 - `--validate` command fails → artifact invalid → fail.
+- `--validate` command hangs → killed at the `--timeout` bound, reported as a
+  failed validation (exit 4), never an unbounded wait (review loop i6).
 - Artifact path is a directory / symlink to nothing → fail as not a regular
   file.
 - A persistent observer/reaper started by the caller survives both success and
@@ -190,6 +197,7 @@ verifier's FLAGGED rule is asserted there too, not only the prose paragraph.
 | `pm/qa/artifacts/wait-for-job.sh` | **new** helper (executable) |
 | `pm/qa/artifacts/tmux-screen-recording.md` | render via helper + completion rules |
 | `pm/qa/artifacts/cli-recording.md` | render via helper + completion rules |
+| `pm/qa/artifacts/web-ui-recording.md` | readiness poll bounded (review loop i4) |
 | `pm_core/prompt_gen.py` | `_background_jobs_block` + injection |
 | `pm_core/qa_loop.py` | copy `*.sh` helpers; freshness in verifier prompt and the FLAGGED rule |
 | `pm_core/docs/qa_library.md` | document helper / background-job rule |

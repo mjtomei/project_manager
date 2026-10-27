@@ -3268,7 +3268,7 @@ Mark each part as:
 
 - If any Given, When, or Then in any triple is SKIPPED or SUBSTITUTED, the verdict is **FLAGGED**. A scenario that worked around missing tools by substituting methodology (unit tests, code review, harnessed source dumps) has not exercised the behavior — it should have reported INPUT_REQUIRED instead of PASS.
 - If everything is DONE but any Then's outcome was FAILED, the verdict is **FLAGGED**.{artifact_judgment_bullet}
-- Only if every part of every triple is DONE and matched (and every required artifact is present or validly excused) is the verdict **VERIFIED**.
+- Only if every part of every triple is DONE and matched (and every required artifact is present and fresh — or validly excused) is the verdict **VERIFIED**.
 
 ### Common false-pass patterns to watch for
 

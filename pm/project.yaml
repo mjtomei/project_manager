@@ -31078,7 +31078,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-27T06:40:31.778549+00:00'
+  updated_at: '2026-10-27T07:02:45.382013+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31130,6 +31130,27 @@ prs:
       No change to wait-for-job.sh. (2026-10-27)'
     created_at: '2026-10-27T06:40:31Z'
     last_edited: '2026-10-27T06:40:31Z'
+  - id: note-77e05f5
+    text: 'Review loop i6: bounded the helper''s `--validate` by the same `--timeout`
+      — a hanging validator (verified: `sleep 20` ran unbounded) stalled the helper
+      forever, the exact stall class this PR fixes; a validate timeout is exit 4 with
+      its own diagnostic, and the validator still runs under pipefail. The validator
+      now runs as the tracked job, so an interrupt during validation stops it too
+      (previously the trap was deferred until the validator finished — unbounded if
+      the validator was what hung); TERM-ignoring validators classify as 124/137,
+      and bash''s "Killed timeout ..." job notice is suppressed. Documented `WAIT_FOR_JOB_KILL_GRACE`
+      and the validate bound in the header so `--help` shows them; qa_library doc
+      updated; the QA verifier''s VERIFIED bullet now reads "present and fresh" instead
+      of presence-only; spec A3 corrected (web-ui has a synchronous ffmpeg transcode,
+      not a background render wait) and its Files/edge-case/R6 sections updated. New
+      tests: test_validate_is_bounded, test_validate_pipeline_failure_is_preserved,
+      test_interrupt_during_validation_stops_the_validator, test_verified_requires_a_fresh_artifact,
+      and --help asserts the grace env var. New file: 53 pass. Full suite: 3744 passed;
+      the 43 failed + 17 errors are environment-only (push-proxy rejects pushes to
+      master, so test_merge_publish/test_signoff_integration cannot run) plus the
+      known baseline test_installer_writes_standalone_receiver.'
+    created_at: '2026-10-27T06:56:15Z'
+    last_edited: '2026-10-27T07:02:45Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

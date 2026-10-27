@@ -128,6 +128,8 @@ class TestHelperBasics:
         assert "--timeout" in r.stdout
         assert "--artifact" in r.stdout
         assert "--validate" in r.stdout
+        # The interrupt escalation bound is documented where users look.
+        assert "WAIT_FOR_JOB_KILL_GRACE" in r.stdout
 
     @pytest.mark.parametrize("args", [
         ["--artifact", "/tmp/x"],                     # no --timeout
@@ -281,6 +283,42 @@ class TestWaitOutcomes:
         # grace, which costs ~10s for the same job.
         assert elapsed < 5, f"interrupt took {elapsed:.1f}s"
         _wait_gone(job_pid)
+
+    def test_interrupt_during_validation_stops_the_validator(self, tmp_path):
+        """An interrupt while `--validate` runs must stop the validator too.
+
+        The renderer has already exited by then, so the only live work is the
+        validator.  Left as a foreground child, bash would defer the trap
+        until the validator finished — unbounded if the validator is what
+        hung.
+        """
+        art = tmp_path / "recording.mp4"
+        pid_file = tmp_path / "validate.pid"
+        proc = subprocess.Popen(
+            ["bash", str(HELPER), "--timeout", "120", "--artifact", str(art),
+             "--validate",
+             f'echo $$ > {shlex.quote(str(pid_file))}; sleep 30',
+             "-c", f"printf video > {shlex.quote(str(art))}"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=dict(os.environ, WAIT_FOR_JOB_KILL_GRACE="1"))
+        try:
+            deadline = time.monotonic() + 10
+            while not pid_file.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert pid_file.exists(), "validator never started"
+            validator_pid = int(pid_file.read_text().strip())
+            started = time.monotonic()
+            proc.terminate()
+            _, err = proc.communicate(timeout=30)
+            elapsed = time.monotonic() - started
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.communicate()
+        assert proc.returncode == 130, err
+        assert "interrupted" in err
+        assert elapsed < 5, f"interrupt took {elapsed:.1f}s"
+        _wait_gone(validator_pid)
 
     def test_timeout_is_failure(self, tmp_path):
         art = tmp_path / "recording.mp4"
@@ -439,6 +477,36 @@ class TestArtifactChecks:
             "-c", f"printf video > {shlex.quote(str(art))}",
         ])
         assert r.returncode == 0, r.stderr
+
+    def test_validate_is_bounded(self, tmp_path):
+        """A hanging validator must not stall the helper forever.
+
+        The helper's whole point is bounding waits; a validator that never
+        returns (a stuck ffprobe on a corrupt or network-mounted file) would
+        reintroduce the unbounded wait one step after the job.
+        """
+        art = tmp_path / "recording.mp4"
+        started = time.monotonic()
+        r = run_helper([
+            "--timeout", "1", "--artifact", str(art),
+            "--validate", "sleep 20",
+            "-c", f"printf video > {shlex.quote(str(art))}",
+        ])
+        elapsed = time.monotonic() - started
+        assert r.returncode == 4
+        assert "validation" in r.stderr
+        assert elapsed < 15, f"validation was not bounded ({elapsed:.1f}s)"
+
+    def test_validate_pipeline_failure_is_preserved(self, tmp_path):
+        """A failing stage in the validator pipeline is not masked."""
+        art = tmp_path / "recording.mp4"
+        r = run_helper([
+            "--timeout", "10", "--artifact", str(art),
+            "--validate", "false | true",
+            "-c", f"printf video > {shlex.quote(str(art))}",
+        ])
+        assert r.returncode == 4
+        assert "failed validation" in r.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -673,3 +741,16 @@ class TestVerifierFreshness:
         bullet = bullet.split("**FLAGGED**")[0]
         assert "stale" in bullet.lower(), bullet
         assert "invalid" in bullet.lower(), bullet
+
+    def test_verified_requires_a_fresh_artifact(self):
+        """The VERIFIED bullet must not read as presence-only."""
+        scenario = QAScenario(
+            index=1, title="T", focus="f", steps="s",
+            artifact_paths=["/scratch/qa-artifacts/tmux-screen-recording.md"],
+        )
+        prompt = _build_verification_prompt(
+            scenario, "PASS", pane_output="output",
+            captures_scenario_dir="/caps/pr-x/scenarios/1",
+        )
+        flat = " ".join(prompt.split())
+        assert "present and fresh" in flat
