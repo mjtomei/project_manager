@@ -1064,7 +1064,11 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         # Any real QA start (review→qa, ``t``) overwrites this record.
         recorded = recorded_qa_verdict(pr_id, pr)
         from pm_core.signoff import return_awaiting
-        if recorded in QA_HOLD_VERDICTS and return_awaiting(pr) != "qa":
+        # (The tree's copy keeps ``awaiting: qa`` after the re-run's start
+        # cleared it on disk; only the file says the return still waits.)
+        if recorded in QA_HOLD_VERDICTS and (
+                return_awaiting(pr) != "qa"
+                or not _awaiting_on_disk(app, pr_id, "qa")):
             _log.debug("auto_start: %s QA already ended %s, not relaunching",
                        pr_id, recorded)
             continue

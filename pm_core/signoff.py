@@ -843,7 +843,8 @@ def return_launch_claimed(pr: dict | None, hop: str) -> bool:
 
 def clear_return_awaiting(root: Path, pr_id: str, hop: str,
                           timeout: float = store.LOCK_TIMEOUT_SECONDS,
-                          *, session_opened: bool = False) -> bool:
+                          *, session_opened: bool = False,
+                          ts: str | None = None) -> bool | None:
     """The routed *hop* launched a fresh session: stop forcing a relaunch.
 
     False when the lock was not acquired within *timeout* (a caller that
@@ -853,12 +854,19 @@ def clear_return_awaiting(root: Path, pr_id: str, hop: str,
     RETURN_CLEAR_WAIT_SECONDS, rather than leave ``awaiting`` and the hop's
     claim behind that session (the first driver after the claim expired
     would launch a second --fresh session over it).  Other callers (the
-    TUI's start_qa, on its main thread) give up after *timeout*.
+    TUI's start_qa, on its main thread) give up after *timeout*: None, and
+    the caller retries with ``store.NO_WAIT``.  With *ts*, only the return
+    recorded at *ts* is cleared (a retry must not clear a later return).
     """
+    def _waiting(pr):
+        rec = (pr or {}).get("signoff_return")
+        return (isinstance(rec, dict) and rec.get("awaiting") == hop
+                and (ts is None or rec.get("ts") == ts))
+
     def _apply(data):
         pr = store.get_pr(data, pr_id)
-        rec = (pr or {}).get("signoff_return")
-        if isinstance(rec, dict) and rec.get("awaiting") == hop:
+        if _waiting(pr):
+            rec = pr["signoff_return"]
             rec["awaiting"] = None
             if hop != "qa":
                 # A qa claim outlives ``awaiting``: the new run has no qa
@@ -867,7 +875,7 @@ def clear_return_awaiting(root: Path, pr_id: str, hop: str,
 
     try:
         data = store.load(root)
-        if return_awaiting(store.get_pr(data, pr_id)) != hop:
+        if not _waiting(store.get_pr(data, pr_id)):
             return True
         try:
             store.locked_update(root, _apply, timeout=timeout)
@@ -875,7 +883,8 @@ def clear_return_awaiting(root: Path, pr_id: str, hop: str,
             if timeout == store.NO_WAIT:
                 return False
             if not session_opened:
-                raise
+                _log.warning("clear sign-off return for %s: %s", pr_id, e)
+                return None
             _log.warning("clear sign-off return for %s: %s; waiting up to "
                          "%ss more", pr_id, e, RETURN_CLEAR_WAIT_SECONDS)
             store.locked_update(root, _apply,

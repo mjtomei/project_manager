@@ -541,6 +541,7 @@ def test_tui_qa_pass_not_handed_to_signoff_while_reqa_awaits(tmp_path):
     p = _returned("qa", "qa")
     p["depends_on"] = []
     app = FakeApp([p], root=tmp_path)
+    store.save({"project": app._data["project"], "prs": [p]}, tmp_path)
     app._auto_start = True
     app._auto_start_targets = {PR: st.make_target_record("t")}
     app._auto_start_run_id = "run"
@@ -840,7 +841,7 @@ def test_clear_waits_out_a_lock_holder_past_its_timeout(tmp_path, status, hop):
     t.start()
     held.wait()
     t0 = time.monotonic()
-    assert signoff.clear_return_awaiting(tmp_path, PR, hop, timeout=0.2) is True
+    assert signoff.clear_return_awaiting(tmp_path, PR, hop, timeout=0.2) is None
     assert time.monotonic() - t0 < 0.5
     t.join()
     assert signoff.return_awaiting(store.get_pr(store.load(tmp_path), PR)) == hop

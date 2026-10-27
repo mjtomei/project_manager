@@ -186,8 +186,9 @@ def start_qa(app, pr_id: str,
 
     # A sign-off REQA return is now being re-verified.
     from pm_core.signoff import clear_return_awaiting
-    if clear_return_awaiting(app._root, pr_id, "qa",
-                             timeout=lock_timeout) is False:
+    cleared = clear_return_awaiting(app._root, pr_id, "qa",
+                                    timeout=lock_timeout)
+    if cleared is False:
         return False
 
     if not _enter_qa_status(app, pr_id, pr, "start_qa",
@@ -195,6 +196,14 @@ def start_qa(app, pr_id: str,
         return False
 
     state = QALoopState(pr_id=pr_id)
+    if cleared is None:
+        # project.yaml stayed busy past the lock timeout: the run starts
+        # anyway (the main thread must not wait), and the poll tick clears
+        # ``awaiting`` once the lock is free.  Left set, it reads as a
+        # return still waiting for its run: the next auto-start pass would
+        # re-run QA after this run ended INPUT_REQUIRED, and a PASS whose
+        # hand-off was missed would never be handed to sign-off.
+        state._ui_return_clear = (pr.get("signoff_return") or {}).get("ts")
 
     def on_update(s: QALoopState):
         # Schedule UI update on the main thread
@@ -347,6 +356,8 @@ def poll_qa_state(app) -> None:
     """Called from the shared poll timer to update QA state in the TUI."""
     tracker = app._pane_idle_tracker
     for pr_id, state in list(app._qa_loops.items()):
+        if state._ui_return_clear is not None:
+            _retry_return_clear(app, state)
         # Drop scenario keys of an earlier run of this PR.  A run replaced
         # in _qa_loops (z t over a running run, a zz t restart) never
         # reaches the completion unregister below, and nothing polls its
@@ -443,6 +454,20 @@ def poll_qa_state(app) -> None:
     if app._qa_resume_poll_counter % 5 == 0:
         _resume_incomplete_qa(app)
     app._qa_resume_poll_counter += 1
+
+
+def _retry_return_clear(app, state: QALoopState) -> None:
+    """Clear the ``awaiting: qa`` that start_qa gave up on, never waiting
+    for the lock (retried on every poll tick until it takes)."""
+    from pm_core.signoff import clear_return_awaiting
+    if clear_return_awaiting(app._root, state.pr_id, "qa",
+                             timeout=store.NO_WAIT,
+                             ts=state._ui_return_clear) is False:
+        return
+    state._ui_return_clear = None
+    _log.info("start_qa: cleared the sign-off return of %s once "
+              "project.yaml was free", state.pr_id)
+    _reload_tree(app)
 
 
 def _project_load_error(app) -> Exception | None:

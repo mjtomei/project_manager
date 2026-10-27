@@ -434,9 +434,13 @@ def advance_all(app, prs: list[dict] | None = None) -> None:
                 step(app, pr_id, store.get_pr(disk, pr_id))
             elif (status == "qa" and pr_id not in app._qa_loops
                   and _auto_start.recorded_qa_verdict(pr_id, pr) == "PASS"
-                  and signoff_mod.return_awaiting(pr) != "qa"):
+                  and (signoff_mod.return_awaiting(pr) != "qa"
+                       or not _auto_start._awaiting_on_disk(
+                           app, pr_id, "qa"))):
                 # (A sign-off REQA return still waiting for its QA run must
-                # not be handed back to sign-off on the old PASS.)
+                # not be handed back to sign-off on the old PASS.  The
+                # tree's copy can say it waits after the re-run's start
+                # cleared it on disk.)
                 # Retried on the next pass, so never wait for the lock.
                 start_signoff(app, pr_id, lock_timeout=store.NO_WAIT)
         except store.StoreLockTimeout as e:

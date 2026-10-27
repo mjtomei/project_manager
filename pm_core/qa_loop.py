@@ -275,6 +275,10 @@ class QALoopState:
     _ui_writes_done: set = field(default_factory=set, repr=False, compare=False)
     _ui_pending: list = field(default_factory=list, repr=False, compare=False)
     _ui_wait_reason: str | None = field(default=None, repr=False, compare=False)
+    # The sign-off REQA return (its ``ts``) whose ``awaiting: qa`` this
+    # TUI run could not clear as it started (project.yaml busy past the
+    # lock timeout); qa_loop_ui retries the clear on every poll tick.
+    _ui_return_clear: str | None = field(default=None, repr=False, compare=False)
     # Orders resume-snapshot renames against :func:`supersede_run`, so a
     # write already past its stop check cannot restore a snapshot that a
     # ``z t`` cleared.
