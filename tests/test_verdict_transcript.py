@@ -56,6 +56,27 @@ def _tool_result_line() -> str:
     })
 
 
+def _thinking_line(text: str) -> str:
+    return json.dumps({
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "thinking", "thinking": text}],
+        },
+    })
+
+
+def _tool_use_line(name: str, tool_input: dict) -> str:
+    return json.dumps({
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": "toolu_1", "name": name,
+                        "input": tool_input}],
+        },
+    })
+
+
 def _write(tmp_path: Path, lines: list[str]) -> Path:
     p = tmp_path / "t.jsonl"
     p.write_text("\n".join(lines) + "\n")
@@ -567,3 +588,57 @@ def test_multiple_system_reminder_blocks_are_transparent(tmp_path: Path) -> None
         _assistant_line("Acknowledged; nothing to add."),
     ])
     assert extract_verdict_from_transcript(p, VERDICTS) == "PASS"
+
+
+def test_verdict_in_thinking_block_is_not_a_verdict(tmp_path: Path) -> None:
+    """A keyword inside a thinking block is not visible output.
+
+    The task-scoped scan reaches records the latest-turn scan never entered,
+    so a thinking block that reasons about the verdict keyword must not be
+    reported as the worker's verdict.
+    """
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _thinking_line("The instructions want INPUT_REQUIRED when blocked.\n"
+                       "INPUT_REQUIRED"),
+        _assistant_line("Still working; no verdict yet."),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) is None
+
+
+def test_verdict_in_tool_use_input_is_not_a_verdict(tmp_path: Path) -> None:
+    """A Grep pattern / written file containing the keyword is not a verdict.
+
+    Real reproduction: a QA worker greps the worktree for ``INPUT_REQUIRED``
+    and a later /loop wakeup postscript follows.  The task-scoped scan must
+    not read the tool_use input as the verdict.
+    """
+    p = _write(tmp_path, [
+        _user_line("You are running QA scenario 44"),
+        _tool_use_line("Grep", {"pattern": "INPUT_REQUIRED", "path": "."}),
+        _tool_result_line(),
+        _assistant_line("The keyword only appears in the instructions."),
+        _user_line(AUTONOMOUS_TICK, is_meta=True),
+        _assistant_line("Still working on the scenario."),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) is None
+
+
+def test_hit_text_contains_the_verdict_after_a_wakeup(tmp_path: Path) -> None:
+    """``VerdictHit.text`` always carries the verdict.
+
+    ``poll_for_verdict`` returns this text and callers re-parse it (e.g.
+    ``parse_review_verdict``), so a hit whose text lacked the keyword would
+    make the returned text disagree with the detected verdict.
+    """
+    from pm_core.verdict_transcript import find_verdict_turn
+
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("Reason: done\nPASS"),
+        _user_line(AUTONOMOUS_TICK, is_meta=True),
+        _assistant_line(SCENARIO_44_POSTSCRIPT),
+    ])
+    hit = find_verdict_turn(p, VERDICTS)
+    assert hit is not None and hit.verdict == "PASS"
+    assert "PASS" in hit.text.splitlines()

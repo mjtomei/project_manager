@@ -29,6 +29,11 @@ Design:
     markdown bold/code markers (``**PASS**`` / ```` `PASS` ````).  That
     rejects incidental mentions like "PASS this file" while accepting
     bare or lightly-formatted ``PASS`` as the entire message.
+  * Visible text only.  The keyword must appear in a record's ``text``
+    content — not in a thinking block or a ``tool_use`` input.  Those are
+    raw JSON strings too, so an agent that greps for ``INPUT_REQUIRED`` or
+    writes the keyword into a file would otherwise be read as emitting a
+    verdict.
   * Longest-match-first.  Verdicts are scanned in descending length
     order so any longer candidate would take precedence over a shorter
     prefix (kept for robustness — today's verdicts have no prefix
@@ -296,6 +301,22 @@ def _turn_text(lines: list[str], verdict_idx: int, verdict_text: str,
     return "\n".join(chunks)
 
 
+def _text_line_is_verdict(text: str, verdict: str) -> bool:
+    """True when *verdict* occupies a whole line of the assistant's text.
+
+    The verdict must be alone on its line; markdown emphasis/code markers
+    around it are tolerated (reviewers wrap verdicts in ``**`` / backticks).
+    Checking the *parsed* text rather than the raw JSONL line keeps a keyword
+    that appears only inside a thinking block or a tool_use input — a Grep
+    pattern, a file the agent wrote — from being read as a verdict.
+    """
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped == verdict or stripped.strip("*`").strip() == verdict:
+            return True
+    return False
+
+
 def find_verdict_turn(
     transcript_path: str | Path | None,
     verdicts: tuple[str, ...],
@@ -328,10 +349,20 @@ def find_verdict_turn(
     for idx in range(len(lines) - 1, -1, -1):
         line = lines[idx]
         if _ASSISTANT_RE.search(line):
+            # A verdict is visible output: only a text-bearing assistant
+            # record can carry one.  Thinking blocks and tool_use inputs are
+            # raw JSON strings too, so a Grep pattern for the keyword or a
+            # file the agent wrote would otherwise match (the task-scoped
+            # scan reaches records the latest-turn scan never entered).
+            if not _TEXT_BLOCK_RE.search(line):
+                continue
+            rec = _parse_record(line)
+            this_text = _record_text(rec)
+            if not this_text:
+                continue
             for verdict, pat in patterns:
-                if verdict in line and pat.search(line):
-                    rec = _parse_record(line)
-                    this_text = _record_text(rec)
+                if (verdict in line and pat.search(line)
+                        and _text_line_is_verdict(this_text, verdict)):
                     turn_text = _turn_text(
                         lines, idx, this_text, segment_texts)
                     return VerdictHit(
@@ -341,12 +372,7 @@ def find_verdict_turn(
                         timestamp=str((rec or {}).get("timestamp") or ""),
                         line_index=idx,
                     )
-            # Only text-bearing records contribute to the turn text; skip
-            # the JSON parse for thinking/tool_use-only records.
-            if _TEXT_BLOCK_RE.search(line):
-                this_text = _record_text(_parse_record(line))
-                if this_text:
-                    segment_texts.append(this_text)
+            segment_texts.append(this_text)
             continue
         if _USER_RE.search(line):
             rec = _parse_record(line)

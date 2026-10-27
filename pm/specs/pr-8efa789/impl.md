@@ -262,3 +262,14 @@ These extend the requirements above; they are implemented and covered by tests.
   `line_index` *before* `send_keys` and passes it. Callers that wait on a human
   answering a question the pane already asked (review/watcher) omit it and keep the
   call-time snapshot.
+- **Only visible text can carry a verdict (review 5e61 i1).** The task-scoped scan
+  reaches records the latest-turn scan never entered, and the verdict pattern is
+  matched against the raw JSONL bytes — so a keyword that appears only inside a
+  thinking block or a `tool_use` input (a `Grep` pattern for `INPUT_REQUIRED`, a
+  file the agent wrote) was reported as the worker's verdict. A hit now requires
+  the assistant record to carry `text` content *and* the keyword to occupy a whole
+  line of that parsed text (`_text_line_is_verdict`); markdown emphasis/code
+  markers around it are still tolerated. Corpus check over ~12.6k local
+  transcripts: 21 such false positives before the gate, none after, and
+  `VerdictHit.text` now always contains the verdict, so `poll_for_verdict`'s
+  returned text cannot disagree with the detected verdict.
