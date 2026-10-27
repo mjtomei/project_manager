@@ -1,4 +1,4 @@
-"""TUI auto-sequence: QA PASS -> sign_off -> recorded approval -> O stops / A merges.
+"""TUI auto-sequence: QA PASS -> sign_off -> recorded approval -> O waits / A merges.
 
 pr-488ac6d: ``qa_loop_ui._on_qa_complete`` used to call ``_maybe_auto_merge``
 directly on a QA PASS, which logged "ready to merge" for O (registry still
