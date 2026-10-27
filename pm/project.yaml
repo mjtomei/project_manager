@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-04-09T22:11:09.274855+00:00'
+  updated_at: '2026-10-27T16:49:49.849433+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -10705,6 +10705,32 @@ prs:
       matches correctly: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-eb2dbfc-92a70215734d8ef3)'
     created_at: '2026-04-10T13:33:17Z'
     last_edited: '2026-04-10T13:33:17Z'
+  - id: note-68e79e0
+    text: 'QA S39 (2026-10-27, cdcf6cc3, fake-claude, nested rootless podman 3.4.4):
+      INPUT_REQUIRED. The stop-on-idle core held live: policy-off impl and standalone
+      review kept Up and live 2+ min after idle; picker review row [open] [idle],
+      then [done PASS]. Policy-on impl and review were removed 10-16 s after idle;
+      panes stayed readable with "Pane is dead"; impl and review peak samples were
+      recorded. The review loop ended PASS and was removed about 10 s after the end.
+      Supersede (zz d mid-run), z d mid-run and immediate zz d restart all reached
+      the replacement PASS; the container was removed only after that PASS. Old-loop
+      stop logged "keeping … pane runs another session". Another session for the same
+      PR3 kept its container (same ID) and live pane while A''s was stopped. Scenario
+      Thens that failed against master design: (1) killing a review window removes
+      its container through the exec wrapper EXIT trap (build_exec_cmd cleanup=True,
+      podman rm -f), even with stop-idle-review off; (2) every fresh review (pm pr
+      review --fresh, so each loop iteration and each z d/zz d) removes and recreates
+      review-<pr>, so the container ID never stays the same; the review_loop.py finally
+      comment "start a fresh review that reuses this container" is inaccurate; (3)
+      the INPUT_REQUIRED loop cannot be held with fake-claude: the follow-up wait
+      re-reads the original verdict and advances every ~26 s (filed pr-3c90e34). The
+      scenario expectations for 1 and 2 need a human call: change the design or the
+      scenario. Minor: after an immediate restart, the old stop thread''s remove_container
+      waits on the new same-named container and logs "still present after 10 s" and
+      then "Stop-on-idle: removed" even though the new container lived. Captures are
+      in /pm-captures/scenarios/39.'
+    created_at: '2026-10-27T16:49:49Z'
+    last_edited: '2026-10-27T16:49:49Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
@@ -36084,6 +36110,35 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T01:30:16.482567+00:00'
   updated_at: '2026-10-27T01:30:16.482567+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3c90e34
+  plan: bugs
+  title: 'Bug: review-loop INPUT_REQUIRED follow-up wait re-reads the original INPUT_REQUIRED
+    and advances without user input'
+  branch: pm/pr-3c90e34-bug-review-loop-input-required-follow-up-wait-re-r
+  status: pending
+  depends_on: []
+  description: 'pm_core/loop_shared.py wait_for_follow_up_verdict returns on the first
+    idle_prompt hook newer than the wait start and runs extract_verdict_from_transcript
+    on the whole transcript, so it re-reads the INPUT_REQUIRED that started the wait
+    (no new assistant turn needed). review_loop then maps the repeated INPUT_REQUIRED
+    to NEEDS_WORK and launches the next iteration. Repro (QA S39 pr-eb2dbfc, 2026-10-27):
+    fake-claude review verdicts ["INPUT_REQUIRED"], zz d. Each iteration ends about
+    26 s after launch and a new one starts (i1..i10+, a new review container each
+    time); the loop never waits for the user. fake-claude re-emits idle_prompt every
+    2 s, so it trips at once. With real Claude the first idle_prompt notification
+    (after about 60 s idle) should do the same. Fix idea: record the latest assistant-turn
+    index or uuid at wait start and accept only a verdict from a newer assistant turn.
+    Same helper is used by watcher_base (QA/watchers). Evidence: /pm-captures/scenarios/39/
+    (watch-review-PR2.log, transcripts review-pr-ce7ce3f-i1..i10).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T16:49:34.569782+00:00'
+  updated_at: '2026-10-27T16:49:34.569782+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
