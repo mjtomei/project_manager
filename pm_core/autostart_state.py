@@ -188,12 +188,16 @@ def _legacy_ids(value) -> list[str]:
     A wrong-typed field still names at least one id when it is a non-empty
     string or a mapping's keys; anything else contributes nothing.  Keeping
     a plausible id preserves a manual gate instead of dropping it.
+    Unordered containers (a set from the old in-memory status input, a
+    mapping's keys) are sorted so the migrated target order is stable.
     """
     if isinstance(value, str):
         return [value] if value else []
     if isinstance(value, dict):
-        return [k for k in value if isinstance(k, str) and k]
-    if isinstance(value, (list, tuple, set)):
+        return sorted(k for k in value if isinstance(k, str) and k)
+    if isinstance(value, set):
+        return sorted(v for v in value if isinstance(v, str) and v)
+    if isinstance(value, (list, tuple)):
         return [v for v in value if isinstance(v, str) and v]
     return []
 

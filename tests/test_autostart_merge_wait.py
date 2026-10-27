@@ -197,6 +197,20 @@ class TestLifecycle:
         assert holds["a"] == {"targets": ["g"]}
         assert "d" not in holds
 
+    def test_removed_target_stays_held_while_another_wait_target_needs_it(
+            self, tmp_path):
+        """A target that is itself a prerequisite of another wait target:
+        removing it releases only its own holds — the other target's hold
+        and scope survive."""
+        prs = [_pr("g"), _pr("f", deps=["g"])]
+        app = _app(prs, tmp_path, wait=["f", "g"])
+        res = auto_start.remove_targets(app, ["g"])
+        assert res["changes"] == [{"pr_id": "g", "action": "removed"}]
+        assert "released" not in res          # nothing stopped being held
+        assert auto_start.in_scope(app, "g")  # still in f's closure
+        assert auto_start.merge_hold(app, "g") == {"targets": ["f"]}
+        assert auto_start.target_policy(app, "g") == POLICY_AUTO  # not a target
+
     def test_remove_does_not_report_merged_deps_released(self, tmp_path):
         app = _app(_diamond(a="merged", b="merged"), tmp_path, wait=["f"])
         res = auto_start.remove_targets(app, ["f"])
