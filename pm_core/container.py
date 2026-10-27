@@ -2628,9 +2628,18 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
         # Pin this checkout/interpreter, not whichever pm happens to be on the
         # pane's PATH. The release persists its exact identity before inventory,
         # then uses the same retention/launch-lock checks as manual cleanup.
+        # The pane's cwd is the PR workdir, which `pm pr cleanup` may already
+        # have deleted: importing pm (its logger resolves the cwd) and every
+        # runtime call (podman needs a cwd) would then fail and the release
+        # would be silently lost.  Import from a surviving cwd, then leave the
+        # workdir so a deletion during the release cannot break it either.
         script = (
-            f"import sys; sys.path.insert(0, {str(Path(__file__).resolve().parent.parent)!r}); "
-            "from pm_core.container import release_on_exit; "
+            "import os, sys\n"
+            "try:\n    os.getcwd()\nexcept OSError:\n    os.chdir('/')\n"
+            f"sys.path.insert(0, {str(Path(__file__).resolve().parent.parent)!r})\n"
+            "from pm_core.container import release_on_exit\n"
+            "import pm_core.container_reaper\n"
+            "os.chdir('/')\n"
             "release_on_exit(*sys.argv[1:])")
         cleanup_cmd = shlex.join([
             sys.executable, "-c", script, name, container_id or "", generation,

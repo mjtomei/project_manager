@@ -1,6 +1,8 @@
 """Tests for container isolation of Claude sessions."""
 
+import os
 import shlex
+import subprocess
 from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 
@@ -1304,3 +1306,38 @@ class TestCreateContainerPushProxy:
                         session_tag="repo-abc", pr_id="pr-1")
         call_kwargs = mock_exec.call_args[1]
         assert call_kwargs["proxy_socket_path"] is None
+
+
+def test_exit_release_survives_deleted_pane_cwd(tmp_path, monkeypatch):
+    """The EXIT-trap release still runs after the pane's workdir is deleted.
+
+    The pane's cwd is the PR workdir; `pm pr cleanup` can remove it while
+    the worker still runs.  Importing pm (its logger resolves the cwd) then
+    raised FileNotFoundError, so the release was silently lost and the
+    container kept running.  Runtime calls must not inherit the dead cwd.
+    """
+    calls = tmp_path / "runtime-calls.log"
+    stub = tmp_path / "podman"
+    stub.write_text(f'#!/bin/sh\necho "$PWD|$*" >> {calls}\n'
+                    'echo "stub runtime failure" >&2\nexit 1\n')
+    stub.chmod(0o755)
+    monkeypatch.setattr("pm_core.container._get_runtime", lambda: str(stub))
+    monkeypatch.setenv("PM_CONTAINER_STATE_DIR", str(tmp_path / "state"))
+    cmd = build_exec_cmd("pm-tag-impl-pr-1", "true", container_id="cid", generation="gen")
+    trap_argv = shlex.split(shlex.split(cmd)[2])
+    assert trap_argv[0] == "trap"
+    release_argv = shlex.split(trap_argv[1])
+
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    env = dict(os.environ, HOME=str(tmp_path / "home"))
+    env.pop("PYTHONPATH", None)
+    result = subprocess.run(
+        ["bash", "-c", 'rmdir "$PWD" && exec "$@"', "_", *release_argv],
+        cwd=workdir, env=env, capture_output=True, text=True, timeout=120)
+
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr
+    recorded = calls.read_text().splitlines()
+    assert recorded, "release never reached the runtime"
+    assert all(line.split("|", 1)[0] == "/" for line in recorded)
