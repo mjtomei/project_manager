@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pm_core import store, notes
+from pm_core import store, notes, graph
 from pm_core.backend import get_backend
 from pm_core.paths import get_global_setting
 from pm_core.prompt_bounds import (
@@ -174,11 +174,15 @@ def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
             pass  # graceful degradation — use main notes only
 
     # Merge: index by note ID, prefer later last_edited on collision.
-    merged: dict[str, dict] = {}
+    merged: dict = {}
     for n in main_notes + workdir_notes:
         nid = n.get("id")
-        if nid is None:
-            # Notes without an ID can't be deduped; give them a unique key.
+        if not isinstance(nid, str) or not nid:
+            # Notes without a usable (string) id can't be deduped; give them a
+            # unique key.  project.yaml is hand-editable state, and a
+            # non-hashable hand-edited id (a list or mapping) would raise
+            # ``TypeError`` out of ``merged.get`` and take every prompt builder
+            # down (the same crash class as a non-mapping note).
             merged[id(n)] = n
             continue
         existing = merged.get(nid)
@@ -357,7 +361,11 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
         status = dep_pr.get("status", "unknown").upper()
         return f"- {dep_id} ({dep_pr.get('title', '???')}) - {status}"
 
-    dep_lines = [line for line in map(_dep_line, pr.get("depends_on") or [])
+    # ``graph.deps_of``: project.yaml is hand-editable state, and a scalar
+    # ``depends_on`` is not a list of ids (``map`` over an int raised
+    # ``TypeError`` out of every prompt builder; a string was walked character
+    # by character, silently rendering no dependency section).
+    dep_lines = [line for line in map(_dep_line, graph.deps_of(pr))
                  if line]
     deps_section = ""
     if dep_lines:

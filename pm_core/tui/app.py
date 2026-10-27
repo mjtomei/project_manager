@@ -20,7 +20,7 @@ from textual.binding import Binding
 from textual.containers import Container, Vertical
 from textual.timer import Timer
 
-from pm_core import store, guide
+from pm_core import store, guide, graph
 
 from pm_core import tmux as tmux_mod
 from pm_core.tui.tech_tree import TechTree, PRSelected
@@ -643,7 +643,7 @@ class ProjectManagerApp(App):
             wq.flush_sync()
         old_statuses = {p.get("id"): p.get("status")
                         for p in (self._data or {}).get("prs") or []}
-        old_deps = {p.get("id"): list(p.get("depends_on") or [])
+        old_deps = {p.get("id"): graph.deps_of(p)
                     for p in (self._data or {}).get("prs") or []}
         try:
             # Only search for root on first load; reuse existing root for refreshes

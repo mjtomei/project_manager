@@ -726,8 +726,14 @@ def _record_qa_note(app, state: QALoopState) -> None:
             if not pr:
                 _log.warning("Cannot record QA note: PR %s not found", state.pr_id)
                 return
-            notes = pr.get("notes") or []
-            existing_ids = {n["id"] for n in notes}
+            # Hand-edited state: a malformed ``notes`` value is no list, and a
+            # member that is not a mapping has no ``id`` — neither is a note
+            # (``n["id"]`` raised ``TypeError``/``KeyError`` and the QA note,
+            # the next session's handoff, was silently lost).
+            notes = pr.get("notes")
+            notes = notes if isinstance(notes, list) else []
+            existing_ids = {n.get("id") for n in notes
+                            if isinstance(n, dict) and isinstance(n.get("id"), str)}
             note_id = store.generate_note_id(state.pr_id, note_text, existing_ids)
             now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             notes.append({"id": note_id, "text": note_text,

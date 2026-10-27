@@ -726,7 +726,7 @@ def on_state_loaded(app, old_statuses: dict,
     regraphed = [] if old_deps is None else [
         p["id"] for p in prs
         if p.get("id") in old_deps
-        and list(p.get("depends_on") or []) != old_deps[p["id"]]]
+        and graph.deps_of(p) != old_deps[p["id"]]]
     if not newly and not regraphed:
         return
     managed = managed_ids(app, prs)
@@ -812,7 +812,7 @@ async def check_and_start(app) -> None:
     for pr in prs:
         if pr.get("status") != "in_progress":
             continue
-        deps = pr.get("depends_on") or []
+        deps = graph.deps_of(pr)
         if all(d in merged_ids for d in deps):
             ready.append(pr)
 

@@ -748,6 +748,21 @@ tests):
     its copy of the list (like `conflicts_total`/`overlap_total`), so the
     return block's marker reports the record's remainder and not just the
     bounded copy's.
+    The same hand-edited-state contract covers the PR's `notes` / `depends_on`
+    / `description` fields, read *and written*: `prompt_gen._format_pr_notes`
+    and `_note_mappings` skip a member that is not a mapping (and a `notes`
+    value that is not a list) instead of raising `AttributeError` out of every
+    prompt builder, `graph.deps_of` is the one reader of `depends_on` (a
+    scalar is absent, a non-string member ignored) for the graph, the TUI
+    layout/render and scheduler, the plan and PR prompts and `pm pr edit`'s
+    reconciliation, and the note commands (`pm pr note add` / `edit` /
+    `delete` — the canonical handoff channel) plus `_apply_pr_edit` treat a
+    malformed member as "not a note" instead of raising `TypeError` /
+    `KeyError` and losing the write: they preserve the malformed member rather
+    than dropping hand-written state, and repair a scalar `notes` value into a
+    real list.  The notes merge dedupes by a *string* id only, so a
+    hand-edited non-hashable id (a list/mapping) reads as unkeyed instead of
+    raising `TypeError` out of `merged.get`.
 
 ## Implicit requirements
 

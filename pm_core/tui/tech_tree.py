@@ -20,6 +20,7 @@ from rich.text import Text
 from rich.cells import cell_len
 from rich.console import RenderableType
 
+from pm_core import graph
 from pm_core.pr_utils import usable_prs
 from pm_core.tui import item_message, perf
 from pm_core.tui.tree_layout import compute_tree_layout, SORT_FIELDS, SORT_FIELD_KEYS
@@ -287,7 +288,9 @@ class EdgeCanvas(Widget):
         # Collect edges where both endpoints are positioned
         edges = []
         for pr in prs:
-            for dep_id in pr.get("depends_on") or []:
+            # ``graph.deps_of``: a hand-edited scalar ``depends_on`` is not a
+            # list of ids (iterating an int raises out of every render).
+            for dep_id in graph.deps_of(pr):
                 if dep_id in node_positions and pr["id"] in node_positions:
                     edges.append((dep_id, pr["id"]))
 

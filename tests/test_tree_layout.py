@@ -77,6 +77,17 @@ class TestEmptyInputs:
         assert layout.ordered_ids == []
         assert layout.node_positions == {}
 
+    def test_malformed_depends_on_does_not_crash_the_layout(self):
+        """A hand-edited scalar ``depends_on`` is no list of ids.
+
+        ``project.yaml`` is hand-editable state, and the layout runs on every
+        render: ``for dep_id in 5`` raised ``TypeError`` out of the TUI.
+        """
+        prs = [_pr("pr-a"), _pr("pr-b")]
+        prs[1]["depends_on"] = 5
+        layout = compute_tree_layout(prs)
+        assert set(layout.ordered_ids) == {"pr-a", "pr-b"}
+
     def test_single_pr(self):
         layout = compute_tree_layout([_pr("pr-a")])
         assert layout.ordered_ids == ["pr-a"]

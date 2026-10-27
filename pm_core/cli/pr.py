@@ -163,8 +163,11 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
                 pr_entry["title"] = parsed["title"]
                 changes.append(f"title={parsed['title']}")
 
-        # Description
-        if parsed["description"] != pr_entry.get("description", "").strip():
+        # Description.  Hand-edited state: only text has whitespace to strip
+        # (a scalar would raise AttributeError out of the edit path).
+        current_desc = pr_entry.get("description")
+        current_desc = current_desc if isinstance(current_desc, str) else ""
+        if parsed["description"] != current_desc.strip():
             pr_entry["description"] = parsed["description"]
             changes.append("description updated")
 
@@ -179,7 +182,10 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
 
         # Dependencies (skip unknown IDs silently)
         if parsed["depends_on_str"] is not None:
-            current_deps = ", ".join(pr_entry.get("depends_on") or [])
+            # ``graph.deps_of``: a hand-edited scalar ``depends_on`` is not a
+            # list of ids (``join`` would raise on an int, and a string would
+            # be joined character by character).
+            current_deps = ", ".join(graph.deps_of(pr_entry))
             if parsed["depends_on_str"] != current_deps:
                 if not parsed["depends_on_str"]:
                     pr_entry["depends_on"] = []
@@ -192,20 +198,28 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
                         pr_entry["depends_on"] = deps
                         changes.append(f"depends_on={', '.join(deps)}")
 
-        # Notes reconciliation
-        current_notes = pr_entry.get("notes") or []
-        old_texts = [n["text"] for n in current_notes]
+        # Notes reconciliation.  Hand-edited state: a member that is not a
+        # mapping, or a note without ``text``/``id``, is not a note the edit
+        # template could have shown — skip it instead of raising
+        # ``AttributeError``/``KeyError`` out of the write path (which would
+        # leave the file untouched and hide the problem).
+        current_notes = _notes_of(pr_entry)
+        malformed_notes = [n for n in current_notes if not isinstance(n, dict)]
+        current_notes = [n for n in current_notes if isinstance(n, dict)]
+        old_texts = [_note_text(n) for n in current_notes]
         if parsed["note_texts"] != old_texts:
-            old_by_text: dict[str, list] = {}
+            old_by_text: dict[str | None, list] = {}
             for n in current_notes:
-                old_by_text.setdefault(n["text"], []).append(n)
+                old_by_text.setdefault(_note_text(n), []).append(n)
             new_notes = []
             existing_note_ids: set[str] = set()
             for text in parsed["note_texts"]:
                 if text in old_by_text and old_by_text[text]:
                     reused = old_by_text[text].pop(0)
                     new_notes.append(reused)
-                    existing_note_ids.add(reused["id"])
+                    reused_id = _note_id(reused)
+                    if reused_id:
+                        existing_note_ids.add(reused_id)
                 else:
                     note_id = store.generate_note_id(pr_id, text, existing_note_ids)
                     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -214,10 +228,11 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
                         "created_at": now, "last_edited": now,
                     })
                     existing_note_ids.add(note_id)
-            new_notes.sort(
-                key=lambda n: n.get("last_edited") or n.get("created_at", "")
-            )
-            pr_entry["notes"] = new_notes
+            new_notes.sort(key=_note_sort_key)
+            # The edit template cannot show a member that is not a note, so
+            # keep those hand-written values rather than dropping them
+            # silently (the readers render them, ``_note_line`` shows ``?``).
+            pr_entry["notes"] = new_notes + malformed_notes
             changes.append("notes updated")
 
         if changes:
@@ -357,20 +372,24 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         # No flags given — open in $EDITOR with live save
         from pm_core.editor import run_watched_editor
 
-        # Capture original state for post-edit comparison
+        # Capture original state for post-edit comparison.  Hand-edited state:
+        # only text has whitespace to strip, a scalar ``depends_on`` is no
+        # list of ids, and a malformed note is not a note (see ``_note_text``).
         orig_title = pr_entry.get("title", "")
-        orig_desc = pr_entry.get("description", "").strip()
+        orig_desc_value = pr_entry.get("description")
+        orig_desc = (orig_desc_value
+                     if isinstance(orig_desc_value, str) else "").strip()
         orig_status = pr_entry.get("status", "pending")
-        orig_deps = ", ".join(pr_entry.get("depends_on") or [])
-        orig_notes = [n["text"] for n in (pr_entry.get("notes") or [])]
+        orig_deps = ", ".join(graph.deps_of(pr_entry))
+        orig_notes = [_note_text(n) for n in _notes_of(pr_entry)]
 
-        current_notes = pr_entry.get("notes") or []
+        current_notes = _notes_of(pr_entry)
         notes_lines = ""
         if current_notes:
             for n in current_notes:
-                ts = n.get("created_at", "")
+                ts = n.get("created_at", "") if isinstance(n, dict) else ""
                 ts_suffix = f"  # {ts}" if ts else ""
-                notes_lines += f"- {n['text']}{ts_suffix}\n"
+                notes_lines += f"- {_note_text(n) or ''}{ts_suffix}\n"
         else:
             notes_lines = "# (no notes)\n"
 
@@ -410,14 +429,17 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         pr_final = store.get_pr(data_final, pr_id)
         if pr_final.get("title", "") != orig_title:
             changes.append(f"title={pr_final['title']}")
-        if pr_final.get("description", "").strip() != orig_desc:
+        final_desc_value = pr_final.get("description")
+        final_desc = (final_desc_value
+                      if isinstance(final_desc_value, str) else "").strip()
+        if final_desc != orig_desc:
             changes.append("description updated")
         if pr_final.get("status", "pending") != orig_status:
             changes.append(f"status: {orig_status} → {pr_final['status']}")
-        final_deps = ", ".join(pr_final.get("depends_on") or [])
+        final_deps = ", ".join(graph.deps_of(pr_final))
         if final_deps != orig_deps:
             changes.append(f"depends_on={final_deps}")
-        final_notes = [n["text"] for n in (pr_final.get("notes") or [])]
+        final_notes = [_note_text(n) for n in _notes_of(pr_final)]
         if final_notes != orig_notes:
             changes.append("notes updated")
 
@@ -551,6 +573,36 @@ def _notes_of(pr_entry: dict) -> list:
     """
     notes = pr_entry.get("notes")
     return notes if isinstance(notes, list) else []
+
+
+def _note_id(n) -> str | None:
+    """A note's ``id`` when it is a string (hand-edited members read absent).
+
+    The note commands index every member with ``n["id"]``/``n["text"]``, so a
+    scalar member, or a member without those keys, raised ``TypeError`` /
+    ``KeyError`` out of ``pm pr note add`` — the canonical handoff channel.
+    """
+    value = n.get("id") if isinstance(n, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
+def _note_text(n) -> str | None:
+    """A note's ``text`` when it is a string (see :func:`_note_id`)."""
+    value = n.get("text") if isinstance(n, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def _note_sort_key(n) -> str:
+    """A note's last-edited/created stamp as text, for stable ordering.
+
+    A hand-edited value YAML parses as a non-string (an unquoted date) cannot
+    be compared with another note's string (``TypeError`` out of ``sort``).
+    """
+    for key in ("last_edited", "created_at"):
+        value = n.get(key) if isinstance(n, dict) else None
+        if isinstance(value, str) and value:
+            return value
+    return ""
 
 
 def _note_line(n: dict) -> str:
@@ -2739,10 +2791,13 @@ def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
         p = store.get_pr(d, pr_id)
         if p is not None:
             p["merge_integrity"] = {"problem": problem, "merge_sha": merge_sha}
-            notes = p.get("notes") or []
-            if not any(n.get("text") == text for n in notes):
+            # Hand-edited state: a malformed member is not a note, so it
+            # neither suppresses this warning nor contributes an id.
+            notes = _notes_of(p)
+            if not any(_note_text(n) == text for n in notes):
                 note_id = store.generate_note_id(
-                    pr_id, text, {n.get("id") for n in notes})
+                    pr_id, text,
+                    {i for i in (_note_id(n) for n in notes) if i})
                 p["notes"] = notes + [{
                     "id": note_id, "text": text,
                     "created_at": created, "last_edited": created}]
@@ -3496,7 +3551,9 @@ def pr_note_add(pr_id: str, text: str):
         pr = store.get_pr(data, pr_id)
         if not pr:
             return
-        notes = pr.get("notes") or []
+        # ``_notes_of`` returns the stored list when it is one (so malformed
+        # members are preserved) and a fresh list when the value is a scalar.
+        notes = _notes_of(pr)
         notes.append(note)
         pr["notes"] = notes
         _record_status_timestamp(pr)
@@ -3521,19 +3578,18 @@ def pr_note_edit(pr_id: str, note_id: str, text: str):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
-    # Validate note exists (on stale data, but good enough for error messages)
-    notes = pr_entry.get("notes") or []
-    target = None
-    for n in notes:
-        if n["id"] == note_id:
-            target = n
-            break
+    # Validate note exists (on stale data, but good enough for error messages).
+    # Hand-edited state: a malformed member is not a note (``n["id"]`` raised
+    # ``TypeError``/``KeyError`` out of the command).
+    notes = _notes_of(pr_entry)
+    target = next((n for n in notes if _note_id(n) == note_id), None)
     if target is None:
         click.echo(f"Note '{note_id}' not found on {_pr_display_id(pr_entry)}.", err=True)
         if notes:
             click.echo("Available notes:", err=True)
             for n in notes:
-                click.echo(f"  {n['id']}: {n['text']}", err=True)
+                click.echo(f"  {_note_id(n) or '?'}: {_note_text(n) or ''}",
+                           err=True)
         raise SystemExit(1)
 
     new_id = store.generate_note_id(pr_id, text)
@@ -3542,8 +3598,8 @@ def pr_note_edit(pr_id: str, note_id: str, text: str):
         pr = store.get_pr(data, pr_id)
         if not pr:
             return
-        for n in pr.get("notes") or []:
-            if n["id"] == note_id:
+        for n in _notes_of(pr):
+            if _note_id(n) == note_id:
                 n["id"] = new_id
                 n["text"] = text
                 n["last_edited"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -3581,21 +3637,25 @@ def pr_note_delete(pr_id: str, note_id: str):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
-    # Validate note exists
-    notes = pr_entry.get("notes") or []
-    if not any(n["id"] == note_id for n in notes):
+    # Validate note exists.  Hand-edited state: a malformed member is not a
+    # note (``n["id"]`` raised ``TypeError``/``KeyError`` out of the command).
+    notes = _notes_of(pr_entry)
+    if not any(_note_id(n) == note_id for n in notes):
         click.echo(f"Note '{note_id}' not found on {_pr_display_id(pr_entry)}.", err=True)
         if notes:
             click.echo("Available notes:", err=True)
             for n in notes:
-                click.echo(f"  {n['id']}: {n['text']}", err=True)
+                click.echo(f"  {_note_id(n) or '?'}: {_note_text(n) or ''}",
+                           err=True)
         raise SystemExit(1)
 
     def apply(data):
         pr = store.get_pr(data, pr_id)
         if not pr:
             return
-        pr["notes"] = [n for n in (pr.get("notes") or []) if n["id"] != note_id]
+        # Keep every other member as-is, including a malformed one that is not
+        # a note: deleting one note must not drop hand-written state.
+        pr["notes"] = [n for n in _notes_of(pr) if _note_id(n) != note_id]
         _record_status_timestamp(pr)
 
     store.locked_update(root, apply)

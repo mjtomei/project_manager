@@ -738,6 +738,159 @@ class TestPromptGenNotes:
         prompt = generate_prompt(data, "pr-001")
         assert "\n## PR Notes\n" not in prompt
 
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_malformed_depends_on_does_not_crash_the_prompt(self, mock_root,
+                                                            mock_notes):
+        """A hand-edited scalar ``depends_on`` reads as absent.
+
+        ``map(_dep_line, 5)`` raised ``TypeError`` out of every prompt builder
+        (impl / review / QA / sign-off), so the session window could not
+        launch; a string was walked character by character and silently
+        rendered no dependency section.
+        """
+        for value in (5, "pr-002", ["pr-002", 7, None]):
+            data = self._data()
+            data["prs"][0]["depends_on"] = value
+            data["prs"].append({
+                "id": "pr-002", "plan": None, "title": "Dep", "status": "merged",
+                "depends_on": [], "description": "", "agent_machine": None,
+                "gh_pr": None, "gh_pr_number": None,
+            })
+            prompt = generate_prompt(data, "pr-001")
+            if value == "pr-002" or value == 5:
+                assert "It depends on:" not in prompt
+            else:
+                assert "pr-002" in prompt
+
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_non_string_note_id_does_not_crash_the_prompt(self, mock_root,
+                                                          mock_notes):
+        """A hand-edited non-hashable ``id`` is no id to index by.
+
+        ``merged.get(nid)`` raised ``TypeError`` on a list/mapping id, which
+        took every prompt builder down (the same class as a non-mapping note).
+        """
+        data = self._data(notes=[
+            {"id": ["not", "hashable"], "text": "List id"},
+            {"id": {"a": 1}, "text": "Mapping id"},
+            {"id": "note-abc", "text": "Real note"},
+        ])
+        prompt = generate_prompt(data, "pr-001")
+        assert "List id" in prompt
+        assert "Mapping id" in prompt
+        assert "Real note" in prompt
+
+
+class TestPrNoteWritePaths:
+    """The note commands are the canonical handoff channel.
+
+    ``project.yaml`` is hand-editable state: a malformed member used to raise
+    ``TypeError``/``KeyError`` out of ``pm pr note add`` / ``edit`` /
+    ``delete`` and out of the ``pm pr edit`` reconciliation, which left the
+    file untouched and hid the problem.
+    """
+
+    def _notes(self, root):
+        return store.get_pr(store.load(root), "pr-001")["notes"]
+
+    def test_add_tolerates_malformed_notes(self, tmp_path):
+        """A scalar ``notes`` value or a non-mapping member must not raise.
+
+        ``notes = pr.get("notes") or []`` then ``notes.append(...)`` raised
+        ``AttributeError`` on a scalar value, and the member indexing raised
+        elsewhere; a hand-edited state file must not make the canonical
+        handoff command fail.
+        """
+        runner = CliRunner()
+
+        # A scalar ``notes`` value is repaired into a real list.
+        root = _make_state(tmp_path, notes=5)
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "add",
+                                     "pr-001", "hello"])
+        assert result.exit_code == 0, result.output
+        notes = self._notes(root)
+        assert [n.get("text") for n in notes if isinstance(n, dict)] == ["hello"]
+
+        # A malformed member in a real list is preserved.
+        root = _make_state(tmp_path, notes=["just a string"])
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "add",
+                                     "pr-001", "hello"])
+        assert result.exit_code == 0, result.output
+        notes = self._notes(root)
+        assert "just a string" in notes
+        assert any(isinstance(n, dict) and n.get("text") == "hello"
+                   for n in notes)
+
+    def test_edit_tolerates_a_non_mapping_note(self, tmp_path):
+        root = _make_state(tmp_path, notes=[
+            "just a string",
+            {"id": "note-abc1234", "text": "old"},
+        ])
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "edit",
+                                     "pr-001", "note-abc1234", "new"])
+        assert result.exit_code == 0, result.output
+        notes = self._notes(root)
+        assert "just a string" in notes
+        assert any(isinstance(n, dict) and n.get("text") == "new"
+                   for n in notes)
+
+    def test_edit_lists_available_notes_without_raising(self, tmp_path):
+        root = _make_state(tmp_path, notes=["just a string"])
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "edit",
+                                     "pr-001", "note-missing", "new"])
+        assert result.exit_code == 1
+        assert "not found" in result.output
+
+    def test_delete_tolerates_a_non_mapping_note(self, tmp_path):
+        root = _make_state(tmp_path, notes=[
+            "just a string",
+            {"id": "note-abc1234", "text": "old"},
+        ])
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "delete",
+                                     "pr-001", "note-abc1234"])
+        assert result.exit_code == 0, result.output
+        # The malformed member is hand-written state: deleting one note must
+        # not drop it.
+        assert self._notes(root) == ["just a string"]
+
+    def test_pr_edit_reconciliation_tolerates_malformed_state(self, tmp_path):
+        """``_apply_pr_edit`` reconciles notes without raising.
+
+        The editor watcher calls this on every save: a scalar ``description``
+        / ``depends_on`` or a malformed note member raised out of it, so the
+        save was lost.
+        """
+        from pm_core.cli.pr import _apply_pr_edit
+
+        root = _make_state(tmp_path, notes=[
+            "just a string",
+            {"id": "note-abc1234", "text": "old"},
+        ])
+        data = store.load(root)
+        pr = store.get_pr(data, "pr-001")
+        pr["description"] = 7
+        pr["depends_on"] = 5
+        store.save(data, root)
+
+        changes = _apply_pr_edit(root, "pr-001", {
+            "title": None, "status": None, "depends_on_str": None,
+            "note_texts": ["old", "new"], "description": "desc",
+        })
+        assert "notes updated" in changes
+        notes = self._notes(root)
+        assert any(isinstance(n, dict) and n.get("text") == "new"
+                   for n in notes)
+        # A member the template cannot show is hand-written state: the edit
+        # keeps it instead of dropping it silently.
+        assert "just a string" in notes
+        assert store.get_pr(store.load(root), "pr-001")["description"] == "desc"
+
 
 class TestPrNotesHandoffGuidance:
     """The ungated 'PR Notes — Handoff Channel' block must reach every work
