@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T08:30:17.786308+00:00'
+  updated_at: '2026-10-27T09:04:42.496446+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36335,6 +36335,26 @@ prs:
       count while a re-armed loop runs. (2026-10-27)'
     created_at: '2026-10-27T08:30:17Z'
     last_edited: '2026-10-27T08:30:17Z'
+  - id: note-fbb4388
+    text: 'Review 385e i8 (fixes applied): (1) consume_breadcrumb now resumes restored
+      review loops *before* the auto-start scheduler pass. A re-armed loop keeps latest_verdict=LAUNCH_FAILED
+      + launch_retryable while it runs, so a restored-but-not-yet-started loop looked
+      like a completed retryable failure: the pass re-armed it, clearing the saved
+      launch_attempts, dropping the remaining backoff and burning an episode. The
+      saved budget/deadline now survives the restart. (2) A user stop while waiting
+      out another loop launch lease raises PaneKilledError -> KILLED instead of a
+      non-retryable LAUNCH_FAILED. (3) A HOLD completion records latest_output (the
+      trust/permission prompt) instead of a stale launch error from an earlier attempt.
+      (4) Dropped the unreachable `latest_verdict != PASS` gate on the retry notice;
+      artifact section headers say chars not bytes. Tests: test_restored_loop_is_running_before_the_scheduler_pass,
+      test_cancellation_while_waiting_for_the_lease_is_killed, test_hold_records_the_hold_message_not_a_stale_launch_error
+      (all fail pre-fix). Full suite 3854 passed; the 13 failures are the base tree
+      pre-existing markdown-module/hook-installer env failures. Residual (non-blocking):
+      review_loop.py ~1395 lines; two lease mechanisms coexist; the _progress label
+      can show the previous episode attempt count while a re-armed loop runs; the
+      artifact prompt copy can name the stale session prompt. (2026-10-27T09:05:00Z)'
+    created_at: '2026-10-27T09:04:42Z'
+    last_edited: '2026-10-27T09:04:42Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
