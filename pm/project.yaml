@@ -33257,7 +33257,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T03:12:35.331379+00:00'
+  updated_at: '2026-10-27T04:13:10.520262+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36256,6 +36256,39 @@ prs:
       epochs as 1.79e+09 (use printf %.3f).'
     created_at: '2026-10-27T03:12:35Z'
     last_edited: '2026-10-27T03:12:35Z'
+  - id: note-3edf0b6
+    text: 'S88 refine: the TUI has no periodic auto-start pass. After a failed sign-off
+      REVIEW return launch, the TUI retries only when some pass runs (a skipped claim
+      arms _recheck_after_claim at 185 s). With `pm pr auto-sequence` ticks running,
+      the tick (no route check on the review hop) usually takes the expired claim
+      and its failed `pm pr review` prints the route error in the ticker pane, so
+      it is not a review-loop ERROR. A TUI-only return with no other activity may
+      never retry; worth an S88 observation or a follow-up. During an ordinary (non-return)
+      in_review ERROR loop, a tick relaunches every 5 s (window-absent branch), so
+      S88 stops the ticker for that story.'
+    created_at: '2026-10-27T03:36:42Z'
+    last_edited: '2026-10-27T03:36:42Z'
+  - id: note-9a2e905
+    text: 'QA S88 (2026-10-27, container mode podman 3, real claude 2.1.311 vs work/
+      router + main stubs, HEAD d93d39a9; captures /pm-captures/scenarios/88, REPORT.md):
+      PASS, no code change. bbaafe6d held live: the hop at 03:46:54 with the router
+      down gave one review_loop "review failed on iteration 1 … work route unavailable
+      … Remedy" ERROR line, TUI "! ERROR (1 iteration)", 0 Tracebacks, no window/container,
+      nothing on main. Retries came only at claim expiry: tick attempts 180.6/183.5/183.4/183.5
+      s apart (rc=1, route error and remedy in the ticker pane), 139 "running: review"
+      ticks between, 0 advanced, awaiting=review throughout, claim renewed each time.
+      The TUI 185 s recheck chain always landed 1-4 s after the tick renewed the claim,
+      so every retry was the ticks. Router back: the tick took the claim (04:02:09,
+      "sign_off: returning to review (iteration 5)"), one window opened, awaiting/claim
+      cleared at once, the TUI adopted it at its 04:03:09 recheck, and router requests
+      were all work/ with 0 400s. z z d with the router down: ERROR, and no relaunch
+      over 4 min of auto-start passes. U on main throughout, ending SIGNOFF_MERGE/ready_to_merge
+      after a harness commit (the stub impl commits nothing, so its first MERGE was
+      correctly coerced to BLOCKED as in_base). Leak scan 0. Cosmetic: each failed
+      tick attempt leaves a dangling auto-sequence/<R>/review-<R>-iN.jsonl symlink,
+      and the iteration number keeps counting.'
+    created_at: '2026-10-27T04:13:10Z'
+    last_edited: '2026-10-27T04:13:10Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
