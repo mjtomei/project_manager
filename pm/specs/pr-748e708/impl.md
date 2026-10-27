@@ -644,3 +644,41 @@ Residual, unchanged and out of scope: in-process refcounts only
 beyond the backlog of 16; the daemon serves one request at a time, so a
 long push serialises other requests on the same workdir; a shared stop
 leaves its `.lock` beside the kept directory until session teardown.
+
+## Review iteration 12 refinements
+
+Twelfth review pass (consistent with R1/R4/R6; no requirement changed).
+
+- **A sweep that keeps a directory now keeps its discovery symlink.**
+  `_remove_proxy_dirs` unlinked a matching symlink before deciding what to
+  do with its target, so a sweep that left a directory in place (a start
+  in flight, or a live proxy) also destroyed the long-name link.  That
+  link is exactly how a *later* process — one with an empty in-process
+  registry — finds a hashed directory to sweep, so removing it while
+  keeping the directory reintroduced (through the sweep) the leak
+  iteration 5 fixed for a missing link.  The link is now unlinked only
+  when the target is removed, is not a proxy directory, or is not a
+  directory at all; a kept directory keeps its link.
+- **`PushProxy.stop()` tolerates a planted sidecar shape.** The socket
+  directory is bind-mounted *writable* into the container, so a container
+  can create a **directory** named `proxy.json`.  `stop()` unlinked it
+  with only `FileNotFoundError` handled, so the daemon's exit path raised
+  `IsADirectoryError` (and the in-process `live_proxies` teardown would
+  error).  It now ignores any `OSError`, matching `_kill_proxy_socket`;
+  the entry is left in place — a later start rewrites the sidecar
+  best-effort and the reuse path treats absent metadata as the
+  backward-compatible case.
+- **Test gap closed for R1's realpath normalisation.** The spec's edge
+  case "two workdirs whose realpaths differ only by trailing slash /
+  symlink → same token, same proxy" had no test.  Added
+  `test_same_workdir_via_a_symlink_shares_one_proxy`, which also pins
+  R4's realpath comparison for a request that names the symlinked
+  spelling.
+
+Tests: `test_sweep_keeps_the_discovery_symlink_of_a_kept_dir` and
+`test_stop_tolerates_a_planted_metadata_directory` both fail at f74c4e70
+for the right reason (the symlink is gone while the directory survives; a
+bare `IsADirectoryError` escapes `stop()`).
+`test_same_workdir_via_a_symlink_shares_one_proxy` passes at f74c4e70 (it
+pins behaviour that already worked).  `tests/test_push_proxy.py` +
+`tests/test_container.py`: 214 passed.

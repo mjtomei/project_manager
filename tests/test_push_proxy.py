@@ -491,6 +491,25 @@ class TestPushProxyLifecycle:
         proxy.stop()
         assert Path(sock_path).read_text() == "someone else's socket"
 
+    def test_stop_tolerates_a_planted_metadata_directory(self, sock_path):
+        """A container can plant a directory on the sidecar name.
+
+        The socket directory is bind-mounted *writable* into the container,
+        so ``proxy.json`` may be a directory the container created.  ``stop()``
+        must still remove its socket and return normally instead of raising
+        ``IsADirectoryError`` out of the daemon's exit path.
+        """
+        proxy = PushProxy(sock_path, "/w", "branch")
+        proxy.start()
+        meta = push_proxy_mod._metadata_path(sock_path)
+        os.unlink(meta)
+        os.makedirs(meta)
+
+        proxy.stop()
+
+        assert not os.path.exists(sock_path)
+        assert os.path.isdir(meta)  # not ours to delete
+
     def test_socket_is_current_tracks_removal_and_replacement(self, sock_path):
         """Both the serve loop and the daemon wait loop use this check."""
         proxy = PushProxy(sock_path, "/w", "branch")
@@ -1250,6 +1269,34 @@ class TestWorkdirKeyedProxies:
             "other-wd", session_tag=self.TAG, pr_id=self.PR,
             workdir=str(other)) is None
 
+    @patch("subprocess.run")
+    def test_same_workdir_via_a_symlink_shares_one_proxy(
+            self, mock_run, tmp_path, live_proxies):
+        """R1 hashes the *realpath*: spellings of one clone agree.
+
+        A symlinked path or a trailing slash must not mint a second proxy
+        for the same clone — that would be the original bug through another
+        door (two proxies for one workdir, one of them never used).
+        """
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        impl = self._workdir(tmp_path, "impl")
+        alias = tmp_path / "impl-alias"
+        alias.symlink_to(impl)
+
+        s_impl = self._start("impl-a", impl)
+        assert self._start("impl-b", alias) == s_impl
+        assert self._start("impl-c", str(impl) + "/") == s_impl
+
+        # A request naming the symlinked spelling is the same clone (R4
+        # compares realpaths, so it is served rather than rejected).
+        resp = _send_request(s_impl, {
+            "cmd": "fetch",
+            "args": ["origin"],
+            "workdir": str(alias),
+        })
+        assert resp["exit_code"] == 0, resp.get("stderr")
+        assert mock_run.call_args[1]["cwd"] == str(alias)
+
     def test_stale_socket_file_is_replaced(self, tmp_path, live_proxies):
         """A leftover non-listening socket file is replaced, not trusted."""
         impl = self._workdir(tmp_path, "impl")
@@ -1685,6 +1732,48 @@ class TestWorkdirKeyedProxies:
 
         assert push_proxy_mod.proxy_is_alive(sock)
         assert os.path.isdir(sock_dir)
+
+    def test_sweep_keeps_the_discovery_symlink_of_a_kept_dir(self, tmp_path):
+        """A sweep that leaves a directory must leave its discovery link too.
+
+        The long-name symlink is how a *later* process (empty in-process
+        registry) finds a hashed directory to sweep.  Unlinking it while
+        keeping the directory — a start in flight, or a live proxy — would
+        leak that proxy past teardown after a restart.
+        """
+        tag = "t" * 80  # forces the hashed directory + discovery symlink
+        impl = self._workdir(tmp_path, "impl")
+        token = push_proxy_mod._workdir_token(str(impl))
+        short_dir = push_proxy_mod._shared_sock_dir_path(
+            tag, self.PR, token)
+        long_dir = f"/tmp/{push_proxy_mod._SOCKET_DIR_PREFIX}{tag}-{self.PR}-{token}"
+        os.makedirs(short_dir, exist_ok=True)
+        os.symlink(short_dir, long_dir)
+        try:
+            # A container start holds this directory's lock right now.
+            with push_proxy_mod._start_lock(short_dir,
+                                            blocking=False) as held:
+                assert held is True
+                push_proxy_mod._remove_proxy_dirs(
+                    f"/tmp/{push_proxy_mod._SOCKET_DIR_PREFIX}{tag}-*")
+
+            assert os.path.isdir(short_dir), "busy dir must be left in place"
+            assert os.path.islink(long_dir), (
+                "discovery symlink removed while its directory was kept")
+
+            # With no start in flight the sweep removes both.
+            push_proxy_mod._remove_proxy_dirs(
+                f"/tmp/{push_proxy_mod._SOCKET_DIR_PREFIX}{tag}-*")
+            assert not os.path.exists(short_dir)
+            assert not os.path.lexists(long_dir)
+        finally:
+            shutil.rmtree(short_dir, ignore_errors=True)
+            try:
+                os.unlink(short_dir + ".lock")
+            except OSError:
+                pass
+            if os.path.lexists(long_dir):
+                os.unlink(long_dir)
 
     def test_sweep_skips_a_dir_whose_start_lock_is_held(self, tmp_path):
         """A start in flight keeps its dir and lock file through teardown."""

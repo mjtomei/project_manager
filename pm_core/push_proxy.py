@@ -356,7 +356,13 @@ class PushProxy:
         _unlink_socket_file(self.socket_path)
         try:
             os.unlink(_metadata_path(self.socket_path))
-        except FileNotFoundError:
+        except OSError:
+            # The socket directory is bind-mounted *writable* into the
+            # container, so the sidecar name may be a directory (or an
+            # unwritable entry) a container planted.  Leaving it behind is
+            # harmless — a later start rewrites the sidecar best-effort —
+            # and must not raise out of stop() the way a bare
+            # ``os.unlink`` would (``_kill_proxy_socket`` ignores it too).
             pass
         _log.info("Push proxy stopped: %s", self.socket_path)
 
@@ -1426,7 +1432,10 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
 
     A directory whose proxy is alive, or whose start lock is held by a
     proxy start in flight, is left in place: removing it would delete a
-    socket a container still bind-mounts.
+    socket a container still bind-mounts.  Its long-name discovery symlink
+    is kept too: that link is how a *later* process finds a hashed
+    directory to sweep, so unlinking it while keeping the directory would
+    leak the proxy past teardown after a restart.
     """
     import glob as _glob
     # Resolve the parent too: on platforms where /tmp is a symlink (macOS:
@@ -1434,18 +1443,24 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
     # resolved entry path, so every directory would be refused and teardown
     # would leak them.  _kill_proxy_socket resolves both sides already.
     parent = os.path.realpath(os.path.dirname(glob_pattern))
+
+    def _unlink_link(link: str) -> None:
+        """Remove *link* itself when it is a symlink; never its target."""
+        if not os.path.islink(link):
+            return
+        try:
+            os.unlink(link)
+        except OSError:
+            pass
+
     for path in _glob.glob(glob_pattern):
         if path.endswith(".lock"):
             continue
         real = os.path.realpath(path)
-        if os.path.islink(path):
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
         if not _is_proxy_dir(real, parent):
             _log.warning("Refusing to remove non-proxy directory %s -> %s",
                          path, real)
+            _unlink_link(path)
             continue
         try:
             if os.stat(real).st_uid != os.getuid():
@@ -1457,6 +1472,7 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
         except OSError:
             continue
         if not os.path.isdir(real):
+            _unlink_link(path)
             _clear_lock_file(real + ".lock")
             continue
         with _start_lock(real, blocking=False) as locked:
@@ -1467,6 +1483,7 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
             if proxy_is_alive(os.path.join(real, "push.sock")):
                 _log.info("Leaving live proxy directory in place: %s", real)
                 continue
+            _unlink_link(path)
             shutil.rmtree(real, ignore_errors=True)
             # Safe: we hold the lock, so no other process is using it.
             try:
