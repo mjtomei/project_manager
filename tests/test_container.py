@@ -1485,6 +1485,15 @@ class TestStopIdleInBackground:
         assert t is not None
         stop.assert_called_once_with("pm-qa-s1", pane_ids=["%1"], resumed=None)
 
+    def test_session_mismatch_keeps_container(self):
+        t, stop = self._run(session_matches=lambda: False)
+        assert t is not None
+        stop.assert_not_called()
+
+    def test_session_match_stops(self):
+        t, stop = self._run(session_matches=lambda: True)
+        stop.assert_called_once_with("pm-qa-s1", pane_ids=["%1"], resumed=None)
+
     def test_resumed_check_uses_transcript(self):
         t, stop = self._run(transcript_path="/t.jsonl", idle_since=100.0)
         resumed = stop.call_args.kwargs["resumed"]

@@ -1085,6 +1085,16 @@ _PANE_CD_RE = re.compile(r'^"?cd ((?:\'[^\']*\'|[^\s\'])+) && ')
 _PANE_CONTAINER_RE = re.compile(r"\b(?:podman|docker) exec\b")
 
 
+def pane_session_id(pane_id: str) -> str | None:
+    """The Claude session id a pane was started with, or None.
+
+    Read from the pane's start command (``--session-id``/``--resume``).
+    """
+    from pm_core import tmux as tmux_mod
+    m = _PANE_SESSION_RE.search(tmux_mod.pane_start_command(pane_id))
+    return m.group(1) if m else None
+
+
 def pane_transcript_path(pane_id: str, workdir: str | None) -> Path | None:
     """Claude's native transcript for the session a pane was launched with.
 

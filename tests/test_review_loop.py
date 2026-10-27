@@ -1,6 +1,6 @@
 """Tests for pm_core.review_loop and pm_core.prompt_gen review loop prompt."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import ANY, patch, MagicMock
 
 import pytest
 
@@ -656,7 +656,46 @@ class TestTuiStopOnIdle:
             review_loop_ui._try_stop_idle_container(app, "pr-001", "impl", "pr-001")
         stop.assert_called_once_with(
             "pm-repo-abc-impl-pr-001", "impl", pane_ids=["%5"],
-            transcript_path=None, idle_since=1000.0)
+            transcript_path=None, idle_since=1000.0, session_matches=ANY)
+
+    def test_session_check_compares_pane_and_transcript_session(self):
+        """A pane re-registered against an older session's transcript
+        (e.g. a standalone review symlink after a review-loop or
+        auto-sequence iteration reused the window) must not be stopped."""
+        from types import SimpleNamespace
+        from pm_core.tui import review_loop_ui
+        sid_old = "11111111-1111-1111-1111-111111111111"
+        sid_new = "22222222-2222-2222-2222-222222222222"
+        app = SimpleNamespace(_session_name="pm-repo-abc",
+                              _pane_idle_tracker=self._tracker())
+        with patch("pm_core.container.stop_idle_in_background") as stop:
+            review_loop_ui._try_stop_idle_container(
+                app, "pr-001", "review", "review:pr-001")
+        session_matches = stop.call_args.kwargs["session_matches"]
+        with patch("pm_core.claude_launcher.session_id_from_transcript",
+                   return_value=sid_old) as from_transcript, \
+             patch("pm_core.tmux.pane_start_command",
+                   return_value=f"podman exec -it pm-x claude --session-id {sid_new}"
+                   ) as start_cmd:
+            assert session_matches() is False
+        from_transcript.assert_called_once_with("/t/review:pr-001.jsonl")
+        start_cmd.assert_called_once_with("%5")
+        with patch("pm_core.claude_launcher.session_id_from_transcript",
+                   return_value=sid_new), \
+             patch("pm_core.tmux.pane_start_command",
+                   return_value=f"claude --resume {sid_new}"):
+            assert session_matches() is True
+
+    def test_session_check_fails_closed_without_pane_or_transcript(self):
+        from pm_core.tui import review_loop_ui
+        with patch("pm_core.tmux.pane_start_command") as start_cmd:
+            assert review_loop_ui._pane_runs_session(None, "/t/x.jsonl") is False
+            assert review_loop_ui._pane_runs_session("%5", None) is False
+        start_cmd.assert_not_called()
+        with patch("pm_core.claude_launcher.session_id_from_transcript",
+                   return_value="22222222-2222-2222-2222-222222222222"), \
+             patch("pm_core.tmux.pane_start_command", return_value="bash"):
+            assert review_loop_ui._pane_runs_session("%5", "/t/x.jsonl") is False
 
     def _poll_review(self, verdict, idle=True):
         from types import SimpleNamespace

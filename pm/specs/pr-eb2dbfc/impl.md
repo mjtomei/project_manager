@@ -93,6 +93,11 @@ container when:
   "retained human session"), or ownership cannot be determined;
 - the session transcript changed after the idle/verdict point (someone
   resumed it);
+- (impl / standalone review, TUI) the pane was not started with the
+  session whose idle event and verdict fired: the TUI registers a window's
+  pane against its own transcript symlink, which can name an earlier
+  session after a review loop or auto-sequence iteration reused the window
+  (review 1811 i5);
 - the verdict is INPUT_REQUIRED or verification is in flight (unchanged).
 The ownership and resumed checks run again right before removal, after
 the stats capture (which takes seconds), so a person who attaches or

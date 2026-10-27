@@ -375,7 +375,6 @@ def container_is_running(name: str) -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
-
 def _ensure_push_proxy(name: str, workdir: str,
                        allowed_push_branch: str | None,
                        session_tag: str | None = None,
@@ -1244,6 +1243,7 @@ def stop_idle_in_background(name: str, container_type: str,
                             pane_ids: list[str] | None = None, *,
                             transcript_path: str | None = None,
                             idle_since: float | None = None,
+                            session_matches: Callable[[], bool] | None = None,
                             ) -> threading.Thread | None:
     """Stop-on-idle entry point: policy-gated and non-blocking.
 
@@ -1252,7 +1252,9 @@ def stop_idle_in_background(name: str, container_type: str,
     :func:`stop_container`) on a daemon thread, so the caller's poll loop
     or UI thread never waits on the runtime.  When *transcript_path* and
     *idle_since* are given, the container is kept if the session was
-    resumed after it went idle.
+    resumed after it went idle.  When *session_matches* returns False
+    (checked on the thread), the idle signal came from a different
+    session than the one in the pane, and the container is kept.
     """
     if not is_container_mode_enabled():
         return None
@@ -1265,6 +1267,10 @@ def stop_idle_in_background(name: str, container_type: str,
 
     def _run() -> None:
         try:
+            if session_matches is not None and not session_matches():
+                _log.info("Stop-on-idle: keeping %s — its pane runs another "
+                          "session than the one that went idle", name)
+                return
             stop_container(name, pane_ids=pane_ids, resumed=resumed)
         except Exception:
             _log.warning("Stop-on-idle failed for %s", name, exc_info=True)
