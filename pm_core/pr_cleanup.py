@@ -80,8 +80,8 @@ def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
             _log.warning("unregister_windows failed: %s", e)
 
     # Drop the per-PR runtime state file so the next QA/review-loop run
-    # starts from a clean slate. The file at ~/.pm/runtime/{pr_id}.json
-    # holds every action entry (qa, review-loop, review, start, merge);
+    # starts from a clean slate. The file at
+    # ~/.pm/runtime/{pm-session}/{pr_id}.json holds every action entry (qa, review-loop, review, start, merge);
     # leaving it behind makes the picker think those loops are still
     # running after we've torn their panes/containers down.
     try:

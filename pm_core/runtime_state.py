@@ -7,8 +7,13 @@ is the source of truth; this module mirrors transitions to per-PR JSON
 files so external readers (popup picker, status spinner after a queued
 ``tui:`` command, etc.) can observe them.
 
-Storage layout: ``~/.pm/runtime/{pr_id}.json`` — one file per PR keeps
-writes localized and avoids whole-file lock contention.
+Storage layout: ``~/.pm/runtime/{pm-session}/{pr_id}.json`` — one file per
+PR keeps writes localized and avoids whole-file lock contention.  The
+directory is per pm session: two clones of one project share ``~/.pm`` and
+their PR ids, but each clone's actions are its own (S93: clone B's QA run of
+a PR overwrote clone A's INPUT_REQUIRED record, so A's auto-start relaunched
+QA, then handed the PR to sign-off on B's PASS, and A's picker showed B's
+run).  A process outside any pm session uses ``~/.pm/runtime/{pr_id}.json``.
 
 Schema (v1)::
 
@@ -69,8 +74,33 @@ VALID_STATES = {
 }
 
 
+_UNSET = object()
+_session_scope: object = _UNSET
+
+
+def _scope() -> str | None:
+    """This process's pm session (``pm-<tag>``), resolved once, or None.
+
+    Inside tmux that is the session of this pane (or of the popup's
+    client); outside it, the session of the clone in the cwd.
+    """
+    global _session_scope
+    if _session_scope is _UNSET:
+        sess = None
+        try:
+            from pm_core.cli.helpers import _get_pm_session
+            sess = _get_pm_session()
+        except Exception:
+            _log.debug("runtime_state: session lookup failed", exc_info=True)
+        _session_scope = sess or None
+    return _session_scope  # type: ignore[return-value]
+
+
 def _runtime_dir() -> Path:
     d = pm_home() / "runtime"
+    sess = _scope()
+    if sess:
+        d = d / sess
     d.mkdir(parents=True, exist_ok=True)
     return d
 
