@@ -470,11 +470,12 @@ def add_targets(app, ids: list[str], policy: str | None = None,
     *policy*: ``auto_merge`` / ``wait_for_merge`` to set explicitly, or None
     to keep an existing target's policy; a *new* target then gets
     *default_policy* (None = plain auto-merge record, i.e. the ``A``-key
-    semantics).  Setting a policy replaces that target's own previous one
-    (its wait flag); other targets are never touched.  The policy is in
-    place before the scheduler pass this queues, so a wait target's
-    dependencies are held before any starts.  Never touches other targets
-    and never enables all-mode.
+    semantics).  The removed ``stop_before_merge`` value is accepted as an
+    alias for ``wait_for_merge``.  Setting a policy replaces that target's
+    own previous one (its wait flag); other targets are never touched.  The
+    policy is in place before the scheduler pass this queues, so a wait
+    target's dependencies are held before any starts.  Never touches other
+    targets and never enables all-mode.
 
     *confirm* replaces the "targets +=" log-line confirmation (e.g. the
     ``O`` key's "Auto-sequence armed …"); it gets the same hold.

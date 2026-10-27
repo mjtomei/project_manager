@@ -169,7 +169,10 @@ def test_breadcrumb_legacy_single_target_is_wait():
     ({"pr_id": "f", "policy": "stop_before_merge"}, True),
     ({"pr_id": "f", "policy": "wait_for_merge"}, True),
     ({"pr_id": "f", "policy": "auto_merge"}, False),
+    ({"pr_id": "f", "policy": "auto-merge"}, False),
     ({"pr_id": "f", "policy": "something_new"}, True),   # fail closed
+    ({"pr_id": "f", "policy": ""}, True),                # fail closed
+    ({"pr_id": "f", "policy": None}, True),              # fail closed
     ({"pr_id": "f", "merge_policy": "stop_before_merge"}, True),
     ({"pr_id": "f", "wait_for_merge": False}, False),
     ({"pr_id": "f", "stop_before_merge": True}, True),
@@ -179,6 +182,40 @@ def test_breadcrumb_record_fields_normalized(record, wait):
     targets, _all, _mig = st.targets_from_breadcrumb(
         {"auto_start": True, "targets": [record]})
     assert bool(targets["f"].get(st.WAIT_KEY)) is wait
+
+
+def test_breadcrumb_record_migration_is_reported():
+    """A legacy record field marks the breadcrumb migrated; a plain
+    current-format record (auto target) does not."""
+    _t, _a, migrated = st.targets_from_breadcrumb(
+        {"auto_start": True,
+         "targets": [{"pr_id": "f", "policy": "stop_before_merge"}]})
+    assert migrated
+    _t, _a, migrated = st.targets_from_breadcrumb(
+        {"auto_start": True,
+         "targets": [{"pr_id": "f", "added_at": "t", "source": "key:A"}]})
+    assert not migrated
+    _t, _a, migrated = st.targets_from_breadcrumb(
+        {"auto_start": True,
+         "targets": [{"pr_id": "f", "wait_for_merge": True}]})
+    assert not migrated
+
+
+def test_breadcrumb_stop_marks_dropped_when_auto_start_was_off():
+    """A leftover mark cannot re-enable auto-start (and launch work) on its
+    own; with auto-start off there is no scheduler/merge path to gate."""
+    targets, all_mode, migrated = st.targets_from_breadcrumb(
+        {"targets": [], "stop_before_merge": ["x"]})
+    assert targets == {} and all_mode is False and migrated
+
+
+def test_breadcrumb_string_target_is_a_legacy_shape():
+    """No pm version wrote bare-string targets; keep the record it implies
+    (plain auto-merge) and report the migration."""
+    targets, _all, migrated = st.targets_from_breadcrumb(
+        {"auto_start": True, "targets": ["f"]})
+    assert list(targets) == ["f"] and migrated
+    assert not targets["f"].get(st.WAIT_KEY)
 
 
 def test_breadcrumb_parse_is_idempotent():

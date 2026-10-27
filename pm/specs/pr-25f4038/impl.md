@@ -43,7 +43,7 @@ remove the parallel explicit-mark path.
 - `autostart_state.POLICIES = (POLICY_AUTO, POLICY_WAIT)`.
 - `POLICY_FLAGS = {POLICY_AUTO: "--auto-merge", POLICY_WAIT: "--wait-for-merge"}`.
 - A target record's policy is now solely `WAIT_KEY` presence:
-  `target_policy(pr_id, record)` → `POLICY_WAIT` iff `record[WAIT_KEY]` truthy,
+  `target_policy(record)` → `POLICY_WAIT` iff `record[WAIT_KEY]` truthy,
   else `POLICY_AUTO`.
 - `merge_holds(prs, targets)` → only wait targets hold their unmerged,
   non-terminal closure. Remove the `stop` parameter and the
@@ -179,6 +179,10 @@ duplicate session and never consumes a stale sign-off.
    Resolved: drop them; there is nothing left to hold or merge. Missing ids
    stay as targets (fail closed) and are pruned by the existing scheduler
    rule when the PR is genuinely gone.
+6. **Legacy stop marks in a breadcrumb whose auto-start was off?**
+   Resolved: drop them (still report `migrated`). Restoring them as targets
+   would re-enable auto-start on restart and could launch work; with
+   auto-start off there is no scheduler/merge path for a hold to gate.
 
 No **[UNRESOLVED]** items.
 

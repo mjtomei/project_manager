@@ -36153,7 +36153,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/261
   gh_pr_number: 261
   created_at: '2026-10-27T04:42:06.128850+00:00'
-  updated_at: '2026-10-27T05:26:44.963258+00:00'
+  updated_at: '2026-10-27T05:49:51.017824+00:00'
   started_at: '2026-10-27T04:42:19.589247+00:00'
   reviewed_at: null
   merged_at: null
@@ -36180,6 +36180,18 @@ prs:
       — launch review from the host.'
     created_at: '2026-10-27T05:26:44Z'
     last_edited: '2026-10-27T05:26:44Z'
+  - id: note-da8d632
+    text: 'review-loop 82bf i1: legacy record migration now fails closed for any non-auto
+      `policy`/`merge_policy` value (incl. empty/None) and record-field migrations
+      are reported in the restart log ("migrated legacy breadcrumb"); bare-string
+      target entries flagged as legacy; added regressions (empty/None/auto-merge policy
+      values, migrated flag, bare strings, stop marks dropped when auto-start was
+      off); synced pm/specs/pr-25f4038/impl.md (target_policy signature, auto-start-off
+      stop marks) and clarified CLI/O policy wording. Full suite: 3762 passed; the
+      only failures (missing markdown module, test_git_ops/test_hook_events, test_signoff_integration/test_merge_publish)
+      are identical on base 450a6362.'
+    created_at: '2026-10-27T05:49:50Z'
+    last_edited: '2026-10-27T05:49:50Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

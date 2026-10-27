@@ -198,8 +198,8 @@ def _legacy_ids(value) -> list[str]:
     return []
 
 
-def _normalize_record(entry: dict) -> dict:
-    """Normalise one breadcrumb target record to the current schema.
+def _normalize_record(entry: dict) -> tuple[dict, bool]:
+    """Normalise one breadcrumb target record; ``(record, legacy_seen)``.
 
     The only policy state is ``WAIT_KEY``.  Legacy record fields are folded
     in and any ambiguity fails closed to the manual policy so a stale record
@@ -207,33 +207,39 @@ def _normalize_record(entry: dict) -> dict:
 
     - ``wait_for_merge`` truthy → wait; explicitly falsy → auto;
     - ``policy`` / ``merge_policy`` == auto → auto, anything else
-      (wait, stop, unknown) → wait;
+      (wait, stop, unknown, empty) → wait;
     - record-level ``stop_before_merge`` truthy → wait.
+
+    *legacy_seen* is True when a removed/legacy field was interpreted, so
+    the restart log can say the breadcrumb was migrated.
     """
     rec = {k: v for k, v in entry.items() if k != "pr_id"}
     manual = False
-    auto = False
+    legacy_seen = False
     for key in ("policy", "merge_policy"):
         if key in rec:
+            legacy_seen = True
             val = rec.pop(key)
-            if isinstance(val, str) and val.strip().lower() in _LEGACY_AUTO_VALUES:
-                auto = True
-            elif val:
-                manual = True          # wait / stop / unknown → fail closed
-    if rec.pop("stop_before_merge", False):
-        manual = True
+            # Only a recognised auto value opts out of the manual policy.
+            if not (isinstance(val, str)
+                    and val.strip().lower() in _LEGACY_AUTO_VALUES):
+                manual = True
+    if "stop_before_merge" in rec:
+        legacy_seen = True
+        if rec.pop("stop_before_merge"):
+            manual = True
     if WAIT_KEY in rec:
         if rec.pop(WAIT_KEY):
             manual = True
         else:
-            auto = True
+            legacy_seen = True
     if manual:
         rec[WAIT_KEY] = True
     else:
         # Plain records are current-format auto-merge targets (the ``A``
         # key's semantics); an explicit auto field also lands here.
         rec.pop(WAIT_KEY, None)
-    return rec
+    return rec, legacy_seen
 
 
 def migrate_legacy_stop(prs: list[dict], targets: dict,
@@ -283,9 +289,14 @@ def targets_from_breadcrumb(data: dict, prs: list[dict] | None = None
     if isinstance(raw, list):
         for entry in raw:
             if isinstance(entry, str):
+                # No pm version wrote bare-string targets; treat one as a
+                # legacy shape.  It carries no policy field, so it gets the
+                # same plain (auto-merge) record a bare dict would.
+                migrated = True
                 targets.setdefault(entry, make_target_record("breadcrumb"))
             elif isinstance(entry, dict) and entry.get("pr_id"):
-                rec = _normalize_record(entry)
+                rec, legacy_seen = _normalize_record(entry)
+                migrated = migrated or legacy_seen
                 rec.setdefault("added_at", now_iso())
                 rec.setdefault("source", "breadcrumb")
                 targets.setdefault(entry["pr_id"], rec)
@@ -314,11 +325,11 @@ def targets_from_breadcrumb(data: dict, prs: list[dict] | None = None
     # Removed per-PR stop marks.  Only meaningful when auto-start was active:
     # with it off there is no scheduler/merge path, and turning these into
     # targets would enable one (and could launch work).
-    stop = data.get("stop_before_merge")
-    if _legacy_ids(stop):
+    stop_ids = _legacy_ids(data.get("stop_before_merge"))
+    if stop_ids:
         migrated = True
         if targets or all_mode:
-            targets = migrate_legacy_stop(prs, targets, stop)
+            targets = migrate_legacy_stop(prs, targets, stop_ids)
     return targets, all_mode, migrated
 
 

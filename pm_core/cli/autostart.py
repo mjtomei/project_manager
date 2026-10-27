@@ -211,7 +211,8 @@ def autostart():
 
     Auto-start drives an explicit set of target PRs: it schedules the
     union of their dependency closures (shared dependencies once), runs
-    impl → review → QA for each, and stops at each target's merge policy.
+    impl → review → QA for each, then applies the target's merge policy
+    (wait for a manual merge, or auto-merge).
     Adding is additive and idempotent; removing a target never kills a
     running window or a dependency another target still needs.  An empty
     target set means auto-start is OFF (never "all pending PRs"; that is
