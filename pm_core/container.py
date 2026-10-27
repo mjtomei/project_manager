@@ -1272,7 +1272,16 @@ def stop_container(name: str, pane_ids: list[str] | None = None,
 
     # Stats were captured above; this also removes the push proxy.
     remove_container(name, capture=False, container_id=container_id)
-    _log.info("Stop-on-idle: removed container %s", name)
+    # On podman the rm takes the stop timeout (~10 s), so an immediate
+    # restart may hold the name by now: say which container went.
+    newer = _running_container_id(name)
+    if newer and newer != container_id:
+        _log.info("Stop-on-idle: removed container %s (%s) — the name now "
+                  "belongs to a newer container (%s), which is kept",
+                  name, container_id[:12], newer[:12])
+    else:
+        _log.info("Stop-on-idle: removed container %s (%s)",
+                  name, container_id[:12])
     return True
 
 

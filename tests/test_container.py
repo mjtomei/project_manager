@@ -1471,6 +1471,22 @@ class TestStopContainer:
         mock_remove.assert_not_called()
 
     @patch("pm_core.container.remove_container")
+    def test_log_names_removed_id_when_name_retaken(self, mock_remove,
+                                                    running):
+        """The podman rm takes ~10 s: a restart that recreated the name
+        meanwhile must not read as the new container being removed."""
+        with patch("pm_core.container._running_container_id",
+                   side_effect=["cid1", "cid1", "cid1", "cid2"]), \
+             patch("pm_core.container._log") as log:
+            assert stop_container("pm-review-pr-1", ["%10"]) is True
+        mock_remove.assert_called_once_with("pm-review-pr-1", capture=False,
+                                            container_id="cid1")
+        msg, *args = log.info.call_args.args
+        assert (msg % tuple(args)) == (
+            "Stop-on-idle: removed container pm-review-pr-1 (cid1) — the "
+            "name now belongs to a newer container (cid2), which is kept")
+
+    @patch("pm_core.container.remove_container")
     def test_keeps_container_replaced_before_capture(self, mock_remove, running):
         with patch("pm_core.container._running_container_id",
                    side_effect=["cid1", "cid2"]):
