@@ -1406,7 +1406,7 @@ def recent_launch(name: str, grace: float, container_id: str | None = None) -> b
     if container_id is None:
         if not (container_state_dir() / "identity-generations").exists():
             return False
-        container_id = current_container_id(name)
+        container_id = _await_container_id(name)
         if container_id is None:
             raise OSError("Cannot determine allocation identity for attachment lease")
     if container_id:
@@ -1573,6 +1573,22 @@ _IDENTITY_PROBE_BUDGET = 45.0  # seconds; concurrent runs can hold the lock ~40s
 _IDENTITY_PROBE_INTERVAL = 1.0
 
 
+def _await_container_id(name: str) -> str | None:
+    """:func:`current_container_id`, re-asked while the runtime is unanswered.
+
+    A busy runtime can leave an inspect unanswered while other scenarios'
+    ``run`` calls hold its storage lock.  Keep asking for a bounded time: an
+    unknown answer is not proof the name is free, and guessing either way is
+    unsafe.  Still None after the budget means genuinely unknown.
+    """
+    deadline = time.monotonic() + _IDENTITY_PROBE_BUDGET
+    container_id = current_container_id(name)
+    while container_id is None and time.monotonic() < deadline:
+        time.sleep(_IDENTITY_PROBE_INTERVAL)
+        container_id = current_container_id(name)
+    return container_id
+
+
 def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
                      *, session_tag: str | None, pr_id: str | None) -> str | None:
     """Return the id of a running, fully set-up container named *name*.
@@ -1588,15 +1604,7 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
     # Capture before checking state: a stopped container can be replaced by an
     # external runtime client without acquiring PM's name lock. Every subsequent
     # probe/removal must address this allocation, never the reusable name.
-    # A busy runtime can leave the first inspect unanswered while other
-    # scenarios' ``run`` calls hold its storage lock.  Keep asking for a
-    # bounded time: an unknown answer is not proof the name is free, and
-    # guessing either way is unsafe.
-    deadline = time.monotonic() + _IDENTITY_PROBE_BUDGET
-    container_id = current_container_id(name)
-    while container_id is None and time.monotonic() < deadline:
-        time.sleep(_IDENTITY_PROBE_INTERVAL)
-        container_id = current_container_id(name)
+    container_id = _await_container_id(name)
     if container_id is None:
         # Preserve a runtime's diagnostic on this error path; a later successful
         # state probe cannot restore the missing immutable identity.

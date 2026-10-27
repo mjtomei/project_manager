@@ -112,3 +112,30 @@ def test_reuse_preflight_still_fails_closed_when_never_answered(monkeypatch):
         cm._ensure_reusable("pm-x", Path("/w"), None, session_tag=None, pr_id=None)
     assert ei.value.kind == "runtime"
     assert "identity unavailable" in str(ei.value)
+
+
+def _identity_generations_recorded():
+    # Any earlier launch leaves this directory; from then on a fresh launch's
+    # attachment-lease check inspects the name before creating anything.
+    (cm.container_state_dir() / "identity-generations").mkdir(parents=True, exist_ok=True)
+
+
+def test_attachment_lease_check_retries_an_unanswered_inspect(monkeypatch):
+    """QA S43: eight concurrent fresh QA launches all aborted with "could not
+    check whether the container is still owned" when that pre-create inspect
+    went unanswered for 10 s; the reuse preflight's bounded retry applies."""
+    monkeypatch.setattr(cm, "_IDENTITY_PROBE_BUDGET", 5.0)
+    monkeypatch.setattr(cm, "_IDENTITY_PROBE_INTERVAL", 0)
+    _identity_generations_recorded()
+    answers = iter([None, None, ""])  # unknown, unknown, then explicitly absent
+    monkeypatch.setattr(cm, "current_container_id", lambda _: next(answers, ""))
+    assert cm.recent_launch("pm-fresh", 120) is False
+
+
+def test_attachment_lease_check_still_fails_closed_when_never_answered(monkeypatch):
+    monkeypatch.setattr(cm, "_IDENTITY_PROBE_BUDGET", 0.05)
+    monkeypatch.setattr(cm, "_IDENTITY_PROBE_INTERVAL", 0)
+    _identity_generations_recorded()
+    monkeypatch.setattr(cm, "current_container_id", lambda _: None)
+    with pytest.raises(OSError, match="Cannot determine allocation identity"):
+        cm.recent_launch("pm-fresh", 120)
