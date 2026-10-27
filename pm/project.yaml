@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T07:14:36.812234+00:00'
+  updated_at: '2026-10-27T16:59:26.825006+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38215,6 +38215,26 @@ prs:
       (qa-run-bg outlives pm session kill and recreates containers).'
     created_at: '2026-10-27T07:14:36Z'
     last_edited: '2026-10-27T07:14:36Z'
+  - id: note-a6bf640
+    text: 'QA S94 (2026-10-27, host, real claude 2.1.311 routed refiner/worker via
+      a recording launcher, router/main stubs; captures /pm-captures/scenarios/94,
+      REPORT.md): CODE CHANGE 8416c20f needs normal re-review. Held: story 1 (router
+      down: one wait line, one driver, no main traffic for R, PASS + [done PASS];
+      U main only), 2b, 2c, 2d, story 4 steps 1-2. Fixed: (1) an id-less project.yaml
+      entry killed the TUI at a QA completion (store.get_pr KeyError in the QA note
+      + start_signoff, then autostart_state.transitive_deps via signoff advance_all):
+      get_pr/get_plan skip id-less entries, auto-start pass + autostart_state use
+      usable_prs; (2) a run ended by a provider setup error left ticks printing running:
+      qa forever (and the TUI adopted and re-failed it): record_setup_stop marks qa_status.json
+      stopped + drops the snapshot, tick relaunches (running: qa (relaunched)) or
+      prints the Error: line; (3) TUI resume scan was per PR, so a TUI that adopted
+      one run never adopted a later dead-driver run: now per QA workdir; (4) wait
+      lines name the PR. Open: 2a pm model set never releases an in-flight route wait
+      (filed pr-97fe1e3); picker shows the previous [done X] while a TUI run plans
+      (pr-f0dc81c). By design: pm tui restart drops auto-start targets. Suite 4373
+      passed.'
+    created_at: '2026-10-27T16:59:26Z'
+    last_edited: '2026-10-27T16:59:26Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
