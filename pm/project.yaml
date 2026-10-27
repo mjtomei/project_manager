@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T08:01:10.224127+00:00'
+  updated_at: '2026-10-27T08:30:17.786308+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36316,6 +36316,25 @@ prs:
       count while a re-armed loop runs. (2026-10-27)'
     created_at: '2026-10-27T08:01:10Z'
     last_edited: '2026-10-27T08:01:10Z'
+  - id: note-1bc031d
+    text: 'Review 385e i7 (fixes applied): (1) the retry adopt path polled an already-running
+      session with the 20 s startup grace; poll_for_verdict drops an idle event that
+      lands inside the grace and waits for a second one, which an idle session never
+      emits, so a review finishing shortly after adoption hung until its pane died.
+      Adopted panes now poll with no grace (matches _adopt_in_flight_review and the
+      _landed_verdict pre-check). (2) The LAUNCH_FAILED notice promised "Will retry
+      automatically" for manual loops / PRs outside the auto-start set / auto-start
+      disabled / the episode cap, none of which re-arm; _retry_rearm_applies() now
+      backs both _schedule_retry_rearm and the message. (3) Removed dead ReviewLoopState.last_pane_id
+      (written + persisted, never read; discovery uses session ids). Full suite 3792
+      passed; remaining failures are the base tree pre-existing markdown/hook-installer/merge/signoff/git
+      env failures. Residual (non-blocking): review_loop.py ~1390 lines; two lease
+      mechanisms coexist; the launch artifact prompt copy can name the stale session
+      prompt when a failed attempt died before rewriting the transcript symlink (artifact
+      records that session id); the runs popup can show the previous episode attempt
+      count while a re-armed loop runs. (2026-10-27)'
+    created_at: '2026-10-27T08:30:17Z'
+    last_edited: '2026-10-27T08:30:17Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
