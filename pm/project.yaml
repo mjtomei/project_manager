@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T19:52:23.369050+00:00'
+  updated_at: '2026-10-27T19:56:29.077726+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14172,6 +14172,25 @@ prs:
       pm _tui` (tmux 3.2a respawn-pane -e PATH is overridden). Evidence /pm-captures/scenarios/43.'
     created_at: '2026-10-27T19:52:23Z'
     last_edited: '2026-10-27T19:52:23Z'
+  - id: note-abf1f22
+    text: 'QA S42 (2026-10-27, tested a44a70dc, then 9abd3c07 for stories 3b-5): all
+      five stories ran live on real nested rootless Podman 3.4.4 with real tmux TUIs.
+      FIXED 9abd3c07: save_breadcrumb logged "nothing to persist, skipping" at DEBUG,
+      so a pm tui restart --breadcrumb with nothing to persist left no save_breadcrumb
+      trace in the INFO debug log (failed Then). Regression test fails pre-fix; full
+      suite 4228 passed. Held: cold start with a 15 s rm shim (nav max 62 ms during
+      in-flight removals, startup removed 4 in 29 s); genuine periodic tick 601 s
+      after mount removed the late orphan with no new QA run; actual TUI merge removed
+      B impl+signoff+proxy in 17 s; LC_ALL=C and unset-locale fixtures (C-locale client
+      attached) gave owned-by-live-pane, startup removed 4, and QA end-of-run release
+      removed 1 with no deferral. Harness traps: tmux 3.2a respawn-pane -e PATH is
+      ignored (use env PATH=... in the command); asciinema refuses a C locale (run
+      it under C.UTF-8 and only the tmux attach under C); the fake sign-off writes
+      no report.html, so g needs pm pr signoff record of a written report; there is
+      no pm pr show; the spec label pm.project_root must be $TEST_DIR/pm, not $TEST_DIR.
+      Evidence /pm-captures/scenarios/42.'
+    created_at: '2026-10-27T19:56:29Z'
+    last_edited: '2026-10-27T19:56:29Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
