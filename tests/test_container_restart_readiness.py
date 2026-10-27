@@ -54,6 +54,50 @@ def test_restart_waits_for_current_boot_and_pins_id(tmp_path, monkeypatch, fresh
     assert all(args[1] == cid for args in calls if args[0] == "exec")
 
 
+@pytest.mark.parametrize("stage", ["restart", "start time"])
+def test_restart_probe_timeout_is_a_retryable_launch_error(monkeypatch, stage):
+    """An unanswered restart/start-time probe must not surface as a raw timeout."""
+    name, cid = "pm-t-review-pr-aaaa", "original-id"
+    monkeypatch.setattr(cm, "current_container_id", lambda _: cid)
+    complete = MagicMock(return_value=True)
+    monkeypatch.setattr(cm, "_setup_complete", complete)
+
+    def runtime(*args, **kwargs):
+        if (stage == "restart" and args[0] == "restart") or \
+                (stage == "start time" and args[0] == "inspect"):
+            raise subprocess.TimeoutExpired(["podman", *args], kwargs.get("timeout"))
+        return subprocess.CompletedProcess(args, 0, json.dumps("2026-10-26T00:00:00Z"), "")
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm.restart_container(name)
+    assert error.value.kind == "timeout"
+    assert name in str(error.value)
+    assert cid not in str(error.value)
+    complete.assert_not_called()
+
+
+def test_restart_setup_verification_error_names_the_container(monkeypatch):
+    """Probes address the id; the launch error must name the container."""
+    name, cid = "pm-t-review-pr-aaaa", "e3b0c44298fc1c149afbf4c8996fb924"
+    monkeypatch.setattr(cm, "current_container_id", lambda _: cid)
+    monkeypatch.setattr(cm, "_wait_for_setup", MagicMock())
+
+    def probe(target):
+        raise cm.launch_error(target, "config", "copying ~/.claude.json failed",
+                              stage="record completed setup")
+
+    monkeypatch.setattr(cm, "_probe_setup", probe)
+    monkeypatch.setattr(cm, "_run_runtime", lambda *a, **k:
+                        subprocess.CompletedProcess(a, 0, json.dumps("2026-10-26T00:00:00Z"), ""))
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm.restart_container(name)
+    message = str(error.value)
+    assert error.value.kind == "config"
+    assert name in message
+    assert cid not in message
+
+
 @pytest.mark.parametrize("timestamp", ["", "garbage", "0001-01-01T00:00:00Z"])
 def test_restart_refuses_unknown_boot_time(monkeypatch, timestamp):
     monkeypatch.setattr(cm, "current_container_id", lambda _: "original-id")

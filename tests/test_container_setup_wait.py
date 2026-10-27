@@ -38,6 +38,25 @@ def test_exited_container_reported_with_podman3_wording_fails_with_logs(monkeypa
     assert ("logs", "--tail", "20", "captured-id") in calls
 
 
+def test_exited_container_with_slow_logs_probe_keeps_the_startup_cause(monkeypatch):
+    """A hanging `logs` probe must not replace the startup failure it explains."""
+    def runtime(*args, **kwargs):
+        if args[0] == "exec":
+            return subprocess.CompletedProcess(args, 125, "", IMPROPER)
+        if args[0] == "inspect":
+            return subprocess.CompletedProcess(args, 0, "false\n", "")
+        if args[0] == "logs":
+            raise subprocess.TimeoutExpired(["podman", "logs"], kwargs.get("timeout"))
+        raise AssertionError(args)
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    monkeypatch.setattr(cm.time, "sleep", lambda s: pytest.fail("polled an exited container"))
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm._wait_for_setup("captured-id")
+    assert error.value.kind == "runtime"
+    assert IMPROPER in str(error.value)
+
+
 def test_running_container_with_unrecognised_probe_error_keeps_waiting(monkeypatch):
     runtime, calls = _runtime("true")
     monkeypatch.setattr(cm, "_run_runtime", runtime)

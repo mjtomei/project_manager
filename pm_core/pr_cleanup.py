@@ -42,7 +42,10 @@ def cleanup_pr_resources(session: str | None, pr: dict, *,
     call when no resources exist. Returns a summary dict::
 
         {"windows": [...], "containers": [...], "registry_windows": [...],
-         "sockets": [...], "container_failures": {name: error}}
+         "runtime_state": bool, "container_failures": {name: error}}
+
+    Push-proxy sockets are released by ``remove_container`` itself; the
+    summary no longer reports them separately.
 
     *background_containers* (automatic callers on the TUI event loop) hands
     the containers to a background, PR-scoped reconcile instead: removal
@@ -52,7 +55,7 @@ def cleanup_pr_resources(session: str | None, pr: dict, *,
     pr_id = pr["id"]
     display_id = _pr_display_id(pr)
     summary = {"windows": [], "containers": [], "registry_windows": [],
-               "sockets": [], "runtime_state": False, "container_failures": {}}
+               "runtime_state": False, "container_failures": {}}
 
     if session:
         try:
@@ -74,9 +77,9 @@ def cleanup_pr_resources(session: str | None, pr: dict, *,
             summary["container_failures"]["container cleanup"] = str(e)
             _log.warning("cleanup_pr_containers failed: %s", e)
 
-    # remove_container already released these proxies. Never stop them again
-    # here: a concurrent launch may have installed a replacement by now.
-    summary["sockets"].extend(summary["containers"])
+    # remove_container already released each container's push proxy. Never
+    # stop them again here: a concurrent launch may have installed a
+    # replacement by now.
 
     if session:
         try:

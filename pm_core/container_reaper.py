@@ -523,7 +523,8 @@ def _servers_for(info: ContainerInfo) -> list[_Server]:
 @dataclass
 class _PaneSnapshot:
     """``None`` panes means the server exists but couldn't be queried."""
-    panes: list[tuple[str, str, str]] | None  # (pane_id, session, start_cmd)
+    # (pane_id, session, start_cmd plus pane-process attachment targets)
+    panes: list[tuple[str, str, str]] | None
 
 
 class _PaneCache:
@@ -1094,6 +1095,31 @@ def spawn_detached_reap(pr_id: str | None = None,
         _log.warning("could not spawn detached reap for %s", pr_id, exc_info=True)
 
 
+def _proxy_failure_actionable(key: str) -> bool:
+    """False when a recorded ``push proxy`` failure names nothing left to retry.
+
+    A shared proxy whose directory disappeared (daemon retirement, /tmp
+    cleanup) or a captured unshared release whose record was already consumed
+    can never be released again, so keeping its failure would leave
+    ``pm container reap`` failing forever. Unknown shapes stay visible.
+    """
+    target = key[len("push proxy "):]
+    if target.startswith("unshared "):
+        stem = target[len("unshared "):]
+        return (container_mod.container_state_dir() / "proxy-releases"
+                / f"{stem}.json").exists()
+    if "/" not in target:
+        return True
+    tag, pr_id = target.split("/", 1)
+    if not tag or not pr_id:
+        return True
+    from pm_core import push_proxy
+    try:
+        return os.path.exists(push_proxy._shared_sock_dir_path(tag, pr_id))
+    except (OSError, ValueError):
+        return True
+
+
 def _release_unused_proxies(scope: Scope, failures: dict[str, str]) -> list[str]:
     from pm_core import push_proxy
     released = push_proxy.retry_unshared_releases(scope, failures)
@@ -1174,7 +1200,16 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
                 # but gets its own context so nested changes cannot race peers.
                 futures = [(d, ex.submit(contextvars.copy_context().run,
                                          _remove_checked, d, scope)) for d in targets]
-                results = [(d, future.result()) for d, future in futures]
+                # One broken worker must not discard the pass's other
+                # removals and failures; record it as that target's failure.
+                results = []
+                for d, future in futures:
+                    try:
+                        results.append((d, future.result()))
+                    except Exception as exc:
+                        _log.warning("container removal for %s failed", d.info.name,
+                                     exc_info=True)
+                        results.append((d, (False, f"error: {exc}")))
             for d, (ok, msg) in results:
                 if ok:
                     out.removed.append(d.info.name)
@@ -1399,6 +1434,12 @@ def _record_locked(out: Outcome, scope: Scope, reason: str,
         failures = {k: v for k, v in failures.items()
                     if k in inventory or k.startswith("push proxy ")
                     or observed_at is not None and v.get("at", 0) >= observed_at}
+        # Only a full pass can prove a proxy is gone for good; drop its
+        # failure instead of retrying it forever. Newer failures stay.
+        failures = {k: v for k, v in failures.items()
+                    if not k.startswith("push proxy ")
+                    or observed_at is not None and v.get("at", 0) >= observed_at
+                    or _proxy_failure_actionable(k)}
     for proxy in out.proxies_released:
         failures.pop(f"push proxy {proxy}", None)
     if reason != "explicit-cleanup" and "push proxy sweep" not in out.failures:

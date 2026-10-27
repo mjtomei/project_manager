@@ -1212,6 +1212,9 @@ def _probe_setup(name: str) -> tuple[bool, str, str]:
             f"setup verification probe did not return within {exc.timeout}s; "
             f"retry when the runtime is responsive",
             stage="verify existing setup") from exc
+    except OSError as exc:
+        raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                           stage="verify existing setup") from exc
     if r.returncode == 0:
         return True, "", ""
     stderr = (r.stderr or "").strip()
@@ -1387,13 +1390,35 @@ def restart_container(name: str, *, container_id: str | None = None) -> None:
         _write_identity_generation(container_id, generation)
     except OSError as exc:
         raise ContainerError(f"Cannot protect '{name}' from EXIT cleanup during restart: {exc}") from exc
-    r = _run_runtime("restart", "-t", "5", container_id, check=False, timeout=90)
+    try:
+        r = _run_runtime("restart", "-t", "5", container_id, check=False, timeout=90)
+    except subprocess.TimeoutExpired as exc:
+        # The restart may still finish; its filesystem is preserved either
+        # way, so this is a retryable timeout rather than a failed recovery.
+        raise launch_error(
+            name, "timeout",
+            f"'{_get_runtime()} restart' did not return within {exc.timeout}s; "
+            f"retry once the runtime is responsive",
+            stage="restart") from exc
+    except OSError as exc:
+        raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                           stage="restart") from exc
     if r.returncode != 0:
         stderr = (r.stderr or "").strip()
         raise launch_error(name, classify_runtime_error(stderr), stderr,
                            stage="restart")
-    started = _run_runtime("inspect", "--format", "{{json .State.StartedAt}}",
-                           container_id, check=False, timeout=10)
+    try:
+        started = _run_runtime("inspect", "--format", "{{json .State.StartedAt}}",
+                               container_id, check=False, timeout=10)
+    except subprocess.TimeoutExpired as exc:
+        raise launch_error(
+            name, "timeout",
+            f"restart start-time probe did not return within {exc.timeout}s; "
+            f"retry once the runtime is responsive",
+            stage="verify restart start time") from exc
+    except OSError as exc:
+        raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                           stage="verify restart start time") from exc
     try:
         # Go's RFC3339Nano output can have 0–9 fractional digits. Avoid float
         # timestamps: a quick restart can touch the marker in the same second.
@@ -1414,13 +1439,20 @@ def restart_container(name: str, *, container_id: str | None = None) -> None:
     try:
         _wait_for_setup(container_id, started_ns=started_ns)
     except ContainerLaunchError as e:
+        # The probes address the captured id; a launch error must name the
+        # container a user can act on ('pm container restart <name>').
         if e.kind != "timeout":
-            raise
+            raise launch_error(name, e.kind, e.stderr,
+                               stage="come back up after restart") from e
         # Describe a failed recovery rather than an initial setup timeout;
         # the restarted container and its filesystem remain available.
         raise launch_error(name, "runtime", e.stderr,
                            stage="come back up after restart") from e
-    if not _setup_complete(container_id):
+    try:
+        complete = _setup_complete(container_id)
+    except ContainerLaunchError as e:
+        raise launch_error(name, e.kind, e.stderr, stage="restart") from e
+    if not complete:
         raise launch_error(name, "incomplete",
                            "setup markers missing after restart", stage="restart")
 
@@ -1533,6 +1565,9 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
         # The probe addresses the immutable id; the error must name the container.
         raise launch_error(name, exc.kind, exc.stderr,
                            stage="inspect existing container") from exc
+    except OSError as exc:
+        raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                           stage="inspect existing container") from exc
     if not running:
         if container_reaper.is_retained(name, container_id):
             raise launch_error(name, "incomplete", "container is explicitly retained; release it before recreation",
@@ -1598,8 +1633,16 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
                 f"readiness probe did not return within {exc.timeout}s; "
                 f"retry when the runtime is responsive",
                 stage="verify existing setup") from exc
+        except OSError as exc:
+            raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                               stage="verify existing setup") from exc
         if base.returncode == 0:
-            _post_setup(container_id, workdir, "podman" in _get_runtime())
+            try:
+                _post_setup(container_id, workdir, "podman" in _get_runtime())
+            except ContainerLaunchError as exc:
+                # Post-setup addresses the captured id; name the container.
+                raise launch_error(name, exc.kind, exc.stderr,
+                                   stage="finish setup of the existing container") from exc
             try:
                 finished = _setup_complete(container_id)
             except ContainerLaunchError as exc:
@@ -1972,8 +2015,16 @@ def _create_fresh(
     container_id = result.stdout.strip()
 
     try:
-        _wait_for_setup(container_id)
-        _post_setup(container_id, workdir, _is_podman)
+        # Setup helpers address the captured id; a launch error must name the
+        # container a user can act on, not its immutable id.
+        try:
+            _wait_for_setup(container_id)
+        except ContainerLaunchError as exc:
+            raise launch_error(name, exc.kind, exc.stderr, stage="finish setup") from exc
+        try:
+            _post_setup(container_id, workdir, _is_podman)
+        except ContainerLaunchError as exc:
+            raise launch_error(name, exc.kind, exc.stderr, stage="finish setup") from exc
         if allowed_push_branch:
             from pm_core.push_proxy import proxy_is_alive
             if not proxy_is_alive(sock_path):
@@ -2026,6 +2077,10 @@ def _wait_for_setup(name: str, *, started_ns: int | None = None) -> None:
             # failed launch: keep polling until the setup deadline.
             last_err = f"readiness probe did not return within {exc.timeout}s"
             continue
+        except OSError as exc:
+            # The runtime itself is unusable; polling cannot fix that.
+            raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                               stage="finish setup") from exc
         if check.returncode == 0:
             return
         err = (check.stderr or "").strip()
@@ -2044,11 +2099,17 @@ def _wait_for_setup(name: str, *, started_ns: int | None = None) -> None:
                 except (ContainerError, subprocess.TimeoutExpired):
                     exited = False
             if exited:
-                logs = _run_runtime("logs", "--tail", "20", name,
-                                    check=False, timeout=10)
+                try:
+                    logs = _run_runtime("logs", "--tail", "20", name,
+                                        check=False, timeout=10)
+                    output = (logs.stdout or "") + (logs.stderr or "")
+                except (OSError, subprocess.TimeoutExpired):
+                    # The startup failure is already known; missing logs must
+                    # not replace it with a raw probe timeout.
+                    output = ""
                 raise launch_error(
                     name, "runtime",
-                    f"{err}\n{(logs.stdout or '') + (logs.stderr or '')}".strip(),
+                    f"{err}\n{output}".strip(),
                     stage="finish setup")
         time.sleep(_SETUP_POLL_INTERVAL)
     _log.error("Container %s setup did not complete within %ds — "
@@ -2147,6 +2208,9 @@ def _post_setup(name: str, workdir: Path, is_podman: bool) -> None:
         except subprocess.TimeoutExpired as exc:
             raise launch_error(name, "timeout", "copying ~/.claude.json timed out",
                                stage="receive ~/.claude.json") from exc
+        except OSError as exc:
+            raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                               stage="receive ~/.claude.json") from exc
         finally:
             if _seeded_tmp is not None:
                 _seeded_tmp.unlink(missing_ok=True)
@@ -2158,6 +2222,9 @@ def _post_setup(name: str, workdir: Path, is_podman: bool) -> None:
         raise launch_error(name, "timeout",
                            f"recording completed setup did not return within "
                            f"{exc.timeout}s; retry when the runtime is responsive",
+                           stage="record completed setup") from exc
+    except OSError as exc:
+        raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
                            stage="record completed setup") from exc
     if done.returncode != 0:
         stderr = (done.stderr or "").strip()

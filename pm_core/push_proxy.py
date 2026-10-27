@@ -1070,10 +1070,22 @@ def defer_unshared_release(proxy, name: str = "") -> Path:
     labels = {}
     if name:
         from pm_core import container as cm
-        inspected = cm._run_runtime("inspect", name, check=False, timeout=10)
-        if inspected.returncode != 0:
-            raise cm.ContainerError(f"Cannot record proxy ownership for '{name}'")
-        labels = (json.loads(inspected.stdout)[0].get("Config") or {}).get("Labels") or {}
+        try:
+            inspected = cm._run_runtime("inspect", name, check=False, timeout=10)
+            if inspected.returncode != 0:
+                raise cm.ContainerError(f"Cannot record proxy ownership for '{name}'")
+            rows = json.loads(inspected.stdout)
+            if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+                raise ValueError("incomplete container inspection")
+            labels = (rows[0].get("Config") or {}).get("Labels") or {}
+            if not isinstance(labels, dict):
+                labels = {}
+        except (OSError, subprocess.TimeoutExpired, ValueError, TypeError,
+                AttributeError) as exc:
+            # Callers expect ContainerError from a failed removal; a raw probe
+            # timeout or malformed inspection would bypass their retry path.
+            raise cm.ContainerError(
+                f"Cannot record proxy ownership for '{name}': {exc}") from exc
     path.parent.mkdir(parents=True, exist_ok=True)
     import tempfile
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".release-")

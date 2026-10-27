@@ -155,6 +155,23 @@ def test_name_fallback_preserves_live_mount(monkeypatch, tmp_path, local):
     assert socket.exists()
 
 
+@pytest.mark.parametrize("failure", ["timeout", "malformed"])
+def test_ownership_probe_failure_is_a_container_error(monkeypatch, tmp_path, failure):
+    """A slow or malformed ownership inspect must defer removal cleanly."""
+    name = "pm-qa-debug-original"
+    proxy = (name, str(tmp_path / "push.sock"), (0, 0, 0), name)
+
+    def runtime(*args, **kwargs):
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(["podman", *args], kwargs.get("timeout"))
+        return subprocess.CompletedProcess(args, 0, "not json", "")
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    with pytest.raises(cm.ContainerError) as error:
+        push_proxy.defer_unshared_release(proxy, name)
+    assert "Cannot record proxy ownership" in str(error.value)
+
+
 @pytest.mark.parametrize("retry", [False, True])
 @pytest.mark.parametrize("socket_state", ["missing", "disappeared", "replaced"])
 def test_missing_socket_cleanup_retires_owner(monkeypatch, tmp_path, retry, socket_state):

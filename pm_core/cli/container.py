@@ -342,11 +342,16 @@ def container_cleanup(pr_id: str | None):
     """Remove stale pm containers."""
     from pm_core.container import _run_runtime, remove_containers, CONTAINER_PREFIX
 
-    result = _run_runtime(
-        "ps", "-a", "--filter", f"name={CONTAINER_PREFIX}",
-        "--format", "{{.Names}}\t{{.Status}}",
-        check=False, timeout=30,
-    )
+    try:
+        result = _run_runtime(
+            "ps", "-a", "--filter", f"name={CONTAINER_PREFIX}",
+            "--format", "{{.Names}}\t{{.Status}}",
+            check=False, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        # A missing/hung runtime is a diagnostic, not a traceback.
+        click.echo(f"Failed to list containers: {exc}", err=True)
+        raise SystemExit(1)
     if result.returncode != 0:
         click.echo("Failed to list containers.", err=True)
         raise SystemExit(1)
@@ -512,8 +517,19 @@ def container_restart(name: str, force: bool):
                        f"restarting would end that session. Re-run with --force "
                        f"once it is safe.", err=True)
             raise SystemExit(1)
+        # Pin the allocation the ownership check just saw: an external runtime
+        # client can replace the name without taking PM's launch lock.
         try:
-            container_mod.restart_container(name)
+            target_id = container_mod.current_container_id(name)
+        except OSError as e:
+            click.echo(f"Cannot verify {name} before restart: {e}", err=True)
+            raise SystemExit(1)
+        if target_id is None:
+            click.echo(f"Cannot verify {name} before restart; retry once the "
+                       f"runtime is responsive.", err=True)
+            raise SystemExit(1)
+        try:
+            container_mod.restart_container(name, container_id=target_id or None)
         except container_mod.ContainerError as e:
             click.echo(str(e), err=True)
             raise SystemExit(1)

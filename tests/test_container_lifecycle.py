@@ -456,6 +456,42 @@ class TestReaperOwnership:
         assert out.removed == [other] and not out.error
         assert slow in out.failures and slow in reaper.pending_failures()
 
+    @pytest.mark.parametrize("present", [False, True])
+    def test_full_pass_retires_only_vanished_proxy_failures(
+            self, fake_env, tmp_path, monkeypatch, present):
+        """A proxy that no longer exists cannot be retried; keep real ones."""
+        from pm_core import push_proxy
+        key = "push proxy tag/pr-aaaa"
+        reaper._record(reaper.Outcome(failures={key: "runtime inventory unavailable"}),
+                       Scope(), "manual")
+        assert key in reaper.pending_failures()
+        proxy_dir = tmp_path / "proxy"
+        if present:
+            proxy_dir.mkdir()
+        monkeypatch.setattr(push_proxy, "_shared_sock_dir_path",
+                            lambda tag, pr: str(proxy_dir))
+        out = reaper.reconcile(reason="manual")
+        assert not out.error
+        assert (key in reaper.pending_failures()) is present
+
+    def test_worker_exception_fails_only_that_container(self, fake_env, monkeypatch):
+        """A crashed removal worker must not discard the pass's other results."""
+        broken, other = "pm-repo-ab12-review-pr-aaaa", "pm-repo-ab12-impl-pr-bbbb"
+        fake_env["containers"] = [_info(broken), _info(other)]
+        original = reaper._remove_checked
+
+        def _checked(decision, scope):
+            if decision.info.name == broken:
+                raise RuntimeError("worker crashed")
+            return original(decision, scope)
+
+        monkeypatch.setattr(reaper, "_remove_checked", _checked)
+        out = reaper.reconcile(reason="manual")
+        assert out.removed == [other]
+        assert not out.error
+        assert "worker crashed" in out.failures[broken]
+        assert broken in reaper.pending_failures()
+
     @pytest.mark.parametrize("released", [False, True])
     def test_unknown_identity_never_removes_by_name(self, fake_env, monkeypatch, released):
         info = _info("pm-repo-ab12-review-pr-aaaa")
@@ -1262,14 +1298,17 @@ class TestReapCLI:
 
         monkeypatch.setattr(cm, "launch_lock", lock)
         monkeypatch.setattr(cm, "pids_usage", lambda: {})
+        monkeypatch.setattr(cm, "current_container_id", lambda n: "cid1")
         monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: list(owners))
         restarted = []
-        monkeypatch.setattr(cm, "restart_container", restarted.append)
+        monkeypatch.setattr(cm, "restart_container",
+                            lambda n, **kw: restarted.append((n, kw.get("container_id"))))
         name = "pm-x-review-pr-1"
         args = ["container", "restart", name] + (["--force"] if force else [])
         r = CliRunner().invoke(cli, args)
         assert r.exit_code == (0 if force else 1), r.output
-        assert restarted == ([name] if force else [])
+        # The restart pins the allocation the ownership check just saw.
+        assert restarted == ([(name, "cid1")] if force else [])
         if not force:
             assert "%7" in r.output
 
@@ -1283,13 +1322,15 @@ class TestReapCLI:
 
         monkeypatch.setattr(reaper, "live_owner_panes", unknown)
         monkeypatch.setattr(cm, "pids_usage", lambda: {})
+        monkeypatch.setattr(cm, "current_container_id", lambda n: "cid1")
         restarted = []
-        monkeypatch.setattr(cm, "restart_container", restarted.append)
+        monkeypatch.setattr(cm, "restart_container",
+                            lambda n, **kw: restarted.append((n, kw.get("container_id"))))
         name = "pm-x-review-pr-1"
         r = CliRunner().invoke(cli, ["container", "restart", name]
                                + (["--force"] if force else []))
         assert r.exit_code == (0 if force else 1), r.output
-        assert restarted == ([name] if force else [])
+        assert restarted == ([(name, "cid1")] if force else [])
         if not force:
             assert "ownership unknown" in r.output and "--force" in r.output
 
@@ -1298,15 +1339,29 @@ class TestReapCLI:
         from pm_core.cli import cli
         name = "pm-x-review-pr-1"
         monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
+        monkeypatch.setattr(cm, "current_container_id", lambda n: "cid1")
         usage = iter([{name: (2041, 2048)}, {name: (3, 2048)}])
         monkeypatch.setattr(cm, "pids_usage", lambda: next(usage))
         held = []
         monkeypatch.setattr(cm, "restart_container",
-                            lambda n: held.append(cm.launch_in_progress(n)))
+                            lambda n, **kw: held.append(cm.launch_in_progress(n)))
         r = CliRunner().invoke(cli, ["container", "restart", name])
         assert r.exit_code == 0, r.output
         assert held == [True]  # restarted under its launch lock
         assert "2041/2048 → 3/2048" in r.output
+
+    def test_restart_refuses_unverifiable_allocation(self, monkeypatch):
+        """An unanswered identity probe must not restart an unchecked name."""
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
+        monkeypatch.setattr(cm, "pids_usage", lambda: {})
+        monkeypatch.setattr(cm, "current_container_id", lambda n: None)
+        restarted = []
+        monkeypatch.setattr(cm, "restart_container", lambda n, **kw: restarted.append(n))
+        r = CliRunner().invoke(cli, ["container", "restart", "pm-x-review-pr-1"])
+        assert r.exit_code == 1 and "retry" in r.output
+        assert restarted == []
 
     def test_session_cleanup_scopes_to_current_tag(self, fake_env, monkeypatch):
         from click.testing import CliRunner
@@ -1339,6 +1394,22 @@ class TestReapCLI:
         assert r.exit_code == 1
         assert removed == ["pm-a-impl-pr-1"]
         assert "FAILED" in r.output and "Removed 1 container(s)." in r.output
+
+    @pytest.mark.parametrize("error", ["missing", "timeout"])
+    def test_cleanup_reports_unavailable_runtime(self, monkeypatch, error):
+        """A missing or hung runtime is a diagnostic, not a traceback."""
+        import subprocess as _subprocess
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        def _rt(*a, **k):
+            if error == "timeout":
+                raise _subprocess.TimeoutExpired(["podman", *a], k.get("timeout"))
+            raise FileNotFoundError("podman")
+        monkeypatch.setattr(cm, "_run_runtime", _rt)
+        r = CliRunner().invoke(cli, ["container", "cleanup"])
+        assert r.exit_code == 1
+        assert "Failed to list containers" in r.output
 
     def test_cleanup_skips_non_pm_substring_matches(self, monkeypatch):
         """The runtime's name filter matches substrings: a user's "npm-cache"

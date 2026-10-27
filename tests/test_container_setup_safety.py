@@ -80,6 +80,29 @@ def test_fresh_proxy_must_accept_connections(monkeypatch, tmp_path):
     assert removed.call_count == 2  # stale name then partial allocation
 
 
+def test_fresh_setup_failure_names_the_container_not_its_id(monkeypatch, tmp_path):
+    """A fresh launch's setup error must name the container, not its id."""
+    name, cid = "pm-t-impl-pr-aaaa", "e3b0c44298fc1c149afbf4c8996fb924"
+    _fresh(monkeypatch, tmp_path)
+
+    def wait(target):
+        raise cm.launch_error(target, "timeout", "setup sentinel missing after 30s",
+                              stage="finish setup within 30s")
+
+    monkeypatch.setattr(cm, "_wait_for_setup", wait)
+    monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw:
+                        subprocess.CompletedProcess(a, 0, cid + "\n", ""))
+    discard = MagicMock()
+    monkeypatch.setattr(cm, "discard_container", discard)
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm.create_container(name, cm.ContainerConfig(), tmp_path)
+    message = str(error.value)
+    assert error.value.kind == "timeout"
+    assert name in message
+    assert cid not in message
+    discard.assert_called_once_with(name, container_id=cid)
+
+
 def test_required_setup_failure_never_writes_readiness(monkeypatch, tmp_path):
     sentinel = tmp_path / "ready"
     monkeypatch.setattr(cm, "_READY_SENTINEL", str(sentinel))
