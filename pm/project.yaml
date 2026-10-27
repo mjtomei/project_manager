@@ -14327,6 +14327,20 @@ prs:
       ~94 min because inline retry backoff blocks the poll loop.'
     created_at: '2026-10-27T21:46:31Z'
     last_edited: '2026-10-27T21:46:31Z'
+  - id: note-9118997
+    text: 'QA scenario 48 (rerun of S33, hour-aged launch-lock pruning) deferred during
+      refinement 2026-10-27 at a44a70dc: the prune gate is still a real mtime age
+      of _LOCK_FILE_MAX_AGE=3600 s in pm_core/container_reaper.py _prune_lock_files,
+      with no injectable clock. Driving it honestly needs at least 60 min of idle
+      wall time plus setup, the concurrent-launch race and cleanup, and nothing provisioned
+      for this run grants that budget (the QA loop has no per-scenario observation-budget
+      surface; ''the worker declares a budget'' is not a provisioned window). To unblock,
+      provision an explicit ~90 min worker window, or real PM-created locks that are
+      already aged from an earlier run in a private container_state_dir. Then use
+      plain ''pm container reap'' (full Scope only prunes) while holding a real same-name
+      launch_lock, e.g. a pm container launch blocked mid-start.'
+    created_at: '2026-10-27T19:06:58Z'
+    last_edited: '2026-10-27T19:06:58Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
