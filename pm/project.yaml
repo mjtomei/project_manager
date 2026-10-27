@@ -14491,7 +14491,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T08:33:35.479666+00:00'
+  updated_at: '2026-10-27T08:58:07.617102+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14770,6 +14770,38 @@ prs:
       a busy daemon from a dead one beyond the larger backlog. (2026-10-27)'
     created_at: '2026-10-27T08:33:35Z'
     last_edited: '2026-10-27T08:33:35Z'
+  - id: note-98537c1
+    text: 'Review-loop db89 i6 (2026-10-27): reviewed ff17b1b8. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies still fails at 74462d76 (2-part key ->
+      all three containers on one socket). Two start-path gaps fixed, each with a
+      test that fails at ff17b1b8 for the right reason: (1) a symlink planted at the
+      shared socket-directory name was followed, so start_push_proxy deleted <target>/push.sock
+      and the daemon would write proxy.json and bind inside whatever directory the
+      link pointed at (reproduced: the target push.sock is gone after a start); (2)
+      a directory we cannot write (or one owned by another user) made _unlink_socket_file
+      raise a bare PermissionError out of start_push_proxy, which wrap_claude_cmd
+      reported as "Is docker running?" - the same misdiagnosis i5 removed for the
+      squatted-file case (reproduced: PermissionError escapes). _start_lock now calls
+      the new _sock_dir_start_problem() before touching the dir and raises PushProxyError
+      naming the reason (is a symlink / is owned by another user / is not writable).
+      The check applies to starts only (blocking=True): teardown deliberately passes
+      the long discovery symlink to _start_lock, and refusing it there would leave
+      a live proxy and its dir surviving stop_session_proxies after a restart, when
+      the registry is empty; teardown keeps its own guards (_kill_proxy_socket, _remove_proxy_dirs).
+      test_teardown_lock_still_accepts_a_symlinked_dir pins that asymmetry. Tests:
+      test_start_refuses_a_symlinked_socket_dir, test_legacy_start_refuses_a_symlinked_socket_dir,
+      test_start_reports_an_unwritable_socket_dir_as_proxy_error. tests/test_push_proxy.py
+      104 passed, tests/test_container.py 101 passed (PATH=/usr/bin:/bin so the container
+      git wrapper does not intercept test pushes). Residual, unchanged and out of
+      scope: in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir (option (3), workdir-per-request, remains the cleaner
+      long-term design); stop_all_proxies (no non-test callers) still sweeps without
+      the start-lock guard; proxy_is_alive still cannot distinguish a busy daemon
+      from a dead one beyond the backlog of 16.'
+    created_at: '2026-10-27T08:58:07Z'
+    last_edited: '2026-10-27T08:58:07Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

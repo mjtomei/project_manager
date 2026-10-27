@@ -859,6 +859,34 @@ def _fd_is_path_file(fd: int, path: str) -> bool:
     return (st_fd.st_dev, st_fd.st_ino) == (st_path.st_dev, st_path.st_ino)
 
 
+def _sock_dir_start_problem(sock_dir: str) -> str | None:
+    """Return why *sock_dir* cannot host a proxy start, or None when it can.
+
+    ``/tmp`` is world-writable, so another user can plant a symlink or a
+    directory with a proxy-shaped name where the socket directory should
+    be.  A start must refuse such a directory instead of following the
+    link — which would delete ``push.sock`` and write ``proxy.json``
+    inside whatever it points at — and instead of leaking a bare
+    ``OSError`` from that unlink (``wrap_claude_cmd`` reports one as a
+    container-runtime problem, hiding the real cause).
+
+    Only starts are checked.  Teardown passes the long discovery symlink
+    to :func:`_start_lock` on purpose and guards itself in
+    :func:`_kill_proxy_socket` / :func:`_remove_proxy_dirs`.
+    """
+    if os.path.islink(sock_dir):
+        return "is a symlink"
+    try:
+        st = os.stat(sock_dir)
+    except OSError as exc:
+        return f"is unusable ({exc})"
+    if st.st_uid != os.getuid():
+        return "is owned by another user"
+    if not os.access(sock_dir, os.W_OK | os.X_OK):
+        return "is not writable"
+    return None
+
+
 @contextlib.contextmanager
 def _start_lock(sock_dir: str, blocking: bool = True):
     """Serialise check-and-spawn across processes for one socket directory.
@@ -874,6 +902,10 @@ def _start_lock(sock_dir: str, blocking: bool = True):
     A lock taken on a file that a teardown unlinked (or another process
     replaced) is discarded and retried against the current file, so two
     processes can never both believe they hold the lock.
+
+    With ``blocking=True`` (a start) a directory that cannot safely hold a
+    proxy — a symlink, or one owned by another user or unwritable — raises
+    :class:`PushProxyError` (see :func:`_sock_dir_start_problem`).
     """
     try:
         os.makedirs(sock_dir, exist_ok=True)
@@ -892,6 +924,14 @@ def _start_lock(sock_dir: str, blocking: bool = True):
                      sock_dir, exc)
         yield False
         return
+    if blocking:
+        problem = _sock_dir_start_problem(sock_dir)
+        if problem is not None:
+            # A symlink (or a foreign/unwritable directory) on the socket
+            # directory name would send the unlink/bind/metadata write into
+            # its target.  Refuse it as a proxy error, not a bare OSError.
+            raise PushProxyError(
+                f"push proxy directory {sock_dir} {problem}")
     lock_path = os.path.realpath(sock_dir) + ".lock"
     flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
     for _attempt in range(_LOCK_ATTEMPTS):

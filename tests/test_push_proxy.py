@@ -1428,6 +1428,91 @@ class TestWorkdirKeyedProxies:
         finally:
             shutil.rmtree(sock_dir, ignore_errors=True)
 
+    def test_start_refuses_a_symlinked_socket_dir(self, tmp_path):
+        """A planted /tmp symlink must not redirect the start into its target.
+
+        ``/tmp`` is world-writable, so another user can point the socket
+        directory name at any directory we can write.  Following it would
+        delete ``push.sock`` and write ``proxy.json`` inside that target.
+        """
+        from pm_core.push_proxy import PushProxyError
+
+        impl = self._workdir(tmp_path, "impl")
+        victim = self._workdir(tmp_path, "victim")
+        (victim / "push.sock").write_text("victim data\n")
+        token = push_proxy_mod._workdir_token(str(impl))
+        sock_dir = push_proxy_mod._shared_sock_dir_path(
+            self.TAG, self.PR, token)
+        os.symlink(str(victim), sock_dir)
+        try:
+            with pytest.raises(PushProxyError, match="is a symlink"):
+                self._start("impl-link", impl)
+            assert (victim / "push.sock").read_text() == "victim data\n"
+            assert not (victim / "proxy.json").exists()
+        finally:
+            if os.path.islink(sock_dir):
+                os.unlink(sock_dir)
+
+    def test_legacy_start_refuses_a_symlinked_socket_dir(self):
+        """The legacy per-container path gets the same guard."""
+        from pm_core.push_proxy import PushProxyError
+
+        sock_dir = os.path.join(
+            tempfile.gettempdir(),
+            f"{push_proxy_mod._SOCKET_DIR_PREFIX}legacy-link")
+        victim = tempfile.mkdtemp()
+        Path(victim, "push.sock").write_text("victim data\n")
+        os.symlink(victim, sock_dir)
+        try:
+            with pytest.raises(PushProxyError, match="is a symlink"):
+                start_push_proxy("legacy-link", victim, self.BRANCH)
+            assert Path(victim, "push.sock").read_text() == "victim data\n"
+            assert not Path(victim, "proxy.json").exists()
+        finally:
+            if os.path.islink(sock_dir):
+                os.unlink(sock_dir)
+            shutil.rmtree(victim, ignore_errors=True)
+
+    def test_start_reports_an_unwritable_socket_dir_as_proxy_error(
+            self, tmp_path):
+        """A directory we cannot write must not leak a bare PermissionError.
+
+        ``_unlink_socket_file`` raises ``PermissionError`` for a stale
+        socket inside such a directory, which used to escape
+        ``start_push_proxy`` and surface as "Is docker running?".
+        """
+        from pm_core.push_proxy import PushProxyError
+
+        impl = self._workdir(tmp_path, "impl")
+        token = push_proxy_mod._workdir_token(str(impl))
+        sock_dir = push_proxy_mod._shared_sock_dir_path(
+            self.TAG, self.PR, token)
+        os.makedirs(sock_dir, exist_ok=True)
+        Path(sock_dir, "push.sock").write_text("stale\n")
+        os.chmod(sock_dir, 0o555)
+        try:
+            with pytest.raises(PushProxyError, match="is not writable"):
+                self._start("impl-ro", impl)
+        finally:
+            os.chmod(sock_dir, 0o755)
+            shutil.rmtree(sock_dir, ignore_errors=True)
+
+    def test_teardown_lock_still_accepts_a_symlinked_dir(self, tmp_path):
+        """Only starts refuse a symlink; teardown walks the discovery link.
+
+        ``stop_session_proxies`` takes the start lock through the
+        long-name symlink, so a non-blocking acquisition must keep
+        working or a live proxy would survive teardown.
+        """
+        target = self._workdir(tmp_path, "real")
+        link = "/tmp/pm-push-proxy-locklink-impl"
+        os.symlink(str(target), link)
+        try:
+            with push_proxy_mod._start_lock(link, blocking=False) as locked:
+                assert locked
+        finally:
+            os.unlink(link)
+
     def test_start_raises_when_daemon_not_ready(self, tmp_path):
         from pm_core.push_proxy import PushProxyError
 

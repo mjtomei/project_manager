@@ -515,3 +515,41 @@ ece0e02c for the right reason (`FileExistsError` escapes both lock
 modes; a bare `FileExistsError` instead of `PushProxyError` on both
 start paths; the collision case spawns instead of raising; `OSError`
 escapes instead of `PushProxyError`).
+
+## Review iteration 9 refinements
+
+Added during the ninth review pass (consistent with R5/R6/R7; no
+requirement changed):
+
+- **The start path refuses an unusable socket directory.** Iterations
+  7–8 hardened the start path against a *regular file* squatting on the
+  socket-directory name, but `/tmp` is world-writable and the other two
+  shapes were still unguarded:
+  - a **symlink** at the directory name was followed, so the stale-socket
+    unlink deleted `<target>/push.sock` and the daemon wrote
+    `<target>/proxy.json` and bound a socket inside whatever directory it
+    pointed at (reproduced: the target's `push.sock` is gone after a
+    start);
+  - a directory we cannot write (or one owned by another user) made
+    `_unlink_socket_file` raise a bare `PermissionError` out of
+    `start_push_proxy`, which `wrap_claude_cmd` reported as
+    "Is docker running?" — the same misdiagnosis iteration 8 removed for
+    the squatted-file case (reproduced: `PermissionError` escapes).
+
+  `_start_lock` now calls the new `_sock_dir_start_problem()` before
+  touching the directory and raises `PushProxyError` naming the reason
+  ("is a symlink" / "is owned by another user" / "is not writable").
+  The check applies to **starts only** (`blocking=True`): teardown
+  deliberately passes the long discovery *symlink* to `_start_lock`, and
+  refusing it there would leave a live proxy — and its directory —
+  surviving `stop_session_proxies` after a restart, when the in-process
+  registry is empty.  Teardown keeps its own guards
+  (`_kill_proxy_socket`, `_remove_proxy_dirs`).
+
+Tests: `test_start_refuses_a_symlinked_socket_dir`,
+`test_legacy_start_refuses_a_symlinked_socket_dir`,
+`test_start_reports_an_unwritable_socket_dir_as_proxy_error` (all three
+fail at ff17b1b8 for the right reason: the start does not raise and the
+victim's `push.sock` is deleted; a bare `PermissionError` escapes) and
+`test_teardown_lock_still_accepts_a_symlinked_dir`, which pins the
+intentional start/teardown asymmetry.
