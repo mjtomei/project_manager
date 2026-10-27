@@ -10,11 +10,13 @@ to that window, leaving no way back to the session short of ``z s`` (QA S62:
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from pm_core import store
 from pm_core import tmux as tmux_mod
 from pm_core.cli import pr as pr_mod
+from pm_core.container import ContainerError
 from pm_core.tui import pr_view
 
 
@@ -82,11 +84,25 @@ def _mock_tmux(mock_tmux, dead):
 
 
 class TestPrStartDeadWindow:
-    def _invoke(self, tmp_path, dead):
-        pm_dir, _ = _save_project(tmp_path)
+    def _invoke(self, tmp_path, dead, refuse=False):
+        pm_dir, data = _save_project(tmp_path)
+        git = MagicMock()
+        git.is_git_repo.return_value = False
+        git.run_git.return_value = MagicMock(returncode=0,
+                                             stdout=yaml.safe_dump(data))
+        wrap = MagicMock(return_value=("wrapped", "ctr"))
+        if refuse:
+            wrap.side_effect = ContainerError("Memory governor blocked impl")
         with patch.object(pr_mod, "tmux_mod") as mock_tmux, \
+             patch.object(pr_mod, "git_ops", git), \
+             patch.object(pr_mod, "prompt_gen"), \
+             patch.object(pr_mod, "find_claude", return_value="claude"), \
+             patch.object(pr_mod, "build_claude_shell_cmd",
+                          return_value="claude ..."), \
              patch.object(pr_mod, "state_root", return_value=pm_dir), \
              patch.object(pr_mod, "_get_pm_session", return_value="pm-sess"), \
+             patch("pm_core.container.wrap_claude_cmd", wrap), \
+             patch("pm_core.paths.get_global_setting", return_value=False), \
              patch("pm_core.home_window.park_if_on"):
             _mock_tmux(mock_tmux, dead)
             result = CliRunner().invoke(pr_mod.pr, ["start", "pr-001"])
@@ -96,8 +112,19 @@ class TestPrStartDeadWindow:
         result, mock_tmux = self._invoke(tmp_path, dead=True)
         mock_tmux.kill_window.assert_called_once_with("pm-sess", "@1")
         mock_tmux.select_window.assert_not_called()
+        mock_tmux.new_window.assert_called_once()
         assert "Closed window 'pr-001' (its session has ended)" in result.output
         assert "Switched to existing window" not in result.output
+
+    def test_refused_relaunch_keeps_dead_window(self, tmp_path):
+        # A governor refusal must leave the stopped session's transcript
+        # readable (QA S66): the window is closed only once admitted.
+        result, mock_tmux = self._invoke(tmp_path, dead=True, refuse=True)
+        assert result.exit_code == 1
+        assert "Memory governor blocked impl" in result.output
+        mock_tmux.kill_window.assert_not_called()
+        mock_tmux.new_window.assert_not_called()
+        assert "Closed window" not in result.output
 
     def test_live_window_is_switched_to(self, tmp_path):
         result, mock_tmux = self._invoke(tmp_path, dead=False)
@@ -105,34 +132,43 @@ class TestPrStartDeadWindow:
         mock_tmux.kill_window.assert_not_called()
 
 
-class _Launched(Exception):
-    """Raised once the review launch gets past the window fast path."""
-
-
 class TestReviewWindowDead:
-    def _launch(self, tmp_path, dead):
+    def _launch(self, tmp_path, dead, refuse=False):
         _, data = _save_project(tmp_path)
         pr_entry = data["prs"][0]
+        wrap = MagicMock(return_value=("wrapped", "ctr"))
+        if refuse:
+            wrap.side_effect = ContainerError("Memory governor blocked review")
         with patch.object(pr_mod, "tmux_mod") as mock_tmux, \
              patch.object(pr_mod, "_get_pm_session", return_value="pm-sess"), \
-             patch("pm_core.home_window.park_if_on"), \
-             patch("pm_core.model_config.resolve_model_and_provider",
-                   side_effect=_Launched):
+             patch.object(pr_mod, "prompt_gen"), \
+             patch.object(pr_mod, "build_claude_shell_cmd",
+                          return_value="claude ..."), \
+             patch("pm_core.container.wrap_claude_cmd", wrap), \
+             patch("pm_core.container.is_container_mode_enabled",
+                   return_value=False), \
+             patch("pm_core.home_window.park_if_on"):
             _mock_tmux(mock_tmux, dead)
             mock_tmux.find_window_by_name.return_value = {
                 "id": "@2", "index": "2", "name": "review-pr-001"}
-            launched = False
+            # Stop once the window would be created.
+            mock_tmux.new_window_get_pane.return_value = None
             try:
                 pr_mod._launch_review_window(data, pr_entry)
-            except _Launched:
-                launched = True
-        return launched, mock_tmux
+            except SystemExit:
+                pass
+        return mock_tmux.new_window_get_pane.called, mock_tmux
 
     def test_dead_review_window_is_closed_and_relaunched(self, tmp_path):
         launched, mock_tmux = self._launch(tmp_path, dead=True)
         assert launched
         mock_tmux.kill_window.assert_called_once_with("pm-sess", "@2")
         mock_tmux.select_window.assert_not_called()
+
+    def test_refused_relaunch_keeps_dead_review_window(self, tmp_path):
+        launched, mock_tmux = self._launch(tmp_path, dead=True, refuse=True)
+        assert not launched
+        mock_tmux.kill_window.assert_not_called()
 
     def test_live_review_window_is_switched_to(self, tmp_path):
         launched, mock_tmux = self._launch(tmp_path, dead=False)
