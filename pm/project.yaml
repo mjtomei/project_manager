@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T18:08:05.515520+00:00'
+  updated_at: '2026-10-27T18:42:26.809181+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36467,6 +36467,28 @@ prs:
       is a non-retryable LAUNCH_FAILED.'
     created_at: '2026-10-27T18:08:05Z'
     last_edited: '2026-10-27T18:08:05Z'
+  - id: note-92678f2
+    text: 'Review 0688 i4 (fixes applied): (1) a stop landing between `_start_loop`
+      marking the loop running synchronously (iteration 4 of 385e) and the loop thread''s
+      first line was swallowed — `run_review_loop_sync` reset `state.stop_requested
+      = False`, so the TUI said "Review loop stopping" while the loop created a review
+      window and container anyway. `_start_loop` already owns the reset (it clears
+      it for a resumed loop; a fresh state defaults False), so the loop no longer
+      resets it. Covered by test_stop_landing_before_the_thread_body_prevents_the_launch
+      (fails pre-fix: the launch runs to max_iterations). Full suite 3808 passed,
+      1 skipped; the 55 failed + 17 errors are the base tree pre-existing markdown-module/hook-installer/merge/signoff/git
+      env failures (test_git_ops::test_keeps_unpushed_merge verified failing identically
+      on an origin/master worktree). Residual (non-blocking, documented in the spec):
+      review_loop.py ~1500 lines; two lease mechanisms coexist; discovery adopts a
+      transcript verdict without an idle hook event (documented); other_owner stand-down
+      is a non-retryable LAUNCH_FAILED; the runtime_state mirror of a re-armed loop
+      keeps the previous episode verdict/attempts until the next iteration mirrors
+      one, so `pm autostart status` says "review iteration N (last LAUNCH_FAILED)"
+      while the retry runs; `_interruptible_sleep` re-reads/validates the ~2 MB project.yaml
+      every 2 s (~3% of a core during backoff, loop thread); session._format_action_status
+      has no tests (the new `[failed; retryable]` badge included).'
+    created_at: '2026-10-27T18:42:26Z'
+    last_edited: '2026-10-27T18:42:26Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
