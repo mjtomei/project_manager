@@ -31078,7 +31078,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-27T08:57:23.660026+00:00'
+  updated_at: '2026-10-27T09:23:26.869157+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31233,6 +31233,31 @@ prs:
       (2026-10-27T09:20:00Z)'
     created_at: '2026-10-27T08:57:23Z'
     last_edited: '2026-10-27T08:57:23Z'
+  - id: note-ac3bdef
+    text: 'Review loop i12: the recording step had the same stale-artifact hole one
+      level up. The render rewrites the .mp4 from whatever cast is on disk, so a recording
+      that wrote nothing still produced a fresh-looking video of the *previous* run
+      — `asciinema rec` exits 0 after "asciicast saved" with no directory, and without
+      --overwrite it aborts on an existing cast while the recorder session dies. Both
+      recipes now `rm -f` the cast before starting the recorder (asserted by TestRecipes::test_capture_section_removes_a_stale_cast).
+      The cli no-TTY scaffold stop step was wrong for its own interactive-`bash` form:
+      Ctrl-C is forwarded to the recorded command, not to asciinema (verified live
+      — asciinema kept recording, pane showed ^C), so it now ends bash with `exit`,
+      waits bounded on the recorder real handle (the pane is started *as* the asciinema
+      command, so `tmux has-session` is the completion signal), checks the cast is
+      non-empty, and only then kills the scaffold; a bounded pane-content readiness
+      wait stops the first keystrokes being swallowed (verified live — send-keys immediately
+      after new-session is lost). The tmux recipe got the same readiness wait and
+      cast check. wait-for-job.sh unchanged apart from documenting its artifact-parent
+      mkdir (pinned by a test). Both recording forms exercised end to end with real
+      asciinema+tmux (rc 0, cast contains the driven command). New tests: test_capture_section_removes_a_stale_cast,
+      test_recorder_stop_is_bounded_and_cast_is_checked, test_recorder_is_ready_before_keys_are_sent,
+      test_cli_stop_ends_the_recorded_shell, test_scaffold_block_parses, test_artifact_parent_directory_is_created
+      — the first three fail against the pre-i12 recipes. New file: 82 pass; related
+      suites 409 pass. Full suite: 3832 passed, 1 known baseline failure (test_installer_writes_standalone_receiver,
+      reproduced on origin/master@450a6362). (2026-10-27)'
+    created_at: '2026-10-27T09:23:26Z'
+    last_edited: '2026-10-27T09:23:26Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
