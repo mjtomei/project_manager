@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-05-04T12:33:34.183770+00:00'
+  updated_at: '2026-10-27T19:28:35.854880+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14649,6 +14649,29 @@ prs:
       No global session takeover.'
     created_at: '2026-10-27T18:43:30Z'
     last_edited: '2026-10-27T18:43:30Z'
+  - id: note-6c3913f
+    text: 'Impl 2026-10-27 (0b18f503): pidfile is now versioned JSON {version,pid,session,started_at,starttime,caps}.
+      New pm_core/tui_pidfile.py owns parse/identity/claim; helpers.submit_tui_command
+      returns TuiIpcResult(ok,reason,message) and trigger_tui_command is a bool wrapper;
+      reload validates too. Caps are published only after loop.add_signal_handler
+      succeeds (claim first writes caps=[]). Identity = liveness+zombie+starttime
+      (/proc field 22)+exact-argv TUI marker, pinned by pidfd across os.kill where
+      available. TUI claims via O_EXCL before app.run; a live sibling is refused with
+      a printed message and exit 2; on_unmount only releases files it owns. pm _tui
+      installs no-op SIGUSR1/2 guards immediately. Legacy numeric pidfiles are treated
+      as caps={sigusr1} (pidfile and handler shipped in 9c30b38a) so reload still
+      reaches a pre-upgrade TUI, while SIGUSR2 is refused with "predates the command-queue
+      feature; restart the TUI (Ctrl+R)". autostart now reads the descriptor. Picker
+      prints the failure reason; its spinner aborts after ~3s of continuous owner
+      invalidity. Spec: pm/specs/pr-c3bf868/impl.md. Evidence: /pm-captures/impl/pre-fix/repro
+      (kills old TUI + unrelated PID), /pm-captures/impl/failing-test (pre-fix fail,
+      fixed pass), /pm-captures/impl/post-fix/repro (all refused, happy path + reload
+      delivered), /pm-captures/impl/post-fix/live-tui (real TUI: caps published, queue
+      drained, sibling refused). Full suite: 3846 passed, 1 skipped (pytest 8.4.2,
+      PATH=/usr/bin:/bin). QA gotcha: run real-TUI checks with an isolated HOME and
+      a throwaway project so the live controller pidfile/tmux state is untouched.'
+    created_at: '2026-10-27T19:28:35Z'
+    last_edited: '2026-10-27T19:28:35Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
