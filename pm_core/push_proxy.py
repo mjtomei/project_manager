@@ -780,6 +780,10 @@ def _shared_sock_dir(session_tag: str, pr_id: str,
     and a long-named symlink for discoverability/cleanup.  Use this
     when starting a proxy; use ``_shared_sock_dir_path`` for read-only
     lookups.
+
+    Directory creation is best-effort here: ``_start_lock`` creates it
+    for real (and reports an unusable name as a ``PushProxyError``), and
+    the discovery symlink is optional.
     """
     long_name = f"{session_tag}-{pr_id}-{workdir_token}"
     long_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{long_name}"
@@ -789,7 +793,14 @@ def _shared_sock_dir(session_tag: str, pr_id: str,
         # Fits — no hash needed, no symlink needed
         return long_dir
 
-    os.makedirs(short_dir, exist_ok=True)
+    try:
+        os.makedirs(short_dir, exist_ok=True)
+    except OSError:
+        # /tmp is world-writable: a regular file squatting on the directory
+        # name makes makedirs fail.  The discovery symlink is optional, so
+        # do not fail here — _start_lock reports the unusable directory as a
+        # PushProxyError (a start) or skips it (teardown).
+        return short_dir
 
     # Create long-named symlink for discoverability/cleanup.  Best effort:
     # a name too long for the filesystem (or an unwritable /tmp) must not
@@ -864,7 +875,23 @@ def _start_lock(sock_dir: str, blocking: bool = True):
     replaced) is discarded and retried against the current file, so two
     processes can never both believe they hold the lock.
     """
-    os.makedirs(sock_dir, exist_ok=True)
+    try:
+        os.makedirs(sock_dir, exist_ok=True)
+    except OSError as exc:
+        # /tmp is world-writable: a regular file (or an unreadable directory)
+        # squatting on the socket-directory name makes makedirs fail.  A
+        # teardown must skip that directory rather than abort the sweep, and
+        # a start must fail as a proxy error instead of leaking a bare
+        # OSError (which wrap_claude_cmd would blame on the runtime) — the
+        # same treatment as an unusable lock file below.
+        if blocking:
+            raise PushProxyError(
+                f"could not create push proxy directory {sock_dir}: "
+                f"{exc}") from exc
+        _log.warning("Push proxy directory %s is unusable (%s); skipping",
+                     sock_dir, exc)
+        yield False
+        return
     lock_path = os.path.realpath(sock_dir) + ".lock"
     flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
     for _attempt in range(_LOCK_ATTEMPTS):
@@ -954,21 +981,29 @@ def _start_proxy_subprocess(sock_path: str, workdir: str,
     """Spawn a push proxy as an independent subprocess that outlives the caller.
 
     Returns True once the socket is connectable, False if it never became
-    ready within the wait window.
+    ready within the wait window (or could not be spawned at all).  It never
+    raises: a failure here is reported by the caller as a
+    :class:`PushProxyError` naming the socket, so it is not mistaken for a
+    container-runtime problem.
     """
     import sys
 
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "pm_core.push_proxy",
-         sock_path, workdir, allowed_branch],
-        start_new_session=True,  # detach from parent process group
-        # Redirect stdin too: when spawned from a tmux popup (`display-popup
-        # -E pm _popup-cmd ...`), an inherited pty FD keeps the popup
-        # overlay open for the lifetime of this daemon.
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "pm_core.push_proxy",
+             sock_path, workdir, allowed_branch],
+            start_new_session=True,  # detach from parent process group
+            # Redirect stdin too: when spawned from a tmux popup
+            # (`display-popup -E pm _popup-cmd ...`), an inherited pty FD
+            # keeps the popup overlay open for the lifetime of this daemon.
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        _log.warning("Push proxy subprocess could not be spawned for %s "
+                     "(workdir=%s): %s", sock_path, workdir, exc)
+        return False
 
     # Wait for the socket to appear and become connectable.  Five seconds
     # covers a slow fork/import without leaving a broken container behind.
@@ -1055,6 +1090,22 @@ def start_push_proxy(container_name: str, workdir: str,
             # same directory*.  Docker creates a *directory* when
             # bind-mounting a non-existent socket path, so handle both
             # files and directories left over from old runs.
+            #
+            # A dead socket can still carry the sidecar of the daemon that
+            # used to own this path.  The key is a hash of the workdir, so a
+            # recorded workdir that differs can only be a token collision:
+            # refuse rather than silently re-point this key at another clone
+            # (the check above only covers a *live* proxy).
+            stale = _read_metadata(sock_path)
+            if stale:
+                stale_workdir = stale.get("workdir")
+                if (stale_workdir
+                        and os.path.realpath(str(stale_workdir))
+                        != os.path.realpath(workdir)):
+                    raise PushProxyConflict(
+                        f"stale push proxy metadata at {sock_path} records "
+                        f"workdir '{stale_workdir}', not requested "
+                        f"'{workdir}' (workdir token collision)")
             _unlink_socket_file(sock_path)
 
             if not _start_proxy_subprocess(sock_path, workdir, allowed_branch):
@@ -1075,7 +1126,12 @@ def start_push_proxy(container_name: str, workdir: str,
     # socket can be found after a TUI restart without a registry.
     sock_dir = os.path.join(tempfile.gettempdir(),
                             f"{_SOCKET_DIR_PREFIX}{container_name}")
-    os.makedirs(sock_dir, exist_ok=True)
+    try:
+        os.makedirs(sock_dir, exist_ok=True)
+    except OSError as exc:
+        raise PushProxyError(
+            f"could not create push proxy directory {sock_dir}: {exc}"
+        ) from exc
     sock_path = os.path.join(sock_dir, "push.sock")
     with _start_lock(sock_dir):
         # Remove stale socket before spawning (see above for why we handle

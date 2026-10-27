@@ -618,6 +618,23 @@ class TestStartLock:
         finally:
             os.chmod(lock_path, 0o600)
 
+    def test_unusable_socket_dir_is_skipped_by_teardown(self, tmp_path):
+        """A non-directory squatting on the socket-dir name must not abort.
+
+        ``/tmp`` is world-writable, so a planted regular file can occupy a
+        proxy directory name.  ``makedirs`` then fails; teardown must treat
+        that like "busy" and a start must report a PushProxyError, matching
+        the unusable-lock-file handling.
+        """
+        sock_dir = str(tmp_path / "squat-dir")
+        Path(sock_dir).write_text("squatter\n")
+        with push_proxy_mod._start_lock(sock_dir, blocking=False) as held:
+            assert held is False
+        with pytest.raises(push_proxy_mod.PushProxyError,
+                           match="could not create push proxy directory"):
+            with push_proxy_mod._start_lock(sock_dir, blocking=True):
+                pass
+
 
 class TestSharedProxy:
     """Tests for (session_tag, pr_id) shared proxy behaviour."""
@@ -1219,6 +1236,63 @@ class TestWorkdirKeyedProxies:
         assert started == sock
         assert push_proxy_mod.proxy_is_alive(started)
 
+    def test_start_reports_a_squatted_socket_dir_as_proxy_error(self, tmp_path):
+        """/tmp is world-writable: a file on the dir name must not leak OSError.
+
+        A bare ``FileExistsError`` here used to surface through
+        ``wrap_claude_cmd`` as "Is docker running?", hiding the real cause.
+        """
+        from pm_core.push_proxy import PushProxyError
+
+        impl = self._workdir(tmp_path, "impl")
+        token = push_proxy_mod._workdir_token(str(impl))
+        sock_dir = push_proxy_mod._shared_sock_dir_path(
+            self.TAG, self.PR, token)
+        Path(sock_dir).write_text("squatter\n")
+        try:
+            with pytest.raises(PushProxyError,
+                               match="could not create push proxy directory"):
+                self._start("impl-squat", impl)
+        finally:
+            os.unlink(sock_dir)
+
+    def test_legacy_start_reports_a_squatted_dir_as_proxy_error(self):
+        """Same guard on the legacy per-container path."""
+        from pm_core.push_proxy import PushProxyError
+
+        sock_dir = os.path.join(
+            tempfile.gettempdir(),
+            f"{push_proxy_mod._SOCKET_DIR_PREFIX}legacy-squat")
+        Path(sock_dir).write_text("squatter\n")
+        try:
+            with pytest.raises(PushProxyError,
+                               match="could not create push proxy directory"):
+                start_push_proxy("legacy-squat", "/tmp", self.BRANCH)
+        finally:
+            os.unlink(sock_dir)
+
+    def test_dead_socket_with_foreign_metadata_is_refused(
+            self, tmp_path, live_proxies):
+        """A workdir-token collision must not silently re-point a key.
+
+        The live-proxy check (R3) cannot fire when the socket is dead, so a
+        leftover sidecar recording a different workdir has to be refused on
+        the spawn path too.
+        """
+        from pm_core.push_proxy import PushProxyConflict
+
+        impl = self._workdir(tmp_path, "impl")
+        qa = self._workdir(tmp_path, "s-1")
+        token = "deadbeefdeadbeef"
+        with patch("pm_core.push_proxy._workdir_token", return_value=token):
+            sock_dir = push_proxy_mod._shared_sock_dir_path(
+                self.TAG, self.PR, token)
+            os.makedirs(sock_dir, exist_ok=True)
+            push_proxy_mod._write_metadata(
+                os.path.join(sock_dir, "push.sock"), str(impl), self.BRANCH)
+            with pytest.raises(PushProxyConflict, match="token collision"):
+                self._start("qa-wd", qa)
+
     def test_stop_session_removes_kept_socket_dirs(self, tmp_path,
                                                    live_proxies):
         impl = self._workdir(tmp_path, "impl")
@@ -1362,6 +1436,20 @@ class TestWorkdirKeyedProxies:
                    return_value=False):
             with pytest.raises(PushProxyError):
                 self._start("not-ready", impl)
+
+    def test_spawn_failure_is_reported_as_a_proxy_error(self, tmp_path):
+        """A Popen failure must not escape as a bare OSError.
+
+        ``wrap_claude_cmd`` blames a bare OSError on the container runtime
+        ("Is docker running?"), hiding the real cause.
+        """
+        from pm_core.push_proxy import PushProxyError
+
+        impl = self._workdir(tmp_path, "impl")
+        with patch("pm_core.push_proxy.subprocess.Popen",
+                   side_effect=OSError("cannot exec")):
+            with pytest.raises(PushProxyError, match="did not become ready"):
+                self._start("spawn-fail", impl)
 
     def test_concurrent_starts_spawn_one_daemon(self, tmp_path):
         """The per-directory start lock serialises check-and-spawn (R7)."""

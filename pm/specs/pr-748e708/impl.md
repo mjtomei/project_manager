@@ -470,3 +470,48 @@ Tests: `test_unopenable_lock_file_is_skipped_by_teardown`,
 The first three fail at 23b21cc0 for the right reason (a `PermissionError`
 escapes both lock modes; the sweep leaves the directory; the foreign
 directory is `rmtree`d).
+
+## Review iteration 8 refinements
+
+Added during the eighth review pass (consistent with R3/R5/R7; no
+requirement changed):
+
+- **A squatted socket-directory name no longer escapes as a bare
+  `OSError`.** Iteration 7 hardened the *lock file* against a
+  world-writable `/tmp`, but the directory itself was still unguarded:
+  a regular file planted at
+  `/tmp/pm-push-proxy-{tag}-{pr}-{token}` (or at the legacy
+  per-container path) made `os.makedirs(..., exist_ok=True)` raise
+  `FileExistsError` out of `start_push_proxy`, which `wrap_claude_cmd`
+  reported as "Is docker running?" — the same misleading diagnosis.
+  `_start_lock` now converts it like the lock-file case (blocking:
+  `PushProxyError` naming the directory; non-blocking: yields `False`,
+  so teardown skips it), the legacy path raises `PushProxyError`
+  directly, and `_shared_sock_dir` treats its own `makedirs` as
+  best-effort so the discovery symlink never fails a start.
+- **The workdir-token collision edge case is enforced.** The spec's
+  "Hash collision → metadata check (R3) refuses the mismatch" edge case
+  was only half-implemented: R3's check ran on the *reuse* path, so a
+  dead socket whose `proxy.json` recorded a different workdir (only
+  possible via a token collision) was silently replaced by a daemon for
+  the requested clone. The spawn path now reads the stale sidecar and
+  raises `PushProxyConflict` naming both paths instead of re-pointing
+  the key.
+- **A spawn failure is a proxy error, not a bare `OSError`.**
+  `_start_proxy_subprocess` let `subprocess.Popen` raise `OSError` (e.g.
+  a missing interpreter), which escaped `start_push_proxy` and was
+  reported by `wrap_claude_cmd` as "Is docker running?" — the same
+  misdiagnosis as the squatted directory. It now logs and returns
+  `False`, so R5's `PushProxyError` naming the socket and workdir is
+  what the caller sees, and the helper's documented contract ("returns
+  True once connectable, False otherwise") is actually true.
+
+Tests: `test_unusable_socket_dir_is_skipped_by_teardown`,
+`test_start_reports_a_squatted_socket_dir_as_proxy_error`,
+`test_legacy_start_reports_a_squatted_dir_as_proxy_error`,
+`test_dead_socket_with_foreign_metadata_is_refused`,
+`test_spawn_failure_is_reported_as_a_proxy_error`. All five fail at
+ece0e02c for the right reason (`FileExistsError` escapes both lock
+modes; a bare `FileExistsError` instead of `PushProxyError` on both
+start paths; the collision case spawns instead of raising; `OSError`
+escapes instead of `PushProxyError`).
