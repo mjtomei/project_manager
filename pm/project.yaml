@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T20:21:10.389314+00:00'
+  updated_at: '2026-10-27T21:46:31.185734+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14311,6 +14311,22 @@ prs:
       ignoring cwd). Evidence /pm-captures/scenarios/37/README.md.'
     created_at: '2026-10-27T20:21:10Z'
     last_edited: '2026-10-27T20:21:10Z'
+  - id: note-f34bbd8
+    text: 'QA S35 (2026-10-27, work/claude-opus-5-5): fixed two real stop/resume bugs,
+      both pushed. (1) 3d4f44c9: zz t during PASS verification was processed as a
+      FLAG ("verifier pane disappeared"): follow-up sent to the worker after the stop,
+      PASS dropped to "?", container released under a live worker. Now: stop-observed
+      verifier failures are not recorded and the poll ends right after its sleep,
+      so the PASS is downgraded to INPUT_REQUIRED "PASS was not verified before the
+      run was stopped". (2) 48780e13: after a killed worker relaunch failed, the poll
+      fallback _get_scenario_pane returned the window first pane (the concretizer),
+      so retries stopped and the run hung forever showing PASS. Now dead workers never
+      use the window lookup. Live evidence /pm-captures/scenarios/35 (pre-fix/post-fix).
+      Story 1 a-e held on a44a70dc and 3a93473c. Full suite 4258 passed. Fixture note:
+      image = Dockerfile minus agg/Node/Playwright (builds in 3 min); story 3 takes
+      ~94 min because inline retry backoff blocks the poll loop.'
+    created_at: '2026-10-27T21:46:31Z'
+    last_edited: '2026-10-27T21:46:31Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
