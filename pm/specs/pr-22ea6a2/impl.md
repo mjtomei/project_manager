@@ -521,3 +521,21 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   ``~/.claude/projects`` (all 9 ``stop_reason: null`` thinking-only records
   are followed by another assistant record; the 7252 ``text`` ones are all
   followed by a user record or EOF).  Pinned by two direct tests.
+
+## Review-iteration notes (2aac i4)
+
+* **A compaction summary is not a submitted prompt** — when a session runs
+  out of context, Claude Code writes the compaction summary ("This session is
+  being continued from a previous conversation…") as a plain-string
+  ``type: "user"`` record flagged ``isCompactSummary`` (with
+  ``isVisibleInTranscriptOnly``).  ``latest_turn_state`` read it as a pending
+  prompt, so a session that ended right after compacting read ``in_progress``
+  and stalled the fresh handoff until the user typed something.  In the local
+  corpus every such tail record (162 of 13,469 transcripts) is preceded by a
+  completed ``end_turn`` assistant answer, so skipping it reads ``complete``
+  — the right answer.  ``_is_non_prompt_user_record`` now skips the precise
+  ``isCompactSummary`` flag (not the broader
+  ``isVisibleInTranscriptOnly``): a false ``in_progress`` is recoverable,
+  a false ``complete`` would start the review over in-flight work.  Two
+  direct tests (summary after a completed turn → ``complete``; summary over
+  an unanswered prompt → ``in_progress``).

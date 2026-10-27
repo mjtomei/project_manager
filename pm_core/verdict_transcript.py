@@ -141,7 +141,10 @@ def latest_turn_state(transcript_path: str | Path | None) -> str:
     a ``tool_result``) means the agent still owes a response, or when the
     newest assistant record is a partial one with no answer yet (a streamed
     thinking block), and ``"unknown"`` when the transcript is missing, empty
-    or unparseable.
+    or unparseable.  Injected/transcript-only user records (slash-command
+    output, ``!`` shell commands, task notifications, compaction summaries)
+    are not prompts and are skipped — see
+    :func:`_is_non_prompt_user_record`.
 
     Used by the explicit fresh-autostart handoff: a completed turn is the
     signal that the user's implementation feedback turn is over.
@@ -176,7 +179,16 @@ _NON_PROMPT_USER_PREFIXES = ("<local-command-", "<command-name>",
 
 def _is_non_prompt_user_record(rec: dict) -> bool:
     """Whether a ``type: "user"`` record is injected/meta, not a prompt."""
-    if rec.get("isMeta"):
+    # A compaction summary ("This session is being continued from a previous
+    # conversation...") is written as a plain-string user record after the
+    # session ran out of context.  It is transcript-only context, not a
+    # submitted prompt; treating it as one reads "in_progress" forever for a
+    # session that ended right after compacting (real transcripts: every such
+    # tail record is preceded by a completed ``end_turn`` assistant answer).
+    # ``isVisibleInTranscriptOnly`` accompanies it in real records but is the
+    # broader flag, so only the precise ``isCompactSummary`` is trusted here —
+    # a false "in_progress" is recoverable, a false "complete" is not.
+    if rec.get("isMeta") or rec.get("isCompactSummary"):
         return True
     msg = rec.get("message")
     content = msg.get("content") if isinstance(msg, dict) else None

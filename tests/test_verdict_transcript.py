@@ -354,6 +354,46 @@ def test_turn_state_ignores_meta_user_records(tmp_path: Path) -> None:
     assert latest_turn_state(p) == "complete"
 
 
+def test_turn_state_ignores_compaction_summary_records(tmp_path: Path) -> None:
+    # Running out of context writes the compaction summary as a plain-string
+    # user record (``isCompactSummary``/``isVisibleInTranscriptOnly``).  It is
+    # transcript-only context, not a submitted prompt: a session that ended
+    # right after compacting must still read "complete", otherwise the fresh
+    # handoff waits forever (every such tail record in real transcripts is
+    # preceded by a completed ``end_turn`` assistant answer).
+    summary = json.dumps({
+        "type": "user",
+        "isCompactSummary": True,
+        "isVisibleInTranscriptOnly": True,
+        "message": {
+            "role": "user",
+            "content": "This session is being continued from a previous "
+                       "conversation that ran out of context. The summary "
+                       "below covers the earlier portion of the conversation.",
+        },
+    })
+    p = _write(tmp_path, [_user_line("do it"), _assistant_line("done"),
+                          summary])
+    assert latest_turn_state(p) == "complete"
+
+
+def test_turn_state_compaction_summary_over_a_pending_prompt(tmp_path: Path) -> None:
+    # Compaction happens on the user's prompt, before the agent answers: the
+    # summary is skipped and the still-unanswered prompt keeps the turn
+    # "in_progress" (a false "complete" would start a review over in-flight
+    # work).
+    summary = json.dumps({
+        "type": "user",
+        "isCompactSummary": True,
+        "message": {"role": "user", "content": "This session is being "
+                                                "continued from a previous "
+                                                "conversation..."},
+    })
+    p = _write(tmp_path, [_assistant_line("done"), _user_line("fix it"),
+                          summary])
+    assert latest_turn_state(p) == "in_progress"
+
+
 def test_turn_state_ignores_bang_shell_records(tmp_path: Path) -> None:
     # ``!`` shell commands are recorded as non-meta user records (input, then
     # stdout/stderr).  The agent owes no reply, so a ``!ls`` left at the end of
