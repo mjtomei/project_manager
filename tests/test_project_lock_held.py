@@ -266,6 +266,29 @@ def test_scheduler_pass_hands_off_without_waiting(tmp_path):
     assert not _logged(app, "Error:")
 
 
+
+def test_scheduler_pass_sign_off_step_lock_timeout_is_one_warning(tmp_path):
+    """A sign-off step that times out on the lock (another pm process
+    writing project.yaml) is retried by the next pass: one warning line, no
+    traceback (S81: a sign-off verdict write landed inside a 10 s holder)."""
+    from pm_core.tui import auto_start, signoff_ui
+
+    def _to_sign_off(d):
+        store.get_pr(d, "pr-001")["status"] = "sign_off"
+    app = _make_app(tmp_path)
+    store.locked_update(app._root, _to_sign_off)
+    app._data = store.load(app._root)
+    busy = store.StoreLockTimeout("Could not acquire lock within 2.0s")
+    with patch.object(auto_start, "is_enabled", return_value=True), \
+            patch.object(auto_start, "in_scope", return_value=True), \
+            patch.object(signoff_ui, "step", side_effect=busy) as step, \
+            patch.object(signoff_ui, "_log") as log:
+        signoff_ui.advance_all(app)
+    step.assert_called_once()
+    log.exception.assert_not_called()
+    log.warning.assert_called_once()
+    assert "pr-001" in log.warning.call_args[0]
+
 def test_review_hand_off_transition_waits_for_a_held_lock(tmp_path):
     from tests.test_review_qa_handoff_unloadable import (
         _self_driving_app, _status)

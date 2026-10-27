@@ -439,5 +439,9 @@ def advance_all(app, prs: list[dict] | None = None) -> None:
                 # not be handed back to sign-off on the old PASS.)
                 # Retried on the next pass, so never wait for the lock.
                 start_signoff(app, pr_id, lock_timeout=store.NO_WAIT)
+        except store.StoreLockTimeout as e:
+            # Another pm process is writing project.yaml; the next pass
+            # retries, so this is not a failure worth a traceback.
+            _log.warning("signoff_ui: advance of %s deferred: %s", pr_id, e)
         except Exception:
             _log.exception("signoff_ui: advance failed for %s", pr_id)

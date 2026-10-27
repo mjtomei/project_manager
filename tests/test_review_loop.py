@@ -695,3 +695,26 @@ class TestGenerateReviewPromptInputRequired:
         assert "INPUT_REQUIRED" in prompt
         # Should explain that it's reserved for genuine ambiguities
         assert "needs the user's attention" in prompt
+
+
+# --- _launch_review_window child timeout ---
+
+def test_launch_child_outlives_the_return_clear_wait():
+    """The ``pm pr review --fresh --review-loop`` child may wait up to
+    RETURN_CLEAR_WAIT_SECONDS past its lock timeout to clear a sign-off
+    return's ``awaiting`` after its window opened; the loop must not kill
+    it first (S81: a 150 s project.yaml holder left ``awaiting`` and the
+    claim behind the live window, and a tick relaunched over it)."""
+    from pm_core import review_loop, store
+    from pm_core.signoff import RETURN_CLEAR_WAIT_SECONDS
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch.object(review_loop.subprocess, "run", side_effect=fake_run):
+        review_loop._launch_review_window("pr-x", "/tmp", iteration=1)
+    assert seen["timeout"] >= (review_loop._LAUNCH_TIMEOUT
+                               + store.LOCK_TIMEOUT_SECONDS
+                               + RETURN_CLEAR_WAIT_SECONDS)

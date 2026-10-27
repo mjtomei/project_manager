@@ -52,9 +52,10 @@ ALL_VERDICTS = (VERDICT_PASS, VERDICT_NEEDS_WORK, VERDICT_INPUT_REQUIRED)
 # almost certainly false positives from prompt text shown in the pane.
 _VERDICT_GRACE_PERIOD = 20
 
-# Upper bound on one ``pm pr review`` window launch (the relauncher's
-# subprocess timeout).  A container-mode launch spends most of it creating
-# the container before the window exists.
+# Upper bound on one ``pm pr review`` launch opening its window.  A
+# container-mode launch spends most of it creating the container before the
+# window exists.  (The relauncher's subprocess timeout adds the sign-off
+# return's clear wait, see _launch_review_window.)
 _LAUNCH_TIMEOUT = 120
 # How long a resumed loop waits for a launch that has not written its
 # iteration transcript symlink yet (pm start-up before the launcher runs).
@@ -136,9 +137,19 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
     cmd.append(pr_id)
     _log.info("relauncher: pr=%s iteration=%s loop_id=%s cmd=%s",
               pr_id, iteration, loop_id, cmd)
+    # After opening a sign-off review return's window the child keeps
+    # waiting out a busy project.yaml for up to RETURN_CLEAR_WAIT_SECONDS
+    # past its lock timeout to clear ``awaiting``.  Killed sooner, it
+    # leaves ``awaiting`` and the hop's claim behind the live window, and
+    # the first tick after the claim expires launches a second --fresh
+    # review over it (S81).
+    from pm_core import store
+    from pm_core.signoff import RETURN_CLEAR_WAIT_SECONDS
+    timeout = (_LAUNCH_TIMEOUT + store.LOCK_TIMEOUT_SECONDS
+               + RETURN_CLEAR_WAIT_SECONDS)
     t0 = time.monotonic()
     result = subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True,
-                            timeout=_LAUNCH_TIMEOUT)
+                            timeout=timeout)
     elapsed = time.monotonic() - t0
     if result.returncode != 0:
         stderr = result.stderr.strip() if result.stderr else ""
