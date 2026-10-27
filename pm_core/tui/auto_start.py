@@ -281,11 +281,16 @@ def _parse_stop_marks(raw) -> tuple[set[str] | None, str | None]:
     dropped while auto-start resumes (that would auto-merge without the
     user's holds); the caller then leaves auto-start OFF.  ``None`` means
     the key was absent/empty.
+
+    Each entry must be a valid PR id (see
+    :func:`pm_core.autostart_state.valid_pr_id`).  A padded/whitespace id
+    would never match a PR in the hold lookup, so accepting it would
+    silently lose the gate — reject the whole set instead.
     """
     if raw is None:
         return None, None
     if not isinstance(raw, list) or not all(
-            isinstance(x, str) and x.strip() for x in raw):
+            autostart_state.valid_pr_id(x) for x in raw):
         return None, ("saved auto-start state has a malformed "
                       "stop_before_merge merge-gate set")
     return set(raw), None

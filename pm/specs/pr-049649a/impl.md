@@ -198,10 +198,13 @@ Rules, in order:
    `mode` is only `off`/`targets`; `status_rows` and `format_text` drop
    the all-mode branches.
 4. **Merge gates are evidence, not optional.** Malformed
-   `stop_before_merge` (not a list of strings) must reject autostart for
-   that restore (no auto-merge without known holds) and produce a
-   diagnostic; a valid list is still restored even when the target parse
-   failed.
+   `stop_before_merge` (not a list of strings, or an entry that is not a
+   valid PR id — e.g. whitespace-padded, which could never match a PR and
+   would silently lose its hold) must reject autostart for that restore
+   (no auto-merge without known holds) and produce a diagnostic; a valid
+   list is still restored even when the target parse failed. Id validity
+   is shared with the target parser
+   (`autostart_state.valid_pr_id`).
 5. **Persistence round-trip.** Save→consume of an explicit multi-target
    collection with mixed policies must reproduce exactly the same targets,
    order, and holds.

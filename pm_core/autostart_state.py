@@ -220,8 +220,14 @@ _ALL_MODE_ERROR = (
 _TARGETLESS_ERROR = "saved auto-start state has no target PRs"
 
 
-def _valid_pr_id(value) -> bool:
-    """A target id must be a non-empty, whitespace-free string."""
+def valid_pr_id(value) -> bool:
+    """A saved PR id must be a non-empty, whitespace-free string.
+
+    Shared by the target parser and the saved merge-gate set: an id that
+    cannot equal a real PR id (padded with whitespace, say) would be
+    silently dropped from the hold lookup, so it is malformed saved state,
+    not something to coerce.
+    """
     return (isinstance(value, str) and bool(value) and value == value.strip()
             and not any(c.isspace() for c in value))
 
@@ -237,7 +243,7 @@ def _parse_target_entries(raw: list) -> tuple[dict[str, dict], str | None]:
     targets: dict[str, dict] = {}
     for i, entry in enumerate(raw):
         if isinstance(entry, str):
-            if not _valid_pr_id(entry):
+            if not valid_pr_id(entry):
                 return {}, f"targets[{i}] is not a valid PR id"
             if entry in targets:
                 return {}, f"targets[{i}] duplicates target {entry!r}"
@@ -247,7 +253,7 @@ def _parse_target_entries(raw: list) -> tuple[dict[str, dict], str | None]:
             return {}, (f"targets[{i}] must be a PR id string or a record "
                         "object")
         pr_id = entry.get("pr_id")
-        if not _valid_pr_id(pr_id):
+        if not valid_pr_id(pr_id):
             return {}, f"targets[{i}] has a missing or invalid pr_id"
         if pr_id in targets:
             return {}, f"targets[{i}] duplicates target {pr_id!r}"
@@ -330,7 +336,7 @@ def targets_from_breadcrumb(data) -> BreadcrumbTargets:
     # all-mode.
     if "target" in data and data.get("target") is not None:
         legacy = data.get("target")
-        if not _valid_pr_id(legacy):
+        if not valid_pr_id(legacy):
             return BreadcrumbTargets(
                 error="saved auto-start state has an invalid legacy target")
         if auto_start is False:

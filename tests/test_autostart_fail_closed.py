@@ -261,6 +261,10 @@ class TestConsumeFailClosed:
         assert auto_start.managed_ids(app) == set()
         assert auto_start.in_scope(app, "pr-unrelated") is False
         assert launched == []
+        # What ``pm autostart status --json`` would report after the restore.
+        status = auto_start.build_status(app)
+        assert status["mode"] == "off"
+        assert status["targets"] == [] and status["runs"] == []
         assert any("remains off" in m for m in app.logs)
         # Evidence is preserved, not silently deleted.
         assert not (tmp_path / "autostart-resume.json").exists()
@@ -372,6 +376,26 @@ class TestConsumeFailClosed:
         assert any("stop_before_merge" in m for m in app.logs)
         # Autostart is off, so restored loop state cannot merge anything.
         assert app._review_loops["pr-a"].iteration == 2
+
+    @pytest.mark.parametrize("marks", [
+        [" pr-a"],          # padded: would never match the real id
+        ["pr-a "],
+        ["pr\ta"],
+        ["pr-a", "pr-b", ""],
+    ])
+    def test_invalid_stop_mark_id_keeps_autostart_off(self, tmp_path, marks):
+        """An id that cannot match a PR would silently lose its hold."""
+        app = FakeApp([_pr("pr-a"), _pr("pr-b")], tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "auto_start": True,
+            "targets": [{"pr_id": "pr-a"}, {"pr_id": "pr-b"}],
+            "stop_before_merge": marks,
+        })
+        _consume(app, tmp_path)
+        assert app._auto_start is False
+        assert app._auto_start_targets == {}
+        assert app.launched == []
+        assert any("stop_before_merge" in m for m in app.logs)
 
     def test_corrupt_json_clears_pre_existing_scope(self, tmp_path):
         """A corrupt file must fail closed even if this app somehow already
@@ -585,3 +609,15 @@ class TestWatcherScopeFailClosed:
         assert "Auto-start targets: **pr-b**" in prompt
         assert "Managed PRs (targets + their transitive dependencies): pr-b" \
             in prompt
+
+    def test_auto_start_watcher_with_no_targets_is_observation_only(self):
+        """The real watcher path (a TUI/resumed auto-start watcher with no
+        targets) must carry the fail-closed scope block, not the general
+        "fix what you can" instructions."""
+        from pm_core.watchers.auto_start_watcher import AutoStartWatcher
+        w = AutoStartWatcher(pm_root=str(Path("/tmp")))
+        assert w.auto_start_targets == []
+        with patch("pm_core.store.load", return_value=self.DATA):
+            prompt = w.generate_prompt(1)
+        assert "no PR is managed" in prompt
+        assert "Observation and reporting only" in prompt
