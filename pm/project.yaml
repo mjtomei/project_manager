@@ -36166,7 +36166,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/268
   gh_pr_number: 268
   created_at: '2026-10-26T05:09:15.878235+00:00'
-  updated_at: '2026-10-27T20:54:02.205686+00:00'
+  updated_at: '2026-10-27T23:06:05.140230+00:00'
   started_at: '2026-10-27T19:07:41.620041+00:00'
   reviewed_at: null
   merged_at: null
@@ -36227,6 +36227,53 @@ prs:
       argv (#249 owns that).'
     created_at: '2026-10-27T20:54:02Z'
     last_edited: '2026-10-27T20:54:02Z'
+  - id: note-2af6d76
+    text: 'QA scenario 6 concretizer notes (2026-10-27): (1) The apostrophe-workdir
+      edge case cannot be driven with a real claude launch: build_claude_shell_cmd
+      emits "$(cat <workdir>/pm/prompts/...)" with the path unquoted (pre-existing
+      at 0edfd481, unchanged by this PR), so a workdir containing an apostrophe makes
+      the pane command fail with ''sh: Syntax error: Unterminated quoted string''
+      and the session never starts. A workdir containing a space makes the prompt
+      empty (same raw $(cat ...)), also pre-existing. Scenario 6 therefore exercises
+      the apostrophe path with fake-claude (no prompt file) and the space path with
+      real claude via a workdir recorded by ''pm pr start --workdir <repo with a space>'',
+      where pane cwd/start-command/TUI tracking are still observable. (2) fake-claude
+      returns before adding --model/cd, so the ''--model openai:...'' flag check needs
+      a non-fake launch (read the launch line from pm log). (3) The tmux-failure-cleanup
+      edge case (no env file left when tmux fails) is not deterministically drivable
+      from the user surface; it is covered by tests/test_tmux.py::test_failed_tmux_removes_the_env_file.
+      (4) The TUI ''s'' action builds ''--transcript {tdir}/...'' unquoted and shlex.splits
+      it, so a project path containing a space breaks the TUI launch (pre-existing);
+      use a plain project root and record the awkward workdir with pm pr start --workdir.'
+    created_at: '2026-10-27T22:13:15Z'
+    last_edited: '2026-10-27T22:13:15Z'
+  - id: note-1f3143e
+    text: 'QA scenario 6 (baseline / hostile values / awkward workdirs) PASS. Observations
+      only, not failures: (1) with a provider selected, the launch line in pm log
+      is the pre-wrap command (`cd <workdir> && claude --model openai:synth-model
+      ...`, secret-free) while #{pane_start_command} is the `sh -c "set -a; . <env
+      file>; ..."` wrapper — the log does not show the wrapper; (2) `pm pr start --workdir
+      <new>` is ignored for an in_progress PR ("reusing existing workdir"); set `pm
+      pr edit <id> --status pending` first to re-record a workdir; (3) under fake-claude
+      the tech-tree tracked marker (spinner) is only visible ~5 s after launch because
+      the fake writes idle_prompt, and a killed impl pane leaves a stale spinner on
+      its node (pre-existing TUI behavior, unrelated to the env transport). Evidence:
+      /pm-captures/scenarios/6/ (CLI cast+mp4 for baseline, hostile key byte-for-byte,
+      stale sweep; tmux pane captures for space workdir).'
+    created_at: '2026-10-27T22:43:09Z'
+    last_edited: '2026-10-27T22:43:09Z'
+  - id: note-4da9b61
+    text: QA S6 capture artifacts completed after the review flag. /pm-captures/scenarios/6/cli/
+      now has transcript.log (tmux pipe-pane scrollback of the recorded session) alongside
+      recording.cast, recording.mp4 and manifest.md; new /pm-captures/scenarios/6/tui/
+      holds the recipe two-session TUI recording (transcript.log, recording.cast,
+      recording.mp4, manifest.md) for the space workdir (real claude, BASH_ENV-held
+      pane, cd outside wrapper, spinner, transcript UUID match) and the apostrophe
+      workdir (fake backend, wrapper without cd, canary only in the process env).
+      All nine stories were re-executed or re-verified on e559149f; verdict unchanged
+      PASS.
+    created_at: '2026-10-27T23:06:05Z'
+    last_edited: '2026-10-27T23:06:05Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
