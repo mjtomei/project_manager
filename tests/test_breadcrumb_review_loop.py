@@ -624,6 +624,55 @@ class TestBreadcrumbRoundTrip:
         # _start_loop was called with the restored state
         mock_start.assert_called_once()
 
+    def test_round_trips_the_retry_notice_key(self, tmp_path):
+        """A restart mid-retry must not re-announce a retry the user already
+        saw: the per-episode notice key travels with the breadcrumb, and
+        ``_start_loop`` must not reset it on resume (only a new retry
+        episode clears it)."""
+        (tmp_path / "merge-restart").touch()
+
+        state = _make_running_state("pr-001", iteration=2)
+        state.latest_verdict = "LAUNCH_FAILED"
+        state.retry_iteration = 2
+        state.launch_attempts = 2
+        state.launch_retryable = True
+        state.last_launch_error = "container setup failed"
+        state._ui_notified_retry = 2
+        save_app = _make_app(review_loops={"pr-001": state}, root=tmp_path)
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.watcher_ui.is_running", return_value=False):
+            from pm_core.tui.auto_start import save_breadcrumb
+            save_breadcrumb(save_app)
+
+        data = json.loads((tmp_path / "autostart-resume.json").read_text())
+        assert data["review_loops"]["pr-001"]["_ui_notified_retry"] == 2
+
+        restore_app = _make_app(auto_start=False, root=tmp_path)
+        restore_app._update_display = MagicMock()
+        restore_app.log_message = MagicMock()
+        pr_data = {"id": "pr-001", "status": "in_review", "workdir": "/tmp/wd"}
+
+        def fake_start(_app, _pr_id, _pr, **kw):
+            # _start_loop marks the loop running synchronously.
+            kw["resume_state"].running = True
+            return True
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start", new_callable=AsyncMock), \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tmux.in_tmux", return_value=True), \
+             patch("pm_core.tui.review_loop_ui._start_loop",
+                   side_effect=fake_start):
+            mock_store.get_pr.return_value = pr_data
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(restore_app))
+
+        rstate = restore_app._review_loops["pr-001"]
+        assert rstate.launch_attempts == 2
+        assert rstate._ui_notified_retry == 2, (
+            "the resumed loop must remember which attempt was announced")
+
 
 # ---------------------------------------------------------------------------
 # pm tui restart command tests

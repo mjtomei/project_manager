@@ -1084,14 +1084,19 @@ def _clear_launch_failure(state: ReviewLoopState) -> None:
 
     Shared by :func:`_reset_launch_retry` (a launch succeeded) and the
     start of a new iteration's episode so the two cannot drift apart.
-    ``retry_episodes`` (the auto-start re-arm cap) and the UI notice key
-    span episodes and are cleared by the caller that owns them.
+    ``retry_episodes`` (the auto-start re-arm cap) is the one field that
+    spans episodes; it is cleared by the caller that owns it.
     """
     state.launch_attempts = 0
     state.next_retry_at = 0.0
     state.last_launch_error = ""
     state.last_launch_artifact = None
     state.launch_retryable = False
+    # The TUI announces each retry attempt once, keyed on the attempt
+    # number.  The key is per episode (attempts restart at 1), so a new
+    # episode must forget what the previous one announced — otherwise its
+    # attempt 2 looks already-notified and is silently swallowed.
+    state._ui_notified_retry = 0
 
 
 def _reset_launch_retry(state: ReviewLoopState) -> None:
@@ -1109,10 +1114,8 @@ def _reset_launch_retry(state: ReviewLoopState) -> None:
     # handoff adopt an earlier run's ``review-<pr>-i<N>.jsonl`` verdict for
     # an iteration this loop never launched.
     state.iteration_attempted = False
-    # The TUI announces each retry attempt once, keyed on the attempt
-    # number; without this a *later* iteration's attempt 2 would look
-    # already-announced and be silently swallowed.
-    state._ui_notified_retry = 0
+    # ``_ui_notified_retry`` is cleared by ``_clear_launch_failure`` (the
+    # per-episode notice key) so a later iteration's attempt 2 is announced.
 
 
 def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,

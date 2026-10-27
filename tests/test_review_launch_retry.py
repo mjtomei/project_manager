@@ -1419,6 +1419,32 @@ def test_autostart_status_reports_the_hold_prompt_not_a_stale_launch_error():
     assert run["review"]["artifact"] == ""
 
 
+def test_autostart_status_does_not_repeat_the_artifact_path():
+    """The concise launch error already ends with "(artifact: …)"; the
+    status reason must not append "[artifact: …]" a second time."""
+    from pm_core import autostart_state as st
+    state = ReviewLoopState(
+        pr_id=PR, running=False, iteration=2,
+        latest_verdict=VERDICT_LAUNCH_FAILED, launch_retryable=True,
+        launch_attempts=3,
+        last_launch_error=("Review window launch failed (rc=1): boom "
+                           "(artifact: /tmp/run/launch-artifacts/a.log)"),
+        last_launch_artifact="/tmp/run/launch-artifacts/a.log")
+    status = st.build_status({
+        "prs": [{"id": PR, "title": "T", "status": "in_review",
+                 "workdir": "/tmp/wd"}],
+        "targets": {PR: {}},
+        "enabled": True,
+        "review_loops": {PR: st.review_progress_input(state)},
+    })
+    run = next(r for r in status["runs"] if r["pr_id"] == PR)
+    assert run["state"] == "failed"
+    assert "review launch failed (retryable)" in run["reason"]
+    assert run["reason"].count("/tmp/run/launch-artifacts/a.log") == 1
+    # The JSON entry still carries the artifact on its own field.
+    assert run["review"]["artifact"] == "/tmp/run/launch-artifacts/a.log"
+
+
 def test_autostart_status_keeps_the_retry_evidence_while_the_retry_runs():
     """A loop sleeping out the backoff has no verdict yet; the retry episode
     must stay visible in the status input (this is the stranding state the
@@ -1546,6 +1572,47 @@ def test_auto_start_rearms_retryable_failure(tmp_path):
     assert start.call_args.kwargs["resume_state"] is state
     assert state.launch_attempts == 0
     assert state.retry_episodes == 1
+
+
+def test_auto_start_rearm_clears_the_retry_notice_key(tmp_path):
+    """The re-arm starts a new retry episode, whose attempts restart at 1.
+    The per-episode notice key must be cleared, or its attempt 2 would look
+    already-announced (the previous episode announced attempt 2) and the
+    user would never hear about the new episode's retry."""
+    from pm_core.tui import auto_start
+    state = ReviewLoopState(pr_id=PR, running=False,
+                            latest_verdict=VERDICT_LAUNCH_FAILED,
+                            launch_retryable=True, retry_ready_at=0,
+                            retry_episodes=0, iteration=1,
+                            launch_attempts=3, _ui_notified_retry=3,
+                            _transcript_dir=str(tmp_path))
+    app = _auto_app(tmp_path, state)
+    with patch("pm_core.tui.review_loop_ui._start_loop") as start, \
+            patch("pm_core.tmux.in_tmux", return_value=True):
+        auto_start._auto_start_review_loops(app, app._data["prs"])
+    start.assert_called_once()
+    assert state._ui_notified_retry == 0
+
+
+def test_auto_start_rearm_restores_the_notice_key_when_it_cannot_start(
+        tmp_path):
+    """A bail-out restores the whole episode, including the notice key, so
+    the still-visible failure is not re-announced later."""
+    from pm_core.tui import auto_start
+    state = ReviewLoopState(pr_id=PR, running=False,
+                            latest_verdict=VERDICT_LAUNCH_FAILED,
+                            launch_retryable=True, retry_ready_at=0,
+                            retry_episodes=1, iteration=1,
+                            launch_attempts=3, _ui_notified_retry=3,
+                            _transcript_dir=str(tmp_path))
+    app = _auto_app(tmp_path, state)
+    with patch("pm_core.tui.review_loop_ui._start_loop",
+               return_value=False), \
+            patch("pm_core.tmux.in_tmux", return_value=True):
+        auto_start._auto_start_review_loops(app, app._data["prs"])
+    assert state.retry_episodes == 1
+    assert state.launch_retryable is True
+    assert state._ui_notified_retry == 3
 
 
 def test_auto_start_does_not_rearm_killed_or_cooldown(tmp_path):
@@ -1679,6 +1746,9 @@ def test_retry_notice_is_only_for_a_real_retry(tmp_path):
     msg = app.log_message.call_args[0][0]
     assert "Review launch retry" in msg
     assert "attempt 2" in msg
+    # The recorded error is the *previous* attempt's failure; the wording
+    # must not read as though the attempt now starting already failed.
+    assert "attempt 1 failed" in msg
     assert "container setup failed" in msg
     assert str(tmp_path / "a.log") in msg
 

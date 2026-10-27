@@ -249,7 +249,11 @@ def _start_loop(app, pr_id: str, pr: dict | None,
         state.stop_requested = False
         state._ui_notified_done = False
         state._ui_notified_input = False
-        state._ui_notified_retry = 0
+        # ``_ui_notified_retry`` is deliberately *not* reset here: it is
+        # persisted in the breadcrumb so a merge restart mid-episode does
+        # not re-announce a retry the user already saw.  It is cleared at
+        # each new retry episode's start (``_clear_launch_failure``), and
+        # the auto-start re-arm clears it explicitly.
         app._review_loops[pr_id] = state
         _log.info("review_loop_ui: resuming loop for %s at iteration %d", pr_id, state.iteration)
     else:
@@ -494,14 +498,18 @@ def _poll_loop_state_inner(app) -> None:
             # A failed launch that is being retried: surface each new
             # attempt (bounded, so this cannot spam forever).  Gated on a
             # recorded error so a normal first attempt (which also has
-            # launch_attempts == 1) is never announced as a retry.
+            # launch_attempts == 1) is never announced as a retry.  The
+            # recorded error belongs to the attempt that just failed, not
+            # to the one starting now, so it is labelled as the previous
+            # failure rather than reading as this attempt's outcome.
             attempts = int(getattr(state, "launch_attempts", 0) or 0)
             err = (getattr(state, "last_launch_error", "") or "").strip()
             if attempts > 1 and err \
                     and attempts != state._ui_notified_retry:
                 state._ui_notified_retry = attempts
                 msg = (f"[yellow]Review launch retry[/] for {state.pr_id} "
-                       f"(attempt {attempts}): {err[:200]}")
+                       f"(attempt {attempts}; attempt {attempts - 1} failed: "
+                       f"{err[:200]})")
                 artifact = getattr(state, "last_launch_artifact", None)
                 if artifact:
                     msg += f"\n  Artifact: {artifact}"

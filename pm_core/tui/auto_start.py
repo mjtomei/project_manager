@@ -222,6 +222,9 @@ def save_breadcrumb(app) -> None:
             "iteration_attempted": rstate.iteration_attempted,
             "stale_session_id": rstate.stale_session_id,
             "stale_pane_session_id": rstate.stale_pane_session_id,
+            # Which retry attempt the user has already been told about: a
+            # restart mid-episode must not re-announce it.
+            "_ui_notified_retry": rstate._ui_notified_retry,
             "history": [
                 {
                     "iteration": h.iteration,
@@ -334,6 +337,8 @@ async def consume_breadcrumb(app) -> None:
                 stale_session_id=loop_data.get("stale_session_id", "") or "",
                 stale_pane_session_id=(
                     loop_data.get("stale_pane_session_id", "") or ""),
+                _ui_notified_retry=int(
+                    loop_data.get("_ui_notified_retry", 0) or 0),
             )
             for h in loop_data.get("history", []):
                 rstate.history.append(ReviewIteration(
@@ -1027,15 +1032,19 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
             app.log_message(f"Auto-start: retrying review launch for {pr_id}")
             # Cleared before the thread starts (it must not resume the
             # spent budget), restored if _start_loop bails so the failure
-            # stays retryable instead of being silently disarmed.
+            # stays retryable instead of being silently disarmed.  This is
+            # a new episode, so the per-episode retry notice key is cleared
+            # too: its attempt 2 must be announced even though the previous
+            # episode already announced an attempt with that number.
             saved = (loop.retry_episodes, loop.launch_attempts,
                      loop.next_retry_at, loop.launch_retryable,
-                     loop.retry_ready_at)
+                     loop.retry_ready_at, loop._ui_notified_retry)
             loop.retry_episodes = getattr(loop, "retry_episodes", 0) + 1
             loop.launch_attempts = 0
             loop.next_retry_at = 0.0
             loop.launch_retryable = False
             loop.retry_ready_at = 0.0
+            loop._ui_notified_retry = 0
             tdir = loop._transcript_dir or str(get_transcript_dir(app))
             try:
                 started = _start_loop(app, pr_id, pr,
@@ -1049,7 +1058,7 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
             if not started:
                 (loop.retry_episodes, loop.launch_attempts,
                  loop.next_retry_at, loop.launch_retryable,
-                 loop.retry_ready_at) = saved
+                 loop.retry_ready_at, loop._ui_notified_retry) = saved
                 _log.warning("auto_start: re-arm for %s did not start; "
                              "keeping the retryable failure", pr_id)
             continue

@@ -364,7 +364,9 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                 if err:
                     reason += f": {err}"
                 artifact = review.get("artifact") or ""
-                if artifact:
+                # The concise error already names the artifact ("… (artifact:
+                # …)"); appending it again would print the path twice.
+                if artifact and artifact not in err:
                     reason += f" [artifact: {artifact}]"
                 return phase, "failed", reason
             if last == "HOLD":

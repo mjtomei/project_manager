@@ -103,7 +103,9 @@ fabricated agent verdict) when retries are exhausted.
      and include the artifact path.  `runtime_state` records `verdict`,
      `retryable`, `attempts`, `error`, `artifact`, `retry_ready_at`; the TUI log
      announces each retry and the terminal failure; `pm autostart status` /
-     the runs popup show `review launch failed (retryable): … [artifact: …]`.
+     the runs popup show `review launch failed (retryable): … [artifact: …]`
+     (the bracketed suffix only when the concise error does not already name
+     the artifact).
    - New loop outcomes (never agent verdicts): `LAUNCH_FAILED`, `HOLD`,
      `CLOSED`.  `history` gains **no** entry for a failed launch.
 
@@ -858,3 +860,60 @@ runtime_state mirror of a *re-armed* loop keeps the previous episode's
 while the retry runs; `_interruptible_sleep` re-reads and re-validates the
 ~2 MB `project.yaml` every 2 s to notice a merge/close (≈3 % of a core
 during a backoff, on the loop thread).
+
+## QA refinement (scenario 3) — cancelled-loop status
+
+QA scenario 3 (cancel/supersede during the retry backoff) found that a loop
+stopped by the user during the backoff ends `KILLED`, but the live status
+input kept the earlier attempts' retry evidence: `pm autostart status --json`
+reported `review.verdict: "KILLED"` with `retryable: true`, `attempts: 2`, and
+a non-empty `error`/`artifact`.  Auto-start never re-arms a `KILLED` loop, so
+`retryable: true` was wrong (the `runtime_state` mirror already drops these
+fields for every non-`LAUNCH_FAILED` completion; `review_progress_input`
+special-cased only `HOLD`).  `review_progress_input` now drops the retry
+evidence once the loop has stopped with a non-`LAUNCH_FAILED` outcome, while a
+loop still running its retry episode (no verdict yet, or a re-armed
+`LAUNCH_FAILED` loop) keeps reporting it.  Covered by
+`test_autostart_status_does_not_report_a_cancelled_loop_as_retryable` and
+`test_autostart_status_keeps_the_retry_evidence_while_the_retry_runs`.
+
+## Review iteration 7 (0688) — refinements
+
+Findings from the next review pass, applied on top of iteration 6 (0688) and
+the QA refinement above:
+
+1. **The retry notice names the failure it is reporting.** The notice fired
+   for attempt *N* carried the error recorded by attempt *N-1* unlabelled
+   (`Review launch retry … (attempt 3): Review window launch failed …`), which
+   reads as though the attempt now starting had failed — QA observed this on a
+   healthy attempt 3 (`rc=0`).  It now says `attempt N; attempt N-1 failed:
+   …`.  Covered by the strengthened
+   `test_retry_notice_is_only_for_a_real_retry`.
+2. **A restart mid-retry no longer re-announces the notice.** QA saw the
+   resumed loop re-emit the persisted attempt-2 notice ~1 s after
+   `Review loop resumed …`.  `_ui_notified_retry` is persisted in the
+   breadcrumb and `_start_loop` no longer clears it on resume; the key is
+   cleared where an episode actually starts — `_clear_launch_failure` (shared
+   by `_reset_launch_retry` and the new-iteration episode start) and the
+   auto-start re-arm (which also restores it when the start bails).  Covered
+   by `test_round_trips_the_retry_notice_key`,
+   `test_auto_start_rearm_clears_the_retry_notice_key` and
+   `test_auto_start_rearm_restores_the_notice_key_when_it_cannot_start`.
+3. **The status reason does not print the artifact path twice.** The concise
+   launch error already ends with `(artifact: …)`; `_derive` appended
+   `[artifact: …]` on top of it.  It now appends only when the error does not
+   already name the artifact.  Covered by
+   `test_autostart_status_does_not_repeat_the_artifact_path`.
+
+Not changed (documented residuals): `review_loop.py` is ~1530 lines; two
+lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
+`runtime_state.claim_action_lease`); discovery still adopts a transcript
+verdict without requiring an idle hook event (rationale in iteration 9);
+`other_owner` stand-down surfaces as a non-retryable `LAUNCH_FAILED` after
+the bounded claim wait; the runtime_state mirror of a *re-armed* loop keeps
+the previous episode's `verdict`/`attempts` until the next iteration mirrors
+a new verdict, so `pm autostart status` reports
+`review iteration N (last LAUNCH_FAILED)` while the retry runs;
+`_interruptible_sleep` re-reads and re-validates the ~2 MB `project.yaml`
+every 2 s to notice a merge/close (≈3 % of a core during a backoff, on the
+loop thread).
