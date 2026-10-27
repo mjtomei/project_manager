@@ -36868,6 +36868,22 @@ prs:
       and bind to the merged head (363ec8b8 plus this metadata note).'
     created_at: '2026-10-27T09:10:04Z'
     last_edited: '2026-10-27T09:10:04Z'
+  - id: note-post-oom-resume-20261027
+    text: 'User explicitly authorized resuming #253 after the OOM host restart and
+      cleanup. Branch clean at91011ee4 with master450a6362 already integrated via363ec8b8
+      and handoff6911cd86. Current QA6e4c9453761550f8 was interrupted during S24-S26
+      refinement; no scenario verdicts and no qa_resume snapshot were persisted. Preserve
+      that run, its source/fixtures/captures/transcripts, and treat it as interrupted,
+      not PASS or policy rejection. Native restart may need a new run because its
+      planner/refiner panes no longer exist. Original prior QA4bb94e100271d6f1 completed
+      PASS with all6verified; preserve this evidence without inventing new acceptance
+      or bypassing native gates. Source unchanged fromcdb01c19 apart from integration/spec/metadata
+      as recorded; assess current required coverage normally. Historical mergecount2vs1
+      findings and real-recording requirements remain recorded/unwaived. DeepSeek1017/high
+      for development/review/QA/helpers; work Opus5.5/high signoff; wait_for_merge/spec-reviewOFF.
+      Do not merge the PR or launch unrelated work.'
+    created_at: '2026-10-27T14:23:00.488199+00:00'
+    last_edited: '2026-10-27T14:23:00.488199+00:00'
   - id: note-44bdc7c
     text: 'QA scenario 31 (resolver policy at the user surface after the base merge)
       PASS at 91011ee4 — no code change. All six stories held live on a two-sided
@@ -37044,6 +37060,16 @@ prs:
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
 - id: pr-22ea6a2
   plan: null
   title: Resume autostart after user feedback in an existing implementation session

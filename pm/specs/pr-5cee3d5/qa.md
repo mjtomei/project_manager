@@ -187,7 +187,12 @@ base by hand, the next check's own base diff is empty (the base is an
 ancestor of HEAD) — but the base's behaviour-relevant changes, the changed
 file count and the overlap must still be shown, and the evidence/checks
 statement still required, including after a later benign re-check replaces
-the record. A summary pm could not compute is not an exemption either.
+the record. A summary pm could not compute is not an exemption either. The
+carried summary lives on the *recorded* check (the sign-off launch, or
+`pm pr signoff integrate --record`); a read-only preview writes no state and
+therefore prints the bare `up to date` result — read `integration.json` or
+the launch output for the carried evidence, and judge the exemption at the
+merge gate, which reads the record.
 
 ### R8. A dirty workdir cannot be approved; a later bounce can apply it
 GIVEN a resolved candidate and a PR workdir with uncommitted changes.
