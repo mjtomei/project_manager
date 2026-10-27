@@ -14508,7 +14508,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T17:38:31.777242+00:00'
+  updated_at: '2026-10-27T18:10:50.685110+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14986,6 +14986,37 @@ prs:
       session teardown.'
     created_at: '2026-10-27T17:38:31Z'
     last_edited: '2026-10-27T17:38:31Z'
+  - id: note-fba6412
+    text: 'Review-loop 6280 i4 (2026-10-27): reviewed 286b0e5a. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at 74462d76 with assert 1 == 3 (all
+      three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock). Two fixes applied,
+      each with a test that fails at 286b0e5a for the right reason: (1) an unremovable
+      socket file (a container can leave a root-owned entry in a sticky dir, an immutable
+      file, or a chmod-d dir) raised a bare PermissionError out of both callers -
+      start_push_proxy surfaced it through wrap_claude_cmd as "Is docker running?",
+      and stop_session_proxies aborted the whole sweep so every other proxy of the
+      session survived. _unlink_socket_file now reports whether the path is gone (logging
+      the refusal); both start paths raise PushProxyError naming the stale socket
+      and workdir; _kill_proxy_socket returns False for a socket it could not stop
+      and leaves the daemon sidecar in place (the daemon still serves it), so the
+      sweep continues and the count stays accurate. (2) Documentation that still described
+      the old design: create_container said containers on the same branch share a
+      proxy, and the container git-wrapper comment said HOST_WORKDIR was for multiple
+      scenario containers sharing one - sharing is per workdir now and the path only
+      proves a request names its own clone. Tests: test_kill_proxy_socket_reports_an_unremovable_socket,
+      test_stop_session_survives_an_unremovable_socket, test_start_reports_an_unremovable_socket_as_proxy_error;
+      tests/test_push_proxy.py + tests/test_container.py 227 passed; full suite 3828
+      passed, 1 skipped (PATH=/usr/bin:/bin, PYTHONPATH=/workspace). Logs: /pm-captures/review-6280-i4/.
+      Residual, unchanged and out of scope: in-process refcounts only (cross-process
+      cleanup stays with #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request,
+      remains the cleaner long-term design); proxy_is_alive cannot distinguish a busy
+      daemon from a dead one beyond the backlog of 16; the daemon serves one request
+      at a time; a shared stop still leaves its .lock beside the kept directory until
+      session teardown.'
+    created_at: '2026-10-27T18:10:50Z'
+    last_edited: '2026-10-27T18:10:50Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
