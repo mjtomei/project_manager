@@ -55,36 +55,11 @@ def _read_transcript_text(transcript_path: str | Path | None) -> str:
     recover the real path by scanning ``~/.claude/projects/*/`` for the
     matching ``<session_id>.jsonl``.
     """
-    if not transcript_path:
+    path = _resolve_transcript_file(transcript_path)
+    if path is None:
         return ""
-    p = Path(transcript_path)
     try:
-        return p.read_text(errors="replace")
-    except (OSError, FileNotFoundError):
-        pass
-    # Symlink target missing — fall back to a session-id glob.
-    sid: str | None = None
-    try:
-        if p.is_symlink():
-            sid = Path(os.readlink(p)).stem
-    except OSError:
-        sid = None
-    if not sid:
-        sid = p.stem
-    if not (len(sid) == 36 and sid.count("-") == 4):
-        return ""
-    projects_dir = Path.home() / ".claude" / "projects"
-    try:
-        matches = list(projects_dir.glob(f"*/{sid}.jsonl"))
-    except OSError:
-        return ""
-    if not matches:
-        return ""
-    # Pick the most recently modified — handles edge cases where stale
-    # files with the same sid linger from a prior run.
-    real = max(matches, key=lambda m: m.stat().st_mtime)
-    try:
-        return real.read_text(errors="replace")
+        return path.read_text(errors="replace")
     except OSError:
         return ""
 
@@ -99,7 +74,10 @@ def _resolve_transcript_file(transcript_path: str | Path | None) -> Path | None:
         return None
     p = Path(transcript_path)
     try:
-        if p.exists():
+        # A readable file (including a symlink to one).  Directories are not
+        # transcripts — fall through to the session-id glob so the previous
+        # "read it, else search" behaviour is preserved.
+        if p.is_file():
             return p
     except OSError:
         pass
@@ -128,7 +106,11 @@ def _resolve_transcript_file(transcript_path: str | Path | None) -> Path | None:
 
 # The latest turn lives at the end of the transcript; reading a bounded tail
 # keeps the scheduler's per-tick check cheap on multi-megabyte sessions.
-_TURN_TAIL_BYTES = 262144
+# The window grows only when the smallest one cannot see a turn boundary —
+# a single record (e.g. a Write tool_use carrying a large file) can exceed
+# it, and dropping that partial line would otherwise hide the newest turn.
+_TURN_TAIL_WINDOWS = (262144, 2 * 1024 * 1024, 8 * 1024 * 1024)
+_TURN_TAIL_BYTES = _TURN_TAIL_WINDOWS[0]
 
 
 def _read_transcript_tail(path: Path, max_bytes: int = _TURN_TAIL_BYTES) -> str:
@@ -164,7 +146,22 @@ def latest_turn_state(transcript_path: str | Path | None) -> str:
     path = _resolve_transcript_file(transcript_path)
     if path is None:
         return "unknown"
-    text = _read_transcript_tail(path)
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return "unknown"
+    # Grow the window until a turn boundary is visible.  A tail that starts
+    # mid-record loses its first (partial) line, so a newest turn larger
+    # than the window would otherwise read as "unknown" forever.
+    for window in _TURN_TAIL_WINDOWS:
+        state = _turn_state_from_tail(_read_transcript_tail(path, window))
+        if state != "unknown" or window >= size:
+            return state
+    return "unknown"
+
+
+def _turn_state_from_tail(text: str) -> str:
+    """Classify the newest user/assistant record in *text* (see above)."""
     if not text.strip():
         return "unknown"
     for line in reversed(text.splitlines()):

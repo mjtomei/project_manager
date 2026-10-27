@@ -11,7 +11,6 @@ The repo has no pytest-asyncio plugin: async bodies run via ``asyncio.run``.
 import asyncio
 import json
 import time
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -156,6 +155,35 @@ class TestReset:
         assert marker["attempt"] == 2
         assert marker["from_status"] == "in_review"
 
+    def test_repeated_reset_records_a_new_explicit_policy(self, project):
+        # `z O` then `z A` while still waiting: same attempt (no second
+        # reset), but the restart marker must carry the policy just asked
+        # for so a TUI restart re-arms the right target.
+        pm_dir = project
+        autostart_fresh.reset_pr(pm_dir, "pr-a", "test", policy=st.POLICY_STOP)
+        out = autostart_fresh.reset_pr(pm_dir, "pr-a", "test",
+                                       policy=st.POLICY_AUTO)
+        assert out["ok"] and out["action"] == "already_waiting"
+        marker = st.fresh_marker(store.get_pr(store.load(pm_dir), "pr-a"))
+        assert marker["policy"] == st.POLICY_AUTO
+        assert marker["attempt"] == 1
+
+    def test_second_attempt_does_not_duplicate_signoff_history(self, project):
+        pm_dir = project
+        data = store.load(pm_dir)
+        store.get_pr(data, "pr-a")["signoff"] = {
+            "verdict": "SIGNOFF_MERGE", "sha": "abc", "ts": OLD}
+        store.save(data, pm_dir)
+        autostart_fresh.reset_pr(pm_dir, "pr-a", "test")
+        # The fresh review started, then more feedback returned it again.
+        data = store.load(pm_dir)
+        store.get_pr(data, "pr-a")["status"] = "in_review"
+        store.save(data, pm_dir)
+        autostart_fresh.reset_pr(pm_dir, "pr-a", "test")
+
+        pr = store.get_pr(store.load(pm_dir), "pr-a")
+        assert len(pr["signoff_history"]) == 1
+
     def test_in_progress_without_marker_is_rejected(self, project):
         pm_dir = project
         data = store.load(pm_dir)
@@ -281,6 +309,52 @@ class TestHandoff:
         marker = st.fresh_marker(store.get_pr(store.load(pm_dir), "pr-a"))
         assert marker["awaiting_handoff"] is False
         assert marker["handoff_at"] and marker["review_started_at"]
+
+
+def _poll_app(tmp_path, pr):
+    """A minimal app for ``_poll_impl_idle`` with one tracked impl pane."""
+    from types import SimpleNamespace
+    from pm_core.pane_idle import PaneIdleTracker
+    target = tmp_path / "11111111-2222-3333-4444-555555555555.jsonl"
+    target.write_text("")
+    tracker = PaneIdleTracker()
+    tracker.register("pr-a", "%1", str(target))
+    app = SimpleNamespace(
+        _session_name="sess", _pane_idle_tracker=tracker,
+        _data={"prs": [pr]}, _review_loops={},
+        _pending_merge_prs=set(), _merge_input_required_prs=set(),
+        log_message=lambda *a, **k: None)
+    return app, tracker
+
+
+class TestPollRouting:
+    """`_poll_impl_idle` must route fresh attempts through handoff_ready()."""
+
+    def _run(self, tmp_path, ready):
+        from pm_core.tui import review_loop_ui
+        pr = _pr(status="in_progress",
+                 **{FRESH_KEY: {"requested_at": st.now_iso(),
+                                "awaiting_handoff": True}})
+        app, tracker = _poll_app(tmp_path, pr)
+        calls = []
+        with patch.object(tracker, "poll", return_value=False), \
+             patch("pm_core.tui.auto_start.is_enabled", return_value=True), \
+             patch.object(review_loop_ui, "_auto_review_idle_prs",
+                          side_effect=lambda _a, pairs: calls.append(pairs)), \
+             patch.object(autostart_fresh, "handoff_ready",
+                          return_value=ready):
+            review_loop_ui._poll_impl_idle(app)
+        return calls
+
+    def test_completed_handoff_starts_the_review_path(self, tmp_path):
+        # The generic became_idle() flag is False here (poll returns False):
+        # only the explicit handoff check may advance a fresh attempt.
+        calls = self._run(tmp_path, ready=True)
+        assert len(calls) == 1
+        assert [pair[0] for pair in calls[0]] == ["pr-a"]
+
+    def test_incomplete_handoff_waits(self, tmp_path):
+        assert self._run(tmp_path, ready=False) == []
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +548,52 @@ class TestRetirement:
             autostart_fresh.retire_in_memory(app, _pr())
         assert loop.stop_requested
 
+    def test_retirement_clears_the_previous_turns_idle_flag(self):
+        # A resumed turn fires no hook at its start, so the tracker keeps
+        # the old turn's idle flag; the wait status would then wrongly say
+        # "turn complete".  Retiring the attempt must reset it.
+        class _Tracker:
+            def __init__(self):
+                self.idle = True
+                self.marked = []
+
+            def is_idle(self, key):
+                return self.idle
+
+            def mark_active(self, key):
+                self.marked.append(key)
+                self.idle = False
+
+        app = FakeApp([_pr()])
+        tracker = _Tracker()
+        app._pane_idle_tracker = tracker
+        with patch("pm_core.runtime_state.get_action_state",
+                   return_value={}), \
+             patch("pm_core.runtime_state.set_action_state"):
+            autostart_fresh.retire_in_memory(app, _pr())
+        assert tracker.marked == ["pr-a"]
+        assert tracker.idle is False
+
+    def test_retirement_keeps_a_live_permission_prompt(self):
+        class _Tracker:
+            def __init__(self):
+                self.marked = []
+
+            def is_idle(self, key):
+                return False
+
+            def mark_active(self, key):
+                self.marked.append(key)
+
+        app = FakeApp([_pr()])
+        tracker = _Tracker()
+        app._pane_idle_tracker = tracker
+        with patch("pm_core.runtime_state.get_action_state",
+                   return_value={}), \
+             patch("pm_core.runtime_state.set_action_state"):
+            autostart_fresh.retire_in_memory(app, _pr())
+        assert tracker.marked == []
+
 
 # ---------------------------------------------------------------------------
 # Stale QA evidence
@@ -495,6 +615,18 @@ class TestStaleQa:
                    return_value={"state": "done", "verdict": "PASS",
                                  "updated_at": st.now_iso()}):
             assert auto_start.recorded_qa_verdict("pr-a", pr) == "PASS"
+
+    def test_retirement_sentinel_is_not_a_verdict(self):
+        # The fresh reset replaces the old run's verdict with SUPERSEDED
+        # (keeping the old one under previous_verdict).  That is not a
+        # usable QA result: it must neither hold nor advance the flow.
+        pr = {"id": "pr-a", FRESH_KEY: {"requested_at": st.now_iso(),
+                                        "awaiting_handoff": False}}
+        with patch("pm_core.runtime_state.get_action_state",
+                   return_value={"state": "done", "verdict": "SUPERSEDED",
+                                 "previous_verdict": "PASS",
+                                 "updated_at": st.now_iso()}):
+            assert auto_start.recorded_qa_verdict("pr-a", pr) is None
 
 
 # ---------------------------------------------------------------------------

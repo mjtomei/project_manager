@@ -208,6 +208,9 @@ def _print_changes(payload: dict) -> None:
         click.echo(f"{action}: {c.get('pr_id')}{pol_s}")
     if payload.get("message"):
         click.echo(payload["message"])
+    for f in payload.get("failed") or []:
+        click.echo(f"failed: {f.get('pr_id')} ({f.get('error')}): "
+                   f"{f.get('message')}", err=True)
     if payload.get("released"):
         click.echo("released merge hold: " + ", ".join(payload["released"]))
     st = payload.get("status") or {}

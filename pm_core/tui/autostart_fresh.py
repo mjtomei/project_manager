@@ -44,6 +44,11 @@ _log = configure_logger("pm.tui.autostart_fresh")
 # separately (idempotent while an attempt is already waiting).
 _LATER_STAGES = ("in_review", "qa", "sign_off")
 
+# Terminal verdict written to the old attempt's runtime_state records.  It
+# replaces a finished loop/QA verdict so nothing adopts it as current work,
+# while ``previous_verdict`` keeps the historical value.
+SUPERSEDED = "SUPERSEDED"
+
 
 # ---------------------------------------------------------------------------
 # Validation
@@ -126,6 +131,14 @@ def reset_pr(root: Path, pr_id: str, source: str,
             return
         if status == "in_progress":
             if fresh_awaiting(pr):
+                # Repeated request while the attempt is already waiting: keep
+                # the attempt (requested_at, handoff baseline) intact, but
+                # record an explicitly requested policy so a TUI restart
+                # restores the target the user just asked for.
+                marker = pr.get(FRESH_KEY)
+                if isinstance(marker, dict) and policy \
+                        and marker.get("policy") != policy:
+                    marker["policy"] = policy
                 out.update(ok=True, action="already_waiting",
                            from_status=status)
             else:
@@ -151,8 +164,11 @@ def reset_pr(root: Path, pr_id: str, source: str,
 
         # A verdict recorded before the feedback verified the old code.
         # Keep it for provenance, but never let it be adopted or merged.
+        # A record invalidated by an earlier attempt is already archived;
+        # appending it again would only duplicate history.
         sig = pr.get("signoff")
-        if isinstance(sig, dict) and sig.get("verdict"):
+        if isinstance(sig, dict) and sig.get("verdict") \
+                and not sig.get("invalidated"):
             hist = pr.get("signoff_history")
             if not isinstance(hist, list):
                 hist = []
@@ -223,6 +239,21 @@ def retire_in_memory(app, pr: dict) -> None:
         qa.stop_requested = True
     (getattr(app, "_self_driving_qa", None) or {}).pop(pr_id, None)
 
+    # A resumed turn fires no hook at its start, so the tracker still holds
+    # the *previous* turn's idle flag; left alone, the status row would claim
+    # "implementation turn complete; starting fresh review" for the whole
+    # wait.  Clear it: the next idle_prompt is this turn's end.  Only the
+    # stale idle flag is wrong — a live permission prompt (waiting_for_input)
+    # must keep its own status reason.
+    tracker = getattr(app, "_pane_idle_tracker", None)
+    if tracker is not None:
+        try:
+            if tracker.is_idle(pr_id):
+                tracker.mark_active(pr_id)
+        except Exception:
+            _log.debug("autostart_fresh: idle reset failed for %s",
+                       pr_id, exc_info=True)
+
     # Sign-off driver bookkeeping (the recorded verdict was invalidated in
     # the atomic reset; the router window/transcript is retired below).
     try:
@@ -240,7 +271,7 @@ def retire_in_memory(app, pr: dict) -> None:
         prev = _rs.get_action_state(pr_id, "review-loop") or {}
         if loop is not None or prev:
             _rs.set_action_state(
-                pr_id, "review-loop", "done", verdict="SUPERSEDED",
+                pr_id, "review-loop", "done", verdict=SUPERSEDED,
                 loop_id=secrets.token_hex(4),
                 previous_verdict=prev.get("verdict")
                 or getattr(loop, "latest_verdict", "") or "",
@@ -252,7 +283,7 @@ def retire_in_memory(app, pr: dict) -> None:
         prev = _rs.get_action_state(pr_id, "qa") or {}
         if qa is not None or prev:
             _rs.set_action_state(
-                pr_id, "qa", "done", verdict="SUPERSEDED",
+                pr_id, "qa", "done", verdict=SUPERSEDED,
                 previous_verdict=prev.get("verdict")
                 or getattr(qa, "latest_verdict", "") or "",
                 superseded_at=now)
@@ -337,12 +368,12 @@ def _impl_transcript(app, pr: dict, tracker) -> str | None:
     return None
 
 
-def _latest_hook_event(app, pr: dict, tracker) -> dict | None:
-    from pm_core import hook_events
-    from pm_core.claude_launcher import session_id_from_transcript
-    transcript = _impl_transcript(app, pr, tracker)
+def _latest_hook_event(transcript: str | None) -> dict | None:
+    """The newest hook event for *transcript*'s Claude session, if any."""
     if not transcript:
         return None
+    from pm_core import hook_events
+    from pm_core.claude_launcher import session_id_from_transcript
     try:
         sid = session_id_from_transcript(transcript)
     except Exception:
@@ -391,7 +422,8 @@ def handoff_ready(app, pr: dict, tracker) -> bool:
         pass
 
     since = _epoch(fresh_marker(pr).get("requested_at"))
-    event = _latest_hook_event(app, pr, tracker)
+    transcript = _impl_transcript(app, pr, tracker)
+    event = _latest_hook_event(transcript)
     if event:
         try:
             ts = float(event.get("timestamp") or 0)
@@ -400,7 +432,6 @@ def handoff_ready(app, pr: dict, tracker) -> bool:
         if ts > since and event.get("event_type") in ("idle_prompt", "Stop"):
             return True
 
-    transcript = _impl_transcript(app, pr, tracker)
     if not transcript:
         return False
     from pm_core.verdict_transcript import latest_turn_state

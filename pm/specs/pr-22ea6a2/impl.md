@@ -277,4 +277,54 @@ update; in-memory retirement and window teardown follow and are best-effort.
 * `pm_core/cli/autostart.py` — `fresh` command + output.
 * `pm_core/signoff.py` — timestamp guard in `fresh_recorded_verdict`
   (fresh-marker aware).
-* `tests/test_autostart_fresh.py` (new).
+* `tests/test_autostart_fresh.py` (new) — reset/handoff/retirement/resume,
+  stale QA and status coverage.
+* `tests/test_verdict_transcript.py` — direct `latest_turn_state()` cases
+  (tool_use blocks/stop_reason, meta records, pending user turn, oversized
+  final record).
+
+## Review-iteration notes (i1)
+
+Implemented as specified, with these refinements from the first review pass:
+
+* **Status accuracy while waiting** — a resumed turn fires no hook at its
+  start, so `PaneIdleTracker` still holds the *previous* turn's `idle` flag.
+  `retire_in_memory` now calls `tracker.mark_active(pr_id)` when that flag is
+  set, so `_derive` reports "waiting for the current implementation turn
+  after feedback" instead of the (wrong) "turn complete; starting fresh
+  review" for the whole wait (a live permission prompt keeps its own
+  reason).  The transcript stays authoritative for the handoff itself.
+* **The retirement sentinel is not a QA verdict** — `recorded_qa_verdict`
+  ignores a `runtime_state` `qa` record whose verdict is `SUPERSEDED`, so the
+  status row cannot say "QA ended SUPERSEDED" and no hold is inferred from it.
+* **`consume_handoff` is only written for fresh attempts** — the ordinary
+  auto-review path no longer performs a locked project.yaml write it has no
+  marker for.
+* **Tail reader grows its window** — `latest_turn_state` retries with larger
+  tail windows when the smallest one cannot see a turn boundary, so a final
+  assistant record larger than 256 KiB (e.g. a big `Write` tool_use) cannot
+  read as `unknown` and stall the handoff forever.
+* **Repeated `fresh` records an explicit policy** — a second `z O`/`z A`
+  while already waiting keeps the same attempt (`requested_at`, `attempt`)
+  but updates the marker's `policy`, so a TUI restart re-arms the target the
+  user last asked for.
+* **No duplicate sign-off history** — an already-invalidated sign-off record
+  is not re-archived by a later attempt.
+* **Partial failures are surfaced** — the CLI prints `failed:` lines for
+  PRs whose reset failed after validation.
+
+Known limitation (documented, not changed): removing the auto-start target
+while an attempt is still waiting does not clear the marker, so
+`resume_pending` re-adds the target after a plain TUI restart.  Re-remove it
+to stop driving the PR; the PR itself stays in implementation either way.
+
+Second known limitation: the stale-QA fence is timestamp-based
+(`runtime_state` `qa.updated_at` vs `requested_at`) and the SUPERSEDED
+sentinel covers TUI-owned runs.  An **out-of-process** QA driver launched
+before the reset (e.g. `pm pr qa` from a CLI auto-sequence) that finishes
+after it would write a `done PASS` record with a post-reset `updated_at`;
+that record is indistinguishable from a legitimate new run under the current
+schema, so it could still hold the new QA.  The TUI-driven flow (the one this
+feature targets) is fenced by popping `app._qa_loops` and by
+`_resume_incomplete_qa` refusing to resume a PR that is no longer in `qa`
+status.  A fully robust fence needs a per-run id in the QA runtime record.

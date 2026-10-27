@@ -1226,8 +1226,10 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
             # A fresh-autostart attempt has now reached its handoff: mark it
             # consumed so the status row stops saying "waiting" and a later
             # in_progress bounce is not mistaken for this attempt.
-            from pm_core.tui import autostart_fresh
-            autostart_fresh.consume_handoff(app, pr_id)
+            from pm_core.autostart_state import fresh_awaiting
+            if fresh_awaiting(updated_pr):
+                from pm_core.tui import autostart_fresh
+                autostart_fresh.consume_handoff(app, pr_id)
             # Start a review loop (same as _auto_start_review_loops)
             loop = app._review_loops.get(pr_id)
             if not loop:

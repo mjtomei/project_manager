@@ -1153,7 +1153,11 @@ class ProjectManagerApp(App):
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
         if not pr_id:
-            self.log_message("No PR selected")
+            if z:
+                self.log_message(
+                    "No PR selected (z O = fresh autostart, stop before merge)")
+            else:
+                self.log_message("No PR selected")
             return
         if z:
             from pm_core.tui import autostart_fresh

@@ -10,6 +10,7 @@ import pytest
 from pm_core.verdict_transcript import (
     extract_verdict_from_transcript,
     extract_verdict_reason_from_transcript,
+    latest_turn_state,
 )
 
 
@@ -253,3 +254,76 @@ def test_reason_missing_returns_empty(tmp_path: Path) -> None:
 
 def test_reason_missing_file() -> None:
     assert extract_verdict_reason_from_transcript(None) == ""
+
+
+# ---------------------------------------------------------------------------
+# latest_turn_state — the fresh-autostart implementation handoff signal
+# ---------------------------------------------------------------------------
+
+def _assistant_tool_line() -> str:
+    return json.dumps({
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "editing"},
+                        {"type": "tool_use", "id": "t1", "name": "Edit",
+                         "input": {}}],
+            "stop_reason": "tool_use",
+        },
+    })
+
+
+def _meta_line(kind: str) -> str:
+    return json.dumps({"type": kind, "message": {}})
+
+
+def test_turn_state_missing_paths() -> None:
+    assert latest_turn_state(None) == "unknown"
+    assert latest_turn_state("/nonexistent/none.jsonl") == "unknown"
+
+
+def test_turn_state_empty_file(tmp_path: Path) -> None:
+    p = tmp_path / "empty.jsonl"
+    p.write_text("")
+    assert latest_turn_state(p) == "unknown"
+
+
+def test_turn_state_complete_after_meta_records(tmp_path: Path) -> None:
+    # Real transcripts append system/meta records after the final assistant
+    # message; they are not turn boundaries.
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("done"),
+        _meta_line("system"),
+        _meta_line("last-prompt"),
+    ])
+    assert latest_turn_state(p) == "complete"
+
+
+def test_turn_state_tool_use_block_is_in_progress(tmp_path: Path) -> None:
+    p = _write(tmp_path, [_user_line("do it"), _assistant_tool_line()])
+    assert latest_turn_state(p) == "in_progress"
+
+
+def test_turn_state_tool_use_stop_reason_without_block(tmp_path: Path) -> None:
+    rec = json.loads(_assistant_line("calling"))
+    rec["message"]["stop_reason"] = "tool_use"
+    p = _write(tmp_path, [_user_line("do it"), json.dumps(rec)])
+    assert latest_turn_state(p) == "in_progress"
+
+
+def test_turn_state_pending_user_record_is_in_progress(tmp_path: Path) -> None:
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("done"),
+        _user_line("one more thing"),
+    ])
+    assert latest_turn_state(p) == "in_progress"
+
+
+def test_turn_state_large_final_record_is_found(tmp_path: Path) -> None:
+    # A final assistant record larger than the first tail window must not
+    # read as "unknown" (which would stall the handoff forever).
+    big = "x" * (600 * 1024)
+    p = _write(tmp_path, [_user_line("go"), _assistant_line(big)])
+    assert latest_turn_state(p) == "complete"

@@ -950,7 +950,12 @@ def recorded_qa_verdict(pr_id: str, pr: dict | None = None) -> str | None:
         # A QA PASS from before the explicit fresh reset verified the old
         # code; it must neither suppress the new QA run nor advance it.
         return None
-    return rec.get("verdict") or None
+    verdict = rec.get("verdict") or None
+    if verdict == "SUPERSEDED":
+        # The fresh reset's retirement sentinel: the run was discarded, so
+        # there is no usable QA result to report or hold on.
+        return None
+    return verdict
 
 
 def _predates_fresh_request(at: str | None, pr: dict) -> bool:
