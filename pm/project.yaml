@@ -36153,7 +36153,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/261
   gh_pr_number: 261
   created_at: '2026-10-27T04:42:06.128850+00:00'
-  updated_at: '2026-10-27T09:54:14.993757+00:00'
+  updated_at: '2026-10-27T11:23:16.800278+00:00'
   started_at: '2026-10-27T04:42:19.589247+00:00'
   reviewed_at: null
   merged_at: null
@@ -36327,6 +36327,23 @@ prs:
       on master.'
     created_at: '2026-10-27T09:54:14Z'
     last_edited: '2026-10-27T09:54:14Z'
+  - id: note-31b01c6
+    text: 'QA S5 capture follow-up (corrects the artifacts, not the verdict): both
+      recording.mp4 files were initially GIFs renamed to .mp4 — agg writes GIF regardless
+      of the output extension, and the ffmpeg encode step had been skipped. Re-encoded
+      both with agg -> ffmpeg -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:v libx264
+      -pix_fmt yuv420p -movflags +faststart (the scale filter is required: agg canvas
+      1703x1000 has an odd width that libx264 rejects); verified codec_name=h264 +
+      ftyp box + a decoded frame. Story 1 was also re-recorded in a fresh project
+      (/tmp/pm-qa5-NqWi) driving A to sign-off alone first, so `pm tui view` shows
+      A own footer "✓ pr-05c47f7 signed off (SIGNOFF_MERGE @ 27624fb7) — waiting for
+      manual merge (wait-for-merge: pr-90419ae) — press ''g'' to merge" (the earlier
+      take only ever showed B line because both signed off together). All story-1
+      Thens re-verified there: C=1 U=0 after merging A; B first merge refused once
+      by the stale-approval guard then auto-re-signed and merged; C=1 D=1 U=0 afterwards.
+      Both manifests now state the real encoding chain.'
+    created_at: '2026-10-27T11:23:16Z'
+    last_edited: '2026-10-27T11:23:16Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
