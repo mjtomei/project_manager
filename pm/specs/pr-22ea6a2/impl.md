@@ -448,3 +448,20 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   `retire_downstream` retires the sign-off run via
   `signoff.retire_signoff_run` (window + transcript + launch stamp).
 * Test module docstring now names `z a` alongside `z O` / `z A`.
+
+## Review-iteration notes (367f i5)
+
+* **Every later stage is covered** — R1 allows a fresh request from
+  `in_review`, `qa` *and* `sign_off`, but only the `in_review` source was
+  tested.  `TestFreshStart::test_rewinds_from_every_later_stage` now runs the
+  full `fresh_start` path from `qa` and `sign_off` (validated, reset,
+  marker `from_status`, target added, no review started).
+* **Repeated resume calls are pinned** — the acceptance list asks for
+  "repeated resume calls"; `TestResume::test_resume_pending_is_idempotent`
+  calls `resume_pending` twice and asserts the second scan returns `[]` and
+  the target set is unchanged (the `pr_id in get_targets` guard).
+* **`handoff_ready`'s hook fallback is documented accurately** — the hook
+  event can only be consulted when the transcript *path* still resolves (its
+  session id is how the event is found).  With no resolvable path nothing can
+  advance; the scheduler's in-progress relaunch / the poll's pane re-adoption
+  has to restore one first.  Docstring only; no behavior change.

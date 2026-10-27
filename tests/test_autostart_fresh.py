@@ -514,6 +514,27 @@ class TestFreshStart:
         out = autostart_fresh.fresh_start(app, ["pr-a"])
         assert not out["ok"] and out["error"] == "not_later_stage"
 
+    @pytest.mark.parametrize("stage", ["qa", "sign_off"])
+    def test_rewinds_from_every_later_stage(self, project, stage):
+        # R1: a fresh request from qa / sign_off starts a new attempt, not
+        # only from in_review (the reported #250 state).
+        data = store.load(project)
+        store.get_pr(data, "pr-a")["status"] = stage
+        store.save(data, project)
+        app = self._app(project)
+        with patch.object(autostart_fresh, "handoff_ready",
+                          return_value=False), \
+             patch("pm_core.tui.review_loop_ui._auto_review_idle_prs") as rev:
+            out = autostart_fresh.fresh_start(app, ["pr-a"])
+        assert out["ok"]
+        assert out["changes"][0]["action"] == "fresh_reset"
+        assert out["changes"][0]["from_status"] == stage
+        rev.assert_not_called()
+        pr = store.get_pr(store.load(project), "pr-a")
+        assert pr["status"] == "in_progress"
+        assert st.fresh_marker(pr)["from_status"] == stage
+        assert st.fresh_awaiting(pr)
+
     def test_one_invalid_id_changes_nothing(self, project):
         # Validation is all-or-nothing: a bad id in the set must not reset
         # (or add a target for) the valid one.
@@ -876,6 +897,15 @@ class TestResume:
         assert auto_start.target_policy(restarted, "pr-a") == st.POLICY_AUTO
         assert st.fresh_awaiting(
             store.get_pr(store.load(project), "pr-a"))
+
+    def test_resume_pending_is_idempotent(self, project):
+        # The restart hook runs once per mount, but a repeated scan must not
+        # duplicate the target or report the PR again.
+        autostart_fresh.reset_pr(project, "pr-a", "test")
+        app = FakeApp(store.load(project)["prs"], project)
+        assert autostart_fresh.resume_pending(app) == ["pr-a"]
+        assert autostart_fresh.resume_pending(app) == []
+        assert auto_start.get_targets(app) == ["pr-a"]
 
     def test_resume_skips_consumed_attempts(self, project):
         app = FakeApp(store.load(project)["prs"], project)

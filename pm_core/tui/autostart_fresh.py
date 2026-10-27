@@ -403,9 +403,13 @@ def handoff_ready(app, pr: dict, tracker) -> bool:
     needed).  ``in_progress`` means a newer turn is still running, so a hook
     event — which can only belong to an earlier turn — must not advance.
 
-    Only when the transcript is missing/unreadable does a **new**
-    ``idle_prompt``/``Stop`` hook event whose timestamp is after
-    ``fresh_autostart.requested_at`` count as the handoff (old events cannot).
+    Only when the transcript path resolves but its contents are
+    missing/unreadable does a **new** ``idle_prompt``/``Stop`` hook event
+    whose timestamp is after ``fresh_autostart.requested_at`` count as the
+    handoff (old events cannot).  With no resolvable transcript path there is
+    no session id to look the event up by, so nothing can advance: the
+    scheduler's in-progress relaunch (or the poll's pane re-adoption) has to
+    restore a resolvable transcript first.
     """
     if not fresh_awaiting(pr):
         return False
