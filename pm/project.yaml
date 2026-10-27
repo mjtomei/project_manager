@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e102089
+  active_pr: pr-950dafa
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -36410,3 +36410,33 @@ prs:
       already be fixed and the PR can be closed.'
     created_at: '2026-10-27T19:56:07Z'
     last_edited: '2026-10-27T19:56:07Z'
+- id: pr-950dafa
+  plan: bugs
+  title: 'Bug: pm set list shows qa-verify-pass off on a fresh store although its
+    default is on'
+  branch: pm/pr-950dafa-bug-pm-set-list-shows-qa-verify-pass-off-on-a-fres
+  status: pending
+  depends_on: []
+  description: "Location: pm_core/cli/__init__.py:_list_settings (boolean branch)\
+    \ + pm_core/paths.py:get_global_setting.\n\nRepro (fresh ~/.pm/settings/, i.e.\
+    \ no qa-verify-pass file):\n  pm set list\n  -> \"  qa-verify-pass off\"   (no\
+    \ \"(default)\" marker)\n\nExpected: \"  qa-verify-pass on (default)\".\n\nWhy\
+    \ it is wrong: _SETTING_DEFAULTS[\"qa-verify-pass\"] = \"on\" and the pm set help\
+    \ text says \"default on\", and pm_core/qa_loop.py:_is_verification_enabled()\
+    \ returns True when the setting is unset. But _list_settings renders booleans\
+    \ via get_global_setting(), which returns False for a missing file, so the listing\
+    \ reports \"off\" and omits the \"(default)\" marker because \"off\" != the declared\
+    \ default \"on\". The result reads as if the user had explicitly turned PASS-verification\
+    \ off, and contradicts the actual behavior.\n\nFix sketch: in the boolean branch\
+    \ of _list_settings, fall back to _SETTING_DEFAULTS.get(name, \"off\") when has_global_setting(name)\
+    \ is False (or compare against the resolved default rather than the raw file read).\n\
+    \nFound incidentally during QA scenario 5 for pr-6566901; unrelated to that PR."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T21:05:33.812344+00:00'
+  updated_at: '2026-10-27T21:05:33.812344+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
