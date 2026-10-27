@@ -163,3 +163,72 @@ def test_concretizer_poll_observes_cancellation(monkeypatch, tmp_path):
     assert qa_loop._concretize_scenario(
         scenario, {}, {}, "%5", "sid", str(tmp_path),
         stop_check=lambda: stopped) == (None, None)
+
+
+@pytest.mark.parametrize("verifier_outcome", ["stopped", "verified"])
+def test_stop_during_pass_verification_neither_flags_nor_messages_worker(
+        tmp_path, monkeypatch, verifier_outcome):
+    """A stop landing while a PASS is being verified leaves it unverified.
+
+    The verifier poll returns no verdict once it sees the stop, and the verdict
+    poll may be mid-sleep when that happens. Treating the empty result as a FLAG
+    sent a follow-up to the worker after the stop and dropped its PASS, so the
+    stopped run reported the scenario as verdictless and released its container
+    instead of downgrading the PASS to INPUT_REQUIRED.
+    """
+    from pm_core import hook_events
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    scenario = qa_loop.QAScenario(
+        index=1, title="s1", focus="", window_name="qa-s1", pane_id="%1",
+        session_id="sid-1", transcript_path=str(tmp_path / "s1.jsonl"))
+    state.scenarios = [scenario]
+    deferred = []
+
+    class DeferredThread:
+        def __init__(self, target, args, **kwargs):
+            self.target, self.args = target, args
+
+        def start(self):
+            deferred.append(self)
+
+    def verify(*args, **kwargs):
+        if verifier_outcome == "stopped":
+            assert kwargs["stop_check"]()
+            return False, "verifier pane disappeared", "%9"
+        return True, "", "%9"
+
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        assert ticks < 6, "the poll must end once stopped"
+        if deferred:
+            # The stop and the verifier's return both land during this sleep.
+            state.stop_requested = True
+            thread = deferred.pop()
+            thread.target(*thread.args)
+
+    send_keys = MagicMock()
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: True)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop.threading, "Thread", DeferredThread)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_verify_single_scenario", verify)
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(tmux, "send_keys", send_keys)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(qa_loop, "extract_verdict_from_transcript", lambda *a: "PASS")
+    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript", lambda *a: None)
+
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=[], concurrency_cap=0,
+        use_containers=False)
+
+    send_keys.assert_not_called()
+    assert state.scenario_verdicts[1] == qa_loop.VERDICT_PASS
+    assert (1 in state.verified_scenarios) == (verifier_outcome == "verified")

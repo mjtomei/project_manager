@@ -2890,6 +2890,11 @@ def _poll_tmux_verdicts(
                          scenario.index, exc_info=True)
             # Do NOT trust-original on crash; leave unverified.
             passed, reason = False, "verification thread crashed"
+        if not passed and state.stop_requested:
+            # The poll returns no verdict when it observes the stop. That is
+            # not a FLAG: recording it would make the loop message the worker
+            # and drop its PASS. Leave the PASS unverified for finalization.
+            return
         with verification_lock:
             verification_results[scenario.index] = (passed, reason)
             # NOTE: do NOT discard from ``verifying`` here — the main
@@ -3009,6 +3014,17 @@ def _poll_tmux_verdicts(
 
     while (pending or verifying or _launch_queue) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
+        if state.stop_requested:
+            # A stop landing during the sleep ends the poll here: this pass
+            # must not message workers, start verifiers or relaunch. Keep
+            # verifications that already passed; finalization downgrades
+            # every other unverified PASS.
+            with verification_lock:
+                state.verified_scenarios.update(
+                    idx for idx, (passed, _reason) in verification_results.items()
+                    if passed)
+                verification_results.clear()
+            break
 
         # Refresh the resume snapshot each iteration so a TUI restart can
         # re-enter this loop with up-to-date scenario pane/session state
