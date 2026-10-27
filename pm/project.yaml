@@ -13768,11 +13768,25 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-03T16:02:14.081159+00:00'
-  updated_at: '2026-05-03T16:02:14.081159+00:00'
+  updated_at: '2026-10-27T04:49:04.812012+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-c46e45f
+    text: 'Impl 54664e53. qa/sign_off (and closed) are now inspection-only: plain
+      `pm pr review` focuses the existing review-<display> window and writes nothing;
+      `--fresh`/`--review-loop` are refused while the PR is in those phases (would
+      start a second agent); `--no-window` is a no-op there; closed is refused like
+      merged. Evidence: /pm-captures/impl/{pre-fix,post-fix}/ — incl. signoff-exactly-once/
+      (real `pm pr review` CLI + picker direct dispatch between the launch stamp and
+      the driver tick; the original SIGNOFF_MERGE still routes once, record sha=HEAD,
+      second tick unchanged). Tests: tests/test_pr.py (20) + picker stdout-surfacing
+      test. Full suite 3771 passed, 1 pre-existing env failure (test_hook_events::test_installer_writes_standalone_receiver,
+      also fails on 59a31f40). Trap: run tests with PATH=/usr/bin:/bin — the QA git
+      wrapper intercepts local `git fetch`.'
+    created_at: '2026-10-27T04:49:04Z'
+    last_edited: '2026-10-27T04:49:04Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
