@@ -49,11 +49,32 @@ Reproduction traps (from the prior QA runs — avoid rediscovering them):
   cursors by hand. Also sync the PR branch with master before committing the
   branch-side record, because `pm pr start` records the workdir state after
   cloning.
-- The branch now contains `master@211a6128` (merged as 7f603144) and the
-  "behind master" warning in older notes no longer applies. Scenarios 13-17
-  PASSed at 481644d5; since then the re-run pointer, the `pm pr show`
-  resolution rendering and the `active_pr` merge landed, so those are the new
-  surfaces to exercise (plus the prompt-bounding merge from #250).
+- The branch now contains `master@450a6362` (merged as 363ec8b8), so HEAD is
+  level with the base (`git rev-list --count HEAD..origin/master` is 0) and
+  the "behind master" warning in older notes no longer applies. That merge
+  was made **by hand** (`git merge`, no pm `--apply`: the implementation
+  container had no PR workdir), so no applied-resolution record exists. The
+  next check therefore reports `up to date` with an empty base diff, and the
+  base-interaction summary must be carried forward from the earlier conflict
+  check (R7, `base_range_from`) or the evidence requirement silently
+  disappears. This post-merge state is the main new surface.
+- Scenarios 13-17 PASSed at 481644d5 and QA 18-23 PASSed at 25fb1918 (the
+  re-run pointer, `pm pr show` resolution rendering, the real #250 shape,
+  bounded evidence, concurrent operators, hostile project.yaml). Since then
+  the only change is the hand base merge above, which also brought the base's
+  own behaviours into overlapping code (`pm_core/cli/pr.py`: the `pr_start`
+  session-aware message and the `pr_qa_run_bg` runtime-state mirror; plus
+  grouped-session window selection in `pm_core/tmux.py`, pane registration,
+  and the TUI popup picker). `pm_core/cli/pr.py` is the one code file both
+  sides changed and Git merged cleanly — exercise both sides' behaviour
+  together, plus the PR's own sign-off code calling into the base's changed
+  tmux/pane-registry helpers.
+- Building the "base already merged by hand" fixture: record the conflicting
+  check first (`--record` or a sign-off launch), then in the PR workdir
+  `git fetch` and `git merge <base>` by hand keeping both sides' records and
+  committing. Do **not** use `--apply` for this fixture — that records an
+  applied resolution and exercises the other carry path (`_carry_forward`'s
+  verified branch), not the hand-reconciled one.
 - Use `--record` when the scenario needs `integration.json` and the resolution
   delta on the PR/captures; a plain check after `--apply` prints only
   "up to date". The read-only check still writes the delta its output names.
@@ -275,6 +296,20 @@ absent instead of crashing the command.
   WHEN the user reads the relaunched sign-off instructions, then adds a real
   PR commit and relaunches. THEN the first names the previous verdict/revision
   and the preserved report; the second no longer claims the PR is unchanged.
+- GIVEN a base the implementation merged by hand (pm could not apply the
+  conflict, so no applied-resolution record exists). WHEN the user re-checks
+  and launches sign-off. THEN the check reports `up to date` but still names
+  the base-changes range, the changed-file count, the overlap and the
+  behaviour-relevant changes, and a MERGE still requires the reuse/checks
+  statement.
+- GIVEN the branch and base both appended records and the base additionally
+  changed a project-level behavioural setting inside the same conflicted
+  `project.yaml`. WHEN the conflict is resolved. THEN the candidate carries
+  the base's value for that setting, the resolution delta shows it, and it is
+  listed among the base's behaviour-relevant changes.
+- GIVEN a branch that contains the base (a hand merge). WHEN the user opens
+  the review window or reads a prompt that names the PR diff. THEN the diff
+  shows only the PR's own changes, not the base merge's files.
 
 ## Pass / Fail criteria
 
