@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T19:55:38.405139+00:00'
+  updated_at: '2026-10-27T21:21:28.445542+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25851,6 +25851,23 @@ prs:
       so that bug PR looks redundant — flagged for the planner.'
     created_at: '2026-10-27T19:55:38Z'
     last_edited: '2026-10-27T19:55:38Z'
+  - id: note-2b98e19
+    text: 'QA scenario 3 (2026-10-27): found+fixed a dashboard gap while testing slot
+      freeing — queued QA scenarios vanished from qa_status.json/the status pane at
+      launch. _launch_scenarios_in_tmux/_containers wrote the status file while state.scenarios
+      was narrowed to the launch batch and without queued_scenarios, overwriting the
+      correct initial write; still-queued rows then showed as pending on each relaunch.
+      Threaded _status_scenarios + _queued_indices through both launchers and pass
+      queued_scenarios= to _write_status_file at the initial launch and each queued
+      relaunch; regression test TestQueuedScenariosStayVisible in tests/test_qa_loop.py.
+      Commit 8ae71190 (pushed). End-to-end verified: 4 scenarios/cap 2 shows Gamma+Delta
+      queued at launch, both dequeue, all four verdictless workers retire individually
+      as INPUT_REQUIRED (distinct reasons/panes), overall INPUT_REQUIRED; happy path
+      (2 PASS, verified, FINALIZE_DONE) and a genuine INPUT_REQUIRED worker (empty
+      reason, pane+session left alive, no recovery lines) are unaffected. Captures:
+      /pm-captures/scenarios/3/.'
+    created_at: '2026-10-27T21:21:28Z'
+    last_edited: '2026-10-27T21:21:28Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
