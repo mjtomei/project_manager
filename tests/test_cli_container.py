@@ -305,6 +305,17 @@ class TestContainerSetValidation:
         assert result.exit_code == 1
         assert "cannot parse memory value: 'notmem'" in result.stderr
 
+    @pytest.mark.parametrize("key", ["system-memory-target",
+                                     "system-memory-default-projection",
+                                     "system-memory-reserve"])
+    def test_size_without_unit_rejected(self, key):
+        """A bare number is bytes: "48" would be a 1 MiB target."""
+        with patch("pm_core.paths.set_global_setting_value") as mock_set:
+            result = self._invoke(key, "48")
+        assert result.exit_code == 1
+        assert "needs a unit, e.g. 48g" in result.stderr
+        mock_set.assert_not_called()
+
     # --- Fractional memory value ---
 
     @patch("pm_core.paths.set_global_setting_value")

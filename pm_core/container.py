@@ -649,8 +649,9 @@ def create_container(
                            session_tag=session_tag, pr_id=pr_id)
         return container_id
 
-    # No existing container or it's in an unexpected state — remove and recreate
-    remove_container(name)
+    # No existing container or it's in an unexpected state — remove and
+    # recreate.  Nothing is running, so there is no memory to sample.
+    remove_container(name, capture=False)
 
     # Auto-build the pm-dev image if it's the default and not yet built.
     # Use a lock so concurrent create_container calls don't all build at once.
@@ -1049,13 +1050,17 @@ def remove_container(name: str, *, capture: bool = True) -> None:
     EXIT trap), this still blocks until the container has fully disappeared so
     that the caller can safely create a fresh container with the same name.
 
-    Captures memory stats before removal for the memory governor unless
-    *capture* is False (the caller already captured them).
+    Captures a running container's memory stats for the memory governor
+    first, unless *capture* is False (the caller already captured them, or
+    knows the container is not running).
     """
     import time
     from pm_core.push_proxy import stop_push_proxy
     _log.info("remove_container: name=%s", name)
-    if capture:
+    # One inspect instead of the failed exec/stats calls a capture of an
+    # absent or exited container would cost (pre-launch cleanup is usually
+    # of a container that does not exist).
+    if capture and container_is_running(name):
         _capture_memory_sample(name)
 
     stop_push_proxy(name)

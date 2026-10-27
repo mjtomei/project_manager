@@ -1143,9 +1143,10 @@ def _poll_impl_idle(app) -> None:
         review_transcript_path = tracker.get_transcript_path(review_key)
         if review_transcript_path:
             from pm_core.verdict_transcript import extract_verdict_from_transcript
+            # The review prompt asks for PASS; LGTM is accepted too.
             verdict = extract_verdict_from_transcript(
                 review_transcript_path,
-                ("LGTM", "NEEDS_WORK", "INPUT_REQUIRED"),
+                ("PASS", "LGTM", "NEEDS_WORK", "INPUT_REQUIRED"),
             )
             if verdict:
                 from pm_core import runtime_state as _rs

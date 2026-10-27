@@ -2825,7 +2825,7 @@ def _poll_tmux_verdicts(
             # Expired (e.g. the loop was blocked): rejoin next attempt.
             _entry_id_map.pop(head.index, None)
             _pending_entry_ids.discard(eid)
-        reason = result.reason or "waiting for memory"
+        reason = _memory_wait_reason(result.reason)
         held = [sc.index for sc in state.scenarios
                 if sc.container_name
                 and state.scenario_verdicts.get(sc.index) == VERDICT_INPUT_REQUIRED]
@@ -3292,6 +3292,30 @@ def _poll_tmux_verdicts(
 def _qa_run_key(state: "QALoopState") -> str:
     """Launch-queue run id: stable across restarts of the same QA loop."""
     return f"{state.pr_id}-{state.loop_id}"
+
+
+def _release_run_entries(state: "QALoopState") -> None:
+    """Drop every launch-queue entry of *state*'s run (best effort)."""
+    try:
+        from pm_core.launch_queue import dequeue_run
+        dequeue_run(_qa_run_key(state))
+    except Exception:
+        _log.debug("Could not release launch-queue entries of %s",
+                   state.pr_id, exc_info=True)
+
+
+def _memory_wait_reason(reason: str) -> str:
+    """Why queued QA scenarios wait for memory.
+
+    When one scenario's projection alone exceeds the target it can never
+    launch until the target is raised (E2) — say that rather than only the
+    arithmetic.
+    """
+    from pm_core import memory_governor as mg
+    fits, why = mg.check_single_container_fits("qa_scenario")
+    if not fits:
+        return why
+    return reason or "waiting for memory"
 
 
 # ---------------------------------------------------------------------------
@@ -3853,7 +3877,7 @@ def _admit_initial_batch(
     admitted = [sc for sc in launch_scenarios if entry_map[sc.index] in granted]
     blocked = [sc for sc in launch_scenarios if entry_map[sc.index] not in granted]
     pending = {entry_map[sc.index] for sc in blocked}
-    reason = (result.reason or "waiting for memory") if blocked else ""
+    reason = _memory_wait_reason(result.reason) if blocked else ""
     if blocked:
         _log.info("Memory governor admitted %d/%d initial QA scenarios: %s",
                   len(admitted), len(launch_scenarios), reason)
@@ -4497,8 +4521,7 @@ def _execute_and_finalize(
     finally:
         if use_containers:
             # Never leave this run's memory reservations behind.
-            from pm_core.launch_queue import dequeue_run
-            dequeue_run(_qa_run_key(state))
+            _release_run_entries(state)
 
     # --- Aggregate verdicts ---
     verdicts = list(state.scenario_verdicts.values())
@@ -4654,6 +4677,9 @@ def start_qa_background(
             run_qa_sync(state, pm_root, pr_data, on_update, max_scenarios)
         except Exception:
             _log.exception("QA background thread crashed for %s", state.pr_id)
+            # This process lives on, so its granted launch-queue entries
+            # would reserve memory until they expire (up to 30 min).
+            _release_run_entries(state)
             state.running = False
             state.latest_verdict = "ERROR"
             state.latest_output = "QA thread crashed"

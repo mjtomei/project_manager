@@ -630,3 +630,71 @@ class TestGenerateReviewPromptInputRequired:
         assert "INPUT_REQUIRED" in prompt
         # Should explain that it's reserved for genuine ambiguities
         assert "needs the user's attention" in prompt
+
+
+class TestTuiStopOnIdle:
+    """TUI stop-on-idle hooks: impl idle and standalone (non-loop) reviews."""
+
+    def _tracker(self, idle_keys=()):
+        tracker = MagicMock()
+        tracker.is_tracked.return_value = True
+        tracker.is_gone.return_value = False
+        tracker.tracked_keys.return_value = []
+        tracker.get_pane_id.side_effect = lambda key: "%5"
+        tracker.get_transcript_path.side_effect = (
+            lambda key: f"/t/{key}.jsonl" if key.startswith("review:") else None)
+        tracker.became_idle.side_effect = lambda key: key in idle_keys
+        return tracker
+
+    def test_forwards_exact_container_pane_and_transcript(self):
+        from types import SimpleNamespace
+        from pm_core.tui import review_loop_ui
+        app = SimpleNamespace(_session_name="pm-repo-abc",
+                              _pane_idle_tracker=self._tracker())
+        with patch("pm_core.container.stop_idle_in_background") as stop, \
+             patch("time.time", return_value=1000.0):
+            review_loop_ui._try_stop_idle_container(app, "pr-001", "impl", "pr-001")
+        stop.assert_called_once_with(
+            "pm-repo-abc-impl-pr-001", "impl", pane_ids=["%5"],
+            transcript_path=None, idle_since=1000.0)
+
+    def _poll_review(self, verdict, idle=True):
+        from types import SimpleNamespace
+        from pm_core.tui import review_loop_ui
+        tracker = self._tracker({"review:pr-001"} if idle else ())
+        app = SimpleNamespace(
+            _session_name="pm-repo-abc", _pane_idle_tracker=tracker,
+            _data={"prs": [{"id": "pr-001", "status": "in_review",
+                            "workdir": "/w"}]},
+            _review_loops={}, _pending_merge_prs=set(),
+            log_message=lambda *a, **k: None)
+        with patch("pm_core.tui.auto_start.is_enabled", return_value=False), \
+             patch("pm_core.verdict_transcript.extract_verdict_from_transcript",
+                   side_effect=lambda path, verdicts: (
+                       verdict if path and path.startswith("/t/review:")
+                       and verdict in verdicts else None)), \
+             patch("pm_core.runtime_state.get_action_state", return_value={}), \
+             patch("pm_core.runtime_state.set_action_state"), \
+             patch("pm_core.container.stop_idle_in_background") as stop:
+            review_loop_ui._poll_impl_idle(app)
+        return stop, tracker
+
+    def test_standalone_pass_review_stops_when_idle(self):
+        """The review prompt asks for PASS — it must count as final."""
+        stop, _ = self._poll_review("PASS")
+        stop.assert_called_once()
+        assert stop.call_args[0][:2] == ("pm-repo-abc-review-pr-001", "review")
+
+    def test_standalone_needs_work_review_stops_when_idle(self):
+        stop, _ = self._poll_review("NEEDS_WORK")
+        stop.assert_called_once()
+
+    def test_standalone_input_required_keeps_container(self):
+        stop, _ = self._poll_review("INPUT_REQUIRED")
+        stop.assert_not_called()
+
+    def test_no_verdict_does_not_consume_idle_edge(self):
+        stop, tracker = self._poll_review(None)
+        stop.assert_not_called()
+        assert all(c.args != ("review:pr-001",)
+                   for c in tracker.became_idle.call_args_list)

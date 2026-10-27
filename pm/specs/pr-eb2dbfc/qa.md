@@ -14,7 +14,7 @@ INPUT_REQUIRED and do not approve this revision.
 ### R1: CLI settings
 
 `pm container set` accepts and validates:
-- `system-memory-target <size>` (e.g. `48g`); `off`/`none`/`unset` clears it (governor inactive)
+- `system-memory-target <size>` (e.g. `48g`); `off`/`none`/`unset` clears it (governor inactive).  Sizes need a unit: a bare `48` is refused (it would be 48 bytes)
 - `system-memory-scope pm|system`
 - `system-memory-reserve <size>|<pct>%` (default 10% of host RAM)
 - `system-memory-default-projection <size>`, `system-memory-history-size <N>` (N ≥ 1)
@@ -82,7 +82,7 @@ Code: `pm_core/memory_governor.py:compute_memory_status()`, `format_memory_statu
 
 ## 3. Edge Cases
 
-- E1: Projection > target → clear `check_single_container_fits` error, no wait loop.
+- E1: Projection > target → impl/review/signoff/qa-debug get the `check_single_container_fits` error, no wait loop; QA scenarios wait with that message as the reason (raising the target mid-run lets them launch).
 - E2: All initial QA scenarios blocked → all `waiting_memory` with reason; launch as memory frees.
 - E3: INPUT_REQUIRED containers hold memory → waiting reason names how many are held; no deadlock beyond needing the user.
 - E4: Concurrent admission across two pm processes/sessions → one walk at a time under `~/.pm/governor.lock`; grants never overlap headroom.
@@ -93,7 +93,7 @@ Code: `pm_core/memory_governor.py:compute_memory_status()`, `format_memory_statu
 - E9: Unknown container names → no stats recorded, no crash.
 - E10: History trimming keeps newest N samples.
 - E11: Someone attached (`podman exec -it <name> bash`) to a finished scenario container → stop-on-idle keeps it.
-- E12: Crashed/restarted pm process → its waiting entries expire or are adopted by the resumed run; its acquired reservations end when the container runs or after 30 min.
+- E12: Crashed/restarted pm process → its waiting entries expire or are adopted by the resumed run; its acquired reservations end when the container runs or after 30 min.  A crashed QA thread in a live TUI releases its run's entries at once.
 
 ## 4. Pass/Fail Criteria
 
@@ -125,7 +125,7 @@ Removal (`rm -f`) after capturing stats; the bind-mounted workdir keeps project 
 At most every 15 s while waiting (each attempt measures runtime stats); immediately after a scenario finishes if no attempt is pending.
 
 ### A4: Standalone review stop-on-idle
-Master's hook-driven review pass mirrors the review verdict; stop-on-idle fires on the first idle with a final verdict that isn't INPUT_REQUIRED.
+Master's hook-driven review pass mirrors the review verdict (PASS — what the review prompt asks for — LGTM, NEEDS_WORK, INPUT_REQUIRED; master only matched LGTM, fixed here); stop-on-idle fires on the first idle with a final verdict that isn't INPUT_REQUIRED.
 
 ## 6. Mocks
 

@@ -166,6 +166,16 @@ def container_set(key: str, value: str):
             click.echo("Error: system-memory-history-size must be a positive integer",
                         err=True)
             raise SystemExit(1)
+    # Sizes need a unit: a bare number is bytes (the runtimes' --memory
+    # convention), so "48" would be a 1 MiB target that refuses everything.
+    if (key in ("system-memory-target", "system-memory-default-projection",
+                "system-memory-reserve")
+            and value.lower() not in ("off", "none", "unset")
+            and not value.strip().endswith("%")
+            and not value.strip()[-1:].isalpha()):
+        click.echo(f"Error: {key} needs a unit, e.g. {value.strip()}g",
+                   err=True)
+        raise SystemExit(1)
     if key == "system-memory-reserve":
         from pm_core.memory_governor import parse_reserve
         try:

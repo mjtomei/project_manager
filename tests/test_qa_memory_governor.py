@@ -408,6 +408,16 @@ class TestInitialBatch:
         assert admitted == [] and blocked == scenarios
         assert "busy" in reason
 
+    def test_scenario_larger_than_target_says_so(self):
+        """E2: a scenario projected above the whole target can never launch
+        until the target is raised — the waiting reason must say that."""
+        scenarios = [_scenario(1, launched=False)]
+        with _governor(target_g=4, used_g=0, proj_g=8):
+            admitted, _b, _m, _p, reason = \
+                _admit_initial_batch(_state(scenarios), scenarios)
+        assert admitted == []
+        assert "a single container cannot fit" in reason
+
     def test_measurement_failure_blocks_batch(self):
         scenarios = [_scenario(1, launched=False)]
         with _governor(error="stats unavailable"):
@@ -433,4 +443,17 @@ class TestRunRelease:
                     str(tmp_path), tmp_path / "status.json", None,
                     use_containers=True, concurrency_cap=0,
                     queued_scenarios=[], notify=lambda: None)
+        assert [e["qa_run_id"] for e in _queue_entries()] == ["pr-9-other"]
+
+    def test_crashed_qa_thread_releases_run_entries(self, tmp_path):
+        """A crash before the poll loop (whose finally releases entries)
+        must not leave grants reserving memory for the life of the TUI."""
+        from pm_core import qa_loop
+        state = _state([_scenario(1, launched=False)])
+        lq.enqueue("qa_scenario", qa_run_id="pr-1-loop", keys=["pr-1-loop:s1"])
+        lq.enqueue("qa_scenario", qa_run_id="pr-9-other", keys=["pr-9-other:s1"])
+        with patch("pm_core.qa_loop.run_qa_sync",
+                   side_effect=RuntimeError("boom")):
+            qa_loop.start_qa_background(state, tmp_path, {}).join(5)
+        assert state.latest_verdict == "ERROR"
         assert [e["qa_run_id"] for e in _queue_entries()] == ["pr-9-other"]

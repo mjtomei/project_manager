@@ -508,7 +508,7 @@ class TestCreateContainer:
         )
 
         assert cid == "abc123"
-        mock_rm.assert_called_once_with("pm-test")
+        mock_rm.assert_called_once_with("pm-test", capture=False)
 
         # First call is `docker run`, subsequent calls are readiness checks
         run_call = mock_docker.call_args_list[0]
@@ -763,7 +763,7 @@ class TestContainerReuse:
         cid = create_container(name="pm-test", config=config,
                                workdir=Path("/w"))
         assert cid == "newid"
-        mock_rm.assert_called_once_with("pm-test")
+        mock_rm.assert_called_once_with("pm-test", capture=False)
         # First docker call should be "run"
         assert mock_docker.call_args_list[0][0][0] == "run"
 
@@ -986,25 +986,31 @@ class TestRemoveContainer:
         mock_docker.assert_any_call(
             "inspect", "test-container", check=False, timeout=5)
 
+    @patch("pm_core.container.container_is_running", return_value=True)
     @patch("pm_core.memory_governor.capture_and_record")
     @patch("pm_core.container._run_runtime")
-    def test_removes_container_after_capture(self, mock_docker, _mock_capture):
+    def test_removes_container_after_capture(self, mock_docker, _mock_capture,
+                                            _running):
         mock_docker.return_value = MagicMock(returncode=1)
         remove_container("test-container")
         mock_docker.assert_any_call(
             "rm", "-f", "test-container", check=False, timeout=30)
 
+    @patch("pm_core.container.container_is_running", return_value=True)
     @patch("pm_core.container._run_runtime")
     @patch("pm_core.memory_governor.capture_and_record")
-    def test_capture_called_with_container_name(self, mock_capture, mock_docker):
+    def test_capture_called_with_container_name(self, mock_capture, mock_docker,
+                                                _running):
         mock_docker.return_value = MagicMock(returncode=1)
         remove_container("pm-impl")
         mock_capture.assert_called_once_with("pm-impl")
 
+    @patch("pm_core.container.container_is_running", return_value=True)
     @patch("pm_core.container._run_runtime")
     @patch("pm_core.push_proxy.stop_push_proxy")
     @patch("pm_core.memory_governor.capture_and_record")
-    def test_capture_before_docker_rm(self, mock_capture, mock_proxy, mock_docker):
+    def test_capture_before_docker_rm(self, mock_capture, mock_proxy, mock_docker,
+                                      _running):
         mock_docker.return_value = MagicMock(returncode=1)
         from unittest.mock import Mock
         manager = Mock()
@@ -1019,13 +1025,40 @@ class TestRemoveContainer:
                       if c == call.docker("rm", "-f", "pm-impl", check=False, timeout=30))
         assert capture_idx < rm_idx
 
+    @patch("pm_core.container.container_is_running", return_value=True)
     @patch("pm_core.container._run_runtime")
     @patch("pm_core.push_proxy.stop_push_proxy")
     @patch("pm_core.memory_governor.capture_and_record", side_effect=RuntimeError("stats failed"))
-    def test_capture_failure_does_not_block_removal(self, mock_capture, mock_proxy, mock_docker):
+    def test_capture_failure_does_not_block_removal(self, mock_capture, mock_proxy,
+                                                    mock_docker, _running):
         mock_docker.return_value = MagicMock(returncode=1)
         remove_container("pm-impl")
         mock_docker.assert_any_call("rm", "-f", "pm-impl", check=False, timeout=30)
+
+
+    @patch("pm_core.container.container_is_running", return_value=False)
+    @patch("pm_core.container._run_runtime")
+    @patch("pm_core.push_proxy.stop_push_proxy")
+    @patch("pm_core.memory_governor.capture_and_record")
+    def test_absent_container_is_not_sampled(self, mock_capture, _proxy,
+                                             mock_docker, _running):
+        """Pre-launch cleanup of a container that does not exist must not
+        pay the failed exec/stats calls of a capture."""
+        mock_docker.return_value = MagicMock(returncode=1)
+        remove_container("pm-impl")
+        mock_capture.assert_not_called()
+        mock_docker.assert_any_call("rm", "-f", "pm-impl", check=False, timeout=30)
+
+    @patch("pm_core.container.container_is_running")
+    @patch("pm_core.container._run_runtime")
+    @patch("pm_core.push_proxy.stop_push_proxy")
+    @patch("pm_core.memory_governor.capture_and_record")
+    def test_capture_false_skips_running_check(self, mock_capture, _proxy,
+                                               mock_docker, running):
+        mock_docker.return_value = MagicMock(returncode=1)
+        remove_container("pm-impl", capture=False)
+        running.assert_not_called()
+        mock_capture.assert_not_called()
 
 
 class TestCleanupContainers:
