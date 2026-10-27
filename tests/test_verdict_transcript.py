@@ -37,6 +37,14 @@ def _user_line(text: str) -> str:
     })
 
 
+def _local_command_line(text: str) -> str:
+    # Claude Code writes slash-command output as a plain-string user record.
+    return json.dumps({
+        "type": "user",
+        "message": {"role": "user", "content": text},
+    })
+
+
 def _write(tmp_path: Path, lines: list[str]) -> Path:
     p = tmp_path / "t.jsonl"
     p.write_text("\n".join(lines) + "\n")
@@ -297,6 +305,40 @@ def test_turn_state_complete_after_meta_records(tmp_path: Path) -> None:
         _meta_line("system"),
         _meta_line("last-prompt"),
     ])
+    assert latest_turn_state(p) == "complete"
+
+
+def test_turn_state_ignores_local_command_records(tmp_path: Path) -> None:
+    # A slash command (e.g. /model) left after the final assistant message is
+    # a user-typed record but not a submitted prompt: it must not read as a
+    # pending turn (which would stall the fresh-autostart handoff forever).
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("done"),
+        _local_command_line("<command-name>/model</command-name>"),
+        _local_command_line("<local-command-stdout>Set model</local-command-stdout>"),
+    ])
+    assert latest_turn_state(p) == "complete"
+
+
+def test_turn_state_ignores_task_notification_records(tmp_path: Path) -> None:
+    # A background-task completion is injected as a user record after the
+    # turn ended; it is not a prompt and must not look like pending work.
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("done"),
+        _local_command_line("<task-notification>\n<task-id>x</task-id>\n"
+                            "</task-notification>"),
+    ])
+    assert latest_turn_state(p) == "complete"
+
+
+def test_turn_state_ignores_meta_user_records(tmp_path: Path) -> None:
+    meta = json.dumps({
+        "type": "user", "isMeta": True,
+        "message": {"role": "user", "content": "injected context"},
+    })
+    p = _write(tmp_path, [_user_line("do it"), _assistant_line("done"), meta])
     assert latest_turn_state(p) == "complete"
 
 

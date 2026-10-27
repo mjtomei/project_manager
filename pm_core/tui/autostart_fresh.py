@@ -396,13 +396,16 @@ def _epoch(iso: str | None) -> float:
 def handoff_ready(app, pr: dict, tracker) -> bool:
     """Whether the current implementation turn has completed.
 
-    Two independent signals, both fenced against the old attempt:
+    The transcript's newest turn is the authoritative signal, fenced against
+    the old attempt: ``complete`` (the newest record is an assistant message
+    with no pending tool) means the turn is over, which covers "already
+    completed before autostart was enabled" and a restarted TUI (no hook
+    needed).  ``in_progress`` means a newer turn is still running, so a hook
+    event — which can only belong to an earlier turn — must not advance.
 
-    * a **new** ``idle_prompt``/``Stop`` hook event whose timestamp is after
-      ``fresh_autostart.requested_at`` (old events cannot count), or
-    * the transcript's newest turn is structurally complete — the
-      authoritative signal, which covers "already completed before autostart
-      was enabled" and a restarted TUI (no hook needed).
+    Only when the transcript is missing/unreadable does a **new**
+    ``idle_prompt``/``Stop`` hook event whose timestamp is after
+    ``fresh_autostart.requested_at`` count as the handoff (old events cannot).
     """
     if not fresh_awaiting(pr):
         return False
@@ -421,8 +424,27 @@ def handoff_ready(app, pr: dict, tracker) -> bool:
     except Exception:
         pass
 
-    since = _epoch(fresh_marker(pr).get("requested_at"))
     transcript = _impl_transcript(app, pr, tracker)
+    if transcript:
+        from pm_core.verdict_transcript import latest_turn_state
+        # The transcript's structure is authoritative: "complete" means the
+        # newest record is an assistant message with no pending tool, i.e.
+        # the turn is over.  Do not additionally require the hook tracker's
+        # idle flag — it can be stale (no turn-start hook) or miss the event
+        # when ``Stop`` is written after ``idle_prompt``.
+        state = latest_turn_state(transcript)
+        if state == "complete":
+            return True
+        if state == "in_progress":
+            # The user already started another turn (e.g. typed a follow-up
+            # after the previous turn's ``idle_prompt`` fired).  A hook event
+            # still on disk belongs to that earlier turn; advancing now would
+            # launch the review over in-flight work.
+            return False
+
+    # Transcript missing/unreadable: fall back to the newest hook event,
+    # fenced against the old attempt by ``requested_at``.
+    since = _epoch(fresh_marker(pr).get("requested_at"))
     event = _latest_hook_event(transcript)
     if event:
         try:
@@ -431,16 +453,7 @@ def handoff_ready(app, pr: dict, tracker) -> bool:
             ts = 0.0
         if ts > since and event.get("event_type") in ("idle_prompt", "Stop"):
             return True
-
-    if not transcript:
-        return False
-    from pm_core.verdict_transcript import latest_turn_state
-    # The transcript's structure is authoritative: "complete" means the
-    # newest record is an assistant message with no pending tool, i.e. the
-    # turn is over.  Do not additionally require the hook tracker's idle
-    # flag — it can be stale (no turn-start hook) or miss the event when
-    # ``Stop`` is written after ``idle_prompt``.
-    return latest_turn_state(transcript) == "complete"
+    return False
 
 
 def consume_handoff(app, pr_id: str) -> None:

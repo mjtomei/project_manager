@@ -313,6 +313,31 @@ Implemented as specified, with these refinements from the first review pass:
 * **Partial failures are surfaced** — the CLI prints `failed:` lines for
   PRs whose reset failed after validation.
 
+## Review-iteration notes (i2)
+
+* **The transcript now really is authoritative** — R3 described the
+  transcript as authoritative but the code checked the hook event first.
+  A previous turn's `idle_prompt` (newer than `requested_at`) could then
+  advance the handoff while the user had already started a follow-up turn,
+  launching the review over in-flight work — contradicting the "Busy turn at
+  reset: ... No early review" edge case.  `handoff_ready` now reads the
+  transcript first: `complete` advances, `in_progress` waits, and the hook
+  event is only consulted when the transcript is missing/unreadable (so the
+  hook still covers a session whose transcript cannot be resolved).
+* **Local-command/meta user records are not a pending turn** — Claude Code
+  appends slash-command output (`<command-name>`, `<local-command-stdout>`,
+  ...), `isMeta` context and background-task notifications
+  (`<task-notification>`) as `type: "user"` records.  `latest_turn_state` now
+  skips them, so a `/model` (or a task completing) left at the end of the
+  transcript cannot read as `in_progress` and stall the handoff forever.
+* **Second-turn idle detection is tested** — `PaneIdleTracker`'s re-arm on a
+  new `idle_prompt` (the i1 change) now has a direct regression test.
+* **A stale `z` prefix cannot arm the destructive variant** — `z O`/`z A`
+  rewind a reviewed PR, so the App-level prefix handler now cancels a pending
+  `z` when the next key is not one of the z-actions (`d`/`t`/`s`/`O`/`A`).
+  Previously `z`, then navigation, then `A` would have run the fresh reset on
+  the newly selected PR instead of a plain auto-merge toggle.
+
 Known limitation (documented, not changed): removing the auto-start target
 while an attempt is still waiting does not clear the marker, so
 `resume_pending` re-adds the target after a plain TUI restart.  Re-remove it

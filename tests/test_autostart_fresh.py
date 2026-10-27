@@ -216,6 +216,11 @@ def _transcript(tmp_path, records):
     return path
 
 
+def _missing_transcript(tmp_path):
+    """A UUID-named path that was never written (transcript unreadable)."""
+    return tmp_path / "12345678-1234-1234-1234-123456789abc.jsonl"
+
+
 def _complete():
     return {"type": "assistant",
             "message": {"role": "assistant",
@@ -274,20 +279,37 @@ class TestHandoff:
             None, pr, _Tracker(path, idle=False))
 
     def test_old_hook_event_does_not_advance(self, tmp_path):
-        path = _transcript(tmp_path, [_busy()])
+        # No transcript to read, so the hook fallback decides: an event from
+        # before ``requested_at`` belongs to the old attempt and cannot count.
         pr = _marker_pr(st.now_iso())
         old_event = {"event_type": "idle_prompt",
                      "timestamp": time.time() - 3600}
         with patch("pm_core.hook_events.read_event", return_value=old_event):
-            assert not autostart_fresh.handoff_ready(None, pr, _Tracker(path))
+            assert not autostart_fresh.handoff_ready(
+                None, pr, _Tracker(_missing_transcript(tmp_path)))
 
-    def test_new_hook_event_advances_even_if_transcript_lags(self, tmp_path):
-        path = _transcript(tmp_path, [_busy()])
+    def test_new_hook_event_advances_when_the_transcript_is_unreadable(
+            self, tmp_path):
+        # No transcript to read: the (post-reset) hook event is the only
+        # signal left, so it must count.
         pr = _marker_pr("2020-01-01T00:00:00Z")
         new_event = {"event_type": "idle_prompt",
                      "timestamp": time.time() + 10}
         with patch("pm_core.hook_events.read_event", return_value=new_event):
-            assert autostart_fresh.handoff_ready(None, pr, _Tracker(path))
+            assert autostart_fresh.handoff_ready(
+                None, pr, _Tracker(_missing_transcript(tmp_path)))
+
+    def test_newer_turn_blocks_a_stale_hook_event(self, tmp_path):
+        # The previous turn's idle_prompt is newer than requested_at, but the
+        # user has already started another turn (a follow-up prompt): the
+        # transcript is authoritative, so the handoff must wait.
+        path = _transcript(tmp_path, [_complete(), _busy()])
+        pr = _marker_pr("2020-01-01T00:00:00Z")
+        new_event = {"event_type": "idle_prompt",
+                     "timestamp": time.time() + 10}
+        with patch("pm_core.hook_events.read_event", return_value=new_event):
+            assert not autostart_fresh.handoff_ready(
+                None, pr, _Tracker(path))
 
     def test_spec_pending_blocks_handoff(self, tmp_path):
         path = _transcript(tmp_path, [_complete()])
@@ -553,6 +575,61 @@ class TestKeyBindings:
         assert any("No PR selected" in line for line in app.logs)
 
 
+class _PrefixApp:
+    """Minimal app for the App-level ``on_key`` prefix handler."""
+
+    def __init__(self, z):
+        self._z_count = z
+        self._w_mode = False
+        self._y_mode = False
+        self._command_pending = False
+        self.screen_stack = [object()]
+        self.cleared = 0
+
+    def query_one(self, *_a, **_k):
+        from types import SimpleNamespace
+        return SimpleNamespace(has_focus=False)
+
+    def _clear_prefix_hint(self):
+        self.cleared += 1
+
+    def log_message(self, *_a, **_k):
+        return 0
+
+    def set_timer(self, *_a, **_k):
+        return MagicMock()
+
+
+class _KeyEvent:
+    def __init__(self, key, character=None):
+        self.key = key
+        self.character = character
+
+    def prevent_default(self):
+        pass
+
+    def stop(self):
+        pass
+
+
+class TestPrefixCancellation:
+    """A stale ``z`` prefix must not arm the destructive fresh variant."""
+
+    def test_unrelated_key_cancels_the_prefix(self):
+        from pm_core.tui.app import ProjectManagerApp
+        app = _PrefixApp(z=1)
+        ProjectManagerApp.on_key(app, _KeyEvent("j", "j"))
+        assert app._z_count == 0
+        assert app.cleared == 1
+
+    def test_z_action_key_keeps_the_prefix(self):
+        from pm_core.tui.app import ProjectManagerApp
+        app = _PrefixApp(z=1)
+        ProjectManagerApp.on_key(app, _KeyEvent("A", "A"))
+        assert app._z_count == 1
+        assert app.cleared == 0
+
+
 # ---------------------------------------------------------------------------
 # Restart recovery
 # ---------------------------------------------------------------------------
@@ -798,20 +875,19 @@ class TestCli:
     def test_fresh_sends_the_verb(self, cli_project):
         sent = []
 
-        def fake_trigger(session, cmd):
-            sent.append(cmd)
-            return True
+        def fake_request(session, args, timeout):
+            sent.append((session, args))
+            return {"ok": True, "changes": [
+                        {"pr_id": "pr-a", "action": "fresh_reset",
+                         "from_status": "in_review"}],
+                    "message": "Auto-start fresh: pr-a: waiting",
+                    "status": {"mode": "targets", "targets": []}}
 
-        with patch("pm_core.cli.autostart.trigger_tui_command",
-                   side_effect=fake_trigger), \
-             patch("pm_core.cli.autostart._request",
-                   return_value={"ok": True, "changes": [
-                       {"pr_id": "pr-a", "action": "fresh_reset",
-                        "from_status": "in_review"}],
-                       "message": "Auto-start fresh: pr-a: waiting",
-                       "status": {"mode": "targets", "targets": []}}):
-            res = _cli(["fresh", "pr-a", "-s", "pm-x"])
+        with patch("pm_core.cli.autostart._request",
+                   side_effect=fake_request):
+            res = _cli(["fresh", "pr-a", "--auto-merge", "-s", "pm-x"])
         assert res.exit_code == 0, res.output
+        assert sent == [("pm-x", ["fresh", "pr-a", "--auto-merge"])]
         assert "fresh: pr-a (in_review → in_progress)" in res.output
         assert "Auto-start fresh: pr-a: waiting" in res.output
 

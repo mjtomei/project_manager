@@ -62,6 +62,12 @@ def _record_log_message(app, msg: str, suppressed: bool) -> None:
     _log.info("log: %s%s", plain, " (hidden by sticky message)" if suppressed else "")
 
 
+# Keys that interpret the ``z`` prefix (``z d``/``z t``/``z s``/``z O``/``z A``).
+# Any other key press cancels a pending ``z`` so a stale prefix cannot turn a
+# later plain ``A``/``O`` into its destructive fresh-autostart variant.
+_Z_PREFIX_KEYS = frozenset({"d", "t", "s", "O", "A"})
+
+
 class ProjectManagerApp(App):
     """Interactive TUI for managing PR dependency graphs."""
 
@@ -203,6 +209,15 @@ class ProjectManagerApp(App):
         # its own keys — App-level prefix keys (y/w/z) must not swallow them.
         if len(self.screen_stack) > 1:
             return
+        # A pending ``z`` prefix only applies to the *next* key when that key
+        # is one of the z-actions.  Without this, pressing ``z`` then
+        # navigating (``j``) leaves the count armed, so a later plain ``A``
+        # would run the destructive fresh autostart on the newly selected PR.
+        key = event.character or event.key
+        if (self._z_count and key != "z"
+                and key not in _Z_PREFIX_KEYS):
+            self._z_count = 0
+            self._clear_prefix_hint()
         # Buffer keystrokes between / press and command bar gaining focus
         if self._command_pending:
             if event.key == "escape":

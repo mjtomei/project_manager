@@ -160,6 +160,26 @@ def latest_turn_state(transcript_path: str | Path | None) -> str:
     return "unknown"
 
 
+# Claude Code records slash commands, injected context and background-task
+# notifications as ``type: "user"`` entries.  They are not a submitted prompt
+# (the agent owes no reply), so they must not read as a pending turn —
+# otherwise a ``/model`` or a task notification left at the end of the
+# transcript would stall the handoff forever.
+_NON_PROMPT_USER_PREFIXES = ("<local-command-", "<command-name>",
+                             "<command-args>", "<command-message>",
+                             "<task-notification>")
+
+
+def _is_non_prompt_user_record(rec: dict) -> bool:
+    """Whether a ``type: "user"`` record is injected/meta, not a prompt."""
+    if rec.get("isMeta"):
+        return True
+    msg = rec.get("message")
+    content = msg.get("content") if isinstance(msg, dict) else None
+    return isinstance(content, str) and content.lstrip().startswith(
+        _NON_PROMPT_USER_PREFIXES)
+
+
 def _turn_state_from_tail(text: str) -> str:
     """Classify the newest user/assistant record in *text* (see above)."""
     if not text.strip():
@@ -176,6 +196,8 @@ def _turn_state_from_tail(text: str) -> str:
             continue
         typ = rec.get("type")
         if typ == "user":
+            if _is_non_prompt_user_record(rec):
+                continue
             return "in_progress"
         if typ == "assistant":
             msg = rec.get("message") or {}
