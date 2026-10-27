@@ -35,6 +35,10 @@ R1. **Reusable, safe wait helper.** Add a checked-in helper
    - validates the expected artifact before success: exists, regular file,
      non-empty, *fresh for this run* (not a stale leftover), plus an optional
      `--validate` command (e.g. `ffprobe`);
+   - if the helper itself is signalled (Ctrl-C, or a supervisor killing the
+     waiting shell), terminates the job's own process group and reports the
+     interruption (exit 130) — a killed wait must not masquerade as a job
+     failure, nor leave a renderer running behind it;
    - emits actionable diagnostics on every failure path.
 
 R2. **Recipe guidance.** `pm/qa/artifacts/tmux-screen-recording.md` and
@@ -51,7 +55,10 @@ R3. **Shared background-job guidance in prompts.** Add one shared prompt block
    - `generate_prompt` (impl sessions that run suites).
    The block states: capture the handle, wait on that PID, bound the wait,
    check exit status, preserve pipeline status (`pipefail`), require a fresh
-   artifact, and never equate killing a wait with a passing result.
+   artifact, and never equate killing a wait with a passing result. The QA
+   child prompt also explains that recipes ship helpers beside them, so a
+   worker sets `RECIPE_DIR` to the recipe's directory rather than assuming
+   the repo root is the cwd.
 
 R4. **Artifact-completion verification.** `_build_verification_prompt` in
 `pm_core/qa_loop.py` must tell the verifier that presence alone is not enough:
@@ -77,6 +84,8 @@ covering at minimum:
    - persistent observer child alongside a finite job → helper completes and
      leaves the observer alive (bare-`wait` deadlock);
    - unreaped zombie sibling does not stall the helper;
+   - signal-killed job → failure with its status; a signalled helper → exit
+     130, the job is terminated, and the diagnostic says "interrupted";
    - recipe/helper content assertions (helper referenced, `--timeout`,
      `--artifact`, `pipefail`; helper copied by `_install_artifact_files`).
 
@@ -142,6 +151,9 @@ verifier's FLAGGED rule is asserted there too, not only the prose paragraph.
 - Job exits 124 on its own (rare) → only classified as timeout when elapsed ≥
   the bound; otherwise reported as job failure 124.
 - Job killed by a signal → reported as failure with status.
+- Helper itself signalled (TERM/INT/HUP) → the job's process group is
+  terminated, the helper exits 130 and says "interrupted" — never a bogus job
+  status, never an orphaned renderer.
 - `--validate` command fails → artifact invalid → fail.
 - Artifact path is a directory / symlink to nothing → fail as not a regular
   file.

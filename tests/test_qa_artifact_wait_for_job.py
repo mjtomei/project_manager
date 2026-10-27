@@ -6,6 +6,7 @@ Covers the pr-b19db15 failure modes:
   pattern must not stall the wait (the self-matching ``pgrep -f`` bug);
 - a renderer failure is a failure even when an artifact exists;
 - a timeout is a failure and kills only the timed-out job;
+- a signalled helper stops the job it started and says it was interrupted;
 - a stale leftover artifact is not success;
 - a persistent observer/reaper must not block a finite job;
 - pipeline failure status is preserved;
@@ -155,6 +156,56 @@ class TestWaitOutcomes:
         assert r.returncode == 1
         assert "exit status 7" in r.stderr
         assert art.exists()  # artifact is irrelevant; the status wins
+
+    def test_signal_killed_job_is_failure(self, tmp_path):
+        """A job killed by a signal reports that status as a failure."""
+        art = tmp_path / "recording.mp4"
+        r = run_helper([
+            "--timeout", "10", "--artifact", str(art),
+            "-c", f'printf video > {shlex.quote(str(art))}; kill -TERM $$',
+        ])
+        assert r.returncode == 1
+        assert "exit status 143" in r.stderr
+
+    def test_interrupted_wait_kills_the_job(self, tmp_path):
+        """A signalled helper stops the job and reports the interruption.
+
+        The bug report's supervisor killed the waiting shell while the
+        renderer kept running.  The helper must not call that a *job*
+        failure (the job did not fail), and must not leave the renderer
+        behind to race a later run over the same artifact.
+        """
+        art = tmp_path / "recording.mp4"
+        pid_file = tmp_path / "job.pid"
+        proc = subprocess.Popen(
+            ["bash", str(HELPER), "--timeout", "60", "--artifact", str(art),
+             "-c", f'echo $$ > {shlex.quote(str(pid_file))}; sleep 30'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=os.environ.copy())
+        try:
+            deadline = time.monotonic() + 10
+            while not pid_file.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert pid_file.exists(), "job never started"
+            job_pid = int(pid_file.read_text().strip())
+            proc.terminate()
+            _, err = proc.communicate(timeout=20)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.communicate()
+        assert proc.returncode == 130, err
+        assert "interrupted" in err
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                os.kill(job_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError(
+                f"job {job_pid} outlived the interrupted helper")
 
     def test_timeout_is_failure(self, tmp_path):
         art = tmp_path / "recording.mp4"

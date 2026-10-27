@@ -20,7 +20,10 @@
 # `--validate` runs only after a successful job; `$ARTIFACT` is exported to it.
 # On timeout only the job's own process group is signalled, so unrelated jobs
 # (including a deliberately persistent observer started by the caller) are
-# left alone.
+# left alone. If the helper itself is signalled (Ctrl-C, or a supervisor killing
+# the waiting shell) it terminates the job's process group and reports the
+# interruption — a killed wait is never passed off as a job failure, and never
+# leaves a renderer running behind it to race a later run over the artifact.
 #
 # Exit status:
 #   0  job exited 0 and the artifact is fresh (and --validate passed)
@@ -29,6 +32,7 @@
 #   3  job exceeded --timeout and was killed
 #   4  artifact missing, empty, stale (not produced by this run), or
 #      --validate failed
+#   130  the wait was interrupted by a signal; the job was terminated
 #
 # Why not poll process names? `until ! pgrep -f "<renderer>"` matches the
 # waiting shell itself, whose command line contains the pattern, so it never
@@ -82,6 +86,25 @@ else
   [ $# -gt 0 ] || die "no command given (use -c 'CMD' or -- CMD [ARG...])"
 fi
 command -v timeout >/dev/null 2>&1 || die "the 'timeout' command is required"
+
+job_pid=""
+
+# If the helper is signalled, stop the job too. Without this the `wait` would
+# return 143 and be reported as a *job* failure while the renderer kept running
+# — a misleading diagnostic and an orphan that can race a retry over the same
+# artifact. `timeout` made itself a process-group leader, so `-$job_pid` is the
+# job's own group; the fallback covers a timeout that could not become leader.
+on_signal() {
+  trap - TERM INT HUP
+  if [ -n "$job_pid" ]; then
+    kill -TERM -- "-$job_pid" 2>/dev/null || \
+        kill -TERM "$job_pid" 2>/dev/null || true
+    wait "$job_pid" 2>/dev/null || true
+  fi
+  printf 'wait-for-job: interrupted before the job finished — this is a failure, not a result\n' >&2
+  exit 130
+}
+trap on_signal TERM INT HUP
 
 mkdir -p -- "$(dirname -- "$artifact")" 2>/dev/null || true
 
