@@ -423,15 +423,16 @@ def _qa_run_record(base, started_at):
         {"pr_id": PR, "loop_id": "x", "started_at": started_at}))
 
 
-@pytest.mark.parametrize("run_after_return, launched", [(True, False),
-                                                        (False, True)])
+@pytest.mark.parametrize("run_after_return, window, launched", [
+    (True, "@7", False), (False, "@7", True), (True, None, True)])
 def test_cli_qa_return_whose_rerun_started_is_left_to_it(
-        tmp_path, run_after_return, launched):
+        tmp_path, run_after_return, window, launched):
     """S87: the TUI started the REQA re-run while project.yaml was busy and
     its clear of ``awaiting`` is still pending.  A tick that got the lock at
     the release must not launch a second QA driver over that run; a qa
     window from a run that started before the return (the judged run) is
-    still relaunched over."""
+    still relaunched over, and so is a newer run record without a window
+    (that run ended or died before opening one)."""
     ts = "2026-10-27T04:07:14+00:00"
     start = signoff.parse_ts(ts).timestamp() + (15 if run_after_return
                                                  else -120)
@@ -441,7 +442,7 @@ def test_cli_qa_return_whose_rerun_started_is_left_to_it(
         tmp_path, _returned("qa", "qa", ts=ts),
         **{"pm_core.cli.pr._qa_status_for": {"return_value": (None, None)},
            "pm_core.cli.pr.tmux_mod.find_window_by_name":
-               {"return_value": "@7"},
+               {"return_value": window},
            "pm_core.paths.workdirs_base": {"return_value": tmp_path / "wd"},
            "pm_core.cli.pr._check_qa_launch": {"return_value": None},
            "pm_core.signoff.claim_return_launch": {"new": claim}})
