@@ -1271,7 +1271,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                           review_loop_id: str = "",
                           transcript: str | None = None) -> None:
     """Launch a tmux review window with Claude review + git diff shell."""
-    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+    # A background launch (``pm pr auto-sequence``) switches no client, so
+    # it may come from a shell outside tmux: the window opens in the pm
+    # session of the project.
+    if not tmux_mod.has_tmux() or not (background or tmux_mod.in_tmux()):
         click.echo("Review window requires tmux.")
         return
 

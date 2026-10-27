@@ -934,10 +934,24 @@ def _get_current_pm_session() -> str | None:
 
 
 def _get_pm_session() -> str | None:
-    """Get the pm tmux session name if running inside one."""
+    """Get the pm tmux session name if running inside one.
+
+    Outside a pm session that is the session of the project this command
+    works on: the ``-C``/``PM_PROJECT`` project when given (a PR workdir is
+    its own git clone, so its cwd names a session nobody runs), else the
+    project of the cwd.
+    """
     if not tmux_mod.has_tmux():
         return None
-    return _get_current_pm_session() or _get_session_name_for_cwd()
+    current = _get_current_pm_session()
+    if current:
+        return current
+    if _project_override:
+        from pm_core.paths import get_session_tag
+        tag = get_session_tag(start_path=_project_override)
+        if tag:
+            return f"pm-{tag}"
+    return _get_session_name_for_cwd()
 
 
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:

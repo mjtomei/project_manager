@@ -1086,6 +1086,13 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         # Skip if no workdir
         if not pr.get("workdir"):
             continue
+        # A ``pm pr auto-sequence`` QA driver runs outside this TUI: its
+        # verdict reaches runtime_state when it ends.
+        from pm_core.qa_loop import run_driven_elsewhere
+        if run_driven_elsewhere(pr_id):
+            _log.debug("auto_start: %s QA run is driven by another process, "
+                       "not starting", pr_id)
+            continue
         _log.info("auto_start: starting QA loop for %s", pr_id)
         app.log_message(f"Auto-start: QA for {pr_id}")
         from pm_core.tui import qa_loop_ui

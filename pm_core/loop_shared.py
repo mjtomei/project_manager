@@ -14,9 +14,22 @@ _log = configure_logger("pm.loop_shared")
 
 
 def get_pm_session() -> str | None:
-    """Get the pm tmux session name."""
-    from pm_core.cli.helpers import _get_current_pm_session
-    return _get_current_pm_session()
+    """Get the pm tmux session name.
+
+    Inside a pm session's pane, that session.  Elsewhere (a QA driver that
+    ``pm pr auto-sequence`` spawned from a shell outside tmux, from a non-pm
+    tmux session or from a PR workdir with ``-C``) the live pm session of
+    the project this process works on, or None when it is not running.
+    """
+    from pm_core import tmux as tmux_mod
+    from pm_core.cli.helpers import _get_current_pm_session, _get_pm_session
+    current = _get_current_pm_session()
+    if current:
+        return current
+    session = _get_pm_session()
+    if session and tmux_mod.session_exists(f"={session}"):
+        return session
+    return None
 
 
 def find_claude_pane(session: str, window_name: str) -> str | None:

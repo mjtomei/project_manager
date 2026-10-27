@@ -267,6 +267,60 @@ class TestAutoStartQASkipRunning:
         mock_start.assert_called_once_with(app, "pr-001")
 
 
+    def test_skips_run_driven_by_another_live_process(self, tmp_path,
+                                                       monkeypatch):
+        """A live ``pm pr qa-run-bg`` driver of this session (its start
+        record names it) is not started over: a TUI loop would kill its
+        windows as stale and QA the PR twice (RQ47 b)."""
+        import json, subprocess
+        from pm_core import qa_loop
+        from pm_core.tui.auto_start import _auto_start_qa_loops
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(qa_loop, "get_pm_session", lambda: "pm-own")
+        app = _make_app(tmp_path, auto_start=True)
+        qa_wd = tmp_path / ".pm" / "workdirs" / "qa" / "pr-001-abc"
+        qa_wd.mkdir(parents=True)
+        driver = subprocess.Popen(["sleep", "30"])
+        try:
+            rec = {"pr_id": "pr-001", "loop_id": "abc", "session_tag": "own",
+                   "started_at": 1.0, "owner_pid": driver.pid,
+                   "owner_start": qa_loop._proc_start_time(driver.pid)}
+            (qa_wd / "qa_run.json").write_text(json.dumps(rec))
+            with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+                _auto_start_qa_loops(app)
+            mock_start.assert_not_called()
+        finally:
+            driver.kill()
+            driver.wait()
+        # Once the driver is gone its record no longer holds the PR back.
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _auto_start_qa_loops(app)
+        mock_start.assert_called_once_with(app, "pr-001")
+
+    def test_own_or_ownerless_run_record_does_not_block(self, tmp_path,
+                                                        monkeypatch):
+        """This process's own runs (a TUI restart execs in place) and records
+        written before they named an owner do not count as another driver."""
+        import json, os
+        from pm_core import qa_loop
+        from pm_core.tui.auto_start import _auto_start_qa_loops
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(qa_loop, "get_pm_session", lambda: "pm-own")
+        app = _make_app(tmp_path, auto_start=True)
+        qa_root = tmp_path / ".pm" / "workdirs" / "qa"
+        for name, extra in (("pr-001-a", {"owner_pid": os.getpid()}),
+                            ("pr-001-b", {})):
+            (qa_root / name).mkdir(parents=True)
+            (qa_root / name / "qa_run.json").write_text(json.dumps(
+                {"pr_id": "pr-001", "session_tag": "own", "started_at": 1.0,
+                 **extra}))
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            _auto_start_qa_loops(app)
+        mock_start.assert_called_once_with(app, "pr-001")
+
+
 # ---------------------------------------------------------------------------
 # Race guard: poll_qa_state vs auto-start
 # ---------------------------------------------------------------------------

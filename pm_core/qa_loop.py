@@ -1234,7 +1234,10 @@ def write_run_record(state: QALoopState) -> None:
     if path.exists():
         return
     data = {"pr_id": state.pr_id, "loop_id": state.loop_id,
-            "session_tag": state.session_tag, "started_at": time.time()}
+            "session_tag": state.session_tag, "started_at": time.time(),
+            # The process driving the run (see run_driven_elsewhere).
+            "owner_pid": os.getpid(),
+            "owner_start": _proc_start_time(os.getpid())}
     try:
         tmp = path.with_name(_RUN_RECORD + ".tmp")
         tmp.write_text(json.dumps(data, indent=2))
@@ -1300,6 +1303,17 @@ def own_run_driven_since(pr_id: str, since: float | None = None) -> bool:
         if isinstance(data, dict) and resume_owned_elsewhere(data):
             return True
     return False
+
+
+def run_driven_elsewhere(pr_id: str) -> bool:
+    """True when another live process of this pm session drives a run of
+    *pr_id*: a ``pm pr qa-run-bg`` driver that ``pm pr auto-sequence``
+    started.  Its start record names it from the start of planning, long
+    before its resume snapshot exists.  A TUI must not start its own loop
+    over it: the new loop kills the driver's windows as stale and runs QA
+    a second time (RQ47 b)."""
+    return any(resume_owned_elsewhere(rec)
+               for _wd, rec in _own_run_records(pr_id))
 
 
 def _own_run_records(pr_id: str):

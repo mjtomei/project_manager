@@ -419,7 +419,9 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         resolve_model_and_provider,
     )
 
-    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+    # Background (auto-sequence) launches switch no client: see
+    # _launch_review_window.
+    if not tmux_mod.has_tmux() or not (background or tmux_mod.in_tmux()):
         print("Sign-off window requires tmux.")
         return
 
