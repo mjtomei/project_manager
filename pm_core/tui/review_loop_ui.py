@@ -11,6 +11,8 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
              If a loop is already running, make this iteration the last one.
 """
 
+import errno
+
 from pm_core.paths import configure_logger
 from pm_core import store
 from pm_core.autostart_state import held_by_text
@@ -382,13 +384,18 @@ def _poll_loop_state(app) -> None:
         _poll_loop_state_inner(app)
     except SystemExit as e:
         import traceback
-        from pm_core.paths import configure_logger
         _log = configure_logger("pm.tui.poll")
         _log.error("_poll_loop_state raised SystemExit(%s):\n%s", e.code, traceback.format_exc())
     except BaseException as e:
-        import traceback
-        from pm_core.paths import configure_logger
         _log = configure_logger("pm.tui.poll")
+        if isinstance(e, OSError) and e.errno in (errno.EAGAIN, errno.ENOMEM):
+            # A fork that fails for lack of processes or memory (the PID
+            # pressure this poll helps clean up) is transient: skip this
+            # tick instead of crashing the TUI, which would take every
+            # in-flight QA/review run-end release down with it.
+            _log.warning("_poll_loop_state skipped a tick: %s", e)
+            return
+        import traceback
         _log.error("_poll_loop_state raised %s:\n%s", type(e).__name__, traceback.format_exc())
         raise
 

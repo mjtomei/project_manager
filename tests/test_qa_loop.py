@@ -1,5 +1,6 @@
 """Tests for the QA loop orchestration."""
 
+import errno
 from pathlib import Path
 
 import pytest
@@ -1054,6 +1055,32 @@ class TestPollTriggersQA:
             _poll_loop_state(app)
 
         mock_qa.assert_not_called()
+
+
+class TestPollLoopStateForkFailure:
+    """A fork failing for lack of PIDs skips the poll tick instead of crashing the TUI."""
+
+    def test_eagain_skips_tick(self):
+        from pm_core.tui.review_loop_ui import _poll_loop_state
+
+        with patch("pm_core.tui.review_loop_ui._poll_loop_state_inner",
+                   side_effect=BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable")):
+            _poll_loop_state(MagicMock())
+
+    def test_enomem_skips_tick(self):
+        from pm_core.tui.review_loop_ui import _poll_loop_state
+
+        with patch("pm_core.tui.review_loop_ui._poll_loop_state_inner",
+                   side_effect=OSError(errno.ENOMEM, "Cannot allocate memory")):
+            _poll_loop_state(MagicMock())
+
+    def test_other_errors_still_raise(self):
+        from pm_core.tui.review_loop_ui import _poll_loop_state
+
+        with patch("pm_core.tui.review_loop_ui._poll_loop_state_inner",
+                   side_effect=FileNotFoundError(errno.ENOENT, "tmux")):
+            with pytest.raises(FileNotFoundError):
+                _poll_loop_state(MagicMock())
 
 
 # ---------------------------------------------------------------------------
