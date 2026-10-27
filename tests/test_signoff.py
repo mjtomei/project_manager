@@ -881,6 +881,46 @@ class TestLatestQaStatusPath:
         with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
             assert paths.latest_qa_status_path("pr-001") is None
 
+    def _two_clone_runs(self, tmp_path):
+        """This clone's older run and another clone's newer one of pr-001
+        (two clones share ~/.pm/workdirs/qa), plus an untagged legacy run."""
+        import json
+        import os
+        qa = tmp_path / "qa"
+        runs = {}
+        for name, tag, mtime in (("pr-001-mine", "a-1111", 2000),
+                                 ("pr-001-other", "b-2222", 3000),
+                                 ("pr-001-legacy", None, 1000)):
+            d = qa / name
+            d.mkdir(parents=True)
+            if tag:
+                (d / "qa_run.json").write_text(json.dumps(
+                    {"pr_id": "pr-001", "session_tag": tag}))
+            st = d / "qa_status.json"
+            st.write_text("{}")
+            os.utime(st, (mtime, mtime))
+            runs[name] = st
+        return runs
+
+    def test_another_clones_run_is_skipped_inside_a_pm_session(self, tmp_path):
+        """S90: clone B's newer PASS of the PR is not clone A's QA status."""
+        from pm_core import paths
+        runs = self._two_clone_runs(tmp_path)
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path), \
+                patch("pm_core.qa_loop.get_pm_session", return_value="pm-a-1111"):
+            assert paths.latest_qa_status_path("pr-001") == runs["pr-001-mine"]
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path), \
+                patch("pm_core.qa_loop.get_pm_session", return_value="pm-c-3333"):
+            # A session with no run of its own still sees untagged runs.
+            assert paths.latest_qa_status_path("pr-001") == runs["pr-001-legacy"]
+
+    def test_every_run_counts_outside_a_pm_session(self, tmp_path):
+        from pm_core import paths
+        runs = self._two_clone_runs(tmp_path)
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path), \
+                patch("pm_core.qa_loop.get_pm_session", return_value=None):
+            assert paths.latest_qa_status_path("pr-001") == runs["pr-001-other"]
+
 
 class TestPrompt:
     def test_prompt_contains_router_contract_and_verdicts(self):

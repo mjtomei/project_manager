@@ -176,12 +176,23 @@ def latest_qa_status_path(pr_id: str) -> Path | None:
     ``<pr_id>-<hex>`` workdir, so several may exist; the newest mtime wins).
     Shared by the auto-sequence QA gate and the sign-off prompt/evidence
     surfaces so they never drift.
+
+    Two clones of a project share ``~/.pm/workdirs/qa``: inside a pm session
+    another clone's run of the PR (its ``qa_run.json`` names that session)
+    is skipped.  Its verdict is that clone's QA, not this one's: read here,
+    this clone's tick advanced on it while its own re-run was running (S90).
+    Outside a pm session no run can be told apart, so every run counts.
     """
+    from pm_core.qa_loop import (launched_elsewhere, own_session_tag,
+                                 read_run_record)
     qa_dir = workdirs_base() / "qa"
     if not qa_dir.is_dir():
         return None
-    candidates = sorted(qa_dir.glob(f"{pr_id}-*/qa_status.json"),
-                        key=lambda p: p.stat().st_mtime if p.exists() else 0)
+    candidates = list(qa_dir.glob(f"{pr_id}-*/qa_status.json"))
+    if own_session_tag():
+        candidates = [p for p in candidates if not launched_elsewhere(
+            (read_run_record(p.parent) or {}).get("session_tag"))]
+    candidates.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0)
     return candidates[-1] if candidates else None
 
 
