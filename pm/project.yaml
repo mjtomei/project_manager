@@ -34032,7 +34032,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T08:20:57.058463+00:00'
+  updated_at: '2026-10-27T08:25:20.228153+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35003,6 +35003,42 @@ prs:
       and clean pm/prompts; agg aarch64 v1.9.0 must be downloaded.'
     created_at: '2026-10-27T08:20:57Z'
     last_edited: '2026-10-27T08:20:57Z'
+  - id: note-cd7d785
+    text: 'QA scenario 18 (refused-merge re-run pointer) PASS at 25fb1918 — all six
+      triples held live. Verified: (1) merge gate refuses a SIGNOFF_MERGE approval
+      whose base moved (d45e9e8d8170 -> 148c205d45bd), publishes nothing, drops the
+      ▲ marker, and the retry says "no longer valid"; (2) arming autostart makes the
+      driver log "Sign-off for pr-c0bbcff is stale (master moved since sign-off (...))
+      — re-running", open signoff-pr-c0bbcff on the PR branch, and report "sign-off
+      review running"; (3) the fresh launch prompt carries "**Why sign-off is running
+      again:**", the reason, SIGNOFF_MERGE, the approved revision 2df745446ae8, and
+      "Read it before you overwrite it", with report.html sha unchanged; (4) real
+      PR work on the branch suppresses all three phrases; (5) a new SIGNOFF_REVIEW
+      verdict at the current head suppresses them too; (6) after a bounce (auto-sequence:
+      sign_off_relaunched -> sign_off: returning to review (iteration 1)) the prompt
+      shows "## Previous sign-off return" and none of the three phrases, with the
+      invalidation marker cleared. Cosmetic observation (left unfixed, not misleading):
+      in the return block the resolution line "pm applied that resolution and merged
+      the base into the branch as <merge> — review/verify the integrated result" and
+      the return line "pm merged the base revision into the PR branch as <merge> —
+      review/verify the integrated result" both fire when resolution.applied_merge_sha
+      and signoff_return.applied.merge_sha are the same bounce merge (seen with fbf3da28ab6d),
+      so the prompt says it twice. Harness facts for the next run: (a) the pm TUI
+      process inherits the launching shell PATH, so fake-claude must be on THAT PATH
+      or every sign-off/QA window dies instantly with "fake-claude: command not found"
+      (symlink it into a dir already on the TUI PATH); (b) tmux new-window panes take
+      the SESSION environment, so `tmux set-environment -g PATH` alone does not redirect
+      the stub — also set it on the pm session (`tmux set-environment -t <session>
+      PATH ...`); (c) recording from a `tmux -L <socket>` scaffold breaks pm autostart
+      ("owner_unavailable: no pm session with a running TUI found") because tmux clients
+      inherit $TMUX — record from a session on the default server; (d) the pre-relaunch
+      autostart reason "SIGNOFF_MERGE stale (...); sign-off re-runs against the current
+      base" is only visible in the sub-second window before the driver retires the
+      record (the driver clears pr.signoff in the same pass that relaunches), so a
+      status read right after the log line shows "no sign-off window; relaunches on
+      next scheduler pass". Captures: /pm-captures/scenarios/18/{story1-merge-refusal,story2-autostart-relaunch,story3-rerun-pointer,story4-suppression-after-work,story5-new-verdict,story6-return-suppression}.'
+    created_at: '2026-10-27T08:25:20Z'
+    last_edited: '2026-10-27T08:25:20Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
