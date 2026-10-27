@@ -1002,8 +1002,10 @@ def _poll_impl_idle(app) -> None:
 
         tracker.poll(pr_id)
 
-        # Detect newly-idle in_progress PRs for auto-review
-        if status == "in_progress" and tracker.became_idle(pr_id):
+        # Detect newly-idle impl panes: stop-on-idle applies to any impl
+        # session (an impl relaunched with ``s`` on an in_review PR too);
+        # auto-review only for in_progress PRs.
+        if tracker.became_idle(pr_id):
             from pm_core.signoff import return_awaiting
             if return_awaiting(pr) == "impl":
                 # Sign-off sent it back but the rework session has not
@@ -1019,7 +1021,8 @@ def _poll_impl_idle(app) -> None:
             else:
                 # Stop-on-idle: stop impl container if policy enabled
                 _try_stop_idle_container(app, pr_id, "impl", pr_id)
-                newly_idle.append((pr_id, pr))
+                if status == "in_progress":
+                    newly_idle.append((pr_id, pr))
 
     # --- Second pass: post-publish repo-update (merge) windows ---
     # Discover merge windows for ALL in_review / sign_off PRs, not just

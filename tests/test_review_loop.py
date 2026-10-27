@@ -760,6 +760,40 @@ class TestTuiStopOnIdle:
             review_loop_ui._poll_impl_idle(app)
         return stop, tracker
 
+    def _poll_impl(self, status):
+        from types import SimpleNamespace
+        from pm_core.tui import review_loop_ui
+        tracker = self._tracker({"pr-001"})
+        app = SimpleNamespace(
+            _session_name="pm-repo-abc", _pane_idle_tracker=tracker,
+            _data={"prs": [{"id": "pr-001", "status": status,
+                            "workdir": "/w"}]},
+            _review_loops={}, _pending_merge_prs=set(),
+            log_message=lambda *a, **k: None)
+        with patch("pm_core.tui.auto_start.is_enabled", return_value=True), \
+             patch("pm_core.signoff.return_awaiting", return_value=None), \
+             patch("pm_core.runtime_state.get_action_state", return_value={}), \
+             patch("pm_core.runtime_state.set_action_state"), \
+             patch.object(review_loop_ui, "_auto_review_idle_prs") as auto, \
+             patch("pm_core.container.stop_idle_in_background") as stop:
+            review_loop_ui._poll_impl_idle(app)
+        return stop, auto
+
+    def test_idle_impl_stops_for_in_progress_pr_and_auto_reviews(self):
+        stop, auto = self._poll_impl("in_progress")
+        stop.assert_called_once()
+        assert stop.call_args[0][:2] == ("pm-repo-abc-impl-pr-001", "impl")
+        auto.assert_called_once()
+
+    def test_idle_impl_relaunched_on_in_review_pr_stops(self):
+        """``s`` on an in_review PR reopens the impl session without
+        changing the status; its idle must still stop the container
+        (QA S54), but must not start another auto-review."""
+        stop, auto = self._poll_impl("in_review")
+        stop.assert_called_once()
+        assert stop.call_args[0][:2] == ("pm-repo-abc-impl-pr-001", "impl")
+        auto.assert_not_called()
+
     def test_standalone_pass_review_stops_when_idle(self):
         """The review prompt asks for PASS — it must count as final."""
         stop, _ = self._poll_review("PASS")
