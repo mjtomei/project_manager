@@ -245,6 +245,29 @@ class TestEdits:
         assert cont["impl"].command == "claude (container route bridge)"
         assert cont["qa_planning"].command == "/opt/launch"  # host role
 
+    def test_role_rows_show_the_s0_legacy_model(self, pm_home_dir):
+        """A plain-model project ``qa_scenario`` from before
+        ``qa_interactive`` still runs s0; the rows say so, as the launch
+        does (they used to show the CLI default)."""
+        from pm_core import qa_loop
+        data = _project(session_models={"qa_scenario": "sonnet"},
+                        session_effort={"qa_scenario": "low"})
+        pr = {"id": "pr-1"}
+        rows = {r.role: r for r in model_settings.role_rows(
+            data, pr, container_mode=False)}
+        s0 = rows["qa_interactive"]
+        assert (s0.value, s0.effort) == ("sonnet", "low")
+        assert s0.source == "project qa_scenario (s0 legacy)"
+        assert s0.effort_source == "project qa_scenario"
+        launch = qa_loop._resolve_interactive_model(pr, data)
+        assert (launch.model, launch.effort) == ("sonnet", "low")
+        # A route never follows: s0 stays on the CLI default.
+        _providers(pm_home_dir, **{ROUTE: _router()})
+        routed = _project(session_models={"qa_scenario": f"provider:{ROUTE}"})
+        s0 = {r.role: r for r in model_settings.role_rows(
+            routed, pr, container_mode=False)}["qa_interactive"]
+        assert (s0.value, s0.source) == ("(default)", "(CLI default)")
+
 
 # ---------------------------------------------------------------------------
 # CLI

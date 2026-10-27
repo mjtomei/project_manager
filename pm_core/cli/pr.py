@@ -19,7 +19,7 @@ import yaml
 
 from pm_core import store, graph, git_ops, prompt_gen
 from pm_core.pr_utils import VALID_PR_STATES
-from pm_core.model_config import PR_SESSION_TYPES
+from pm_core.model_config import EFFORT_LEVELS, PR_SESSION_TYPES
 from pm_core.shell import shell_quote
 from pm_core import pr_sync as pr_sync_mod
 from pm_core import tmux as tmux_mod
@@ -3293,7 +3293,7 @@ def pr_model_show(pr_id: str):
 @pr_model.command("set")
 @click.argument("pr_id")
 @click.argument("value", required=False)
-@click.option("--effort", type=click.Choice(["low", "medium", "high"]),
+@click.option("--effort", type=click.Choice(list(EFFORT_LEVELS)),
               default=None, help="Also set the effort")
 @click.option("--role", "roles", multiple=True, type=_PR_ROLE_CHOICE,
               help="Only this role (repeatable); default: every role")

@@ -217,6 +217,21 @@ def resolve_model_and_provider(
         if resolution is None:
             resolution = ModelResolution()
 
+    # Scenario 0 (qa_interactive) from before that type existed: a project
+    # or global plain-model ``qa_scenario`` keeps applying to it.  Not a
+    # provider (s0 never follows workers onto a route) and not a PR's
+    # worker exception.  Resolved here so launches and every view agree.
+    legacy = None
+    if (session_type == "qa_interactive"
+            and not resolution.model and not resolution.provider):
+        legacy = resolve_model_and_provider("qa_scenario",
+                                            project_data=project_data)
+        if legacy.model and not legacy.provider:
+            resolution.model = legacy.model
+            resolution.source = f"{legacy.source} (s0 legacy)"
+        else:
+            legacy = None
+
     # --- Effort resolution ---
     effort, effort_source = None, None
     # 1. PM_EFFORT env var
@@ -255,6 +270,8 @@ def resolve_model_and_provider(
             if effort:
                 effort_source = "built-in"
                 break
+    if not effort and legacy is not None and legacy.effort:
+        effort, effort_source = legacy.effort, legacy.effort_source
     resolution.effort = effort
     resolution.effort_source = effort_source if effort else None
 

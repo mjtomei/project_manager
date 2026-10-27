@@ -384,6 +384,10 @@ variables, so the suite gives the same result inside a routed session.
   continue automatically once fixed (no verdict), not INPUT_REQUIRED.
 - *s0 legacy fallback.* `qa_interactive` → `qa`; if neither is configured and
   `qa_scenario` is a plain model (not a provider), s0 keeps using it.
+  `resolve_model_and_provider("qa_interactive")` applies this (source
+  `<setting> (s0 legacy)`), so `pm pr model show`, `pm model show` and the
+  TUI `o` rows show what s0 runs (review loop 6f0c i2: they showed the CLI
+  default while s0 ran the legacy model).
 - *Subagent pin for plain-model sessions (R8).* pm forces subagents onto
   the selected model for plain-model sessions too, not only routes. The
   account is the same either way. This enforces the selected model and stops

@@ -6,7 +6,7 @@ import os
 import click
 
 from pm_core.cli.helpers import state_root
-from pm_core.model_config import SESSION_TYPES
+from pm_core.model_config import EFFORT_LEVELS, SESSION_TYPES
 
 # Single source of truth — kept in sync with model_config.SESSION_TYPES.
 _SESSION_TYPES = list(SESSION_TYPES)
@@ -171,7 +171,7 @@ def model_show():
 @model.command("set")
 @click.argument("session_type", type=click.Choice(_SESSION_TYPES))
 @click.argument("model_value")
-@click.option("--effort", type=click.Choice(["low", "medium", "high"]),
+@click.option("--effort", type=click.Choice(list(EFFORT_LEVELS)),
               default="medium", help="Effort level (default: medium)")
 @click.option("--project", "use_project", is_flag=True, default=False,
               help="Set in project.yaml instead of global settings")

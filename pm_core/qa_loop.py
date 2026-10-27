@@ -2391,17 +2391,10 @@ def _resolve_interactive_model(pr_data: dict, data: dict):
     before ``qa_interactive`` that set only ``qa_scenario`` to a plain
     model keep that model for s0.  A PR's ``session_models`` worker
     exception is not such a config, so that step reads project/global
-    settings only.
+    settings only (``resolve_model_and_provider`` applies it, so
+    ``pm pr model show`` and the TUI show what s0 runs).
     """
-    res = _resolve_qa_model(pr_data, data, session_type="qa_interactive")
-    if not res.model and not res.provider:
-        # No PR override reached qa_interactive here (the PR ``model`` and
-        # a ``qa``/``qa_interactive`` exception would have).
-        legacy = _resolve_qa_model({}, data, session_type="qa_scenario")
-        if legacy.model and not legacy.provider:
-            res.model = legacy.model
-            res.effort = res.effort or legacy.effort
-    return res
+    return _resolve_qa_model(pr_data, data, session_type="qa_interactive")
 
 
 def _launch_scenario_0(

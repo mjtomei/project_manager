@@ -3,6 +3,7 @@
 import click
 
 from pm_core.cli import cli
+from pm_core.model_config import EFFORT_LEVELS
 
 
 @cli.group("provider")
@@ -128,7 +129,7 @@ _FIELD_OPTIONS = [
                  help="API key (or ${ENV_VAR} reference); not for routers"),
     click.option("--model", default=None, help="Model name"),
     click.option("--effort", default=None,
-                 type=click.Choice(["low", "medium", "high"]),
+                 type=click.Choice(list(EFFORT_LEVELS)),
                  help="Default effort for sessions on this provider (a PR's "
                       "own effort setting wins)"),
     click.option("--capabilities", default=None,
