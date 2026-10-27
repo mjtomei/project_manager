@@ -50,7 +50,6 @@ class App:
         self._auto_start = True
         self._auto_start_targets = {t: st.make_target_record("test")
                                     for t in targets}
-        self._auto_start_all = False
         self._auto_start_run_id = "run"
         self._auto_start_launching = set()
         self._stop_before_merge = {PR} if stop else set()

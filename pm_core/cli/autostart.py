@@ -214,8 +214,9 @@ def autostart():
     impl → review → QA for each, and stops at each target's merge policy.
     Adding is additive and idempotent; removing a target never kills a
     running window or a dependency another target still needs.  An empty
-    target set means auto-start is OFF (never "all pending PRs"; that is
-    the explicit command-bar `autostart all`).
+    target set means auto-start is OFF; there is no all-PR/whole-backlog
+    mode, so every PR auto-start acts on must belong to an explicit
+    target's dependency closure.
 
     \b
     Policies (per target, also set by the O / A keys):

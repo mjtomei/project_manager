@@ -1451,11 +1451,16 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
     except FileNotFoundError:
         pass
 
-    # Compute auto-start scope (union of the targets' dependency fan-ins)
+    # Compute auto-start scope (union of the targets' dependency fan-ins).
+    # An explicitly provided but empty target set is fail-closed: the
+    # watcher may observe, but must not act on any PR.  (Omitting the
+    # argument entirely keeps the legacy unscoped prompt for callers that
+    # never had an auto-start scope.)
     auto_start_scope_block = ""
     targets = list(auto_start_targets or [])
     if auto_start_target and auto_start_target not in targets:
         targets.append(auto_start_target)
+    scope_provided = auto_start_targets is not None or auto_start_target is not None
     if targets:
         from pm_core.autostart_state import managed_ids as _managed_ids
         # Markers carry no leading space: bounded_join appends them after
@@ -1483,6 +1488,16 @@ Other PRs may have active tmux windows from manual user activity -- do NOT attem
 fix, restart, or interfere with those sessions. You may observe them for cross-session
 conflict detection (e.g. overlapping file edits), but take no corrective action on
 windows belonging to unmanaged PRs.
+"""
+    elif scope_provided:
+        auto_start_scope_block = """
+### Auto-Start Scope
+
+Auto-start has no targets: no PR is managed.
+
+**IMPORTANT**: Do not start, restart, fix, merge, or otherwise take corrective
+action on any PR or tmux window. Observation and reporting only; surface issues
+to the human instead of acting on them.
 """
 
     id_label = f" [{loop_id}]" if loop_id else ""

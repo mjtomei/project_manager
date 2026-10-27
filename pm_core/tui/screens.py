@@ -757,8 +757,6 @@ class AutoRunsScreen(ModalScreen):
         title = "Auto-start runs"
         if mode == "targets":
             title += f" — {len(st.get('targets') or [])} target(s)"
-        elif mode == "all":
-            title += " — all ready PRs (backlog mode)"
         if st.get("run_id"):
             title += f"  [dim]{st['run_id']}[/]"
         self.query_one("#runs-title", Label).update(title)

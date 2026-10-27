@@ -20,7 +20,6 @@ class _App:
         self._root = root
         self._auto_start = False
         self._auto_start_targets = {}
-        self._auto_start_all = False
         self._auto_start_run_id = None
         self._stop_before_merge = set()
         self._review_loops = {}

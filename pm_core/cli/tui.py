@@ -262,16 +262,17 @@ Auto-start (multiple targets; also `pm autostart --help`):
   A                Toggle selected PR as auto-merge target (no PR: all off)
   a                Runs popup: targets + running/queued deps (Enter/f focus,
                    r refresh, Esc/q/a close)
-  /autostart add|remove ID...   Command bar (also: list, status, clear, all)
+  /autostart add|remove ID...   Command bar (also: list, status, clear)
 
 Other:
   r                Refresh / sync
   b                Rebalance panes
   ctrl+b d         Detach from session
 
-Migration: targets are additive — A/O/`autostart target X` no longer replace
-the previous target. Bare `autostart` only turns auto-start off; the old
-"no target = all ready PRs" mode is now explicit: `autostart all`.
+Targets are additive — A/O/`autostart target X` do not replace the previous
+target. Bare `autostart` only turns auto-start off. There is no all-PR
+mode: auto-start runs only the explicit targets you add and their
+dependency closures.
 """)
 
 

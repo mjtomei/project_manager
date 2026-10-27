@@ -40,7 +40,6 @@ class FakeApp:
         self._root = root
         self._auto_start = False
         self._auto_start_targets = {}
-        self._auto_start_all = False
         self._auto_start_run_id = None
         self._auto_start_launching = set()
         self._stop_before_merge = set()
@@ -107,25 +106,26 @@ class TestBreadcrumbFormat:
         targets = {"a": st.make_target_record("cli"),
                    "b": st.make_target_record("key:O")}
         data = {"auto_start": True,
-                "targets": st.targets_to_breadcrumb(targets),
-                "all_mode": False}
-        got, all_mode, migrated = st.targets_from_breadcrumb(data)
-        assert list(got) == ["a", "b"]
-        assert got["b"]["source"] == "key:O"
-        assert (all_mode, migrated) == (False, False)
+                "targets": st.targets_to_breadcrumb(targets)}
+        got = st.targets_from_breadcrumb(data)
+        assert list(got.targets) == ["a", "b"]
+        assert got.targets["b"]["source"] == "key:O"
+        assert (got.migrated, got.error) == (False, None)
 
     def test_legacy_single_target_migrates(self):
-        got, all_mode, migrated = st.targets_from_breadcrumb(
+        got = st.targets_from_breadcrumb(
             {"auto_start": True, "target": "pr-1", "run_id": "r"})
-        assert list(got) == ["pr-1"] and not all_mode and migrated
+        assert list(got.targets) == ["pr-1"]
+        assert got.migrated and got.error is None
 
-    def test_legacy_targetless_is_explicit_all_mode(self):
-        got, all_mode, migrated = st.targets_from_breadcrumb(
+    def test_legacy_targetless_is_rejected_not_all_mode(self):
+        got = st.targets_from_breadcrumb(
             {"auto_start": True, "target": None, "run_id": "r"})
-        assert got == {} and all_mode and migrated
+        assert got.targets == {} and got.error
 
     def test_no_auto_start(self):
-        assert st.targets_from_breadcrumb({"review_loops": {}}) == ({}, False, False)
+        got = st.targets_from_breadcrumb({"review_loops": {}})
+        assert got.targets == {} and got.error is None and not got.migrated
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +141,6 @@ class TestAddRemove:
         assert r["changes"][0]["action"] == "unchanged"
         assert auto_start.get_targets(app) == ["a", "b"]
         assert app._auto_start is True
-        assert not auto_start.is_all_mode(app)
 
     def test_default_policy_new_target_is_stop(self):
         app = FakeApp([_pr("a")])
@@ -335,7 +334,7 @@ class TestKeys:
         app = FakeApp([_pr("a")])
         asyncio.run(auto_start.toggle(app, None))
         assert app._auto_start is False
-        assert not auto_start.is_all_mode(app)
+        assert auto_start.managed_ids(app) == set()
 
 
 # ---------------------------------------------------------------------------
@@ -411,7 +410,7 @@ class TestCheckAndStart:
             asyncio.run(auto_start.check_and_start(app))
         sp.assert_not_called()
         assert app._auto_start is False
-        assert not auto_start.is_all_mode(app)
+        assert auto_start.managed_ids(app) == set()
 
     def test_empty_pr_data_does_not_prune_targets(self, tmp_path):
         """Unloaded/empty PR data must not read as "every target vanished"."""
@@ -541,7 +540,7 @@ class TestBreadcrumb:
              patch.object(auto_start, "check_and_start"):
             asyncio.run(auto_start.consume_breadcrumb(fresh))
         assert auto_start.get_targets(fresh) == ["a"]
-        assert not auto_start.is_all_mode(fresh)
+        assert auto_start.managed_ids(fresh) == {"a"}
         assert any("migrated legacy" in m for m in fresh.logs)
 
 
@@ -595,10 +594,12 @@ class TestHandleCommand:
         auto_start.handle_command(app, ["target", "b"])
         assert auto_start.get_targets(app) == ["a", "b"]
 
-    def test_all_mode_is_explicit(self):
+    def test_all_mode_is_rejected(self):
         app = FakeApp([_pr("a")])
-        auto_start.handle_command(app, ["all"])
-        assert auto_start.is_all_mode(app) and auto_start.managed_ids(app) is None
+        result = auto_start.handle_command(app, ["all"])
+        assert result["ok"] is False and result["error"] == "all_mode_removed"
+        assert app._auto_start is False
+        assert auto_start.managed_ids(app) == set()
 
     def test_bad_reply_id_rejected(self, tmp_path):
         with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path):
