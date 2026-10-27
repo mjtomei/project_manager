@@ -33257,7 +33257,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T02:29:46.498877+00:00'
+  updated_at: '2026-10-27T02:43:10.361249+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36200,6 +36200,39 @@ prs:
       it (68-119 ms); a slower child would make a restored loop relaunch at once.'
     created_at: '2026-10-27T02:29:46Z'
     last_edited: '2026-10-27T02:29:46Z'
+  - id: note-c3e32e4
+    text: 'S85 refine: the review-loop child (pm pr review --fresh --review-loop)
+      gives up its sign-off-return clear at window+182 s (2 s lock timeout + RETURN_CLEAR_WAIT_SECONDS
+      180) and exits rc 0, so a project.yaml hold that starts at review-<R> window
+      creation can never reach the 302 s subprocess timeout: 200 s and 320 s holds
+      behave alike (awaiting+claim left set, first tick after the release prints "sign_off:
+      returning to review" and replaces the pane, TUI loop ends KILLED). Story 4 uses
+      a 7 s `pm edit` hold (EDITOR="sh -c \"sleep 7\"") because a 5 s hold only overlaps
+      a 5 s advance_all pass + 2 s lock wait ~60% of the time.'
+    created_at: '2026-10-27T01:20:06Z'
+    last_edited: '2026-10-27T01:20:06Z'
+  - id: note-48baddd
+    text: 'QA S85 (2026-10-27, host, all fake-claude, HEAD 0eeb8719 vs control 5b78ba40
+      side by side; captures /pm-captures/scenarios/85, REPORT.md): PASS, no code
+      change. f83b3963 held live. 150 s hold: child rc=0 elapsed=150.20s, awaiting+claim
+      cleared +0.17 s after release, one pane, PASS once (control: killed at hop+120
+      s, tick relaunch at hop+181 s). 200 s and 320 s holds: child gives up at window+182
+      s (second WARNING "within 180s", rc=0, never TimeoutExpired); ticks print only
+      "running: review" through the hold; the first tick after the release replaces
+      the pane (returning to review), TUI KILLED, one session, advanced: qa once.
+      advance_all lock timeout = one "advance of R deferred" WARNING (control: advance
+      failed + Traceback). Harness: the spec tick loop `pm pr show | sed -n "s/^Status:
+      //p"` returns 2 lines (PR status + integration "in_base") and never ticks; use
+      `| head -1`. Open point for the next pass (x1, deterministic): if the review
+      PASS lands after the child gives up but inside the hold (hold 250 s, review
+      delay 200 s), the TUI pending auto_qa hand-off wins the lock at release and
+      moves R to qa with signoff_return.awaiting=review and the expired claim still
+      set; it rides through QA into sign_off until the next sign-off verdict resolves
+      the return (claim object stays). Mostly cosmetic (only awaiting==qa gates QA/hand-off),
+      but _maybe_start_qa apply_qa could clear a review return awaiting+claim on that
+      post-return PASS.'
+    created_at: '2026-10-27T02:43:10Z'
+    last_edited: '2026-10-27T02:43:10Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
