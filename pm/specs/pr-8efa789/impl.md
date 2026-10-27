@@ -210,4 +210,36 @@ No **[UNRESOLVED]** ambiguities.
   persist `scenario_verdict_sources`; validate identity on resume.
 - `pm_core/review_loop.py` — adopt-in-flight path returns the verdict turn text.
 - `tests/test_verdict_transcript.py` — replay + barrier + identity tests.
-- `tests/test_qa_loop.py` — resume identity test (if the harness allows).
+- `tests/test_qa_loop.py` — `TestPollVerdictsAfterLoopWakeup` drives
+  `_poll_tmux_verdicts` over the scenario-44 replay.
+- `tests/test_qa_resume.py` — resume identity tests (the harness only supports
+  the snapshot round-trip there, not a full resume run).
+
+## 6. Post-implementation notes (review iterations)
+
+These extend the requirements above; they are implemented and covered by tests.
+
+- **Compaction summaries are transparent.** Claude Code injects a "This session is
+  being continued…" record with `isCompactSummary: true` as a *plain* user record
+  (not `isMeta`). It is harness-generated, so the scan crosses it rather than
+  treating it as a task boundary; the pre-compaction turns stay in the file behind
+  it. Verified against real transcripts.
+- **`VerdictHit.text` is the whole turn, not just the text after the verdict.**
+  Callers parse markers (`REFINED_STEPS_*`, `FLAGGED_*`) that can sit in an earlier
+  record of the same turn, so the walk in `_turn_text` also collects the assistant
+  text records *preceding* the verdict. Tool-result records inside the turn are
+  crossed without resetting the collected text; only a genuine non-task wakeup
+  record starts a new segment (text after it belongs to a later turn).
+- **The reason is read from the hit, not from a second transcript read.**
+  `extract_reason_from_text(hit.text)` is used by `qa_loop`; re-scanning the
+  transcript between the verdict lookup and the reason lookup could land on a newer
+  wakeup turn and report a different turn's reason.
+- **Loop-derived verdicts carry no source.** When verification replaces the
+  worker's verdict (NEEDS_WORK after exhausted verification, or INPUT_REQUIRED when
+  the window vanishes mid-verification), `scenario_verdict_sources` is cleared for
+  that scenario: the verdict no longer comes from a worker turn, so the resume
+  identity check must not attribute it to a (possibly stale) session.
+- **A multi-`<system-reminder>` record is transparent.** Every reminder block is
+  stripped, not just one wrapper at each end; only text outside the reminders can
+  make the record a task boundary. An unclosed reminder tag is left in place
+  (fail closed).

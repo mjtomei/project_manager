@@ -322,7 +322,8 @@ def find_verdict_turn(
 
     lines = text.splitlines()
     # Text blocks of assistant records in the current (newest-first)
-    # segment.  Reset when the scan crosses a non-task user record.
+    # segment.  Reset when the scan crosses a non-task *wakeup* record;
+    # tool results belong to the same turn and keep it.
     segment_texts: list[str] = []
     for idx in range(len(lines) - 1, -1, -1):
         line = lines[idx]
@@ -349,6 +350,11 @@ def find_verdict_turn(
             continue
         if _USER_RE.search(line):
             rec = _parse_record(line)
+            if rec is not None and _is_tool_result_record(rec):
+                # Part of the same assistant turn: keep the text already
+                # collected after the verdict so ``VerdictHit.text`` covers
+                # the whole turn.
+                continue
             if rec is not None and _user_record_is_non_task(rec):
                 segment_texts = []
                 continue
@@ -383,6 +389,22 @@ _REASON_RE = re.compile(
 _DEFAULT_REASON_VERDICTS = ("INPUT_REQUIRED", "NEEDS_WORK", "PASS")
 
 
+def extract_reason_from_text(text: str) -> str:
+    """Return the last ``Reason: ...`` line in *text* (``""`` when none).
+
+    Shared by the transcript helper and callers that already hold a
+    :class:`VerdictHit` and must not re-read the transcript (a re-read can
+    land on a different turn if the worker appends a wakeup turn in
+    between).
+    """
+    last = ""
+    for line in (text or "").splitlines():
+        m = _REASON_RE.match(line)
+        if m:
+            last = m.group(1).strip()
+    return last
+
+
 def extract_verdict_reason_from_transcript(
     transcript_path: str | Path | None,
     verdicts: tuple[str, ...] = _DEFAULT_REASON_VERDICTS,
@@ -401,14 +423,7 @@ def extract_verdict_reason_from_transcript(
     """
     hit = find_verdict_turn(transcript_path, verdicts)
     text = hit.text if hit else read_latest_assistant_text(transcript_path)
-    if not text:
-        return ""
-    last = ""
-    for line in text.splitlines():
-        m = _REASON_RE.match(line)
-        if m:
-            last = m.group(1).strip()
-    return last
+    return extract_reason_from_text(text)
 
 
 def read_latest_assistant_text(transcript_path: str | Path | None) -> str:

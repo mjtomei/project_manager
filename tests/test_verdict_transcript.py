@@ -483,6 +483,57 @@ def test_hit_text_covers_whole_verdict_turn(tmp_path: Path) -> None:
     assert "go" not in hit.text
 
 
+def test_hit_text_keeps_turn_text_after_a_tool_result(tmp_path: Path) -> None:
+    """A tool result inside the verdict's turn must not truncate ``hit.text``.
+
+    Tool results belong to the assistant tool-use turn, so the text records
+    written after them are still part of the same turn and must survive.
+    """
+    from pm_core.verdict_transcript import find_verdict_turn
+
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("Reason: verified live\nPASS"),
+        _tool_result_line(),
+        _assistant_line("Captures pushed to the PR branch."),
+    ])
+    hit = find_verdict_turn(p, VERDICTS)
+    assert hit is not None
+    assert hit.verdict == "PASS"
+    assert "Reason: verified live" in hit.text
+    assert "Captures pushed to the PR branch." in hit.text
+    # The turn walk must not cross the prompt that opened the turn.
+    assert "go" not in hit.text
+
+
+def test_hit_text_stops_at_a_wakeup_turn(tmp_path: Path) -> None:
+    """Text after a non-task wakeup belongs to a later turn, not the
+    verdict's — it must not be folded into ``hit.text``."""
+    from pm_core.verdict_transcript import find_verdict_turn
+
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("Reason: done\nPASS"),
+        _tool_result_line(),
+        _assistant_line("Captures pushed."),
+        _user_line(AUTONOMOUS_TICK, is_meta=True),
+        _assistant_line(SCENARIO_44_POSTSCRIPT),
+    ])
+    hit = find_verdict_turn(p, VERDICTS)
+    assert hit is not None
+    assert "Captures pushed." in hit.text
+    assert SCENARIO_44_POSTSCRIPT not in hit.text
+
+
+def test_extract_reason_from_text() -> None:
+    from pm_core.verdict_transcript import extract_reason_from_text
+
+    assert extract_reason_from_text(
+        "Some text\nReason: first\nmore\n**Reason**: second\nPASS") == "second"
+    assert extract_reason_from_text("") == ""
+    assert extract_reason_from_text("no reason here") == ""
+
+
 def test_compaction_summary_is_transparent(tmp_path: Path) -> None:
     """Claude Code appends a compaction summary as a plain user record; it
     must not hide a verdict emitted before compaction."""

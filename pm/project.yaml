@@ -21429,7 +21429,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-13T14:15:50.184464+00:00'
-  updated_at: '2026-10-27T04:50:36.868587+00:00'
+  updated_at: '2026-10-27T05:38:07.974551+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -21455,6 +21455,20 @@ prs:
       receiver, 12 test_markdown_render missing markdown dep).'
     created_at: '2026-10-27T04:50:36Z'
     last_edited: '2026-10-27T04:50:36Z'
+  - id: note-a1cd0e9
+    text: 'Review i2 (68b5): (1) find_verdict_turn no longer resets the collected
+      turn text when it crosses a tool_result record — tool results belong to the
+      same assistant turn, so VerdictHit.text now really covers the whole turn (previously
+      text after a tool result inside the verdict turn was dropped, contradicting
+      the i1 contract); (2) qa_loop reads the reason from hit.text via new extract_reason_from_text
+      instead of re-scanning the transcript, removing a double full-file read and
+      the window where a wakeup turn appended between the two reads could supply a
+      different turn''s reason; (3) spec section 6 records the i1/i2 extensions (isCompactSummary
+      transparency, whole-turn hit.text, loop-derived verdicts carry no source, multi-reminder
+      records). Full suite 3774 passed, 1 pre-existing env failure (test_hook_events
+      standalone receiver). Log: /pm-captures/review-8efa789-i2/full-suite.log'
+    created_at: '2026-10-27T05:38:07Z'
+    last_edited: '2026-10-27T05:38:07Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

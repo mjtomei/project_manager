@@ -41,8 +41,8 @@ from pm_core.loop_shared import (
     VERDICT_TAIL_LINES,
 )
 from pm_core.verdict_transcript import (
+    extract_reason_from_text,
     extract_verdict_from_transcript,
-    extract_verdict_reason_from_transcript,
     find_verdict_turn,
     read_latest_assistant_text,
 )
@@ -3095,9 +3095,11 @@ def _poll_tmux_verdicts(
                         "turn_id": hit.turn_id,
                         "timestamp": hit.timestamp,
                     }
-                reason = extract_verdict_reason_from_transcript(
-                    scenario.transcript_path, ALL_VERDICTS,
-                )
+                # Read the reason from the very turn the verdict came from
+                # (hit.text) rather than re-scanning the transcript: a
+                # re-scan could land on a newer wakeup turn appended in
+                # between and report a different turn's reason.
+                reason = extract_reason_from_text(hit.text) if hit else ""
                 if reason:
                     state.scenario_verdict_reasons[scenario.index] = reason
                 pending.discard(scenario.index)
