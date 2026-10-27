@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T19:32:22.472885+00:00'
+  updated_at: '2026-10-27T19:44:11.622711+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14115,6 +14115,41 @@ prs:
       on PATH. Evidence /pm-captures/scenarios/36/manifest.md'
     created_at: '2026-10-27T19:32:22Z'
     last_edited: '2026-10-27T19:32:22Z'
+  - id: note-969d00b
+    text: 'QA S40 incidental fix (3c9ab152): the impl/review/sign-off pane EXIT-trap
+      release ran python in the pane cwd = PR workdir. After `pm pr cleanup` deleted
+      that workdir, ending the session lost the release: `import pm_core.container`
+      raised FileNotFoundError (configure_logger -> get_session_tag -> Path.cwd()),
+      silently, and the container kept running until a later `pm container reap` (live
+      repro: still Up 15 s after kill-window; reaped later). In merged teardown the
+      workdir vanished mid-release: the reaper _runtime_domain os.getcwd() traceback
+      plus podman "error getting current working directory", logged as "Pane cleanup
+      deferred ... podman is not available". The trap script now imports from / if
+      its cwd is gone and chdirs to / before releasing (the reaper is imported first
+      so the log file is unchanged). Regression test test_exit_release_survives_deleted_pane_cwd
+      fails pre-fix and passes now. Full suite 4219 passed. Evidence /pm-captures/scenarios/40/{pre-fix,post-fix}.'
+    created_at: '2026-10-27T19:44:10Z'
+    last_edited: '2026-10-27T19:44:10Z'
+  - id: note-cd2f073
+    text: 'QA S40 (a44a70dc, real rootless Podman, unmodified build-base PASSED):
+      R24 hook isolation and abbreviated-option refusal held end to end. Proxy push/fetch/ls-remote/pull;
+      pr start --fresh; stale-index status probes; concurrent impl+review workers
+      on one proxy with exact rejection messages; HEAD:master refusal; auto-sequence
+      review->QA->SIGNOFF_REQA bounce merge M (parents prev head + B) -> planner hand-off
+      published M -> SIGNOFF_MERGE -> pm pr merge (origin master parents B,M) -> list/cleanup.
+      Zero host markers throughout; the plain-git control fired all six hooks. ONE
+      THEN NOT MET (spec/scenario conflict, needs a decision): `pm pr start --fresh`
+      on an in_progress PR printed the expected lines but REUSED the running impl
+      container (same ID, debug "Reusing existing container ... (id=bf621cf13510)");
+      only the worker process was new. The scenario expects "a new impl container";
+      R16 says replacing a session makes its obsolete container disappear, and review/sign-off
+      discard their predecessor before relaunch, but impl `pr start` has no such discard
+      and relies on R5 verified reuse (the outcome may race the old pane EXIT release).
+      Decide whether impl --fresh must replace (add discard_unowned_container like
+      _launch_review_window) or whether reuse is intended (then fix the scenario wording).
+      Evidence /pm-captures/scenarios/40/.'
+    created_at: '2026-10-27T19:44:11Z'
+    last_edited: '2026-10-27T19:44:11Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
