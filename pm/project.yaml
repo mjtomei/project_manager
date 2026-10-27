@@ -31446,7 +31446,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T06:17:29.491425+00:00'
-  updated_at: '2026-10-25T02:37:46.982539+00:00'
+  updated_at: '2026-10-27T00:58:55.101618+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31500,6 +31500,19 @@ prs:
       (manifest.md).'
     created_at: '2026-10-25T02:37:46Z'
     last_edited: '2026-10-25T02:37:46Z'
+  - id: note-9df0d44
+    text: 'QA S80 (pr-592e4bd, 2026-10-27): the tick side of the same run-dir gap.
+      With the TUI stopped while its auto-start sign-off router (transcript under
+      pm/transcripts/autostart-<run>/) had answered SIGNOFF_REQA, every `pm pr auto-sequence
+      <pr>` tick printed "running: sign_off" for 2 min and never read that verdict;
+      closing the window let the next tick launch its own router (sign_off_relaunched).
+      Also seen: a hop tick kill -9ed between recording the REQA verdict and retiring
+      its router left the window + auto-sequence transcript behind; 20 min later (after
+      the QA re-run) the TUI start_signoff counted that window as running and the
+      next tick hopped again on the old verdict. Captures /pm-captures/scenarios/80/story4*-invalid1-*,
+      post-fix/story4.'
+    created_at: '2026-10-27T00:58:55Z'
+    last_edited: '2026-10-27T00:58:55Z'
 - id: pr-328cfd0
   plan: bugs
   title: 'Bug: zz t on an in_review PR runs QA without moving it to qa; arming auto-start
@@ -33244,7 +33257,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T00:48:27.423261+00:00'
+  updated_at: '2026-10-27T00:58:54.050316+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36137,6 +36150,30 @@ prs:
       6 known test_worker_route failures (same on 5b78ba40).'
     created_at: '2026-10-27T00:48:27Z'
     last_edited: '2026-10-27T00:48:27Z'
+  - id: note-d41950b
+    text: 'QA S80 (2026-10-27, host, all fake-claude, HEAD 0f4ecbf2 vs control 62ba5b0f
+      side by side; captures /pm-captures/scenarios/80, REPORT.md): CODE CHANGE 63cabd07
+      needs normal re-review. 0f4ecbf2 held live: under 3/10 s holders at the TUI
+      REQA hop the TUI froze 2.00/2.10 s (control 3.00/10.01 s, keys burst at release),
+      one "clear sign-off return" warning with no "waiting up to 180s", QA started
+      2.0 s after the hop inside the hold; 1.5 s holder 1.59 s/1.49 s both builds;
+      one Starting QA per round, no qa-run-bg. Defect (story 2, both builds): after
+      the re-run ended INPUT_REQUIRED the first TUI auto-start pass re-ran QA. HEAD:
+      awaiting: qa stayed on disk (the give-up). Control too: _auto_start_qa_loops/advance_all
+      read awaiting from the TUI copy of the PR, loaded at the hop and not reloaded
+      after start_qa cleared it (R reload stopped it). Fix 63cabd07: clear_return_awaiting
+      returns None on a give-up and takes the return ts; start_qa keeps a pending
+      clear retried by the QA poll tick with NO_WAIT (+ tree reload); both scheduler
+      checks confirm awaiting: qa on disk. Live post-fix: awaiting cleared 0.7-1.2
+      s after release, 0 extra runs (3 passes "already ended INPUT_REQUIRED"), story
+      4 (c) tick "running: qa" with no qa-run-bg (pre-fix HEAD: "running: qa (launched)"
+      + qa-run-bg double drive, pr-bddda0f). Open point (b) did not reproduce on either
+      build: a restarted TUI recovers the held PASS (Recovered completed QA → PASS)
+      and hands it to sign-off once via _on_qa_complete. Full suite 4048 passed (pytest
+      8.4.2; pytest 9.1.1 fails 6 caplog tests in test_worker_route.py, same on unmodified
+      HEAD), merged tree 4055 passed.'
+    created_at: '2026-10-27T00:58:53Z'
+    last_edited: '2026-10-27T00:58:53Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
