@@ -14508,7 +14508,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T21:41:31.109762+00:00'
+  updated_at: '2026-10-27T22:17:03.640842+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15212,6 +15212,34 @@ prs:
       socket is chmod 0o777 in world-writable /tmp (filed as pr-e618b9c).'
     created_at: '2026-10-27T21:41:31Z'
     last_edited: '2026-10-27T21:41:31Z'
+  - id: note-d6d895e
+    text: 'Review-loop 6280 i11 (2026-10-27): reviewed c03c3aae. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at base 74462d76 with assert 1 ==
+      3 (checked this pass in a base worktree). One bookkeeping defect fixed, with
+      a test that fails at c03c3aae for the right reason: stop_session_proxies reaches
+      one hashed proxy through two candidate paths — the {tag}-* glob (long discovery
+      symlink) and the in-process registry (hashed dir), the latter added by iteration
+      5. When the socket dir survives the first stop (a container can leave an entry
+      in the bind mount, so the per-socket rmdir fails), the second spelling was processed
+      too and _kill_proxy_socket reported a stop for the already-removed socket (a
+      missing socket file counts as gone), so the function returned 2 for one proxy.
+      Candidates are now collapsed by real socket directory before the stop loop.
+      Test: test_stop_session_counts_a_hashed_proxy_once (assert 2 == 1 at c03c3aae).
+      Tests: tests/test_push_proxy.py + tests/test_container.py 238 passed; full suite
+      3839 passed, 1 skipped (env -u PM_HOST_HOME, PATH=/usr/bin:/bin, PYTHONPATH=/workspace;
+      pytest<9 + markdown in a scratch venv). Spec updated with Review iteration 22
+      refinements. Residual, unchanged and out of scope: in-process refcounts only
+      (cross-process cleanup stays with #241/pr-ac12b47); one daemon per workdir (option
+      (3), workdir-per-request, remains the cleaner long-term design); proxy_is_alive
+      cannot distinguish a busy daemon from a dead one beyond the backlog of 16; the
+      daemon serves one request at a time; a shared stop still leaves its .lock beside
+      the kept directory until session teardown; a blocking start waits on the directory
+      start lock without a deadline; the proxy socket is chmod 0o777 in world-writable
+      /tmp (filed as pr-e618b9c).'
+    created_at: '2026-10-27T22:17:03Z'
+    last_edited: '2026-10-27T22:17:03Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
