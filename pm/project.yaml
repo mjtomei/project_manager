@@ -34032,7 +34032,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T02:43:14.398488+00:00'
+  updated_at: '2026-10-27T03:19:50.753919+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34749,6 +34749,20 @@ prs:
       15 (behaviour carry) on the integrated code.'
     created_at: '2026-10-27T02:43:14Z'
     last_edited: '2026-10-27T02:43:14Z'
+  - id: note-7cd9a6e
+    text: 'review-loop 3911 i1: a carried resolution whose recorded delta pointer
+      is a *string* but unreadable no longer takes every later integration check down.
+      `_carry_forward` read `resolution.diff_path` under `suppress(OSError)`, but
+      a non-UTF-8 file raises UnicodeDecodeError and a null byte raises ValueError
+      out of `open` — neither is an OSError, so both escaped (the sign-off launch
+      reported only "Integration check failed"). The delta now reads as absent and
+      the resolution provenance is still carried (the pointer is kept for the host
+      that wrote it). Test covers a binary file and a null-byte path; mutation-checked
+      against the pre-fix HEAD. Full suite 3658 passed, 1 skipped, 1 pre-existing
+      env failure (test_hook_events installer — fails on origin/master too). Spec
+      R9 item 14 synced.'
+    created_at: '2026-10-27T03:19:50Z'
+    last_edited: '2026-10-27T03:19:50Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
