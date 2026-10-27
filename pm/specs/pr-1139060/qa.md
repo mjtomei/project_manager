@@ -17,6 +17,18 @@ User-visible behavior added after `25751700` that fresh scenarios must cover:
 - `container-max-running` re-clamps before each queued launch from the run's desired batch (grows back after a full or unreadable inventory recovers; unreadable clamps to one); a stopped run downgrades never-verified PASS to INPUT_REQUIRED and opens no finalize pane; a PASS awaiting verification whose relaunches all fail becomes INPUT_REQUIRED.
 - `pm pr cleanup --resources` from a plain terminal covers every session tag; sign-off/debug treat an existing window after a failed pane lookup as launched.
 
+Refresh on 2026-10-27 at HEAD `76081338` (QA fixes from scenarios 34–45 plus review-loop c2fc i1). Scenarios 34–48 are locked historical evidence; fresh scenarios begin at 49. Results of the 34–48 run (aggregate NEEDS_WORK): S36, S38 (after 3d291aeb), S39, S40 (one spec conflict, resolved below as A16), S42, S43, S45 held live, and S37/S44 held after in-run fixes. S34 and S35 each found and fixed real bugs and need clean reruns. S34 T3 (stopping a large multi-PR run) was blocked by the worker's PID budget: PID 1 there is `sleep infinity`, zombies pile up, and the cgroup cap is 2048. S35 story 3 took about 94 minutes because inline retry backoff blocks the poll. S41 was refined live, but no result note exists, so its stories are rerun. S46 (keyring/PID pressure) was rejected, S47 (Docker) deferred and S48 (hour-aged locks) deferred: none of them had a qualified prerequisite.
+
+User-visible behavior added after `8c5fad86` that fresh scenarios must cover:
+- Supersede and resume: after `/pr qa fresh` over an active run, superseded workers whose panes are already gone are released within seconds, not left for the periodic pass (895b5b69). A TUI restart resumes only the newest QA snapshot for a PR (b913a424). A superseded run never rewrites its own snapshot, so after the replacement finishes, a later restart does not recover the stopped run as a completion: no duplicate note or transition, and the PR does not stay in `qa` after PASS (76081338).
+- Stopping and dead workers: a stop during PASS verification sends no follow-up to the worker, records no FLAG and keeps the container live during the stop. The scenario becomes INPUT_REQUIRED "PASS was not verified before the run was stopped" (3d4f44c9). When a dead worker's relaunch fails, the run keeps retrying it. It never adopts the window's concretizer pane, so the run cannot hang showing PASS (48780e13).
+- Process pressure: if forking fails in the TUI's QA poll tick (EAGAIN/ENOMEM), the tick is skipped and the TUI survives, so a stopped run's workers are still released (065aba13).
+- Headroom and queued scenarios: settled workers whose release was deferred by an unreadable inventory are retried once per poll, so the batch grows back after recovery. The dashboard keeps every queued scenario and its queued label through launches (868a4654). In an 8-worker run, a slow identity inspect is retried within the bounded budget and does not abort every worker (b25c70e8).
+- Restart and launch advice: `pm container restart` tags its generation, so the launch it tells the user to run reuses the container immediately and is not refused as "still owned by an attaching launch" (3d291aeb). PID-exhaustion advice for a fresh launch that PM already removed says to retry the launch, not to restart a container that no longer exists (76e1443e).
+- Pane release after workdir deletion: the impl/review/sign-off pane EXIT release still works after `pm pr cleanup` or merge teardown has deleted the pane's cwd (3c9ab152). `pm tui restart --breadcrumb` logs its save/skip decision at INFO (9abd3c07).
+- Popups and proxy reporting: a `pr start` launched from a popup labels the container with the session's project root (`-C`/`PM_PROJECT`), not the viewed PR workdir clone. Reap and `session cleanup` print `stopped  push proxy <dir>` for proxies they stop (9d26eb3a).
+- Status output: `pm container status` lists only this runtime's retention markers (61cf62b5), and no longer lists a retained container that cleanup has since removed (incidental fix made during this planning pass). Against a hung runtime, status finishes within one bounded probe. A legacy unlabeled container's PR status is resolved through the owning session's project, not the caller's cwd (fdf4a1d5).
+
 Source grounding:
 - `pm_core/container.py`: serialized launch/reuse, completed setup/config probes, runtime cause classification, ID-specific EXIT cleanup, PID recovery, bounded creation and legacy cleanup.
 - `pm_core/container_reaper.py`: exact pane ownership, scope, retention, launch grace, pre-delete rechecks, bounded removal, persisted failures and unused-proxy cleanup.
@@ -43,7 +55,18 @@ Source grounding:
 | PR workdir `.git` (hooks directory, refs, index) writable by the container and operated on by host git; push-proxy daemon command parsing | A worker plants hooks while host-side pr start/sign-off integration/QA publish/status run and another worker pushes through the same shared proxy; scenario 40 |
 | Process locale seen by TUI, reaper and QA release | C-locale and UTF-8 TUI/reaper processes reconciling the same runtime; scenario 42 |
 
-These resources are shared within a scenario only. No scenario relies on another scenario's files, daemons or state. Fresh scenarios 34–48 re-cover every row on HEAD `8c5fad86`: runtime namespace/identity (34–39, 43, 44), locks/leases (38, 48), reaper outcomes (37, 42), retention (37, 38), tmux sockets/clients (34–38, 42, 45), push proxies (39, 40), headroom/queues (44), kernel pressure (46, 47), workdirs/evidence (all), popups (45).
+These resources are shared within a scenario only. No scenario relies on another scenario's files, daemons or state. Fresh scenarios 34–48 re-cover every row on HEAD `8c5fad86`: runtime namespace/identity (34–39, 43, 44), locks/leases (38, 48), reaper outcomes (37, 42), retention (37, 38), tmux sockets/clients (34–38, 42, 45), push proxies (39, 40), headroom/queues (44), kernel pressure (46, 47), workdirs/evidence (all), popups (45). Fresh scenarios 49–57 re-cover them on HEAD `76081338`:
+- runtime namespace/identity: 49–53, 55
+- locks/leases: 52, 57
+- reaper outcomes: 51, 53, 57
+- retention: 53, 55
+- tmux sockets/clients: 49, 50, 54, 55
+- push proxies: 52–54
+- headroom/queues: 51
+- process trees/PID: 49, 56
+- workdirs/evidence: all
+- popups: 54
+- locale: 55
 
 ## Setup
 
@@ -67,6 +90,27 @@ These resources are shared within a scenario only. No scenario relies on another
 17. Split prerequisite-heavy coverage: Docker USER-pm setup (28; fresh 47), delegated PID pressure (29; fresh 46), isolated genuine keyring relief (30; fresh 46), and real hour-aged lock contention (33; fresh 48) have independent qualification. A blocked prerequisite does not waive it or prevent the ordinary Podman/setup/child-reaping scenarios from running. Record proxy process state explicitly: an exited zombie is not a running listener, but is not evidence of successful process reaping; preserve the existing pr-2111fa0 dependency if outer PID1 prevents disappearance.
 18. Use current CLI semantics: safe preview is `container reap --dry-run` or `session cleanup --dry-run`, never legacy `container cleanup`; PR resource cleanup is explicit destructive teardown. Session kill must be driven from a surviving control session with the target directory, and does not promise a removal count. Absent telemetry is annotated in evidence even when CLI simply omits it. Manual reap callers serialize; use a separately acknowledged full-reap/explicit-cleanup interleaving to test stale outcome writes.
 19. Fixture lessons from 20–33: use fake holds of at least 86400 seconds when a worker must outlive the story; make any fixture runtime wrapper executable (otherwise PM silently uses the real binary); read launcher output only after a per-attempt begin marker; close a leftover review window before a trial that must allocate (review otherwise only focuses it); `pm qa debug` clones locally so the PR branch must exist as a local ref; prefer an overlay storage driver over VFS for build budgets; PM resolves runtime storage through XDG paths, so record `podman info` graphRoot/runRoot rather than trusting `CONTAINERS_STORAGE_CONF`. Never kill the fixture TUI pane in a way that triggers the after-kill-pane respawn in an unrelated cwd: that runs an unscoped startup reconcile that legitimately removes unowned fixtures. Isolated fixture setup must not be run through a worktree-constrained helper that refuses isolated HOME (S32 blocker).
+
+20. Fixture lessons from 34–48:
+    - Environment and PATH:
+      - Put the host fake-claude directory (`/workspace/bin`) on the PATH, plus a non-provider `claude` stub, since `pr start`/meta call `find_claude`.
+      - tmux 3.2a ignores `respawn-pane -e PATH`, so respawn the TUI as `env PATH=... pm _tui`.
+      - asciinema refuses a C locale: record under C.UTF-8 and run only the attached client under C.
+    - Storage and image:
+      - `/tmp` is overlayfs, so private Podman storage needs `mount_program=fuse-overlayfs`.
+      - `build-base` needs the Dockerfile beside the project's `pm_core` copy.
+      - New PRs need `pm push` and a merge of the `pm/sync` branch before `pr start`.
+    - Podman 3.4.4 and git:
+      - Podman 3.4.4 `rm` has no `-t`; use kill plus `rm -f`.
+      - `git -C /workspace push` bypasses the container git wrapper (pr-a6e74e3); push with `podman exec -w /workspace`.
+    - Fake agent:
+      - The fake verdict cursor clamps at its last entry, so supply one entry per consumer.
+      - Scenario numbers renumber across attempts.
+    - Ownership fixtures:
+      - Closing a PM-launched pane writes an owner-release record. Make unowned past-grace fixtures with `pm container restart --force` and wait more than 120 s.
+      - Gates on inspect/list-panes must release within their 10 s or 5 s probe timeout, and must match tmux argv after `-S <sock>`.
+    - PID budget: in a worker whose PID 1 does not reap zombies, size worker counts to the cgroup PID budget and record it.
+    - Budget-heavy stories: dead-worker retry backoff and hour-aged lock aging need a declared wall-clock budget of up to 90 minutes. S35 showed that such a budget can be completed.
 
 ## Requirements — user stories
 
@@ -187,5 +231,11 @@ BLOCKED/unsupported is required if the worker cannot obtain real runtime/image/n
 13. Host git hook isolation and push-proxy option prefixes are incidental security fixes carried by this branch; they are in QA scope as user-visible host behavior. Config-key escapes (pr-c558b14) and positional/`--repo` local-path bypass (pr-15734c1) are tracked separately and are not acceptance criteria here.
 14. Fresh 34–48 replace no locked scenario. NEEDS_WORK in 20/21/26/27 reflected defects fixed in-run; their stories are rerun on `8c5fad86` rather than inherited as passes. S22's PASS stands as historical evidence; its tolerant-decoding and locale extensions are new assertions.
 15. Sign-off still exits 0 after printing a launch error (review exits 1) because auto-sequence calls it in-process; QA records the exit status but does not fail on it alone — the visible cause and absence of a leaked allocation are the acceptance criteria.
+
+16. Impl `pm pr start --fresh` (S40 conflict) means a fresh agent session. Unlike review/sign-off, it does not discard its container first. It kills the window and relies on verified reuse (R5/R11): "a complete healthy reusable container need not be recreated." Either outcome passes: a new container, or the same verified healthy ID. In both cases the old agent process is gone, no second container leaks, and a delayed old EXIT cannot remove the reused or new allocation. R16 "obsolete container disappears" applies to containers that are not reused.
+17. S43 C2 "config hash matches the fixture": PM seeds `/workspace` trust into the copied `.claude.json`. Compare content apart from that PM-added trust entry; the user-visible criterion is no onboarding.
+18. S43 story 4c: when PM itself removed the failed fresh allocation, the correct recovery advice is to retry the launch (76e1443e). `pm container restart NAME` is correct only when the allocation still exists. In every case the printed command must run.
+19. S44 outage peak: an unreadable inventory clamps to one launch (the at-least-one floor), and deferred releases still count. While the inventory is unreadable, the run's peak may therefore reach L+1. After recovery it must return to at most L, and the batch must grow back. A larger excess, or permanent serialization after recovery, fails.
+20. Prerequisite-gated S46/S47/S48 are not re-emitted to unqualified workers. A fresh scenario that runs with a declared 90-minute budget covers hour-aged lock pruning (as S35's 94-minute run did). Docker parity, genuine keyring relief and delegated PID-cgroup pressure remain open acceptance items that need a provisioned VM or Docker host; they are not waived. PID-1 orphan reaping inside PM containers (R14) does not need those prerequisites and is planned separately under ordinary nested Podman.
 
 No unresolved product ambiguities remain. This refresh records planning only; it does not claim runtime validation.
