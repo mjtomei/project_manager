@@ -1269,6 +1269,36 @@ class TestWorkdirKeyedProxies:
             "other-wd", session_tag=self.TAG, pr_id=self.PR,
             workdir=str(other)) is None
 
+    def test_lookup_ignores_a_foreign_discovery_link(self, tmp_path,
+                                                     live_proxies):
+        """A planted link must not make the lookup return another socket.
+
+        ``get_proxy_socket_path`` is what ``create_container``'s reuse path
+        asks "is my proxy alive?".  If a planted discovery link made it
+        return a sibling session's live socket, this container's dead proxy
+        would never be restarted.
+        """
+        tag = "t" * 80
+        ours = self._workdir(tmp_path, "ours")
+        theirs = self._workdir(tmp_path, "theirs")
+        other_sock = start_push_proxy(
+            "other-session-c", str(theirs), "pm/pr-o",
+            session_tag="othertag", pr_id="pr-o")
+        other_dir = os.path.dirname(other_sock)
+
+        long_dir = self._long_link(tag, ours)
+        if os.path.lexists(long_dir):
+            os.unlink(long_dir)
+        os.symlink(other_dir, long_dir)  # planted; our own proxy is dead
+        try:
+            assert get_proxy_socket_path(
+                "our-c", session_tag=tag, pr_id=self.PR,
+                workdir=str(ours)) is None
+        finally:
+            if os.path.lexists(long_dir):
+                os.unlink(long_dir)
+            stop_push_proxy("other-session-c")
+
     @patch("subprocess.run")
     def test_same_workdir_via_a_symlink_shares_one_proxy(
             self, mock_run, tmp_path, live_proxies):
@@ -1446,6 +1476,160 @@ class TestWorkdirKeyedProxies:
         assert stop_session_proxies(tag) >= 1
         assert not push_proxy_mod.proxy_is_alive(sock)
         assert not os.path.exists(sock_dir)
+
+    def _long_link(self, tag, workdir):
+        token = push_proxy_mod._workdir_token(str(workdir))
+        return (f"/tmp/{push_proxy_mod._SOCKET_DIR_PREFIX}"
+                f"{tag}-{self.PR}-{token}")
+
+    def test_discovery_target_matches_the_hashed_dir(self, tmp_path,
+                                                     live_proxies):
+        """A real discovery link resolves to the hash of its own name."""
+        tag = "t" * 80
+        impl = self._workdir(tmp_path, "impl")
+        self._start("impl-long", impl, tag=tag)
+        long_dir = self._long_link(tag, impl)
+        token = push_proxy_mod._workdir_token(str(impl))
+
+        assert os.path.islink(long_dir)
+        assert (push_proxy_mod._discovery_target(long_dir)
+                == push_proxy_mod._shared_sock_dir_path(tag, self.PR, token))
+        assert not push_proxy_mod._is_foreign_discovery_link(long_dir)
+        # Not a link at all -> nothing to verify.
+        assert push_proxy_mod._discovery_target(str(impl)) is None
+        assert not push_proxy_mod._is_foreign_discovery_link(str(impl))
+
+    def test_start_replaces_a_foreign_discovery_link(self, tmp_path,
+                                                     live_proxies):
+        """A planted long-name link is replaced so teardown can still find us.
+
+        If the link keeps pointing elsewhere, a teardown from a later
+        process (empty registry) would unlink it but never find the hashed
+        directory, leaking the proxy and its socket directory.
+        """
+        tag = "t" * 80
+        ours = self._workdir(tmp_path, "ours")
+        theirs = self._workdir(tmp_path, "theirs")
+        other_sock = start_push_proxy(
+            "other-session-c", str(theirs), "pm/pr-o",
+            session_tag="othertag", pr_id="pr-o")
+        other_dir = os.path.dirname(other_sock)
+
+        long_dir = self._long_link(tag, ours)
+        if os.path.lexists(long_dir):
+            os.unlink(long_dir)
+        os.symlink(other_dir, long_dir)  # planted by someone else
+
+        try:
+            sock = self._start("our-c", ours, tag=tag)
+            assert os.path.islink(long_dir)
+            assert (os.path.realpath(long_dir)
+                    == os.path.realpath(os.path.dirname(sock)))
+            # The planted link's target is untouched.
+            assert os.path.isdir(other_dir)
+            assert push_proxy_mod.proxy_is_alive(other_sock)
+        finally:
+            stop_push_proxy("our-c")
+            stop_push_proxy("other-session-c")
+
+    def test_teardown_follows_its_own_discovery_link(self, tmp_path,
+                                                     live_proxies):
+        """The identity check must not stop a legitimate link being swept."""
+        tag = "t" * 80
+        impl = self._workdir(tmp_path, "impl")
+        sock = self._start("impl-long", impl, tag=tag)
+        long_dir = self._long_link(tag, impl)
+        assert os.path.islink(long_dir)
+
+        assert stop_session_proxies(tag) >= 1
+        assert not push_proxy_mod.proxy_is_alive(sock)
+        assert not os.path.exists(os.path.dirname(sock))
+        assert not os.path.lexists(long_dir)
+
+    def test_teardown_refuses_a_foreign_discovery_link(self, tmp_path,
+                                                       live_proxies):
+        """A planted long-name link must never reach another session's proxy.
+
+        /tmp is world-writable (and the socket directory is writable from
+        the container), so anyone can point our long discovery name at a
+        sibling session's proxy directory.  Following it would stop that
+        session's *live* proxy and delete the directory its container
+        bind-mounts — the S18 failure through a planted link.  Teardown
+        must remove the link and leave the target alone.
+        """
+        tag = "t" * 80
+        ours = self._workdir(tmp_path, "ours")
+        theirs = self._workdir(tmp_path, "theirs")
+        other_sock = start_push_proxy(
+            "other-session-c", str(theirs), "pm/pr-o",
+            session_tag="othertag", pr_id="pr-o")
+        other_dir = os.path.dirname(other_sock)
+        sock = self._start("our-c", ours, tag=tag)
+
+        long_dir = self._long_link(tag, ours)
+        assert os.path.islink(long_dir)
+        os.unlink(long_dir)
+        os.symlink(other_dir, long_dir)  # planted by someone else
+
+        try:
+            stop_session_proxies(tag)
+            assert push_proxy_mod.proxy_is_alive(other_sock), (
+                "teardown followed a planted discovery link and killed "
+                "another session's live proxy")
+            assert os.path.isdir(other_dir)
+            assert not os.path.lexists(long_dir)
+            # Our own proxy still went away.
+            assert not push_proxy_mod.proxy_is_alive(sock)
+        finally:
+            if os.path.lexists(long_dir):
+                os.unlink(long_dir)
+            stop_push_proxy("other-session-c")
+
+    def test_stop_socket_under_lock_refuses_a_foreign_discovery_link(
+            self, tmp_path, live_proxies):
+        """The per-socket sweep entry point refuses a foreign link too."""
+        theirs = self._workdir(tmp_path, "theirs")
+        other_sock = start_push_proxy(
+            "other-session-c", str(theirs), "pm/pr-o",
+            session_tag="othertag", pr_id="pr-o")
+        other_dir = os.path.dirname(other_sock)
+        link = "/tmp/pm-push-proxy-foreignlink"
+        if os.path.lexists(link):
+            os.unlink(link)
+        os.symlink(other_dir, link)
+        try:
+            assert push_proxy_mod._stop_socket_under_lock(
+                link + "/push.sock") is False
+            assert push_proxy_mod.proxy_is_alive(other_sock)
+            assert os.path.isdir(other_dir)
+            assert not os.path.lexists(link)
+        finally:
+            if os.path.lexists(link):
+                os.unlink(link)
+            stop_push_proxy("other-session-c")
+
+    def test_kill_proxy_socket_refuses_a_foreign_discovery_link(
+            self, tmp_path, live_proxies):
+        """``_kill_proxy_socket`` itself never touches a foreign link's target."""
+        theirs = self._workdir(tmp_path, "theirs")
+        other_sock = start_push_proxy(
+            "other-session-c", str(theirs), "pm/pr-o",
+            session_tag="othertag", pr_id="pr-o")
+        other_dir = os.path.dirname(other_sock)
+        link = "/tmp/pm-push-proxy-foreignlink2"
+        if os.path.lexists(link):
+            os.unlink(link)
+        os.symlink(other_dir, link)
+        try:
+            assert push_proxy_mod._kill_proxy_socket(
+                link + "/push.sock") is False
+            assert push_proxy_mod.proxy_is_alive(other_sock)
+            assert os.path.isdir(other_dir)
+            assert not os.path.lexists(link)
+        finally:
+            if os.path.lexists(link):
+                os.unlink(link)
+            stop_push_proxy("other-session-c")
 
     def test_sweep_refuses_to_delete_a_foreign_symlink_target(self, tmp_path):
         """Teardown must not rmtree whatever a /tmp symlink happens to point at."""

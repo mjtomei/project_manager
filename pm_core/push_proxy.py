@@ -827,7 +827,9 @@ def _shared_sock_dir(session_tag: str, pr_id: str,
     Like :func:`_shared_sock_dir_path` but also creates the directory
     and a long-named symlink for discoverability/cleanup.  Use this
     when starting a proxy; use ``_shared_sock_dir_path`` for read-only
-    lookups.
+    lookups.  A link found at the long name that does not resolve to this
+    name's hashed directory is replaced (the link only, never its target),
+    so a later registry-less teardown can still find the directory.
 
     Directory creation is best-effort here: ``_start_lock`` creates it
     for real (and reports an unusable name as a ``PushProxyError``), and
@@ -879,10 +881,74 @@ def _shared_sock_dir(session_tag: str, pr_id: str,
             except OSError:
                 _log.warning("Push proxy: could not create discovery "
                              "symlink %s", long_dir, exc_info=True)
+        elif _is_foreign_discovery_link(long_dir):
+            # A link planted at our long name (or one left pointing at
+            # another session's directory) would make a later process — one
+            # with an empty registry — sweep the wrong directory and miss
+            # ours.  Replace the link itself; its target is never touched.
+            try:
+                os.unlink(long_dir)
+                os.symlink(short_dir, long_dir)
+            except OSError:
+                _log.warning("Push proxy: could not replace a discovery "
+                             "link that points elsewhere: %s", long_dir,
+                             exc_info=True)
     except OSError:
         _log.warning("Push proxy: could not create discovery symlink %s",
                      long_dir, exc_info=True)
     return short_dir
+
+
+def _discovery_target(link: str) -> str | None:
+    """Return the directory a long-name discovery symlink must point at.
+
+    When the readable socket directory name would exceed the Unix socket
+    path limit, :func:`_shared_sock_dir` creates the hashed directory and
+    a long-named symlink to it.  That link's only legitimate target is the
+    hash of its *own* name, so a link pointing anywhere else was planted
+    (``/tmp`` is world-writable) or belongs to something else.  Following
+    it would let teardown stop — and delete the bind-mount directory of —
+    *another* session's proxy.
+
+    Returns ``None`` when *link* is not a symlink (nothing to verify).
+    """
+    if not os.path.islink(link):
+        return None
+    name = os.path.basename(link)
+    if not name.startswith(_SOCKET_DIR_PREFIX):
+        return None
+    long_name = name[len(_SOCKET_DIR_PREFIX):]
+    dir_hash = hashlib.sha256(long_name.encode()).hexdigest()[:16]
+    return f"/tmp/{_SOCKET_DIR_PREFIX}{dir_hash}"
+
+
+def _is_foreign_discovery_link(sock_dir: str) -> bool:
+    """True when *sock_dir* is a discovery symlink pointing somewhere else.
+
+    A legitimate discovery link resolves to the hashed directory derived
+    from its own name; anything else must never be followed by teardown.
+    """
+    expected = _discovery_target(sock_dir)
+    return (expected is not None
+            and os.path.realpath(sock_dir) != os.path.realpath(expected))
+
+
+def _drop_foreign_discovery_link(sock_dir: str) -> bool:
+    """Unlink a discovery symlink that points somewhere other than its hash.
+
+    Returns True when *sock_dir* was such a link.  Only the link itself is
+    removed — its target is never touched (it may be another session's
+    live proxy directory).
+    """
+    if not _is_foreign_discovery_link(sock_dir):
+        return False
+    _log.warning("Refusing to touch a discovery link that points elsewhere: "
+                 "%s -> %s", sock_dir, os.path.realpath(sock_dir))
+    try:
+        os.unlink(sock_dir)
+    except OSError:
+        pass
+    return True
 
 
 # How many times _start_lock re-opens the lock file when the one it locked
@@ -920,7 +986,9 @@ def _sock_dir_start_problem(sock_dir: str) -> str | None:
 
     Only starts are checked.  Teardown passes the long discovery symlink
     to :func:`_start_lock` on purpose and guards itself in
-    :func:`_kill_proxy_socket` / :func:`_remove_proxy_dirs`.
+    :func:`_stop_socket_under_lock` / :func:`_kill_proxy_socket` /
+    :func:`_remove_proxy_dirs` (which also verify that the link leads to
+    its own hashed directory).
     """
     if os.path.islink(sock_dir):
         return "is a symlink"
@@ -1254,8 +1322,12 @@ def start_push_proxy(container_name: str, workdir: str,
 
 
 def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
-                       lock_held: bool = False) -> None:
+                       lock_held: bool = False) -> bool:
     """Stop a subprocess proxy by removing its socket (triggers exit).
+
+    Returns True when the socket was stopped, False when the path was
+    refused (a non-proxy directory, a foreign-owned directory, or a
+    discovery link that points elsewhere).
 
     When *remove_dir* is False the socket directory is kept.  Shared
     proxies use that mode: a container may still bind-mount the
@@ -1273,6 +1345,11 @@ def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
     a foreign link is unlinked, its target is left alone.
     """
     sock_dir = str(Path(sock_path).parent)
+    # A long-name discovery link must resolve to its own hashed directory:
+    # following a planted one would stop *another* session's live proxy and
+    # delete the directory its container bind-mounts.
+    if _drop_foreign_discovery_link(sock_dir):
+        return False
     parent = os.path.realpath(os.path.dirname(sock_dir))
     # Resolve the real directory if sock_dir is a symlink
     real_dir = os.path.realpath(sock_dir)
@@ -1284,7 +1361,7 @@ def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
                 os.unlink(sock_dir)
             except OSError:
                 pass
-        return
+        return False
     try:
         if os.stat(real_dir).st_uid != os.getuid():
             # /tmp is world-writable: anyone can plant a directory with a
@@ -1292,7 +1369,7 @@ def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
             # with EPERM and abort the whole teardown sweep).
             _log.warning("Refusing to stop proxy in a directory owned by "
                          "another user: %s", real_dir)
-            return
+            return False
     except OSError:
         pass  # already gone — the unlinks below are no-ops
     # Docker creates a *directory* at a bind-mounted socket path that did
@@ -1304,7 +1381,7 @@ def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
     except OSError:
         pass
     if not remove_dir:
-        return
+        return True
     # Clean up the symlink if sock_dir is one
     if os.path.islink(sock_dir):
         try:
@@ -1326,6 +1403,7 @@ def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
             pass
     else:
         _clear_lock_file(real_dir + ".lock")
+    return True
 
 
 def _stop_shared_proxy_socket(key: str, sock_dir: str,
@@ -1427,8 +1505,11 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
 
     Only paths that resolve to a proxy socket directory are removed; a
     symlink pointing anywhere else is unlinked but its target is left alone.
-    Directories owned by another user are left alone too — ``/tmp`` is
-    world-writable, so anyone can create a matching name there.
+    A long-name discovery symlink must also resolve to the hashed directory
+    derived from its *own* name — a link pointing at another session's proxy
+    directory is removed, never followed.  Directories owned by another user
+    are left alone too — ``/tmp`` is world-writable, so anyone can create a
+    matching name there.
 
     A directory whose proxy is alive, or whose start lock is held by a
     proxy start in flight, is left in place: removing it would delete a
@@ -1455,6 +1536,11 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
 
     for path in _glob.glob(glob_pattern):
         if path.endswith(".lock"):
+            continue
+        # A discovery link may only lead to its own hashed directory; a
+        # planted one is removed (never followed) so the sweep cannot delete
+        # another session's proxy directory.
+        if _drop_foreign_discovery_link(path):
             continue
         real = os.path.realpath(path)
         if not _is_proxy_dir(real, parent):
@@ -1503,14 +1589,17 @@ def _stop_socket_under_lock(sock_path: str) -> bool:
     bind-mounts) — the S18 failure through the sweep.
     """
     sock_dir = os.path.dirname(sock_path)
+    # Check the discovery link *before* taking a lock: resolving a planted
+    # link would make us lock — and then stop — another session's proxy.
+    if _drop_foreign_discovery_link(sock_dir):
+        return False
     if not os.path.isdir(sock_dir):
         return False  # nothing on disk (registry entry already swept)
     with _start_lock(sock_dir, blocking=False) as locked:
         if not locked:
             _log.info("Proxy start in flight; not stopping: %s", sock_path)
             return False
-        _kill_proxy_socket(sock_path, lock_held=True)
-        return True
+        return _kill_proxy_socket(sock_path, lock_held=True)
 
 
 def stop_all_proxies() -> None:
@@ -1598,7 +1687,16 @@ def get_proxy_socket_path(container_name: str,
     enough within the process that started the proxy.
     """
     def _resolve(path: str) -> str | None:
-        """Return the realpath if the socket exists, else None."""
+        """Return the realpath if the socket exists, else None.
+
+        A directory reached through a discovery symlink that points
+        somewhere other than its own hash is ignored: a planted link must
+        not make this lookup hand back *another* session's socket (the
+        caller would then believe its own dead proxy is alive and skip the
+        restart).
+        """
+        if _is_foreign_discovery_link(os.path.dirname(path)):
+            return None
         if os.path.exists(path):
             return os.path.realpath(path)
         return None

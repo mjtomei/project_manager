@@ -682,3 +682,54 @@ bare `IsADirectoryError` escapes `stop()`).
 `test_same_workdir_via_a_symlink_shares_one_proxy` passes at f74c4e70 (it
 pins behaviour that already worked).  `tests/test_push_proxy.py` +
 `tests/test_container.py`: 214 passed.
+
+## Review iteration 13 refinements
+
+Thirteenth review pass (consistent with R6; no requirement changed).  The
+discovery symlink is a `/tmp` path that teardown reaches through a glob,
+and the earlier iterations only verified that its *target* looked like a
+proxy directory:
+
+- **A discovery link is followed only to its own hashed directory.**
+  `_is_proxy_dir` plus the `st_uid` check establish that the target is a
+  proxy-shaped directory under `/tmp` owned by us — a link planted at our
+  long name and pointing at a **sibling session's** proxy directory passes
+  both.  Reproduced at b0e0550e: `stop_session_proxies(our_tag)` resolved
+  the planted link, killed the other session's *live* proxy and deleted the
+  directory its container bind-mounts (the S18 failure through a planted
+  link), and counted the refused sweep as a stop.  New `_discovery_target()`
+  recomputes the hash of the link's own name, `_is_foreign_discovery_link()`
+  compares the resolved target against it, and `_drop_foreign_discovery_link()`
+  unlinks such a link — never its target.  `_remove_proxy_dirs`,
+  `_kill_proxy_socket` and `_stop_socket_under_lock` (which now checks
+  before taking a lock, so it cannot lock another session's directory) all
+  refuse a foreign link.  A legitimate link resolves to exactly the hashed
+  directory derived from its name, so ordinary sweeps are unchanged.
+- **A start replaces a foreign discovery link.**  `_shared_sock_dir` used to
+  leave any existing symlink at the long name alone, so a planted one kept
+  pointing elsewhere: teardown from a later process (empty registry) would
+  unlink it but never find the hashed directory, leaking the proxy and its
+  socket directory.  It now replaces a link that does not resolve to its own
+  hashed directory — the link only; its target is never touched.
+- **The socket lookup ignores a foreign link too.**  `get_proxy_socket_path`
+  resolves paths with `os.path.exists`; a planted long-name link pointing at
+  another session's live socket made it hand that path back, so
+  `create_container`'s reuse path would see "alive" and skip restarting this
+  container's dead proxy.  Its `_resolve` now returns None for a socket
+  reached through a foreign link.
+- **`_kill_proxy_socket` reports whether it stopped anything.**  It returns
+  a bool and `_stop_socket_under_lock` propagates it, so
+  `stop_session_proxies`/`stop_all_proxies` no longer report (and count) a
+  socket they refused to touch.
+
+Tests: `test_teardown_refuses_a_foreign_discovery_link`,
+`test_stop_socket_under_lock_refuses_a_foreign_discovery_link` and
+`test_kill_proxy_socket_refuses_a_foreign_discovery_link` all fail at
+b0e0550e for the right reason (the other session's live proxy is killed;
+`None is False`), `test_start_replaces_a_foreign_discovery_link` fails there
+too (the planted link still points at the other directory), as does
+`test_lookup_ignores_a_foreign_discovery_link` (the lookup returns the
+other session's socket), and `test_discovery_target_matches_the_hashed_dir`
+pins the hash relation.
+`test_teardown_follows_its_own_discovery_link` pins that a legitimate link
+is still swept (it passes at b0e0550e too).

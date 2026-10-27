@@ -14508,7 +14508,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T16:36:22.922399+00:00'
+  updated_at: '2026-10-27T17:08:48.527763+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14913,6 +14913,41 @@ prs:
       .lock beside the kept directory until session teardown. (2026-10-27)'
     created_at: '2026-10-27T16:36:22Z'
     last_edited: '2026-10-27T16:36:22Z'
+  - id: note-4287c9c
+    text: 'Review-loop 6280 i2 (2026-10-27): reviewed b0e0550e. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at 74462d76 with assert 1 == 3;
+      and a 4-process concurrent start_push_proxy check yields exactly one socket
+      (R7 across processes, not just threads). One defect found and fixed in the newly
+      hardened teardown area: a long-name discovery symlink was followed whenever
+      its *target* looked like a proxy dir under /tmp owned by us (_is_proxy_dir +
+      st_uid), so a link planted at our long name and pointing at a sibling session
+      dir made stop_session_proxies resolve it, kill that session LIVE proxy and delete
+      the directory its container bind-mounts (reproduced at b0e0550e) and it double-counted.
+      Added _discovery_target/_is_foreign_discovery_link/_drop_foreign_discovery_link:
+      _remove_proxy_dirs, _kill_proxy_socket and _stop_socket_under_lock (checked
+      before taking a lock) unlink such a link and never touch its target; _shared_sock_dir
+      replaces a foreign link so a later registry-less teardown can still find the
+      hashed dir; get_proxy_socket_path ignores a socket reached through a foreign
+      link (the reuse path could otherwise believe its own dead proxy was alive).
+      _kill_proxy_socket now returns a bool and _stop_socket_under_lock propagates
+      it, so the reported/returned stop count is accurate. Tests: 7 new, 5 fail at
+      b0e0550e for the right reason (other live proxy killed; planted link not replaced;
+      lookup returns the other socket); test_teardown_follows_its_own_discovery_link
+      and test_discovery_target_matches_the_hashed_dir pin the legitimate path. tests/test_push_proxy.py
+      + tests/test_container.py: 221 passed. Full suite (PATH=/usr/bin:/bin, PYTHONPATH=/workspace):
+      3809 passed, 1 skipped, 13 failed - all pre-existing environment (12 test_markdown_render
+      without the markdown module + test_hook_events::test_installer_writes_standalone_receiver),
+      identical at b0e0550e. Spec updated with Review iteration 13 refinements. Residual,
+      unchanged and out of scope: in-process refcounts only (cross-process cleanup
+      stays with #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request,
+      remains the cleaner long-term design); proxy_is_alive still cannot distinguish
+      a busy daemon from a dead one beyond the backlog of 16; the daemon serves one
+      request at a time; a shared stop leaves its .lock beside the kept directory
+      until session teardown.'
+    created_at: '2026-10-27T17:08:48Z'
+    last_edited: '2026-10-27T17:08:48Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -31379,7 +31414,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T22:54:04.987012+00:00'
-  updated_at: '2026-10-12T22:56:41.644886+00:00'
+  updated_at: '2026-10-27T17:08:54.733146+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31393,6 +31428,19 @@ prs:
       --show-toplevel == the container workdir, else exec real git.'
     created_at: '2026-10-12T22:56:41Z'
     last_edited: '2026-10-12T22:56:41Z'
+  - id: note-c902155
+    text: 'Design constraint from pr-748e708 (workdir-keyed push proxies, in review):
+      the proxy now rejects any request whose "workdir" differs from its own workdir
+      (spec R4), and each host workdir gets its own proxy/socket. So the "git proxy
+      forwards pull/fetch/push from any repo to the scenario workdir" bug cannot be
+      fixed by making the wrapper send the container cwd - that request will be rejected
+      with an explicit git-proxy: rejected message. The compatible fix is wrapper-side:
+      only forward to the proxy when the command runs in the mounted repo (/workspace),
+      and otherwise exec real git (which fails cleanly without credentials) or fail
+      with a clear message. Serving arbitrary workdirs per request is the deferred
+      option (3) in pr-748e708 spec. (2026-10-27)'
+    created_at: '2026-10-27T17:08:54Z'
+    last_edited: '2026-10-27T17:08:54Z'
 - id: pr-22c92ef
   plan: bugs
   title: 'Bug: status bar clips "AUTO ×N" to "AUTO …" when the TUI pane is ~40 cols
