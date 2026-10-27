@@ -33257,7 +33257,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T04:36:39.706908+00:00'
+  updated_at: '2026-10-27T06:41:44.020687+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36341,6 +36341,26 @@ prs:
       sign_off; H keeps awaiting: review.'
     created_at: '2026-10-27T04:36:39Z'
     last_edited: '2026-10-27T04:36:39Z'
+  - id: note-8b0327d
+    text: 'QA S90 (2026-10-27, host, all fake-claude, two clones sharing ~/.pm, HEAD
+      373fb92c vs control a69b6945 vs fix; captures /pm-captures/scenarios/90, REPORT.md):
+      CODE CHANGE af0d5519 (tested as f42b8024) needs normal re-review. Story 1: HEAD
+      first tick launched the re-run once (only pm-A windows replaced, B untouched);
+      control stuck on running: qa about 230 s until B verdict. On BOTH builds clone
+      B PASS of P (newest qa_status.json under the shared workdirs) made clone A tick
+      print advanced: sign_off while A own 360 s re-run was running; the REQA hop
+      then left two qa-run-bg drivers for P in A (HEAD). Fix: latest_qa_status_path
+      (auto-sequence gate, sign-off evidence, finalize pointer) skips runs whose qa_run.json
+      names another pm session (untagged still count; outside a pm session all count);
+      2 tests, mutation-checked; full suite failure set identical to unmodified HEAD
+      (41F/17E, environmental git push refusals). Post-fix live: A ignored B PASS,
+      advanced only on its own. Stories 2 (both TUIs restarted mid-run) and 3 (B TUI
+      closed, A restarted and scanned 3.5 min) PASS: no adoption, one note/transition
+      per clone, TUI responsive. Story 3 deviation: pm after-kill-pane respawns a
+      killed TUI with the kill-pane caller cwd, so `pm session` never printed TUI
+      pane missing. launch_claim stays until its 180 s expiry (by design).'
+    created_at: '2026-10-27T06:41:43Z'
+    last_edited: '2026-10-27T06:41:43Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
