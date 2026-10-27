@@ -25584,7 +25584,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T04:59:44.098691+00:00'
+  updated_at: '2026-10-27T05:38:42.743704+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25603,6 +25603,24 @@ prs:
       Full suite 3823 passed, 1 skipped.'
     created_at: '2026-10-27T04:59:44Z'
     last_edited: '2026-10-27T04:59:44Z'
+  - id: note-cd7ce6a
+    text: 'Review-loop efd5 i1 (5b479657): fixed a blocking hole — the settle deferral
+      reset on *every* newer idle_prompt, so a session refreshing the hook for the
+      same turn (FakeClaude re-emits every 2s while held open) deferred forever: no
+      nudge, no exhaustion. That is the PRs own motivating repro (verdictless fake
+      finalize) still hanging. Now only a newer event whose transcript text changed
+      counts as native recovery (defer+reset); a same-turn refresh counts against
+      max_deferrals (default 10) and raises no_progress -> NO_VERDICT without nudging
+      (a nudge closes a fakes stdin). QA tick loop measures its settle window from
+      episode start, not the latest event ts, and drops stale trackers on relaunch/pane
+      change. Also: stop_check during settle returns "stopped" (no teardown nudge),
+      planner/refiner resume messages name their block markers, autostart treats NO_VERDICT
+      as failed, qa-verdict-reminder-timeout help updated. Tests added (refresh bound
+      unit/poll/tick, stop-during-settle, block resume, verifier exhaustion, NO_VERDICT->failed,
+      autostart). Full suite: 3694 passed, 1 skipped excluding 4 files whose 43F+17E
+      reproduce identically on origin/master (git-version/env).'
+    created_at: '2026-10-27T05:38:42Z'
+    last_edited: '2026-10-27T05:38:42Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
