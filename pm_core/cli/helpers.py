@@ -15,6 +15,7 @@ from pathlib import Path
 import click
 
 from pm_core import store, git_ops
+from pm_core.graph import deps_of
 from pm_core.paths import configure_logger
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
@@ -286,7 +287,12 @@ def format_pr_line(p: dict, active_pr: str | None = None,
     v_icon = signoff_verdict_icon(display_signoff_verdict(p))
     if v_icon:
         verdict_str = f" {v_icon}"
-    deps = p.get("depends_on") or []
+    # ``graph.deps_of``: a hand-edited scalar ``depends_on`` is not a list of
+    # ids (an int raises out of ``join``; a string would be joined character by
+    # character).  This formatter backs `pm pr list`, `pm pr show` and the home
+    # window's PR list, so one malformed field must not take a reader (or a
+    # TUI render) down.
+    deps = deps_of(p)
     dep_str = f" <- [{', '.join(deps)}]" if deps else ""
     machine = p.get("agent_machine")
     machine_str = f" ({machine})" if machine else ""
@@ -294,12 +300,17 @@ def format_pr_line(p: dict, active_pr: str | None = None,
     ts_str = ""
     if with_timestamp:
         ts = p.get("updated_at") or p.get("created_at") or ""
-        if ts:
+        if isinstance(ts, str) and ts:
             try:
                 dt = datetime.fromisoformat(ts).astimezone()
                 ts_str = f" [{dt.strftime('%Y-%m-%d %H:%M')}]"
             except ValueError:
                 ts_str = f" [{ts}]"
+        elif ts:
+            # A hand-edited value YAML parses as a non-string (an unquoted
+            # date is a ``datetime.date``): render it rather than raising
+            # ``TypeError`` out of ``fromisoformat``.
+            ts_str = f" [{ts}]"
     return (
         f"  {icon} {_pr_display_id(p)}: {p.get('title', '???')} "
         f"[{p.get('status', '?')}{verdict_str}]{dep_str}{machine_str}{active_str}{ts_str}"

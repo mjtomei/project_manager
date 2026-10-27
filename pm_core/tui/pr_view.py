@@ -8,7 +8,7 @@ import shlex
 import sys
 
 from pm_core.paths import configure_logger
-from pm_core import store
+from pm_core import graph, store
 from pm_core.tui._shell import _run_shell, _run_shell_async
 
 _log = configure_logger("pm.tui.pr_view")
@@ -92,9 +92,12 @@ def start_pr(app, companion: bool = False) -> None:
     # In beginner mode, block starting PRs with unmerged dependencies
     if get_global_setting("beginner-mode"):
         pr = store.get_pr(app._data, pr_id)
-        if pr and pr.get("depends_on"):
+        # Hand-edited state: a scalar ``depends_on`` is no list of ids
+        # (``for dep_id in 5`` raises out of the key handler).
+        deps = graph.deps_of(pr) if pr else []
+        if deps:
             unmerged = []
-            for dep_id in pr["depends_on"]:
+            for dep_id in deps:
                 dep = store.get_pr(app._data, dep_id)
                 if dep and dep.get("status") != "merged":
                     unmerged.append(f"{dep_id} ({dep.get('status', 'pending')})")

@@ -134,6 +134,23 @@ def _note_timestamp(n: dict, key: str) -> str:
     return str(n.get(key) or "")
 
 
+def _note_mappings(value) -> list[dict]:
+    """The mapping members of a PR's ``notes`` value.
+
+    ``project.yaml`` is hand-editable state.  A ``notes`` value that is not a
+    list (a hand-edited scalar) and a list member that is not a mapping both
+    read as absent — the same tolerance a note without an ``id``/``text``
+    already gets (:func:`_note_timestamp`, :func:`_pr_note_full_line`).  The
+    merge below indexes every member with ``n.get(...)``, so without this a
+    single malformed note raises ``AttributeError`` out of *every* prompt
+    builder (impl / review / QA / sign-off) and the session window cannot
+    launch at all.
+    """
+    if not isinstance(value, list):
+        return []
+    return [n for n in value if isinstance(n, dict)]
+
+
 def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
     """Format PR notes as a markdown section, or empty string if none.
 
@@ -142,7 +159,7 @@ def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
     the later ``last_edited`` timestamp.  The merged list is sorted by
     ``created_at``.
     """
-    main_notes = list(pr.get("notes") or [])
+    main_notes = _note_mappings(pr.get("notes"))
 
     # Collect notes from the workdir project.yaml, if available.
     workdir_notes: list[dict] = []
@@ -152,7 +169,7 @@ def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
             wd_data = store.load(wd_root, validate=False)
             wd_pr = store.get_pr(wd_data, pr["id"])
             if wd_pr:
-                workdir_notes = list(wd_pr.get("notes") or [])
+                workdir_notes = _note_mappings(wd_pr.get("notes"))
         except Exception:
             pass  # graceful degradation — use main notes only
 

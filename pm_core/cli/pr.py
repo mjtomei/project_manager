@@ -543,6 +543,16 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
     emit_paged(out)
 
 
+def _notes_of(pr_entry: dict) -> list:
+    """A PR's ``notes`` as a list (hand-edited state may hold a scalar).
+
+    The readers below must not raise on a shape ``project.yaml`` can hold: a
+    ``notes`` value that is not a list is no collection to iterate.
+    """
+    notes = pr_entry.get("notes")
+    return notes if isinstance(notes, list) else []
+
+
 def _note_line(n: dict) -> str:
     """One note, as ``pm pr note list`` and ``pm pr show`` print it.
 
@@ -553,6 +563,13 @@ def _note_line(n: dict) -> str:
     ``project.yaml``), so the reader falls back to a placeholder rather than
     raising ``KeyError`` and hiding every note behind a traceback.
     """
+    if not isinstance(n, dict):
+        # Hand-edited project.yaml: a note member that is not a mapping is not
+        # a note.  Both readers are the on-demand fallback for an abbreviated
+        # PR-notes block, so render the raw value rather than raise out of the
+        # command (the prompt builder skips the same shape, see
+        # ``prompt_gen._note_mappings``).
+        return f"  ?: {n}"
     ts = n.get("created_at", "")
     ts_str = f" ({ts})" if ts else ""
     # Tolerate a note with no ``text`` as well as no ``id`` (hand-edited or
@@ -589,7 +606,11 @@ def pr_show(pr_id: str):
         val = pr_entry.get(key)
         if val:
             click.echo(f"{label}: {val}")
-    deps = pr_entry.get("depends_on") or []
+    # ``graph.deps_of``: a hand-edited scalar ``depends_on`` is not a list of
+    # ids (an int raises out of ``join``; a string would be joined character by
+    # character), so the readers agree with `pm pr list` and the behaviour
+    # summary.
+    deps = graph.deps_of(pr_entry)
     if deps:
         click.echo(f"Depends on: {', '.join(deps)}")
     for label, key in (
@@ -597,10 +618,13 @@ def pr_show(pr_id: str):
         ("Tests", "tests"),
         ("Files", "files"),
     ):
-        val = (pr_entry.get(key) or "").strip()
+        # Hand-edited state: only text has whitespace to strip (a scalar would
+        # raise AttributeError out of the reader the prompts point at).
+        val = pr_entry.get(key)
+        val = val.strip() if isinstance(val, str) else ""
         if val:
             click.echo(f"\n## {label}\n{val}")
-    notes = pr_entry.get("notes") or []
+    notes = _notes_of(pr_entry)
     if notes:
         click.echo("\n## Notes")
         for n in notes:
@@ -2046,7 +2070,11 @@ def _finalize_merge(root, pr_entry: dict, pr_id: str,
     # pending PR).
     prs = data.get("prs") or []
     ready = graph.ready_prs(prs)
-    unblocked = [p for p in ready if pr_id in (p.get("depends_on") or [])]
+    # ``graph.deps_of``: a hand-edited scalar ``depends_on`` is no list of ids
+    # (``pr_id in 5`` raises TypeError, and a string would be substring-matched)
+    # — and this runs *after* the merge published, so a crash here would leave
+    # the PR half-finalized.
+    unblocked = [p for p in ready if pr_id in graph.deps_of(p)]
     merged = f"PR {_pr_display_id(pr_entry)} marked as merged"
     if ready:
         click.echo("Newly ready PRs:")
@@ -3535,7 +3563,7 @@ def pr_note_list(pr_id: str):
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
 
-    notes = pr_entry.get("notes") or []
+    notes = _notes_of(pr_entry)
     if not notes:
         click.echo(f"No notes on {_pr_display_id(pr_entry)}.")
         return

@@ -174,6 +174,42 @@ class TestPrNoteList:
         assert result.exit_code == 0
         assert "Legacy note" in result.output
 
+    def test_list_tolerates_a_non_mapping_note(self, tmp_path):
+        """A hand-edited note member that is not a mapping still lists.
+
+        ``pm pr note list`` (like ``pm pr show``) is the on-demand reader the
+        PR-notes prompt marker names, so one malformed member must not hide
+        every note behind a traceback.
+        """
+        notes = ["just a string", {"id": "note-abc1234", "text": "Real note"}]
+        root = _make_state(tmp_path, notes=notes)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "note", "list", "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "Real note" in result.output
+
+
+class TestPrShowReaders:
+    """``pm pr show`` is the reader prompt builders point sessions at."""
+
+    def test_show_tolerates_malformed_fields(self, tmp_path):
+        """Hand-edited ``depends_on`` / ``notes`` / ``description`` must not
+        crash the reader (``join`` on an int, ``.get`` on a scalar note and
+        ``.strip()`` on a scalar description all raised out of the command).
+        """
+        root = _make_state(tmp_path)
+        data = store.load(root)
+        pr = store.get_pr(data, "pr-001")
+        pr["depends_on"] = 5
+        pr["notes"] = ["just a string", {"id": "note-abc", "text": "Real note"}]
+        pr["description"] = 7
+        store.save(data, root)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-C", str(root), "pr", "show", "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "Real note" in result.output
+        assert "Depends on:" not in result.output
+
 
 class TestPrNoteEdit:
     def test_edit_note_text(self, tmp_path):
@@ -673,6 +709,34 @@ class TestPromptGenNotes:
         prompt = generate_qa_child_prompt(data, "pr-001", scenario, "/tmp/workdir")
         assert "\n## PR Notes\n" in prompt
         assert "QA PASS: All passed" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_non_mapping_note_does_not_crash_the_prompt(self, mock_root,
+                                                        mock_notes):
+        """A hand-edited note member that is not a mapping reads as absent.
+
+        ``project.yaml`` is hand-editable state, and every prompt builder
+        renders the notes block.  ``n.get(...)`` on a scalar note raised
+        ``AttributeError`` out of prompt generation, so the impl / review /
+        QA / sign-off window could not launch at all — the same class of
+        crash the note readers already tolerate for a missing ``id``/``text``.
+        """
+        data = self._data(notes=[
+            "just a string", 5,
+            {"id": "note-abc", "text": "Real note"},
+        ])
+        prompt = generate_prompt(data, "pr-001")
+        assert "Real note" in prompt
+
+    @patch("pm_core.prompt_gen.notes.notes_for_prompt", return_value=("", ""))
+    @patch("pm_core.prompt_gen.store.find_project_root")
+    def test_non_list_notes_reads_as_absent(self, mock_root, mock_notes):
+        """A scalar ``notes`` value is no collection to iterate."""
+        data = self._data()
+        data["prs"][0]["notes"] = 5
+        prompt = generate_prompt(data, "pr-001")
+        assert "\n## PR Notes\n" not in prompt
 
 
 class TestPrNotesHandoffGuidance:
