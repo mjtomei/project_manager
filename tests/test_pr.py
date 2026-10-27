@@ -103,6 +103,25 @@ def test_review_after_review_step_leaves_status_unchanged(tmp_path, status,
     assert "without changing status" in result.output
 
 
+@pytest.mark.parametrize("exists", [True, False], ids=["focused", "no-window"])
+def test_inspection_output_is_one_line_for_the_tui_log(tmp_path, exists):
+    """The TUI's spawned-command log keeps only the last stdout line.
+
+    `pr_view._run_command_async` logs ``stdout.split("\\n")[-1]``, so the
+    inspection notice must be a single line for the TUI 'd' path to show it.
+    """
+    root, _ = _make_project(tmp_path, status="qa")
+
+    with _review_window(exists=exists), \
+         mock.patch.object(pr_mod, "_launch_review_window"):
+        result = _invoke(root, PR)
+
+    assert result.exit_code == 0, result.output
+    lines = result.output.strip().splitlines()
+    assert len(lines) == 1, lines
+    assert "in QA" in lines[0] and "status" in lines[0]
+
+
 def test_review_inspection_preserves_signoff_and_return_records(tmp_path):
     """Inspection must not touch approval/return/claim state."""
     signoff = {"verdict": "SIGNOFF_MERGE", "sha": "abc123", "ts": "t",
