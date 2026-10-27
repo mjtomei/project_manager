@@ -388,3 +388,28 @@ class TestGovernorSettingsAndStatus:
         assert "30G used + 4G expected growth / 48G target" in result.output
         assert "20G of 64G (reserve 6G)" in result.output
         assert "Blocked:       impl pr-9" in result.output
+
+
+class TestContainerCleanupCommand:
+    """`pm container cleanup` parses the runtime's name/status listing."""
+
+    def test_removes_podman_tab_padded_names(self):
+        # podman's tabwriter pads the tab separator with spaces.
+        listing = MagicMock(returncode=0, stdout=(
+            "pm-s-impl-pr-1  Up 3 minutes ago\n"
+            "pm-s-qa-pr-2-s1  stopping\n"))
+        with patch("pm_core.container._run_runtime", return_value=listing), \
+             patch("pm_core.container.remove_container") as mock_rm:
+            result = CliRunner().invoke(container_group, ["cleanup"])
+        assert result.exit_code == 0, result.output
+        assert [c.args[0] for c in mock_rm.call_args_list] == [
+            "pm-s-impl-pr-1", "pm-s-qa-pr-2-s1"]
+        assert "Removing: pm-s-impl-pr-1 (Up 3 minutes ago)" in result.output
+
+    def test_removes_docker_tab_separated_names(self):
+        listing = MagicMock(returncode=0, stdout="pm-s-review-pr-3\tExited (0)\n")
+        with patch("pm_core.container._run_runtime", return_value=listing), \
+             patch("pm_core.container.remove_container") as mock_rm:
+            result = CliRunner().invoke(container_group, ["cleanup", "--pr", "pr-3"])
+        assert result.exit_code == 0, result.output
+        mock_rm.assert_called_once_with("pm-s-review-pr-3")

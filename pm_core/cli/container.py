@@ -402,7 +402,9 @@ def container_cleanup(pr_id: str | None):
 
     removed = 0
     for line in lines:
-        parts = line.split("\t", 1)
+        # Split on any whitespace: podman's tabwriter pads the tab with
+        # spaces, and names never contain whitespace.
+        parts = line.split(None, 1)
         name = parts[0].strip()
         status = parts[1].strip() if len(parts) > 1 else ""
         if pr_id and pr_id not in name:
