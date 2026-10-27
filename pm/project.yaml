@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T21:24:21.601398+00:00'
+  updated_at: '2026-10-27T21:26:49.094348+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36557,6 +36557,21 @@ prs:
       preserved, no re-arm, no LAUNCH_FAILED, one review window.'
     created_at: '2026-10-27T21:24:21Z'
     last_edited: '2026-10-27T21:24:21Z'
+  - id: note-47acb82
+    text: 'QA scenario 2 (2026-10-27, PASS): exhaustion + re-arm verified end-to-end
+      on the real surfaces. Two spec-text details to reuse next run: (1) `pm autostart
+      status --json` emits `run_id`/`targets`/`runs` at the TOP level — `.status.runs[]`
+      / `.status.run_id` are null, so a jq read of `.status.*` errors with "Cannot
+      iterate over null"; the evidence is under `.runs[0].review` and `.targets[0].state`.
+      (2) launch artifacts live under `<project>/pm/transcripts/<run_id>/launch-artifacts/`
+      (the `pm/` segment is omitted in the scenario text). Observed residual (already
+      documented in i4/i6/i9): while the re-armed loop runs, `pm autostart status`
+      reads `running/review review #2 (launch retry N) — review iteration 2 (last
+      LAUNCH_FAILED)` rather than a bare `review iteration 2` — the previous episode
+      verdict lingers in the mirror until the next iteration lands; the row is not
+      the stuck failed entry and the loop produced PASS on its own. Captures: /pm-captures/scenarios/2/{story1-launch-retry,story4-manual-loop}.'
+    created_at: '2026-10-27T21:26:49Z'
+    last_edited: '2026-10-27T21:26:49Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
