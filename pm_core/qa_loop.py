@@ -184,6 +184,10 @@ class QALoopState:
     pr_id: str
     running: bool = False
     stop_requested: bool = False
+    # Set (before stop_requested) when a fresh start replaces this run: the
+    # TUI stops tracking it, so nothing would ever process or clear its
+    # snapshot, and a later restart would "recover" it as a completed run.
+    superseded: bool = False
     loop_id: str = field(default_factory=lambda: secrets.token_hex(8))
     # Wall-clock start of this run; when a PR has several resume snapshots
     # (a fresh start superseded a run) only the newest is resumed.
@@ -4661,10 +4665,16 @@ def _finalize_scenarios(
         if not s.window_name and s.index not in state.scenario_verdicts
         and not _is_launch_failure(state, s.index)
     }
-    # Refresh the snapshot with the overall + finalize verdict so a
-    # restart between completion and TUI processing still carries them.
-    _write_resume_file(state, use_containers, concurrency_cap, queued_indices,
-                       desired_cap=desired_cap)
+    if state.superseded:
+        # No one will process this run's completion; drop its snapshot so a
+        # restart after the replacement run finished cannot recover it.
+        if state.qa_workdir:
+            clear_resume_file(state.qa_workdir)
+    else:
+        # Refresh the snapshot with the overall + finalize verdict so a
+        # restart between completion and TUI processing still carries them.
+        _write_resume_file(state, use_containers, concurrency_cap, queued_indices,
+                           desired_cap=desired_cap)
 
     state.running = False
     finalize_suffix = ""

@@ -255,3 +255,23 @@ def test_initial_launch_errors_restore_scenarios_and_release(
     assert state.scenarios is scenarios
     assert released == [scenarios]
     finalize.assert_not_called()
+
+
+def test_superseded_run_drops_its_snapshot_instead_of_rewriting_it(
+        finalize_context, monkeypatch):
+    # A fresh start popped this run from the TUI, which therefore never
+    # processes or clears its snapshot. Rewriting it would let a restart after
+    # the replacement finished "recover" this stopped run as a completion.
+    state, snapshots, release, run = finalize_context
+    resume = qa_loop._resume_file_path(state.qa_workdir)
+    resume.write_text("{}")
+
+    def poll(*args, **kwargs):
+        state.superseded = True
+        state.stop_requested = True
+
+    monkeypatch.setattr(qa_loop, "_poll_tmux_verdicts", poll)
+    run()
+    assert len(snapshots) == 1  # only the pre-poll snapshot
+    assert not resume.exists()
+    release.assert_called_once_with(state, "pm-t")

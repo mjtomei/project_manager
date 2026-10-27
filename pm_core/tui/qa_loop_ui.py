@@ -192,8 +192,15 @@ def fresh_start_qa(app, pr_id: str) -> None:
     # Stop any running QA for this PR
     existing = app._qa_loops.get(pr_id)
     if existing and existing.running:
+        # Superseded first: the run drops its own snapshot when it ends,
+        # since popping it below means the TUI never processes it.
+        existing.superseded = True
         existing.stop_requested = True
         _log.info("fresh_start_qa: stopping running QA for %s", pr_id)
+    elif existing and existing.qa_workdir:
+        # Finished but not yet (fully) processed: nothing will clear it now.
+        from pm_core import qa_loop
+        qa_loop.clear_resume_file(existing.qa_workdir)
 
     # Remove from loops dict so start_qa doesn't see it as running
     app._qa_loops.pop(pr_id, None)

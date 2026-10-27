@@ -883,7 +883,11 @@ class _PrStatus:
         self._current_root: str | None = None
 
     def _session_root(self, tag: str) -> str:
-        """Project root recorded for session *tag* by `pm session`, or ""."""
+        """Project root recorded for session *tag* by `pm session`, or "".
+
+        Not :func:`paths.get_session_pm_root`: its ``session_dir`` creates
+        the directory, and *tag* comes from arbitrary container names.
+        """
         if tag not in self._by_session:
             root = ""
             try:
