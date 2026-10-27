@@ -468,3 +468,99 @@ async def test_tree_badge_marks_pr_with_its_own_settings():
                 for n in app.query(PRNode)}
         assert "⇄" not in rows["pr-a"]
         assert rows["pr-b"].rstrip().endswith("⇄ │")
+
+
+@async_test
+async def test_tree_badge_follows_a_settings_change():
+    # A popup save changes only the PR's model fields; the tree must rebuild
+    # the node so ⇄ appears (and goes once the settings are cleared).
+    from tests.test_tech_tree_widgets import _TreeApp, _pr
+    from pm_core.tui.tech_tree import PRNode, TechTree
+
+    def row(app, pr_id):
+        return {n.pr_id: n.render().plain.splitlines()[1]
+                for n in app.query(PRNode)}[pr_id]
+
+    app = _TreeApp([_pr("pr-a"), _pr("pr-b")])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert "⇄" not in row(app, "pr-a")
+        tree = app.query_one("#tech-tree", TechTree)
+        tree.update_prs([_pr("pr-a", model="provider:x"), _pr("pr-b")])
+        await pilot.pause()
+        assert row(app, "pr-a").rstrip()[:-1].rstrip().endswith("⇄")
+        assert "⇄" not in row(app, "pr-b")
+        tree.update_prs([_pr("pr-a"), _pr("pr-b")])
+        await pilot.pause()
+        assert "⇄" not in row(app, "pr-a")
+
+
+@async_test
+async def test_tui_popup_is_wide_enough_for_every_row(project_root,
+                                                     pm_home_dir):
+    # Rows run past 140 columns (the "decided by" column); on a wide
+    # terminal the popup must show them whole, not clip that column.
+    _providers(pm_home_dir, **{ROUTE: _router(
+        launcher="/opt/shared-team-tools/bin/route-launcher-wrapper-v2")})
+    app = _screen_app(project_root, "pr-001")
+    async with app.run_test(size=(200, 50)) as pilot:
+        await pilot.press("enter", "down", "down", "enter")  # PR-wide route
+        await pilot.pause()
+        body = app.screen_obj.query_one("#model-body")
+        longest = max(len(line) for line in body.render().plain.splitlines())
+        assert longest > 136  # wider than the old 140-column box held
+        box = app.screen_obj.query_one("#model-container")
+        assert box.content_region.width >= longest
+
+
+@async_test
+async def test_tui_project_view_shows_ok_route_status(project_root,
+                                                      pm_home_dir,
+                                                      monkeypatch):
+    # "[OK]" reads as a markup tag to textual; the popup must still show it.
+    from pm_core import worker_route
+    _providers(pm_home_dir, **{ROUTE: _router()})
+    monkeypatch.setattr(worker_route, "check_route",
+                        lambda res: worker_route.RouteStatus(
+                            ok=True, route=res.provider))
+    app = _screen_app(project_root, "pr-001")
+    async with app.run_test(size=(160, 60)) as pilot:
+        await pilot.pause()
+        await pilot.press("p")
+        await pilot.pause()
+        body = app.screen_obj.query_one("#model-body").render().plain
+        line = next(x for x in body.splitlines()
+                    if x.strip().startswith(f"{ROUTE}  type=router"))
+        assert line.rstrip().endswith("[OK]")
+
+
+@async_test
+async def test_tui_long_refusal_wraps_inside_the_popup(project_root,
+                                                      pm_home_dir,
+                                                      monkeypatch):
+    long = "held by pm edit; " + "the remedy names a command. " * 12
+    def busy(*a, **k):
+        raise store.StoreLockTimeout(long)
+    monkeypatch.setattr(store, "locked_update", busy)
+    app = _screen_app(project_root, "pr-001")
+    async with app.run_test(size=(200, 50)) as pilot:
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        status = app.screen_obj.query_one("#model-status")
+        box = app.screen_obj.query_one("#model-container")
+        assert status.region.width <= box.content_region.width
+        assert status.region.height > 1
+        assert status.render().plain.rstrip().endswith("command.")
+
+
+def test_badge_ignores_blank_entries():
+    # Hand-edited blank entries select nothing (launches and the rows treat
+    # them as absent), so they don't earn the ⇄ badge either.
+    assert not model_settings.has_pr_override(
+        {"id": "p", "session_models": {"signoff": None},
+         "session_effort": {"impl": "  "}, "model": ""})
+    assert model_settings.has_pr_override(
+        {"id": "p", "session_models": {"signoff": None, "impl": "opus"}})
+    assert model_settings.has_pr_override({"id": "p", "effort": "high"})
+    assert model_settings.has_pr_override({"id": "p", "session_models": "x"})

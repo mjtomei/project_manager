@@ -33,6 +33,16 @@ CLEAR = "(clear)"
 _EFFORT_CYCLE = (None, *EFFORT_LEVELS)
 
 
+def escape(text: str) -> str:
+    """Escape every ``[`` for Label markup.  rich's and textual's escape()
+    skip brackets that start uppercase, and textual reads ``[OK]`` or
+    ``[Done]`` as a tag and drops it.  Textual takes only the backslash
+    right before a ``[`` as an escape; a trailing one gets a space so it
+    cannot escape a closing tag that follows."""
+    text = text.replace("[", "\\[")
+    return text + " " if text.endswith("\\") else text
+
+
 def model_choices(data: dict) -> list[str]:
     """Values offered by the picker: clear, every configured provider, then
     the plain model names already used in this project."""
@@ -77,9 +87,11 @@ class ModelSettingsScreen(ModalScreen):
         align: center middle;
     }
     #model-container {
-        width: 96%;
-        max-width: 140;
+        width: auto;  /* set from the rows in _refresh */
+        min-width: 60;
+        max-width: 96%;
         height: auto;
+        overflow-x: auto;
         max-height: 90%;
         background: $surface;
         border: solid $primary;
@@ -90,6 +102,7 @@ class ModelSettingsScreen(ModalScreen):
         margin-bottom: 1;
     }
     #model-status {
+        width: 100%;  /* wraps a long refusal inside the box */
         margin-top: 1;
     }
     """
@@ -151,7 +164,6 @@ class ModelSettingsScreen(ModalScreen):
         self._refresh()
 
     def _refresh(self) -> None:
-        from rich.markup import escape
         title = ("Project model settings" if self._project_view
                  else f"Model settings for {self._pr_id}")
         self.query_one("#model-title", Label).update(title)
@@ -173,11 +185,19 @@ class ModelSettingsScreen(ModalScreen):
             lines.append("[dim]↑↓ row  Enter set model  e cycle effort  "
                          f"p {'PR' if self._project_view else 'project'} view"
                          "  Esc close[/]")
-        self.query_one("#model-body", Label).update("\n".join(lines))
+        body = "\n".join(lines)
+        self.query_one("#model-body", Label).update(body)
         self.query_one("#model-status", Label).update(self._status)
+        # Size the box to its rows (CSS caps it at 96% of the screen) so
+        # no column is clipped; the status line wraps inside that width.
+        from rich.cells import cell_len
+        from textual.markup import to_content
+        widest = max(cell_len(line) for line in
+                     [title, *to_content(body).plain.splitlines()])
+        # + border, padding and room for a vertical scrollbar
+        self.query_one("#model-container").styles.width = widest + 8
 
     def _table_lines(self) -> list[str]:
-        from rich.markup import escape
         from pm_core import model_settings
         rows = self._rows()
         if not rows:
@@ -207,7 +227,6 @@ class ModelSettingsScreen(ModalScreen):
         return lines
 
     def _provider_lines(self) -> list[str]:
-        from rich.markup import escape
         from pm_core import worker_route
         from pm_core.model_config import ModelResolution
         from pm_core.providers import (
@@ -298,7 +317,6 @@ class ModelSettingsScreen(ModalScreen):
         return efforts.get(target) if isinstance(efforts, dict) else None
 
     def _apply(self, kind: str, value: str | None) -> None:
-        from rich.markup import escape
         from pm_core import model_settings
         target = self._targets()[self._selected]
         if kind == "model" and value is not None:
