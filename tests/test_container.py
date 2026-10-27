@@ -1706,8 +1706,9 @@ class TestLaunchAdmission:
         """Raising the target cannot help a reserve refusal; name the reserve."""
         from pm_core.container import acquire_launch_admission
         self._settings(_isolated_memory_governor, system_memory_target="64g")
-        reason = ("host headroom: 66G free - 894M committed would leave "
-                  "65.1G < 118.5G reserve")
+        from pm_core.memory_governor import HOST_HEADROOM_REASON
+        reason = (f"{HOST_HEADROOM_REASON}: 66G free - 894M committed would "
+                  "leave 65.1G < 118.5G reserve")
         with patch("pm_core.container.container_is_running", return_value=False), \
              patch("pm_core.memory_governor.project_memory", return_value=818), \
              patch("pm_core.launch_queue.enqueue_and_try_acquire",

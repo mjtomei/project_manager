@@ -746,6 +746,11 @@ def take_snapshot(stats: dict | None = None) -> MemorySnapshot:
     return snap
 
 
+# Prefix of an :func:`admit` refusal that comes from the host reserve, not
+# the target (refusal hints name the setting that would help).
+HOST_HEADROOM_REASON = "host headroom"
+
+
 def admit(snapshot: MemorySnapshot, projected_mb: int,
           inflight_mb: int = 0) -> tuple[bool, str]:
     """Would one more container projected at *projected_mb* fit?
@@ -773,7 +778,7 @@ def admit(snapshot: MemorySnapshot, projected_mb: int,
         left = snapshot.host.available_mb - growth - inflight_mb - projected_mb
         if left < snapshot.reserve_mb:
             return False, (
-                f"host headroom: {_fmt_mb(snapshot.host.available_mb)} free "
+                f"{HOST_HEADROOM_REASON}: {_fmt_mb(snapshot.host.available_mb)} free "
                 f"- {_fmt_mb(growth + inflight_mb + projected_mb)} committed "
                 f"would leave {_fmt_mb(max(left, 0))} "
                 f"< {_fmt_mb(snapshot.reserve_mb)} reserve")

@@ -438,7 +438,9 @@ class TestAdmit:
         """pm-scope target fits but the host would drop below its reserve."""
         snap = self._snap(10, growth_g=2, host=_host(64, 12), reserve_g=6)
         ok, reason = mg.admit(snap, 5 * 1024)
-        assert not ok and "host headroom" in reason
+        # The refusal hint (container.acquire_launch_admission) keys on
+        # this prefix to point at the reserve instead of the target.
+        assert not ok and reason.startswith(mg.HOST_HEADROOM_REASON)
         assert mg.admit(snap, 3 * 1024)[0] is True
 
     def test_parse_reserve(self):

@@ -44,7 +44,7 @@ import shutil
 import subprocess
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1349,7 +1349,7 @@ def acquire_launch_admission(name: str, action: str) -> str | None:
         # A host-headroom refusal is about the reserve; the target is
         # already met, so raising it would not help.
         setting, change = (("system-memory-reserve", "lower/unset the reserve")
-                           if reason.startswith("host headroom")
+                           if reason.startswith(mg.HOST_HEADROOM_REASON)
                            else ("system-memory-target", "raise/unset the target"))
         return ContainerError(
             f"Memory governor blocked {action}: {reason.rstrip('.')}. Free "
@@ -1690,7 +1690,7 @@ def sample_session_containers(session_tag: str) -> set[str]:
 
 
 def cleanup_session_containers(session_tag: str,
-                               sampled: set[str] = frozenset()) -> int:
+                               sampled: Collection[str] = ()) -> int:
     """Remove all containers belonging to a session.
 
     Filters by ``pm-{session_tag}-`` which matches every container whose
