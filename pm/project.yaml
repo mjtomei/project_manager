@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T17:58:59.108489+00:00'
+  updated_at: '2026-10-27T18:01:07.978289+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -10834,6 +10834,24 @@ prs:
       5 stories held live on nested rootless podman; captures /pm-captures/scenarios/42.'
     created_at: '2026-10-27T17:58:59Z'
     last_edited: '2026-10-27T17:58:59Z'
+  - id: note-96b0685
+    text: 'QA S45 (2026-10-27, e19a0bf5, nested rootless podman 3.4.4): INPUT_REQUIRED
+      on one literal Then; everything else held live. Story 1: NEEDS_WORK s3 removed
+      12 s after the loop verdict; verified PASS s4 Up through the 60 s verifier,
+      removed 17 s after VERIFIED (about 10 s of that is podman stop); IR s1 kept
+      and answered echo alive 5 min later; shell-attached s2 got "keeping … 1 other
+      exec session(s) open" and stayed Up after exit; exactly 2 peak samples (s3,
+      s4). Story 2 (policy off, z t): only the 2 running old containers were sampled
+      and removed (2->4), new s5 Up. Story 3: s5 NEEDS_WORK stayed Up with live panes
+      for 71 s with no Stop-on-idle or sample; the second z t sampled it (4->5). Failed
+      Then: the s4 dead panes read "Error: container has already been removed / Pane
+      is dead (status 255 …)", not status 137 (s3 showed 137). pm removes both with
+      the same podman rm -f; the podman exec client exit code is a podman race (it
+      loses the exec exit-code lookup to rm). Decide: accept status 137 or 255 in
+      the scenario, or make removal deterministic (e.g. stop, wait for exec clients,
+      then rm). Captures /pm-captures/scenarios/45.'
+    created_at: '2026-10-27T18:01:07Z'
+    last_edited: '2026-10-27T18:01:07Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
