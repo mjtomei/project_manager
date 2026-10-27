@@ -301,6 +301,10 @@ update; in-memory retirement and window teardown follow and are best-effort.
 * `tests/test_verdict_transcript.py` — direct `latest_turn_state()` cases
   (tool_use blocks/stop_reason, meta records, pending user turn, oversized
   final record).
+* `tests/test_pane_idle.py` — the second-turn `idle_prompt` re-arm
+  (`became_idle()` fires again for a resumed turn).
+* `tests/test_review_loop_terminal_state.py` — a superseded loop must not
+  finalize the successor's live `review-<pr>-i<n>.jsonl` symlink.
 
 ## Review-iteration notes (i1)
 
@@ -603,3 +607,26 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   (a stopped ``ReviewLoopState`` is retired, the fresh review starts exactly
   once, the marker is consumed), a busy turn holds the handoff across poll
   ticks, and a complete turn advances on the next tick without a duplicate.
+
+## Review-iteration notes (2aac i9)
+
+* **The handoff retry backoff is described against the real poll cadence** —
+  the i5 note (and the comment it added) said the handoff launch would be
+  retried on "the next 1 s tick".  ``_poll_impl_idle`` is not the 1 s timer:
+  ``_poll_loop_state_inner`` runs it on every fifth tick (~5 s).  The
+  backoff's behaviour is unchanged (15 s ≈ 3 implementation polls); only the
+  comment, the ``handoff_attempt_due`` caller comment and the rate-limit
+  test's docstring were corrected to say so.  A misleading "1 s" invites a
+  future maintainer to shrink ``_HANDOFF_RETRY_SECONDS`` or to assume a
+  per-second subprocess is being prevented.
+* **The ``z`` key set is now derived, not just enumerated** —
+  ``test_the_z_key_set_matches_the_consume_z_callers`` walks
+  ``ProjectManagerApp.BINDINGS`` and every action's source (following
+  ``pane_ops`` / ``pr_view`` / ``qa_loop_ui`` helpers) for
+  ``_consume_z()``, then asserts the resulting key set equals
+  ``_Z_PREFIX_KEYS``.  The explicit list in the sibling test had already
+  drifted once (i2), so the invariant is now checked from the source rather
+  than from another hand-maintained list.
+* **Files list completed** — the spec's "Files to change" now names
+  ``tests/test_pane_idle.py`` and ``tests/test_review_loop_terminal_state.py``,
+  which the i1 work added but the list never mentioned.

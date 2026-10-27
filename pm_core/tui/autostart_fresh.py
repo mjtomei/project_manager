@@ -455,9 +455,10 @@ def handoff_ready(app, pr: dict, tracker) -> bool:
 
 # A handoff launch that does not move the PR out of ``in_progress`` (e.g.
 # ``pr review --no-window`` erroring on a locked/corrupt store) leaves the
-# transcript complete, so the 1 s poll would re-run it — a subprocess plus two
-# log lines every tick, forever.  Rate-limit the launch; a successful one
-# changes the status, which leaves the handoff path on its own.
+# transcript complete, so every ``_poll_impl_idle`` tick (every fifth 1 s
+# ``_poll_loop_state`` tick) would re-run it — a subprocess plus two log
+# lines, forever.  Rate-limit the launch; a successful one changes the
+# status, which leaves the handoff path on its own.
 _HANDOFF_RETRY_SECONDS = 15.0
 
 

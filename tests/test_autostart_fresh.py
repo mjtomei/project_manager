@@ -423,9 +423,9 @@ class TestPollRouting:
     def test_failed_launch_is_rate_limited(self, tmp_path, monkeypatch):
         # A launch that does not move the PR out of in_progress (e.g.
         # ``pr review`` erroring) leaves the transcript complete, so without a
-        # backoff the 1 s poll would re-run it forever: a subprocess plus two
-        # log lines every tick.  The handoff check stays cheap; only the
-        # launch is throttled.
+        # backoff every ``_poll_impl_idle`` tick would re-run it forever: a
+        # subprocess plus two log lines.  The handoff check stays cheap; only
+        # the launch is throttled.
         from pm_core.tui import review_loop_ui
         pr = _pr(status="in_progress",
                  **{FRESH_KEY: {"requested_at": st.now_iso(),
@@ -924,6 +924,44 @@ class TestPrefixCancellation:
             ProjectManagerApp.on_key(app, _KeyEvent(key, key))
             assert app._z_count == 1, key
             assert app.cleared == 0, key
+
+    def test_the_z_key_set_matches_the_consume_z_callers(self):
+        # The hand-maintained list above has drifted before (i2's set omitted
+        # keys whose handlers consume z; ``q``/``t`` were nearly confused).
+        # Derive the set from the source instead: for every single-key binding
+        # whose action — directly or through a ``pane_ops``/``pr_view``/
+        # ``qa_loop_ui`` helper — calls ``_consume_z()``, the key must be in
+        # ``_Z_PREFIX_KEYS``, and every key in the set must be such a binding.
+        import inspect
+        from pm_core.tui import pane_ops, pr_view, qa_loop_ui
+        from pm_core.tui.app import ProjectManagerApp, _Z_PREFIX_KEYS
+
+        helpers = (pane_ops, pr_view, qa_loop_ui)
+
+        def consumes(fn) -> bool:
+            try:
+                return "_consume_z(" in inspect.getsource(fn)
+            except (OSError, TypeError):
+                return False
+
+        def action_consumes(action: str) -> bool:
+            fn = getattr(ProjectManagerApp, f"action_{action}", None)
+            if fn is None:
+                return False
+            if consumes(fn):
+                return True
+            src = inspect.getsource(fn)
+            for mod in helpers:
+                short = mod.__name__.rsplit(".", 1)[-1]
+                for name, obj in vars(mod).items():
+                    if (inspect.isfunction(obj) and consumes(obj)
+                            and f"{short}.{name}" in src):
+                        return True
+            return False
+
+        derived = {b.key for b in ProjectManagerApp.BINDINGS
+                   if len(b.key) == 1 and action_consumes(b.action)}
+        assert derived == set(_Z_PREFIX_KEYS)
 
     def test_non_z_action_key_cancels_the_prefix(self):
         # ``i`` (sign-off), ``Y`` (cleanup), ``g`` (merge) and ``p`` (plans)
