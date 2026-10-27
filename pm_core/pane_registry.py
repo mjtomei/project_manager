@@ -231,6 +231,49 @@ def unregister_windows(session: str, window_names: list[str]) -> list[str]:
     return removed
 
 
+def prune_dead_windows(session: str) -> list[str]:
+    """Remove registry entries for windows that no longer exist in *session*.
+
+    Registration and layout only reconcile the window they touch, so a
+    window killed while nothing was registering into it (for example the
+    QA window an execution-only run leaves behind, killed before the next
+    run) keeps its panes under a stale ``@id`` forever. Returns the removed
+    window IDs.
+    """
+    _ensure_logging()
+    from pm_core import tmux as tmux_mod
+
+    # Query tmux OUTSIDE the lock, and never prune a session we cannot see:
+    # an empty window list from a dead/absent session must not wipe the
+    # registry.  A live session always has at least one window, so an empty
+    # list here means the query itself failed (or the session died between
+    # the two calls) — not that every registered window is gone.
+    if not tmux_mod.session_exists(session):
+        return []
+    live_windows = {w["id"] for w in tmux_mod.list_windows(session)}
+    if not live_windows:
+        _logger.info("prune_dead_windows: no live windows for %s, skipping",
+                     session)
+        return []
+
+    removed: list[str] = []
+
+    def modifier(raw):
+        data = _prepare_registry_data(raw, session)
+        for window_id in list(data.get("windows", {})):
+            if window_id not in live_windows:
+                removed.append(window_id)
+                del data["windows"][window_id]
+        if not removed:
+            return None  # no changes, skip write
+        _logger.info("prune_dead_windows: removed %s from %s",
+                     removed, session)
+        return data
+
+    locked_read_modify_write(registry_path(session), modifier)
+    return removed
+
+
 def kill_and_unregister(session: str, pane_id: str) -> None:
     """Kill a tmux pane and remove it from the registry."""
     from pm_core import tmux as tmux_mod
