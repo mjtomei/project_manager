@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T22:19:48.069028+00:00'
+  updated_at: '2026-10-27T23:37:35.618704+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11122,6 +11122,17 @@ prs:
       number scenarios after earlier runs (2-5, then 6-9). Captures /pm-captures/scenarios/60.'
     created_at: '2026-10-27T22:13:31Z'
     last_edited: '2026-10-27T22:13:31Z'
+  - id: note-d4d7022
+    text: 'QA S65 (2026-10-27, 17c4a8d2, nested rootless podman): all 4 stories PASS
+      live, no code change. Every set validation message and rc matched; status off/6g
+      lines; cgroup-less helper -> unmeasurable refusal rc=1, Blocked line, recovery
+      launch clears it; system scope 73G used + 1G growth; damaged queue/blocked/stats
+      files -> status rc=0, queue rewritten empty, B growth 885+139=1024M (1g default),
+      warnings logged, 0 tracebacks; TUI kill -9 -> Zsl+ zombie, 3 status runs show
+      no Queue depth and prune nothing, pm pr start C prunes both entries (one log
+      line each). Captures /pm-captures/scenarios/65.'
+    created_at: '2026-10-27T23:37:35Z'
+    last_edited: '2026-10-27T23:37:35Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
