@@ -73,10 +73,16 @@ BINDING_KEYS = ("target_repo", "base_branch", "base_sha", "candidate_tree",
                 "status", "head")
 
 
-def _git(*args: str, cwd, no_hooks: bool = False) -> subprocess.CompletedProcess:
-    """Host-side git in a workdir.  ``no_hooks`` for the container-writable
-    PR workdir (see :data:`pm_core.git_ops.NO_HOOKS_ARGS`)."""
-    return git_ops.run_git(*args, cwd=cwd, check=False, no_hooks=no_hooks)
+def _git(*args: str, cwd) -> subprocess.CompletedProcess:
+    """Host-side git, always with repository hooks disabled.
+
+    Nearly every call runs in the container-writable PR workdir (or its
+    candidate worktree, which shares that ``.git``), and not only the merge
+    runs hooks there: ``fetch``/``update-ref`` fire ``reference-transaction``
+    and ``worktree add`` fires ``post-checkout``.  pm's integration plumbing
+    needs no hooks (see :data:`pm_core.git_ops.NO_HOOKS_ARGS`).
+    """
+    return git_ops.run_git(*args, cwd=cwd, check=False, no_hooks=True)
 
 
 def _out(r) -> str:
@@ -248,9 +254,8 @@ def _worktree_merge_locked(workdir: str, head: str, base_sha: str):
     tmp = Path(tempfile.mkdtemp(prefix="pm-integrate-"))
     # A unique basename gives a unique admin dir (.git/worktrees/<name>).
     wt = tmp / f"candidate-{secrets.token_hex(4)}"
-    no_hooks_args = git_ops.NO_HOOKS_ARGS
     try:
-        add = _git(*no_hooks_args, "worktree", "add", "--detach", "--quiet",
+        add = _git("worktree", "add", "--detach", "--quiet",
                    str(wt), head, cwd=workdir)
         if add.returncode != 0:
             return None, [], f"candidate worktree failed: {_detail(add)}"
@@ -258,7 +263,7 @@ def _worktree_merge_locked(workdir: str, head: str, base_sha: str):
         # replayed resolution would make the candidate depend on local
         # history (with rerere.autoUpdate it stages the replayed paths, so a
         # conflict surfaces as an unexplained "candidate merge failed").
-        m = _git(*no_hooks_args, "-c", "rerere.enabled=false",
+        m = _git("-c", "rerere.enabled=false",
                  "-c", "user.name=pm", "-c", "user.email=pm@localhost",
                  "merge", "--no-commit", "--no-ff", "--no-edit", base_sha, cwd=wt)
         if m.returncode == 0:
@@ -489,10 +494,9 @@ def apply_integration(root: Path, pr_id: str, record: dict | None = None,
     base_sha = record.get("base_sha")
     msg = (f"Integrate {record.get('base_branch')}@{base_sha[:8]} into "
            f"{branch or 'PR branch'}")
-    m = _git("merge", "--no-ff", "-m", msg, base_sha, cwd=workdir,
-             no_hooks=True)
+    m = _git("merge", "--no-ff", "-m", msg, base_sha, cwd=workdir)
     if m.returncode != 0:
-        _git("merge", "--abort", cwd=workdir, no_hooks=True)
+        _git("merge", "--abort", cwd=workdir)
         return None, f"merge failed: {_detail(m)}"
     merged = _out(_git("rev-parse", "HEAD", cwd=workdir))
     tree = _out(_git("rev-parse", "HEAD^{tree}", cwd=workdir))

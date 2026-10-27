@@ -195,12 +195,16 @@ operations do not take PM's launch lock.
   container-writable, so a container-authored `.git/hooks/pre-push` (or a
   repo `core.hooksPath`) would otherwise execute on the host — the same
   sandbox escape the dangerous-flag guard blocks. The same applies to every
-  host-side pm git command that runs inside the container-writable PR workdir:
-  `integration.apply_integration`'s merge (sign-off routing), the merge
-  publish pushes (`_publish_vanilla` / `_publish_github`), `pr start`'s
-  pull/checkout/commit/push, and QA's `_publish_planner_head` push all pass
-  `no_hooks=True` (`pm_core.git_ops.NO_HOOKS_ARGS`), so a planted
-  `post-merge`, `pre-push`, `pre-commit` or `post-checkout` hook never runs
+  host-side pm git command that runs inside the container-writable PR workdir,
+  including plain ref updates (`fetch`/`update-ref` fire
+  `reference-transaction`): every `pm_core.integration` git call (the
+  integration check's fetch/`update-ref`, candidate worktree, sign-off merge),
+  the merge publish pushes (`_publish_vanilla` / `_publish_github`) and
+  `_publish_local`'s workdir `update-ref`s, `pr start`'s
+  pull/checkout/commit/push, the workdir provisioning checkout, and QA's
+  `_publish_planner_head` push all pass `no_hooks=True`
+  (`pm_core.git_ops.NO_HOOKS_ARGS`), so a planted `post-merge`, `pre-push`,
+  `pre-commit`, `post-checkout` or `reference-transaction` hook never runs
   on the host. Reuse holds the same
   proxy lock while validating its runtime domain or repairing a dead socket;
   a dead foreign-domain proxy directory is not reassigned.

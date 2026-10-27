@@ -3,7 +3,8 @@
 A PR workdir is bind-mounted read-write into containers, so ``.git/hooks/*``
 is container-authored code.  Any host-side pm git command that runs a hook
 from that directory (``merge``, ``push``, ``commit``, ``checkout``,
-``pull``) would execute it with the host user's credentials — the same
+``pull``, and any ref update — ``fetch``/``update-ref`` fire
+``reference-transaction``) would execute it with the host user's credentials — the same
 sandbox escape the push proxy blocks for container-initiated git.  pm's own
 operations pass ``no_hooks=True`` (``-c core.hooksPath=/dev/null``).
 
@@ -192,3 +193,46 @@ class TestWorkdirHooksDoNotRun:
         assert git(remote, "rev-parse", "refs/heads/master") == merge_sha
         assert not marker.exists(), (
             "the container-writable workdir's pre-push hook ran on the host")
+
+    def test_integration_fetch_base_skips_reference_transaction(self, tmp_path):
+        """Not only merges run hooks: every ref update in the workdir fires
+        ``reference-transaction``, and the integration check's fetch +
+        ``update-ref`` runs on every sign-off routing pass."""
+        target = _repo(tmp_path / "target")
+        base_sha = commit(target, "a.txt", "a", "base")
+        wd = _repo(tmp_path / "wd")
+        commit(wd, "w.txt", "w", "workdir root")
+
+        marker = tmp_path / "hook-ran"
+        plant_hook(wd, "reference-transaction", marker)
+
+        sha, err = integration.fetch_base(str(wd), str(target), "master")
+
+        assert err is None, err
+        assert sha == base_sha
+        assert git(wd, "rev-parse", integration.BASE_REF) == base_sha
+        assert not marker.exists(), (
+            "the workdir's reference-transaction hook ran on the host")
+
+    def test_publish_local_update_ref_skips_reference_transaction(self, tmp_path):
+        main = _repo(tmp_path / "main")
+        base_sha = commit(main, "a.txt", "a", "base")
+        git(main, "checkout", "-q", "-b", "other")
+        wd = tmp_path / "wd"
+        git(tmp_path, "clone", "-q", str(main), str(wd))
+        git(wd, "checkout", "-q", "-b", BRANCH, "origin/master")
+        merge_sha = commit(wd, "b.txt", "b", "merged work")
+
+        marker = tmp_path / "hook-ran"
+        plant_hook(wd, "reference-transaction", marker)
+
+        data = {"project": {"name": "p", "repo": str(main)}, "prs": [],
+                "plans": []}
+        pr_mod._publish_local(data, tmp_path / "state", {"id": PR}, str(wd),
+                              "master", base_sha, merge_sha)
+
+        assert git(main, "rev-parse", "refs/heads/master") == merge_sha
+        # The workdir's own base ref is fast-forwarded too (another update-ref).
+        assert git(wd, "rev-parse", "refs/heads/master") == merge_sha
+        assert not marker.exists(), (
+            "the workdir's reference-transaction hook ran on the host")

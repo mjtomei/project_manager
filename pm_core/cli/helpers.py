@@ -814,8 +814,9 @@ def _clone_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     else:
         shutil.move(str(tmp_path), str(work_path))
 
-    # Checkout the PR branch
-    git_ops.checkout_branch(work_path, branch, create=True)
+    # Checkout the PR branch.  An existing work_path was kept above and may
+    # already be container-written, so run no hooks from it.
+    git_ops.checkout_branch(work_path, branch, create=True, no_hooks=True)
 
     # Update and persist the new workdir path atomically
     workdir_str = str(work_path)

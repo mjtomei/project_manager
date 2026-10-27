@@ -2142,12 +2142,15 @@ def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
     pr_id = pr_entry["id"]
     repo_dir = str(_resolve_repo_dir(root, data))
     ref = f"refs/pm/merge/{pr_id}"
-    git_ops.run_git("update-ref", ref, merge_sha, cwd=workdir, check=False)
+    # update-ref fires reference-transaction: no hooks in the PR workdir.
+    git_ops.run_git("update-ref", ref, merge_sha, cwd=workdir, check=False,
+                    no_hooks=True)
     # Into the same private ref on the main repo side, not FETCH_HEAD: a
     # concurrent fetch there (a user, an agent) would overwrite FETCH_HEAD.
     fetch = git_ops.run_git("fetch", "--no-tags", workdir, f"+{ref}:{ref}",
                             cwd=repo_dir, check=False)
-    git_ops.run_git("update-ref", "-d", ref, cwd=workdir, check=False)
+    git_ops.run_git("update-ref", "-d", ref, cwd=workdir, check=False,
+                    no_hooks=True)
     fetched = _ref(repo_dir, ref)
     # The merge commit stays reachable from the base once published; the
     # private ref is not needed after this check.
@@ -2200,7 +2203,7 @@ def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
     if wd_head != base_branch and (
             old is None or integration.is_ancestor(workdir, old, merge_sha)):
         git_ops.run_git("update-ref", f"refs/heads/{base_branch}", merge_sha,
-                        cwd=workdir, check=False)
+                        cwd=workdir, check=False, no_hooks=True)
 
 
 def _publish_vanilla(root: Path, pr_entry: dict, workdir: str,
