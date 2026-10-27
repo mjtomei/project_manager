@@ -78,6 +78,11 @@ removed by automatic or scoped cleanup) when any of:
    Query the current process tree with a bounded, non-truncated process listing
    and refresh it at the locked deletion check; failed/malformed
    listings or missing live pane roots mean unknown ownership, never absence.
+   Both probes decode tolerantly (`errors="replace"`): a non-UTF-8 byte in
+   some process's argv or a pane's start command must not raise out of the
+   ownership check (which would abort the pass and traceback `pm container
+   restart`) instead of leaving ownership unknown; names and pane IDs are
+   ASCII, so a replaced byte cannot hide an owner.
    The tmux pane query uses a printable field separator: tmux rewrites control
    characters (a tab) to `_` unless the client is UTF-8, so a tab-delimited
    format is unparseable in a C locale and would report every container as
@@ -185,7 +190,11 @@ operations do not take PM's launch lock.
   that tag+PR (using the reaper's label-first inventory, with legacy name
   fallback), checked under a per-proxy fcntl lock; `create_container` holds
   that lock from proxy start until `run` returns so a concurrent release
-  cannot stop a proxy a new container is about to mount. Reuse holds the same
+  cannot stop a proxy a new container is about to mount. Host-side git runs
+  with repository hooks disabled (`core.hooksPath=/dev/null`): the workdir is
+  container-writable, so a container-authored `.git/hooks/pre-push` (or a
+  repo `core.hooksPath`) would otherwise execute on the host — the same
+  sandbox escape the dangerous-flag guard blocks. Reuse holds the same
   proxy lock while validating its runtime domain or repairing a dead socket;
   a dead foreign-domain proxy directory is not reassigned.
   If runtime inventory is unavailable, preserve the shared proxy for a later

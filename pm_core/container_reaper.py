@@ -614,10 +614,17 @@ def _query_server(server: _Server) -> _PaneSnapshot:
         # every container as ownership-unknown in a C locale. tmux rewrites
         # ':' inside session names, so the separator is unique; the start
         # command is last, so any ':' of its own stay in the final field.
+        # ``errors="replace"`` keeps an undecodable byte in some pane's start
+        # command from raising out of this probe. tmux escapes non-printable
+        # bytes today, but that is not a documented guarantee; a raw
+        # UnicodeDecodeError here would abort the whole pass (and traceback
+        # out of ``pm container restart``) instead of leaving ownership
+        # unknown. Names and pane IDs are ASCII, so a replaced byte cannot
+        # hide an owner.
         r = subprocess.run(
             ["tmux", *server.args, "list-panes", "-a", "-F",
              "#{pane_dead}:#{pane_id}:#{session_name}:#{pane_pid}:#{pane_start_command}"],
-            capture_output=True, text=True, timeout=5, env=env)
+            capture_output=True, text=True, errors="replace", timeout=5, env=env)
     except (OSError, subprocess.TimeoutExpired):
         return _PaneSnapshot(panes=None)
     if r.returncode != 0:
@@ -699,9 +706,16 @@ def _runtime_owner_target(command: str) -> str:
 
 def _pane_process_commands(pids: list[int]) -> dict[int, list[str]] | None:
     try:
+        # ``errors="replace"``: this dumps *every* host process's argv, so on a
+        # platform whose ps does not escape non-printable bytes a single
+        # process with a non-UTF-8 argument would raise UnicodeDecodeError and
+        # abort the whole ownership check (the pass errors out;
+        # ``pm container restart`` tracebacks) instead of reporting what it can
+        # see. Container names are ASCII, so a replaced byte cannot hide an
+        # owner.
         result = subprocess.run(
             ["ps", "-ax", "-ww", "-o", "pid=,ppid=,stat=,args="],
-            capture_output=True, text=True, timeout=5)
+            capture_output=True, text=True, errors="replace", timeout=5)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if result.returncode != 0:

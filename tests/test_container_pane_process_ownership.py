@@ -210,3 +210,30 @@ def test_real_shell_descendant_commands():
         assert any(CID in command for command in commands[child.pid][1:])
     finally:
         child.communicate(timeout=5)
+
+
+def test_ownership_probes_decode_tolerantly(monkeypatch):
+    """Both ownership probes must not raise on undecodable runtime output.
+
+    ``ps -o args=`` and ``tmux list-panes -F #{pane_start_command}`` echo
+    process/pane commands, which may contain non-UTF-8 bytes. GNU ps and
+    tmux 3.2 escape those today, but that is not guaranteed (BSD ps emits
+    argv raw). A strict decode would raise ``UnicodeDecodeError`` out of the
+    ownership check: the whole reconcile pass errors (nothing is cleaned) and
+    ``pm container restart`` tracebacks. The spec requires a failed or
+    malformed listing to mean *unknown ownership*, never an exception.
+    """
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((list(args), dict(kwargs)))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(reaper.subprocess, "run", run)
+    reaper._pane_process_commands([1])
+    reaper._query_server(reaper._server_for_socket(__file__))
+    assert {args[0] for args, _ in calls} == {"ps", "tmux"}
+    for args, kwargs in calls:
+        assert kwargs.get("text") is True
+        assert kwargs.get("errors") == "replace", (
+            f"{args[0]} probe must decode tolerantly: {kwargs}")

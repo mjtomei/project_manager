@@ -50,6 +50,40 @@ def _send_request(sock_path: str, request: dict) -> dict:
     return json.loads(data.decode())
 
 
+class TestPushProxyDisablesContainerAuthoredHooks:
+    """The workdir is container-writable, so its git hooks must not run here.
+
+    ``git push`` runs ``.git/hooks/pre-push`` and ``git pull`` runs hooks such
+    as ``post-merge``.  A container can write both, which would execute
+    container-authored code on the host — the escape ``_check_dangerous_flags``
+    exists to prevent.
+    """
+
+    @patch("subprocess.run")
+    def test_push_disables_hooks(self, mock_run, proxy, sock_path):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        resp = _send_request(sock_path,
+                             {"args": ["origin", "pm/pr-123-feature"]})
+        assert resp["exit_code"] == 0
+        push_call = [c for c in mock_run.call_args_list
+                     if c[0][0][:2] == ["git", "-C"] and "push" in c[0][0]]
+        assert len(push_call) == 1
+        cmd = push_call[0][0][0]
+        assert cmd[3:5] == ["-c", "core.hooksPath=/dev/null"]
+
+    @patch("subprocess.run")
+    def test_read_commands_disable_hooks(self, mock_run, proxy, sock_path):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        for cmd_name in ("fetch", "pull", "ls-remote"):
+            mock_run.reset_mock()
+            resp = _send_request(sock_path,
+                                 {"cmd": cmd_name, "args": ["origin"]})
+            assert resp["exit_code"] == 0, cmd_name
+            cmd = mock_run.call_args_list[0][0][0]
+            assert cmd[:4] == ["git", "-c", "core.hooksPath=/dev/null", cmd_name], (
+                f"{cmd_name} must disable hooks: {cmd}")
+
+
 class TestPushProxyBranchValidation:
     def test_rejects_wrong_branch(self, proxy, sock_path):
         resp = _send_request(sock_path, {"args": ["origin", "main"]})
@@ -74,14 +108,16 @@ class TestPushProxyBranchValidation:
         resp = _send_request(sock_path,
                              {"args": ["origin", "pm/pr-123-feature"]})
         assert resp["exit_code"] == 0
-        # Push runs as `git -C <source> push <args>` (post-PR-6be8ee6 design:
-        # source is the caller's clone, which has origin set to the real
-        # upstream).  Find that call.
+        # Push runs as `git -C <source> -c core.hooksPath=/dev/null push
+        # <args>` (source is the caller's clone, which has origin set to the
+        # real upstream; hooks are disabled because the workdir is
+        # container-writable).  Find that call.
         push_call = [c for c in mock_run.call_args_list
                      if c[0][0][:2] == ["git", "-C"] and "push" in c[0][0]]
         assert len(push_call) == 1
         cmd = push_call[0][0][0]
-        assert cmd[3:] == ["push", "origin", "pm/pr-123-feature"]
+        assert cmd[3:5] == ["-c", "core.hooksPath=/dev/null"]
+        assert cmd[5:] == ["push", "origin", "pm/pr-123-feature"]
 
     @patch("subprocess.run")
     def test_allows_force_push_plus_prefix(self, mock_run, proxy, sock_path):
@@ -192,8 +228,10 @@ class TestPushProxyBranchValidation:
                      if c[0][0][:2] == ["git", "-C"] and "push" in c[0][0]]
         assert len(push_call) == 1
         cmd = push_call[0][0][0]
-        # cmd is ["git", "-C", <source>, "push", "-u", "origin", "pm/pr-123-feature"]
-        assert cmd[3:] == ["push", "-u", "origin", "pm/pr-123-feature"]
+        # cmd is ["git", "-C", <source>, "-c", "core.hooksPath=/dev/null",
+        #         "push", "-u", "origin", "pm/pr-123-feature"]
+        assert cmd[3:5] == ["-c", "core.hooksPath=/dev/null"]
+        assert cmd[5:] == ["push", "-u", "origin", "pm/pr-123-feature"]
 
 
 class TestDangerousFlags:
@@ -525,7 +563,8 @@ class TestCallerWorkdir:
         assert len(push_calls) == 1
         push_cmd = push_calls[0][0][0]
         assert push_cmd[2] == "/caller-clone"
-        assert push_cmd[3:] == ["push", "origin", "pm/pr-123-feature"]
+        assert push_cmd[3:5] == ["-c", "core.hooksPath=/dev/null"]
+        assert push_cmd[5:] == ["push", "origin", "pm/pr-123-feature"]
 
     @patch("subprocess.run")
     def test_fetch_uses_caller_workdir(self, mock_run, proxy, sock_path):

@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T16:06:04.559407+00:00'
+  updated_at: '2026-10-27T16:34:06.257643+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14063,6 +14063,25 @@ prs:
       pre-fix. Full suite 4203 passed.'
     created_at: '2026-10-27T16:06:04Z'
     last_edited: '2026-10-27T16:06:04Z'
+  - id: note-9cfe9e4
+    text: 'f54b i4 incidental fixes. (1) Ownership probes now decode tolerantly (errors="replace"):
+      ps -ax -ww -o args= dumps every host process, and tmux list-panes echoes pane
+      start commands, so on a platform whose ps/tmux does not escape non-printable
+      bytes one bad argv byte raised UnicodeDecodeError out of the ownership check
+      — aborting the whole reconcile pass and tracebacking out of pm container restart
+      instead of leaving ownership unknown (R2: failed/malformed listing = unknown,
+      never an exception). Names/pane IDs are ASCII so a replaced byte cannot hide
+      an owner; contract test asserts both probes pass errors="replace". (2) The push
+      proxy ran git in the container-writable workdir, so a container-authored .git/hooks/pre-push
+      executed on the host on push (git pull: post-merge) — verified with real git
+      — the same escape _check_dangerous_flags exists to block. Host-side git now
+      runs with -c core.hooksPath=/dev/null (command-line -c outranks repo config);
+      tests assert it for push/fetch/pull/ls-remote. Not fixed, filed as pr-c558b14:
+      the config-based equivalents (remote.<name>.uploadpack/receivepack, core.sshCommand,
+      core.fsmonitor) are still reachable; remote.origin.uploadpack was verified to
+      execute on the host via the proxy ls-remote/fetch and needs a design decision.'
+    created_at: '2026-10-27T16:34:06Z'
+    last_edited: '2026-10-27T16:34:06Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -34002,6 +34021,34 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T08:34:37.511161+00:00'
   updated_at: '2026-10-27T08:34:37.511161+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c558b14
+  plan: bugs
+  title: 'Bug: push proxy executes container-authored git config (remote.*.uploadpack,
+    core.sshCommand) on the host'
+  branch: pm/pr-c558b14-bug-push-proxy-executes-container-authored-git-con
+  status: pending
+  depends_on: []
+  description: 'pm_core/push_proxy.py _local_push / _execute_read_cmd run git in the
+    container-writable workdir, so the repo .git/config is attacker-controlled. _check_dangerous_flags
+    blocks --upload-pack/--receive-pack/--exec, but the same execution is reachable
+    through config: `git config remote.origin.uploadpack /workspace/evil.sh` makes
+    the proxy host-side `git ls-remote origin` / `git fetch origin` run /workspace/evil.sh
+    (verified with real git 2.34.1; GIT_TRACE shows run_command: ... evil.sh <remote>).
+    Same class: remote.<name>.receivepack (push), core.sshCommand (ssh remotes), core.fsmonitor.
+    Repro: inside a pm container, write that config in /workspace/.git/config and
+    call the proxy with {"cmd":"ls-remote","args":["origin"]}. The pre-push hook vector
+    was closed in pr-1139060 (core.hooksPath=/dev/null); this needs a design decision
+    on which config keys to neutralise without breaking local-path/file:// QA clones,
+    plus tests.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T16:31:43.269298+00:00'
+  updated_at: '2026-10-27T16:31:43.269298+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

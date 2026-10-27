@@ -45,6 +45,14 @@ _SOCKET_DIR_PREFIX = "pm-push-proxy-"
 _CONTAINER_SOCKET_DIR = "/run/pm-push-proxy"
 _CONTAINER_SOCKET_PATH = f"{_CONTAINER_SOCKET_DIR}/push.sock"
 
+# Neutralise repo-configured hooks on every host-side git invocation the proxy
+# makes. The workdir is container-writable, so ``.git/hooks/pre-push`` (or
+# ``core.hooksPath``) is container-authored code that would otherwise run on
+# the host — the same escape ``--upload-pack``/``--exec`` are blocked for.
+# ``/dev/null`` is not a directory, so git finds no hook to run; a
+# command-line ``-c`` outranks the repository's own config.
+_NO_HOOKS = "core.hooksPath=/dev/null"
+
 
 def _resolve_local_remote_url(workdir: str, remote: str = "origin") -> str | None:
     """If *remote* in *workdir* points to a local directory, return its path.
@@ -421,7 +429,13 @@ class PushProxy:
         before this is called.
         """
         source = caller_workdir or self.workdir
-        cmd = ["git", "-C", source, "push"] + push_args
+        # The workdir is container-writable, and ``git push`` runs the
+        # repo's pre-push hook — a container could drop
+        # ``.git/hooks/pre-push`` and have it execute on the host, which is
+        # exactly the sandbox escape ``_check_dangerous_flags`` exists to
+        # block. Disable hooks (the command-line ``-c`` outranks the repo
+        # config); the proxy needs none of them.
+        cmd = ["git", "-C", source, "-c", _NO_HOOKS, "push"] + push_args
         _log.info("Push proxy push: %s", cmd)
         try:
             result = subprocess.run(
@@ -456,7 +470,9 @@ class PushProxy:
             return danger
 
         workdir = caller_workdir or self.workdir
-        cmd = ["git", git_cmd] + args
+        # ``git pull`` runs repo hooks (e.g. post-merge) from this
+        # container-writable workdir; see ``_NO_HOOKS``.
+        cmd = ["git", "-c", _NO_HOOKS, git_cmd] + args
         _log.info("Git proxy executing read cmd: %s (in %s)", cmd, workdir)
         try:
             result = subprocess.run(
