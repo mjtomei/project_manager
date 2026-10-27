@@ -1653,6 +1653,38 @@ class TestLaunchAdmission:
         assert "a single container cannot fit" in str(exc.value)
         assert ".." not in str(exc.value)
 
+    def test_host_headroom_refusal_points_at_reserve(self, _isolated_memory_governor):
+        """Raising the target cannot help a reserve refusal; name the reserve."""
+        from pm_core.container import acquire_launch_admission
+        self._settings(_isolated_memory_governor, system_memory_target="64g")
+        reason = ("host headroom: 66G free - 894M committed would leave "
+                  "65.1G < 118.5G reserve")
+        with patch("pm_core.container.container_is_running", return_value=False), \
+             patch("pm_core.memory_governor.project_memory", return_value=818), \
+             patch("pm_core.launch_queue.enqueue_and_try_acquire",
+                   return_value=("e1", False, reason)), \
+             patch("pm_core.launch_queue.dequeue"):
+            with pytest.raises(ContainerError) as exc:
+                acquire_launch_admission("pm-t-impl-pr-1", "impl pr-1")
+        msg = str(exc.value)
+        assert msg.endswith("or lower/unset the reserve with "
+                            "'pm container set system-memory-reserve'.")
+        assert "system-memory-target" not in msg
+
+    def test_target_refusal_points_at_target(self, _isolated_memory_governor):
+        from pm_core.container import acquire_launch_admission
+        self._settings(_isolated_memory_governor, system_memory_target="1g")
+        with patch("pm_core.container.container_is_running", return_value=False), \
+             patch("pm_core.memory_governor.project_memory", return_value=818), \
+             patch("pm_core.launch_queue.enqueue_and_try_acquire",
+                   return_value=("e1", False,
+                                 "542M used + 818M projected > 1G target (pm scope)")), \
+             patch("pm_core.launch_queue.dequeue"):
+            with pytest.raises(ContainerError) as exc:
+                acquire_launch_admission("pm-t-impl-pr-1", "impl pr-1")
+        assert str(exc.value).endswith(
+            "or raise/unset the target with 'pm container set system-memory-target'.")
+
     def test_invalid_target_refuses(self, _isolated_memory_governor):
         from pm_core.container import acquire_launch_admission
         self._settings(_isolated_memory_governor, system_memory_target="48 gigs")

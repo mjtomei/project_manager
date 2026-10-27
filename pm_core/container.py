@@ -1346,11 +1346,15 @@ def acquire_launch_admission(name: str, action: str) -> str | None:
 
     def _refuse(reason: str) -> ContainerError:
         mg.record_blocked(action, reason)
+        # A host-headroom refusal is about the reserve; the target is
+        # already met, so raising it would not help.
+        setting, change = (("system-memory-reserve", "lower/unset the reserve")
+                           if reason.startswith("host headroom")
+                           else ("system-memory-target", "raise/unset the target"))
         return ContainerError(
             f"Memory governor blocked {action}: {reason.rstrip('.')}. Free "
             f"memory by closing finished sessions (their containers then stop), or "
-            f"raise/unset the target with 'pm container set "
-            f"system-memory-target'.")
+            f"{change} with 'pm container set {setting}'.")
 
     try:
         if not mg.governor_active():
