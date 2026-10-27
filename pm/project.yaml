@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-27T00:58:41.627597+00:00'
+  updated_at: '2026-10-27T01:02:56.572216+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16982,6 +16982,39 @@ prs:
       -> space) with a regression test. Captures /pm-captures/scenarios/31.'
     created_at: '2026-10-27T00:58:41Z'
     last_edited: '2026-10-27T00:58:41Z'
+  - id: note-8e6a548
+    text: 'QA S33 (2026-10-27, HEAD 4370ddee) PASS — GitHub numbers moving/reassigning
+      while the picker is open. All 7 stories held live on the real 80-col picker
+      (fzf 0.56.3, tmux 3.2a, dedicated socket): (1) B closes + C gains #20 -> l reaches
+      C as "#20 (2/2)" Gamma; (2) A gains #21 -> h reaches "#21 (1/3)" Alpha, no dispatch;
+      (3) A loses #12 / B gains it -> all five review routes dispatch pr-90c877f (shortcut,
+      Enter, --fresh, tui:review-loop start, no-fzf), never B, never bare #12, window
+      review-pr-90c877f; (4) duplicate #12 int/int, int/string and duplicate local
+      id each fail closed naming entry #2 (string shown quoted) and wait, repair reopens
+      normally; (5) B gains A #12 while open -> every route shows "Could not refresh
+      PR actions; no action was run." + "Repair project.yaml and retry." (no-fzf menu
+      variant: "...and reopen the picker."), nav keeps the 3-entry last-good list,
+      repair dispatches pr-977fe4f; (6) closed B listed FIRST + A merged -> every
+      route and h/l show "PR Actions — #12" + "No actions — PR is merged.", never
+      closed; (7) reopen from A window after its number moves to B -> header "pr-90c877f
+      (1/2)", l -> "#12 (2/2)", 0 -> A, d reviews pr-90c877f. Dispatch log for the
+      whole run has exactly 7 entries, none during a refusal. No code change. Harness
+      traps for the next run: (a) the tui:review-loop dispatch opens a display-popup
+      over the attached client current window, so with the recorder parked on the
+      picker window the loop spinner writes into the picker pane and swallows it —
+      run the loop route with the client on main, or kill+reopen the picker afterwards;
+      (b) capture-pane on tmux 3.2a returns blank for a window until an attached client
+      has rendered it, so select-window + ~1s before every capture; (c) the pane shell
+      does not inherit $S/$A, so send the literal session/window names; (d) fzf lives
+      in /usr/local/bin (root-owned) — use sudo to move it aside for the no-fzf route;
+      (e) story 6 order matters (closed B must be entry #1) or a naive #12 lookup
+      would pick A anyway and the test proves nothing; (f) story 5 as written reopens
+      on an already-ambiguous snapshot, which correctly fails the initial load instead
+      of showing the no-fzf menu — exercise the "reopen the picker" row by making
+      the snapshot ambiguous while a menu is already waiting. Captures /pm-captures/scenarios/33
+      (REPORT.md + 7 story dirs with cast/mp4/transcript/pane-text).'
+    created_at: '2026-10-27T01:02:56Z'
+    last_edited: '2026-10-27T01:02:56Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
