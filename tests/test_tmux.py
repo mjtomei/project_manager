@@ -413,6 +413,46 @@ class TestNewWindowGetPane:
         result = new_window_get_pane("sess", "review", "bash", "/tmp")
         assert result == "%5"
 
+    @patch("pm_core.tmux.get_pane_indices", return_value=[("%12", 0)])
+    @patch("pm_core.tmux.find_window_by_name",
+           return_value={"id": "@11", "index": "3", "name": "qa-pr-1-s1"})
+    @patch("pm_core.tmux.subprocess.run")
+    def test_returns_created_pane_not_first_same_named_window(
+            self, mock_run, mock_fwbn, mock_gpi):
+        # A QA relaunch reuses the name of the concretizer's surviving window;
+        # the name lookup would return that window's concretizer pane.
+        mock_run.return_value = MagicMock(returncode=0, stdout="@13 4 %15\n")
+        result = new_window_get_pane("sess", "qa-pr-1-s1", "bash", "/tmp",
+                                     switch=False)
+        assert result == "%15"
+        mock_fwbn.assert_not_called()
+        mock_gpi.assert_not_called()
+
+    def test_real_tmux_duplicate_window_name(self, tmp_path, monkeypatch):
+        import shutil
+        import subprocess
+        import pytest
+        if not shutil.which("tmux"):
+            pytest.skip("tmux not installed")
+        sock = str(tmp_path / "tmux.sock")
+        monkeypatch.setenv("PM_TMUX_SOCKET", sock)
+        subprocess.run(["tmux", "-S", sock, "new-session", "-d", "-s", "t",
+                        "-n", "main", "sleep 60"], check=True)
+        try:
+            first = new_window_get_pane("t", "dup", "sleep 60", str(tmp_path),
+                                        switch=False)
+            second = new_window_get_pane("t", "dup", "sleep 60", str(tmp_path),
+                                         switch=False)
+            out = subprocess.run(
+                ["tmux", "-S", sock, "list-panes", "-s", "-t", "t", "-F",
+                 "#{window_name} #{pane_id}"],
+                capture_output=True, text=True, check=True).stdout.split("\n")
+            assert first and second and first != second
+            assert f"dup {first}" in out and f"dup {second}" in out
+        finally:
+            subprocess.run(["tmux", "-S", sock, "kill-server"],
+                           capture_output=True)
+
     @patch("pm_core.tmux.find_window_by_name", return_value=None)
     @patch("pm_core.tmux.subprocess.run")
     def test_returns_none_when_window_not_found(self, mock_run, mock_fwbn):

@@ -367,3 +367,36 @@ def test_failed_relaunch_does_not_adopt_the_concretizer_as_the_worker(
     assert len(attempts) == 3
     assert state.scenario_verdicts[1] == qa_loop.VERDICT_INPUT_REQUIRED
     assert state.scenario_verdict_reasons[1].startswith("launch failed:")
+
+
+def _logged(log):
+    return [c.args[0] % c.args[1:] for c in log.info.call_args_list + log.warning.call_args_list]
+
+
+def test_failed_relaunch_logs_tmux_error_text(scenario_state, monkeypatch):
+    state, scenario = scenario_state
+    monkeypatch.setattr(tmux, "new_window_get_pane", MagicMock(
+        side_effect=subprocess.CalledProcessError(
+            1, "tmux new-window", stderr="can't find session: injected")))
+    monkeypatch.setattr(container, "discard_unowned_container", MagicMock())
+    log = MagicMock()
+    monkeypatch.setattr(qa_loop, "_log", log)
+    assert not qa_loop._relaunch_scenario_window(
+        scenario, state, {}, {"id": state.pr_id}, "pm-t", scenario.worktree_path)
+    line = [m for m in _logged(log) if m.startswith("Failed to relaunch scenario 1")]
+    assert line and "can't find session: injected" in line[0]
+
+
+def test_run_end_logs_containers_it_keeps(scenario_state, monkeypatch):
+    state, scenario = scenario_state
+    state.scenario_verdicts[1] = qa_loop.VERDICT_INPUT_REQUIRED
+    monkeypatch.setattr(qa_loop, "_viewed_window_ids", lambda *a: set())
+    from pm_core import container_reaper
+    release = MagicMock()
+    monkeypatch.setattr(container_reaper, "release_containers", release)
+    log = MagicMock()
+    monkeypatch.setattr(qa_loop, "_log", log)
+    assert qa_loop._release_scenario_containers(state, "pm-t") is False
+    release.assert_not_called()
+    assert any("released containers: none (kept s1 INPUT_REQUIRED)" in m
+               for m in _logged(log))

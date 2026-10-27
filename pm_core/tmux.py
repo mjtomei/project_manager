@@ -181,11 +181,22 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     active window (useful for background operations like the review loop).
     """
     target = f"{session}:"
-    _run(
-        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
-        check=True,
+    result = _run(
+        _tmux_cmd("new-window", "-d", "-P", "-F",
+                  "#{window_id} #{window_index} #{pane_id}",
+                  "-t", target, "-n", name, "-c", cwd, cmd),
+        check=True, text=True,
     )
-    win = find_window_by_name(session, name)
+    # Use the window tmux just created: another window may already carry
+    # *name* (a QA scenario relaunch shares its name with the concretizer's
+    # surviving window), and a name lookup returns the first one.
+    created = result.stdout.split() if isinstance(result.stdout, str) else []
+    if len(created) == 3 and created[2].startswith("%"):
+        win = {"id": created[0], "index": created[1], "name": name}
+        pane = created[2]
+    else:
+        win = find_window_by_name(session, name)
+        pane = None
     _log.info("new_window_get_pane: session=%s name=%s id=%s index=%s switch=%s",
               session, name,
               (win or {}).get("id"), (win or {}).get("index"), switch)
@@ -197,6 +208,8 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
         _run(
             _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
         )
+    if pane:
+        return pane
     # Discover the pane ID
     panes = get_pane_indices(session, win["index"])
     if panes:

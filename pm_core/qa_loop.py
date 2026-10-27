@@ -2791,7 +2791,8 @@ def _relaunch_scenario_window(
                        scenario.index, exc_info=True)
         return True
     except Exception as exc:
-        _log.warning("Failed to relaunch scenario %d", scenario.index, exc_info=True)
+        _log.warning("Failed to relaunch scenario %d: %s", scenario.index,
+                     tmux_mod.launch_error_detail(exc), exc_info=True)
         _record_launch_failure(state, scenario, exc)
         if use_containers and scenario.container_name:
             from pm_core import container as container_mod
@@ -4739,6 +4740,7 @@ def _release_scenario_containers(state: QALoopState, session: str, *,
         _note_cleanup(state, " [container cleanup deferred: viewed windows unavailable]")
         return True
     names: list[str] = []
+    kept: list[str] = []
     for sc in state.scenarios if scenarios is None else scenarios:
         if not sc.container_name:
             continue
@@ -4751,11 +4753,13 @@ def _release_scenario_containers(state: QALoopState, session: str, *,
                 generation=sc.container_generation)
             continue
         if state.scenario_verdicts.get(sc.index) == VERDICT_INPUT_REQUIRED:
+            kept.append(f"s{sc.index} INPUT_REQUIRED")
             continue
         if viewed and sc.pane_id:
             try:
                 window_id = tmux_mod.pane_window_id(sc.pane_id)
                 if window_id in viewed:
+                    kept.append(f"s{sc.index} viewed")
                     continue
                 # ``None`` is "no window id" — the pane is gone or the lookup
                 # failed. Only a pane the server positively no longer lists is
@@ -4769,6 +4773,10 @@ def _release_scenario_containers(state: QALoopState, session: str, *,
                 continue
         names.append(sc.container_name)
     if not names:
+        if kept:
+            # Say what run end left for the reconciler, not just what it removed.
+            _log.info("QA %s/%s released containers: none (kept %s)",
+                      state.pr_id, state.loop_id, ", ".join(kept))
         return False
     released = state.scenarios if scenarios is None else scenarios
     identities = {s.container_name: s.container_id for s in released if s.container_id}
