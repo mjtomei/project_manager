@@ -14341,6 +14341,21 @@ prs:
       launch_lock, e.g. a pm container launch blocked mid-start.'
     created_at: '2026-10-27T19:06:58Z'
     last_edited: '2026-10-27T19:06:58Z'
+  - id: note-f624029
+    text: 'Scenario 47 concretization deferred (2026-10-27, HEAD a44a70dc): Docker
+      USER pm setup/ownership-repair/reap-parity story cannot be driven in this worker.
+      Read-only probe: no docker or dockerd executable on PATH, no DOCKER_HOST/CONTAINER_HOST
+      env, no ~/.docker config, no /var/run/docker.sock, /run/docker.sock or /run/user/*/docker.sock;
+      only rootless Podman 3.4.4 installed. Podman results are not evidence for Docker
+      (same blocker as S16/S28 notes). Unblock: run in a worker with an accessible
+      isolated Docker daemon plus a qualified developer image whose default USER is
+      pm; select Docker explicitly via pm container set runtime docker (auto-detect
+      prefers Podman), then drive impl+review launch, end one, kill shared proxy,
+      resume other; then interrupted-setup retry and scoped reap preview/apply alongside
+      an unrelated Docker container. No launch/reap assertions executed; no PASS or
+      failure claimed.'
+    created_at: '2026-10-27T19:06:50Z'
+    last_edited: '2026-10-27T19:06:50Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
