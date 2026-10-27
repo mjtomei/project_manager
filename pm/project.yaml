@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T22:29:33.981365+00:00'
+  updated_at: '2026-10-27T22:55:26.742028+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36666,6 +36666,31 @@ prs:
       s during backoff. (2026-10-27)'
     created_at: '2026-10-27T22:29:33Z'
     last_edited: '2026-10-27T22:29:33Z'
+  - id: note-08c5c07
+    text: 'Review f076 i2 (fixes applied): three surface-polish items. (1) A HOLD''s
+      "Review loop done" notice appended the earlier failed attempt''s `Artifact:
+      …` under the trust/permission prompt it sits at (QA scenario 6); the artifact
+      line is now shown only for LAUNCH_FAILED, matching the runtime_state mirror
+      and `pm autostart status`. (2) A re-armed retry keeps latest_verdict=LAUNCH_FAILED
+      until the new iteration lands, so `pm autostart status` said "review iteration
+      N (last LAUNCH_FAILED)" while the retry ran; `_derive`''s running branch now
+      suppresses the "(last …)" suffix for LAUNCH_FAILED only (a real previous verdict
+      still shows) — closes a residual documented since 0688 i4. (3) The per-attempt
+      `launch failed (rc=…)` line logged at ERROR though the loop retries it (QA s1);
+      it now logs WARNING for a retryable failure and keeps ERROR for auth, while
+      the loop still logs ERROR when it gives up. Tests: 6 added (96 in test_review_launch_retry.py);
+      the three behaviour tests fail on the previous HEAD and pass here. Full suite
+      3825 passed, 1 skipped; the 55F+17E are the base tree pre-existing signoff/merge/git
+      + markdown-module + hook-installer env failures (identical counts/files on an
+      origin/master worktree). Spec records iteration 8 (0688). Residual (non-blocking):
+      review_loop.py ~1540 lines; two lease mechanisms coexist; discovery adopts a
+      transcript verdict without an idle hook event; other_owner stand-down is a non-retryable
+      LAUNCH_FAILED; the runtime_state mirror of a re-armed loop keeps the previous
+      episode verdict/attempts (runs popup) though the live status path no longer
+      shows it; `_interruptible_sleep` re-reads the ~2 MB project.yaml every 2 s during
+      backoff.'
+    created_at: '2026-10-27T22:55:26Z'
+    last_edited: '2026-10-27T22:55:26Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
