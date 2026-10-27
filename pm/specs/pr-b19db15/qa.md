@@ -33,13 +33,24 @@ wait, or a timeout as a successful result.
 
 - Run inside the repo (or a clone) for the helper/recipe scenarios; the
   pm-dev image ships `asciinema`, `agg`, `ffmpeg`/`ffprobe`, and `tmux`, so
-  real recordings and real H.264 renders are expected.
+  real recordings and real H.264 renders are expected. If `agg` is missing
+  from a container, install its release binary for the architecture — do not
+  substitute a different renderer.
 - Captures for a scenario go under the per-PR captures dir at
   `$CAP/scenarios/<n>/` (the worker prompt names `$CAP`).
+- The PR-head recipes are at `pm/qa/artifacts/` in the scenario's clone
+  (`/workspace`). The copy the runner installs into `scratch/qa-artifacts/`
+  comes from the QA session's project library (`pm_root/qa/artifacts`), which
+  is the project's main branch and **can lag the PR head** (observed: an
+  installed `web-ui-recording.md` without the bounded readiness wait, and a
+  kit without `wait-for-job.sh`). Use the PR-head copy for recipe-content
+  assertions and record any difference; the installed copy is the QA-loop
+  operator's surface (R16), not the recipe under review.
 - For the generated-guidance / QA-loop scenario, `pm` must be usable
   (`./install.sh --local` if needed) and a throwaway project is created with
-  `pm init`; the project's QA library is bootstrapped by copying the repo's
-  `pm/qa/artifacts/` into it so the loop has the recipe and helper to install.
+  `pm init`; the project's QA library is bootstrapped by copying the PR-head
+  `pm/qa/artifacts/` (recipe **and** helper) into the throwaway project so
+  the nested loop's `pm_root` library has both to install.
 - A worker may start long-lived decoys/observers and run several jobs in
   parallel inside its own scenario; scenarios never depend on another
   scenario's state.
@@ -54,7 +65,10 @@ the CLI recording recipe (and its shipped helper) at hand,
 scaffold and renders it with the recipe's render block (through
 `wait-for-job.sh`),
 **Then**
-- `recording.cast` exists, is non-empty, and is from this run;
+- the capture step creates the capture directory and removes any cast an
+  earlier run left there *before* recording;
+- `recording.cast` exists, is non-empty, and is from this run (an earlier
+  run's marker is not present);
 - `recording.mp4` is freshly written, non-empty, and `ffprobe` reports
   `codec_name=h264`;
 - the helper prints its `ok — job exited 0 … artifact fresh` line and exits 0;
@@ -265,10 +279,16 @@ validated mp4), proving the copy — not just the repo-root path — works.
   failing stage in the validate pipeline → validation failure.
 - Artifact parent directory missing → helper creates it; artifact itself is
   never repaired.
-- `--timeout` missing/invalid, no command, `-c` with extra args → usage error
-  (exit 2).
+- `--timeout` missing/invalid, no command, `-c` with extra args, an empty
+  `-c` command, or a `--validate` flag with no value → usage error (exit 2).
+- coreutils `timeout` not installed → usage error (exit 2) naming the missing
+  tool, not a confusing "job failed with exit status 127".
 - Capture directory missing before `asciinema rec` → recipe creates it first
   (otherwise asciinema exits 0 and writes nothing).
+- A cast left by an earlier run in the capture directory → the capture step
+  deletes it before recording (both recording recipes), so a recording that
+  wrote nothing cannot be rendered into a fresh-looking video of the previous
+  run.
 - Ctrl-C at a recorded interactive shell reaches the recorded command, not
   asciinema → the recipe ends the recorded shell with `exit` and checks the
   cast, rather than killing the pane by process name.
@@ -307,3 +327,24 @@ substituting a different methodology is not.
   recording is the point; direct helper invocations (a documented surface) are
   used for timeout/interrupt/stale cases that would otherwise take 30 minutes
   or need process tricks.
+- **The installed kit vs a nested QA loop (R16/R17).** Every scenario worker
+  already receives the recipes it names through the same
+  `_install_artifact_files` path the QA loop uses, so the helper-copy and
+  `RECIPE_DIR` behavior (R10/R17) is exercised directly in the recording
+  scenarios. R16's *operator* surface — a QA loop installing the kit into a
+  scenario it launches — is exercised once, separately, by running a loop with
+  the fake planner/worker (see the TUI Manual Testing instruction) and reading
+  the launched scenario's `prompt.md` and `qa-artifacts/` directory.
+- **Renderer availability.** If `agg`, `ffmpeg`/`ffprobe`, or `asciinema` is
+  genuinely absent and cannot be installed in the scenario container, the
+  recording story is INPUT_REQUIRED; the helper-only stories (which need only
+  `bash`/coreutils) still run and are not an excuse to skip the render. A
+  missing `agg` is installable (release binary), so try that before declaring
+  INPUT_REQUIRED.
+- **Installed kit vs PR head.** The runner installs recipes from the QA
+  session's project library, which is the project's main branch, so the
+  installed copy can lag the PR head (observed: a `web-ui-recording.md`
+  without the deadline, and a kit with no `wait-for-job.sh`). Recipe-content
+  assertions use the PR-head copy in the scenario clone; R16's operator
+  scenario bootstraps the throwaway project's own `pm/qa/artifacts` so the
+  nested loop has the helper to install.
