@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T22:55:26.742028+00:00'
+  updated_at: '2026-10-27T23:31:38.377992+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36691,6 +36691,37 @@ prs:
       backoff.'
     created_at: '2026-10-27T22:55:26Z'
     last_edited: '2026-10-27T22:55:26Z'
+  - id: note-0a1f894
+    text: 'Review f076 i3 (fixes applied): (1) the supersede paths (`z d`/`zz d`)
+      and `_on_complete_from_thread` each carried their own inline `release_action_lease`
+      block; all three now call `review_loop._release_lease`, the helper the loop
+      finally already uses, so the "only release a lease this owner still holds" rule
+      lives in one place. (2) `VERDICT_ICONS` keys the error icon on `VERDICT_ERROR`
+      instead of the `"ERROR"` literal. (3) A HOLD is the trust/permission prompt
+      a *launched* review sits at, so `_derive` no longer says "review launch held:
+      …" — it reports "review held at a permission prompt: …" (the loop log line matches).
+      (4) `review_progress_input` dropped `retryable`/`error`/`artifact` for a loop
+      stopped with a non-LAUNCH_FAILED outcome (QA scenario 3) but kept `attempts`,
+      so `pm autostart status --json` showed `verdict: "KILLED", attempts: 2` while
+      the runtime_state mirror drops `attempts` for the same completion; the live
+      path now drops it too. Tests: two strengthened (`test_autostart_status_reports_the_hold_prompt_not_a_stale_launch_error`
+      asserts the new wording, `test_autostart_status_does_not_report_a_cancelled_loop_as_retryable`
+      asserts attempts==0); targeted review/autostart/runtime-state suites 447 passed.
+      Full suite 3825 passed, 1 skipped; the 55 failed + 17 errors are the base tree
+      pre-existing signoff/merge/git + markdown-module + hook-installer env failures
+      (verified identical set on origin/master). New documented residual (spec iteration
+      9): a merge restart during the post-exhaustion re-arm *cooldown* does not persist
+      the loop (`save_breadcrumb` saves only running loops), so auto-start starts
+      a fresh loop for the PR instead of continuing the episode — the review still
+      runs and no verdict is fabricated (the new loop snapshots the stale symlink/pane),
+      only the loop history/iteration numbering restarts. Residual (non-blocking):
+      review_loop.py ~1540 lines; two lease mechanisms coexist; discovery adopts a
+      transcript verdict without an idle hook event (documented); other_owner stand-down
+      is a non-retryable LAUNCH_FAILED; the runtime_state mirror of a re-armed loop
+      keeps the previous episode verdict/attempts (runs popup); `_interruptible_sleep`
+      re-reads the ~2 MB project.yaml every 2 s during backoff. (2026-10-27)'
+    created_at: '2026-10-27T23:31:38Z'
+    last_edited: '2026-10-27T23:31:38Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
