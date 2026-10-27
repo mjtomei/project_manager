@@ -607,6 +607,40 @@ def dequeue_run(qa_run_id: str) -> bool:
     return True
 
 
+def adopt_run(qa_run_id: str, keys: list[str]) -> dict[str, str]:
+    """Take over QA run *qa_run_id*'s entries for *keys*; returns key -> id.
+
+    For a run resumed after a restart.  Its entries still name the old
+    owner (this process's pre-restart instance, or a dead process), so the
+    first clean would drop them and the run would rejoin at the back.
+    Adoption keeps each entry's id and place in line (``enqueued_at``),
+    returns a grant to waiting like :func:`enqueue`, and cleans nothing:
+    other resumed runs must get to adopt their own entries first.  Entries
+    of a live other owner are left alone.
+
+    Raises :class:`GovernorLockTimeout` if the lock is busy.
+    """
+    wanted = set(keys)
+    adopted: dict[str, str] = {}
+    now = time.time()
+    with governor_lock():
+        queue = _load_queue()
+        for e in queue["entries"]:
+            key = e.get("key")
+            if (key not in wanted or e.get("qa_run_id") != qa_run_id
+                    or not (_is_mine(e) or _stale_reason(e, now))):
+                continue
+            if e.get("status") == "acquired":
+                e["status"] = "waiting"
+                e.pop("acquired_at", None)
+            e.update(_owner_fields())
+            e["heartbeat_at"] = now
+            adopted[key] = e["id"]
+        if adopted:
+            _save_queue(queue)
+    return adopted
+
+
 def keepalive(entry_ids: list[str]) -> bool:
     """Renew *entry_ids* so they keep their place while their owner waits.
 

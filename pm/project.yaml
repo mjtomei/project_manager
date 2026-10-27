@@ -10872,6 +10872,22 @@ prs:
       superseded by zz d. Captures: /pm-captures/scenarios/46.'
     created_at: '2026-10-27T18:19:10Z'
     last_edited: '2026-10-27T18:19:10Z'
+  - id: note-5eab8c7
+    text: 'S44 refine (e19a0bf5): on a TUI restart (re-exec, same pid, new launch_queue._INSTANCE)
+      the resumed QA loop re-enqueues only its queue HEAD (_admit_queued_head -> _ensure_queue_entries([head])).
+      That enqueue adopts the head key and then, in the same call, _clean_stale drops
+      every other entry owned by the pre-restart instance: the run''s other waiting
+      entries (e.g. :s4 from the initial batch) and every entry of other QA runs in
+      the same TUI process. Repro on an isolated HOME: enqueue A:s3,A:s4,B:s1; set
+      lq._INSTANCE to a new value; enqueue A:s3 -> only A:s3 remains (same id/enqueued_at).
+      Those runs then re-enqueue fresh with a later enqueued_at and lose their place.
+      This violates R4 "keeps its place" when a run has more than one waiting entry
+      or two runs share a TUI. S44 story "resume keeps place" expects all entries
+      kept. Likely fix: on resume, re-adopt every waiting scenario that had an entry
+      (persist the entry keys or keys of queued indices in qa_resume.json) before
+      any clean.'
+    created_at: '2026-10-27T17:45:28Z'
+    last_edited: '2026-10-27T17:45:28Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa

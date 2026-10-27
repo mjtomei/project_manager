@@ -20,6 +20,7 @@ from pm_core.launch_queue import (
     keepalive,
     keepalive_during,
     try_acquire_detailed,
+    adopt_run,
     GovernorLockTimeout,
     _INSTANCE,
     _WAITING_TTL,
@@ -673,6 +674,43 @@ class TestOwnership:
         assert len(entries) == 1
         assert entries[0]["enqueued_at"] == 1.0
         assert entries[0]["instance"] == _INSTANCE
+
+    def test_adopt_run_keeps_every_entry_of_every_resumed_run(self, tmp_path):
+        """A restart re-adopts all of a run's waiting entries, not just the
+        head, and adopting one run must not drop another run's entries."""
+        with _patch_home(tmp_path):
+            enqueue("qa_scenario", qa_run_id="a", keys=["a:s3", "a:s4"])
+            enqueue("qa_scenario", qa_run_id="b", keys=["b:s1", "b:s2"])
+            q = _load_queue()
+            for i, e in enumerate(q["entries"]):
+                e["instance"] = "pre-restart"
+                e["enqueued_at"] = float(i)
+            _save_queue(q)
+            before = {e["key"]: e["id"] for e in q["entries"]}
+            a = adopt_run("a", ["a:s3", "a:s4"])
+            b = adopt_run("b", ["b:s1", "b:s2"])
+            # The first post-restart clean keeps everything adopted.
+            assert keepalive(list(a.values()) + list(b.values()))
+            entries = _load_queue()["entries"]
+        assert a == {"a:s3": before["a:s3"], "a:s4": before["a:s4"]}
+        assert b == {"b:s1": before["b:s1"], "b:s2": before["b:s2"]}
+        assert [e["key"] for e in entries] == ["a:s3", "a:s4", "b:s1", "b:s2"]
+        assert [e["enqueued_at"] for e in entries] == [0.0, 1.0, 2.0, 3.0]
+        assert all(e["instance"] == _INSTANCE for e in entries)
+
+    def test_adopt_run_cleans_nothing_and_skips_live_other_owner(self, tmp_path):
+        with _patch_home(tmp_path):
+            enqueue("qa_scenario", qa_run_id="a", keys=["a:s1"])
+            enqueue("qa_scenario", qa_run_id="b", keys=["b:s1"])
+            q = _load_queue()
+            q["entries"][0].update(pid=os.getppid(),
+                                   pid_start=_proc_start_time(os.getppid()))
+            q["entries"][1]["instance"] = "pre-restart"
+            _save_queue(q)
+            assert adopt_run("a", ["a:s1"]) == {}
+            entries = _load_queue()["entries"]
+        assert entries[0]["pid"] == os.getppid()
+        assert entries[1]["instance"] == "pre-restart"  # not cleaned yet
 
     def test_keepalive_during_renews_while_blocked(self, tmp_path):
         """A QA launch blocks on its refiners for minutes; the scenarios

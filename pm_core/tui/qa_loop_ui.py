@@ -448,6 +448,7 @@ def _resume_incomplete_qa(app) -> None:
     # Defer the (relatively expensive) project load until a candidate is
     # actually found — this runs on the ~1s poll tick.
     project_data = None
+    to_resume = []
 
     for resume_file in qa_root.glob("*/qa_resume.json"):
         try:
@@ -512,7 +513,15 @@ def _resume_incomplete_qa(app) -> None:
         app._qa_loops[pr_id] = state
         app.log_message(f"Resuming QA for {pr_id} after restart...")
         _log.info("Resuming incomplete QA from disk: %s", pr_id)
-        qa_loop.resume_qa_background(state, app._root, pr, _on_update)
+        to_resume.append((state, pr, _on_update))
+
+    # Adopt every resumed run's launch-queue entries before any resumed
+    # loop runs: a loop's first queue access cleans entries still owned by
+    # the pre-restart instance, which would drop the other runs' entries.
+    for state, _pr, _cb in to_resume:
+        qa_loop.adopt_queue_entries(state)
+    for state, pr, cb in to_resume:
+        qa_loop.resume_qa_background(state, app._root, pr, cb)
 
 
 # ---------------------------------------------------------------------------

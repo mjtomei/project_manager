@@ -526,3 +526,57 @@ def test_resumed_pass_skips_reverification(tmp_path):
     assert "verifying" not in state.latest_output
     assert state.scenario_verdicts[1] == VERDICT_PASS
     assert 1 in state.verified_scenarios
+
+
+def test_resume_adopts_every_queued_entry_of_every_run(tmp_path):
+    """A TUI restart (same PID, new launch-queue instance) must keep each
+    resumed run's waiting entries -- all of them, with their ids and place
+    in line -- even when two runs resume in the same TUI.  Adoption happens
+    before any resumed loop starts, since a loop's first queue access cleans
+    the pre-restart entries (QA S44, note-5eab8c7)."""
+    from pm_core import launch_queue as lq
+
+    app = _make_app(tmp_path)
+    pm_dir = app._root
+    data = store.load(pm_dir)
+    data["prs"].append(dict(data["prs"][0], id="pr-002"))
+    store.save(data, pm_dir)
+    runs = {}
+    for pr_id in ("pr-001", "pr-002"):
+        qa_dir = _seed_run(tmp_path, pr_id=pr_id)
+        state = build_resume_state(_load_resume_file(qa_dir))
+        _write_resume_file(state, use_containers=True, concurrency_cap=4,
+                           queued_indices={1, 2})
+        runs[pr_id] = qa_loop._qa_run_key(state)
+
+    lq_home = tmp_path / "lqhome"
+    lq_home.mkdir()
+    with patch("pm_core.launch_queue.pm_home", return_value=lq_home):
+        for pr_id in ("pr-001", "pr-002"):
+            run = runs[pr_id]
+            lq.enqueue("qa_scenario", qa_run_id=run,
+                       keys=[f"{run}:s1", f"{run}:s2"])
+        q = lq._load_queue()
+        for e in q["entries"]:
+            e["instance"] = "pre-restart"
+        lq._save_queue(q)
+        before = {e["key"]: (e["id"], e["enqueued_at"]) for e in q["entries"]}
+
+        started = []
+
+        def _resume_bg(state, *a, **k):
+            # A resumed loop's first queue access cleans stale entries.
+            entry_map, _ = qa_loop.adopt_queue_entries(state)
+            lq.keepalive(list(entry_map.values()))
+            started.append(entry_map)
+
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch.object(qa_loop, "resume_qa_background",
+                          side_effect=_resume_bg):
+            qa_loop_ui._resume_incomplete_qa(app)
+        after = {e["key"]: (e["id"], e["enqueued_at"])
+                 for e in lq._load_queue()["entries"]}
+
+    assert len(started) == 2
+    assert after == before
+    assert all(sorted(m) == [1, 2] for m in started)

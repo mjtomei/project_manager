@@ -59,7 +59,11 @@ re-exec in place with the same PID) are stale.  Waiting entries expire
 unless their owner renews them (`keepalive`, ≤ every 15 s while waiting;
 TTL 300 s).  Entries have keys (container name; `<pr>-<loop_id>:s<N>`
 for QA) so retries don't pile up and a resumed QA run adopts its old
-entries and keeps its place in line.  impl/review/signoff/QA all walk the
+entries and keeps its place in line.  On a TUI restart every resumed run
+adopts all its queued scenarios' entries (`launch_queue.adopt_run`, which
+cleans nothing) before any resumed loop starts, because a loop's first
+queue access cleans pre-restart entries and would drop the other runs'
+(and its own non-head) entries (QA S44).  impl/review/signoff/QA all walk the
 same queue under the same lock (`enqueue_and_try_acquire` uses the full
 policy walk).
 

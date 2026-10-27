@@ -3304,6 +3304,40 @@ def _release_run_entries(state: "QALoopState") -> None:
                    state.pr_id, exc_info=True)
 
 
+def adopt_queue_entries(state: "QALoopState",
+                        queued_indices: set[int] | None = None,
+                        ) -> tuple[dict[int, str], set[str]]:
+    """Re-own a resumed run's launch-queue entries (best effort).
+
+    Returns ``(entry_id_map, pending_entry_ids)`` for the queued scenarios
+    that still have an entry, so the resumed loop keeps every one of them
+    (not just its head) in its pre-restart place.  *queued_indices*
+    defaults to the run's ``qa_resume.json`` snapshot.
+    """
+    if queued_indices is None:
+        rdata = (_load_resume_file(state.qa_workdir)
+                 if state.qa_workdir else None) or {}
+        if not rdata.get("use_containers"):
+            return {}, set()  # no governor queue without containers
+        queued_indices = set(rdata.get("queued_indices") or [])
+    if not queued_indices:
+        return {}, set()
+    run_id = _qa_run_key(state)
+    keys = {f"{run_id}:s{i}": i for i in queued_indices}
+    try:
+        from pm_core.launch_queue import adopt_run
+        adopted = adopt_run(run_id, list(keys))
+    except Exception:
+        _log.info("Could not adopt launch-queue entries of %s", run_id,
+                  exc_info=True)
+        return {}, set()
+    entry_map = {keys[k]: eid for k, eid in adopted.items()}
+    if entry_map:
+        _log.info("Adopted %d launch-queue entr(ies) for resumed %s",
+                  len(entry_map), run_id)
+    return entry_map, set(entry_map.values())
+
+
 def _memory_wait_reason(reason: str) -> str:
     """Why queued QA scenarios wait for memory.
 
@@ -4654,6 +4688,12 @@ def resume_qa_sync(
     state.latest_output = "Resuming QA after restart..."
     _notify()
 
+    # Keep every queued scenario's entry and place in line; otherwise only
+    # the head re-enqueues, and that enqueue's clean drops the rest.
+    entry_map, pending_ids = ({}, set())
+    if use_containers:
+        entry_map, pending_ids = adopt_queue_entries(state, queued_idx)
+
     return _execute_and_finalize(
         state, pm_root, pr_data, data, session, window_name,
         workdir_path, status_path, repo_root,
@@ -4661,6 +4701,8 @@ def resume_qa_sync(
         concurrency_cap=concurrency_cap,
         queued_scenarios=queued_scenarios,
         notify=_notify,
+        entry_id_map=entry_map,
+        pending_entry_ids=pending_ids,
     )
 
 
