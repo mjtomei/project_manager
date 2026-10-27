@@ -3144,8 +3144,20 @@ def _poll_tmux_verdicts(
                 elif (time.time()
                       - _no_verdict_since[scenario.index]) >= _recovery_settle:
                     try:
-                        result = rec.handle(scenario.transcript_path,
-                                            ev_ts or last_ts)
+                        result = rec.handle(
+                            scenario.transcript_path,
+                            ev_ts or last_ts,
+                            # Never nudge a worker while the run is being
+                            # torn down (its pane is left for inspection).
+                            stop_check=lambda: state.stop_requested,
+                            # The verdict scan above runs when the idle hook
+                            # fires, which can precede the transcript write;
+                            # re-check right before nudging so a completed
+                            # worker is never asked to re-emit its outcome.
+                            verdict_check=lambda: extract_verdict_from_transcript(
+                                scenario.transcript_path, ALL_VERDICTS)
+                            is not None,
+                        )
                     except VerdictRecoveryExhausted as e:
                         _recovery_exhausted(scenario, e)
                         pending.discard(scenario.index)
@@ -3159,9 +3171,16 @@ def _poll_tmux_verdicts(
                         # MissingOutputRecovery bounds them with
                         # ``max_deferrals`` (no_progress exhaustion).
                         _no_verdict_since[scenario.index] = time.time()
+                    elif result.status == "completed":
+                        # The verdict landed while we settled: record it
+                        # below instead of nudging a completed worker.
+                        verdict = extract_verdict_from_transcript(
+                            scenario.transcript_path, ALL_VERDICTS,
+                        )
                     else:
-                        # A nudge was sent — the next no-verdict turn
-                        # starts a fresh settle window.
+                        # A nudge was sent — or a stop was requested during
+                        # teardown — so the next no-verdict turn starts a
+                        # fresh settle window.
                         _no_verdict_since.pop(scenario.index, None)
 
             if verdict:
@@ -4076,6 +4095,11 @@ def run_qa_sync(
             )
             if ev is None:
                 # No idle_prompt yet — loop so we re-check deadline/stop.
+                if state.stop_requested:
+                    # A stop must end the run cleanly; a recovery nudge that
+                    # never got an answer is not an exhaustion while tearing
+                    # down.
+                    break
                 try:
                     planner_recovery.check_response()
                 except VerdictRecoveryExhausted as e:
@@ -4133,12 +4157,33 @@ def run_qa_sync(
                         stop_check=lambda: state.stop_requested,
                     ),
                     stop_check=lambda: state.stop_requested,
+                    # The plan read above runs when the idle hook fires,
+                    # which can precede the transcript write; re-check right
+                    # before nudging so a completed plan is never asked for
+                    # again.
+                    verdict_check=lambda: bool(_read_planner_plan(
+                        planner_transcript, None, pm_root,
+                        scenario_start).scenarios),
                 )
             except VerdictRecoveryExhausted as e:
                 planner_exhausted = e
                 break
             if result.status == "stopped":
                 break
+            if result.status == "completed":
+                # The plan landed while we settled; accept it now rather
+                # than waiting for another idle event that may never come.
+                plan = _read_planner_plan(
+                    planner_transcript, None, pm_root, scenario_start)
+                if plan.scenarios:
+                    _log.info("planner poll: accepted %d scenario(s) from %s "
+                              "after recovery settle", len(plan.scenarios),
+                              plan.source)
+                    state.plan_output = plan.text
+                    state.scenarios = plan.scenarios
+                    plan_found = True
+                    break
+                continue
 
         if planner_exhausted:
             # The planner idled without ever emitting a complete plan and

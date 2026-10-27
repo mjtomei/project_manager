@@ -245,7 +245,8 @@ def build_block_resume_request(
 @dataclass
 class RecoveryResult:
     """Outcome of one :meth:`MissingOutputRecovery.handle` call."""
-    status: str                     # "deferred" | "nudged" | "stopped"
+    # "deferred" | "nudged" | "stopped" | "completed"
+    status: str
     event: dict | None = None       # newer idle event when deferred
 
 
@@ -344,7 +345,9 @@ class MissingOutputRecovery:
     def handle(self, transcript_path: str, ev_ts: float, *,
                wait_for_newer: Callable[[float, float], dict | None]
                | None = None,
-               stop_check: Callable[[], bool] | None = None) -> RecoveryResult:
+               stop_check: Callable[[], bool] | None = None,
+               verdict_check: Callable[[], bool] | None = None
+               ) -> RecoveryResult:
         """Handle one idle turn that produced no expected outcome.
 
         *wait_for_newer(timeout, newer_than)* may block up to the settle
@@ -357,12 +360,20 @@ class MissingOutputRecovery:
         (a hook refresh) is counted against *max_deferrals* instead, so a
         session that keeps refreshing cannot defer forever.
 
+        *verdict_check* is re-evaluated immediately before a nudge.  The
+        caller's first verdict scan runs when the idle hook fires, which can
+        precede the transcript write (or a completed turn can land during
+        the settle window), so a completed outcome must never be nudged: it
+        returns ``RecoveryResult("completed")`` instead.
+
         Returns ``RecoveryResult("deferred", event)`` when a newer event
         landed (do not nudge; process that turn instead),
-        ``RecoveryResult("stopped")`` when *stop_check* fired during the
-        settle window (the caller should return its "stopped" result), or
-        ``RecoveryResult("nudged")`` after sending a recovery request.
-        Raises :class:`VerdictRecoveryExhausted` once the budget runs out.
+        ``RecoveryResult("stopped")`` when *stop_check* fired (the caller
+        should return its "stopped" result),
+        ``RecoveryResult("completed")`` when *verdict_check* now finds the
+        expected outcome, or ``RecoveryResult("nudged")`` after sending a
+        recovery request.  Raises :class:`VerdictRecoveryExhausted` once the
+        budget runs out.
         """
         kind = self.classify(transcript_path)
         self.last_kind = kind
@@ -405,10 +416,20 @@ class MissingOutputRecovery:
                            self.deferrals, self.max_deferrals,
                            self.session_id)
                 return RecoveryResult("deferred", newer)
-            if stop_check is not None and stop_check():
-                # The caller asked us to stop while we waited for a newer
-                # turn — do not nudge a session that is being torn down.
-                return RecoveryResult("stopped")
+
+        if stop_check is not None and stop_check():
+            # The caller asked us to stop (possibly while we waited for a
+            # newer turn) — do not nudge a session that is being torn down.
+            return RecoveryResult("stopped")
+
+        # Never nudge a completed outcome.  The caller's verdict scan runs
+        # when the idle hook fires, which can race the transcript write; the
+        # turn may also have completed during the settle window.
+        if verdict_check is not None and verdict_check():
+            _log.info("%s: outcome landed during recovery settle — not "
+                      "nudging (session %s)", self.log_prefix,
+                      self.session_id)
+            return RecoveryResult("completed")
 
         if self.attempts >= self.max_attempts:
             raise self.exhausted(kind)
@@ -460,10 +481,13 @@ class MissingOutputRecovery:
         else:
             detail = (f"the session idled {self.attempts} time(s) without a "
                       f"standalone outcome; recovery attempts are exhausted")
+        pane_note = (f"pane {self.pane_id}" if self.pane_id
+                     else "the session's pane")
         return VerdictRecoveryExhausted(
             f"{self.log_prefix}: session {self.session_id} produced no "
             f"expected outcome ({_expected_outcomes(self.verdicts)}): "
-            f"{detail}. The pane was left open for inspection.",
+            f"{detail}. {pane_note.capitalize()} was left open for "
+            f"inspection.",
             attempts=self.attempts,
             last_output=self.last_output,
             reason=reason,
@@ -738,11 +762,25 @@ def poll_for_verdict(
             float(ev.get("timestamp") or hook_baseline),
             wait_for_newer=_wait_newer,
             stop_check=stop_check,
+            verdict_check=lambda: bool(
+                extract_verdict_from_transcript(transcript_path, verdicts)),
         )
         if result.status == "stopped":
             # stop_check fired while we waited out the settle window; do not
             # nudge a session that is being torn down.
             return None
+        if result.status == "completed":
+            # The verdict was flushed after the idle hook fired (or landed
+            # during the settle window): never nudge a completed outcome.
+            verdict = extract_verdict_from_transcript(transcript_path, verdicts)
+            if verdict:
+                _log.info("%s: hook-driven verdict %s (session_id=%s)",
+                          log_prefix, verdict, session_id)
+                return read_latest_assistant_text(transcript_path) or verdict
+            # The transcript changed between the two scans; wait for the
+            # next idle turn rather than nudging.
+            ev = None
+            continue
         if result.status == "deferred" and result.event is not None:
             # Process the newer turn in this same iteration instead of
             # re-waiting for an event we already consumed.

@@ -325,6 +325,32 @@ class TestMissingOutputRecovery:
         assert rec.handle(str(transcript), ev_ts=1.0).status == "nudged"
         assert rec.attempts == 1
 
+    def test_completed_outcome_during_settle_is_not_nudged(self, tmp_path):
+        """A verdict flushed after the idle hook fired is never nudged.
+
+        The caller's verdict scan runs at the idle event, but the transcript
+        write can land during the settle window.  Recovery must re-check
+        before sending an outcome request, or it would ask a completed
+        session to re-emit work it already finished.
+        """
+        rec, sent = _recovery(tmp_path, max_attempts=2, settle=5.0)
+        transcript = _transcript_with_assistant(tmp_path, "still thinking")
+        found = {"v": False}
+
+        def wait_and_complete(_timeout, _ts):
+            _write_transcript(transcript, [("user", "review"),
+                                           ("assistant", "PASS")])
+            found["v"] = True
+            return None
+
+        result = rec.handle(str(transcript), ev_ts=1.0,
+                            wait_for_newer=wait_and_complete,
+                            verdict_check=lambda: found["v"])
+
+        assert result.status == "completed"
+        assert sent == []
+        assert rec.attempts == 0
+
     def test_check_response_raises_after_timeout(self, tmp_path):
         rec, _ = _recovery(tmp_path, response_timeout=0.01)
         transcript = _transcript_with_assistant(tmp_path, "no verdict")
@@ -460,6 +486,45 @@ class TestPollForVerdictRecovery:
                 log_prefix="test",
             )
         assert exc.value.reason == "no_progress"
+        assert sent == []
+
+    def test_verdict_flushed_during_settle_is_returned(self, tmp_path,
+                                                       monkeypatch):
+        """A verdict written during the settle window is returned, not nudged.
+
+        Guards the idle-hook/transcript-write race: the first scan runs at
+        the hook event and can miss a verdict that lands a moment later.
+        """
+        link, target = _uuid_transcript(tmp_path)
+        _write_transcript(target, [("user", "review"),
+                                   ("assistant", "still reading")])
+        calls = {"n": 0}
+
+        def fake_wait(*_a, **_kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _idle(1)
+            # The transcript write lands while recovery settles.
+            _write_transcript(target, [("user", "review"),
+                                       ("assistant", "PASS")])
+            return None
+
+        from pm_core import hook_events, tmux
+        monkeypatch.setattr(hook_events, "wait_for_event", fake_wait)
+        monkeypatch.setattr(tmux, "pane_exists", lambda _p: True)
+        monkeypatch.setattr(loop_shared, "recovery_settle_seconds",
+                            lambda: 5.0)
+        monkeypatch.setattr(loop_shared, "recovery_max_attempts", lambda: 2)
+        monkeypatch.setattr(loop_shared, "recovery_response_timeout",
+                            lambda: 3600.0)
+        sent: list[str] = []
+
+        content = loop_shared.poll_for_verdict(
+            "%1", str(link), ("PASS",),
+            grace_period=0, wait_timeout=0.01, send=sent.append,
+            log_prefix="test",
+        )
+        assert "PASS" in content
         assert sent == []
 
     def test_overall_timeout_raises(self, tmp_path, monkeypatch):
@@ -851,6 +916,80 @@ class TestQARecoveryWiring:
         assert sent, "silent worker was never nudged"
         assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
         assert "no_response" in state.scenario_verdict_reasons[1]
+
+    def test_scenario_worker_verdict_flushed_after_idle_is_recorded(
+            self, tmp_path, monkeypatch):
+        """A verdict that lands after the idle hook is recorded, not nudged.
+
+        The tick loop's verdict scan runs at the idle event; if the
+        transcript write trails it, recovery must re-check before nudging so
+        a completed worker is never asked to re-emit its outcome.
+        """
+        from pm_core import qa_loop
+        from pm_core.qa_loop import QALoopState, QAScenario
+
+        scenario = QAScenario(index=1, title="S", focus="f")
+        scenario.window_name = "qa-s1"
+        scenario.session_id = "sid-s1"
+        scenario.pane_id = "%1"
+        scenario.transcript_path = str(
+            _transcript_with_assistant(tmp_path, "still testing"))
+
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+        state.qa_workdir = None
+
+        clock = {"t": 1000.0}
+
+        def fake_time():
+            clock["t"] += 1.0
+            return clock["t"]
+
+        def fake_read_event(_sid):
+            # One idle_prompt, then silence: the transcript gains the
+            # verdict but no newer hook event ever arrives.
+            return {"event_type": "idle_prompt", "timestamp": 100.0,
+                    "session_id": "sid-s1"}
+
+        calls = {"n": 0}
+
+        def fake_extract(_path, _verdicts):
+            calls["n"] += 1
+            # The scan at the idle event races the transcript write; every
+            # later scan sees the completed verdict.
+            return None if calls["n"] == 1 else "PASS"
+
+        sent: list[str] = []
+
+        monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+        monkeypatch.setattr(qa_loop, "recovery_max_attempts", lambda: 2)
+        monkeypatch.setattr(qa_loop, "recovery_settle_seconds", lambda: 5.0)
+        monkeypatch.setattr(qa_loop, "recovery_response_timeout", lambda: 0.0)
+        monkeypatch.setattr(qa_loop, "_is_verification_enabled",
+                            lambda: False)
+        monkeypatch.setattr(qa_loop, "_get_verdict_reminder_timeout",
+                            lambda: None)
+
+        with patch("pm_core.hook_events.read_event",
+                   side_effect=fake_read_event), \
+             patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   side_effect=fake_extract), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.time", side_effect=fake_time), \
+             patch("pm_core.qa_loop.time.monotonic", return_value=1000.0), \
+             patch("pm_core.tmux.send_keys",
+                   side_effect=lambda _p, m: sent.append(m)), \
+             patch("pm_core.tmux.pane_exists", return_value=True):
+            qa_loop._poll_tmux_verdicts(
+                state, {}, {}, "sess", str(tmp_path),
+                tmp_path / "status.json", lambda *a: None,
+            )
+
+        assert state.scenario_verdicts[1] == "PASS"
+        assert sent == []
 
     def test_scenario_worker_stop_event_does_not_strand_recovery(
             self, tmp_path, monkeypatch):

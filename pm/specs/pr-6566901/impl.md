@@ -60,14 +60,16 @@ already interpret as "pane died/stopped"):
 class VerdictRecoveryExhausted(RuntimeError):
     attempts: int
     last_output: str
-    reason: str            # "no_output" | "no_verdict" | "overall_timeout" | "no_response"
+    reason: str            # "no_output" | "no_verdict" | "no_progress"
+                           # | "overall_timeout" | "no_response"
     session_id: str
     pane_id: str
     verdicts: tuple[str, ...]
 ```
 
-The message names the session, the expected outcomes, the attempt count, and
-the last-turn classification so the TUI can surface it verbatim.
+The message names the session, the expected outcomes, the attempt count, the
+last-turn classification, and the pane left open for inspection so the TUI
+can surface it verbatim.
 
 ### R2 — Retry with targeted recovery messages
 
@@ -131,7 +133,11 @@ All four poller families use one shared helper so behaviour cannot drift.
 
 * **Do not nudge a completed outcome.** Always try
   `extract_verdict_from_transcript` first; recovery only runs when it returns
-  `None`. This is the coordination point with pr-8efa789 (post-verdict wakeup
+  `None`. The check is repeated immediately before a nudge (`verdict_check`):
+  the idle hook can fire before the transcript write lands (or a completed
+  turn can land during the settle window), and recovery must return
+  `"completed"` rather than ask a finished session to re-emit its outcome.
+  This is the coordination point with pr-8efa789 (post-verdict wakeup
   ownership): a completed verdict is never treated as absent.
 * **Never duplicate a native/provider recovery.** Before sending a nudge, wait
   up to `recovery_settle` seconds (default `5`) for a *newer* `idle_prompt`.
@@ -191,10 +197,14 @@ class MissingOutputRecovery:
     def reset(self) -> None                     # newer activity → attempts = 0
     def classify(self, transcript_path) -> str  # "no_output" | "no_verdict"
     def handle(self, transcript_path, ev_ts, *,
-               wait_for_newer=None, stop_check=None) -> RecoveryResult
+               wait_for_newer=None, stop_check=None,
+               verdict_check=None) -> RecoveryResult
         # "deferred"  — a newer *turn* landed (transcript changed); no nudge,
         #               budget reset.  A refresh of the same turn counts a
         #               deferral instead and exhausts with "no_progress".
+        # "completed" — verdict_check found the expected outcome just before
+        #               the nudge (transcript write raced the idle hook);
+        #               no nudge; the caller records it
         # "nudged"    — recovery message sent, attempt counted
         # "stopped"   — stop_check fired during settle; caller returns
         # raises VerdictRecoveryExhausted when attempts/deferrals exceed max
@@ -249,15 +259,19 @@ non-blocking `hook_events.read_event` that counts **only** a newer
   (not the latest event), and the settle/nudge is evaluated on every tick
   while the episode is open. On exhaustion the scenario is marked
   `INPUT_REQUIRED` with a reason of the form
-  `"worker produced no verdict (<reason>) after N recovery attempt(s): …"`,
+  `"worker produced no verdict (<reason>): …"` (`str(exc)` already carries the
+  attempt/deferral count, so no separate "after N attempt(s)" prefix),
   `pending` is discarded and the slot freed. The legacy
   `qa-verdict-reminder-timeout` path is replaced by this bounded recovery
   (setting retained but now only tunes the settle interval). A `deferred`
-  result restarts the settle window rather than closing the episode.
+  result restarts the settle window rather than closing the episode; a
+  `completed` result records the verdict that landed during the settle.
 * **planner** — per-attempt `MissingOutputRecovery` with a `QA_PLAN_START/END`
   outcome request and a resume request; on exhaustion break out with
   `INPUT_REQUIRED` + `_error` (reusing the existing "plan incomplete" surface
-  block). Keep `_PLANNER_TIMEOUT` as the outer deadline.
+  block). A `completed` result re-reads and accepts the plan. A stop request
+  is honoured before `check_response`, so teardown never surfaces a spurious
+  exhaustion. Keep `_PLANNER_TIMEOUT` as the outer deadline.
 
 ### Settings (all optional, defaulted)
 
@@ -333,7 +347,9 @@ values (e.g. `0.5`) are accepted by `pm set`.
   (including the `poll_for_verdict` and QA-tick-loop integration cases);
   a newer non-idle event (`Stop`) is not a new turn; overall timeout;
   response timeout; recovery disabled keeps legacy behaviour; `stop_check`
-  during settle does not nudge. Also holds the loop wiring tests below.
+  during settle does not nudge; a verdict flushed during the settle window
+  returns `"completed"` and is never nudged (unit, `poll_for_verdict`, and
+  QA-tick-loop cases). Also holds the loop wiring tests below.
 * `tests/test_loop_recovery.py` (review/watcher wiring): exhaustion →
   `NO_VERDICT`, history entry, callback fired; QA refiner label, verifier
   reason, finalize `NO_VERDICT`, scenario-worker exhaustion
