@@ -36153,7 +36153,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/261
   gh_pr_number: 261
   created_at: '2026-10-27T04:42:06.128850+00:00'
-  updated_at: '2026-10-27T08:24:32.289712+00:00'
+  updated_at: '2026-10-27T09:47:28.299378+00:00'
   started_at: '2026-10-27T04:42:19.589247+00:00'
   reviewed_at: null
   merged_at: null
@@ -36271,6 +36271,16 @@ prs:
       12, test_hook_events, test_git_ops — identical set on base 450a6362).'
     created_at: '2026-10-27T08:24:32Z'
     last_edited: '2026-10-27T08:24:32Z'
+  - id: note-52a6dd7
+    text: 'QA scenario 6 (auto-merge opt-in, wait/auto policy flips) PASSED all 3
+      stories. Env note for the next QA run: start `pm session` with the real git
+      ahead of the push-proxy wrapper — `export PATH=/tmp/pm-venv/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.local/bin`
+      AFTER activating the venv. Otherwise `~/.local/bin/git` forwards the local integration
+      `git fetch` to the host proxy, every SIGNOFF_MERGE is coerced to SIGNOFF_BLOCKED
+      ("does not appear to be a git repository"), and story 1/2 never reach a merge.
+      Captures: /pm-captures/scenarios/6/{story1,story2,story3}.'
+    created_at: '2026-10-27T09:47:28Z'
+    last_edited: '2026-10-27T09:47:28Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
