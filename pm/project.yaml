@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T19:41:05.796722+00:00'
+  updated_at: '2026-10-27T19:59:03.012611+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -10934,6 +10934,36 @@ prs:
       both behaved the same. Captures /pm-captures/scenarios/49.'
     created_at: '2026-10-27T19:41:05Z'
     last_edited: '2026-10-27T19:41:05Z'
+  - id: note-8aaefa5
+    text: 'S56 refine (2026-10-27, e7ebba77): memory code unchanged since S48 PASS
+      (e19a0bf5). Live probe: nested podman 3.4.4 stats "590.2MB" per container (outer
+      cgroup, same for pm and non-pm); memory.peak sticky outer (dd 900M to /tmp raised
+      it 898→2390 MiB). Sample-projection refusal needs a running pm container of
+      a sample-less type (e.g. pm-<tag>-signoff-<pr>, growth 0) so used>0; with used=0
+      every refusal is the single-container E2 message instead of the arithmetic.
+      Make impl history all snapshots (rm /bin/cat in 3 impl-named alpine containers)
+      so p90 = 1.5×snapshot. Reserve refusal = raise reserve (e.g. 99%), not lower
+      it.'
+    created_at: '2026-10-27T19:26:44Z'
+    last_edited: '2026-10-27T19:26:44Z'
+  - id: note-7d43663
+    text: 'QA S56 (2026-10-27, e7ebba77 + fixes, nested rootless podman 3.4.4): all
+      7 stories held live. Units: 513.3MB -> pm 509M (+19.5 MiB pm-process drift),
+      other-hog excluded. Peak samples = ceil(memory.peak/2^20) from pm container
+      cleanup, pm pr cleanup --resources (4 concurrent samples under lock, history
+      3 kept newest) and pm session kill. oddname cleanup left the stats file byte-identical.
+      p90 refusal "542M used + 818M projected > 1.1G target" with 818 = ceil(1.5x545
+      snapshot). Reserve 99% gives the host-headroom refusal. Fixed 3ab7d7dd: host-headroom
+      refusals said "raise/unset the target"; they now point at system-memory-reserve.
+      Fixed fcf7b121: pm session kill killed tmux first, so the pane EXIT traps (rm
+      -f) removed pm-launched containers before pm sampled them (no impl sample).
+      It now samples running session containers before the kill. Harness: build-base
+      page cache stays charged to the outer cgroup (~2.7G), so release it with echo
+      2G > /sys/fs/cgroup/memory.reclaim (avoid repeating: it pushes anon to swap).
+      P >= 1024M prints as G. pm pr start needs pm push + merge of the sync branch.
+      Captures /pm-captures/scenarios/56.'
+    created_at: '2026-10-27T19:59:02Z'
+    last_edited: '2026-10-27T19:59:02Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
