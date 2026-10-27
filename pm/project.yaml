@@ -14508,7 +14508,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T19:33:01.242389+00:00'
+  updated_at: '2026-10-27T20:15:49.018497+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15081,6 +15081,36 @@ prs:
       in normal operation).'
     created_at: '2026-10-27T19:33:01Z'
     last_edited: '2026-10-27T19:33:01Z'
+  - id: note-48da8f8
+    text: 'Review-loop 6280 i7 (2026-10-27): reviewed 2f8fcda3. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact).
+      One defect fixed, each with a test that fails at 2f8fcda3 for the right reason:
+      PushProxy.stop() read FileNotFoundError from _owns_socket_path() as "already
+      gone — the unlink below is a no-op" and returned True. A daemon exits exactly
+      when its socket was removed (a shared stop unlinks it and keeps the directory),
+      so a restart for the same workdir could bind a fresh socket at that path in
+      the window between the ownership stat and the unlink — which then deleted the
+      replacement''s socket, leaving the container pointing at a dead socket (the
+      S18 failure through the daemon exit path rather than teardown). _owns_socket_path()
+      now reports a missing/unreadable path as "not owned", so stop() leaves it alone;
+      anything of ours is already gone and the metadata sidecar is best-effort (a
+      later start rewrites it, session teardown removes it). Tests: test_owns_socket_path_is_false_once_removed
+      (returns True at 2f8fcda3) and test_stop_does_not_unlink_a_socket_bound_after_removal
+      (the replacement file is deleted at 2f8fcda3). Also hoisted glob to module level
+      (no behaviour change). tests/test_push_proxy.py + tests/test_container.py: 232
+      passed. Full suite: 3833 passed, 1 skipped, 0 failed (env -u PM_HOST_HOME, PATH=/usr/bin:/bin,
+      PYTHONPATH=/workspace; pytest<9 and markdown installed in a scratch dir). Spec
+      updated with Review iteration 18 refinements. Residual, unchanged and out of
+      scope: in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir (option (3), workdir-per-request, remains the cleaner
+      long-term design); proxy_is_alive cannot distinguish a busy daemon from a dead
+      one beyond the backlog of 16; the daemon serves one request at a time; a shared
+      stop still leaves its .lock beside the kept directory until session teardown;
+      _start_proxy_subprocess leaves a daemon spawned during a readiness timeout running
+      (a later start reuses it).'
+    created_at: '2026-10-27T20:15:48Z'
+    last_edited: '2026-10-27T20:15:48Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
