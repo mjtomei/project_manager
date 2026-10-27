@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-d3ac02c
+  active_pr: pr-c94e588
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T18:01:07.978289+00:00'
+  updated_at: '2026-10-27T18:19:10.449007+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -10852,6 +10852,26 @@ prs:
       then rm). Captures /pm-captures/scenarios/45.'
     created_at: '2026-10-27T18:01:07Z'
     last_edited: '2026-10-27T18:01:07Z'
+  - id: note-a52e9ae
+    text: 'QA S46 (2026-10-27, nested rootless podman, fake-claude): all 7 stories
+      driven live. Policies off: impl and review were kept Up for 2+ min; picker [open]
+      [idle], then [done PASS] after kill-window. Policies on: impl and review were
+      removed about 10 s after idle, with dead readable panes and peak samples. A
+      standalone review that printed INPUT_REQUIRED was kept for 2 min. Loop PASS:
+      removed 11 s after the loop ended. z d then zz d: the replacement container
+      Y lived until its PASS, and the superseded loop started no stop. Cross-session:
+      B kept its PR3 container and live pane, and the shell-attached PR4 was kept
+      with "1 other exec session(s) open". Fixed 74982e6a: when zz d recreated review-<pr>
+      while the old loop stop was still inside podman rm (about 10 s stop timeout),
+      the stop logged a bare "Stop-on-idle: removed container <name>" after the new
+      container Y existed. Y was never removed, but the line read as if Y was. The
+      line now names the removed ID and notes that a newer container holds the name
+      and is kept. In another run the old stop kept the container instead ("1 other
+      exec session(s) open", the killed window exec client). Filed pr-c94e588 (cosmetic):
+      the picker review row is stuck at [working] after a z d standalone review is
+      superseded by zz d. Captures: /pm-captures/scenarios/46.'
+    created_at: '2026-10-27T18:19:10Z'
+    last_edited: '2026-10-27T18:19:10Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
@@ -36336,6 +36356,32 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T17:55:27.332039+00:00'
   updated_at: '2026-10-27T17:55:27.332039+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-c94e588
+  plan: bugs
+  title: 'Bug: picker review row stuck at [working] after z d standalone review is
+    superseded by zz d before it goes idle'
+  branch: pm/pr-c94e588-bug-picker-review-row-stuck-at-working-after-z-d-s
+  status: pending
+  depends_on: []
+  description: 'Found in pr-eb2dbfc QA S46 (2026-10-27). Repro: in the TUI, start
+    a review loop on an in_review PR (zz d), then press z d (stops the loop and opens
+    a fresh standalone review) and within ~2 s press zz d. The new loop review --fresh
+    removes review-<pr> and kills the standalone review window before its session
+    ever posts an idle_prompt hook. The runtime `review` action entry keeps state=running
+    with that dead session_id, so derive_action_status (pm_core/runtime_state.py)
+    never sees an idle/waiting hook and the picker review row reads `[open] [working]
+    [done i1 PASS]` permanently, even after later loops end PASS and their containers
+    are removed. Expected: a superseded/killed standalone review entry should be finalized
+    (or treated as not-running once its window/pane is gone). Captures: /pm-captures/scenarios/46/panes/s6-prefix-picker-PR2.txt.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T18:19:00.772201+00:00'
+  updated_at: '2026-10-27T18:19:00.772201+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
