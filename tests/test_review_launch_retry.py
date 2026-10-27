@@ -1414,6 +1414,9 @@ def test_autostart_status_reports_the_hold_prompt_not_a_stale_launch_error():
     assert run["state"] == "failed"
     assert "trust prompt" in run["reason"]
     assert "container setup failed" not in run["reason"]
+    # A hold is not a launch failure: the launch succeeded and the pane sits
+    # at a prompt a human must answer.
+    assert run["reason"].startswith("review held at a permission prompt")
     # The artifact belongs to the failed attempt, not to the hold; the live
     # status input must not attach it (matching the runtime_state mirror).
     assert run["review"]["artifact"] == ""
@@ -1487,6 +1490,9 @@ def test_autostart_status_does_not_report_a_cancelled_loop_as_retryable():
     assert run["review"]["retryable"] is False
     assert run["review"]["artifact"] == ""
     assert run["review"]["error"] == ""
+    # The attempt count is part of the same retry evidence and is dropped
+    # with it, matching the runtime_state mirror (`_on_complete_from_thread`).
+    assert run["review"]["attempts"] == 0
 
 
 # ---------------------------------------------------------------------------

@@ -375,10 +375,13 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                     reason += f" [artifact: {artifact}]"
                 return phase, "failed", reason
             if last == "HOLD":
+                # The launch itself succeeded; the review is sitting at a
+                # trust/permission prompt a human must answer, so this is a
+                # hold rather than a launch failure.
                 err = (review.get("error") or "").strip()
                 return (phase, "failed",
-                        "review launch held" + (f": {err}" if err else
-                                                " — needs human input"))
+                        "review held at a permission prompt" +
+                        (f": {err}" if err else " — needs human input"))
             if last in ("KILLED", "ERROR"):
                 return phase, "failed", f"review loop ended {last}"
             if last:
@@ -739,6 +742,7 @@ def review_progress_input(state) -> dict:
     error = getattr(state, "last_launch_error", "") or ""
     artifact = getattr(state, "last_launch_artifact", "") or ""
     retryable = bool(getattr(state, "launch_retryable", False))
+    attempts = int(getattr(state, "launch_attempts", 0) or 0)
     if verdict == "HOLD":
         error = getattr(state, "latest_output", "") or error
         artifact = ""
@@ -755,6 +759,7 @@ def review_progress_input(state) -> dict:
         retryable = False
         artifact = ""
         error = ""
+        attempts = 0
     return {
         "running": running,
         "iteration": getattr(state, "iteration", 0) or 0,
@@ -762,7 +767,7 @@ def review_progress_input(state) -> dict:
         "input_required": bool(getattr(state, "input_required", False)),
         # Failed-launch retry evidence (LAUNCH_FAILED / HOLD outcomes).
         "retryable": retryable,
-        "attempts": int(getattr(state, "launch_attempts", 0) or 0),
+        "attempts": attempts,
         "error": error,
         "artifact": artifact,
     }

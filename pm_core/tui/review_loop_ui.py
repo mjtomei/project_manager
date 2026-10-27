@@ -19,6 +19,7 @@ from pm_core.autostart_state import held_by_text
 from pm_core.review_loop import (
     ReviewLoopState,
     start_review_loop_background,
+    _release_lease,
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
@@ -37,7 +38,7 @@ VERDICT_ICONS = {
     VERDICT_INPUT_REQUIRED: "[red bold]⏸ INPUT_REQUIRED[/]",
     "KILLED": "[red bold]☠ KILLED[/]",
     "TIMEOUT": "[red bold]⏱ TIMEOUT[/]",
-    "ERROR": "[red bold]! ERROR[/]",
+    VERDICT_ERROR: "[red bold]! ERROR[/]",
     VERDICT_LAUNCH_FAILED: "[red bold]↻ LAUNCH_FAILED[/]",
     VERDICT_HOLD: "[yellow bold]⏸ HOLD[/]",
     VERDICT_CLOSED: "[dim]· CLOSED[/]",
@@ -82,13 +83,7 @@ def stop_loop_or_fresh_review(app) -> None:
         # Hand the cross-driver launch lease to the fresh loop now; waiting
         # for the old thread to exit would make the new loop's first claim
         # fail against a still-live lease.
-        try:
-            from pm_core import runtime_state as _rs
-            _rs.release_action_lease(pr_id, "review-loop",
-                                     f"loop:{loop.loop_id}")
-        except Exception:
-            _log.debug("review_loop_ui: supersede lease release failed",
-                       exc_info=True)
+        _release_lease(loop)
         # Kill the review window so the running iteration's
         # _poll_for_verdict (which doesn't check stop_requested)
         # detects pane-gone, raises PaneKilledError, and the loop
@@ -149,13 +144,7 @@ def start_or_stop_loop(app) -> None:
         existing.stop_requested = True
         # Release the old loop's launch lease immediately so the new loop's
         # first claim does not lose to a loop that is already stopping.
-        try:
-            from pm_core import runtime_state as _rs
-            _rs.release_action_lease(pr_id, "review-loop",
-                                     f"loop:{existing.loop_id}")
-        except Exception:
-            _log.debug("review_loop_ui: supersede lease release failed",
-                       exc_info=True)
+        _release_lease(existing)
         # Force the running iteration to terminate now: the
         # _run_claude_review path blocks in _poll_for_verdict (which
         # doesn't check stop_requested) until the pane is gone.
@@ -365,11 +354,7 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
     from pm_core import runtime_state as _rs
     # Release this loop's cross-driver launch lease (only if we still hold
     # it; a superseding loop owns its own).
-    try:
-        _rs.release_action_lease(state.pr_id, "review-loop",
-                                 f"loop:{state.loop_id}")
-    except Exception:
-        _log.debug("review_loop_ui: lease release failed", exc_info=True)
+    _release_lease(state)
     if not _is_active_loop(state):
         # We were superseded by a fresh loop; don't overwrite its
         # 'running' entry with our terminal (often KILLED) verdict.

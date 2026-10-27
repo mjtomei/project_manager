@@ -966,3 +966,49 @@ path no longer shows it — see refinement 2 — and the runs popup reads
 `runtime_state`); `_interruptible_sleep` re-reads and re-validates the ~2 MB
 `project.yaml` every 2 s to notice a merge/close (≈3 % of a core during a
 backoff, on the loop thread).
+
+## Review iteration 9 (0688) — refinements
+
+Findings from the next review pass, applied on top of iteration 8 (0688):
+
+1. **One lease-release helper.** The supersede paths
+   (`stop_loop_or_fresh_review`, `start_or_stop_loop`) and
+   `_on_complete_from_thread` each carried their own copy of the same
+   inline import + `release_action_lease` + `_log.debug` block.  All three
+   now call `review_loop._release_lease(state)`, the helper the loop's own
+   `finally` already uses, so the "only release a lease this owner still
+   holds" rule lives in one place and cannot drift between paths.
+2. **`VERDICT_ERROR` in the icon table.** `review_loop_ui.VERDICT_ICONS`
+   still keyed the error icon on the `"ERROR"` literal while the rest of
+   the module uses the constant (iteration 10 of 385e converted the
+   comparisons).
+3. **A HOLD is not described as a failed launch.** `_derive`'s HOLD branch
+   said "review launch held: …", but a hold is the trust/permission prompt
+   a *launched* review is sitting at — the launch itself succeeded.  It now
+   reports "review held at a permission prompt: …", and the loop's log line
+   matches.  Covered by the strengthened
+   `test_autostart_status_reports_the_hold_prompt_not_a_stale_launch_error`.
+4. **A cancelled loop drops its attempt count too.**
+   `review_progress_input` dropped `retryable`/`error`/`artifact` for a loop
+   stopped with a non-`LAUNCH_FAILED` outcome (the QA scenario-3 fix) but
+   kept `attempts`, so `pm autostart status --json` reported
+   `verdict: "KILLED", attempts: 2` while the `runtime_state` mirror drops
+   `attempts` for the same completion.  The live path now drops it too.
+   Covered by the strengthened
+   `test_autostart_status_does_not_report_a_cancelled_loop_as_retryable`.
+
+Not changed (documented residuals): `review_loop.py` is ~1540 lines; two
+lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
+`runtime_state.claim_action_lease`); discovery still adopts a transcript
+verdict without requiring an idle hook event (rationale in iteration 9 of
+385e); `other_owner` stand-down surfaces as a non-retryable `LAUNCH_FAILED`
+after the bounded claim wait; the `runtime_state` mirror of a re-armed loop
+keeps the previous episode's `verdict`/`attempts` until the next iteration
+mirrors a new verdict (the runs popup reads `runtime_state`); a merge
+restart during the post-exhaustion re-arm *cooldown* does not persist the
+loop (`save_breadcrumb` only saves running loops), so auto-start starts a
+fresh loop for the PR instead of continuing the episode — the review still
+runs and no verdict is fabricated (the new loop snapshots the stale
+symlink/pane), only the loop's history/iteration numbering restarts;
+`_interruptible_sleep` re-reads and re-validates the ~2 MB `project.yaml`
+every 2 s during a backoff.

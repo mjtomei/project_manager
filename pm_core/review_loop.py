@@ -1403,7 +1403,8 @@ def run_review_loop_sync(
                 state.latest_output = str(e)
                 break
             except ReviewHoldError as e:
-                _log.warning("review_loop: review launch held on iteration %d: %s",
+                _log.warning("review_loop: review held on iteration %d "
+                             "(permission/trust prompt): %s",
                              state.iteration, e)
                 state.latest_verdict = VERDICT_HOLD
                 state.latest_output = str(e)
