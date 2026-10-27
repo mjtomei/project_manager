@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T19:47:49.095256+00:00'
+  updated_at: '2026-10-27T21:24:21.601398+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36542,6 +36542,21 @@ prs:
       every 2 s during backoff.'
     created_at: '2026-10-27T19:47:49Z'
     last_edited: '2026-10-27T19:47:49Z'
+  - id: note-cc06975
+    text: 'QA S5 (restart handoff during the retry) PASS. Evidence: /pm-captures/scenarios/5
+      (recording.mp4 + transcript logs + status JSON/text snapshots). Two cosmetic
+      observations, both non-blocking: (1) ~1 s after "Review loop resumed for <pr>
+      at iteration 2 loop=<id>" the resumed loop re-emits the persisted "Review launch
+      retry for <pr> (attempt 2): ..." notice, a duplicate of the pre-restart notice
+      for the same attempt; (2) the retry notice for attempt N carries the PREVIOUS
+      attempt error text, so "Review launch retry for <pr> (attempt 3): Review window
+      launch failed ..." is logged even when attempt 3 launches fine (relauncher rc=0)
+      — the wording reads like the new attempt failed. Functional behaviour was correct
+      throughout: same loop id across the restart, attempt 3 (not a fresh attempt
+      1) after the remaining backoff, iteration-2 history and the attempt-2 artifact
+      preserved, no re-arm, no LAUNCH_FAILED, one review window.'
+    created_at: '2026-10-27T21:24:21Z'
+    last_edited: '2026-10-27T21:24:21Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
