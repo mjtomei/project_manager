@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T16:58:34.573673+00:00'
+  updated_at: '2026-10-27T18:08:05.515520+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36446,6 +36446,27 @@ prs:
       surfaces as a non-retryable LAUNCH_FAILED.'
     created_at: '2026-10-27T16:58:34Z'
     last_edited: '2026-10-27T16:58:34Z'
+  - id: note-15a9ae3
+    text: 'Review 0688 i3 (fixes applied): (1) a stopping/superseded loop could re-take
+      the launch lease between its loop-top stop check and the launch, then create
+      a review window the replacement just asked to replace; the new loop then waited
+      out its bounded claim and expired into a non-retryable LAUNCH_FAILED (re-stranding
+      the target). _claim_launch now refuses when stop_requested, and the retry re-checks
+      stop_requested right before launching. (2) autostart_state.review_progress_input
+      drops the failed attempt artifact for a HOLD, matching the runtime_state mirror
+      (pm autostart status --json no longer attaches stale evidence to a trust/permission
+      prompt). (3) The restart handoff and the retry adopt branch share _poll_adopted_review
+      (landed-verdict read + no-grace poll + trust-hold conversion); the handoff records
+      the adopted transcript session as last_session_id even when the verdict had
+      already landed. Tests: test_stopping_loop_does_not_claim_the_launch_lease, test_stop_between_claim_and_launch_does_not_launch
+      (both fail pre-fix), plus the HOLD artifact assertion. Full suite 3807 passed;
+      55 failed + 17 errors are the base tree pre-existing markdown/hook-installer/signoff/merge/git
+      env failures (verified identical on origin/master). Residual (non-blocking):
+      review_loop.py ~1500 lines; two lease mechanisms coexist; discovery adopts a
+      transcript verdict without an idle hook event (documented); other_owner stand-down
+      is a non-retryable LAUNCH_FAILED.'
+    created_at: '2026-10-27T18:08:05Z'
+    last_edited: '2026-10-27T18:08:05Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
