@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T18:12:21.123078+00:00'
+  updated_at: '2026-10-27T18:44:33.073039+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25806,6 +25806,28 @@ prs:
       residual). (2026-10-27T17:20:00Z)'
     created_at: '2026-10-27T18:12:21Z'
     last_edited: '2026-10-27T18:12:21Z'
+  - id: note-e46cb9c
+    text: 'Review-loop d476 i4 (d9eb238c): no other functional defects found in the
+      recovery machinery — handle()/deferral bounds, the completed-verdict guard,
+      the grace-window idle processing, QA tick-loop episode bookkeeping (_no_verdict_since/_recovery_ev_ts),
+      planner stop ordering and the pr-8efa789 merge coordination all hold under adversarial
+      tracing. Fixed one remaining spurious-exhaustion path: _poll_tmux_verdicts ran
+      check_response() (and the settle/nudge block) unconditionally, so a stop set
+      by the TUI thread between two ticks — after the while condition was evaluated
+      — retired the worker as INPUT_REQUIRED/no_response during teardown, with the
+      reason persisted into the resume snapshot; handle() has the same hole because
+      its no_progress deferral bound is checked before its own stop_check. Both are
+      now skipped when state.stop_requested is set, matching the planner loop. Regression
+      test test_scenario_worker_stop_does_not_surface_a_spurious_exhaustion fails
+      on the previous code and passes now; spec updated. Full suite: 3853 passed,
+      1 skipped, 1 failed — the only failure is the pre-existing env failure tests/test_hook_events.py::test_installer_writes_standalone_receiver
+      (fails standalone). Residuals unchanged: verdict-recovery-response-timeout (1
+      h) can retire a silently-busy worker; a poller that starts while its session
+      is already idle (review adoption) is bounded only by overall_timeout/pane death;
+      a recovery nudge can still land in a permission hold that begins during an open
+      episode. (2026-10-27T18:45:00Z)'
+    created_at: '2026-10-27T18:44:33Z'
+    last_edited: '2026-10-27T18:44:33Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
