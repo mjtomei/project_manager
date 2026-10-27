@@ -1569,23 +1569,23 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     )
     saw_disappear = False
 
-    # For fresh-mode actions, the on-disk runtime_state entry from a
-    # prior completed run may still read 'done'/'failed' at popup start
-    # — the launcher hasn't yet overwritten it because the TUI hasn't
-    # drained the SIGUSR2 queue.  Snapshot the initial entry so the
-    # terminal-state short-circuit below can distinguish stale terminal
-    # state (must wait through the launcher's transitions) from a
-    # genuine terminal state produced by this invocation.  Track the
-    # full (state, updated_at) identity rather than state alone so a
-    # rapid stale-done → fresh-done transition still trips the flag.
-    if fresh:
-        _initial_entry = _rs.get_action_state(pr_id, action) or {}
-        initial_state_key = (
-            _initial_entry.get("state"),
-            _initial_entry.get("updated_at"),
-        )
-    else:
-        initial_state_key = (None, None)
+    # The on-disk runtime_state entry from a prior completed run may
+    # still read 'done'/'failed' at popup start — the launcher hasn't yet
+    # overwritten it because the TUI hasn't drained the SIGUSR2 queue
+    # (fresh-mode actions), or the new run writes its state only once
+    # its windows exist (a plain ``qa`` start after a finished run, S92).
+    # Snapshot the initial entry so the terminal-state short-circuit
+    # below can distinguish stale terminal state (must wait through the
+    # launcher's transitions) from a genuine terminal state produced by
+    # this invocation.  Track the full (state, updated_at) identity
+    # rather than state alone so a rapid stale-done → fresh-done
+    # transition still trips the flag.
+    _initial_entry = _rs.get_action_state(pr_id, action) or {}
+    initial_state_key = (
+        _initial_entry.get("state"),
+        _initial_entry.get("updated_at"),
+    )
+    initial_terminal = initial_state_key[0] in ("done", "failed")
     saw_state_change = False
 
     _log.info(
@@ -1646,7 +1646,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
         while True:
             entry = _rs.get_action_state(pr_id, action)
             cur_state = entry.get("state") if entry else None
-            if fresh and not saw_state_change:
+            if not saw_state_change:
                 cur_key = (
                     (entry.get("state") if entry else None),
                     (entry.get("updated_at") if entry else None),
@@ -1708,9 +1708,13 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             # it once the TUI drains the queue.  Treat the action as
             # non-terminal until we observe *some* change to the entry,
             # at which point any subsequent terminal state is genuinely
-            # from this invocation.
+            # from this invocation.  Other actions get the same guard
+            # when the entry was already terminal at popup start:
+            # exiting on it would report the prior run's verdict and
+            # drop a q/Esc meant to keep focus off the new run's window.
             terminal = (cur_state in ("done", "failed")
-                        and (not fresh or saw_state_change))
+                        and (saw_state_change
+                             or not (fresh or initial_terminal)))
             if terminal and not window_open:
                 verdict = (entry.get("verdict") if entry else "") or ""
                 failed = cur_state == "failed" or verdict in ("ERROR", "KILLED")
@@ -1766,6 +1770,8 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             spin = frames[i % len(frames)]
             if fresh and initial_window_ids and not saw_disappear:
                 label = "rebuilding window"
+            elif initial_terminal and not saw_state_change:
+                label = "queued"  # the prior run's verdict, not this one's
             elif cur_state == "failed":
                 v = (entry.get("verdict") if entry else "") or ""
                 label = f"failed ({v})" if v else "failed"
