@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T23:55:32.524430+00:00'
+  updated_at: '2026-10-27T23:56:45.263846+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11159,6 +11159,37 @@ prs:
       (C-b d). Captures /pm-captures/scenarios/68.'
     created_at: '2026-10-27T23:55:32Z'
     last_edited: '2026-10-27T23:55:32Z'
+  - id: note-4a17393
+    text: 'S66 refine (17c4a8d2): code predicts the A7 Then fails. pm pr start closes
+      a dead-pane window (pr.py fast path, before the PR-committed check) before wrap_claude_cmd
+      runs governor admission, so a refused relaunch (target 1g) kills the stopped
+      PR window and its scrollback. pr review has the same ordering in _launch_review_window.
+      Likely fix: run admission (or check_single_container_fits + snapshot admit)
+      before closing the dead window, or keep the window until wrap_claude_cmd succeeds.
+      ~/.pm/container-stats.json samples from earlier scenarios change P; move it
+      aside for the U+3g story.'
+    created_at: '2026-10-27T23:56:44Z'
+    last_edited: '2026-10-27T23:56:44Z'
+  - id: note-4c69c34
+    text: 'QA S66 (2026-10-27, nested rootless podman, fake-claude, test repo on /scratch,
+      a different st_dev from ~/.pm): fixed 7e73d3b3 (spec A7). pm pr start and _launch_review_window
+      closed a stop-on-idle dead-pane window before wrap_claude_cmd admission, so
+      a relaunch the governor refused (target 1g) destroyed the stopped session transcript.
+      Pre-fix live: kill_window @8 logged before the refusal, and the window was gone.
+      Now the dead window closes only after admission passes. Post-fix live: the refusal
+      kept window pr-<PR4> (pane dead=1, identical scrollback), and at 40g the container
+      was created, then kill_window, then new_window. 2 regression tests were mutation-checked;
+      full suite 4108 passed, with 1 env-only hook_events failure. All other Thens
+      held live: bar mem U/T (pm) with no brackets, 4 refusals (impl/review/signoff
+      exit 0/qa-debug stderr exit 1, no EXDEV), blocked +3 -> +2 after an admitted
+      PR3, host-headroom reserve hint, reuse of the orphaned container with the same
+      ID and no Blocked or queue entry, and slow/hang/badcg with <=0.21 s redraws
+      and unmeasurable within 23 s (recovered in 9 s). Cosmetic: the TUI never shows
+      the "Closed window … relaunching" line (only the last stdout line). A refused
+      signoff also moves in_review -> sign_off (noted on pr-ee7bd75). Captures: /pm-captures/scenarios/66
+      (pre-fix/, post-fix/).'
+    created_at: '2026-10-27T23:56:45Z'
+    last_edited: '2026-10-27T23:56:45Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
@@ -36692,11 +36723,18 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-27T18:34:51.008193+00:00'
-  updated_at: '2026-10-27T18:34:51.008193+00:00'
+  updated_at: '2026-10-27T23:56:46.303919+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f2a7db0
+    text: 'QA S66 (pr-eb2dbfc, 2026-10-27): besides exit 0, a governor-refused pm
+      pr signoff on an in_review PR first prints "PR <id> marked as sign_off." and
+      leaves the PR in sign_off status with no window/container (same shape as pr-62db99c
+      for impl). Fix both together: move the status change after admission.'
+    created_at: '2026-10-27T23:56:46Z'
+    last_edited: '2026-10-27T23:56:46Z'
 - id: pr-62db99c
   plan: bugs
   title: 'Bug: a pm pr start refused by the memory governor leaves the PR in_progress
