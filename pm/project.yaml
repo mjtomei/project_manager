@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e102089
+  active_pr: pr-84ebabf
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -36147,7 +36147,7 @@ prs:
     as ANTHROPIC_API_KEY=<value> into the logged launch command and the tmux pane
     command'
   branch: pm/pr-84ebabf-bug-a-claude-type-provider-api-key-even-a-var-refe
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'pm_core/providers.py ProviderConfig.env_vars resolves api_key (_resolve_env_ref)
     and pm_core/claude_launcher.py build_claude_shell_cmd inlines every provider env
@@ -36162,12 +36162,12 @@ prs:
     how host panes get secret provider env (process env of the tmux client, a shell
     reference for ${VAR} keys when the pane inherits the var, or redaction at least
     in the log) and keep openai OPENAI_API_KEY the same.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/268
+  gh_pr_number: 268
   created_at: '2026-10-26T05:09:15.878235+00:00'
-  updated_at: '2026-10-27T18:43:31.767149+00:00'
-  started_at: null
+  updated_at: '2026-10-27T19:52:26.203402+00:00'
+  started_at: '2026-10-27T19:07:41.620041+00:00'
   reviewed_at: null
   merged_at: null
   notes:
@@ -36181,6 +36181,20 @@ prs:
       avoid duplicating that work.'
     created_at: '2026-10-27T18:43:31Z'
     last_edited: '2026-10-27T18:43:31Z'
+  - id: note-c3f89aa
+    text: 'impl: fixed. build_claude_shell_cmd no longer interpolates provider env
+      values; it returns them via env_out. Host tmux panes get them with `-e NAME`
+      (value in the tmux client env, so only the name reaches #{pane_start_command});
+      foreground launches use execvpe; container exec uses `-e NAME` (runtime reads
+      the value from the pane env); send_keys (no production callers) sources a 0600
+      env file. launch_claude debug env dump now logs names only. Evidence: /pm-captures/impl/{pre-fix,post-fix}
+      (synthetic canary only) — pre-fix leaked into command, pane_start_command and
+      log; post-fix all three clean and the value still reaches the pane process env.
+      Full suite 3837 passed / 1 skipped (pytest 8.4.2) in /pm-captures/impl/post-fix/pytest-full.log.
+      Tests: test_provider_integration, test_tmux TestProviderEnvTransport, test_container
+      TestBuildExecCmdProviderEnv, test_claude_launcher TestLaunchClaudeInTmuxProviderEnv/TestWriteEnvFile.'
+    created_at: '2026-10-27T19:52:26Z'
+    last_edited: '2026-10-27T19:52:26Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -36194,3 +36208,4 @@ prs:
     qa_interactive: provider:deepseek-flash
     signoff: provider:claude-work
     merge: provider:deepseek-flash
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-84ebabf-bug-a-claude-type-provider-api-key-e-registered-20261027
