@@ -500,6 +500,18 @@ def _info_from(name: str, cid: str, running: bool, status: str,
 
 def list_containers() -> list[ContainerInfo] | None:
     """All pm containers (any state), or None when the runtime is unavailable."""
+    # A container removed between the listing and the inspect (a concurrent
+    # cleanup) fails the inspect batch. That is not a runtime failure: take
+    # the whole inventory once more. Any other failure still fails closed.
+    for _ in range(2):
+        vanished: list[str] = []
+        inventory = _list_containers_once(vanished)
+        if inventory is not None or not vanished:
+            return inventory
+    return None
+
+
+def _list_containers_once(vanished: list[str]) -> list[ContainerInfo] | None:
     names: dict[str, None] = {}
     # A managed allocation may have been renamed. Labels remain authoritative
     # for its ownership and shared proxy; the name query also includes legacy
@@ -523,18 +535,21 @@ def list_containers() -> list[ContainerInfo] | None:
         return []
     # _inspect rechecks the managed label/name rather than trusting runtime
     # substring filters, and rejects missing or malformed rows.
-    return _inspect(list(names), timeout=60)
+    return _inspect(list(names), timeout=60, vanished=vanished)
 
 
 _INSPECT_FMT = ("{{.Name}}\t{{.Id}}\t{{.State.Running}}\t{{.State.Status}}\t"
                 "{{json .Config.Labels}}")
 
 
-def _inspect(names: list[str], timeout: int) -> list[ContainerInfo] | None:
+def _inspect(names: list[str], timeout: int,
+             vanished: list[str] | None = None) -> list[ContainerInfo] | None:
     """ContainerInfo for *names*, or None if the inventory is incomplete.
 
     Missing rows are not proof of absence: full reconciles use this inventory
     to prune retention and failure records, so a failed inspect must fail closed.
+    When the runtime explicitly reports a missing object, the failure is noted
+    in *vanished* so a caller can retake its listing.
     """
     try:
         insp = container_mod._run_runtime("inspect", "--format", _INSPECT_FMT,
@@ -542,8 +557,10 @@ def _inspect(names: list[str], timeout: int) -> list[ContainerInfo] | None:
     except (OSError, subprocess.TimeoutExpired):
         return None
     if insp.returncode != 0:
-        # A vanished container can fail the batch too; retry on the next pass
-        # rather than guess whether missing rows mean removal or runtime failure.
+        # A vanished container can fail the batch too; never guess whether
+        # missing rows mean removal or runtime failure.
+        if vanished is not None and container_mod._container_absent(insp.stderr or ""):
+            vanished.append((insp.stderr or "").strip())
         return None
     out: list[ContainerInfo] = []
     seen: set[str] = set()

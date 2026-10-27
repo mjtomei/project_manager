@@ -83,16 +83,22 @@ def _echo_reaper_state(runtime_ok: bool = True, inventory=None) -> None:
         # An owner release of a still-retained allocation is deferred, not
         # failed: reap keeps it until the retention is released, so retrying
         # cannot help.
-        deferred = sorted(
-            name for name, info in failures.items()
+        deferred = {
+            name: failures.pop(name) for name, info in list(failures.items())
             if info.get("owner_release")
-            and container_reaper.is_retained(name, str(info.get("id") or "")))
-        for name in deferred:
-            failures.pop(name)
+            and container_reaper.is_retained(name, str(info.get("id") or ""))}
+        if inventory is not None:
+            # A retained allocation removed since (e.g. by pm pr cleanup) has
+            # nothing left to release; its records are pruned by the next full
+            # pass, so don't list it as still waiting on the retention.
+            ids = {info.id for info in inventory if info.id}
+            names = {info.name for info in inventory}
+            deferred = {name: info for name, info in deferred.items()
+                        if (str(info["id"]) in ids if info.get("id") else name in names)}
         if deferred:
             click.echo("Released while retained (removed once "
                        "'pm container retain --release' drops the retention):")
-            for name in deferred:
+            for name in sorted(deferred):
                 click.echo(f"  {name}")
         # A release recorded while the runtime identity was unavailable can
         # never authorize cleanup (and full passes deliberately preserve it),
