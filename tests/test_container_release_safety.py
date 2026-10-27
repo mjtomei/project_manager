@@ -395,20 +395,67 @@ class TestRestartGeneration:
         reaper._record_release(NAME, "id-" + NAME, "", "late-old-exit")
         assert reaper.reconcile(reason="periodic").removed == [NAME]
 
-    def test_final_recheck_sees_restart_under_lock(self, fake_env, monkeypatch):
+    def test_final_recheck_sees_restart_under_lock(self, fake_env):
         """A restart between plan() and the locked removal changes the
         generation; the removal must re-read it under the launch lock."""
         fake_env["containers"] = [_info(NAME)]
         fake_env["panes"] = _owned(NAME)
-        orig = cm.current_container_id
+        ids, gens = _identity(NAME)  # generation "" (no marker yet)
+        reaper._record_release(NAME, ids[NAME], gens[NAME], "release")
+        out = reaper.plan()
+        decision, = out.decisions
+        assert decision.action == "remove" and decision.released
+        # The restart lands after the plan was taken.
+        _write_generation(NAME, "restarted-meanwhile")
+        ok, reason = reaper._remove_checked(decision, reaper.Scope())
+        assert not ok and "restarted" in reason
+        assert fake_env["removed"] == []
 
-        def _cid(name):
-            _write_generation(name, "restarted-meanwhile")
-            return orig(name)
-        monkeypatch.setattr(cm, "current_container_id", _cid)
-        out = _release([NAME])
-        assert out.removed == [] and fake_env["removed"] == []
-        assert "restarted" in out.decisions[0].reason
+    def test_legacy_release_still_applies_after_the_name_is_reused(self, fake_env):
+        """A replacement's marker must not invalidate a pre-ID release.
+
+        The legacy generation lives under the recorded name.  Once a
+        replacement holds that name its marker says nothing about the old
+        allocation, whose release (and its retry) must still apply.
+        """
+        old, cid, renamed = NAME, "id-" + NAME, "renamed-worker"
+        fake_env["containers"] = [_info(renamed, id=cid),
+                                  _info(old, id="replacement-id")]
+        fake_env["panes"] = _Panes(
+            [f"podman exec -it {renamed} bash -c 'claude'"])
+        reaper._record_release(old, cid, "", "pane-exit")
+        _write_generation(old, "replacement-generation")
+
+        out = reaper.reconcile(reason="periodic")
+
+        assert renamed in out.removed
+        assert reaper.pending_releases() == {}
+
+    def test_pending_release_retry_respects_a_reuse(self, fake_env):
+        """The failed-removal retry must not delete a container reused since.
+
+        The retry carries no release record (that is why the fallback runs),
+        so its recorded generation is the only thing that can tell the
+        container apart from a later launch that reused the allocation.
+        """
+        fake_env["containers"] = [_info(NAME)]
+        fake_env["panes"] = _owned(NAME)
+        reaper._record(
+            reaper.Outcome(failures={NAME: "rm refused"},
+                           released_failures={NAME},
+                           decisions=[reaper.Decision(
+                               _info(NAME), "remove", "released by its run",
+                               released=True, release_generation="g1")]),
+            reaper.Scope(names={NAME}), "qa-run-end")
+        assert reaper.pending_failures()[NAME]["owner_release"]
+
+        _write_generation(NAME, "g2")  # a launch reused the allocation
+
+        out = reaper.reconcile(reason="periodic")
+        assert NAME not in out.removed
+        # The old request no longer describes the new attachment, so it is
+        # retired rather than retried against it.
+        assert NAME not in reaper.pending_failures()
 
     def test_final_recheck_unknown_generation_fails_closed(self, fake_env, monkeypatch):
         fake_env["containers"] = [_info(NAME)]

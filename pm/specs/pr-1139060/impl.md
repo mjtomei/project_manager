@@ -274,7 +274,12 @@ operations do not take PM's launch lock.
   additional ID-keyed recovery generation. Restarting the renamed allocation invalidates
   a release captured under its original name; original-name replacement allocations
   are never authorized by that request. Pre-ID generation records remain readable
-  through the release's original name until an ID epoch supersedes them.
+  through the release's original name until an ID epoch supersedes them; once a
+  replacement holds that name, its marker says nothing about the old allocation
+  (a restart or reuse of that allocation would have written an identity epoch),
+  so the record neither looks stale nor is pruned. A retried failed removal
+  carries its recorded generation and is therefore refused for an allocation
+  reused since.
   Replacements/restarts are never adopted by a delayed request. Temporary retention
   or a launch lock defers cleanup without erasing the request or last failure.
   Pane EXIT uses this same identity-bound release rather than raw runtime removal,
@@ -502,7 +507,13 @@ and CLI failure status, rather than treating an empty removed list as success.
 All container failure diagnostics carry the captured allocation ID so a later
 same-name replacement retires stale errors without granting owner-release authority.
 Explicit and automatic outcome writes share a bounded state lock to preserve
-concurrent failures; inability to persist an outcome is itself reported.
+concurrent failures; inability to persist an outcome is itself reported. Once
+scoped state exists, an outcome whose runtime identity is unavailable is
+reported instead of written to the legacy unscoped store, where nothing would
+prune it and no later pass would see it. A whole-sweep proxy failure is
+cleared only by a full pass that actually enumerated the proxies, and a
+malformed persisted state or retention marker is ignored rather than aborting
+a pass that already removed containers.
 
 ### R8 — Bounded launch concurrency / backpressure
 - A process-wide semaphore bounds concurrent container creates

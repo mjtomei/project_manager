@@ -246,8 +246,12 @@ def _prune_retain_markers(inventory: dict[str, str], since: float) -> None:
         if rec.get("runtime_domain") != domain:
             continue  # another runtime's absence proves nothing about this marker
         name = rec["name"]
-        if (rec.get("id") in existing_ids
-                or not rec.get("id") and name in inventory):
+        if not isinstance(name, str):
+            continue  # a marker we cannot key; leave it for a human
+        marker_id = rec.get("id")
+        if marker_id is not None and not isinstance(marker_id, str):
+            continue
+        if marker_id in existing_ids or not marker_id and name in inventory:
             continue
         try:
             # "at" has whole-second resolution, so compare against the
@@ -275,11 +279,27 @@ def restart_generation(name: str) -> str | None:
 
 
 def allocation_generation(name: str, cid: str) -> str | None:
-    """Use the ID epoch after renames; preserve legacy name-only generations."""
+    """Use the ID epoch after renames; preserve legacy name-only generations.
+
+    A container created before the ID epoch existed has no identity-keyed
+    marker, so its generation lives under the name it was released with.  That
+    marker only speaks for this allocation while the name still resolves to it:
+    once a replacement holds the name, the marker belongs to the replacement
+    and saying otherwise would make the record look stale (and be pruned).
+    """
     try:
         path = container_mod._identity_generation_path(cid)
         if path.exists():
             return path.read_text().strip()
+        current = container_mod.current_container_id(name)
+        if current is None:
+            return None  # unanswered identity probe: unknown, not stale
+        if current and current != cid:
+            # A replacement holds the recorded name, so its marker says
+            # nothing about this allocation.  A restart or reuse of *this*
+            # allocation would have written an identity epoch (returned
+            # above), so its own legacy generation is still the empty one.
+            return ""
         return restart_generation(name)
     except OSError:
         return None
@@ -915,6 +935,9 @@ class Outcome:
     # Proxies this pass reached a definitive answer for (released, or proven
     # still in use). A failure recorded for one of them earlier is resolved.
     proxies_checked: list[str] = field(default_factory=list)
+    # The pass enumerated the shared proxies (full scope, runtime identity
+    # available): only then may an earlier whole-sweep failure be cleared.
+    proxy_sweep_ran: bool = False
     # Kept containers near their PID limit: (name, pids, limit, reason kept).
     pid_pressure: list[tuple[str, int, int, str]] = field(default_factory=list)
     running_before: int | None = None
@@ -961,7 +984,7 @@ class Outcome:
 
 def _decide(info: ContainerInfo, scope: Scope, cache: _PaneCache,
             prs: _PrStatus, now: float,
-            pending_release: dict[str, str] | None = None,
+            pending_release: dict[str, tuple[str, str | None]] | None = None,
             release_records: list[dict] | None = None) -> Decision:
     if scope.owner_release and info.name in scope.expected_ids:
         if info.id != scope.expected_ids[info.name]:
@@ -984,12 +1007,15 @@ def _decide(info: ContainerInfo, scope: Scope, cache: _PaneCache,
                 return Decision(info, "remove", "released by its run", released=True,
                                 release_generation=generation,
                                 release_name=rec["name"])
-    if (not releases and _is_pending_release(info, pending_release or {})
-            and restart_generation(info.name) == ""):
+    pending = (pending_release or {}).get(info.name)
+    if (not releases and pending is not None and pending[0]
+            and info.id and pending[0] == info.id and pending[1] is not None):
         # Its run already let it go but the removal failed; the run's panes
-        # are still exec'd into it and would otherwise "own" it forever.
+        # are still exec'd into it and would otherwise "own" it forever.  Keep
+        # the recorded generation so the locked removal still refuses a
+        # container that was reused since (that writes a new generation).
         return Decision(info, "remove", "released by its run (retrying failed removal)",
-                        released=True)
+                        released=True, release_generation=pending[1])
     owners, indeterminate = _owner_panes(info, cache)
     if owners:
         return Decision(info, "keep", f"owned by live pane {', '.join(owners)}")
@@ -1012,18 +1038,6 @@ def _decide(info: ContainerInfo, scope: Scope, cache: _PaneCache,
             return Decision(info, "remove", f"tmux session pm-{info.session_tag} gone")
     what = "QA run finished or superseded" if info.kind == "qa" else "attempt ended"
     return Decision(info, "remove", f"no owning pane ({what})")
-
-
-def _is_pending_release(info: ContainerInfo, pending: dict[str, str]) -> bool:
-    """True when *info* is the very container whose owner release failed.
-
-    Bound to the container id: a replacement created under the same name
-    belongs to a new launch and must go through the normal ownership checks.
-    """
-    if info.name not in pending:
-        return False
-    rec_id = pending[info.name]
-    return bool(rec_id and info.id and rec_id == info.id)
 
 
 def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
@@ -1215,8 +1229,12 @@ def plan(scope: Scope | None = None) -> Outcome:
         return out
     out.inventory = infos
     cache, prs, now = _PaneCache(), _PrStatus(), time.time()
+    # name -> (captured id, recorded generation or None).  The generation is
+    # what makes the retry safe: a container reused after the failed release
+    # has a new one, and must not be removed by the old request.
     pending_release = {
-        n: str(f.get("id") or "") for n, f in pending_failures().items()
+        n: (str(f.get("id") or ""), f.get("generation"))
+        for n, f in pending_failures().items()
         if isinstance(f, dict) and f.get("owner_release")}
     releases: dict[str, list[dict]] = {}
     for _, rec in _current_release_records():
@@ -1280,6 +1298,11 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
         try:
             out.proxies_released = _release_unused_proxies(
                 scope, out.failures, out.proxies_checked)
+            # Only a full pass with a runtime identity actually enumerated the
+            # proxies; a scoped or identity-less pass cannot clear a failure
+            # recorded by a sweep it never performed.
+            out.proxy_sweep_ran = (_is_full_scope(scope)
+                                   and _runtime_domain() is not None)
         except Exception as exc:
             out.failures["push proxy sweep"] = str(exc)
             _log.warning("proxy sweep failed", exc_info=True)
@@ -1453,10 +1476,22 @@ def _state_file() -> Path:
 
 
 def last_state() -> dict:
+    """Persisted outcome, or ``{}`` when missing or not the shape we wrote.
+
+    A hand-edited or truncated file must not abort a pass that already removed
+    containers (``_record_locked`` reads every failure entry as a dict).
+    """
     try:
-        return json.loads(_state_file().read_text())
+        state = json.loads(_state_file().read_text())
     except (OSError, ValueError):
         return {}
+    if not isinstance(state, dict):
+        return {}
+    failures = state.get("failures")
+    state["failures"] = ({name: value for name, value in failures.items()
+                          if isinstance(value, dict)}
+                         if isinstance(failures, dict) else {})
+    return state
 
 
 def unavailable_runtime_diagnostics() -> list[tuple[str, str, str]]:
@@ -1497,12 +1532,28 @@ def _record(out: Outcome, scope: Scope, reason: str,
         _record_locked(out, scope, reason, inventory, observed_at)
 
 
+def _scoped_state_exists() -> bool:
+    try:
+        return any(container_mod.container_state_dir().glob("reaper-*.json"))
+    except OSError:
+        return False
+
+
 def _record_locked(out: Outcome, scope: Scope, reason: str,
                    inventory: set[str] | None = None,
                    observed_at: float | None = None) -> None:
+    domain = _runtime_domain()
+    if domain is None and _scoped_state_exists():
+        # Unknown identity cannot fall back to the legacy unscoped store once
+        # scoped state exists: entries written there are never pruned and are
+        # invisible to every later pass.  Report the lost outcome instead.
+        out.failures["cleanup state"] = (
+            "runtime identity unavailable; cleanup outcome not persisted — "
+            "retry with pm container reap")
+        _log.warning("cleanup outcome not persisted: runtime identity unavailable")
+        return
     prev = last_state()
     failures = dict(prev.get("failures") or {})
-    domain = _runtime_domain()
     if inventory is not None and domain is not None:
         failures = {k: v for k, v in failures.items()
                     if k in inventory or k.startswith("push proxy ")
@@ -1525,7 +1576,7 @@ def _record_locked(out: Outcome, scope: Scope, reason: str,
                 and previous.get("at", 0) >= observed_at):
             continue
         failures.pop(key, None)
-    if reason != "explicit-cleanup" and "push proxy sweep" not in out.failures:
+    if out.proxy_sweep_ran and "push proxy sweep" not in out.failures:
         failures.pop("push proxy sweep", None)
     for d in out.decisions:
         if domain is None:
@@ -1536,7 +1587,8 @@ def _record_locked(out: Outcome, scope: Scope, reason: str,
         if (d.info.name in out.removed or
                 previous.get("id") and previous["id"] != d.info.id or
                 previous.get("owner_release") and
-                restart_generation(d.info.name) not in (None, previous.get("generation", ""))):
+                allocation_generation(d.info.name, d.info.id)
+                not in (None, previous.get("generation", ""))):
             failures.pop(d.info.name, None)
     ids = {d.info.name: d.info.id for d in out.decisions}
     for name, err in out.failures.items():

@@ -36,7 +36,11 @@ def test_bulk_outcome_does_not_clear_unattempted_proxy_sweep():
     reaper._record(reaper.Outcome(removed=["pm-test"]),
                    reaper.Scope(names={"pm-test"}), "explicit-cleanup")
     assert "push proxy sweep" in reaper.pending_failures()
+    # A pass that never enumerated the proxies cannot clear its failure...
     reaper._record(reaper.Outcome(), reaper.Scope(), "periodic")
+    assert "push proxy sweep" in reaper.pending_failures()
+    # ...only a completed full sweep can.
+    reaper._record(reaper.Outcome(proxy_sweep_ran=True), reaper.Scope(), "periodic")
     assert not reaper.pending_failures()
 
 
