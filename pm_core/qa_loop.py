@@ -2034,6 +2034,7 @@ def _launch_scenarios_in_tmux(
     workdir_path: str,
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _queued_indices: set[int] | None = None,
 ) -> None:
     """Launch each scenario in its own tmux window (with worktree isolation).
 
@@ -2138,7 +2139,11 @@ def _launch_scenarios_in_tmux(
         t.join()
 
     # Write status with window names so the dashboard is navigable
-    # while concretizers run (before the polling loop starts).
+    # while concretizers run (before the polling loop starts).  Keep the
+    # still-queued scenarios visible (verdict "queued") — this write runs
+    # with ``state.scenarios`` narrowed to the launch batch, so the full
+    # list and the queued set have to be threaded in explicitly or the
+    # queued rows disappear from the dashboard.
     if state.qa_workdir and pending:
         _write_status_file(
             Path(state.qa_workdir) / "qa_status.json",
@@ -2146,6 +2151,7 @@ def _launch_scenarios_in_tmux(
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
+            queued_scenarios=_queued_indices,
             verdict_reasons=state.scenario_verdict_reasons,
         )
 
@@ -2244,6 +2250,7 @@ def _launch_scenarios_in_containers(
     workdir_path: str,
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _queued_indices: set[int] | None = None,
 ) -> None:
     """Launch each scenario in a Docker container, presented via a tmux window.
 
@@ -2383,7 +2390,11 @@ def _launch_scenarios_in_containers(
         t.join()
 
     # Write status with window names so the dashboard is navigable
-    # while concretizers run (before the polling loop starts).
+    # while concretizers run (before the polling loop starts).  Keep the
+    # still-queued scenarios visible (verdict "queued") — this write runs
+    # with ``state.scenarios`` narrowed to the launch batch, so the full
+    # list and the queued set have to be threaded in explicitly or the
+    # queued rows disappear from the dashboard.
     if state.qa_workdir and pending:
         _write_status_file(
             Path(state.qa_workdir) / "qa_status.json",
@@ -2391,6 +2402,7 @@ def _launch_scenarios_in_containers(
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
+            queued_scenarios=_queued_indices,
             verdict_reasons=state.scenario_verdict_reasons,
         )
 
@@ -2785,11 +2797,13 @@ def _poll_tmux_verdicts(
                 _launch_scenarios_in_containers(
                     state, data, pr_data, session, repo_root, workdir_path,
                     pm_root=pm_root, _status_scenarios=orig,
+                    _queued_indices=_queued_indices,
                 )
             else:
                 _launch_scenarios_in_tmux(
                     state, data, pr_data, session, repo_root, workdir_path,
                     pm_root=pm_root, _status_scenarios=orig,
+                    _queued_indices=_queued_indices,
                 )
         finally:
             state.scenarios = orig
@@ -4539,12 +4553,14 @@ def run_qa_sync(
     if use_containers:
         _launch_scenarios_in_containers(
             state, data, pr_data, session, repo_root, workdir_path,
-            pm_root=pm_root,
+            pm_root=pm_root, _status_scenarios=all_scenarios,
+            _queued_indices=queued_indices,
         )
     else:
         _launch_scenarios_in_tmux(
             state, data, pr_data, session, repo_root, workdir_path,
-            pm_root=pm_root,
+            pm_root=pm_root, _status_scenarios=all_scenarios,
+            _queued_indices=queued_indices,
         )
     state.scenarios = all_scenarios
 

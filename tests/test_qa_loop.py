@@ -1888,6 +1888,70 @@ class TestStateErrorWiring:
 
 
 # ---------------------------------------------------------------------------
+# Queued scenarios stay visible in the status dashboard while they wait
+# ---------------------------------------------------------------------------
+
+class TestQueuedScenariosStayVisible:
+    """The launch-time status write must keep still-queued scenarios.
+
+    Regression (QA pr-6566901 s3): ``_launch_scenarios_in_tmux`` writes
+    qa_status.json while ``state.scenarios`` is temporarily narrowed to the
+    launch batch and passed no ``queued_scenarios`` set, so the queued rows
+    vanished from the dashboard at launch instead of reading "queued".
+    """
+
+    def test_write_status_file_marks_queued(self, tmp_path):
+        from pm_core.qa_loop import _write_status_file
+        import json
+
+        launched = QAScenario(index=1, title="A", focus="a")
+        waiting = QAScenario(index=2, title="B", focus="b")
+        status_path = tmp_path / "status.json"
+        _write_status_file(
+            status_path, "pr-001", [launched, waiting], {},
+            queued_scenarios={2},
+        )
+        rows = json.loads(status_path.read_text())["scenarios"]
+        assert {r["index"]: r["verdict"] for r in rows} == {1: "", 2: "queued"}
+
+    def test_launcher_passes_full_list_and_queued_set(self, tmp_path):
+        from pm_core import qa_loop
+
+        launched = QAScenario(index=1, title="A", focus="a")
+        waiting = QAScenario(index=2, title="B", focus="b")
+        state = QALoopState(pr_id="pr-001")
+        state.qa_workdir = str(tmp_path)
+        state.scenarios = [launched]        # narrowed to the launch batch
+        captured = {}
+
+        class _Stop(Exception):
+            pass
+
+        def _record(path, pr_id, scenarios, verdicts, **kwargs):
+            captured["scenarios"] = [s.index for s in scenarios]
+            captured["queued"] = kwargs.get("queued_scenarios")
+            raise _Stop
+
+        with patch.object(qa_loop, "_resolve_qa_model", return_value=None), \
+             patch.object(qa_loop, "create_scenario_workdir",
+                          return_value=(tmp_path / "clone", tmp_path / "scratch")), \
+             patch.object(qa_loop, "_build_concretize_cmd", return_value="cmd"), \
+             patch.object(qa_loop, "_scenario_transcript_path", return_value="t"), \
+             patch.object(qa_loop, "_scenario_window_name", return_value="w"), \
+             patch.object(qa_loop, "_write_status_file", side_effect=_record), \
+             patch("pm_core.tmux.new_window_get_pane", return_value="%1"):
+            with pytest.raises(_Stop):
+                qa_loop._launch_scenarios_in_tmux(
+                    state, {}, {"branch": "b"}, "pm-test", None, str(tmp_path),
+                    _status_scenarios=[launched, waiting],
+                    _queued_indices={2},
+                )
+
+        assert captured["scenarios"] == [1, 2]
+        assert captured["queued"] == {2}
+
+
+# ---------------------------------------------------------------------------
 # Spec gate: state.running is set to False on early return
 # ---------------------------------------------------------------------------
 
