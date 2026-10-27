@@ -33257,7 +33257,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T02:43:10.361249+00:00'
+  updated_at: '2026-10-27T03:12:35.331379+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36233,6 +36233,29 @@ prs:
       post-return PASS.'
     created_at: '2026-10-27T02:43:10Z'
     last_edited: '2026-10-27T02:43:10Z'
+  - id: note-bc38940
+    text: 'QA S83 (2026-10-27, host, all fake-claude, HEAD 0eeb8719 vs control 5b78ba40;
+      captures /pm-captures/scenarios/83, REPORT.md): CODE CHANGE d6e599bf (tested
+      as 8dbba263, same tree minus the S84/S85 rebase) needs normal re-review. 63cabd07
+      held live: A INPUT_REQUIRED re-run inside a 92 s hold -> one 2 s give-up, 2.00
+      s frozen, cleared 0.89 s after release (ts kept), one note, 3 passes not relaunching;
+      control re-ran QA once on pass 1. Also held: C3 PASS kept for the lock -> cleared
+      + recorded + sign-off hand-off on the same tick; D pm edit new ts -> retry drops
+      the old return, the newer return gets exactly one run; F pm tui restart -> one
+      visible redundant run (startup Auto-start: QA), cleared on release; G z t ->
+      second give-up, one clear, replaced run not recorded; I+J REQA in one pass ->
+      5.3 s freeze, one clear per PR, ticks only running: qa / paused: input_required,
+      no qa-run-bg, picker [done INPUT_REQUIRED] each. Fixed: (1) zz t over a run
+      whose clear was pending dropped it and never cleared (H3: awaiting qa outlived
+      the hold, pass re-ran QA); the loop start now clears with NO_WAIT and pends
+      on busy. (2) A REVIEW return written behind the TUI (pm edit) never got its
+      review loop: a finished loop in _review_loops blocked every pass; a finished
+      loop now yields to a waiting return. Both verified post-fix live (H2, E2). Full
+      suite 4060 passed rebased. Harness traps: host load hit ~1200 for 15 min (6.5
+      min pm-log stalls) — check /proc/loadavg before timing rounds; awk prints big
+      epochs as 1.79e+09 (use printf %.3f).'
+    created_at: '2026-10-27T03:12:35Z'
+    last_edited: '2026-10-27T03:12:35Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
