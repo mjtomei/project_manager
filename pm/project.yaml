@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T06:22:17.036547+00:00'
+  updated_at: '2026-10-27T06:43:19.537132+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36260,6 +36260,21 @@ prs:
       keeps a dead local (mode_label, pre-existing). (2026-10-27)'
     created_at: '2026-10-27T06:22:16Z'
     last_edited: '2026-10-27T06:22:16Z'
+  - id: note-fa427a0
+    text: 'Review 385e i3 (fix): a failed launch could still adopt a previous run''s
+      transcript for the same iteration — after the first attempt failed, rediscovery
+      read the shared dir''s older review-<pr>-i<N>.jsonl (a launch that dies before
+      the child writes the symlink leaves it in place) and recorded that run''s verdict,
+      e.g. PASS, for an iteration that never ran. ReviewLoopState.stale_session_id
+      now snapshots the symlink session id at episode start (breadcrumb-persisted);
+      discovery only adopts a symlink whose session differs, and _is_historical_session
+      treats the stale id as historical. Also: _reset_launch_retry clears _ui_notified_retry
+      so a later iteration''s retry is announced; _retry_rearm_blocked lost its unused
+      app arg. Tests: test_retry_never_adopts_a_previous_runs_transcript + notice-per-episode;
+      full suite 3831 passed (13 pre-existing env failures: missing markdown module
+      + hook receiver installer). (2026-10-27T06:55:00Z)'
+    created_at: '2026-10-27T06:43:19Z'
+    last_edited: '2026-10-27T06:43:19Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

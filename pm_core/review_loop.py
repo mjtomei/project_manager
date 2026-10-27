@@ -163,6 +163,12 @@ class ReviewLoopState:
     # may pre-retry rediscovery adopt a transcript/verdict it finds: before
     # that, any existing transcript belongs to an earlier loop run.
     iteration_attempted: bool = False
+    # Session id of the iteration's transcript symlink *before* this loop
+    # first attempted the iteration.  The transcript dir outlives a loop,
+    # so after a failed launch that symlink can still point at an earlier
+    # run's iteration N; adopting its verdict would fabricate one.  Only a
+    # session id different from this one can be this loop's own attempt.
+    stale_session_id: str = ""
 
 
 def _match_verdict(line: str) -> str | None:
@@ -436,6 +442,17 @@ def _verdict_output_if_present(transcript: str | None) -> str | None:
     return None
 
 
+def _transcript_session_id(transcript: str | None) -> str | None:
+    """Session id of an existing transcript symlink, or None."""
+    if not transcript or not os.path.lexists(transcript):
+        return None
+    try:
+        from pm_core.claude_launcher import session_id_from_transcript
+        return session_id_from_transcript(transcript)
+    except Exception:
+        return None
+
+
 @dataclass
 class AttemptDiscovery:
     """What rediscovery found for an iteration before (re)launching."""
@@ -490,6 +507,10 @@ def _is_historical_session(state: ReviewLoopState, transcript_dir: str,
         return False
     if getattr(state, "last_session_id", "") == session_id:
         return True
+    if getattr(state, "stale_session_id", "") == session_id:
+        # The symlink that was already there when this loop first attempted
+        # the iteration: an earlier run's session, never this attempt.
+        return True
     try:
         from pm_core.claude_launcher import session_id_from_transcript
         pattern = re.compile(
@@ -521,18 +542,20 @@ def _discover_iteration(state: ReviewLoopState, pr_data: dict,
     across loops (``manual-<token>`` lives for the whole TUI session), so
     an existing ``review-<pr>-i<N>.jsonl`` symlink may be a previous run's
     iteration N.  Adopting its verdict would fabricate a verdict for a
-    review that never ran.
+    review that never ran.  The same reasoning applies *after* a failed
+    attempt: the symlink is only this attempt's when its session id is not
+    the one that was already there when the episode started
+    (``state.stale_session_id``) — a launch that fails before the child
+    writes the symlink leaves the older one in place.
     """
     pr_id = state.pr_id
     workdir = pr_data.get("workdir")
     our_transcript = f"{transcript_dir}/review-{pr_id}-i{iteration}.jsonl"
     our_sid = None
-    try:
-        from pm_core.claude_launcher import session_id_from_transcript
-        if allow_recovery and os.path.lexists(our_transcript):
-            our_sid = session_id_from_transcript(our_transcript)
-    except Exception:
-        our_sid = None
+    if allow_recovery:
+        our_sid = _transcript_session_id(our_transcript)
+        if our_sid and our_sid == getattr(state, "stale_session_id", ""):
+            our_sid = None
     if our_sid:
         output = _verdict_output_if_present(our_transcript)
         if output:
@@ -887,6 +910,10 @@ def _reset_launch_retry(state: ReviewLoopState) -> None:
     state.last_launch_artifact = None
     state.launch_retryable = False
     state.retry_episodes = 0
+    # The TUI announces each retry attempt once, keyed on the attempt
+    # number; without this a *later* iteration's attempt 2 would look
+    # already-announced and be silently swallowed.
+    state._ui_notified_retry = 0
 
 
 def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
@@ -912,6 +939,10 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
         state.last_launch_artifact = None
         state.launch_retryable = False
         state.iteration_attempted = False
+        # Snapshot the transcript symlink *before* any attempt: if the
+        # launch fails before the child replaces it, rediscovery must not
+        # mistake an earlier run's iteration-N transcript for this attempt.
+        state.stale_session_id = _transcript_session_id(transcript) or ""
 
     # A merge-restart may land mid-backoff: honour the remaining delay.
     if state.next_retry_at > time.time():

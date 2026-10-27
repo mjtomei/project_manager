@@ -653,22 +653,53 @@ def test_fresh_loop_never_adopts_a_previous_runs_verdict(tmp_path, monkeypatch):
 
 def test_retry_adopts_a_verdict_that_landed_after_the_failure(tmp_path,
                                                               monkeypatch):
-    """After our own failed attempt, a recovered transcript IS adopted."""
+    """After our own failed attempt, a transcript IT created IS adopted."""
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
-    sid = str(uuid.uuid4())
-    _make_symlink(tmp_path, "review-pr-001-i1.jsonl", sid)
-    (tmp_path / f"{sid}.jsonl").write_text(json.dumps({
-        "type": "assistant",
-        "message": {"content": [{"type": "text", "text": "recovered\n\n**PASS**"}]},
-    }) + "\n")
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
+    sid = str(uuid.uuid4())
+    link = tmp_path / "review-pr-001-i1.jsonl"
     state = ReviewLoopState(pr_id=PR)
     err = ReviewLaunchError("boom", retryable=True)
-    with patch.object(review_loop, "_run_claude_review", side_effect=err) as run:
+
+    def fake_review(*_a, **_kw):
+        # The child wrote the transcript (Claude started) before the
+        # parent-side launch failed, then the recovery landed a verdict.
+        link.symlink_to(tmp_path / f"{sid}.jsonl")
+        (tmp_path / f"{sid}.jsonl").write_text(json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text",
+                                     "text": "recovered\n\n**PASS**"}]},
+        }) + "\n")
+        raise err
+
+    with patch.object(review_loop, "_run_claude_review",
+                      side_effect=fake_review) as run:
         result = _run(state, tmp_path)
     assert run.call_count == 1
     assert result.latest_verdict == VERDICT_PASS
     assert [h.iteration for h in result.history] == [1]
+
+
+def test_retry_never_adopts_a_previous_runs_transcript(tmp_path, monkeypatch):
+    """A launch that fails *before* the child writes its transcript leaves
+    the shared dir's older iteration-N symlink in place.  Its verdict is a
+    previous run's, so it must not be recorded as this iteration's — the
+    loop retries and then reports LAUNCH_FAILED, never a fabricated PASS."""
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
+    sid = str(uuid.uuid4())
+    _make_symlink(tmp_path, "review-pr-001-i1.jsonl", sid)
+    (tmp_path / f"{sid}.jsonl").write_text(json.dumps({
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "old\n\n**PASS**"}]},
+    }) + "\n")
+    state = ReviewLoopState(pr_id=PR)
+    err = ReviewLaunchError("container setup failed", retryable=True)
+    with patch.object(review_loop, "_run_claude_review", side_effect=err) as run:
+        result = _run(state, tmp_path)
+    assert run.call_count == 3, "no verdict may be adopted from the old run"
+    assert result.latest_verdict == VERDICT_LAUNCH_FAILED
+    assert result.history == []
 
 
 # ---------------------------------------------------------------------------
@@ -952,6 +983,36 @@ def test_retry_notice_is_only_for_a_real_retry(tmp_path):
     assert "attempt 2" in msg
     assert "container setup failed" in msg
     assert str(tmp_path / "a.log") in msg
+
+
+def test_retry_notice_is_announced_again_in_a_later_iteration(tmp_path):
+    """The notice is keyed on the attempt number; a successful iteration
+    must reset that key so the next iteration's attempt 2 is announced
+    rather than swallowed as already-notified."""
+    from pm_core.tui import review_loop_ui
+    app = MagicMock()
+    state = ReviewLoopState(pr_id=PR, running=True, iteration=1,
+                            launch_attempts=2, last_launch_error="first")
+    app._review_loops = {PR: state}
+    app._impl_poll_counter = 0
+    app._qa_loops = {}
+    app._data = {"prs": []}
+    app._watcher_manager.is_any_running.return_value = False
+    app._review_loop_timer = None
+    with patch.object(review_loop_ui, "_refresh_tech_tree"), \
+            patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
+            patch("pm_core.tui.qa_loop_ui.poll_qa_state"):
+        review_loop_ui._poll_loop_state_inner(app)
+        assert app.log_message.call_count == 1
+        # Iteration 1's launch eventually succeeded; iteration 2 then needs
+        # a retry at the same attempt number.
+        review_loop._reset_launch_retry(state)
+        state.iteration = 2
+        state.launch_attempts = 2
+        state.last_launch_error = "second"
+        review_loop_ui._poll_loop_state_inner(app)
+    assert app.log_message.call_count == 2
+    assert "second" in app.log_message.call_args[0][0]
 
 
 # ---------------------------------------------------------------------------

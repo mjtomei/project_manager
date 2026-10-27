@@ -221,6 +221,7 @@ def save_breadcrumb(app) -> None:
             "last_pane_id": rstate.last_pane_id,
             "last_session_id": rstate.last_session_id,
             "iteration_attempted": rstate.iteration_attempted,
+            "stale_session_id": rstate.stale_session_id,
             "history": [
                 {
                     "iteration": h.iteration,
@@ -331,6 +332,7 @@ async def consume_breadcrumb(app) -> None:
                 last_session_id=loop_data.get("last_session_id", "") or "",
                 iteration_attempted=bool(
                     loop_data.get("iteration_attempted", False)),
+                stale_session_id=loop_data.get("stale_session_id", "") or "",
             )
             for h in loop_data.get("history", []):
                 rstate.history.append(ReviewIteration(
@@ -927,7 +929,7 @@ def _retryable_launch_failure(loop) -> bool:
             and bool(getattr(loop, "launch_retryable", False)))
 
 
-def _retry_rearm_blocked(app, loop) -> bool:
+def _retry_rearm_blocked(loop) -> bool:
     """Whether a retryable failure must wait (cooldown) or stop (cap)."""
     episodes = int(getattr(loop, "retry_episodes", 0) or 0)
     if episodes >= MAX_REVIEW_LAUNCH_RETRY_EPISODES:
@@ -973,7 +975,7 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
             from pm_core import tmux as _tmux
             if not _tmux.in_tmux():
                 continue
-            if _retry_rearm_blocked(app, loop):
+            if _retry_rearm_blocked(loop):
                 # Still cooling down: keep a timer armed so the re-arm does
                 # not depend on an unrelated TUI event landing after the
                 # cooldown (the episode cap schedules nothing — it is final).

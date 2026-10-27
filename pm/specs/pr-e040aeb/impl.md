@@ -274,3 +274,35 @@ Findings from the second review pass, applied on top of iteration 1:
    `WorkspaceTrustBlocked` there surfaced as a terminal `ERROR` (no re-arm).
    It now converts to `ReviewHoldError` → `HOLD`, matching every other adopt
    path.
+
+## Review iteration 3 (385e) — refinements
+
+Findings from the third review pass, applied on top of iteration 2:
+
+1. **A failed launch must not adopt a previous run's transcript
+   (correctness fix).** Iteration 1 gated transcript recovery on
+   `allow_recovery`, but that flag turns on *after* this loop's first
+   attempt fails — and a launch that fails before the child writes the
+   symlink leaves the shared transcript dir's older
+   `review-<pr>-i<N>.jsonl` in place.  The retry then read that earlier
+   run's verdict (a `PASS`, for instance) and recorded it for an iteration
+   that never ran: exactly the fabricated verdict requirement 1 forbids.
+   `ReviewLoopState.stale_session_id` now snapshots the symlink's session
+   id when the iteration's episode starts (persisted in the breadcrumb);
+   `_discover_iteration` only treats the symlink as this attempt's when its
+   session id differs, and `_is_historical_session` treats the stale id as
+   historical so a live pane running it is replaced, not adopted.
+   `tests/test_review_launch_retry.py::test_retry_never_adopts_a_previous_runs_transcript`
+   covers it; `test_retry_adopts_a_verdict_that_landed_after_the_failure`
+   now models a transcript created *by* the failed attempt.
+2. **The retry notice is keyed per episode.** `_ui_notified_retry` was
+   only reset when a loop (re)started, so a later iteration's attempt 2
+   was swallowed as already-announced.  `_reset_launch_retry` (run after
+   every successful iteration) clears it.
+3. **Dead parameter removed.** `_retry_rearm_blocked(app, loop)` ignored
+   `app`; it is now `_retry_rearm_blocked(loop)`.
+
+Note (not changed): a child auth failure (`_looks_like_auth_failure`) is a
+non-retryable `LAUNCH_FAILED`, not `HOLD`.  `HOLD` stays reserved for a
+pane sitting at a workspace-trust/permission prompt (the launch succeeded);
+an auth-rejected child never launched a session.
