@@ -14491,7 +14491,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T06:50:45.474514+00:00'
+  updated_at: '2026-10-27T07:19:45.341547+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14633,6 +14633,41 @@ prs:
       design). (2026-10-27)'
     created_at: '2026-10-27T06:50:45Z'
     last_edited: '2026-10-27T06:50:45Z'
+  - id: note-6977072
+    text: 'Review-loop db89 i2 (2026-10-27): reviewed 6941c923 (unchanged since db89
+      i1). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact), and test_impl_and_qa_get_distinct_proxies fails
+      at 74462d76 (assert 1 == 3). Seven fixes applied, each with a test: (1) PushProxy.stop()
+      no longer unlinks a socket it never bound - start() sets _server_socket before
+      bind(), so a bind() failure left _sock_ino unset and _owns_socket_path() returned
+      True on the no-inode fallback, deleting another daemon socket; the instance
+      now records _bound after a successful bind (reproduced at 6941c923: the file
+      is gone after stop()). (2) stop_push_proxy shared path now goes through _stop_shared_proxy_socket(),
+      which takes the per-directory start lock (non-blocking) and re-checks _proxy_refs
+      before unlinking - a concurrent start that reused the socket between the last
+      ref being dropped and the kill could otherwise have it unlinked from under it
+      (S18 through the per-container path). Lock order unchanged (_start_lock then
+      _proxy_lock). (3) The legacy per-container stop gets the same guard and passes
+      lock_held=True; without it the _clear_lock_file LOCK_NB probe saw our own lock
+      and leaked a .lock on every legacy stop. (4) stop_session_proxies also derives
+      candidate sockets from the in-process registry, so a hashed socket dir whose
+      long-name symlink is missing (the {tag}-* glob cannot match the hash) no longer
+      survives teardown; it failed at 6941c923 with count 0. (5) A non-object JSON
+      request (e.g. ["origin"]) used to raise AttributeError and be dropped with no
+      response; now rejected explicitly. (6) Socket-file removal consolidated into
+      _unlink_socket_file() at all five unlink sites (module-level import shutil),
+      so the IsADirectoryError branch cannot be lost at a future call site. Tests:
+      tests/test_push_proxy.py 88 passed, tests/test_container.py passed (189 together).
+      Full suite: 3777 passed, 1 skipped, 13 failed - all pre-existing environment
+      (12 test_markdown_render missing markdown module + test_hook_events::test_installer_writes_standalone_receiver).
+      Residual, unchanged and out of scope: in-process refcounts only (cross-process
+      cleanup stays with #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request,
+      remains the cleaner long-term design); stop_all_proxies (no non-test callers)
+      still sweeps without the start-lock guard - if it gains a caller it should use
+      the same guard. (2026-10-27T07:19:37Z)'
+    created_at: '2026-10-27T07:19:45Z'
+    last_edited: '2026-10-27T07:19:45Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

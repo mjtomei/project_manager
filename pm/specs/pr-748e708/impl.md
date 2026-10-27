@@ -322,3 +322,62 @@ requirement changed):
   itself), which the start path already handled. A leftover of that shape
   would have raised `IsADirectoryError` out of `stop_push_proxy` /
   `stop_session_proxies` / `stop_all_proxies`; it is now removed instead.
+
+## Review iteration 5 refinements
+
+Added during the fifth review pass (consistent with R3/R6/R7/R8; no
+requirement changed):
+
+- **`stop()` cannot unlink a socket it never bound.** `PushProxy.start()`
+  sets `_server_socket` *before* `bind()`, so a `start()` that raised
+  (e.g. `EADDRINUSE`) left `_sock_ino` unset; `_owns_socket_path()` then
+  returned True on the "no inode recorded" fallback and `stop()` unlinked
+  whatever another daemon had bound at that path. The instance now records
+  `_bound` after a successful bind and `stop()` returns before the unlink
+  when it never bound (R3's "never unlink a socket you do not own").
+- **Per-container shared stops take the start lock too.** `stop_push_proxy`
+  unlinked the socket after dropping the last reference without holding
+  the per-directory start lock, so a concurrent `start_push_proxy` that
+  reused (and re-referenced) the socket in that window could have it
+  unlinked underneath it — the S18 failure through the per-container path
+  rather than the sweep. The kill now goes through
+  `_stop_shared_proxy_socket()`, which takes `_start_lock` (non-blocking)
+  and re-checks `_proxy_refs` before unlinking; a busy lock or a
+  re-appeared reference leaves the proxy for session teardown, exactly
+  like any other unreferenced proxy. Lock order is unchanged
+  (`_start_lock` → `_proxy_lock`, the same order `start_push_proxy` uses).
+  The legacy per-container stop gets the same guard (re-check
+  `_container_to_proxy_key`, which a concurrent start would repopulate)
+  and passes `lock_held=True` so the start-lock file is removed while it
+  holds the lock — otherwise `_clear_lock_file`'s `LOCK_NB` probe would
+  see our own lock and leak the file on every legacy stop.
+- **Session teardown also uses the in-process registry.** `stop_session_proxies`
+  killed only sockets matched by the `/tmp/pm-push-proxy-{tag}-*/push.sock`
+  glob. When a long session tag forces the hashed socket directory, the
+  glob reaches it only through the long-name symlink; if that symlink is
+  missing (creation failed, or it was removed), the proxy and its hashed
+  directory survived teardown. Candidate sockets now come from the glob
+  *and* from `_shared_sock_dir_path()` for this process's keys.
+- **A non-object request gets a reply.** Valid JSON that is not an object
+  (e.g. `["origin"]`) used to raise `AttributeError` inside the handler,
+  which `_serve_loop` swallowed: the connection was dropped with no
+  response and the container wrapper failed with a bare traceback. It is
+  now rejected explicitly (`request must be a JSON object`), matching
+  R4's other input validation.
+- **Socket-file removal is one helper.** The "`os.unlink`, but tolerate
+  the directory docker leaves behind" block was duplicated at four sites
+  (`PushProxy.start`, both `start_push_proxy` paths, `_kill_proxy_socket`),
+  and `PushProxy.stop()` unlinked the same path catching only
+  `FileNotFoundError`. It is now `_unlink_socket_file()` (module-level
+  `import shutil`) at all five sites, so a future call site cannot
+  silently lose the `IsADirectoryError` branch.
+
+Tests: `test_stop_does_not_unlink_a_socket_it_never_bound`,
+`test_shared_stop_kills_an_unreferenced_socket`,
+`test_shared_stop_skips_a_socket_re_referenced_mid_stop`,
+`test_shared_stop_skips_when_a_start_holds_the_lock`,
+`test_stop_session_finds_hashed_dir_without_long_symlink`,
+`test_legacy_stop_clears_its_start_lock`,
+`test_rejects_non_object_request`. The `never_bound` and `hashed_dir`
+tests fail at 6941c923 for the right reason (the socket is unlinked;
+`stop_session_proxies` returns 0).

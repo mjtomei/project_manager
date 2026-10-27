@@ -87,6 +87,21 @@ def _send_request(sock_path: str, request: dict) -> dict:
     return json.loads(data.decode())
 
 
+def _send_raw(sock_path: str, payload: bytes) -> dict:
+    """Helper: send raw bytes to the proxy and return the parsed response."""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(sock_path)
+    s.sendall(payload)
+    data = b""
+    while True:
+        chunk = s.recv(4096)
+        if not chunk:
+            break
+        data += chunk
+    s.close()
+    return json.loads(data.decode())
+
+
 class TestPushProxyBranchValidation:
     def test_rejects_wrong_branch(self, proxy, sock_path):
         resp = _send_request(sock_path, {"args": ["origin", "main"]})
@@ -306,19 +321,15 @@ class TestPushProxyProtocol:
         assert "must be a string" in resp["stderr"]
 
     def test_invalid_json(self, proxy, sock_path):
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.connect(sock_path)
-        s.sendall(b"not json\n")
-        data = b""
-        while True:
-            chunk = s.recv(4096)
-            if not chunk:
-                break
-            data += chunk
-        s.close()
-        resp = json.loads(data.decode())
+        resp = _send_raw(sock_path, b"not json\n")
         assert resp["exit_code"] == 1
         assert "invalid" in resp["stderr"]
+
+    def test_rejects_non_object_request(self, proxy, sock_path):
+        """Valid JSON that is not an object must get a reply, not a drop."""
+        resp = _send_raw(sock_path, b'["origin", "branch"]\n')
+        assert resp["exit_code"] == 1
+        assert "JSON object" in resp["stderr"]
 
     @patch("subprocess.run")
     def test_push_timeout(self, mock_run, proxy, sock_path):
@@ -383,6 +394,23 @@ class TestPushProxyLifecycle:
     def test_get_proxy_socket_path_nonexistent(self):
         assert get_proxy_socket_path("no-such-container") is None
 
+    def test_legacy_stop_clears_its_start_lock(self):
+        """Per-container stop holds the start lock; it must clear the file.
+
+        `_clear_lock_file` cannot unlink a lock this process holds through
+        another fd, so the stop path must pass ``lock_held=True`` or every
+        legacy stop leaks a ``.lock`` in /tmp.
+        """
+        cname = "legacy-lock-test"
+        sock = start_push_proxy(cname, "/w", "pm/pr-123")
+        sock_dir = os.path.dirname(sock)
+        assert os.path.exists(sock_dir + ".lock")
+
+        stop_push_proxy(cname)
+
+        assert not os.path.exists(sock_dir)
+        assert not os.path.exists(sock_dir + ".lock")
+
     def test_thread_exits_when_socket_removed(self, sock_path):
         """Proxy thread self-terminates when its socket file is deleted."""
         proxy = PushProxy(sock_path, "/w", "branch")
@@ -414,6 +442,15 @@ class TestPushProxyLifecycle:
         Path(sock_path).write_text("replacement")
         proxy.stop()
         assert Path(sock_path).read_text() == "replacement"
+
+    def test_stop_does_not_unlink_a_socket_it_never_bound(self, sock_path):
+        """start() that raised at bind() owns no socket and must not unlink."""
+        Path(sock_path).write_text("someone else's socket")
+        proxy = PushProxy(sock_path, "/w", "branch")
+        proxy._server_socket = MagicMock()  # created, then bind() raised
+        proxy._bound = False
+        proxy.stop()
+        assert Path(sock_path).read_text() == "someone else's socket"
 
     def test_socket_is_current_tracks_removal_and_replacement(self, sock_path):
         """Both the serve loop and the daemon wait loop use this check."""
@@ -950,6 +987,62 @@ class TestWorkdirKeyedProxies:
         # The directory is kept so a container bind-mount stays valid.
         assert os.path.isdir(sock_dir)
 
+    def _key_for(self, workdir):
+        return push_proxy_mod._shared_proxy_key(
+            self.TAG, self.PR, push_proxy_mod._workdir_token(str(workdir)))
+
+    def test_shared_stop_kills_an_unreferenced_socket(self, tmp_path,
+                                                      live_proxies):
+        """The guarded stop path still stops a proxy nothing references."""
+        impl = self._workdir(tmp_path, "impl")
+        sock = self._start("impl-wd", impl)
+        sock_dir = os.path.dirname(sock)
+        key = self._key_for(impl)
+        with push_proxy_mod._proxy_lock:
+            push_proxy_mod._proxy_refs.pop(key, None)
+
+        push_proxy_mod._stop_shared_proxy_socket(key, sock_dir, sock)
+
+        assert not push_proxy_mod.proxy_is_alive(sock)
+        assert os.path.isdir(sock_dir)  # R6: dir kept for the mount
+
+    def test_shared_stop_skips_a_socket_re_referenced_mid_stop(
+            self, tmp_path, live_proxies):
+        """A start that reused the socket during the stop must keep it alive.
+
+        The stopping container's reference is already gone when the kill
+        runs; a concurrent start can register a new container on the same
+        key in that window.  Unlinking then would leave the new container
+        with a dead socket (the S18 failure through another door).
+        """
+        impl = self._workdir(tmp_path, "impl")
+        sock = self._start("impl-wd", impl)
+        key = self._key_for(impl)
+        with push_proxy_mod._proxy_lock:
+            push_proxy_mod._proxy_refs.pop(key, None)
+            # Simulate the concurrent start re-registering a container.
+            push_proxy_mod._proxy_refs.setdefault(key, set()).add("late-wd")
+
+        push_proxy_mod._stop_shared_proxy_socket(
+            key, os.path.dirname(sock), sock)
+
+        assert push_proxy_mod.proxy_is_alive(sock)
+
+    def test_shared_stop_skips_when_a_start_holds_the_lock(
+            self, tmp_path, live_proxies):
+        """A start in flight owns the decision; teardown leaves it alone."""
+        impl = self._workdir(tmp_path, "impl")
+        sock = self._start("impl-wd", impl)
+        sock_dir = os.path.dirname(sock)
+        key = self._key_for(impl)
+        with push_proxy_mod._proxy_lock:
+            push_proxy_mod._proxy_refs.pop(key, None)
+
+        with push_proxy_mod._start_lock(sock_dir, blocking=False) as locked:
+            assert locked
+            push_proxy_mod._stop_shared_proxy_socket(key, sock_dir, sock)
+            assert push_proxy_mod.proxy_is_alive(sock)
+
     def test_refuses_live_proxy_with_different_workdir(
             self, tmp_path, monkeypatch, live_proxies):
         from pm_core.push_proxy import PushProxyConflict
@@ -1016,6 +1109,31 @@ class TestWorkdirKeyedProxies:
         assert os.path.isdir(sock_dir)  # kept for live container mounts
 
         stop_session_proxies(self.TAG)
+        assert not os.path.exists(sock_dir)
+
+    def test_stop_session_finds_hashed_dir_without_long_symlink(
+            self, tmp_path, live_proxies):
+        """Teardown must stop a proxy the ``{tag}-*`` glob cannot reach.
+
+        A long session tag forces the hashed socket directory plus a
+        long-named symlink for discovery.  If that symlink is missing the
+        glob matches nothing, but the in-process registry still knows the
+        socket and must stop it (otherwise it and its dir leak).
+        """
+        tag = "t" * 80
+        impl = self._workdir(tmp_path, "impl")
+        sock = self._start("impl-long", impl, tag=tag)
+        sock_dir = os.path.dirname(sock)
+        token = push_proxy_mod._workdir_token(str(impl))
+        long_dir = f"/tmp/{push_proxy_mod._SOCKET_DIR_PREFIX}{tag}-{self.PR}-{token}"
+        assert os.path.islink(long_dir)
+        assert sock_dir == push_proxy_mod._shared_sock_dir_path(
+            tag, self.PR, token)
+
+        os.unlink(long_dir)  # discovery symlink lost
+
+        assert stop_session_proxies(tag) >= 1
+        assert not push_proxy_mod.proxy_is_alive(sock)
         assert not os.path.exists(sock_dir)
 
     def test_sweep_refuses_to_delete_a_foreign_symlink_target(self, tmp_path):

@@ -35,6 +35,7 @@ import fcntl
 import hashlib
 import json
 import os
+import shutil
 import socket
 import subprocess
 import threading
@@ -166,6 +167,22 @@ def _read_metadata(sock_path: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _unlink_socket_file(path: str) -> None:
+    """Remove the socket file at *path*, tolerating what docker leaves behind.
+
+    Docker creates a *directory* where a bind-mounted socket file should be
+    (older pm versions mounted the socket itself), so a plain ``os.unlink``
+    would raise ``IsADirectoryError`` and abort the caller.  A missing path
+    is not an error.
+    """
+    try:
+        os.unlink(path)
+    except IsADirectoryError:
+        shutil.rmtree(path, ignore_errors=True)
+    except FileNotFoundError:
+        pass
+
+
 class PushProxy:
     """A single-client push proxy daemon for one container.
 
@@ -184,6 +201,9 @@ class PushProxy:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._sock_ino: int | None = None
+        # True only once bind() succeeded.  A start() that raised before
+        # that point owns no socket and must not unlink one on stop().
+        self._bound = False
 
     def start(self) -> bool:
         """Start the proxy in a background daemon thread.
@@ -203,16 +223,11 @@ class PushProxy:
             return False
 
         # Clean up stale socket (docker may have created a directory here)
-        try:
-            os.unlink(self.socket_path)
-        except IsADirectoryError:
-            import shutil
-            shutil.rmtree(self.socket_path, ignore_errors=True)
-        except FileNotFoundError:
-            pass
+        _unlink_socket_file(self.socket_path)
 
         self._server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._server_socket.bind(self.socket_path)
+        self._bound = True
         # Make socket world-writable so the container user can connect
         os.chmod(self.socket_path, 0o777)
         try:
@@ -280,14 +295,19 @@ class PushProxy:
                 pass
         if self._thread:
             self._thread.join(timeout=5)
+        if not self._bound:
+            # start() raised before binding (e.g. EADDRINUSE): we never
+            # owned the path, so leave whatever is there alone.
+            _log.info("Push proxy never bound; leaving %s in place",
+                      self.socket_path)
+            return
         if not self._owns_socket_path():
             _log.info("Push proxy socket replaced by another daemon; "
                       "leaving it in place: %s", self.socket_path)
             return
-        try:
-            os.unlink(self.socket_path)
-        except FileNotFoundError:
-            pass
+        # Same shapes as the other teardown paths (a directory left by
+        # docker at a bind-mounted socket path must not raise here).
+        _unlink_socket_file(self.socket_path)
         try:
             os.unlink(_metadata_path(self.socket_path))
         except FileNotFoundError:
@@ -343,6 +363,14 @@ class PushProxy:
         except (json.JSONDecodeError, UnicodeDecodeError):
             response = {"exit_code": 1, "stdout": "",
                         "stderr": "git-proxy: invalid request format\n"}
+            conn.sendall((json.dumps(response) + "\n").encode())
+            return
+
+        if not isinstance(request, dict):
+            # Valid JSON but not an object: answer explicitly instead of
+            # raising and dropping the connection with no response.
+            response = {"exit_code": 1, "stdout": "",
+                        "stderr": "git-proxy: request must be a JSON object\n"}
             conn.sendall((json.dumps(response) + "\n").encode())
             return
 
@@ -752,7 +780,6 @@ def _shared_sock_dir(session_tag: str, pr_id: str,
     except FileExistsError:
         # If it's a stale real directory, replace with symlink
         if os.path.isdir(long_dir) and not os.path.islink(long_dir):
-            import shutil
             shutil.rmtree(long_dir, ignore_errors=True)
             try:
                 os.symlink(short_dir, long_dir)
@@ -921,13 +948,7 @@ def start_push_proxy(container_name: str, workdir: str,
             # same directory*.  Docker creates a *directory* when
             # bind-mounting a non-existent socket path, so handle both
             # files and directories left over from old runs.
-            try:
-                os.unlink(sock_path)
-            except IsADirectoryError:
-                import shutil
-                shutil.rmtree(sock_path, ignore_errors=True)
-            except FileNotFoundError:
-                pass
+            _unlink_socket_file(sock_path)
 
             if not _start_proxy_subprocess(sock_path, workdir, allowed_branch):
                 raise PushProxyError(
@@ -951,14 +972,8 @@ def start_push_proxy(container_name: str, workdir: str,
     sock_path = os.path.join(sock_dir, "push.sock")
     with _start_lock(sock_dir):
         # Remove stale socket before spawning (see above for why we handle
-        # IsADirectoryError).
-        try:
-            os.unlink(sock_path)
-        except IsADirectoryError:
-            import shutil
-            shutil.rmtree(sock_path, ignore_errors=True)
-        except FileNotFoundError:
-            pass
+        # the directory-at-the-socket-path case).
+        _unlink_socket_file(sock_path)
 
         if not _start_proxy_subprocess(sock_path, workdir, allowed_branch):
             raise PushProxyError(
@@ -1014,15 +1029,9 @@ def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
             return
     except OSError:
         pass  # already gone — the unlinks below are no-ops
-    try:
-        os.unlink(sock_path)
-    except FileNotFoundError:
-        pass
-    except IsADirectoryError:
-        # Docker creates a *directory* at a bind-mounted socket path that
-        # did not exist (older pm versions mounted the socket file itself).
-        import shutil
-        shutil.rmtree(sock_path, ignore_errors=True)
+    # Docker creates a *directory* at a bind-mounted socket path that did
+    # not exist (older pm versions mounted the socket file itself).
+    _unlink_socket_file(sock_path)
     # Metadata describes the daemon we just stopped.
     try:
         os.unlink(os.path.join(real_dir, _METADATA_NAME))
@@ -1051,6 +1060,33 @@ def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
             pass
     else:
         _clear_lock_file(real_dir + ".lock")
+
+
+def _stop_shared_proxy_socket(key: str, sock_dir: str,
+                              sock_path: str) -> None:
+    """Unlink a shared proxy's socket once no container references it.
+
+    Runs under the per-directory start lock so a concurrent
+    :func:`start_push_proxy` that just reused (and re-referenced) this
+    socket cannot have it unlinked from under it — the same S18 failure
+    (a container left pointing at a dead socket) through a different
+    door.  When the lock is busy, or a reference reappeared, the socket
+    is left for session teardown, exactly like any other unreferenced
+    proxy.
+    """
+    if not os.path.isdir(sock_dir):
+        return  # nothing on disk left to stop
+    with _start_lock(sock_dir, blocking=False) as locked:
+        if not locked:
+            _log.info("Proxy start in flight; leaving socket for teardown: "
+                      "%s", sock_path)
+            return
+        with _proxy_lock:
+            if _proxy_refs.get(key):
+                _log.info("Proxy re-referenced during stop; leaving it: %s",
+                          sock_path)
+                return
+        _kill_proxy_socket(sock_path, remove_dir=False)
 
 
 def stop_push_proxy(container_name: str) -> None:
@@ -1087,14 +1123,27 @@ def stop_push_proxy(container_name: str) -> None:
         stag, pid, token = parts
         sock_dir = _shared_sock_dir_path(stag, pid, token)
         sock_path = os.path.join(sock_dir, "push.sock")
-        _kill_proxy_socket(sock_path, remove_dir=False)
+        _stop_shared_proxy_socket(key, sock_dir, sock_path)
     else:
         # Legacy key = container_name
         import tempfile
-        sock_path = os.path.join(tempfile.gettempdir(),
-                                 f"{_SOCKET_DIR_PREFIX}{key}",
-                                 "push.sock")
-        _kill_proxy_socket(sock_path, remove_dir=True)
+        sock_dir = os.path.join(tempfile.gettempdir(),
+                                 f"{_SOCKET_DIR_PREFIX}{key}")
+        sock_path = os.path.join(sock_dir, "push.sock")
+        if not os.path.isdir(sock_dir):
+            return  # nothing on disk left to stop
+        # Same guard as the shared path: a concurrent start of this
+        # container's proxy owns the socket until it releases the lock.
+        with _start_lock(sock_dir, blocking=False) as locked:
+            if not locked:
+                return
+            with _proxy_lock:
+                if container_name in _container_to_proxy_key:
+                    return  # re-registered by a concurrent start
+            # lock_held=True: we own this directory's start lock, so the
+            # lock file must be unlinked here (the LOCK_NB probe in
+            # _clear_lock_file would see our own lock and skip it).
+            _kill_proxy_socket(sock_path, remove_dir=True, lock_held=True)
 
 
 def _is_proxy_dir(path: str, parent: str) -> bool:
@@ -1121,7 +1170,6 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
     socket a container still bind-mounts.
     """
     import glob as _glob
-    import shutil
     parent = os.path.dirname(glob_pattern)
     for path in _glob.glob(glob_pattern):
         if path.endswith(".lock"):
@@ -1197,11 +1245,25 @@ def stop_session_proxies(session_tag: str) -> int:
             for cname in _proxy_refs.pop(k, set()):
                 _container_to_proxy_key.pop(cname, None)
 
+    # Candidate sockets: the on-disk glob (works after a restart, when the
+    # registry is empty) plus paths derived from this process's keys (works
+    # even when the long-name symlink is missing — the hashed directory does
+    # not match the ``{tag}-*`` glob, so a lost symlink would otherwise leak
+    # a live proxy past teardown).
+    socks = set(_glob.glob(
+        f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-*/push.sock"))
+    for k in keys_to_remove:
+        parts = k.split("\0")
+        if len(parts) == 3:
+            socks.add(os.path.join(_shared_sock_dir_path(*parts), "push.sock"))
+
     # Kill sockets matching the session tag.  Skip a directory whose start
     # lock is held: a container is creating that proxy right now, and the
     # dir sweep below will leave it for the next teardown.
     count = 0
-    for sock in _glob.glob(f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-*/push.sock"):
+    for sock in sorted(socks):
+        if not os.path.isdir(os.path.dirname(sock)):
+            continue  # nothing on disk (registry entry already swept)
         with _start_lock(os.path.dirname(sock), blocking=False) as locked:
             if not locked:
                 _log.info("Session proxy start in flight; not stopping: %s",
