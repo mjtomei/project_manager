@@ -157,6 +157,13 @@ class PushProxy:
                 os.unlink(self.socket_path)
             except FileNotFoundError:
                 pass
+            except IsADirectoryError:
+                # Docker creates a directory when bind-mounting a socket path
+                # that does not exist yet.  start_push_proxy anticipates this;
+                # a repair of an existing allocation's socket does not, and
+                # would otherwise die here on every retry.
+                import shutil
+                shutil.rmtree(self.socket_path, ignore_errors=True)
 
             self._server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self._server_socket.bind(self.socket_path)
@@ -607,9 +614,19 @@ def _start_proxy_subprocess(sock_path: str, workdir: str,
     # A failed launch must not leave a detached child that can publish its
     # socket after container/proxy cleanup has already finished.
     try:
-        for _ in range(30):
+        # Bound by a real deadline: each probe can block for its 2 s connect
+        # timeout, so a fixed iteration count would hold the caller's proxy
+        # lock for far longer than the 3 s this reports.  A child that already
+        # exited cannot publish anything, so fail immediately with its status.
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
             if os.path.exists(sock_path) and proxy_is_alive(sock_path):
                 break
+            if proc.poll() is not None:
+                from pm_core.container import ContainerError
+                raise ContainerError(
+                    f"Push proxy subprocess (pid={proc.pid}) exited "
+                    f"(rc={proc.returncode}) before publishing {sock_path}")
             time.sleep(0.1)
         else:
             from pm_core.container import ContainerError
@@ -1127,17 +1144,24 @@ def defer_unshared_release(proxy, name: str = "") -> Path:
             # timeout or malformed inspection would bypass their retry path.
             raise cm.ContainerError(
                 f"Cannot record proxy ownership for '{name}': {exc}") from exc
-    path.parent.mkdir(parents=True, exist_ok=True)
     import tempfile
-    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".release-")
     try:
-        with os.fdopen(fd, "w") as stream:
-            json.dump({"proxy": proxy, "runtime_domain": domain,
-                       "session_tag": labels.get("pm.session_tag"),
-                       "pr_id": labels.get("pm.pr_id")}, stream)
-        os.replace(temporary, path)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".release-")
+        try:
+            with os.fdopen(fd, "w") as stream:
+                json.dump({"proxy": proxy, "runtime_domain": domain,
+                           "session_tag": labels.get("pm.session_tag"),
+                           "pr_id": labels.get("pm.pr_id")}, stream)
+            os.replace(temporary, path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+    except OSError as exc:
+        # The record must exist before the container is deleted; a full or
+        # unwritable state dir defers removal (preserving the allocation for a
+        # retry) and must not escape as a raw OSError.
+        raise cm.ContainerError(
+            f"Cannot record unshared proxy release: {exc}") from exc
     return path
 
 
@@ -1152,9 +1176,26 @@ def retry_unshared_releases(scope, failures: dict[str, str]) -> list[str]:
         key = f"unshared {record.stem}"
         try:
             data = json.loads(record.read_text())
+        except (OSError, ValueError) as exc:
+            # A record we cannot parse names no allocation we could release.
+            # Reporting it as a retryable failure would leave `pm container
+            # reap` failing on every pass with no way to clear it.
+            _log.warning("ignoring unreadable push-proxy release record %s: %s",
+                         record, exc)
+            continue
+        proxy = data.get("proxy") if isinstance(data, dict) else None
+        if not (isinstance(proxy, (list, tuple)) and len(proxy) == 4):
+            _log.warning("ignoring malformed push-proxy release record %s", record)
+            continue
+        original, path, identity, current = proxy
+        if not (isinstance(original, str) and isinstance(path, str)
+                and isinstance(current, str)
+                and isinstance(identity, (list, tuple)) and len(identity) == 3):
+            _log.warning("ignoring malformed push-proxy release record %s", record)
+            continue
+        try:
             if data.get("runtime_domain") != domain:
                 continue
-            original, path, identity, current = data["proxy"]
             parsed = cm.parse_container_name(original)
             if scope.names is not None and not {original, current} & scope.names:
                 continue
@@ -1199,14 +1240,21 @@ def unshared_proxy_in_use(path: str) -> bool:
     from pm_core import container as cm
     # Do not filter by source volume: Podman 3.x only promises volume names
     # and mount destinations, which can omit bind-mounted users of this path.
-    listing = cm._run_runtime("ps", "-aq", check=False, timeout=30)
-    if listing.returncode != 0:
-        raise cm.ContainerError("Cannot inventory mounted push proxy users")
-    ids = listing.stdout.split()
-    if not ids:
-        return False
-    inspected = cm._run_runtime("inspect", "--format", "{{json .Mounts}}", *ids,
-                                check=False, timeout=60)
+    try:
+        listing = cm._run_runtime("ps", "-aq", check=False, timeout=30)
+        if listing.returncode != 0:
+            raise cm.ContainerError("Cannot inventory mounted push proxy users")
+        ids = listing.stdout.split()
+        if not ids:
+            return False
+        inspected = cm._run_runtime("inspect", "--format", "{{json .Mounts}}",
+                                    *ids, check=False, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        # Removal callers expect ContainerError from a failed cleanup and retry
+        # it; a raw probe timeout would escape after the container was already
+        # removed and be reported as an unrelated failure.
+        raise cm.ContainerError(
+            f"Cannot inventory mounted push proxy users: {exc}") from exc
     rows = inspected.stdout.splitlines()
     if inspected.returncode != 0 or len(rows) != len(ids):
         raise cm.ContainerError("Cannot inspect mounted push proxy users")

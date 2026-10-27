@@ -214,7 +214,12 @@ operations do not take PM's launch lock.
   before publishing their ready socket, so an immediate stop cannot bypass cleanup.
   A readiness timeout or interrupted startup terminates and reaps the spawned
   child before returning failure; a delayed daemon cannot publish an orphan
-  socket after allocation cleanup. Removal captures a managed allocation's actual
+  socket after allocation cleanup. The readiness window is a real deadline
+  (each probe can block for its connect timeout, so a fixed iteration count
+  would hold the caller's proxy lock far longer than it reports), a child
+  that already exited fails immediately with its status, and binding clears a
+  directory left at the socket path by a bind mount.
+  Removal captures a managed allocation's actual
   unshared proxy mount and socket generation before deleting it, so runtime renames
   do not strand the original proxy or let delayed cleanup unlink a replacement.
   For renamed allocations, cleanup also takes the original name's launch lock
@@ -232,6 +237,10 @@ operations do not take PM's launch lock.
   uses the same surviving-user check. Captured unshared socket releases are
   durable and runtime-domain/socket-generation bound, so failed or deferred cleanup
   remains retryable after the container disappears without touching a replacement.
+  An unreadable or malformed captured release record names no allocation that
+  could be released: it is logged and skipped rather than reported as a
+  retryable failure that no pass could ever clear, and a failure to write the
+  record defers removal with a classified error.
   Unshared proxy directories carry runtime-domain ownership too; another runtime
   cannot start, repair, or unlink their sockets based on its own empty inventory.
   Existing unreadable or malformed proxy owner records fail closed rather than

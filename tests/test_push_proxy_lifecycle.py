@@ -182,3 +182,93 @@ def test_kill_proxy_socket_removes_a_directory_at_the_socket_path(tmp_path):
 
     assert not sock.exists()
     assert not sock_dir.exists()
+
+
+def test_start_clears_a_directory_at_the_socket_path(tmp_path):
+    """A repair must clear the Docker bind-mount directory before binding.
+
+    start_push_proxy pre-cleans the path, but repairing an existing
+    allocation's socket goes straight to PushProxy.start(); without the same
+    guard the child dies with IsADirectoryError on every retry and the
+    container can never get a working proxy.
+    """
+    path = tmp_path / "push.sock"
+    path.mkdir()
+    (path / "junk").write_text("x")
+
+    proxy = push_proxy.PushProxy(str(path), str(tmp_path), "branch")
+    proxy.start()
+    try:
+        assert push_proxy.proxy_is_alive(str(path))
+        assert path.is_socket()
+    finally:
+        proxy.stop()
+
+
+def test_failed_daemon_start_fails_fast(monkeypatch, tmp_path):
+    """A child that already exited cannot publish; do not wait out the window."""
+    from pm_core.container import ContainerError
+
+    class Exited:
+        pid = 123
+        returncode = 2
+
+        def poll(self):
+            return 2
+
+        def terminate(self):  # pragma: no cover - must not be needed
+            raise AssertionError("an exited child must not be terminated")
+
+        def wait(self, timeout=None):
+            return 2
+
+    monkeypatch.setattr(push_proxy.subprocess, "Popen", lambda *a, **k: Exited())
+    started = time.monotonic()
+    with pytest.raises(ContainerError, match="exited"):
+        push_proxy._start_proxy_subprocess(str(tmp_path / "push.sock"),
+                                           str(tmp_path), "branch")
+    assert time.monotonic() - started < 2.0
+
+
+def test_unshared_proxy_in_use_classifies_probe_failures(monkeypatch):
+    """A probe timeout is a retryable cleanup failure, not a raw exception."""
+    from pm_core import container as cm
+    from pm_core.container import ContainerError
+
+    def timed_out(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args, kwargs.get("timeout"))
+
+    monkeypatch.setattr(cm, "_run_runtime", timed_out)
+    with pytest.raises(ContainerError) as err:
+        push_proxy.unshared_proxy_in_use("/tmp/pm-push-proxy-x/push.sock")
+    assert isinstance(err.value.__cause__, subprocess.TimeoutExpired)
+
+
+def test_release_record_failure_is_a_container_error(monkeypatch, tmp_path):
+    """An unwritable state dir defers removal with a classified error."""
+    from pm_core import container as cm
+    from pm_core.container import ContainerError
+
+    blocker = tmp_path / "state"
+    blocker.write_text("not a directory")
+    monkeypatch.setattr(cm, "container_state_dir", lambda: blocker)
+
+    proxy = ("pm-x", "/tmp/pm-push-proxy-pm-x/push.sock", (1, 2, 3), "pm-x")
+    with pytest.raises(ContainerError, match="Cannot record unshared proxy release"):
+        push_proxy.defer_unshared_release(proxy)
+
+
+def test_malformed_release_record_is_ignored_not_wedged(monkeypatch, tmp_path):
+    """A corrupt release record must not make every reap fail forever."""
+    from pm_core import container as cm, container_reaper
+
+    releases = tmp_path / "proxy-releases"
+    releases.mkdir()
+    (releases / "unreadable.json").write_text("{not json")
+    (releases / "shape.json").write_text('{"proxy": ["only", "three"]}')
+    monkeypatch.setattr(cm, "container_state_dir", lambda: tmp_path)
+
+    failures: dict[str, str] = {}
+    assert push_proxy.retry_unshared_releases(
+        container_reaper.Scope(), failures) == []
+    assert failures == {}
