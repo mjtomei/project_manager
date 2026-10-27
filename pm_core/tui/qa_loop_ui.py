@@ -18,6 +18,7 @@ from pm_core.qa_loop import (
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
+    VERDICT_STOPPED,
     start_qa_background,
     _compute_qa_window_name,
     planner_code_changes_suffix,
@@ -538,6 +539,8 @@ def _on_qa_complete(app, state: QALoopState) -> None:
       - NEEDS_WORK / changes: reset pass_count, transition to in_review,
         and directly start a review loop (independent of auto-start).
       - INPUT_REQUIRED: pause self-driving loop for human input.
+      - STOPPED: a user stop before any plan existed — clean teardown,
+        no lifecycle transition and no QA note.
 
     Legacy mode (plain t or auto-start):
       - PASS: hand off to the sign-off step when auto-start is enabled
@@ -642,6 +645,12 @@ def _on_qa_complete(app, state: QALoopState) -> None:
         )
         if sd:
             _log.info("QA self-driving: INPUT_REQUIRED — loop paused")
+    elif verdict == VERDICT_STOPPED:
+        # The user stopped the run before it had a plan.  This is a clean
+        # teardown, not a QA result: no lifecycle transition, no
+        # INPUT_REQUIRED surface, and no QA note on the PR.
+        app.log_message(f"QA stopped for {pr_id} — no verdict recorded")
+        return
     else:
         app.log_message(f"QA finished for {pr_id}: {verdict}")
 

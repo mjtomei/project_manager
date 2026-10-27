@@ -16,6 +16,7 @@ from pm_core.qa_loop import (
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
+    VERDICT_STOPPED,
     ALL_VERDICTS,
     _scenario_window_name,
     _cleanup_stale_scenario_windows,
@@ -687,6 +688,31 @@ class TestOnQAComplete:
         data = store.load(app._root)
         pr = store.get_pr(data, "pr-001")
         assert pr["status"] == "qa"
+
+    def test_stopped_during_planning_is_clean_teardown(self, tmp_path):
+        """STOPPED reports a plain stop: no note, no INPUT_REQUIRED surface."""
+        from pm_core.tui.qa_loop_ui import _on_qa_complete
+        from pm_core import store
+
+        app = self._make_app(tmp_path)
+        state = QALoopState(pr_id="pr-001")
+        state.latest_verdict = VERDICT_STOPPED
+        state.latest_output = "QA stopped during planning"
+
+        with patch("pm_core.tui.qa_loop_ui._record_qa_note") as mock_note, \
+             patch("pm_core.tui.qa_loop_ui._trigger_signoff") as mock_signoff:
+            _on_qa_complete(app, state)
+
+        mock_note.assert_not_called()
+        mock_signoff.assert_not_called()
+        msgs = [c.args[0] for c in app.log_message.call_args_list]
+        assert any("QA stopped for pr-001" in m for m in msgs)
+        assert not any("INPUT_REQUIRED" in m for m in msgs)
+        # The PR is left untouched (still qa, no note recorded).
+        data = store.load(app._root)
+        pr = store.get_pr(data, "pr-001")
+        assert pr["status"] == "qa"
+        assert not pr.get("notes")
 
     def test_no_restart_when_auto_start_disabled(self, tmp_path):
         """With auto-start off, NEEDS_WORK should not call check_and_start."""
@@ -2129,3 +2155,73 @@ class TestStoppedRunAggregation:
                            QAScenario(index=4, title="B", focus="b")]
         state.scenario_verdicts = {3: VERDICT_PASS, 4: VERDICT_PASS}
         assert self._finalize(state, tmp_path) == VERDICT_PASS
+
+
+class TestPlannerStopTeardown:
+    """A stop while the planner is still working is a clean teardown.
+
+    Nothing was planned, so there is no incomplete coverage and no missing
+    plan to report: the run must end in STOPPED, not surface INPUT_REQUIRED
+    with "Planner produced no parseable scenarios".
+    """
+
+    def _run(self, tmp_path):
+        from pm_core import qa_loop
+
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        qa_workdir = tmp_path / "qa"
+        qa_workdir.mkdir()
+        pr = {"id": "pr-001", "title": "t", "branch": "",
+              "status": "qa", "workdir": str(workdir)}
+        data = {"project": {"name": "p"}, "prs": [pr]}
+        state = QALoopState(pr_id="pr-001")
+        state.qa_workdir = str(qa_workdir)
+        # The user stopped the run before the planner's first idle turn.
+        state.stop_requested = True
+        resolution = MagicMock(model=None, provider=None, effort=None)
+        updates = []
+        with patch("pm_core.qa_loop.get_pm_session", return_value="pm-test"), \
+             patch("pm_core.store.load", return_value=data), \
+             patch("pm_core.qa_loop._resolve_qa_model",
+                   return_value=resolution), \
+             patch("pm_core.qa_loop._next_scenario_offset", return_value=0), \
+             patch("pm_core.qa_loop._launch_scenario_0", return_value=None), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._cleanup_stale_scenario_windows"), \
+             patch("pm_core.container.is_container_mode_enabled",
+                   return_value=False), \
+             patch("pm_core.prompt_gen.generate_qa_planner_prompt",
+                   return_value="prompt"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="planner-cmd"), \
+             patch("pm_core.tmux.find_window_by_name", return_value=None), \
+             patch("pm_core.tmux.new_window"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.find_claude_pane", return_value="%9"), \
+             patch("pm_core.qa_loop._register_qa_planner"), \
+             patch("pm_core.claude_launcher.transcript_path_for",
+                   return_value=tmp_path / "t.jsonl"), \
+             patch("pm_core.claude_launcher.WorkspacePromptWatch"), \
+             patch("pm_core.tmux.pane_exists", return_value=True):
+            qa_loop.run_qa_sync(state, tmp_path / "pm", pr,
+                                on_update=updates.append)
+        return state, updates
+
+    def test_stop_during_planning_ends_stopped(self, tmp_path):
+        state, updates = self._run(tmp_path)
+
+        assert state.latest_verdict == VERDICT_STOPPED
+        assert state._error == ""
+        assert state.latest_output == "QA stopped during planning"
+        assert state.running is False
+        assert updates and updates[-1].latest_output == \
+            "QA stopped during planning"
+
+    def test_stop_during_planning_does_not_surface_input_required(
+            self, tmp_path):
+        state, _ = self._run(tmp_path)
+
+        assert state.latest_verdict != VERDICT_INPUT_REQUIRED
+        assert "no parseable scenarios" not in state.latest_output.lower()
+        assert state.latest_verdict not in ALL_VERDICTS

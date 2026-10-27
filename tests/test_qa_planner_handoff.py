@@ -125,7 +125,8 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
                   transcript_turns: list[tuple[str, str]] | None,
                   idle_events: int = 1, grace: float | None = 0,
                   extra_patches: tuple = (),
-                  settle_transcript_turns: list[tuple[str, str]] | None = None):
+                  settle_transcript_turns: list[tuple[str, str]] | None = None,
+                  end_with_stop: bool = False):
     """Drive run_qa_sync's planning phase with a fake tmux + hook layer.
 
     Returns the final state.  The PR has no QA spec, so when a plan is
@@ -133,6 +134,12 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
     before any scenario launch — leaving ``state.scenarios`` as the
     accepted plan.  When no plan is accepted the spec gate is skipped and
     the harness stops at the first Phase 2 tmux call.
+
+    Once the scripted idle events run out the poll loop is ended by its
+    planner deadline (a fake qa_loop-local clock), i.e. the way a planner
+    that never produces a plan really ends.  ``end_with_stop=True`` ends it
+    with ``stop_requested`` instead, for tests that need the teardown path
+    (which skips the final gated read) rather than a timeout.
 
     *settle_transcript_turns*, when given, is written to the planner's
     transcript during the recovery settle wait (the "the plan landed just
@@ -173,8 +180,30 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
                               settle_writes["pending"])
             settle_writes["pending"] = None
             return None
-        state.stop_requested = True
+        if end_with_stop:
+            state.stop_requested = True
         return None
+
+    class _FakeClock:
+        """qa_loop-local clock: each monotonic() call advances one second.
+
+        Replacing ``pm_core.qa_loop.time`` (not the stdlib module) lets the
+        planner deadline pass after the scripted idle events without a
+        stop, while the recovery layer keeps real time.
+        """
+
+        def __init__(self):
+            self.now = 1000.0
+
+        def monotonic(self):
+            self.now += 1.0
+            return self.now
+
+        def time(self):
+            return 1_700_000_000.0
+
+        def sleep(self, _secs):
+            pass
 
     class _StopHarness(Exception):
         pass
@@ -204,7 +233,9 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
         patch("pm_core.hook_events.wait_for_event",
               side_effect=fake_wait_for_event),
         patch("pm_core.tmux.new_window_get_pane", side_effect=_StopHarness),
-        patch("pm_core.qa_loop.time.sleep"),
+        patch("pm_core.tmux.send_keys"),
+        patch("pm_core.qa_loop.time", _FakeClock()),
+        patch.object(qa_loop, "_PLANNER_TIMEOUT", 3.0),
         *extra_patches,
     ]
     with ExitStack() as stack:
@@ -288,14 +319,19 @@ class TestPlannerReadsTranscript:
 
     def test_stale_turn_not_reparsed_without_fresh_idle(
             self, tmp_path, monkeypatch):
-        """Freshness: without an idle_prompt event nothing is read."""
+        """Freshness: without an idle_prompt event nothing is read.
+
+        The run is ended by a stop so the timeout's final gated read (which
+        deliberately does re-read a completed transcript) does not apply:
+        this test is about the *poll* read being event-gated.
+        """
         with patch("pm_core.qa_loop.read_latest_assistant_text"
                    ) as read_text:
             state = _run_planning(
                 tmp_path, monkeypatch, pane_content=PANE_TAIL_ONLY,
                 transcript_turns=[("user", TEMPLATE_PROMPT),
                                   ("assistant", FULL_PLAN)],
-                idle_events=0)
+                idle_events=0, end_with_stop=True)
         read_text.assert_not_called()
         assert state.scenarios == []
 

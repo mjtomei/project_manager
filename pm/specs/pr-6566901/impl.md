@@ -339,6 +339,14 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   accepts the plan. A stop request is honoured before `check_response`, so
   teardown never surfaces a spurious
   exhaustion. Keep `_PLANNER_TIMEOUT` as the outer deadline.
+  A stop before any plan was accepted ends the run in the terminal
+  `STOPPED` state (`latest_output = "QA stopped during planning"`): the
+  no-scenarios path would otherwise report `INPUT_REQUIRED` with "Planner
+  produced no parseable scenarios" and record a QA note, turning a user
+  stop into a missing-plan failure. `qa_loop_ui` logs `QA stopped for <pr>
+  — no verdict recorded` and skips both the lifecycle transition and the
+  QA note for it. `STOPPED` is not in `ALL_VERDICTS`: nothing about the PR
+  was determined, so it must never parse as a result.
 
 ### Settings (all optional, defaulted)
 

@@ -61,6 +61,10 @@ _log = configure_logger("pm.qa_loop")
 VERDICT_PASS = "PASS"
 VERDICT_NEEDS_WORK = "NEEDS_WORK"
 VERDICT_INPUT_REQUIRED = "INPUT_REQUIRED"
+# Terminal state for a run the user stopped before any plan existed.  It is
+# deliberately not in ALL_VERDICTS: nothing is reported about the PR (no
+# incomplete coverage, no missing plan), so it must never parse as a result.
+VERDICT_STOPPED = "STOPPED"
 
 ALL_VERDICTS = (VERDICT_PASS, VERDICT_NEEDS_WORK, VERDICT_INPUT_REQUIRED)
 _QA_KEYWORDS = ("INPUT_REQUIRED", "NEEDS_WORK", "PASS")
@@ -4389,6 +4393,22 @@ def run_qa_sync(
         if plan_found:
             _log.info("QA plan parsed: %d scenario(s) for %s",
                       len(state.scenarios), state.pr_id)
+
+        if state.stop_requested and not state.scenarios:
+            # The user stopped the run while the planner was still working:
+            # nothing was planned, so there is no incomplete coverage and no
+            # missing plan to surface.  End in a terminal "stopped" state
+            # instead of falling into the no-scenarios path below, which
+            # would report INPUT_REQUIRED (and record a QA note) as if the
+            # planner had failed.  A stop must be a clean teardown.
+            _log.info("QA planning stopped for %s — no scenarios planned",
+                      state.pr_id)
+            state.latest_verdict = VERDICT_STOPPED
+            state.latest_output = "QA stopped during planning"
+            state.planning_phase = False
+            _notify()
+            state.running = False
+            return state
 
         if not state.scenarios:
             _log.warning("Planner produced no scenarios for %s", state.pr_id)
