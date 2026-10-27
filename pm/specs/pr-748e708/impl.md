@@ -812,3 +812,26 @@ Tests: `test_kill_proxy_socket_reports_an_unremovable_socket`,
 286b0e5a for the right reason (a bare `PermissionError` escapes
 `_kill_proxy_socket`, `stop_session_proxies` and `start_push_proxy`).
 `tests/test_push_proxy.py` + `tests/test_container.py`: 227 passed.
+
+## Review iteration 16 refinements
+
+Sixteenth review pass (consistent with R6/R7; no requirement changed).  The
+two remaining teardown paths that take the per-directory start lock did so
+on a path that could be a symlink planted in world-writable `/tmp`:
+
+- **A planted symlink at a derived socket-dir name is no longer followed.**
+  `_stop_shared_proxy_socket` (the per-container shared stop) and the
+  legacy per-container `stop_push_proxy` branch called
+  `_start_lock(sock_dir, blocking=False)` directly.  Neither socket-dir
+  path is ever legitimately a symlink (`_shared_sock_dir_path` returns the
+  real readable dir or the hashed dir), so a symlink planted there made
+  `_start_lock` resolve it and create/lock ``<target>.lock`` next to an
+  arbitrary directory the planter can write.  Both paths now run
+  `_drop_foreign_discovery_link(sock_dir)` first — the same guard
+  `_stop_socket_under_lock` already applies — unlinking the link (never
+  its target) and leaving the directory to the sweep.
+
+Tests: `test_shared_stop_does_not_follow_a_planted_symlinked_dir` and
+`test_legacy_stop_does_not_follow_a_planted_symlinked_dir` both fail at
+61389980 for the right reason (`<victim>.lock` is created through the
+planted symlink) and pass at HEAD.

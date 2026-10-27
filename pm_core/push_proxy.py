@@ -1474,6 +1474,14 @@ def _stop_shared_proxy_socket(key: str, sock_dir: str,
     is left for session teardown, exactly like any other unreferenced
     proxy.
     """
+    # A socket directory derived from the key is never legitimately a
+    # symlink, so one planted at its name in world-writable /tmp must not be
+    # followed: _start_lock would resolve it and create/lock ``<target>.lock``
+    # at a path another user chose.  Unlink the link (never its target) and
+    # leave the directory to the sweep.  The same guard _stop_socket_under_lock
+    # applies before taking the lock.
+    if _drop_foreign_discovery_link(sock_dir):
+        return
     if not os.path.isdir(sock_dir):
         return  # nothing on disk left to stop
     with _start_lock(sock_dir, blocking=False) as locked:
@@ -1529,6 +1537,13 @@ def stop_push_proxy(container_name: str) -> None:
         sock_dir = os.path.join(tempfile.gettempdir(),
                                  f"{_SOCKET_DIR_PREFIX}{key}")
         sock_path = os.path.join(sock_dir, "push.sock")
+        # A per-container socket directory is never legitimately a symlink,
+        # so one planted at its name in world-writable /tmp must not be
+        # followed: _start_lock would resolve it and create/lock
+        # ``<target>.lock`` at a path another user chose.  Unlink the link
+        # (never its target); the directory sweep handles the rest.
+        if _drop_foreign_discovery_link(sock_dir):
+            return
         if not os.path.isdir(sock_dir):
             return  # nothing on disk left to stop
         # Same guard as the shared path: a concurrent start of this

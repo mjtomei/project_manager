@@ -450,6 +450,33 @@ class TestPushProxyLifecycle:
         assert not os.path.exists(sock_dir)
         assert not os.path.exists(sock_dir + ".lock")
 
+    def test_legacy_stop_does_not_follow_a_planted_symlinked_dir(
+            self, tmp_path):
+        """A symlink at a per-container socket dir must not be followed.
+
+        ``_start_lock`` resolves the directory, so following a symlink
+        planted in world-writable ``/tmp`` would create and lock
+        ``<target>.lock`` at a path another user chose.  The link is
+        unlinked; its target is never touched.
+        """
+        victim = tmp_path / "victim"
+        victim.mkdir()
+        cname = "legacy-symlink-test"
+        sock_dir = os.path.join(tempfile.gettempdir(),
+                                f"{push_proxy_mod._SOCKET_DIR_PREFIX}{cname}")
+        os.symlink(str(victim), sock_dir)
+        with push_proxy_mod._proxy_lock:
+            push_proxy_mod._container_to_proxy_key[cname] = cname
+            push_proxy_mod._active_proxies[cname] = os.path.join(
+                sock_dir, "push.sock")
+
+        stop_push_proxy(cname)
+
+        assert not os.path.exists(str(victim) + ".lock"), (
+            "the start lock was taken through the planted symlink")
+        assert not os.path.islink(sock_dir)
+        assert os.path.isdir(victim)
+
     def test_thread_exits_when_socket_removed(self, sock_path):
         """Proxy thread self-terminates when its socket file is deleted."""
         proxy = PushProxy(sock_path, "/w", "branch")
@@ -1226,6 +1253,33 @@ class TestWorkdirKeyedProxies:
             assert locked
             push_proxy_mod._stop_shared_proxy_socket(key, sock_dir, sock)
             assert push_proxy_mod.proxy_is_alive(sock)
+
+    def test_shared_stop_does_not_follow_a_planted_symlinked_dir(
+            self, tmp_path):
+        """A symlink planted at the socket-dir name must not be followed.
+
+        ``_start_lock`` resolves the directory, so following a symlink
+        planted in world-writable ``/tmp`` would create and lock
+        ``<target>.lock`` at a path another user chose.  The link is
+        unlinked; its target is never touched.
+        """
+        victim = tmp_path / "victim"
+        victim.mkdir()
+        workdir = self._workdir(tmp_path, "impl")
+        key = self._key_for(workdir)
+        sock_dir = push_proxy_mod._shared_sock_dir_path(
+            self.TAG, self.PR, push_proxy_mod._workdir_token(str(workdir)))
+        os.symlink(str(victim), sock_dir)
+        with push_proxy_mod._proxy_lock:
+            push_proxy_mod._proxy_refs.pop(key, None)
+
+        push_proxy_mod._stop_shared_proxy_socket(
+            key, sock_dir, os.path.join(sock_dir, "push.sock"))
+
+        assert not os.path.exists(str(victim) + ".lock"), (
+            "the start lock was taken through the planted symlink")
+        assert not os.path.islink(sock_dir)
+        assert os.path.isdir(victim)
 
     def test_refuses_live_proxy_with_different_workdir(
             self, tmp_path, monkeypatch, live_proxies):
