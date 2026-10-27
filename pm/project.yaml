@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-089af69
+  active_pr: pr-a6e74e3
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T19:56:29.077726+00:00'
+  updated_at: '2026-10-27T20:03:12.692493+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14191,6 +14191,43 @@ prs:
       Evidence /pm-captures/scenarios/42.'
     created_at: '2026-10-27T19:56:29Z'
     last_edited: '2026-10-27T19:56:29Z'
+  - id: note-eff436f
+    text: 'Refine S39 (2026-10-27, HEAD a44a70dc): there is no user-facing way to
+      "resume or reuse a renamed unshared-proxy container" so that PM repairs its
+      dead daemon. Unshared proxies only come from `pm qa debug`, which names every
+      allocation pm-qa-debug-<instr>-<random> and never reuses a name. Every pr start/review/sign-off/QA
+      launch passes a session tag and PR id, so it takes the shared (session, PR)
+      proxy path. That makes repair_unshared_proxy unreachable from the CLI or TUI,
+      so S39 story 2 was reshaped to cover cleanup by actual mount, a live co-mount
+      (fixture decoy), a deferred retryable release and replacement-socket safety,
+      and drops the repair Then. Other notes from checking the code: (1) when reap
+      removes the last user of a shared proxy, remove_container -> stop_push_proxy
+      releases that proxy inside the same pass. The output then shows "removed <name>"
+      and no "stopped  push proxy" line, and that line appears only when the proxy
+      outlived every user before reap ran. (2) The QA scenario pane exec uses cleanup=False,
+      so killing a `pm qa run` worker leaves its container for reap after the 120
+      s LAUNCH_GRACE. (3) Two stores with the same session tag and PR collide on /tmp/pm-push-proxy-<tag>-<pr>,
+      so store B is refused with "Existing shared push proxy belongs to a different
+      or unverifiable runtime"; use a different PR for B. (4) Worker panes run `podman
+      exec` with the tmux server environment, so each store needs its own tmux server
+      started from that store env. (5) `pm container restart` probes runtime identity
+      through recent_launch, so a gate held past the 10 s info timeout gives a fail-closed
+      refusal instead of the live-owner refusal, and an allocation younger than 120
+      s gives "awaiting attachment". (6) No image exists in this container, so build-base
+      (or the authorized smoke-only recovery image) must run first.'
+    created_at: '2026-10-27T19:14:51Z'
+    last_edited: '2026-10-27T19:14:51Z'
+  - id: note-6d4445e
+    text: 'QA S39 (2026-10-27, a44a70dc + qa fix): all four stories driven live on
+      real rootless Podman with private overlay stores (evidence /pm-captures/scenarios/39/manifest.md).
+      Fixed: pm container status listed another store''s retention markers under "Retained:"
+      (two stores sharing PM state); now domain-filtered via local_retained_names(),
+      with foreign markers shown only under saved diagnostics when identity is unknown.
+      Filed pr-a6e74e3: the container git wrapper ignores leading global options,
+      so `git -C /workspace push` bypasses the proxy. Use `podman exec -w /workspace
+      <id> git push` in fixtures. Proxy daemons exit as Z under PID 1 (pr-2111fa0).'
+    created_at: '2026-10-27T20:03:12Z'
+    last_edited: '2026-10-27T20:03:12Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -34180,3 +34217,32 @@ prs:
       host-side workdir git with a sanitised config (`GIT_CONFIG_*`).'
     created_at: '2026-10-27T17:10:21Z'
     last_edited: '2026-10-27T17:10:21Z'
+- id: pr-a6e74e3
+  plan: bugs
+  title: 'Bug: container git wrapper ignores leading global options, so `git -C <dir>
+    push` bypasses the push proxy'
+  branch: pm/pr-a6e74e3-bug-container-git-wrapper-ignores-leading-global-o
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/container.py git wrapper script (case "$1" in push|fetch|pull|ls-remote).
+    The wrapper only proxies when the git subcommand is $1, so any leading global
+    option (git -C /workspace push, git -c k=v fetch, git --git-dir=... pull) falls
+    through to REAL_GIT inside the container. Repro (QA S39, pr-1139060, real rootless
+    Podman): in a pm pr start impl container, `podman exec <id> git -C /workspace
+    push origin <pr-branch>` fails with "fatal: /scratch/.../proj does not appear
+    to be a git repository" (the dual pushurl local source is not mounted), while
+    `podman exec -w /workspace <id> git push origin <pr-branch>` succeeds through
+    the proxy. With a GitHub origin the bypass would try to push directly without
+    host credentials. Agents commonly use git -C; the wrapper should skip/handle leading
+    global options (at least -C <dir> resolving to the mounted workdir) and route
+    the subcommand through the proxy, rejecting -c/--exec-path/--git-dir forms the
+    proxy cannot honour.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T19:51:10.564754+00:00'
+  updated_at: '2026-10-27T19:51:10.564754+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
