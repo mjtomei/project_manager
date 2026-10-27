@@ -36241,3 +36241,28 @@ prs:
     signoff: provider:claude-work
     merge: provider:deepseek-flash
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-84ebabf-bug-a-claude-type-provider-api-key-e-registered-20261027
+- id: pr-9ff8a1b
+  plan: bugs
+  title: 'Bug: pm qa debug/launch crash when the project repo and ~/.pm/workdirs are
+    on different filesystems (git clone --local cross-device hardlink)'
+  branch: pm/pr-9ff8a1b-bug-pm-qa-debug-launch-crash-when-the-project-repo
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py create_scenario_workdir (~line 320) runs
+    `git clone --local <repo_root> <dest>`; --local hardlinks objects, so it fails
+    when <repo_root> and ~/.pm/workdirs are on different filesystems. Repro: project
+    at /scratch/x (nvme) with HOME=/home/user/.pm on overlay; run `pm qa debug <instruction>
+    --foreground` -> CalledProcessError: git clone --local ... returned exit status
+    128, fatal: failed to create link ...: Invalid cross-device link. Same for any
+    qa path that clones from a project root on another mount. Fix: on clone failure,
+    retry with --no-hardlinks (or always pass it when st_dev differs). Found during
+    QA S3 of pr-84ebabf; worked around by pointing HOME at a same-device dir.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T22:20:00.072106+00:00'
+  updated_at: '2026-10-27T22:20:00.072106+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
