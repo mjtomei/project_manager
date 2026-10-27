@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T16:59:26.825006+00:00'
+  updated_at: '2026-10-27T18:16:00.772477+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38280,6 +38280,24 @@ prs:
       passed.'
     created_at: '2026-10-27T16:59:26Z'
     last_edited: '2026-10-27T16:59:26Z'
+  - id: note-187d8cf
+    text: 'QA S95 (2026-10-27, host, all fake-claude, two clones sharing ~/.pm; OLD
+      2a424a0d builds the records, control ad5eed13 vs HEAD cb4ec5e0; captures /pm-captures/scenarios/95,
+      REPORT.md): PASS, no code change. 86c0da90 held live. HEAD seeded pm-<tagA>/
+      with P qa done INPUT_REQUIRED, Q failed and R review-loop done PASS: no R in-flight
+      qa entry, no suppress_switch, original timestamps, shared sha256 unchanged.
+      Auto-start held P (waiting, "last QA run ended INPUT_REQUIRED"), and the picker
+      showed [done INPUT_REQUIRED]/[failed]/[done i1 PASS]. On the control, Auto-start
+      relaunched QA for P, with no badges. 6 first-start race rounds (rm pm-<tag>,
+      then tui restart + 2 pickers + 2 ticks within 0.01 s) plus an 8-tick round:
+      always one dir, no .seed dirs, ticks paused: input_required, no qa-run-bg, no
+      Traceback; no seed loser was observed. Older-pm clone B PASS on the shared path
+      did not leak into A. B upgraded to HEAD seeded its PASS and handed P to sign-off
+      (RQ47 trade-off). Cleanup, TUI restart and session recreate: same dir inode,
+      no re-seed; fresh autostart add relaunched QA. Observation: a new run keeps
+      the prior terminal entry started_at while running; the older pm does the same.'
+    created_at: '2026-10-27T18:16:00Z'
+    last_edited: '2026-10-27T18:16:00Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
