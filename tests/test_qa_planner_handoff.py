@@ -523,6 +523,47 @@ class TestPlannerRecovery:
         assert state.planning_phase is False
         assert state.running is False
 
+    def test_exhaustion_names_the_rejected_plan_problem(
+            self, tmp_path, monkeypatch):
+        """A malformed plan's specific rejection survives into the error.
+
+        A planner that DID emit a QA_PLAN block which the validator rejected
+        (here: non-contiguous numbering) must not be reported as merely "no
+        complete plan": the validator's reason is the actionable part, and
+        the non-exhaustion "plan incomplete" surface already names it.
+        """
+
+        class _Exhausted:
+            enabled = True
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def handle(self, *args, **kwargs):
+                raise qa_loop.VerdictRecoveryExhausted(
+                    "planner produced no complete QA_PLAN block",
+                    attempts=3)
+
+            def check_response(self):
+                pass
+
+        # Drop scenario 2 so the plan's numbering is not contiguous.
+        malformed = FULL_PLAN.replace(_scenario(2, TITLES[1]), "")
+        assert "contiguous" in qa_loop.qa_plan_problem(
+            malformed, parse_qa_plan(malformed), 1)
+
+        monkeypatch.setattr(qa_loop, "MissingOutputRecovery", _Exhausted)
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=TEMPLATE_PROMPT,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", malformed)],
+            extra_patches=(
+                patch("pm_core.qa_loop._add_status_pane"),
+            ))
+
+        assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
+        assert "contiguous" in state._error
+
     def test_plan_landing_during_settle_is_accepted_not_renudged(
             self, tmp_path, monkeypatch):
         """A plan written after the idle hook (the transcript-write race) is

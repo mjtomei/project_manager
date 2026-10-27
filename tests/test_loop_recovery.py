@@ -1459,6 +1459,89 @@ class TestQARecoveryWiring:
             "a worker was retired during teardown")
         assert 1 not in state.scenario_verdict_reasons
 
+    def test_scenario_worker_stop_during_handle_does_not_retire(
+            self, tmp_path, monkeypatch):
+        """A stop set *inside* ``handle`` must not persist a retirement.
+
+        ``handle``'s attempt bound is checked before its own ``stop_check``
+        and the tick loop's settle read is non-blocking, so a stop that lands
+        between the ``stopping`` snapshot and the bound can surface as
+        exhaustion.  Teardown is not a verdict: the worker must stay pending,
+        not be recorded as INPUT_REQUIRED (whose reason is persisted into the
+        resume snapshot).
+        """
+        from pm_core import qa_loop
+        from pm_core.qa_loop import QALoopState, QAScenario
+
+        scenario = QAScenario(index=1, title="S", focus="f")
+        scenario.window_name = "qa-s1"
+        scenario.session_id = "sid-s1"
+        scenario.pane_id = "%1"
+        scenario.transcript_path = str(
+            _transcript_with_assistant(tmp_path, "still testing"))
+
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+        state.qa_workdir = None
+
+        clock = {"t": 1000.0}
+
+        def fake_time():
+            clock["t"] += 1.0
+            return clock["t"]
+
+        def fake_read_event(_sid):
+            clock["t"] += 1.0
+            return {"event_type": "idle_prompt",
+                    "timestamp": clock["t"],
+                    "session_id": "sid-s1"}
+
+        calls = {"n": 0}
+
+        def fake_extract(*_a, **_kw):
+            calls["n"] += 1
+            # Call 1 = first episode's turn scan, call 2 = its
+            # verdict_check, call 3 = second episode's turn scan, call 4 =
+            # its verdict_check.  The user stops the run while ``handle`` is
+            # deciding the second turn.
+            if calls["n"] == 4:
+                state.stop_requested = True
+            return None
+
+        monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+        monkeypatch.setattr(qa_loop, "recovery_max_attempts", lambda: 1)
+        monkeypatch.setattr(qa_loop, "recovery_settle_seconds", lambda: 0.0)
+        monkeypatch.setattr(qa_loop, "recovery_response_timeout", lambda: 0.0)
+        monkeypatch.setattr(qa_loop, "_is_verification_enabled",
+                            lambda: False)
+        monkeypatch.setattr(qa_loop, "_get_verdict_reminder_timeout",
+                            lambda: None)
+
+        sent: list[str] = []
+
+        with patch("pm_core.hook_events.read_event",
+                   side_effect=fake_read_event), \
+             patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   side_effect=fake_extract), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.time", side_effect=fake_time), \
+             patch("pm_core.qa_loop.time.monotonic", return_value=1000.0), \
+             patch("pm_core.tmux.send_keys",
+                   side_effect=lambda _p, m: sent.append(m)), \
+             patch("pm_core.tmux.pane_exists", return_value=True):
+            qa_loop._poll_tmux_verdicts(
+                state, {}, {}, "sess", str(tmp_path),
+                tmp_path / "status.json", lambda *a: None,
+            )
+
+        assert sent, "worker was never nudged"
+        assert 1 not in state.scenario_verdicts, (
+            "a worker was retired during teardown")
+        assert 1 not in state.scenario_verdict_reasons
+
 
 # ---------------------------------------------------------------------------
 # Settings

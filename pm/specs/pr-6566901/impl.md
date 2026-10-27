@@ -324,13 +324,20 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   evaluated, so without the guard a worker being torn down would be
   retired as `no_response` (or `no_progress` — `handle`'s deferral bound
   is checked before its own `stop_check`) with a reason that is persisted
-  into the resume snapshot. The planner honours `stop_requested` the same
-  way before its `check_response`.
+  into the resume snapshot. The guard is a snapshot taken just before the
+  check, so both `except VerdictRecoveryExhausted` handlers *also* re-check
+  `state.stop_requested` before retiring: a stop can land while `handle`
+  is deciding (its deferral bound is checked before its own `stop_check`,
+  and the tick loop's settle read is non-blocking), and teardown must not
+  persist an `INPUT_REQUIRED` reason. The planner honours `stop_requested`
+  the same way before its `check_response`.
 * **planner** — per-attempt `MissingOutputRecovery` with a `QA_PLAN_START/END`
   outcome request and a resume request; on exhaustion break out with
   `INPUT_REQUIRED` + `_error` (reusing the existing "plan incomplete" surface
-  block). A `completed` result re-reads and accepts the plan. A stop request
-  is honoured before `check_response`, so teardown never surfaces a spurious
+  block, and naming the validator's last rejection when the planner did emit
+  a block that could not be consumed). A `completed` result re-reads and
+  accepts the plan. A stop request is honoured before `check_response`, so
+  teardown never surfaces a spurious
   exhaustion. Keep `_PLANNER_TIMEOUT` as the outer deadline.
 
 ### Settings (all optional, defaulted)
@@ -453,9 +460,13 @@ unbounded.
   (`INPUT_REQUIRED` + reason, slot freed); a verdict landing on the tick the
   post-nudge response deadline expires is recorded, not retired as
   `no_response`; a stop that lands between ticks does not retire a worker as
-  `no_response` (no spurious exhaustion during teardown).
+  `no_response`, and a stop set *inside* `handle` (after the `stopping`
+  snapshot) does not retire it either (both are spurious-exhaustion guards
+  during teardown).
 * `tests/test_qa_planner_handoff.py`: planner exhaustion surfaces
-  `INPUT_REQUIRED` + error and stops planning; a plan written while recovery
+  `INPUT_REQUIRED` + error and stops planning; exhaustion after a malformed
+  block names the validator's rejection (e.g. non-contiguous numbering) in
+  `_error`; a plan written while recovery
   settles (the idle-hook/transcript-write race) is accepted from the settle
   re-read rather than being asked for again.
 * `tests/test_review_loop_terminal_state.py`: `NO_VERDICT` → `failed`.

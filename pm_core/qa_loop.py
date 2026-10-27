@@ -3163,6 +3163,12 @@ def _poll_tmux_verdicts(
                 try:
                     _rec.check_response()
                 except VerdictRecoveryExhausted as e:
+                    if state.stop_requested:
+                        # A stop that landed while we were deciding (after
+                        # the ``stopping`` snapshot above) is teardown, not
+                        # a verdict: never persist a spurious
+                        # INPUT_REQUIRED reason into the resume snapshot.
+                        continue
                     _recovery_exhausted(scenario, e)
                     pending.discard(scenario.index)
                     verdicts_changed = True
@@ -3184,8 +3190,8 @@ def _poll_tmux_verdicts(
             # ever pass the fresh-event gate.
             if (verdict is None and not stopping
                     and scenario.index in _no_verdict_since):
-                if not pane_id:
-                    continue
+                # ``pane_id`` is always set here: the retry/retire block
+                # above continues for every ``pane_id is None`` case.
                 rec = _recovery_for(scenario, pane_id)
                 if not rec.enabled:
                     # Recovery disabled: legacy behaviour — leave the
@@ -3214,6 +3220,14 @@ def _poll_tmux_verdicts(
                             is not None,
                         )
                     except VerdictRecoveryExhausted as e:
+                        if state.stop_requested:
+                            # ``handle``'s deferral bound is checked before
+                            # its own ``stop_check``, so a stop that landed
+                            # while we were deciding can surface here as a
+                            # spurious exhaustion.  Teardown is not a
+                            # verdict: leave the worker pending instead of
+                            # recording an INPUT_REQUIRED reason.
+                            continue
                         _recovery_exhausted(scenario, e)
                         pending.discard(scenario.index)
                         verdicts_changed = True
@@ -4284,8 +4298,19 @@ def run_qa_sync(
             state.latest_output = (
                 "QA planner produced no complete plan after recovery — "
                 "no scenarios planned")
+            # A planner that DID emit a block which the validator rejected
+            # (e.g. non-contiguous scenario numbering) is the actionable
+            # case: name the rejection, exactly as the non-exhaustion
+            # "plan incomplete" surface does.  Without this the user only
+            # learns that no complete plan appeared.
+            problem_detail = (
+                f"\n\nA plan block the planner emitted was rejected: "
+                f"{plan_problem}"
+                if plan_problem else ""
+            )
             state._error = (
-                "QA planning did not produce a complete QA_PLAN block.\n\n"
+                "QA planning did not produce a complete QA_PLAN block."
+                f"{problem_detail}\n\n"
                 f"{planner_exhausted}\n\n"
                 "The planner pane was left open. Ask it to re-emit the full "
                 "QA_PLAN_START ... QA_PLAN_END block, or restart QA from the "
