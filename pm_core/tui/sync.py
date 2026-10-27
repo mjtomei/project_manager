@@ -15,14 +15,22 @@ import copy
 from pm_core.paths import configure_logger
 from pm_core import store, guide, pr_sync
 from pm_core.cli.helpers import _record_status_timestamp
+from pm_core.pr_utils import usable_prs
 
 _log = configure_logger("pm.tui.sync")
 
 
 def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
-    """Kill tmux windows for merged PRs since they're no longer accessible from the TUI."""
+    """Tear down all live resources for merged PRs.
+
+    Mirrors the manual `Y`/`y` cleanup path: windows, containers,
+    push-proxy sockets, pane registry entries, and the per-PR runtime
+    state file. Previously this only killed tmux windows, leaving
+    containers, sockets, and registry entries to linger indefinitely
+    after merge-detection.
+    """
+    from pm_core import pr_cleanup
     from pm_core import tmux as tmux_mod
-    from pm_core.cli.helpers import kill_pr_windows
 
     if not app._session_name or not merged_pr_ids:
         return
@@ -34,9 +42,12 @@ def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
         pr = store.get_pr(app._data, pr_id)
         if not pr:
             continue
-        killed = kill_pr_windows(session, pr)
-        for win_name in killed:
+        summary = pr_cleanup.cleanup_pr_resources(session, pr)
+        for win_name in summary.get("windows", []):
             _log.info("Killed window '%s' for merged %s", win_name, pr_id)
+        if summary.get("containers"):
+            _log.info("Cleaned %d container(s) for merged %s",
+                      len(summary["containers"]), pr_id)
 
 
 async def background_sync(app) -> None:
@@ -46,16 +57,20 @@ async def background_sync(app) -> None:
     # Reload capture config in case it was updated via CLI
     load_capture_config(app)
 
-    # Check current guide state
+    # Check current guide state — use temporaries so a mid-sequence
+    # exception (e.g. corrupt YAML) never leaves app in a half-updated state.
     try:
-        app._root = store.find_project_root()
-        app._data = store.load(app._root)
+        root = store.find_project_root()
+        data = store.load(root)
     except FileNotFoundError:
         app._root = None
         app._data = {}
     except store.ProjectYamlParseError as e:
         _log.warning("Skipping sync: %s", e)
         return
+    else:
+        app._root = root
+        app._data = data
 
     # If we're in guide mode, check for state changes
     if app._current_guide_step is not None:
@@ -82,22 +97,15 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
     Args:
         is_manual: True if triggered by user (r key), False for periodic background sync
     """
-    from pm_core.tui.widgets import StatusBar
-
     if not app._root:
         return
     try:
-        status_bar = app.query_one("#status-bar", StatusBar)
-        project = app._data.get("project", {})
-        prs = app._data.get("prs") or []
-        # Memory governor status (best-effort)
-        memory_status = ""
-        try:
-            from pm_core.memory_governor import format_memory_status
-            memory_status = format_memory_status()
-        except Exception:
-            pass
-        status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), "pulling", pr_count=len(prs), memory_status=memory_status)
+        # Don't clobber a mode-specific status bar (QA/Plans) with project info.
+        mode_owns_status = getattr(app, "_qa_visible", False) or getattr(app, "_plans_visible", False)
+        if not mode_owns_status:
+            # Through _update_status_bar so AUTO ×N / WCH / filter stay up
+            # while pulling (a bare update_status() blanked them per refresh).
+            app._update_status_bar(sync_state="pulling")
 
         # Use shorter interval for manual refresh, longer for background
         min_interval = (
@@ -120,33 +128,55 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
 
         # Snapshot PR statuses before reload so we can detect merges that
         # happened outside of sync (e.g. `pm pr merge` for local/vanilla).
+        # Entries without a usable string id are skipped rather than
+        # indexed: a partial or externally written project.yaml must not
+        # raise out of the sync loop (the popup picker rejects such
+        # snapshots too, with a readable reason).
         old_statuses = {
             pr["id"]: pr.get("status")
-            for pr in (app._data.get("prs") or [])
+            for pr in usable_prs(app._data.get("prs"))
         }
 
-        # Reload from disk (picks up any concurrent user changes) and
-        # apply sync results (merged PRs) on the main thread.
-        try:
-            app._data = store.load(app._root)
-        except store.ProjectYamlParseError as e:
-            _log.warning("Skipping reload: %s", e)
-            app._update_status_bar()
-            return
+        # Reload from disk and apply sync results (merged PRs) atomically.
         if result.merged_prs:
-            for pr in app._data.get("prs") or []:
-                if pr["id"] in result.merged_prs:
-                    pr["status"] = "merged"
-                    _record_status_timestamp(pr, "merged")
-            store.save(app._data, app._root)
+            merged_set = set(result.merged_prs)
+
+            def apply_merged(data):
+                for pr in usable_prs(data.get("prs")):
+                    if pr["id"] in merged_set:
+                        pr["status"] = "merged"
+                        _record_status_timestamp(pr, "merged")
+
+            try:
+                app._data = store.locked_update(app._root, apply_merged)
+            except store.StoreLockTimeout as e:
+                app.log_message(f"Sync: {e}")
+                _log.warning("do_normal_sync: lock timeout applying merges: %s", e)
+                try:
+                    app._data = store.load(app._root)
+                except store.ProjectYamlParseError:
+                    pass  # keep existing app._data
+                app._update_display()
+                return
+            except store.ProjectYamlParseError as e:
+                _log.warning("Skipping reload: %s", e)
+                app._update_status_bar()
+                return
             _kill_merged_pr_windows(app, result.merged_prs)
+        else:
+            try:
+                app._data = store.load(app._root)
+            except store.ProjectYamlParseError as e:
+                _log.warning("Skipping reload: %s", e)
+                app._update_status_bar()
+                return
         app._update_display()
 
         # Detect PRs that became merged — either via sync or via CLI
         # (e.g. `pm pr merge` for local/vanilla backends saves status
         # to disk before triggering a TUI refresh).
         newly_merged = set(result.merged_prs)
-        for pr in app._data.get("prs") or []:
+        for pr in usable_prs(app._data.get("prs")):
             if pr.get("status") == "merged" and old_statuses.get(pr["id"]) != "merged":
                 newly_merged.add(pr["id"])
 
@@ -160,11 +190,15 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
 
         prs = app._data.get("prs") or []
 
-        # Determine sync status message
+        # Determine sync status message.  The manual-refresh clear below is
+        # bound to this message (own_seq), never to a held line logged by
+        # check_and_start above or a concurrent worker (e.g. "target W
+        # merged — removed"), which a clear of "the latest" would cut short.
+        own_seq = None
         if result.was_skipped:
             sync_status = "no-op"
             if is_manual:
-                app.log_message("Already up to date")
+                own_seq = app.log_message("Already up to date")
         elif result.error:
             # "No workdirs" is not really an error - just nothing to sync yet
             if "No workdirs" in result.error:
@@ -173,20 +207,30 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
             else:
                 sync_status = "error"
                 _log.warning("PR sync error: %s", result.error)
-                app.log_message(f"Sync error: {result.error}")
+                own_seq = app.log_message(f"Sync error: {result.error}")
         elif result.updated_count > 0:
             sync_status = "synced"
-            app.log_message(f"Synced: {result.updated_count} PR(s) merged")
+            own_seq = app.log_message(
+                f"Synced: {result.updated_count} PR(s) merged")
         else:
             sync_status = "synced"
             if is_manual:
-                app.log_message("Refreshed")
+                own_seq = app.log_message("Refreshed")
 
-        status_bar.update_status(project.get("name", "???"), project.get("repo", "???"), sync_status, pr_count=len(prs), memory_status=memory_status)
+        mode_owns_status = getattr(app, "_qa_visible", False) or getattr(app, "_plans_visible", False)
+        if mode_owns_status:
+            app._update_status_bar()
+        else:
+            # Route through _update_status_bar so the filter/sort/assist/watcher
+            # indicators survive the sync; the bare update_status() call dropped
+            # them, blanking "filter: hide closed" etc. after every refresh.
+            app._update_status_bar(sync_state=sync_status)
 
         # Clear log message after 1 second for manual refresh
         if is_manual:
-            app.set_timer(1.0, app._clear_log_message)
+            if own_seq is None:  # e.g. "No workdirs": replace "Refreshing..."
+                own_seq = app.log_message("Refreshed")
+            app.clear_log_message_later(1.0, seq=own_seq)
     except SystemExit as e:
         _log.error("Sync raised SystemExit(%s) — suppressing to prevent TUI crash", e.code)
     except Exception as e:
@@ -208,7 +252,7 @@ async def startup_github_sync(app) -> None:
         return
 
     try:
-        app.log_message("Syncing with GitHub...")
+        own_seq = app.log_message("Syncing with GitHub...")
         # Run blocking HTTP call in a thread so it doesn't freeze the UI.
         # Deep copy + save_state=False to avoid racing with user actions.
         data_copy = copy.deepcopy(app._data)
@@ -217,35 +261,42 @@ async def startup_github_sync(app) -> None:
             None, lambda: pr_sync.sync_from_github(app._root, data_copy, save_state=False))
 
         if result.synced and result.updated_count > 0:
-            # Reload from disk and apply ALL status changes on the main thread
-            app._data = store.load(app._root)
-            changed = False
+            # Apply ALL status changes atomically under lock
+            updates = result.status_updates
             newly_merged = set()
-            for pr in app._data.get("prs") or []:
-                new_status = result.status_updates.get(pr["id"])
-                if new_status and pr.get("status") != new_status:
-                    if new_status == "merged":
-                        newly_merged.add(pr["id"])
-                    pr["status"] = new_status
-                    _record_status_timestamp(pr, new_status)
-                    changed = True
-            if changed:
-                store.save(app._data, app._root)
+
+            def apply_github(data):
+                for pr in usable_prs(data.get("prs")):
+                    new_status = updates.get(pr["id"])
+                    if new_status and pr.get("status") != new_status:
+                        if new_status == "merged":
+                            newly_merged.add(pr["id"])
+                        pr["status"] = new_status
+                        _record_status_timestamp(pr, new_status)
+
+            try:
+                app._data = store.locked_update(app._root, apply_github)
+            except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+                app.log_message(f"GitHub sync: {e}")
+                _log.warning("startup_github_sync: %s: %s", type(e).__name__, e)
+                return
             if newly_merged:
                 _kill_merged_pr_windows(app, newly_merged)
             app._update_display()
-            app.log_message(f"GitHub sync: {result.updated_count} PR(s) updated")
-            # Auto-start ready PRs if enabled
+            own_seq = app.log_message(
+                f"GitHub sync: {result.updated_count} PR(s) updated")
+            # Auto-start ready PRs if enabled; the clear below stays bound
+            # to the sync line, not a held line check_and_start logs.
             if newly_merged:
                 from pm_core.tui.auto_start import check_and_start
                 await check_and_start(app)
         elif result.error:
             _log.warning("GitHub sync error: %s", result.error)
         else:
-            app.log_message("GitHub sync: up to date")
+            own_seq = app.log_message("GitHub sync: up to date")
 
-        app.set_timer(2.0, app._clear_log_message)
+        app.clear_log_message_later(2.0, seq=own_seq)
     except Exception as e:
         _log.exception("GitHub sync error")
         app.log_message(f"GitHub sync error: {e}")
-        app.set_timer(3.0, app._clear_log_message)
+        app.clear_log_message_later(3.0)

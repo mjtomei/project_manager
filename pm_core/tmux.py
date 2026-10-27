@@ -74,14 +74,18 @@ def create_session(name: str, cwd: str, cmd: str, socket_path: str | None = None
     )
 
 
-def split_pane(session: str, direction: str, cmd: str) -> str:
+def split_pane(session: str, direction: str, cmd: str,
+               window: str | None = None) -> str:
     """Split a pane and run cmd. Returns new pane ID.
 
     direction: 'h' for horizontal (left/right), 'v' for vertical (top/bottom)
+    window: optional tmux window id/name to target. When omitted, splits
+        the active pane of the session's active window.
     """
     flag = "-h" if direction == "h" else "-v"
+    target = f"{session}:{window}" if window else session
     result = _run(
-        _tmux_cmd("split-window", flag, "-t", session, "-P", "-F", "#{pane_id}", cmd),
+        _tmux_cmd("split-window", flag, "-t", target, "-P", "-F", "#{pane_id}", cmd),
         text=True,
         check=True,
     )
@@ -121,6 +125,7 @@ def kill_session(name: str, socket_path: str | None = None) -> None:
 
 def kill_window(session: str, window: str) -> None:
     """Kill a tmux window by index or name."""
+    _log.info("kill_window: session=%s window=%s", session, window)
     _run(
         _tmux_cmd("kill-window", "-t", f"{session}:{window}"),
     )
@@ -143,14 +148,17 @@ def new_window(session: str, name: str, cmd: str, cwd: str,
         _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
         check=True,
     )
-    if switch:
-        # Switch only the current grouped session to the new window
-        win = find_window_by_name(session, name)
-        if win:
-            current = current_or_base_session(session)
-            _run(
-                _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
-            )
+    win = find_window_by_name(session, name)
+    _log.info("new_window: session=%s name=%s id=%s index=%s switch=%s",
+              session, name,
+              (win or {}).get("id"), (win or {}).get("index"), switch)
+    if switch and win:
+        current = current_or_base_session(session)
+        result = _run(
+            _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
+        )
+        _log.info("new_window: select-window target=%s:%s rc=%d",
+                  current, win["index"], result.returncode)
 
 
 def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
@@ -169,14 +177,19 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
         check=True,
     )
     win = find_window_by_name(session, name)
+    _log.info("new_window_get_pane: session=%s name=%s id=%s index=%s switch=%s",
+              session, name,
+              (win or {}).get("id"), (win or {}).get("index"), switch)
     if not win:
         return None
     if switch:
         # Switch the current grouped session to the new window
         current = current_or_base_session(session)
-        _run(
+        result = _run(
             _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
         )
+        _log.info("new_window_get_pane: select-window target=%s:%s rc=%d",
+                  current, win["index"], result.returncode)
     # Discover the pane ID
     panes = get_pane_indices(session, win["index"])
     if panes:
@@ -213,13 +226,21 @@ def split_pane_background(session: str, direction: str, cmd: str) -> str:
     return result.stdout.strip()
 
 
-def split_pane_at(pane_id: str, direction: str, cmd: str, background: bool = False) -> str:
+def split_pane_at(pane_id: str, direction: str, cmd: str,
+                  background: bool = False, cwd: str | None = None) -> str:
     """Split a specific pane. Returns new pane ID.
 
     direction: 'h' for horizontal (left/right), 'v' for vertical (top/bottom)
+    cwd: starting directory for the new pane. Without this, tmux inherits
+        the target pane's current /proc cwd, which can drift if the
+        target's shell has been chdir'd by a long-running process
+        (e.g. Claude Code's persistent Bash tool).
     """
     flag = "-h" if direction == "h" else "-v"
-    args = ["split-window", flag, "-t", pane_id, "-P", "-F", "#{pane_id}", cmd]
+    args = ["split-window", flag, "-t", pane_id, "-P", "-F", "#{pane_id}"]
+    if cwd:
+        args += ["-c", cwd]
+    args.append(cmd)
     if background:
         args.insert(2, "-d")
     result = _run(_tmux_cmd(*args), text=True, check=True)
@@ -277,14 +298,29 @@ def apply_layout(session: str, window: str, layout_string: str) -> bool:
     return True
 
 
+# Set by the popup dispatchers to the session of the client that opened
+# the popup; read by get_session_name().
+POPUP_SESSION_ENV = "PM_POPUP_SESSION"
+
+
 def get_session_name() -> str:
     """Get the current tmux session name (must be called from within tmux).
 
     Uses $TMUX_PANE to target the specific pane, which is more reliable
     than display-message without a target (which uses "current client"
     and can return wrong session in background processes).
+
+    Popups have no pane, so the popup dispatchers (prefix+P / prefix+M)
+    export the opening client's session as $PM_POPUP_SESSION; without
+    it, "current client" is whichever client was active last, which is
+    another client's session when two clients use popups at once.
     """
     pane = os.environ.get("TMUX_PANE")
+    popup_session = os.environ.get(POPUP_SESSION_ENV)
+    # The variable is inherited by anything the popup spawns, so only
+    # trust it while that session still exists ("=" = exact name match).
+    if not pane and popup_session and session_exists(f"={popup_session}"):
+        return popup_session
     if pane:
         # Target the specific pane to get accurate session name
         result = _run(
@@ -391,6 +427,22 @@ def select_window(session: str, window: str) -> bool:
     result = _run(
         _tmux_cmd("select-window", "-t", f"{target}:{window}"),
     )
+    _log.info("select_window: target=%s:%s rc=%d",
+              target, window, result.returncode)
+    return result.returncode == 0
+
+
+def select_window_in_session(session: str, window: str) -> bool:
+    """Select a window in a specific (grouped) session, not the calling client's.
+
+    Used by cross-session park: a kill in session A may need to park session B
+    on the home window before tmux processes the kill.
+    """
+    result = _run(
+        _tmux_cmd("select-window", "-t", f"{session}:{window}"),
+    )
+    _log.info("select_window_in_session: target=%s:%s rc=%d",
+              session, window, result.returncode)
     return result.returncode == 0
 
 
@@ -558,6 +610,26 @@ def next_grouped_session_name(base: str, socket_path: str | None = None) -> str:
     return f"{base}~{max_n + 1}"
 
 
+def get_pane_option(pane_id: str, name: str) -> str | None:
+    """Return a pane-scoped (user) option's value, or None if unset/gone."""
+    result = _run(_tmux_cmd("show-options", "-p", "-q", "-v", "-t",
+                            pane_id, name), text=True)
+    value = result.stdout.strip() if result.returncode == 0 else ""
+    return value or None
+
+
+def set_pane_option(pane_id: str, name: str, value: str) -> None:
+    """Set a pane-scoped (user) option; silently ignores a gone pane."""
+    _run(_tmux_cmd("set-option", "-p", "-t", pane_id, name, value))
+
+
+def pane_start_command(pane_id: str) -> str:
+    """Return the command a pane was started with, or "" if it is gone."""
+    result = _run(_tmux_cmd("display-message", "-p", "-t", pane_id,
+                            "#{pane_start_command}"), text=True)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
 def capture_pane(pane_id: str, full_scrollback: bool = False) -> str:
     """Capture the contents of a tmux pane.
 
@@ -590,6 +662,41 @@ def pane_window_id(pane_id: str) -> str | None:
         text=True,
     )
     return result.stdout.strip() or None
+
+
+def attached_group_active_windows(base: str, socket_path: str | None = None) -> dict[str, str]:
+    """Map attached sessions in a group to active windows in one tmux query.
+
+    Used by the popup picker to show which windows a *collaborator* is
+    currently viewing.  An unattached session (e.g. the base session when
+    the TUI runs in grouped sessions) has an "active window" in tmux's
+    bookkeeping but no client focusing it, so it is omitted.  Returns an
+    empty map on any tmux error.
+
+    The separator must be printable: tmux rewrites control characters in
+    format output to ``_`` when the server runs under a non-UTF-8 locale
+    (``LC_ALL=C``), which silently turned a tab-separated query into one
+    unparsable field.  The session name comes last (``maxsplit=2``) so it
+    may itself contain the separator.
+    """
+    result = _run(
+        _tmux_cmd("list-sessions", "-F",
+                  "#{session_attached}|#{window_id}|#{session_name}",
+                  socket_path=socket_path),
+        text=True,
+    )
+    if result.returncode != 0:
+        return {}
+    active = {}
+    for line in result.stdout.splitlines():
+        parts = line.split("|", 2)
+        if len(parts) != 3:
+            continue
+        attached, wid, name = parts
+        if (name == base or name.startswith(base + "~")) and attached.isdigit():
+            if int(attached) > 0 and wid:
+                active[name] = wid
+    return active
 
 
 def sessions_on_window(base: str, window_id: str) -> list[str]:

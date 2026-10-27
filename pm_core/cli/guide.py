@@ -13,7 +13,7 @@ from pm_core import tmux as tmux_mod
 from pm_core import guide as guide_mod
 from pm_core.claude_launcher import (
     find_claude, find_editor, launch_claude, load_session, save_session,
-    clear_session, build_claude_shell_cmd,
+    clear_session, build_claude_shell_cmd, prepare_workspace,
 )
 
 from pm_core.cli import cli
@@ -37,6 +37,16 @@ def _in_pm_tmux_session() -> bool:
 def guide(fresh):
     """Guided workflow — launches setup or assist depending on project state."""
     _run_guide(fresh=fresh)
+
+
+def _prepare_guide_workspace():
+    """Trust boundary for the tmux guide pane, which runs Claude in this
+    process's cwd.  Mirrors launch_claude (the non-tmux branch): real
+    Claude only — a fake guide has no dialog.  Not via ``cwd=``, which
+    would also write the prompt into ``<cwd>/pm/prompts``."""
+    from pm_core.paths import fake_claude_config_for_type
+    if fake_claude_config_for_type("guide") is None:
+        prepare_workspace(os.getcwd())
 
 
 def _run_guide(fresh=False):
@@ -82,10 +92,11 @@ def _run_guide(fresh=False):
             return
 
         if _in_pm_tmux_session():
-            cmd = build_claude_shell_cmd(prompt=prompt)
+            _prepare_guide_workspace()
+            cmd = build_claude_shell_cmd(prompt=prompt, session_type="guide")
             os.execvp("bash", ["bash", "-c", cmd])
         else:
-            launch_claude(prompt)
+            launch_claude(prompt, session_type="guide")
     else:
         # Setup mode — no PRs yet
         prompt = guide_mod.build_setup_prompt(state, ctx, root, session_name=pm_session)
@@ -104,6 +115,8 @@ def _run_guide(fresh=False):
         if _in_pm_tmux_session():
             import uuid as uuid_mod
 
+            _prepare_guide_workspace()
+
             # Get or create session ID for resume
             session_id = None
             is_resuming = False
@@ -117,7 +130,8 @@ def _run_guide(fresh=False):
                 session_id = str(uuid_mod.uuid4())
                 save_cmd = f"pm _save-session '{session_key}' '{session_id}' '{root}' ; "
 
-            claude_cmd = build_claude_shell_cmd(prompt=prompt, session_id=session_id, resume=is_resuming)
+            claude_cmd = build_claude_shell_cmd(prompt=prompt, session_id=session_id,
+                                                resume=is_resuming, session_type="guide")
 
             # On failure (non-zero exit), clear the session so next launch starts fresh
             clear_cmd = f"pm _clear-session '{session_key}' '{root}'" if root else "true"
@@ -125,7 +139,8 @@ def _run_guide(fresh=False):
 
             os.execvp("bash", ["bash", "-c", cmd])
         else:
-            launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh)
+            launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh,
+                          session_type="guide")
 
 
 @cli.command("notes")

@@ -3,7 +3,8 @@
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
-from textual.widgets import Label
+from textual.geometry import Region
+from textual.widgets import Label, Static
 from textual.screen import ModalScreen
 
 
@@ -242,12 +243,15 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]F[/]  Cycle sort field", classes="help-row")
                 yield Label("PR Actions", classes="help-section")
                 yield Label("  [bold]s[/]  Start selected PR", classes="help-row")
-                yield Label("  [bold]d[/]  Review (zz d: loop, zzz d: strict)", classes="help-row")
+                yield Label("  [bold]d[/]  Review (zz d: loop)", classes="help-row")
                 yield Label("  [bold]g[/]  Merge PR", classes="help-row")
+                yield Label("  [bold]i[/]  Sign-off (router)", classes="help-row")
                 yield Label("  [bold]e[/] / [bold]Enter[/]  Edit selected PR", classes="help-row")
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
-                yield Label("  [bold]A[/]  Auto-start to selected PR / off", classes="help-row")
+                yield Label("  [bold]O[/]  Auto-start target (stop before merge)", classes="help-row")
+                yield Label("  [bold]A[/]  Toggle auto-merge target", classes="help-row")
+                yield Label("  [bold]a[/]  Auto-start runs popup", classes="help-row")
                 yield Label("  [bold]V[/]  Review oldest pending spec", classes="help-row")
                 yield Label("  [bold]w[/]  Focus watcher window", classes="help-row")
             yield Label("Panes & Views", classes="help-section")
@@ -272,14 +276,16 @@ class HelpScreen(ModalScreen):
             yield Label("  [bold]Ctrl+R[/]  Restart TUI", classes="help-row")
             yield Label("  [bold]?[/]  Show this help", classes="help-row")
             yield Label("  [bold]ctrl+b d[/]  Detach from session", classes="help-row")
+            yield Label("Tmux Prefix Bindings", classes="help-section")
+            yield Label("  [bold]prefix P[/]  PR action picker popup (q/Esc to quit)", classes="help-row")
+            yield Label("  [bold]prefix M[/]  pm command runner popup (Ctrl+C to quit)", classes="help-row")
+            yield Label("  [bold]prefix R[/]  Rebalance panes", classes="help-row")
             yield Label("Review Loop", classes="help-section")
-            yield Label("  [bold]zz d[/]   Start loop", classes="help-row")
-            yield Label("  [bold]zzz d[/]  Start strict loop", classes="help-row")
-            yield Label("  [bold]z d[/]    Stop loop / fresh done", classes="help-row")
+            yield Label("  [bold]zz d[/]  Start loop", classes="help-row")
+            yield Label("  [bold]z d[/]   Kill loop, fresh review", classes="help-row")
             yield Label("QA Loop", classes="help-section")
-            yield Label("  [bold]zz t[/]   Start QA loop (lenient)", classes="help-row")
-            yield Label("  [bold]zzz t[/]  Start strict QA loop", classes="help-row")
-            yield Label("  [bold]z t[/]    Fresh start QA", classes="help-row")
+            yield Label("  [bold]zz t[/]  Start QA loop", classes="help-row")
+            yield Label("  [bold]z t[/]   Fresh start QA", classes="help-row")
             yield Label("")
             yield Label("[dim]Press Esc/? to close  |  h to discuss pm[/]", classes="help-row")
 
@@ -450,3 +456,430 @@ class PlanAddScreen(ModalScreen):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+class QACreatePickerScreen(ModalScreen):
+    """Modal for picking which kind of QA file to author.
+
+    Returns ``(category, mode, name)`` on confirm, where category is one
+    of ``"instructions" / "regression" / "artifacts"``, mode is always
+    ``"author"`` (guided Claude session — the TUI does not expose the
+    scaffold-stub flow; use ``pm qa add-*`` from the CLI for that), and
+    name is the file name the user typed. Returns ``None`` on cancel.
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    QACreatePickerScreen {
+        align: center middle;
+    }
+    #qa-create-container {
+        width: 60;
+        height: auto;
+        background: $surface;
+        border: solid $primary;
+        padding: 1 2;
+    }
+    #qa-create-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    .qa-create-label {
+        margin-top: 1;
+    }
+    #qa-create-container Input {
+        border: none;
+        height: 1;
+        padding: 0 1;
+        background: #333333;
+    }
+    #qa-create-container Input:focus {
+        background: #444444;
+    }
+    """
+
+    _OPTIONS = [
+        ("instructions", "author", "Instruction"),
+        ("regression",   "author", "Regression test"),
+        ("artifacts",    "author", "Artifact recipe"),
+    ]
+
+    def __init__(self):
+        super().__init__()
+        self._selected = 0
+
+    def compose(self) -> ComposeResult:
+        from textual.widgets import Input
+        with Vertical(id="qa-create-container"):
+            yield Label("Create QA file", id="qa-create-title")
+            yield Label("Name", classes="qa-create-label")
+            yield Input(placeholder="e.g. login-flow-setup", id="qa-create-name")
+            yield Label("Kind", classes="qa-create-label")
+            yield Label("", id="qa-create-options")
+            yield Label(
+                "[dim]↑↓ change kind · Enter create · Esc cancel[/]",
+                classes="qa-create-label",
+            )
+
+    def on_mount(self) -> None:
+        from textual.widgets import Input
+        self._refresh_options()
+        self.query_one("#qa-create-name", Input).focus()
+
+    def _refresh_options(self) -> None:
+        lines = []
+        for i, (_cat, _mode, label) in enumerate(self._OPTIONS):
+            pointer = "▸ " if i == self._selected else "  "
+            lines.append(f"{pointer}{label}")
+        self.query_one("#qa-create-options", Label).update("\n".join(lines))
+
+    def on_key(self, event) -> None:
+        # Arrow keys move the radio selection even while the Input is focused.
+        if event.key in ("up",):
+            self._selected = max(0, self._selected - 1)
+            self._refresh_options()
+            event.prevent_default()
+            event.stop()
+        elif event.key in ("down",):
+            self._selected = min(len(self._OPTIONS) - 1, self._selected + 1)
+            self._refresh_options()
+            event.prevent_default()
+            event.stop()
+
+    def on_input_submitted(self, event) -> None:
+        from textual.widgets import Input
+        name = self.query_one("#qa-create-name", Input).value.strip()
+        if not name:
+            return
+        category, mode, _label = self._OPTIONS[self._selected]
+        self.dismiss((category, mode, name))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class ConfirmCleanupScreen(ModalScreen):
+    """Confirm tearing down all live resources for a PR."""
+
+    BINDINGS = [
+        Binding("y", "confirm", "Yes", show=False),
+        Binding("n", "cancel", "No", show=False),
+        Binding("escape", "cancel", "Cancel", show=False),
+    ]
+
+    CSS = """
+    ConfirmCleanupScreen {
+        align: center middle;
+    }
+    #cleanup-container {
+        width: 60;
+        height: auto;
+        background: $surface;
+        border: solid $warning;
+        padding: 1 2;
+    }
+    #cleanup-title {
+        text-align: center;
+        text-style: bold;
+        color: $warning;
+        margin-bottom: 1;
+    }
+    .cleanup-line {
+        margin-left: 2;
+    }
+    #cleanup-hint {
+        text-align: center;
+        margin-top: 1;
+        color: $text-muted;
+    }
+    """
+
+    def __init__(self, pr_display_id: str):
+        super().__init__()
+        self._pr_display_id = pr_display_id
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="cleanup-container"):
+            yield Label(f"Clean up {self._pr_display_id}?", id="cleanup-title")
+            yield Label("This will remove:")
+            yield Label("• tmux windows (impl, review, merge, QA)", classes="cleanup-line")
+            yield Label("• docker containers (all QA scenarios)", classes="cleanup-line")
+            yield Label("• pane registry entries", classes="cleanup-line")
+            yield Label("• push-proxy sockets", classes="cleanup-line")
+            yield Label("[bold]y[/] confirm  [bold]n[/]/[bold]Esc[/] cancel", id="cleanup-hint")
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
+class AutoRunsScreen(ModalScreen):
+    """Live view of the auto-start target set and its runs (key ``a``).
+
+    Renders ``auto_start.build_status(app)`` — the same
+    ``pm.autostart.status/1`` dict that ``pm autostart status --json``
+    returns — flattened by ``autostart_state.status_rows``.  Refreshes every
+    2s while open; Enter/f focuses the selected run's tmux window.
+    """
+
+    REFRESH_SECONDS = 2.0
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("q", "close", "Close", show=False),
+        Binding("a", "close", "Close", show=False),
+        Binding("j", "move(1)", "Down", show=False),
+        Binding("k", "move(-1)", "Up", show=False),
+        Binding("down", "move(1)", "Down", show=False),
+        Binding("up", "move(-1)", "Up", show=False),
+        Binding("enter", "focus_run", "Focus window"),
+        Binding("f", "focus_run", "Focus window", show=False),
+        Binding("r", "refresh_runs", "Refresh"),
+        # The popup may stay open indefinitely; it must not swallow the
+        # Ctrl+R that `pm tui restart` / merge-triggered restarts send.
+        Binding("ctrl+r", "restart_app", "Restart", show=False),
+    ]
+
+    CSS = """
+    AutoRunsScreen {
+        align: center middle;
+    }
+    #runs-container {
+        width: 110;
+        max-width: 95%;
+        height: auto;
+        max-height: 85%;
+        background: $surface;
+        border: solid $primary;
+        padding: 0 1;
+    }
+    #runs-title {
+        text-style: bold;
+    }
+    #runs-body {
+        width: 100%;
+    }
+    #runs-footer {
+        color: $text-muted;
+    }
+    """
+
+    _POLICY_STYLES = {"stop": "magenta", "wait": "bold magenta",
+                      "auto": "green"}
+
+    _STATE_STYLES = {
+        "running": "bold green",
+        "waiting": "bold yellow",
+        "paused": "bold magenta",
+        "failed": "bold red",
+        "queued": "cyan",
+        "completed": "green",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._rows: list[dict] = []
+        self._status: dict = {}
+        self._selected = 0
+        self._selected_key: tuple | None = None
+        self._timer = None
+        # (row key, message) shown on the selected row's detail line.
+        self._notice: tuple | None = None
+
+    def compose(self) -> ComposeResult:
+        container = VerticalScroll(id="runs-container")
+        # Not focusable: a focused scroll container claims ↑/↓ for
+        # scrolling once the rows overflow, so they would stop moving the
+        # selection.  The selected row is scrolled into view instead.
+        container.can_focus = False
+        with container:
+            yield Label("Auto-start runs", id="runs-title")
+            yield Static("", id="runs-body")
+            yield Label(
+                "j/k select · Enter/f focus window · r refresh · "
+                "Esc/q/a close · refreshes every 2s",
+                id="runs-footer")
+
+    def on_mount(self) -> None:
+        self.action_refresh_runs()
+        self._timer = self.set_interval(self.REFRESH_SECONDS,
+                                        self.action_refresh_runs)
+
+    def on_unmount(self) -> None:
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+
+    @staticmethod
+    def _row_key(rows: list[dict], idx: int) -> tuple | None:
+        """(owning target, pr_id) — a shared dep appears once per target."""
+        if not (0 <= idx < len(rows)):
+            return None
+        owner = None
+        for r in rows[:idx + 1]:
+            if r["kind"] in ("target", "run"):
+                owner = r["pr_id"]
+        return (owner, rows[idx]["pr_id"])
+
+    def action_refresh_runs(self) -> None:
+        from pm_core.tui import auto_start as _auto_start
+        from pm_core.autostart_state import status_rows
+        try:
+            self._status = _auto_start.build_status(self.app)
+        except Exception as e:  # never let a refresh tick kill the popup
+            # Text, not markup: the exception text may contain brackets.
+            from rich.text import Text
+            self.query_one("#runs-body", Static).update(
+                Text(f"status failed: {e}", style="red"))
+            return
+        self._rows = status_rows(self._status)
+        # Keep the same run selected across refreshes when it still exists.
+        if self._selected_key is not None:
+            for i in range(len(self._rows)):
+                if self._row_key(self._rows, i) == self._selected_key:
+                    self._selected = i
+                    break
+        self._selected = max(0, min(self._selected, len(self._rows) - 1))
+        self._selected_key = self._row_key(self._rows, self._selected)
+        self._render_rows()
+
+    def _render_rows(self) -> None:
+        from rich.text import Text
+        from pm_core.autostart_state import policy_labels
+        st = self._status
+        mode = st.get("mode", "off")
+        title = "Auto-start runs"
+        if mode == "targets":
+            title += f" — {len(st.get('targets') or [])} target(s)"
+        elif mode == "all":
+            title += " — all ready PRs (backlog mode)"
+        if st.get("run_id"):
+            title += f"  [dim]{st['run_id']}[/]"
+        self.query_one("#runs-title", Label).update(title)
+
+        body = Text()
+        body_widget = self.query_one("#runs-body", Static)
+        row_texts: list[tuple[Text, Text]] = []
+        if mode == "off" or not self._rows:
+            if mode == "off":
+                body.append("No auto-start targets (auto-start off).\n", style="bold")
+            else:
+                body.append("No active runs.\n", style="bold")
+            body.append("Add a target with O (stop before merge) or A on a PR,\n"
+                        "or `pm autostart add PR_ID`.", style="dim")
+            body_widget.update(body)
+            return
+        for i, row in enumerate(self._rows):
+            r = row["run"]
+            sel = i == self._selected
+            indent = "  " * row["depth"]
+            prefix = "▶ " if sel else "  "
+            line = Text(prefix + indent, style="reverse" if sel else "")
+            if row["kind"] == "target":
+                line.append("◎ ", style="bold yellow")
+            elif row["kind"] == "dep":
+                line.append("└ ", style="dim")
+            line.append(str(r.get("display_id") or r["pr_id"]), style="bold")
+            if r.get("display_id") and r.get("display_id") != r["pr_id"]:
+                line.append(f" {r['pr_id']}", style="dim")
+            # Target headers always name their policy (R14); a dep shows
+            # only a hold — a stop mark or the wait target(s) holding it.
+            for label, kind in policy_labels(row):
+                line.append(f" [{label}]", style=self._POLICY_STYLES[kind])
+            state = r.get("state") or "?"
+            line.append(f"  {state.upper()}",
+                        style=self._STATE_STYLES.get(state, ""))
+            line.append(f"  {r.get('phase') or ''}", style="bold cyan")
+            if row.get("progress"):
+                line.append(f"  {row['progress']}")
+            win = r.get("window")
+            if win:
+                line.append(f"  ⧉ {win['name']}", style="blue")
+            body.append_text(line)
+            body.append("\n")
+            detail = Text("    " + indent)
+            detail.append((r.get("title") or "")[:60], style="italic")
+            if r.get("reason"):
+                detail.append(f" — {r['reason']}", style="dim")
+            if row.get("also"):
+                detail.append(f" (also needed by {', '.join(row['also'])})",
+                              style="dim yellow")
+            if sel and self._notice and self._notice[0] == self._selected_key:
+                if r.get("window"):
+                    # A refresh found a window since: the notice is stale.
+                    self._notice = None
+                else:
+                    detail.append(f"  ⚠ {self._notice[1]}", style="bold red")
+            body.append_text(detail)
+            body.append("\n")
+            row_texts.append((line, detail))
+        body_widget.update(body)
+        # After the refresh: the body's width and the container's scrollable
+        # height are only known once the new content has been laid out.
+        self.call_after_refresh(self._scroll_selected_into_view, row_texts,
+                                self._selected)
+
+    def _scroll_selected_into_view(self, row_texts: list[tuple], selected: int
+                                   ) -> None:
+        """Scroll the container so row *selected* (two Texts, either of
+        which may wrap) is visible."""
+        if not (0 <= selected < len(row_texts)):
+            return
+        body = self.query_one("#runs-body", Static)
+        width = body.content_region.width
+        if width <= 0:
+            return
+
+        def height(t) -> int:
+            return len(t.wrap(self.app.console, width))
+
+        top = body.virtual_region.y + sum(
+            height(a) + height(b) for a, b in row_texts[:selected])
+        h = sum(height(t) for t in row_texts[selected])
+        if selected == 0:  # keep the title in view at the top
+            top, h = 0, top + h
+        self.query_one("#runs-container", VerticalScroll).scroll_to_region(
+            Region(0, top, 1, h), animate=False, immediate=True)
+
+    def action_move(self, delta: int) -> None:
+        if not self._rows:
+            return
+        self._selected = max(0, min(len(self._rows) - 1, self._selected + delta))
+        self._selected_key = self._row_key(self._rows, self._selected)
+        self._notice = None
+        self._render_rows()
+
+    def action_focus_run(self) -> None:
+        if not (0 <= self._selected < len(self._rows)):
+            return
+        run = self._rows[self._selected]["run"]
+        win = run.get("window")
+        if not win:
+            msg = f"No live window for {run['pr_id']}"
+            self.app.log_message(msg)
+            # On a short terminal the popup covers the app's log line, so
+            # also show the notice on the selected row (always in view).
+            self._notice = (self._selected_key, msg)
+            self._render_rows()
+            return
+        session = getattr(self.app, "_session_name", None)
+        self.action_close()
+        if session:
+            from pm_core import tmux as tmux_mod
+            tmux_mod.select_window(session, win["id"])
+
+    def action_restart_app(self) -> None:
+        self.action_close()
+        self.app.action_restart()
+
+    def action_close(self) -> None:
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+        self.app.pop_screen()

@@ -31,12 +31,47 @@ from pm_core.tmux import (
     list_grouped_sessions,
     find_unattached_grouped_session,
     sessions_on_window,
+    attached_group_active_windows,
 )
 
 
 # ---------------------------------------------------------------------------
 # has_tmux / in_tmux
 # ---------------------------------------------------------------------------
+
+class TestAttachedGroupActiveWindows:
+    @patch("pm_core.tmux._run")
+    def test_single_query_filters_group_and_attachment(self, run):
+        run.return_value = MagicMock(returncode=0, stdout=(
+            "1|@1|base\n2|@2|base~1\n0|@3|base~2\n"
+            "1|@4|other\n1|@5|base-extra\n"
+            "|@6|base~3\n1||base~4\nmalformed\n"
+            "1|@7|base~5|with|pipes\n"))
+        assert attached_group_active_windows("base", socket_path="/socket") == {
+            "base": "@1", "base~1": "@2", "base~5|with|pipes": "@7"}
+        run.assert_called_once()
+        cmd = run.call_args.args[0]
+        assert "list-sessions" in cmd
+        assert "#{session_attached}|#{window_id}|#{session_name}" in cmd
+        assert cmd[cmd.index("-S") + 1] == "/socket"
+
+    @patch("pm_core.tmux._run")
+    def test_separator_is_printable_so_c_locale_cannot_break_it(self, run):
+        # tmux rewrites control characters (e.g. a tab) in format output to
+        # "_" when the server runs under LC_ALL=C, so a tab-separated query
+        # silently parsed as zero fields.  The separator must be printable.
+        run.return_value = MagicMock(returncode=0, stdout="1|@1|base\n")
+        assert attached_group_active_windows("base") == {"base": "@1"}
+        fmt = next(a for a in run.call_args.args[0] if "session_name" in a)
+        assert "\t" not in fmt
+        assert "|" in fmt
+
+    @patch("pm_core.tmux._run")
+    def test_error_returns_empty_map(self, run):
+        run.return_value = MagicMock(returncode=1, stdout="")
+        assert attached_group_active_windows("base") == {}
+        run.assert_called_once()
+
 
 class TestHasTmux:
     @patch("shutil.which", return_value="/usr/bin/tmux")
@@ -354,11 +389,45 @@ class TestGetSessionName:
         mock_run.return_value = MagicMock(returncode=0, stdout="sess\n")
         env = os.environ.copy()
         env.pop("TMUX_PANE", None)
+        env.pop("PM_POPUP_SESSION", None)
         with patch.dict(os.environ, env, clear=True):
             result = get_session_name()
         cmd = mock_run.call_args[0][0]
         assert "-t" not in cmd
         assert result == "sess"
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_popup_session_env_without_tmux_pane(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        env = os.environ.copy()
+        env.pop("TMUX_PANE", None)
+        env["PM_POPUP_SESSION"] = "proj~7"
+        with patch.dict(os.environ, env, clear=True):
+            result = get_session_name()
+        assert result == "proj~7"
+        cmd = mock_run.call_args[0][0]
+        assert "has-session" in cmd and "=proj~7" in cmd
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_popup_session_env_ignored_once_session_is_gone(self, mock_run):
+        """An inherited PM_POPUP_SESSION naming a dead session falls back
+        to the current client instead of returning a stale name."""
+        mock_run.side_effect = [MagicMock(returncode=1, stdout=""),
+                                MagicMock(returncode=0, stdout="proj~2\n")]
+        env = os.environ.copy()
+        env.pop("TMUX_PANE", None)
+        env["PM_POPUP_SESSION"] = "proj~7"
+        with patch.dict(os.environ, env, clear=True):
+            result = get_session_name()
+        assert result == "proj~2"
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_tmux_pane_beats_popup_session_env(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="myproj\n")
+        with patch.dict(os.environ, {"TMUX_PANE": "%5",
+                                     "PM_POPUP_SESSION": "proj~7"}):
+            result = get_session_name()
+        assert result == "myproj"
 
 
 # ---------------------------------------------------------------------------

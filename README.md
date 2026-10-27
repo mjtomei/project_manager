@@ -18,14 +18,25 @@ boring, repetitive parts so they can focus on what matters.
 
 ## Features
 
-- **Interactive TUI** — tmux-based dashboard with quality of life improvements in tmux hooks
-- **Guided setup** — step-by-step guide for new users to initialize projects, create plans, and start working
-- **Plan-driven workflow** — write and manage plans and associated PRs with Claude in a standardized flow
-- **Parallel Claude sessions** — spin up Claude sessions with their own branches and working directories as needed for PRs, experiments, or any task
+- **Interactive TUI** — tmux-based dashboard showing your PR dependency graph as a tech tree
+- **Plan → implement → review → QA** — write plans, break them into PRs with specs, and let agents execute the full lifecycle. Autostart picks up PRs as their dependencies merge, review loops iterate until code passes, and QA runs scenario-based tests in containers
+- **Watchers** — background agents that monitor sessions, detect failures, and record bugs and improvements
+- **Container isolation** — run review and QA sessions in Docker or Podman containers
+- **Parallel Claude sessions** — each PR gets its own branch, workdir, and Claude session
 - **Shared sessions** — share your tmux session with other users on the same machine via `--global` or `--group`
 - **Smart mobile mode** — auto-zooms the active pane on narrow terminals, usable over SSH from phones and tablets
-- **Automated review loop** — iterative code review where Claude reviews, fixes issues, and re-reviews until the PR passes (`zz d` in the TUI)
+- **Guided setup** — step-by-step guide for new users to initialize projects, create plans, and start working
 - **Meta-development** — open a Claude session targeting the pm codebase itself, to fix pain points as you encounter them
+- **QA library** — write reusable test recipes, regression tests, mock contracts, and evidence-capture procedures as Markdown files; agents pick them up automatically. See [pm_core/docs/qa_library.md](pm_core/docs/qa_library.md).
+
+## Demo
+
+Three lines of notes became a working multiplayer tetromino stacking game with
+real-time networking, lobby system, adaptive handicapping, and end-to-end test
+coverage — 50+ merged PRs and 30,000+ lines of code from ~2 hours of human input.
+
+See the [full narrative](https://github.com/mjtomei/tomino/blob/master/docs/pm-demo-narrative.md)
+and the [resulting repo](https://github.com/mjtomei/tomino).
 
 ## Install
 
@@ -210,17 +221,68 @@ meta session, and immediately benefit from the improvement.
 When a PR is ready for review, the review loop automates the review-fix cycle:
 
 1. Claude reviews the diff against the base branch
-2. If issues are found (NEEDS_WORK), Claude fixes them, commits, and pushes
+2. If issues or suggestions are found (NEEDS_WORK), Claude fixes them, commits, and pushes
 3. A new review iteration starts automatically
-4. The loop stops when the PR receives PASS or PASS_WITH_SUGGESTIONS
+4. The loop stops when the PR receives PASS
 
 From the TUI:
-- `zz d` — start a review loop (stops on PASS or PASS_WITH_SUGGESTIONS)
-- `zzz d` — start a strict loop (stops only on full PASS)
+- `zz d` — start a review loop (iterates until PASS)
 - `z d` — stop a running loop, or do a single fresh review
 
 The loop runs in the background without stealing focus from your active window,
 so you can continue working while reviews iterate.
+
+## Auto-start targets
+
+Auto-start drives an explicit set of target PRs through implementation →
+review → QA → sign-off inside the running TUI, starting each target's
+dependencies as they become ready (a dependency shared by several targets runs
+once). Targets are additive: pressing `O` (stop before merge) or `A`
+(auto-merge) on another PR adds it without dropping the others. An empty set
+means auto-start is off.
+
+A QA PASS hands the PR to sign-off; the router's verdict is recorded against
+the branch HEAD and routed (re-QA, back to review, back to implementation, or
+blocked for a human). Only a fresh `SIGNOFF_MERGE` on the current HEAD
+finishes the sequence: `O` stops there ("ready to merge — press g"), `A`
+merges. With `skip_qa`, sign-off follows the review PASS.
+
+```bash
+pm autostart add pr-abc123 pr-def456   # add targets (default: stop before merge)
+pm autostart add 42 --auto-merge       # merge automatically (sign-off gate still applies)
+pm autostart add pr-final --wait-for-merge  # whole chain, every merge manual
+pm autostart remove pr-abc123          # stop scheduling it; running windows are kept
+pm autostart status --json             # what every target and dependency is doing
+```
+
+`--stop-before-merge` holds only the named target, so its prerequisites still
+auto-merge. To walk an entire dependency chain with manual merges, add just the
+final PR with `--wait-for-merge`:
+
+1. The final PR stays the only target; every unmerged transitive prerequisite
+   is held for a manual merge (as is the target itself). Holds are derived from
+   the current dependency graph, so a prerequisite added later is held too.
+2. Each ready prerequisite runs implementation → review → QA → a fresh
+   sign-off, then waits: the log shows `✓ <pr> signed off … — waiting for
+   manual merge (wait-for-merge: pr-final)` and `pm autostart status` / the
+   `a` popup show `[wait-for-merge ← pr-final]` with the reason.
+3. Merge it yourself (`g` in the TUI or `pm pr merge <pr>`; the sign-off gate
+   still applies). The TUI reloads the merged state and the scheduler starts
+   the dependents that merge unblocked — no further `autostart` command.
+4. Repeat until the final PR signs off and waits; merging it completes the
+   target.
+
+A dependency shared by several targets is held while any active wait-for-merge
+target needs it or it carries its own stop mark; other targets keep their
+policy. Removing the wait target, or re-adding it with `--auto-merge` /
+`--stop-before-merge`, releases only the holds it caused (the command reports
+`released merge hold: …`). Re-adding without a flag keeps the policy; giving
+two policy flags is rejected without changing anything. The policy survives a
+merge-triggered TUI restart.
+
+Press `a` in the TUI for a live runs popup (same data as `pm autostart status`):
+phase, running/waiting/paused/failed state with a reason, review iteration or QA
+progress, and Enter to jump to the run's tmux window.
 
 ## Shared sessions
 
@@ -253,5 +315,7 @@ others.
 ## Requirements
 
 - Python 3.12+
-- click, pyyaml, textual (installed via `pip install -r requirements.txt`)
-- `gh` CLI only if using the github backend
+- tmux
+- click, pyyaml, textual (installed by `install.sh`)
+- `gh` CLI (only if using the GitHub backend)
+- Docker or Podman (only if using container isolation for QA/review)

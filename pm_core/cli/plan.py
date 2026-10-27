@@ -9,10 +9,29 @@ from pathlib import Path
 import click
 
 from pm_core import store, notes
-from pm_core.plan_parser import parse_plan_prs
-from pm_core import review as review_mod
+from pm_core.plans.parser import parse_plan_prs
+from pm_core.plans import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
+from pm_core.prompt_bounds import (
+    PLAN_LIST_BUDGET, PLAN_LIST_MAX, PROMPT_ARG_LIMIT, bounded_join,
+)
 from pm_core.prompt_gen import tui_section
+
+# claude receives a session's prompt as a single argv entry.  Linux caps a
+# single argument at MAX_ARG_STRLEN (128 KiB / 131072 bytes, including the
+# terminating NUL); exceeding it makes execve fail with E2BIG.  Stay well
+# under that so prompts that inline per-PR detail degrade gracefully.
+_PROMPT_ARG_LIMIT = PROMPT_ARG_LIMIT
+
+# Cap collection listings so cross-plan / existing-PR context cannot grow
+# without bound.  The markers point at commands that read the full detail.
+_PLAN_LIST_MAX = PLAN_LIST_MAX
+# A count cap alone does not bound a listing whose lines carry user-authored
+# titles; this bounds the product.  Real listings here run 0.4-14.5 KB.
+_PLAN_LIST_BUDGET = PLAN_LIST_BUDGET
+# One-line PR summaries inline the description; truncate it so 40 large
+# descriptions (11 KB each in this project) cannot blow the prompt budget.
+_PLAN_DESC_CHARS = 300
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -23,7 +42,8 @@ from pm_core.cli.helpers import (
     _pr_display_id,
     _require_plan,
     _resolve_repo_dir,
-    save_and_push,
+    echo_record,
+    emit_paged,
     state_root,
     trigger_tui_refresh,
 )
@@ -64,11 +84,8 @@ def plan_add(name: str, description: str, fresh: bool):
     plan_file = f"plans/{plan_id}.md"
 
     entry = store.make_plan_entry(plan_id, name, plan_file)
-    if data.get("plans") is None:
-        data["plans"] = []
-    data["plans"].append(entry)
 
-    # Create the plan file
+    # Create the plan file (idempotent, safe outside lock)
     plan_path = root / plan_file
     plan_path.parent.mkdir(parents=True, exist_ok=True)
     plan_path.write_text(f"# {name}\n\n<!-- Describe the plan here -->\n")
@@ -76,7 +93,12 @@ def plan_add(name: str, description: str, fresh: bool):
     # Ensure notes file exists
     notes.ensure_notes_file(root)
 
-    save_and_push(data, root, f"pm: add plan {plan_id}")
+    def apply(data):
+        if data.get("plans") is None:
+            data["plans"] = []
+        data["plans"].append(entry)
+
+    store.locked_update(root, apply)
     click.echo(f"Created plan {plan_id}: {name}")
     click.echo(f"  Plan file: {plan_path}")
     trigger_tui_refresh()
@@ -120,9 +142,11 @@ when there's a real ordering constraint.
 
 {_MANUAL_TESTING_GUIDANCE}
 
-After writing the PRs section, tell the user to run `pm plan review {plan_id}`
-(key: c in the plans pane) to check consistency and coverage before loading.
-Let them know it is safe to close this pane — the review will run in a new session.
+After writing the PRs section, tell the user to run `pm plan load {plan_id}`
+(key: l in the plans pane) to load the PRs into project.yaml. They can
+optionally run `pm plan review {plan_id}` (key: c) afterward to check
+consistency and coverage.
+Let them know it is safe to close this pane — load and review will run in new sessions.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
@@ -131,7 +155,8 @@ Let them know it is safe to close this pane — the review will run in a new ses
         if fresh:
             clear_session(root, session_key)
         click.echo("Launching Claude...")
-        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh)
+        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh,
+                      session_type="plan")
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-add"].format(path=plan_path)
         click.echo("Reviewing results... (background)")
@@ -152,8 +177,7 @@ def plan_list():
     if not plans:
         click.echo("No plans.")
         return
-    for p in plans:
-        click.echo(f"  {p['id']}: {p['name']} [{p.get('status', 'draft')}]")
+    emit_paged([f"  {p['id']}: {p['name']} [{p.get('status', 'draft')}]" for p in plans])
 
 
 @plan.command("breakdown")
@@ -179,10 +203,16 @@ def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
     existing_prs = data.get("prs") or []
     existing_context = ""
     if existing_prs:
-        existing_context = "\nExisting PRs in this project:\n" + "\n".join(
-            f"  {pr['id']}: {pr.get('title', '???')} [{pr.get('status', '?')}]"
-            + (f" (depends on: {', '.join(pr.get('depends_on') or [])})" if pr.get("depends_on") else "")
-            for pr in existing_prs
+        def _existing_line(pr: dict) -> str:
+            deps = pr.get("depends_on") or []
+            dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+            return (f"  {pr['id']}: {pr.get('title', '???')} "
+                    f"[{pr.get('status', '?')}]{dep_str}")
+        existing_context = "\nExisting PRs in this project:\n" + bounded_join(
+            existing_prs, _existing_line, max_items=_PLAN_LIST_MAX,
+            max_bytes=_PLAN_LIST_BUDGET,
+            omitted_note=lambda n: (
+                f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
         )
 
     initial_context = ""
@@ -222,9 +252,10 @@ Guidelines:
 - Write the ## PRs section directly into the plan file at {plan_path}
 - {_MANUAL_TESTING_GUIDANCE}
 
-After writing, tell the user to run `pm plan review {plan_id}` (key: c in the
-plans pane) to check consistency and coverage before loading PRs.
-Let them know it is safe to close this pane — the review will run in a new session.
+After writing, tell the user to run `pm plan load {plan_id}` (key: l in the
+plans pane) to load the PRs into project.yaml. They can optionally run
+`pm plan review {plan_id}` (key: c) afterward to check consistency and coverage.
+Let them know it is safe to close this pane — load and review will run in new sessions.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
     claude = find_claude()
@@ -233,7 +264,8 @@ Let them know it is safe to close this pane — the review will run in a new ses
         if fresh:
             clear_session(root, session_key)
         click.echo(f"Launching Claude to break down plan {plan_id}...")
-        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh)
+        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh,
+                      session_type="plan")
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-breakdown"].format(path=plan_path)
         click.echo("Reviewing results... (background)")
@@ -288,16 +320,25 @@ def plan_review(plan_id: str | None, fresh: bool):
 
     other_prs_context = ""
     if other_prs:
-        other_prs_context = "\nPRs from other plans (for cross-plan reference):\n" + "\n".join(
-            f"  {pr['id']}: {pr.get('title', '???')} [{pr.get('status', '?')}] (plan: {pr.get('plan', '?')})"
-            for pr in other_prs
-        ) + "\n"
+        def _other_plan_line(pr: dict) -> str:
+            return (f"  {pr['id']}: {pr.get('title', '???')} "
+                    f"[{pr.get('status', '?')}] (plan: {pr.get('plan', '?')})")
+        other_prs_context = (
+            "\nPRs from other plans (for cross-plan reference):\n"
+            + bounded_join(
+                other_prs, _other_plan_line, max_items=_PLAN_LIST_MAX,
+                max_bytes=_PLAN_LIST_BUDGET,
+                omitted_note=lambda n: (
+                    f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
+            )
+            + "\n")
 
     notes_block = notes.notes_section(root)
 
     if plan_prs:
         # Post-load: PRs exist in project.yaml — review with progress awareness
-        prompt = f"""\
+        def _post_load_prompt(pr_list: str, pr_detail_note: str) -> str:
+            return f"""\
 Your goal: Review the plan's progress, iterate on both the plan and its PRs,
 and help the user understand where things stand.
 
@@ -308,7 +349,7 @@ Read the plan file at: {plan_path}
 
 PRs belonging to this plan:
 {pr_list}
-
+{pr_detail_note}
 {other_prs_context}\
 First, assess progress:
 - How many PRs are done (merged/in_review) vs remaining (pending/in_progress)?
@@ -338,8 +379,32 @@ For any issues found, you can propose a fix. Fixes can be applied as follows:
 - For plan updates: edit the plan file directly at {plan_path}
 - To add new PRs: use `pm pr add`
 
+IMPORTANT: keep the three sources of truth in sync. Whenever you change
+a PR's functionality, scope, or dependencies:
+1. Run `pm pr edit` (the canonical update — writes to project.yaml).
+2. Update the corresponding section in the plan file at {plan_path}
+   so the human-readable plan reflects the change.
+3. If the PR is already merged or in_review (i.e. its body cannot be
+   meaningfully rewritten anymore), add a `pm pr note add <id> "..."`
+   describing the change in context (e.g. "Phase N redesign: this PR's
+   <feature> is now consumed at <new surface> by <other PR>") instead
+   of editing the description.
+
+Apply the same rule when you reference a merged PR's behavior from a
+new pending PR — add a note on the merged PR pointing back, so future
+sessions reading either side find the connection.
+
 After fixing, summarize what was changed.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
+
+        # Every PR's description, tests and files are inlined whole: they are
+        # the material this review works from, so they are never truncated
+        # (spec §31 — only PR notes and pure enumerations are bounded).  A
+        # plan large enough to push the prompt over one argv entry is delivered
+        # by the launcher's file-backed bootstrap, which carries the complete
+        # prompt; the session then reviews the real descriptions rather than
+        # fetching each one with `pm pr show`.
+        prompt = _post_load_prompt(pr_list, "")
     else:
         # Pre-load: no PRs in project.yaml yet — review the plan file's PR section
         prompt = f"""\
@@ -407,7 +472,8 @@ Let them know it is safe to close this pane — loading runs instantly without a
         if fresh or plan_prs:
             clear_session(root, session_key)
         click.echo(f"Launching Claude to review plan {plan_id}...")
-        launch_claude(prompt, session_key=session_key, pm_root=root, resume=not fresh and not plan_prs)
+        launch_claude(prompt, session_key=session_key, pm_root=root,
+                      resume=not fresh and not plan_prs, session_type="plan")
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-review"].format(path=plan_path)
         click.echo("Reviewing results... (background)")
@@ -430,24 +496,54 @@ def plan_deps():
         click.echo("No PRs. Add PRs first with: pm pr add <title>", err=True)
         raise SystemExit(1)
 
-    pr_lines = []
-    for p in prs:
+    # Display ids of the PRs whose description this builder abbreviates.  The
+    # note below describes the lines the session actually reads, so it must be
+    # driven by the *kept* lines, not by whether any formatter call truncated:
+    # ``bounded_join`` formats the first item past the byte budget before
+    # breaking, so the only cut description can belong to a PR the listing
+    # dropped, and a plain flag would claim the kept descriptions are previews
+    # when every one of them is complete.
+    truncated_ids: list[str] = []
+
+    def _dep_pr_line(p: dict) -> str:
         deps = p.get("depends_on") or []
         dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-        desc = p.get("description", "")
+        desc = " ".join((p.get("description") or "").split())
+        display_id = _pr_display_id(p)
+        if len(desc) > _PLAN_DESC_CHARS:
+            desc = desc[:_PLAN_DESC_CHARS].rstrip() + "…"
+            truncated_ids.append(display_id)
         desc_str = f" — {desc}" if desc else ""
-        pr_lines.append(f"  {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{desc_str}")
+        return (f"  {display_id}: {p.get('title', '???')} "
+                f"[{p.get('status', '?')}]{dep_str}{desc_str}")
 
-    pr_list_str = "\n".join(pr_lines)
+    pr_list_str = bounded_join(
+        prs, _dep_pr_line, max_items=_PLAN_LIST_MAX,
+        max_bytes=_PLAN_LIST_BUDGET,
+        omitted_note=lambda n: (
+            f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
+    )
+    # Every kept line starts with its PR's unique display id, so the kept set
+    # is exactly the ids that prefix a line of the joined listing.
+    kept_ids = {line.split(": ", 1)[0] for line in pr_list_str.split("\n")}
+    if any(f"  {display_id}" in kept_ids for display_id in truncated_ids):
+        pr_list_str += (
+            "\n  (Descriptions above are abbreviated to fit the prompt size "
+            "limit — run `pm pr show <id>` for a PR's full description.)")
 
-    # Include plan context if available
+    # Include plan context if available.  Plan files are planning documents
+    # the session works from, so they are inlined whole and never truncated;
+    # a prompt too large for one argv entry is delivered by the launcher's
+    # file-backed bootstrap instead (see pm_core.prompt_bounds).
     plan_context = ""
-    plans = data.get("plans") or []
-    for plan_entry in plans:
+    for plan_entry in (data.get("plans") or []):
         plan_path = root / plan_entry["file"]
-        if plan_path.exists():
-            plan_context += f"\nPlan: {plan_entry['name']} ({plan_entry['id']})\n"
-            plan_context += plan_path.read_text() + "\n"
+        if not plan_path.exists():
+            continue
+        plan_context += (
+            f"\nPlan: {plan_entry['name']} ({plan_entry['id']})\n"
+            + plan_path.read_text() + "\n"
+        )
 
     notes_block = notes.notes_section(root)
 
@@ -485,7 +581,8 @@ dependency tree.
     claude = find_claude()
     if claude:
         click.echo("Launching Claude to review dependencies...")
-        launch_claude(prompt, session_key="plan:deps", pm_root=root)
+        launch_claude(prompt, session_key="plan:deps", pm_root=root,
+                      session_type="plan")
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-deps"]
         click.echo("Reviewing results... (background)")
@@ -557,7 +654,7 @@ def plan_load(plan_id: str | None):
             title_to_id[pr["title"]] = pr_id
             existing_ids.add(pr_id)
 
-    created = 0
+    new_entries = []
     for pr in prs:
         pr_id = title_to_id[pr["title"]]
 
@@ -584,15 +681,22 @@ def plan_load(plan_id: str | None):
         entry = _make_pr_entry(pr_id, pr["title"], branch,
                                plan=plan_id, depends_on=deps,
                                description=desc)
-        data["prs"].append(entry)
+        new_entries.append(entry)
         existing_titles[pr["title"]] = pr_id
-        created += 1
         click.echo(f"  Created {pr_id}: {pr['title']}")
 
-    if created:
-        save_and_push(data, root, f"pm: load plan {plan_id}")
+    if new_entries:
+        def apply(data):
+            if data.get("prs") is None:
+                data["prs"] = []
+            current_ids = {p["id"] for p in data["prs"]}
+            for entry in new_entries:
+                if entry["id"] not in current_ids:
+                    data["prs"].append(entry)
+
+        store.locked_update(root, apply)
         trigger_tui_refresh()
-    click.echo(f"\nLoaded {created} PRs from plan {plan_id}.")
+    click.echo(f"\nLoaded {len(new_entries)} PRs from plan {plan_id}.")
 
 
 @plan.command("fixes")
@@ -629,6 +733,9 @@ def _run_fix_command(step_name: str, review_path_str: str):
         if pp.exists():
             context_parts.append(f"Plan {p['id']} ({p['name']}):\n{pp.read_text()}")
 
+    # Every plan file is inlined whole: plan files are the documents this
+    # session works from, so they are never truncated.  A prompt too large for
+    # one argv entry is delivered by the launcher's file-backed bootstrap.
     original_context = "\n".join(context_parts) if context_parts else "No plan files found."
     prompt = review_mod.build_fix_prompt(step_name, original_context, parsed["findings"])
 
@@ -646,7 +753,8 @@ def _run_fix_command(step_name: str, review_path_str: str):
         review_key = review_path.stem  # e.g. "plan-add-20240101-120000"
         session_key = f"fix:{step_name.replace(' ', '-')}:{review_key}"
         click.echo(f"Launching Claude to fix issues from review...")
-        launch_claude(prompt, session_key=session_key, pm_root=root)
+        launch_claude(prompt, session_key=session_key, pm_root=root,
+                      session_type="plan")
     else:
         click.echo("Claude CLI not found. Copy-paste this prompt:")
         click.echo(f"---\n{prompt}\n---")
@@ -685,31 +793,36 @@ def _import_github_prs(root: Path, data: dict) -> None:
         click.echo("  No open PRs found.")
         return
 
-    if data.get("prs") is None:
-        data["prs"] = []
+    existing_ids = {p["id"] for p in (data.get("prs") or [])}
+    entries_to_import = []
 
-    imported = 0
     for gh_pr in gh_prs:
         branch = gh_pr.get("headRefName", "")
         number = gh_pr.get("number")
         title = gh_pr.get("title", "")
         status = _gh_state_to_status(gh_pr.get("state", "OPEN"), gh_pr.get("isDraft", False))
 
-        existing_ids = {p["id"] for p in data["prs"]}
         desc = gh_pr.get("body", "") or ""
         pr_id = store.generate_pr_id(title, desc, existing_ids)
 
         entry = _make_pr_entry(pr_id, title, branch, status=status,
                                description=desc, gh_pr=gh_pr.get("url", ""),
                                gh_pr_number=number)
-        data["prs"].append(entry)
+        entries_to_import.append(entry)
         existing_ids.add(pr_id)
-        imported += 1
         click.echo(f"  + {pr_id}: {title} [{status}] (#{number})")
 
-    if imported:
-        store.save(data, root)
-        click.echo(f"  Imported {imported} PR(s) from GitHub.")
+    if entries_to_import:
+        def apply(data):
+            if data.get("prs") is None:
+                data["prs"] = []
+            current_ids = {p["id"] for p in data["prs"]}
+            for entry in entries_to_import:
+                if entry["id"] not in current_ids:
+                    data["prs"].append(entry)
+
+        store.locked_update(root, apply)
+        click.echo(f"  Imported {len(entries_to_import)} PR(s) from GitHub.")
 
 
 def _run_plan_import(name: str):
@@ -721,11 +834,8 @@ def _run_plan_import(name: str):
     plan_file = f"plans/{plan_id}.md"
 
     entry = store.make_plan_entry(plan_id, name, plan_file)
-    if data.get("plans") is None:
-        data["plans"] = []
-    data["plans"].append(entry)
 
-    # Create the plan file
+    # Create the plan file (idempotent, safe outside lock)
     plan_path = root / plan_file
     plan_path.parent.mkdir(parents=True, exist_ok=True)
     plan_path.write_text(f"# {name}\n\n")
@@ -733,7 +843,12 @@ def _run_plan_import(name: str):
     # Ensure notes file exists
     notes.ensure_notes_file(root)
 
-    save_and_push(data, root, f"pm: add plan {plan_id}")
+    def apply(data):
+        if data.get("plans") is None:
+            data["plans"] = []
+        data["plans"].append(entry)
+
+    store.locked_update(root, apply)
     click.echo(f"Created plan {plan_id}: {name}")
     click.echo(f"  Plan file: {plan_path}")
     trigger_tui_refresh()
@@ -796,7 +911,8 @@ Once verified, the next step is `pm plan load {plan_id}` to create the PRs.
     if claude:
         session_key = f"plan:import:{plan_id}"
         click.echo("Launching Claude...")
-        launch_claude(prompt, session_key=session_key, pm_root=root)
+        launch_claude(prompt, session_key=session_key, pm_root=root,
+                      session_type="plan")
         # Background review
         check_prompt = review_mod.REVIEW_PROMPTS["plan-import"].format(path=plan_path)
         click.echo("Reviewing results... (background)")

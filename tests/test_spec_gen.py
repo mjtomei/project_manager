@@ -4,7 +4,9 @@ import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 
-from pm_core import spec_gen
+import yaml
+
+from pm_core import spec_gen, store
 
 
 # ---------------------------------------------------------------------------
@@ -26,6 +28,11 @@ def _make_data(pr_overrides=None):
         "project": {"name": "test", "repo": "test-repo", "base_branch": "master"},
         "prs": [pr],
     }
+
+
+def _save_to_disk(data, root):
+    """Write project.yaml so locked_update can load it."""
+    store.save(data, root)
 
 
 def _make_spec_file(root, pr_id, phase, content):
@@ -154,6 +161,7 @@ class TestGenerateSpec:
     def test_basic_generation(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "## Requirements\n- Add widget\n"
         data = _make_data()
+        _save_to_disk(data, tmp_path)
 
         spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl",
                                                      root=tmp_path)
@@ -161,9 +169,8 @@ class TestGenerateSpec:
         assert spec == "## Requirements\n- Add widget"
         assert not needs_review
         mock_claude.assert_called_once()
-        # Spec should be saved — PR entry has file path
-        pr = data["prs"][0]
-        assert Path(pr["spec_impl"]).exists()
+        # Spec should be saved at the convention path
+        assert (tmp_path / "specs" / "pr-abc1234" / "impl.md").exists()
 
     @patch("pm_core.spec_gen.launch_claude_print")
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
@@ -185,7 +192,8 @@ class TestGenerateSpec:
     def test_force_regenerate(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "new spec"
         spec_path = _make_spec_file(tmp_path, "pr-abc1234", "impl", "existing spec")
-        data = _make_data({"spec_impl": spec_path})
+        data = _make_data({"workdir": str(tmp_path)})
+        _save_to_disk(data, tmp_path)
 
         spec, needs_review = spec_gen.generate_spec(
             data, "pr-abc1234", "impl", root=tmp_path, force=True,
@@ -199,6 +207,7 @@ class TestGenerateSpec:
     def test_review_mode_needs_review(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "some spec"
         data = _make_data()
+        _save_to_disk(data, tmp_path)
 
         spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl",
                                                      root=tmp_path)
@@ -210,6 +219,7 @@ class TestGenerateSpec:
     def test_prompt_mode_ambiguity_flag(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "spec\nAMBIGUITY_FLAG\nWhat should X be?"
         data = _make_data()
+        _save_to_disk(data, tmp_path)
 
         spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl",
                                                      root=tmp_path)
@@ -222,6 +232,7 @@ class TestGenerateSpec:
     def test_auto_mode_no_review(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "spec\nAMBIGUITY_FLAG\nQuestion?"
         data = _make_data()
+        _save_to_disk(data, tmp_path)
 
         spec, needs_review = spec_gen.generate_spec(data, "pr-abc1234", "impl",
                                                      root=tmp_path)
@@ -243,18 +254,14 @@ class TestGenerateSpec:
     def test_saves_to_root(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "test spec"
         data = _make_data()
-
-        import yaml
-        (tmp_path / "project.yaml").write_text(yaml.dump(data))
+        _save_to_disk(data, tmp_path)
 
         spec_gen.generate_spec(data, "pr-abc1234", "impl", root=tmp_path)
 
-        # Verify spec file was created in the project directory
-        pr = data["prs"][0]
-        spec_path = Path(pr["spec_impl"])
+        # Verify spec file was created at the convention path
+        spec_path = tmp_path / "specs" / "pr-abc1234" / "impl.md"
         assert spec_path.exists()
         assert spec_path.read_text() == "test spec"
-        assert str(tmp_path) in str(spec_path)
 
 
 # ---------------------------------------------------------------------------
@@ -351,10 +358,8 @@ class TestPendingSpec:
 
 class TestApproveSpec:
     def test_approve_clears_pending(self, tmp_path):
-        spec_file = tmp_path / "impl.md"
-        spec_file.write_text("original spec")
+        _make_spec_file(tmp_path, "pr-abc1234", "impl", "original spec")
         data = _make_data({
-            "spec_impl": str(spec_file),
             "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"},
         })
 
@@ -363,20 +368,20 @@ class TestApproveSpec:
         assert "spec_pending" not in data["prs"][0]
 
     def test_approve_with_edits(self, tmp_path):
-        spec_file = tmp_path / "impl.md"
-        spec_file.write_text("original spec")
+        _make_spec_file(tmp_path, "pr-abc1234", "impl", "original spec")
         data = _make_data({
-            "spec_impl": str(spec_file),
+            "workdir": str(tmp_path),
             "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"},
         })
+        _save_to_disk(data, tmp_path)
 
         phase = spec_gen.approve_spec(data, "pr-abc1234", root=tmp_path,
                                        edited_text="edited spec")
         assert phase == "impl"
-        # The file should be updated
-        pr = data["prs"][0]
-        assert Path(pr["spec_impl"]).read_text() == "edited spec"
-        assert "spec_pending" not in pr
+        # The file should be updated at the convention path
+        spec_path = tmp_path / "specs" / "pr-abc1234" / "impl.md"
+        assert spec_path.read_text() == "edited spec"
+        assert "spec_pending" not in data["prs"][0]
 
     def test_approve_no_pending(self):
         data = _make_data()
@@ -426,6 +431,7 @@ class TestGenerateSpecPending:
     def test_review_mode_sets_pending(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "some spec"
         data = _make_data()
+        _save_to_disk(data, tmp_path)
 
         spec_gen.generate_spec(data, "pr-abc1234", "impl", root=tmp_path)
 
@@ -438,6 +444,7 @@ class TestGenerateSpecPending:
     def test_no_pending_when_no_ambiguity(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "clean spec"
         data = _make_data()
+        _save_to_disk(data, tmp_path)
 
         spec_gen.generate_spec(data, "pr-abc1234", "impl", root=tmp_path)
 
@@ -449,6 +456,7 @@ class TestGenerateSpecPending:
     def test_ambiguity_sets_pending(self, mock_setting, mock_claude, tmp_path):
         mock_claude.return_value = "spec\nAMBIGUITY_FLAG\nQuestion?"
         data = _make_data()
+        _save_to_disk(data, tmp_path)
 
         spec_gen.generate_spec(data, "pr-abc1234", "impl", root=tmp_path)
 
@@ -470,7 +478,7 @@ class TestSpecGenerationPreamble:
         assert "How This Session Works" in result
         assert "Step 0" in result
         assert "best judgement" in result
-        assert "spec-save" in result
+        assert "Save the spec to" in result
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="prompt")
     def test_prompt_mode_generates_preamble(self, mock_setting, tmp_path):
@@ -480,7 +488,7 @@ class TestSpecGenerationPreamble:
         assert "How This Session Works" in result
         assert "Step 0" in result
         assert "UNRESOLVED" in result
-        assert "spec-save" in result
+        assert "Save the spec to" in result
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="review")
     def test_review_mode_generates_preamble(self, mock_setting, tmp_path):
@@ -490,7 +498,7 @@ class TestSpecGenerationPreamble:
         assert "How This Session Works" in result
         assert "Step 0" in result
         assert "approve" in result
-        assert "spec-save" in result
+        assert "Save the spec to" in result
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="auto")
     def test_existing_spec_returns_empty(self, mock_setting, tmp_path):
@@ -506,7 +514,7 @@ class TestSpecGenerationPreamble:
         pr = {"id": "pr-1"}
         result = spec_gen.spec_generation_preamble(pr, "qa", root=tmp_path)
         assert "QA" in result
-        assert "spec-save" in result
+        assert "Save the spec to" in result
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="auto")
     def test_auto_mode_documents_ambiguities(self, mock_setting, tmp_path):
@@ -522,16 +530,16 @@ class TestSpecGenerationPreamble:
         result = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
         assert "impl.md" in result
         assert "specs" in result
-        # Path should be under the project root, not ~/.pm
-        assert str(tmp_path) in result
+        # Path should be relative (works inside containers)
+        assert "specs/pr-1/impl.md" in result
 
     @patch("pm_core.spec_gen.get_global_setting_value", return_value="auto")
     def test_preamble_path_in_project_dir(self, mock_setting, tmp_path):
         """Spec path in preamble should be in the pm project directory."""
         pr = {"id": "pr-xyz"}
         result = spec_gen.spec_generation_preamble(pr, "impl", root=tmp_path)
-        expected_path = str(tmp_path / "specs" / "pr-xyz" / "impl.md")
-        assert expected_path in result
+        # Path should be relative for container compatibility
+        assert "specs/pr-xyz/impl.md" in result
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +655,7 @@ class TestRejectSpec:
         data = _make_data({
             "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"},
         })
+        _save_to_disk(data, tmp_path)
 
         phase = spec_gen.reject_spec(data, "pr-abc1234", root=tmp_path)
 
@@ -673,6 +682,7 @@ class TestRejectSpec:
             "description": "Original description.",
             "spec_pending": {"phase": "impl", "generated_at": "2025-01-01"},
         })
+        _save_to_disk(data, tmp_path)
 
         spec_gen.reject_spec(
             data, "pr-abc1234", feedback="Make it shorter", root=tmp_path

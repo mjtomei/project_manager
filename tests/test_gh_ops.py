@@ -66,6 +66,57 @@ class TestCreateDraftPr:
 
             assert result is None
 
+    def test_recovers_existing_pr_when_already_exists(self, mock_gh_check):
+        """If a PR already exists for the branch, recover it instead of failing.
+
+        Reproduces the orphaned-PR bug: a prior `pr start` created the PR on
+        GitHub but crashed before persisting the number, so a re-run hits
+        `gh pr create` failing with 'already exists'. We should look up the
+        existing PR and return its url/number so the caller can record it.
+        """
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                # gh pr create → fails because PR already exists
+                mock.Mock(
+                    returncode=1,
+                    stdout="",
+                    stderr=(
+                        'a pull request for branch "pm/pr-x" into branch '
+                        '"master" already exists:\n'
+                        "https://github.com/owner/repo/pull/210"
+                    ),
+                ),
+                # gh pr view HEAD → returns the existing PR
+                mock.Mock(
+                    returncode=0,
+                    stdout=(
+                        '{"state": "OPEN", "number": 210, '
+                        '"url": "https://github.com/owner/repo/pull/210", '
+                        '"title": "Test PR", "mergedAt": null}'
+                    ),
+                    stderr="",
+                ),
+            ]
+
+            result = gh_ops.create_draft_pr("/tmp/repo", "Test PR", "master")
+
+            assert result is not None
+            assert result["number"] == 210
+            assert result["url"] == "https://github.com/owner/repo/pull/210"
+
+    def test_other_failure_still_returns_none(self, mock_gh_check):
+        """A non-'already exists' failure must not trigger recovery."""
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.Mock(
+                returncode=1,
+                stdout="",
+                stderr="Error: authentication required",
+            )
+
+            result = gh_ops.create_draft_pr("/tmp/repo", "Test PR", "master")
+
+            assert result is None
+
     def test_extracts_pr_number_from_url(self, mock_gh_check):
         """Should extract PR number from various URL formats."""
         with mock.patch("subprocess.run") as mock_run:

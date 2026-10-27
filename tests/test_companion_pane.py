@@ -46,8 +46,6 @@ class TestAddCompanionPane:
              patch.object(pr_mod, "pane_layout") as mock_layout:
             mock_tmux.get_pane_indices.return_value = [("%1", 0)]
             mock_tmux.split_pane_at.return_value = "%2"
-            mock_reg.load_registry.return_value = {}
-            mock_reg.get_window_data.return_value = {"user_modified": True}
 
             pr_mod._add_companion_pane("sess", {"id": "@1", "index": "1"},
                                         "/work/dir", "impl")
@@ -55,12 +53,10 @@ class TestAddCompanionPane:
             mock_tmux.split_pane_at.assert_called_once_with(
                 "%1", "h", mock.ANY, background=True,
             )
-            # Both panes registered and layout rebalanced via register_and_rebalance
+            # Shared window size set and panes registered via register_and_rebalance
+            mock_tmux.set_shared_window_size.assert_called_once_with("sess", "@1")
             mock_layout.register_and_rebalance.assert_called_once()
-            call_args = mock_layout.register_and_rebalance.call_args
-            assert call_args[0][0] == "sess"
-            assert call_args[0][1] == "@1"
-            panes_arg = call_args[0][2]
+            panes_arg = mock_layout.register_and_rebalance.call_args[0][2]
             roles = [p[1] for p in panes_arg]
             assert "impl-claude" in roles
             assert "impl-companion" in roles
@@ -220,6 +216,29 @@ class TestMergeWindowCompanion:
 
         mock_tmux.new_window.assert_called_once()
         mock_tmux.new_window_get_pane.assert_not_called()
+
+    @patch.object(pr_mod, "tmux_mod")
+    @patch.object(pr_mod, "prompt_gen")
+    @patch.object(pr_mod, "build_claude_shell_cmd", return_value="claude ...")
+    def test_claude_cmd_uses_tmux_session_tag(
+        self, mock_cmd, _prompt, mock_tmux,
+    ):
+        """Launch config (fake-claude, skip-permissions) follows the tmux
+        session, not the cwd tag of a PR workdir the picker runs from."""
+        mock_tmux.has_tmux.return_value = True
+        mock_tmux.in_tmux.return_value = True
+        mock_tmux.session_exists.return_value = True
+        mock_tmux.find_window_by_name.return_value = None
+
+        data = {"project": {"base_branch": "master"}}
+        pr_entry = {"id": "pr-001", "workdir": "/work/dir"}
+
+        with patch.object(pr_mod, "_get_pm_session", return_value="pm-sess"), \
+             patch("pm_core.paths.get_global_setting", return_value=False), \
+             patch.object(pr_mod, "_ensure_workdir", return_value="/work/dir"):
+            pr_mod._launch_merge_window(data, pr_entry, "conflict error")
+
+        assert mock_cmd.call_args.kwargs["session_tag"] == "sess"
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import click
 
-from pm_core import store, notes, guide
+from pm_core import store, guide
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
@@ -47,6 +47,67 @@ def _share_mode_options(f):
             _set_share_mode_env(share_global, share_group)
         return f(*args, **kwargs)
     return wrapper
+
+
+# Shell bodies for the popup bindings.  Query tmux from inside the popup
+# shell to resolve session/window — tmux's expansion of #{session_name}
+# in display-popup arguments (both shell-command and -e values) is
+# unreliable across versions, so we let the popup's shell call tmux
+# itself.  The trailing failure handler pauses on launch failure (e.g.
+# pm not on PATH) so the popup stays visible long enough to read the
+# error instead of vanishing instantly with display-popup -E.  tmux 3.2
+# runs popup bodies with /bin/sh (dash on Debian/Ubuntu), so the handler
+# must be POSIX: bash's ``read -n 1 -s -p`` fails there and the popup
+# closes at once.  Save $? before the first echo resets it.
+# The bare S/W queries resolve against tmux's "best" client (the most
+# recently active one), which is wrong when two clients open popups at
+# the same time.  When _popup-show knows the pressing client's session
+# it pins S and W to literal values instead (see _pin_popup_body).
+_POPUP_BODY_S = 'S=$(tmux display-message -p "#{session_name}");'
+_POPUP_BODY_W = ' W=$(tmux display-message -p "#{window_name}");'
+_POPUP_FAILURE_HANDLER = (
+    " || { rc=$?; echo; echo \"pm popup failed (exit $rc).\";"
+    " printf 'Press any key to close...'; t=$(stty -g);"
+    " stty -icanon -echo min 1 time 0; dd bs=1 count=1 >/dev/null 2>&1;"
+    " stty \"$t\"; }"
+)
+_POPUP_PICKER_BODY = (
+    _POPUP_BODY_S
+    + _POPUP_BODY_W
+    + ' pm _popup-picker "$S" "$W"'
+    + _POPUP_FAILURE_HANDLER
+)
+_POPUP_CMD_BODY = (
+    _POPUP_BODY_S
+    + ' pm _popup-cmd "$S"'
+    + _POPUP_FAILURE_HANDLER
+)
+
+
+_POPUP_KINDS = {
+    # kind -> (height, body)
+    "picker": ("80%", _POPUP_PICKER_BODY),
+    "cmd": ("50%", _POPUP_CMD_BODY),
+}
+
+
+def _bind_popups() -> None:
+    """Bind prefix+P and prefix+M to dynamic-resolve popup launchers.
+
+    The bindings are static — they invoke ``pm _popup-show <kind>``,
+    which resolves the right ``-w`` at trigger time based on the
+    smallest attached-client width.  No rebinding on resize, no stale
+    state, no tmux-parser quoting fragility.
+
+    run-shell expands the pressing client's name and session before
+    the job starts; the job itself has no client context, so without
+    them two clients pressing at once both resolve to the same one.
+    """
+    for key, kind in (("P", "picker"), ("M", "cmd")):
+        subprocess.run(tmux_mod._tmux_cmd("bind-key", "-T", "prefix", key,
+                 "run-shell",
+                 f"pm _popup-show {kind} #{{q:client_name}} #{{q:session_name}}"),
+                check=False)
 
 
 def _register_tmux_bindings(session_name: str) -> None:
@@ -97,12 +158,38 @@ def _register_tmux_bindings(session_name: str) -> None:
     # Uses "window-resized" (fires on any window size change) not
     # "after-resize-window" (only fires after the resize-window command).
     # Note: window-resized is a window hook, so use -gw not -g.
-    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "window-resized",
+    # Capture stderr: this also runs from the TUI, whose stderr is the pane
+    # itself, and tmux < 3.3 rejects the hook ("invalid option").
+    r = subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gw", "window-resized",
              "run-shell 'pm _window-resized \"#{session_name}\" \"#{window_id}\"'"),
-            check=False)
-    # Clean up stale hook from earlier versions that used the wrong name
-    subprocess.run(tmux_mod._tmux_cmd("set-hook", "-gu", "after-resize-window"),
-            check=False)
+            check=False, capture_output=True, text=True)
+    if r.returncode != 0:
+        _log.warning("set-hook window-resized failed: %s", r.stderr.strip())
+    # Clean up stale hooks from earlier versions:
+    # - after-resize-window: never the right hook name; only fired after the
+    #   resize-window command.
+    # - after-select-window + client-attached/detached/session-changed: added
+    #   on 2026-05-03 as defensive companions to window-resized for cases
+    #   where window-resized alone misses (aggressive-resize deferral,
+    #   smallest-client recompute). In practice they formed a feedback loop —
+    #   pm's _window-resized handler ended up re-triggering one of them and
+    #   the cycle fired every 1-2s, pegging the session. Removed; the bare
+    #   window-resized hook + prefix+R manual rebalance cover the remaining
+    #   edge cases.
+    for stale_hook, scope in (
+        ("after-resize-window", "-gu"),
+        ("after-select-window", "-guw"),
+        ("client-session-changed", "-gu"),
+        ("client-attached", "-gu"),
+        ("client-detached", "-gu"),
+    ):
+        subprocess.run(tmux_mod._tmux_cmd("set-hook", scope, stale_hook),
+                check=False)
+
+    # Popup bindings: PR action picker (prefix+P) and pm command runner
+    # (prefix+M).  Width is resolved dynamically by ``pm _popup-show``
+    # at trigger time — see that command and the _bind_popups() helper.
+    _bind_popups()
 
 
 def _schedule_rebalance(session_name: str) -> None:
@@ -151,6 +238,16 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
                           before attaching.
     """
     _log.info("session_cmd started")
+    # Install Claude Code hooks so idle_prompt / Stop events can drive
+    # pm's verdict detection without pane polling.  Conflicts with
+    # existing third-party hooks abort the session so the user can
+    # resolve the conflict rather than having pm silently step on it.
+    from pm_core.hook_install import ensure_hooks_installed, HookConflictError
+    try:
+        ensure_hooks_installed()
+    except HookConflictError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
     if not tmux_mod.has_tmux():
         click.echo("tmux is required for 'pm session'. Install it first.", err=True)
         raise SystemExit(1)
@@ -193,6 +290,15 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         data = None
         has_project = False
 
+    # Persist project root for popup commands so they can resolve it
+    # without relying on the launching pane's cwd (popups run with a
+    # cwd that may sit outside any pm repo, or in a deleted workdir).
+    if has_project and root is not None:
+        from pm_core.paths import get_session_tag, set_session_pm_root
+        _persist_tag = get_session_tag(start_path=root)
+        if _persist_tag:
+            set_session_pm_root(_persist_tag, root)
+
     # Generate session name with path hash (uses helper to ensure consistency)
     # Use the repo directory (parent of pm/) as the working directory
     if root and store.is_internal_pm_dir(root):
@@ -213,9 +319,6 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         # Prefer the actual tmux session if we're already inside one (e.g. meta
         # workdirs whose git-root hash differs from the session they belong to).
         session_name = _get_current_pm_session() or _get_session_name_for_cwd()
-
-    expected_root = root or (Path.cwd() / "pm")
-    notes_path = expected_root / notes.NOTES_FILENAME
 
     _log.info("checking if session exists: %s (socket=%s)", session_name, socket_path)
     if tmux_mod.session_exists(session_name, socket_path=socket_path):
@@ -391,16 +494,8 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
         return (f"bash -c 'trap \"pm _pane-exited {session_name} {window_id} {generation} $TMUX_PANE\" EXIT; "
                 f"{escaped}'")
 
-    # Only auto-start the notes pane when the guide will NOT auto-launch.
-    # Having both the guide and notes panes open overwhelms the initial layout.
-    if not guide.needs_guide(root):
-        _log.info("guide will not auto-launch, creating notes pane")
-        notes.ensure_notes_file(root)
-        notes_pane = tmux_mod.split_pane(session_name, "h", _wrap(f"pm notes {notes_path}"))
-        pane_registry.register_pane(session_name, window_id, notes_pane, "notes", "pm notes")
-        _log.info("created notes_pane=%s", notes_pane)
-    else:
-        _log.info("guide will auto-launch, skipping notes pane")
+    # Notes pane is no longer auto-started — press `n` in the TUI to
+    # open it on demand, or run `pm notes` in a pane manually.
 
     # Apply initial balanced layout
     pane_layout.rebalance(session_name, window_id)
@@ -594,11 +689,35 @@ def session_mobile(force: bool | None):
             click.echo(f"Session: {session_name}")
             click.echo(f"Mobile active: {mobile}")
             click.echo(f"Force flag: {force_flag}")
-            click.echo(f"Window width: {width} (threshold: {pane_layout.MOBILE_WIDTH_THRESHOLD})")
+            click.echo(f"Window width: {width} (threshold: {pane_layout._get_mobile_width_threshold()})")
         else:
             click.echo(f"Session: {session_name} (not running)")
             click.echo(f"Force flag: {force_flag}")
-            click.echo(f"Threshold: {pane_layout.MOBILE_WIDTH_THRESHOLD}")
+            click.echo(f"Threshold: {pane_layout._get_mobile_width_threshold()}")
+
+
+@session.command("home")
+def session_home():
+    """Ensure the home window exists and switch to it.
+
+    The home window is a long-lived 'park here' tmux window providing
+    an at-a-glance overview (default: open PRs by recent activity).
+    First invocation creates it; subsequent invocations refresh and
+    re-focus.  See ``home-window-provider`` setting to swap providers.
+    """
+    from pm_core.cli.helpers import _get_pm_session
+    from pm_core import home_window
+
+    session_name = _get_pm_session()
+    if not session_name or not tmux_mod.session_exists(session_name):
+        click.echo("Not inside a pm tmux session.", err=True)
+        raise SystemExit(1)
+
+    provider = home_window.get_active_provider()
+    win_name = provider.ensure_window(session_name)
+    provider.refresh(session_name)
+    tmux_mod.select_window(session_name, win_name)
+    click.echo(f"Home window: {win_name} (provider: {provider.name})")
 
 
 # --- Internal pane/window commands ---
@@ -626,6 +745,94 @@ def pane_closed_cmd():
 def pane_opened_cmd(session: str, window: str, pane_id: str):
     """Internal: handle tmux after-split-window hook."""
     pane_layout.handle_pane_opened(session, window, pane_id)
+
+
+def _pin_popup_body(body: str, session: str, window: str | None) -> str:
+    """Replace the body's tmux S/W queries with literal shell values.
+
+    W is left as a query when *window* is unknown.
+    """
+    body = body.replace(_POPUP_BODY_S, f"S={shlex.quote(session)};")
+    if window is None:
+        return body
+    return body.replace(_POPUP_BODY_W, f" W={shlex.quote(window)};")
+
+
+@cli.command("_popup-show", hidden=True)
+@click.argument("kind")
+@click.argument("client", required=False)
+@click.argument("session", required=False)
+def popup_show_cmd(kind: str, client: str | None = None,
+                   session: str | None = None):
+    """Internal: launch a popup picking width by smallest attached client.
+
+    Resolves popup width dynamically based on the smallest attached
+    client in the current tmux session's group: 95% (always fits)
+    when below the mobile-width threshold, fixed 80 cols otherwise.
+    Then invokes ``tmux display-popup -E -w <width> -h <height> <body>``
+    via subprocess, where each arg is passed as one argv element so we
+    sidestep tmux's parser-quoting issues that the previous
+    if-shell-with-nested-display-popup approach hit.
+    """
+    if kind not in _POPUP_KINDS:
+        _log.warning("_popup-show: unknown kind %r", kind)
+        return
+    height, body = _POPUP_KINDS[kind]
+
+    # Width is the pressing client's current window width — the size of
+    # the window we are about to overlay, not some min/max across the
+    # group.  run-shell has no client context of its own, so an untargeted
+    # display-message resolves to the most recently active client; when
+    # the binding passed the pressing client's session, target its current
+    # window explicitly ("=name:").  Old bindings (no args) keep the
+    # untargeted query.
+    target = ["-t", f"={session}:"] if session else []
+    result = subprocess.run(
+        tmux_mod._tmux_cmd("display-message", *target, "-p", "#{window_width}"),
+        capture_output=True, text=True, check=False,
+    )
+    win_width: int | None = None
+    if result.returncode == 0 and result.stdout.strip().isdigit():
+        win_width = int(result.stdout.strip())
+    threshold = pane_layout._get_mobile_width_threshold()
+    if win_width is not None and win_width < threshold:
+        width = "95%"
+    else:
+        width = "80"
+
+    # Resolve the launching pane's cwd so the popup's shell starts where
+    # the user is, not in tmux's server-side default. Without -d the
+    # popup's cwd can land outside any git repo, which makes
+    # find_project_root() fail with a misleading 'No project.yaml found'.
+    cwd_result = subprocess.run(
+        tmux_mod._tmux_cmd("display-message", *target, "-p", "#{pane_current_path}"),
+        capture_output=True, text=True, check=False,
+    )
+    pane_cwd = cwd_result.stdout.strip() if cwd_result.returncode == 0 else ""
+
+    if session:
+        win_result = subprocess.run(
+            tmux_mod._tmux_cmd("display-message", *target, "-p", "#{window_name}"),
+            capture_output=True, text=True, check=False,
+        )
+        window = (win_result.stdout.rstrip("\n")
+                  if win_result.returncode == 0 else None)
+        body = _pin_popup_body(body, session, window)
+
+    _log.info("_popup-show: kind=%s client=%r session=%r window_width=%s threshold=%d"
+              " -> width=%s cwd=%r",
+              kind, client, session, win_width, threshold, width, pane_cwd)
+    popup_cmd = ["display-popup", "-E", "-w", width, "-h", height]
+    if pane_cwd:
+        popup_cmd[2:2] = ["-d", pane_cwd]
+    if client:
+        popup_cmd[1:1] = ["-c", client]
+    popup_cmd[1:1] = target
+    popup_cmd.append(body)
+    subprocess.run(
+        tmux_mod._tmux_cmd(*popup_cmd),
+        check=False,
+    )
 
 
 @cli.command("_window-resized", hidden=True)
@@ -737,6 +944,1750 @@ def rebalance_cmd():
     tmux_mod.unzoom_pane(session, window)
     pane_layout.rebalance(session, window)
     click.echo("Layout rebalanced.")
+
+
+# --- Popup commands ---
+
+# All available actions.  Each entry is (action_label, pm_command_template).
+# Templates use {pr_id} for the internal PR ID.
+# Commands prefixed with "tui:" are routed through the TUI command bar.
+_ALL_ACTIONS: list[tuple[str, str]] = [
+    ("start", "pr start {pr_id}"),
+    ("edit", "tui:edit {pr_id}"),
+    ("review", "pr review {pr_id}"),
+    ("qa", "tui:pr qa {pr_id}"),
+    ("signoff", "pr signoff {pr_id}"),
+    ("merge", "pr merge --resolve-window {pr_id}"),
+]
+
+# Modifier-key (z / zz) variants for actions that support fresh / loop.
+# Mirrors the TUI's z/zz chord behavior: ``z s`` = fresh start,
+# ``z d`` = fresh review, ``zz d`` = review loop,
+# ``z t`` = fresh qa, ``zz t`` = qa loop, ``z i`` = fresh sign-off.
+_MODIFIED_ACTION_CMDS: dict[tuple[str, str], str] = {
+    ("z",  "start"):   "pr start --fresh {pr_id}",
+    ("z",  "review"):  "pr review --fresh {pr_id}",
+    ("zz", "review"):  "tui:review-loop start {pr_id}",
+    ("z",  "qa"):      "tui:pr qa fresh {pr_id}",
+    ("zz", "qa"):      "tui:pr qa loop {pr_id}",
+    ("z",  "signoff"): "pr signoff --fresh {pr_id}",
+}
+
+# Map action labels to tmux window name patterns.
+# ``None`` means the action doesn't open its own tmux window — it's a
+# *shortcut-only* action.  Such actions don't appear as rows in the
+# picker; their status (when meaningful) is folded into a list row's
+# annotation via ``_SHORTCUT_FOLD_INTO``.
+_ACTION_WINDOW_PATTERNS: dict[str, str | None] = {
+    "start": "{display_id}",
+    "edit": None,
+    "review": "review-{display_id}",
+    "review-loop": "review-{display_id}",  # used only via z d/zz d chord
+    "qa": "qa-{display_id}",
+    "signoff": "signoff-{display_id}",
+    "merge": "merge-{display_id}",
+}
+
+# Actions that get their own row in the picker.  Shortcut-only actions
+# (edit, review-loop) are reachable via their `--expect` keys but don't
+# clutter the list with an extra row.
+_LIST_ACTIONS: set[str] = {"start", "review", "qa", "signoff", "merge"}
+
+# Shortcut-only actions whose runtime status should be displayed on a
+# list row alongside another action.  ``review-loop`` shares the
+# ``review-{display_id}`` window, so its `[loop iN]` badge lives on the
+# review row.  Edit isn't here because the edit pane opens in the
+# current window and there's nothing meaningful to display.
+_SHORTCUT_FOLD_INTO: dict[str, str] = {
+    "review-loop": "review",
+}
+
+# Terminal statuses — PRs in these states have no actions.
+_TERMINAL_STATUSES = {"merged", "closed"}
+
+# Map status to the action label representing the current phase.
+_STATUS_PHASE: dict[str, str] = {
+    "in_progress": "start",
+    "in_review": "review",
+    "qa": "qa",
+    "sign_off": "signoff",
+}
+
+
+def _actions_for_status(status: str) -> list[tuple[str, str]]:
+    """Return (action_label, command_template) pairs for a PR status.
+
+    All actions are returned for non-terminal statuses.
+    """
+    if status in _TERMINAL_STATUSES:
+        return []
+    return list(_ALL_ACTIONS)
+
+
+def _status_phase(status: str) -> str | None:
+    """Return the action label representing the current phase for a status."""
+    return _STATUS_PHASE.get(status)
+
+
+def _current_window_pr_id(window_name: str) -> str | None:
+    """Extract PR display ID from a window name."""
+    import re
+    m = re.match(
+        r'^(?:review-|merge-|qa-|signoff-)?(#\d+|pr-[a-zA-Z0-9]+)(?:-s\d+)?$',
+        window_name,
+    )
+    return m.group(1) if m else None
+
+
+def _current_window_phase(window_name: str) -> str | None:
+    """Map a window name's prefix to a picker action label.
+
+    Drives the ●-marker in the picker so it reflects the user's current
+    context rather than the PR's status.  Returns 'start' for an
+    unprefixed PR window (the implementation pane), 'review' for
+    ``review-…``, 'qa' for ``qa-…``, 'signoff' for ``signoff-…``,
+    'merge' for ``merge-…``, or None if the window isn't a PR window.
+    """
+    if _current_window_pr_id(window_name) is None:
+        return None
+    if window_name.startswith("review-"):
+        return "review"
+    if window_name.startswith("qa-"):
+        return "qa"
+    if window_name.startswith("signoff-"):
+        return "signoff"
+    if window_name.startswith("merge-"):
+        return "merge"
+    return "start"
+
+
+# Prefixes used for a PR's per-action windows (see _ACTION_WINDOW_PATTERNS).
+_WINDOW_ACTION_PREFIXES = ("review-", "merge-", "qa-", "signoff-")
+
+
+def _strip_action_window_prefix(window_name: str) -> str:
+    """Drop one action prefix (``review-``, ``qa-``, …) from a window name.
+
+    Used only as a fallback when the raw window name and
+    ``_current_window_pr_id``'s grammar both fail to name a PR: a legacy
+    local id the grammar cannot read (e.g. ``pr-a_b``) still appears in a
+    prefixed window (``review-pr-a_b``), which must anchor home on it
+    rather than on the first live PR.  A ``-s<N>`` suffix is never
+    stripped — an id that legitimately ends in one must win.
+    """
+    for prefix in _WINDOW_ACTION_PREFIXES:
+        if window_name.startswith(prefix) and len(window_name) > len(prefix):
+            return window_name[len(prefix):]
+    return window_name
+
+
+def _format_action_status(pr_id: str, action: str) -> str:
+    """Return a short status badge for an action, or '' when nothing useful.
+
+    Reads the persisted runtime state and cross-references the latest
+    hook event for the action's pane (when applicable) so the badge
+    reflects the same idle/waiting/working signals the TUI uses.
+    """
+    try:
+        from pm_core import runtime_state as _rs
+        entry = _rs.derive_action_status(pr_id, action)
+    except Exception:
+        return ""
+    if not entry:
+        return ""
+    state = entry.get("state")
+    if action == "review-loop":
+        if state == "running":
+            it = entry.get("iteration")
+            return f" [loop i{it}]" if it else " [loop]"
+        if state == "done":
+            it = entry.get("iteration")
+            v = entry.get("verdict")
+            return (f" [done i{it} {v}]" if it and v
+                    else f" [done {v}]" if v
+                    else " [done]")
+        if state == "failed":
+            return " [failed]"
+        return ""
+    # start / qa / review / merge: hook-event-derived states from
+    # derive_action_status (live), plus terminal verdict states written
+    # by the qa / review completion paths.  Stale/dead entries are
+    # cleared (not flagged) by the TUI-mount sweep and pane_idle's
+    # pane-gone path, so we never need to render a "no longer alive"
+    # badge — absence of an entry is the signal, and [open] from the
+    # live tmux window list is authoritative.
+    if state == "idle":
+        return " [idle]"
+    if state == "waiting":
+        return " [wait]"
+    if state == "running":
+        return " [working]"
+    if state == "done":
+        v = entry.get("verdict")
+        return f" [done {v}]" if v else " [done]"
+    if state == "failed":
+        return " [failed]"
+    return ""
+
+
+def _session_active_windows(base: str) -> dict[str, str]:
+    """Map attached sessions to active windows for the picker's ●/○ marks.
+
+    One batched query keeps per-key refresh costs independent of the number
+    of grouped sessions, including detached sessions left by earlier clients.
+    """
+    return tmux_mod.attached_group_active_windows(base)
+
+
+def _action_window_matches(label: str, win_name: str, name: str) -> bool:
+    """True if tmux window `name` is the `label` action's window `win_name`.
+
+    qa windows can have scenario suffixes (``qa-#158-s1``), so for qa the
+    bare name or any ``<win_name>-…`` variant matches.
+    """
+    if label == "qa":
+        return name == win_name or name.startswith(win_name + "-")
+    return name == win_name
+
+
+def _find_pr_for_window_id(prs: list[dict], window_pr_id: str) -> dict | None:
+    """Resolve a PR id taken from a window name to its project.yaml entry.
+
+    Windows are named by ``_pr_display_id`` at creation time, so the name
+    can drift from the current display id when ``gh_pr_number`` is added
+    (window ``pr-abc``, display ``#12``) or lost (window ``#12``, display
+    ``pr-abc``) afterwards.  Match the display id first (which also covers
+    a ``gh_pr_number`` stored as a string), then fall back to
+    ``_resolve_pr_id`` (local id, or ``#N`` against ``gh_pr_number``).
+    """
+    from pm_core.cli.helpers import _pr_display_id, _resolve_pr_id
+
+    wid = (window_pr_id or "").strip()
+    if not wid:
+        return None
+    # ``prs`` may still be the raw snapshot (the picker validates it after
+    # this lookup), so only entries that can be keyed by id are considered.
+    keyed = [p for p in prs
+             if isinstance(p, dict) and isinstance(p.get("id"), str)]
+    for p in keyed:
+        if _pr_display_id(p) == wid:
+            return p
+    return _resolve_pr_id({"prs": keyed}, wid)
+
+
+def _describe_pr_entry(index: int, pr) -> str:
+    """Identify one rejected project.yaml PR entry for an error message.
+
+    The picker fails closed on a malformed snapshot, so the message is the
+    user's only clue about which entry to repair in a large project.  Values
+    go through ``repr`` so control characters stay escaped on screen.
+    """
+    where = f"entry #{index + 1}"
+    if not isinstance(pr, dict):
+        return f"{where} (not a mapping: {type(pr).__name__})"
+    bits = [f"{key}={pr[key]!r}"
+            for key in ("id", "gh_pr_number", "status") if key in pr]
+    return f"{where} ({', '.join(bits)})" if bits else where
+
+
+def _build_nav_entries(
+    prs: list[dict],
+    window_pr_id: str | None,
+    open_windows: set[str],
+    *, home_local_id: str | None = None,
+) -> tuple[list[str], dict[str, dict], str | None]:
+    """Build the picker's PR navigation list.
+
+    Returns ``(nav_pr_ids, pr_by_disp, home_pr)``.  ``nav_pr_ids`` lists the
+    display ids of non-terminal PRs with at least one open window, in
+    project.yaml order, plus the home PR (the invoking window's PR) even
+    when it is merged/closed or has no other windows.  ``pr_by_disp`` maps
+    each nav id to its PR dict so callers never re-look-up by display id.
+    ``home_pr`` is the canonical display id of the invoking window's PR,
+    or the raw window id when it matches no PR (so the picker can say it
+    couldn't load it), or None for a non-PR window.
+    """
+    from pm_core.cli.helpers import _pr_display_id
+    from pm_core.pr_utils import VALID_PR_STATES
+
+    import re
+
+    # A GitHub number can provide a display id even when the local id is
+    # missing or malformed. Commands still require the local id, so reject
+    # such snapshots here, inside the refresh transaction, before rendering.
+    if not isinstance(prs, list):
+        raise ValueError("Picker snapshot requires a prs list (use [] for no PRs)")
+    local_ids: set[str] = set()
+    display_terminal: dict[str, bool] = {}
+    for index, pr in enumerate(prs):
+        where = _describe_pr_entry(index, pr)
+        pr_id = pr.get("id") if isinstance(pr, dict) else None
+        if (not isinstance(pr_id, str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", pr_id) is None):
+            raise ValueError("Picker PR entry requires a non-empty, "
+                             f"command-safe string id: {where}")
+        status = pr.get("status")
+        # ``in`` hashes its operand: a YAML list/mapping status would raise
+        # TypeError here and the user would get "unhashable type" instead of
+        # the entry that needs repairing.
+        if not isinstance(status, str) or status not in VALID_PR_STATES:
+            raise ValueError(f"Picker PR entry requires a valid status: {where}")
+        display_id = _pr_display_id(pr)
+        if not display_id.isprintable():
+            raise ValueError("Picker PR entry requires a printable display id: "
+                             f"{where}")
+        # Partial state repairs can temporarily assign a number to two PRs.
+        # Historical terminal-only duplicates are harmless (no actions), but
+        # any collision involving a live PR makes display lookup unsafe.
+        terminal = status in _TERMINAL_STATUSES
+        if (pr_id in local_ids or (display_id in display_terminal
+                and not (terminal and display_terminal[display_id]))):
+            raise ValueError("Picker PR entries have ambiguous local or display "
+                             f"ids: {where} collides with an earlier entry")
+        local_ids.add(pr_id)
+        display_terminal[display_id] = terminal
+
+    # A pinned local identity must never fall through to numeric GitHub lookup
+    # after deletion. Only an unresolved window name is eligible for that lookup.
+    if home_local_id is not None:
+        home = next((p for p in prs if p["id"] == home_local_id), None)
+        home_pr = home_local_id
+    else:
+        home = _find_pr_for_window_id(prs, window_pr_id) if window_pr_id else None
+        home_pr = window_pr_id
+    if home is not None:
+        home_pr = _pr_display_id(home)
+
+    # Index all QA suffix boundaries once, preserving the existing arbitrary
+    # suffix match even for hyphenated local ids. Navigation reloads on each key.
+    qa_window_prefixes = set()
+    for name in open_windows:
+        if name.startswith("qa-"):
+            qa_window_prefixes.update(name[:i] for i, ch in enumerate(name)
+                                      if ch == "-" and i > 2)
+
+    def _has_open_window(pr: dict) -> bool:
+        ids = {_pr_display_id(pr), pr.get("id")}
+        for label, pat in _ACTION_WINDOW_PATTERNS.items():
+            if not pat:
+                continue
+            for i in ids:
+                if not i:
+                    continue
+                win_name = pat.format(display_id=i)
+                if win_name in open_windows:
+                    return True
+                if label == "qa" and win_name in qa_window_prefixes:
+                    return True
+        return False
+
+    nav_pr_ids: list[str] = []
+    pr_by_disp: dict[str, dict] = {}
+    for p in prs:
+        did = _pr_display_id(p)
+        if not did or did in pr_by_disp:
+            continue
+        is_home = home is not None and p is home
+        if is_home or (p.get("status") not in _TERMINAL_STATUSES
+                       and _has_open_window(p)):
+            nav_pr_ids.append(did)
+            pr_by_disp[did] = p
+    if home_pr and home_pr not in pr_by_disp:
+        # Window id matched no PR — keep it reachable so the picker can
+        # report the lookup failure rather than silently landing elsewhere.
+        nav_pr_ids.insert(0, home_pr)
+    return nav_pr_ids, pr_by_disp, home_pr
+
+
+def _no_actions_notice(pr_disp: str, pr: dict | None) -> str:
+    """Inline message for a PR the picker has no actions for."""
+    status = (pr or {}).get("status", "")
+    if pr is not None and status in _TERMINAL_STATUSES:
+        return f"No actions — PR is {status}."
+    return f"Could not load actions for {pr_disp}."
+
+
+def _build_picker_lines(
+    prs: list[dict],
+    current_pr_display: str | None,
+    open_windows: set[str] | None = None,
+    current_phase: str | None = None,
+    caller_wid: str | None = None,
+    other_wids: set[str] | None = None,
+    name_to_wid: dict[str, str] | None = None,
+) -> list[tuple[str, str, str]]:
+    """Build display lines for the action-based PR picker.
+
+    Only shows actions for the PR matching `current_pr_display`.
+    Returns list of (display_line, pm_command, pr_display_id) tuples.
+    pm_command is empty for non-selectable header lines.
+
+    If `open_windows` is provided (set of tmux window names), actions
+    whose windows are already open are annotated with ``[open]``.
+
+    The leading indicator column shows which session is currently viewing
+    each action's window.  When `name_to_wid` (window name → window id) is
+    provided, each row is marked ``●`` if its window is the active window
+    in the caller's session (`caller_wid`), ``○`` if it is the active
+    window in some other attached grouped session (`other_wids`), or blank
+    otherwise (caller takes priority).  Without `name_to_wid`, the column
+    falls back to the phase-derived dot (the invoking window's own phase).
+    """
+    from pm_core.cli.helpers import _pr_display_id
+
+    if not current_pr_display:
+        return []
+
+    # Find the PR matching the current window
+    pr = None
+    display_id = None
+    for p in prs:
+        did = _pr_display_id(p)
+        if did == current_pr_display:
+            pr = p
+            display_id = did
+            break
+
+    if not pr:
+        return []
+
+    status = pr.get("status", "")
+    actions = _actions_for_status(status)
+    if not actions:
+        return []
+
+    lines: list[tuple[str, str, str]] = []
+    title = pr.get("title")
+    title = "" if title is None else str(title)
+    # fzf consumes newline-delimited rows; title text must never become a
+    # separate selectable item or emit terminal control sequences.
+    max_title = 40
+    short_title = (title[:max_title - 1] + "…") if len(title) > max_title else title
+    short_title = "".join(ch if ch.isprintable() else " " for ch in short_title)
+
+    lines.append((f"  {display_id}  ({status})  {short_title}", "", display_id))
+
+    # Phase indicator reflects the *current window* (where the user is),
+    # not the PR's status — e.g. sitting in the impl window of an
+    # in_review PR should highlight 'start', not 'review'.
+    phase = current_phase if current_phase is not None else _status_phase(status)
+    # Actions without their own tmux window (edit, review-loop) are
+    # shortcut-only — they don't get a row in the picker; their status
+    # (where meaningful) is folded into a related list action's row.
+    fold_status: dict[str, str] = {}
+    for label, host in _SHORTCUT_FOLD_INTO.items():
+        tag = _format_action_status(pr["id"], label)
+        if tag:
+            fold_status[host] = fold_status.get(host, "") + tag
+    for label, cmd_template in actions:
+        if label not in _LIST_ACTIONS:
+            continue  # shortcut-only; status (if any) folded in above
+        cmd = cmd_template.format(pr_id=pr["id"])
+
+        pattern = _ACTION_WINDOW_PATTERNS.get(label)
+        win_name = pattern.format(display_id=display_id) if pattern else None
+        # qa windows can have scenario suffixes (qa-#158-s1); match the
+        # bare name or any "<name>-…" variant for both [open] and the
+        # per-session indicator below.
+        def _matches(name: str) -> bool:
+            return bool(win_name) and _action_window_matches(
+                label, win_name, name)
+
+        # Per-session window-selected indicator (●/○) when the caller
+        # supplied the active-window map; otherwise fall back to the
+        # phase-derived dot (current window of the invoking session).
+        if name_to_wid is not None:
+            wids = {wid for name, wid in name_to_wid.items() if _matches(name)}
+            if caller_wid and caller_wid in wids:
+                indicator = "●"
+            elif other_wids and (wids & other_wids):
+                indicator = "○"
+            else:
+                indicator = " "
+        else:
+            indicator = "●" if label == phase else " "
+
+        # Check if this action's window is open
+        open_tag = ""
+        if open_windows is not None and win_name is not None:
+            if any(_matches(w) for w in open_windows):
+                open_tag = " [open]"
+
+        # Live status from the shared runtime-state file (loop iteration,
+        # idle/waiting derived from the latest hook event, etc.).
+        status_tag = _format_action_status(pr["id"], label)
+        # Fold in any shortcut-only actions whose status belongs here
+        # (e.g. review-loop's '[loop i3]' lives on the review row since
+        # review-loop iterations run in the review window).
+        status_tag += fold_status.get(label, "")
+
+        lines.append((f"  {indicator} {label:<18s}"
+                      f"{open_tag}{status_tag}", cmd, display_id))
+
+    return lines
+
+
+def _fzf_supports_no_input() -> bool:
+    """Whether the installed fzf accepts ``--no-input`` (fzf 0.59+).
+
+    Cached on the module so we don't fork a subprocess every time the
+    picker re-launches fzf during chord-state transitions.
+    """
+    cached = getattr(_fzf_supports_no_input, "_cached", None)
+    if cached is not None:
+        return cached
+    try:
+        out = subprocess.run(
+            ["fzf", "--version"], capture_output=True, text=True,
+            timeout=2,
+        ).stdout
+        # fzf --version prints e.g. "0.59.0 (...)".  Compare numerically
+        # against the (major, minor) tuple where --no-input landed.
+        version = out.split()[0] if out.split() else ""
+        parts = version.split(".")
+        major = int(parts[0]) if parts and parts[0].isdigit() else 0
+        minor = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        supported = (major, minor) >= (0, 59)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        supported = False
+    _fzf_supports_no_input._cached = supported  # type: ignore[attr-defined]
+    return supported
+
+
+def _parse_tui_action(tui_cmd: str) -> tuple[str | None, str | None, bool]:
+    """Best-effort: extract (pr_id, picker_action, fresh) from a tui: cmd.
+
+    ``fresh`` indicates the action will kill+recreate its target window
+    (review-loop iteration, ``pr qa fresh``, ``pr qa loop``).  The
+    spinner uses this to wait for a window-id transition rather than
+    just window appearance, so a stale-window snapshot doesn't trigger
+    an immediate switch to the about-to-be-killed window.
+    """
+    parts = shlex.split(tui_cmd) if tui_cmd else []
+    if not parts:
+        return None, None, False
+    if parts[0] == "review-loop":
+        rest = [t for t in parts[1:] if t not in ("start", "stop")]
+        # Every review-loop iteration recreates the review window.
+        return (rest[0] if rest else None), "review-loop", True
+    if len(parts) >= 2 and parts[0] == "pr" and parts[1] == "qa":
+        rest = parts[2:]
+        mode = None
+        if rest and rest[0] in ("fresh", "loop"):
+            mode = rest[0]
+            rest = rest[1:]
+        return (rest[0] if rest else None), "qa", mode in ("fresh", "loop")
+    if parts[0] == "edit":
+        return (parts[1] if len(parts) >= 2 else None), "edit", False
+    return None, None, False
+
+
+def _wait_for_tui_command(session: str, tui_cmd: str,
+                          tick_s: float = 0.15) -> None:
+    """Show a spinner while a queued TUI command transitions states.
+
+    Polls the shared runtime-state file and the tmux window list and
+    exits when the target window appears.  No timeout — long-running
+    launches stay visible until they complete.  The user can press
+    ``q`` or ``Esc`` at any time to dismiss the spinner *without*
+    cancelling the queued command (the TUI continues to handle it
+    once it picks the entry up off the queue).
+    """
+    import select
+    import sys
+    import termios
+    import tty
+
+    from pm_core import runtime_state as _rs
+
+    pr_id, action, fresh = _parse_tui_action(tui_cmd)
+    if not pr_id or not action:
+        _log.info("spinner exit: reason=not_pr_or_action tui_cmd=%r", tui_cmd)
+        return
+    # 'edit' opens in the current window — there's no window-appearance
+    # signal to wait for and the launch is effectively instant.  Skip
+    # the spinner entirely so the popup closes without a visible flash.
+    if action == "edit":
+        _log.info("spinner exit: reason=edit_skip pr=%s", pr_id)
+        return
+    _trace = os.environ.get("PM_SPINNER_TRACE") == "1"
+    try:
+        root = state_root()
+        data = store.load(root)
+        from pm_core.cli.helpers import _pr_display_id
+        display_id = None
+        for p in data.get("prs") or []:
+            if p.get("id") == pr_id:
+                display_id = _pr_display_id(p)
+                break
+    except Exception:
+        display_id = None
+    pattern = _ACTION_WINDOW_PATTERNS.get(action)
+    target_window = pattern.format(display_id=display_id) if (
+        pattern and display_id) else None
+
+    def _find_target_window_ids() -> list[str]:
+        """Return all tmux window ids whose name matches the target.
+
+        For most actions this is at most one window; for ``qa`` the
+        target name is a prefix (e.g. ``qa-#158`` matches ``qa-#158-s1``,
+        ``qa-#158-s2``), so multiple ids can be live simultaneously.
+        """
+        if not target_window:
+            return []
+        try:
+            wins = tmux_mod.list_windows(session)
+        except Exception:
+            return []
+        ids: list[str] = []
+        for w in wins:
+            name = w.get("name", "")
+            wid = w.get("id")
+            if not wid:
+                continue
+            if action == "qa":
+                if name == target_window or name.startswith(target_window + "-"):
+                    ids.append(wid)
+            elif name == target_window:
+                ids.append(wid)
+        return ids
+
+    def _first_target_window_id() -> str | None:
+        ids = _find_target_window_ids()
+        return ids[0] if ids else None
+
+    # For fresh-mode actions (review-loop, qa fresh/loop) the target
+    # window(s) may currently exist but are about to be killed and
+    # recreated.  Snapshot the *set* of initial window-ids so we can
+    # distinguish a freshly created window (id not in the snapshot)
+    # from a doomed sibling that simply hasn't been killed yet.  For
+    # QA in particular, multiple scenario windows match the prefix and
+    # they get killed one at a time — without the set we'd switch to
+    # the next-still-alive sibling instead of waiting for the rebuild.
+    initial_window_ids: set[str] = (
+        set(_find_target_window_ids()) if fresh else set()
+    )
+    saw_disappear = False
+
+    # For fresh-mode actions, the on-disk runtime_state entry from a
+    # prior completed run may still read 'done'/'failed' at popup start
+    # — the launcher hasn't yet overwritten it because the TUI hasn't
+    # drained the SIGUSR2 queue.  Snapshot the initial entry so the
+    # terminal-state short-circuit below can distinguish stale terminal
+    # state (must wait through the launcher's transitions) from a
+    # genuine terminal state produced by this invocation.  Track the
+    # full (state, updated_at) identity rather than state alone so a
+    # rapid stale-done → fresh-done transition still trips the flag.
+    if fresh:
+        _initial_entry = _rs.get_action_state(pr_id, action) or {}
+        initial_state_key = (
+            _initial_entry.get("state"),
+            _initial_entry.get("updated_at"),
+        )
+    else:
+        initial_state_key = (None, None)
+    saw_state_change = False
+
+    _log.info(
+        "spinner: pr=%s action=%s fresh=%s target_window=%s "
+        "initial_window_ids=%s initial_state=%s",
+        pr_id, action, fresh, target_window,
+        sorted(initial_window_ids), initial_state_key[0],
+    )
+
+    # Print a header line so the popup clearly shows what's happening
+    # underneath the picker.  The spinner below uses \r to overwrite a
+    # single line; this header stays put.
+    if fresh:
+        click.echo(f"\n── starting fresh: {action} for {pr_id} ──")
+    else:
+        click.echo(f"\n── starting: {action} for {pr_id} ──")
+
+    frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    i = 0
+
+    # ANSI escapes used to keep the spinner line clean:
+    #   \x1b[K  — erase from cursor to end of line (avoids leftover
+    #             characters when a shorter label replaces a longer
+    #             one, e.g. 'running…' over 'rebuilding window…')
+    #   \x1b[?25l / \x1b[?25h — hide / show the terminal cursor so it
+    #             doesn't sit on top of the last character of the line
+    CLR_EOL = "\x1b[K"
+    HIDE_CURSOR = "\x1b[?25l"
+    SHOW_CURSOR = "\x1b[?25h"
+    click.echo(HIDE_CURSOR, nl=False)
+
+    # Put stdin in cbreak mode so we can poll for q/Esc keypresses
+    # without waiting for Enter.  Restore in finally so the popup shell
+    # isn't left in a broken state if anything raises.
+    fd = sys.stdin.fileno()
+    cbreak_ok = False
+    cbreak_reason = ""
+    try:
+        old_attrs = termios.tcgetattr(fd)
+    except termios.error as e:
+        old_attrs = None
+        cbreak_reason = f"tcgetattr_failed:{e}"
+    if old_attrs is not None:
+        try:
+            tty.setcbreak(fd)
+            cbreak_ok = True
+        except termios.error as e:
+            old_attrs = None
+            cbreak_reason = f"setcbreak_failed:{e}"
+    _log.debug("spinner stdin: cbreak=%s reason=%s",
+               cbreak_ok, cbreak_reason or "ok")
+
+    # Transition tracking — log only when these flip, not every tick.
+    prev_cur_state = None
+    prev_window_open = None
+    prev_saw_disappear = False
+    try:
+        while True:
+            entry = _rs.get_action_state(pr_id, action)
+            cur_state = entry.get("state") if entry else None
+            if fresh and not saw_state_change:
+                cur_key = (
+                    (entry.get("state") if entry else None),
+                    (entry.get("updated_at") if entry else None),
+                )
+                if cur_key != initial_state_key:
+                    saw_state_change = True
+            cur_window_ids = _find_target_window_ids()
+            if fresh and initial_window_ids:
+                # Wait for *all* original windows to be killed and a new
+                # one with the same name to appear.  A "new" window is
+                # one whose id is not in the initial set; for QA this
+                # avoids switching to a still-alive sibling scenario
+                # (e.g. qa-#158-s2) when only s1 has been killed.
+                new_ids = [i for i in cur_window_ids
+                           if i not in initial_window_ids]
+                if not cur_window_ids:
+                    saw_disappear = True
+                    window_open = False
+                elif new_ids:
+                    window_open = True
+                    # Prefer switching to a freshly created window so we
+                    # never land on a doomed sibling.
+                    cur_window_id = new_ids[0]
+                else:
+                    window_open = False
+            else:
+                window_open = bool(cur_window_ids)
+                cur_window_id = cur_window_ids[0] if cur_window_ids else None
+
+            if cur_state != prev_cur_state:
+                _log.info("spinner transition: cur_state %s -> %s",
+                          prev_cur_state, cur_state)
+                prev_cur_state = cur_state
+            if window_open != prev_window_open:
+                _log.info("spinner transition: window_open %s -> %s",
+                          prev_window_open, window_open)
+                prev_window_open = window_open
+            if saw_disappear != prev_saw_disappear:
+                _log.info("spinner transition: saw_disappear %s -> %s",
+                          prev_saw_disappear, saw_disappear)
+                prev_saw_disappear = saw_disappear
+            if _trace:
+                _log.info(
+                    "spinner tick i=%d cur_state=%s cur_window_ids=%s "
+                    "saw_disappear=%s window_open=%s",
+                    i, cur_state, cur_window_ids,
+                    saw_disappear, window_open,
+                )
+
+            # Terminal-state short-circuit: if the action has reached a
+            # terminal state (done/failed) without producing the expected
+            # tmux window — review-loop in particular has no persistent
+            # window between iterations — exit the spinner instead of
+            # spinning forever.  Failures get surfaced via _wait_dismiss
+            # so the user sees the verdict before the popup closes;
+            # successes dismiss as today.
+            # For fresh-mode actions, 'done'/'failed' at popup start is
+            # stale state from a prior run; the launcher will overwrite
+            # it once the TUI drains the queue.  Treat the action as
+            # non-terminal until we observe *some* change to the entry,
+            # at which point any subsequent terminal state is genuinely
+            # from this invocation.
+            terminal = (cur_state in ("done", "failed")
+                        and (not fresh or saw_state_change))
+            if terminal and not window_open:
+                verdict = (entry.get("verdict") if entry else "") or ""
+                failed = cur_state == "failed" or verdict in ("ERROR", "KILLED")
+                _log.info("spinner exit: reason=terminal_state state=%s verdict=%s",
+                          cur_state, verdict)
+                # Restore terminal *before* writing final lines / waiting
+                # for keypress so cbreak/cursor state doesn't leak.
+                if old_attrs is not None:
+                    try:
+                        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+                    except termios.error:
+                        pass
+                    old_attrs = None
+                click.echo(SHOW_CURSOR, nl=False)
+                if failed:
+                    suffix = f" ({verdict})" if verdict else ""
+                    click.echo(f"\r✗ {action}: failed{suffix}{CLR_EOL}")
+                    _wait_dismiss()
+                else:
+                    suffix = f" ({verdict})" if verdict else ""
+                    click.echo(f"\r✓ {action}: done{suffix}{CLR_EOL}")
+                return
+            if window_open:
+                # Switch the invoking session to the target window
+                # unless the user pre-emptively suppressed it.  Doing
+                # the switch here keeps review and review-loop
+                # consistent: review's switch is performed by the
+                # 'pm pr review' subprocess, but review-loop iterations
+                # don't switch on first start, so we drive it from the
+                # popup.  qa keeps its own focus_or_start_qa switch
+                # path — and owns its own suppress_switch consume —
+                # so we leave the flag in place for action == "qa".
+                if action != "qa":
+                    try:
+                        suppressed = _rs.consume_suppress_switch(pr_id, action)
+                    except Exception:
+                        suppressed = False
+                    if not suppressed:
+                        try:
+                            rc = tmux_mod.select_window(session, target_window)
+                            _log.info(
+                                "spinner select_window: target=%s:%s ok=%s",
+                                session, target_window, rc,
+                            )
+                        except Exception:
+                            _log.exception("spinner select_window failed")
+                _log.info("spinner exit: reason=window_open target=%s",
+                          target_window)
+                click.echo(
+                    f"\r✓ {action}: window {target_window} is open"
+                    f"{CLR_EOL}")
+                return
+            spin = frames[i % len(frames)]
+            if fresh and initial_window_ids and not saw_disappear:
+                label = "rebuilding window"
+            elif cur_state == "failed":
+                v = (entry.get("verdict") if entry else "") or ""
+                label = f"failed ({v})" if v else "failed"
+            else:
+                label = cur_state or "queued"
+            click.echo(f"\r{spin} {action}: {label}…{CLR_EOL}", nl=False)
+
+            # Wait up to tick_s for a keypress.  q/Esc → close the
+            # popup immediately *without* cancelling the queued command
+            # (the TUI continues processing it).  Other keys are
+            # ignored.  We exit the whole popup process here so tmux's
+            # ``display-popup -E`` tears the overlay down right away.
+            r, _, _ = select.select([sys.stdin], [], [], tick_s)
+            if r:
+                try:
+                    ch = sys.stdin.read(1)
+                except OSError:
+                    ch = ""
+                if ch in ("q", "Q", "\x1b"):  # Esc
+                    _log.info("spinner keypress: ch=%r", ch)
+                    # Tell the TUI to skip its window-switch for this
+                    # action — the user explicitly dismissed; don't
+                    # steal focus when the launch eventually completes.
+                    try:
+                        _rs.request_suppress_switch(pr_id, action)
+                    except Exception:
+                        pass
+                    if old_attrs is not None:
+                        try:
+                            termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+                        except termios.error:
+                            pass
+                    _log.info("spinner exit: reason=keypress")
+                    raise SystemExit(0)
+            i += 1
+    except KeyboardInterrupt:
+        _log.info("spinner exit: reason=kbinterrupt")
+        return
+    finally:
+        if old_attrs is not None:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+            except termios.error:
+                pass
+        click.echo(SHOW_CURSOR)
+
+
+def _wait_dismiss(prompt: str = "\nPress q/Esc/Enter to close...") -> None:
+    """Block until the user presses q, Q, Esc, Enter, or sends EOF/Ctrl+C.
+
+    Replaces ``input()`` for popup error/info screens — ``input()`` only
+    accepts Enter, so users pressing q or Esc to dismiss the popup felt
+    stuck.  Falls back to ``input()`` if stdin isn't a tty (e.g. tests).
+    """
+    import sys
+    try:
+        if not sys.stdin.isatty():
+            try:
+                input(prompt)
+            except (EOFError, KeyboardInterrupt):
+                pass
+            return
+        click.echo(prompt, nl=False)
+        sys.stdout.flush()
+        import termios
+        import tty
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            while True:
+                ch = sys.stdin.read(1)
+                if not ch:
+                    break  # EOF
+                if ch in ("q", "Q", "\r", "\n", "\x1b", "\x03", "\x04"):
+                    break
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        click.echo("")
+    except (KeyboardInterrupt, Exception):
+        pass
+
+
+def _run_picker_command(cmd: str, session: str) -> None:
+    """Execute a picker command — either direct CLI or routed through TUI."""
+    route = "tui" if cmd.startswith("tui:") else "direct"
+    _log.info("picker dispatch: cmd=%r route=%s", cmd, route)
+    if cmd.startswith("tui:"):
+        # Route through the TUI's SIGUSR2 + queue-file IPC.  Focus-
+        # independent: doesn't depend on tmux send-keys timing, can't
+        # be eaten by whichever widget has focus, and supports queuing
+        # multiple commands across concurrent picker invocations.
+        from pm_core.cli.helpers import trigger_tui_command
+        tui_cmd = cmd[4:]
+        base = pane_registry.base_session_name(session)
+        if not trigger_tui_command(base, tui_cmd):
+            click.echo("Could not reach the TUI (no pidfile or signal failed).")
+            _wait_dismiss()
+            return
+        # Brief progress display: poll runtime_state for the action to
+        # transition out of 'queued' / into 'running'.  Exits early on
+        # state transition or when the target window appears.
+        _wait_for_tui_command(base, tui_cmd)
+    else:
+        # Run pm command directly. Capture stdout/stderr so we can re-emit
+        # them ourselves — display-popup -E's raw-mode TTY mangles bytes
+        # streamed by the child, leaving the user staring at an empty
+        # popup when something fails.
+        full_cmd = _session_pm_argv(session, shlex.split(cmd))
+        result = subprocess.run(full_cmd, text=True, capture_output=True)
+        if result.stdout:
+            click.echo(result.stdout, nl=False)
+        if result.returncode != 0:
+            err = (result.stderr or "").strip()
+            if err:
+                click.echo(f"pm error: {err}", err=True)
+            _wait_dismiss()
+        elif result.stderr:
+            # Even on success some commands print informational lines to
+            # stderr; surface them so they don't vanish.
+            click.echo(result.stderr, nl=False, err=True)
+
+
+# Bootstrap for popup-dispatched pm commands (see _session_pm_argv).
+# ``python -c`` prepends '' (the cwd) to sys.path; drop it before any
+# pm_core import so a PR workdir's pm_core can never be picked up, then
+# hand off to the dispatcher's wrapper with the session tag.
+_SESSION_PM_BOOTSTRAP = (
+    "import sys\n"
+    "if sys.path and sys.path[0] == '':\n"
+    "    del sys.path[0]\n"
+    "root, tag = sys.argv[1:3]\n"
+    "del sys.argv[1:3]\n"
+    "sys.path.insert(0, root)\n"
+    "import pm_core.wrapper as w\n"
+    "sys.argv[0] = w.__file__\n"
+    "sys.exit(w.main_for_session(tag))\n"
+)
+
+
+def _session_pm_argv(session: str, args: list[str]) -> list[str]:
+    """Build the argv for running ``pm <args>`` as *session*'s pm.
+
+    Used by the popup dispatchers (picker direct route, ``_popup-cmd``).
+    The child keeps the popup's cwd (and inherited PM_PROJECT), but its
+    code is the session's — ``wrapper.main_for_session`` resolves the
+    override / pm_root for the session tag and never walks the cwd,
+    which is often a PR workdir carrying unmerged pm_core.
+    """
+    import sys
+    import pm_core
+    tag = _session_tag_from_name(session) or ""
+    dispatcher_root = str(Path(pm_core.__file__).parent.parent)
+    return [sys.executable, "-c", _SESSION_PM_BOOTSTRAP,
+            dispatcher_root, tag] + list(args)
+
+
+def _session_tag_from_name(session: str) -> str | None:
+    """Return the ``~/.pm/sessions/<tag>`` key for tmux *session*.
+
+    The session name is ``pm-<tag>``, optionally with a grouped-session
+    ``~N`` suffix (see ``_get_session_name_for_cwd``).  None when the
+    name isn't a pm session.
+    """
+    base = pane_registry.base_session_name(session)
+    tag = base.removeprefix("pm-")
+    return tag if tag != base else None
+
+
+def _resolve_root_from_session(session: str) -> Path | None:
+    """Resolve a pm session's persisted project root from its name.
+
+    The session name is ``pm-<tag>`` (see ``_get_session_name_for_cwd``).
+    Returns the persisted root if present and still on disk, else None.
+    """
+    from pm_core.paths import get_session_pm_root
+    tag = _session_tag_from_name(session)
+    if tag is None:
+        return None
+    return get_session_pm_root(tag)
+
+
+@cli.command("_popup-picker", hidden=True)
+@click.argument("session")
+@click.argument("window_name", default="")
+def popup_picker_cmd(session: str, window_name: str):
+    """Internal: action-based PR picker for tmux popup.
+
+    Shows one PR at a time — the invoking window's PR, else the first
+    active PR with an open window — with its available actions (start,
+    review, qa, merge, review-loop) based on PR status.  h/l/0 step
+    through the other active PRs that have open windows; a merged/closed
+    or unresolvable PR shows a notice row instead of actions.  Selecting
+    an action runs the corresponding pm command.
+    """
+    import shutil
+    import sys
+
+    def _pause_and_exit(code: int = 0):
+        # display-popup -E closes when the command exits, so wait for Enter
+        # whenever we have a message the user needs to read.
+        _wait_dismiss()
+        raise SystemExit(code)
+
+    base = pane_registry.base_session_name(session)
+    rp = pane_registry.registry_path(base)
+    _log.info("popup-picker invoked: session=%r window=%r base=%r registry_path=%s exists=%s HOME=%r module=%s",
+              session, window_name, base, rp, rp.exists(),
+              os.environ.get("HOME"), __file__)
+    if not rp.exists():
+        click.echo("Not a pm session.")
+        _pause_and_exit(1)
+
+    # Commands run from here (and their children) switch windows in this
+    # client's session, not whichever client tmux considers current.
+    os.environ[tmux_mod.POPUP_SESSION_ENV] = session
+
+    saved_root = _resolve_root_from_session(session)
+    try:
+        root = saved_root if saved_root is not None else state_root()
+        # Validate the raw snapshot below: the general loader repairs invalid
+        # statuses to pending, which could make a partially written PR actionable.
+        data = store.load(root, validate=False)
+    except FileNotFoundError:
+        click.echo("No project.yaml found.")
+        _pause_and_exit(1)
+    except Exception as e:
+        _log.warning("popup-picker: initial load failed: %s", e)
+        click.echo(f"Could not load PR actions: {e}")
+        _pause_and_exit(1)
+    # Make subcommands inherit the session's root rather than walking
+    # up from the popup's cwd (which may be outside the repo or deleted).
+    os.environ["PM_PROJECT"] = str(root)
+
+    prs = data.get("prs")
+    current_pr = _current_window_pr_id(window_name)
+
+    # Gather open windows to annotate the picker.  One list_windows call
+    # feeds both the [open] tags (by name) and the per-session ●/○
+    # indicator (which needs name → window-id resolution).
+    all_windows = tmux_mod.list_windows(base)
+    open_windows = {w["name"] for w in all_windows}
+    name_to_wid = {w["name"]: w["id"] for w in all_windows}
+
+    # Per-session active-window map: which window each attached session in
+    # the group is currently viewing.  The caller's own active window gets
+    # ●; any other attached session's gets ○.
+    active_map = _session_active_windows(base)
+    caller_wid = active_map.get(session)
+    other_wids = {wid for s, wid in active_map.items() if s != session}
+
+    # Build the navigation list: non-merged/closed PRs that the user has
+    # at least one open window for.  The invoking window's PR (if any) is
+    # included as the "home" position for the 0 key, whatever its status.
+    # When the picker is opened from a non-PR window (current_pr is None),
+    # home_pr is None and navigation cycles through whichever active PRs
+    # have live windows.
+    window_pr_id = current_pr
+    # A window is named by its PR's display id, which is the local id when
+    # there is no GitHub number.  The name grammar only knows ``#N`` and
+    # ``pr-<alnum>``, so prefer an exact snapshot match on the raw window
+    # name: it keeps home anchored for a legacy numeric, dotted or
+    # underscored local id, and for an id that itself ends in ``-s<N>``
+    # (which the grammar would otherwise read as a QA scenario suffix).
+    # The same match is retried without the action prefix so a prefixed
+    # window (``review-pr-a_b``) anchors on an id the grammar cannot read.
+    # Non-PR windows (``tui``, ``pm-meta``) match no PR and are unaffected.
+    if window_name and isinstance(prs, list):
+        for candidate in (window_name,
+                          _strip_action_window_prefix(window_name)):
+            if candidate and _find_pr_for_window_id(prs, candidate) is not None:
+                window_pr_id = candidate
+                break
+    home_local_id = None
+
+    def _navigation(prs, windows):
+        # Display IDs are presentation only: two terminal records may share one.
+        # Internally use local IDs, retaining raw window IDs only until resolved.
+        displays, by_display, home_display = _build_nav_entries(
+            prs, window_pr_id, windows, home_local_id=home_local_id)
+        entries = {p["id"]: p for p in prs}
+        nav = [by_display[d]["id"] if d in by_display else d for d in displays]
+        home = (by_display[home_display]["id"] if home_display in by_display
+                else home_display)
+        return nav, entries, home
+
+    try:
+        nav_pr_ids, pr_by_local, home_pr = _navigation(prs, open_windows)
+    except (ValueError, TypeError, KeyError) as e:
+        _log.warning("popup-picker: initial navigation failed (root=%s): %s", root, e)
+        click.echo(f"Could not load PR actions: {e}")
+        _pause_and_exit(1)
+
+    if not nav_pr_ids:
+        click.echo("PR Actions (prefix+P)")
+        # home_pr is always in the list when set, so only a non-PR
+        # window with no active PR windows gets here.
+        click.echo("No active PR windows open.")
+        _pause_and_exit(0)
+
+    try:
+        nav_index = nav_pr_ids.index(home_pr) if home_pr else 0
+    except ValueError:
+        nav_index = 0
+
+    # Once resolved, home is a local identity, not a reusable GitHub number.
+    # Keep unresolved window ids verbatim so later repair can still resolve them.
+    if home_pr in pr_by_local:
+        home_local_id = home_pr
+
+    invoking_phase = _current_window_phase(window_name)
+
+    def _display_id(identity: str) -> str:
+        from pm_core.cli.helpers import _pr_display_id
+
+        picked = pr_by_local.get(identity)
+        if picked is not None:
+            return _pr_display_id(picked)
+        # Home identity that no longer resolves: with no PR entries left at
+        # all (an explicit `prs: []`) nothing can supply a display id, so
+        # name the PR id taken from the window the picker was opened from
+        # (``review-#12`` -> ``#12``, not the raw window name).  While other
+        # PRs remain, keep the retained local id — it is the only
+        # unambiguous name for a deleted home, since the window name may now
+        # belong to a different PR.
+        if identity == home_pr and not prs:
+            return window_pr_id or identity
+        return identity
+
+    def _log_no_actions(pr_disp: str, picked: dict | None) -> None:
+        """Log a lookup failure with enough context to diagnose id drift."""
+        from pm_core.cli.helpers import _pr_display_id
+
+        # Pair the two ids to diagnose window-name drift without dumping a
+        # large project's entire PR list on every reload.
+        known_ids = [(p.get("id"), _pr_display_id(p)) for p in prs[:20]]
+        _log.warning(
+            "popup-picker: no actions for %r (window=%r, root=%s, "
+            "found=%s, status=%r, prs_loaded=%d, "
+            "known_ids(local,display)=%r, ids_omitted=%d)",
+            pr_disp, window_name, root, picked is not None,
+            (picked or {}).get("status"), len(prs), known_ids,
+            max(0, len(prs) - len(known_ids)))
+
+    def _resolve_for(identity: str):
+        """Return (lines, picked_pr, label_to_cmd) for the given PR.
+
+        When the PR has no actions (merged/closed, or its lookup failed)
+        ``lines`` is a single non-actionable notice row and
+        ``label_to_cmd`` is empty — the picker stays open so navigation
+        to other PRs still works.
+        """
+        picked = pr_by_local.get(identity)
+        pr_disp = _display_id(identity)
+        label_to_cmd: dict[str, str] = {}
+        pr_lines: list[tuple[str, str, str]] = []
+        if picked is not None:
+            for lbl, tpl in _actions_for_status(picked.get("status", "")):
+                label_to_cmd[lbl] = tpl.format(pr_id=picked["id"])
+            # Phase indicator only meaningful for the invoking PR — when
+            # navigating to a different PR the user isn't "in" any of its
+            # phases.  Pass "" (not None) so _build_picker_lines treats it
+            # as "no phase" rather than falling back to status-derived.
+            phase = invoking_phase if identity == home_pr else ""
+            pr_lines = _build_picker_lines(
+                [picked], pr_disp, open_windows, current_phase=phase,
+                caller_wid=caller_wid, other_wids=other_wids,
+                name_to_wid=name_to_wid)
+        if not pr_lines:
+            if picked is None or picked.get("status") not in _TERMINAL_STATUSES:
+                _log_no_actions(pr_disp, picked)
+            label_to_cmd = {}
+            pr_lines = [(f"  {_no_actions_notice(pr_disp, picked)}",
+                         "", pr_disp)]
+        return pr_lines, picked, label_to_cmd
+
+    def _refresh_state() -> bool:
+        """Reload project.yaml and the window list, rebuild the nav list.
+
+        Called on every navigation key and before dispatching an action so
+        a PR merged/closed while the popup is open drops out of navigation
+        and loses its actions instead of leaving stale entries behind.
+        Keeps the previous state if the reload fails, returning False so
+        dispatch can refuse to act on that stale snapshot.
+        """
+        nonlocal prs, nav_pr_ids, pr_by_local, home_pr, home_local_id
+        nonlocal open_windows, name_to_wid, caller_wid, other_wids
+        try:
+            fresh_prs = store.load(root, validate=False).get("prs")
+            fresh_windows = tmux_mod.list_windows(base)
+            fresh_open = {w["name"] for w in fresh_windows}
+            fresh_name_to_wid = {w["name"]: w["id"] for w in fresh_windows}
+            fresh_nav, fresh_by_local, fresh_home = _navigation(fresh_prs, fresh_open)
+            fresh_active = _session_active_windows(base)
+            fresh_caller = fresh_active.get(session)
+            fresh_others = {wid for s, wid in fresh_active.items() if s != session}
+        except Exception as e:
+            _log.warning("popup-picker: refresh failed, keeping state: %s", e)
+            return False
+        # Publish only a complete snapshot; malformed entries must not
+        # replace part of the last-good state before nav construction fails.
+        prs, pr_by_local = fresh_prs, fresh_by_local
+        open_windows = fresh_open
+        name_to_wid = fresh_name_to_wid
+        caller_wid, other_wids = fresh_caller, fresh_others
+        nav_pr_ids, home_pr = fresh_nav, fresh_home
+        # An initially unresolved home can acquire an identity after repair.
+        # Pin it only after the complete refresh succeeds, just as on startup.
+        if home_local_id is None and home_pr in pr_by_local:
+            home_local_id = home_pr
+        return True
+
+    def _sync_index(shown: str, prev_index: int) -> int:
+        """Return the nav index of `shown`, keeping it in the list.
+
+        A PR on screen that dropped out of the rebuilt list (merged or
+        closed while displayed) stays at its old position until the user
+        navigates away, so the index never points past the list or at a
+        different PR than the header names.
+        """
+        if shown not in nav_pr_ids:
+            nav_pr_ids.insert(min(prev_index, len(nav_pr_ids)), shown)
+        return nav_pr_ids.index(shown)
+
+    def _step_target(delta: int | None) -> str:
+        """Reload, then pick the PR to show after a nav key.
+
+        `delta` is -1/+1 for h/l, None for the home key.  If the PR being
+        left dropped out of the rebuilt list, step to the nearest surviving
+        neighbour in the requested direction in the old order.
+        """
+        old_list, old_cur, old_home = list(nav_pr_ids), current_pr, home_pr
+        unresolved_home = home_local_id is None
+        _refresh_state()
+        # A formerly unresolved home may have acquired its local identity.
+        if unresolved_home and home_local_id is not None:
+            old_list = [home_pr if key == old_home else key for key in old_list]
+            if old_cur == old_home:
+                old_cur = home_pr
+        cur = old_cur
+        if not nav_pr_ids:
+            return cur
+        if delta is None:
+            return home_pr if home_pr in nav_pr_ids else nav_pr_ids[0]
+        if cur in nav_pr_ids:
+            i = nav_pr_ids.index(cur)
+            return nav_pr_ids[(i + delta) % len(nav_pr_ids)]
+        if old_cur in old_list:
+            # A bulk window/status change may remove every old neighbour.
+            # Keep identity and membership checks constant-time per candidate.
+            nav_ids = set(nav_pr_ids)
+            k = old_list.index(old_cur)
+            for n in range(1, len(old_list) + 1):
+                cand = old_list[(k + delta * n) % len(old_list)]
+                if cand in nav_ids:
+                    return cand
+        return nav_pr_ids[0]
+
+    current_pr = nav_pr_ids[nav_index]
+    lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
+
+    fzf_input_lines = [display for display, _, _ in lines]
+
+    def _still_has_action(label: str) -> bool:
+        """Refresh before either interface dispatches a selected action."""
+        # ``current_pr`` is only read here — navigation owns it.
+        nonlocal nav_index, lines, _picked_pr, _label_to_cmd
+        nonlocal fzf_input_lines
+        # Display numbers can be reassigned during state repair. Bind the
+        # pending action to the local identity the user actually selected,
+        # never to whichever PR now owns the old display number.
+        selected_id = _picked_pr["id"] if _picked_pr is not None else None
+        if not _refresh_state():
+            # Keep last-good navigation, but explain why the action was refused.
+            # Without fzf the menu is one-shot, so retrying means reopening it.
+            # Two rows: the 80-column popup clips (never wraps) a long fzf row,
+            # which would hide the repair instruction.
+            retry = "retry" if has_fzf else "reopen the picker"
+            lines = [("  Could not refresh PR actions; no action was run.", "", current_pr),
+                     (f"  Repair project.yaml and {retry}.", "", current_pr)]
+            fzf_input_lines = [d for d, _, _ in lines]
+            return False
+
+        selected = pr_by_local.get(selected_id)
+        nav_index = _sync_index(current_pr, nav_index)
+        if selected is None:
+            _picked_pr, _label_to_cmd = None, {}
+            # Name the PR the same way the header does: with an explicit
+            # `prs: []` the identity is the invoking window id (#12), and the
+            # notice must not disagree with the header naming the local id.
+            pr_disp = _display_id(current_pr)
+            lines = [(f"  {_no_actions_notice(pr_disp, None)}", "", pr_disp)]
+            # The selected PR vanished between selection and dispatch: log the
+            # same lookup-failure diagnostics as a rendered notice so a window
+            # that drifted out of range is diagnosable from the pm log too.
+            _log_no_actions(pr_disp, None)
+            _log.warning("popup-picker: selected PR %r disappeared before dispatch", selected_id)
+        else:
+            lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
+        fzf_input_lines = [d for d, _, _ in lines]
+        return label in _label_to_cmd
+
+    has_fzf = shutil.which("fzf") is not None
+
+    # Shortcut keys: press a key to immediately run an action.
+    # Ordered to match _ALL_ACTIONS display order.
+    # Note: q is reserved for quitting the picker (mapped to fzf abort
+    # below), so qa uses 't'.
+    _SHORTCUT_KEYS = {
+        "s": "start",
+        "e": "edit",
+        "d": "review",
+        "t": "qa",
+        "i": "signoff",
+        "g": "merge",
+    }
+    if has_fzf:
+        shortcut_hint = "  ".join(
+            f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
+        )
+        chord_hint = "z s/d/t/i: fresh   zz d/t: loop"
+
+        # fzf 0.59+ supports --no-input which hides the entire input
+        # box, so unrecognized keystrokes don't echo anywhere in the
+        # popup.  Detect support up-front so we can fall back to the
+        # older --disabled + --prompt= combo on older versions (which
+        # still echoes typed characters into the prompt area).
+        no_input_supported = _fzf_supports_no_input()
+
+        # Chord state-machine: each iteration re-launches fzf with a
+        # header reflecting the current chord state (none / 'z' / 'zz')
+        # so the chord UI lives in the same picker pane.  q/Esc inside
+        # a chord state aborts that fzf invocation, and we go back to
+        # the main state on the next loop iteration; q/Esc in the main
+        # state exits the popup.
+        # Belt-and-suspenders: bind every alphanumeric key not in the
+        # current --expect set to fzf's ``ignore`` action so unsupported
+        # letters (e.g. j/k/h/l/i…) never echo anywhere — even on fzf
+        # versions that don't honor --no-input or where --disabled
+        # leaves the input box's character echo enabled.  q is bound
+        # to abort separately so it always quits the (sub-)picker.
+        import string
+        def _make_fzf_cmd(header: str, expect: list[str],
+                          accept: bool = True) -> list[str]:
+            expect_set = set(expect)
+            binds = ["q:abort"]
+            for ch in string.ascii_lowercase + string.ascii_uppercase + string.digits:
+                if ch != "q" and ch not in expect_set:
+                    binds.append(f"{ch}:ignore")
+            if not accept:
+                # Nothing selectable (PR with no actions): Enter and
+                # double-click must not complete fzf and close the popup.
+                binds += ["enter:ignore", "double-click:ignore"]
+            cmd = ["fzf", "--ansi", "--no-sort", "--reverse",
+                   f"--header={header}",
+                   "--header-first",
+                   "--pointer=>",
+                   "--no-info",
+                   f"--bind={','.join(binds)}",
+                   # --height inhibits fzf's alt-screen mode so fzf and
+                   # the dispatch spinner share the popup's one screen.
+                   "--height=100%",
+                   # Keys typed while the picker reloads between fzf runs
+                   # are read before the rows arrive; without --sync fzf
+                   # then exits 1 ("no match") and the popup closes.
+                   "--sync",
+                   # Leave the last frame up between fzf runs instead of
+                   # flashing an empty popup on every nav key.
+                   "--no-clear",
+                   f"--expect={','.join(expect)}"]
+            if no_input_supported:
+                cmd.append("--no-input")
+            else:
+                cmd.extend(["--disabled", "--prompt="])
+            return cmd
+
+        cmd_to_run: str | None = None
+        chord_state = "main"  # 'main' | 'z' | 'zz'
+        while True:
+            if chord_state == "main":
+                # The nav list can grow/shrink on refresh, so recompute.
+                multi_pr = len(nav_pr_ids) > 1
+                if multi_pr:
+                    nav_hint = ("h/l: prev/next PR   0: home" if home_pr
+                                else "h/l: prev/next PR")
+                else:
+                    nav_hint = ""
+                pr_pos = (f"  ({nav_index + 1}/{len(nav_pr_ids)})"
+                          if multi_pr else "")
+                # A PR with no actions (merged/closed or unresolvable)
+                # only offers quit + navigation: leaving the action keys
+                # out of --expect binds them to fzf's ignore.
+                has_actions = bool(_label_to_cmd)
+                if has_actions:
+                    header_lines = [f"PR Actions — {_display_id(current_pr)}{pr_pos}",
+                                    f"q/Esc: quit  {shortcut_hint}",
+                                    chord_hint]
+                    expect = list(_SHORTCUT_KEYS.keys()) + ["z"]
+                else:
+                    header_lines = [f"PR Actions — {_display_id(current_pr)}{pr_pos}",
+                                    "q/Esc: quit"]
+                    expect = []
+                if nav_hint:
+                    header_lines.append(nav_hint)
+                header = "\n".join(header_lines)
+                # Nav keys are accepted even with a single PR (unadvertised):
+                # each press reloads, so a PR that becomes live or opens a
+                # window while the popup is open can still be reached.
+                expect += ["h", "l", "left", "right"]
+                if home_pr:
+                    expect.append("0")
+            elif chord_state == "z":
+                header = (f"z — fresh start for {_display_id(current_pr)}\n"
+                          f"s=fresh impl   d=fresh review   t=fresh qa   "
+                          f"i=fresh signoff   z again for loop   "
+                          f"q/Esc cancels")
+                expect = ["z", "s", "d", "t", "i"]
+            else:  # 'zz'
+                header = (f"zz — loop for {_display_id(current_pr)}\n"
+                          f"d=review-loop   t=qa-loop   "
+                          f"q/Esc cancels")
+                expect = ["d", "t"]
+
+            fzf_cmd = _make_fzf_cmd(
+                header, expect,
+                accept=(chord_state != "main" or has_actions))
+            proc = subprocess.Popen(
+                fzf_cmd,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                text=True,
+            )
+            stdout, _ = proc.communicate(input="\n".join(fzf_input_lines))
+
+            # 1 is fzf's "no match": a key read before the rows loaded.
+            # The --expect key is still printed, so handle it as a press.
+            if proc.returncode == 1 and not stdout.strip():
+                continue
+            if proc.returncode not in (0, 1):
+                # fzf aborted (q/Esc).  In a chord state, that means
+                # "cancel chord, go back to main".  In main, it
+                # dismisses the popup.
+                if chord_state == "main":
+                    raise SystemExit(0)
+                chord_state = "main"
+                continue
+
+            # Line 1 is the --expect key, empty for Enter/double-click —
+            # only drop the trailing newline, or the key line is lost and
+            # the selected row is misread as the key.
+            out_lines = stdout.rstrip("\n").split("\n")
+            pressed_key = out_lines[0] if out_lines else ""
+            selected = out_lines[1] if len(out_lines) > 1 else ""
+
+            if chord_state == "main":
+                nav_delta = {"h": -1, "left": -1, "l": 1, "right": 1}
+                if (pressed_key in nav_delta
+                        or (home_pr and pressed_key == "0")):
+                    current_pr = _step_target(nav_delta.get(pressed_key))
+                    nav_index = _sync_index(current_pr, nav_index)
+                    lines, _picked_pr, _label_to_cmd = _resolve_for(current_pr)
+                    fzf_input_lines = [d for d, _, _ in lines]
+                    continue
+                if not has_actions:
+                    # Nothing to run for this PR — never let a keypress
+                    # on it close the picker; only q/Esc does.
+                    continue
+                if pressed_key == "z":
+                    chord_state = "z"
+                    continue
+                if pressed_key in _SHORTCUT_KEYS:
+                    action_label = _SHORTCUT_KEYS[pressed_key]
+                    if not _still_has_action(action_label):
+                        continue
+                    cmd_to_run = _label_to_cmd.get(action_label)
+                    break
+                if selected:
+                    selected_cmd = None
+                    for display, cmd, _ in lines:
+                        if display == selected:
+                            selected_cmd = cmd or None
+                            break
+                    if not selected_cmd:
+                        # Title row: nothing to run.  fzf starts on it, so
+                        # an early Enter must not close the picker.
+                        continue
+                    label = next((lbl for lbl, c in _label_to_cmd.items()
+                                  if c == selected_cmd), None)
+                    # Every dispatch goes through the refresh check; a row
+                    # with no known action label is never run unchecked.
+                    if label is None or not _still_has_action(label):
+                        continue
+                    cmd_to_run = _label_to_cmd[label]
+                    break
+                # No actionable input — bail.
+                break
+
+            # In a chord state — resolve to a modified command.
+            if chord_state == "z" and pressed_key == "z":
+                chord_state = "zz"
+                continue
+            if pressed_key in ("s", "d", "t", "i"):
+                action_label = _SHORTCUT_KEYS.get(pressed_key)
+                if action_label and not _still_has_action(action_label):
+                    chord_state = "main"
+                    continue
+                if action_label and _picked_pr is not None:
+                    template = _MODIFIED_ACTION_CMDS.get(
+                        (chord_state, action_label))
+                    if template:
+                        cmd_to_run = template.format(
+                            pr_id=_picked_pr["id"])
+                    else:
+                        cmd_to_run = _label_to_cmd.get(action_label)
+                break
+            # Unrecognized key in chord — return to main.
+            chord_state = "main"
+            continue
+
+        if cmd_to_run:
+            # --no-clear left the last picker frame up; wipe it so the
+            # command's progress and errors don't print over it.
+            sys.stdout.write("\033[H\033[2J")
+            sys.stdout.flush()
+            _run_picker_command(cmd_to_run, session)
+        # Always exit the popup process explicitly after dispatching —
+        # display-popup -E ties the overlay to this process's lifetime,
+        # so an explicit exit (with stdout flush) ensures the overlay
+        # closes promptly after the spinner switches windows.
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        raise SystemExit(0)
+    else:
+        # Fallback: numbered list with shortcut keys
+        click.echo("Tip: install fzf for a better experience"
+                    " (brew install fzf / apt install fzf)\n")
+        click.echo(f"PR Actions — {_display_id(current_pr)}\n")
+
+        numbered: list[tuple[int, str]] = []  # (num, command)
+        num = 0
+        for display, cmd, _ in lines:
+            if not cmd:
+                click.echo(display)
+            else:
+                num += 1
+                numbered.append((num, cmd))
+                click.echo(f"  {num}) {display.strip()}")
+
+        if not numbered:
+            # No actions for this PR (notice row printed above); there is
+            # no navigation without fzf, so wait for the user to read it.
+            _pause_and_exit(0)
+
+        shortcut_hint = "  ".join(
+            f"{key}={label}" for key, label in _SHORTCUT_KEYS.items()
+        )
+        click.echo(f"\nShortcuts: {shortcut_hint}")
+        try:
+            choice = input(f"Select [1-{num}] or shortcut key: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            raise SystemExit(0)
+
+        target_label = _SHORTCUT_KEYS.get(choice)
+        if target_label is None:
+            try:
+                choice_num = int(choice)
+            except ValueError:
+                raise SystemExit(0)
+            selected_cmd = next((cmd for n, cmd in numbered if n == choice_num), None)
+            target_label = next((label for label, cmd in _label_to_cmd.items()
+                                 if cmd == selected_cmd), None)
+
+        if target_label:
+            if _still_has_action(target_label):
+                _run_picker_command(_label_to_cmd[target_label], session)
+            else:
+                # The numbered menu was displayed before this PR changed.
+                # Show its current notice and wait, just as on initial load.
+                for display, _, _ in lines:
+                    click.echo(display)
+                _pause_and_exit(0)
+
+
+@cli.command("_popup-cmd", hidden=True)
+@click.argument("session")
+def popup_cmd_cmd(session: str):
+    """Internal: pm command prompt for tmux popup."""
+    base = pane_registry.base_session_name(session)
+    rp = pane_registry.registry_path(base)
+    _log.info("popup-cmd invoked: session=%r base=%r registry_path=%s exists=%s HOME=%r module=%s",
+              session, base, rp, rp.exists(),
+              os.environ.get("HOME"), __file__)
+    if not rp.exists():
+        click.echo("Not a pm session.")
+        _wait_dismiss()
+        raise SystemExit(1)
+
+    os.environ[tmux_mod.POPUP_SESSION_ENV] = session
+
+    # Inherit the session's persisted root so user commands resolve
+    # project state correctly even if the popup's cwd is outside the
+    # repo or in a deleted workdir.
+    saved_root = _resolve_root_from_session(session)
+    if saved_root is not None:
+        os.environ["PM_PROJECT"] = str(saved_root)
+
+    try:
+        cmd = input("pm> ").strip()
+    except (EOFError, KeyboardInterrupt):
+        raise SystemExit(0)
+
+    if not cmd:
+        raise SystemExit(0)
+
+    # Route TUI-dependent commands through the TUI command bar
+    try:
+        parts = shlex.split(cmd)
+    except ValueError as e:
+        click.echo(f"Invalid command syntax: {e}")
+        _wait_dismiss()
+        raise SystemExit(1)
+    _cmd_norm = cmd.replace("review loop", "review-loop")
+    if (_cmd_norm.startswith("pr qa")
+            or _cmd_norm.startswith("review-loop")):
+        _run_picker_command(f"tui:{_cmd_norm}", session)
+        return
+
+    full_cmd = _session_pm_argv(session, parts)
+
+    rc = _run_with_abort_keys(full_cmd)
+
+    if rc == _ABORTED_BY_USER:
+        # User pressed Esc/Ctrl+C — close popup immediately, no error wait.
+        return
+    if rc != 0:
+        # Keep popup open so user can see error
+        _wait_dismiss()
+
+
+_ABORTED_BY_USER = -999
+
+
+def _run_with_abort_keys(cmd: list[str]) -> int:
+    """Run *cmd* inheriting stdout/stderr, but watch the popup pty for
+    Esc / Ctrl+C and terminate the child when either is pressed.
+
+    The child is spawned in its own session with ``stdin=DEVNULL`` so the
+    parent owns the pty input.  Returns the child's exit code, or
+    ``_ABORTED_BY_USER`` if the user dismissed the popup mid-run.
+    """
+    import signal
+    import sys
+
+    if not sys.stdin.isatty():
+        # Tests / non-interactive: just run it.
+        return subprocess.run(cmd, text=True).returncode
+
+    import select
+    import termios
+    import tty
+
+    proc = subprocess.Popen(
+        cmd, text=True,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+    fd = sys.stdin.fileno()
+    old_attrs = termios.tcgetattr(fd)
+    aborted = False
+    try:
+        tty.setcbreak(fd)
+        # Disable ISIG so Ctrl+C arrives as the byte 0x03 we can intercept
+        # and forward, instead of raising KeyboardInterrupt in this process.
+        new_attrs = termios.tcgetattr(fd)
+        new_attrs[3] &= ~termios.ISIG  # lflags
+        termios.tcsetattr(fd, termios.TCSANOW, new_attrs)
+        while True:
+            if proc.poll() is not None:
+                break
+            try:
+                r, _, _ = select.select([fd], [], [], 0.1)
+            except (InterruptedError, OSError):
+                continue
+            if not r:
+                continue
+            try:
+                ch = os.read(fd, 1)
+            except OSError:
+                continue
+            if not ch:
+                continue
+            if ch in (b"\x1b", b"\x03"):  # Esc, Ctrl+C
+                aborted = True
+                try:
+                    os.killpg(proc.pid, signal.SIGINT)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                # Give the child a moment to exit on SIGINT, then escalate.
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(proc.pid, signal.SIGTERM)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                    try:
+                        proc.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            os.killpg(proc.pid, signal.SIGKILL)
+                        except (ProcessLookupError, PermissionError):
+                            pass
+                        proc.wait()
+                break
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+
+    if aborted:
+        return _ABORTED_BY_USER
+    return proc.returncode if proc.returncode is not None else 0
 
 
 # --- Session registry commands ---

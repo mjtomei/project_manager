@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from pm_core.claude_launcher import (
     find_claude,
     find_editor,
@@ -188,8 +190,10 @@ class TestLaunchClaudeInTmux:
     @patch("pm_core.tmux.send_keys")
     def test_with_cwd(self, mock_sk, mock_build):
         launch_claude_in_tmux("%1", "hello", cwd="/tmp/proj")
-        cmd = mock_sk.call_args[0][1]
-        assert cmd.startswith("cd '/tmp/proj' && ")
+        # cwd is now forwarded to build_claude_shell_cmd rather than prepended
+        mock_build.assert_called_once_with(prompt="hello", cwd="/tmp/proj",
+                                           session_type=None)
+        mock_sk.assert_called_once_with("%1", "claude 'hello'")
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +201,31 @@ class TestLaunchClaudeInTmux:
 # ---------------------------------------------------------------------------
 
 class TestLaunchClaude:
+    @pytest.fixture(autouse=True)
+    def _isolate_workspace_trust(self):
+        # These tests mock subprocess.run for Claude's retry sequence.
+        # Trust setup can also run Git when pytest's cwd is a PM workdir;
+        # its real behavior is covered by test_workspace_trust.py.
+        with patch("pm_core.claude_launcher.prepare_workspace") as prep:
+            self.prepare_workspace = prep
+            yield
+
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.claude_launcher.subprocess.run")
+    @patch("pm_core.claude_launcher._skip_permissions", return_value=False)
+    @patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude")
+    def test_prepares_workspace_trust(self, mock_fc, mock_sp, mock_run,
+                                      mock_log, tmp_path, monkeypatch):
+        """The fixture stubs trust setup; still check it targets the
+        launch directory (explicit cwd, else the process cwd)."""
+        mock_run.return_value = MagicMock(returncode=0)
+        launch_claude("hello", "key1", tmp_path, cwd="/some/workdir")
+        self.prepare_workspace.assert_called_once_with("/some/workdir")
+        self.prepare_workspace.reset_mock()
+        monkeypatch.chdir(tmp_path)
+        launch_claude("hello", "key2", tmp_path)
+        self.prepare_workspace.assert_called_once_with(os.getcwd())
+
     @patch("pm_core.claude_launcher.find_claude", return_value=None)
     def test_raises_when_no_claude(self, mock_fc, tmp_path):
         import pytest
@@ -341,6 +370,32 @@ class TestLaunchBridgeInTmux:
         launch_bridge_in_tmux(None, "/tmp/proj", "sess")
         cmd = mock_split.call_args[0][2]
         assert "--prompt" not in cmd
+
+    @patch("pm_core.tmux.split_pane_background")
+    def test_oversized_prompt_is_passed_by_file(self, mock_split, tmp_path):
+        """An over-limit prompt cannot be a shell argument (E2BIG), so the
+        complete text goes to a file the bridge reads with --prompt-file."""
+        import shlex
+        from pm_core.prompt_bounds import PROMPT_ARG_LIMIT, prompt_bytes
+
+        huge = "x" * (PROMPT_ARG_LIMIT + 1)
+        launch_bridge_in_tmux(huge, str(tmp_path), "sess")
+        cmd = mock_split.call_args[0][2]
+        assert "--prompt-file" in cmd
+        assert "--prompt " not in cmd
+        assert huge not in cmd
+        # The command itself stays small enough to exec.
+        assert prompt_bytes(cmd) < PROMPT_ARG_LIMIT
+        argv = shlex.split(cmd)
+        prompt_file = argv[argv.index("--prompt-file") + 1]
+        assert Path(prompt_file).read_text() == huge
+
+    @patch("pm_core.tmux.split_pane_background")
+    def test_small_prompt_is_still_a_shell_argument(self, mock_split, tmp_path):
+        launch_bridge_in_tmux("small prompt", str(tmp_path), "sess")
+        cmd = mock_split.call_args[0][2]
+        assert "--prompt-file" not in cmd
+        assert "small prompt" in cmd
 
 
 # ---------------------------------------------------------------------------

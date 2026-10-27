@@ -14,6 +14,14 @@ import pytest
 from pm_core.review_loop import ReviewLoopState, ReviewIteration
 
 
+@pytest.fixture(autouse=True)
+def _no_real_qa_adoption():
+    """consume_breadcrumb scans ~/.pm/workdirs/qa for resumable QA runs;
+    keep tests away from the real home directory."""
+    with patch("pm_core.tui.auto_start._adopt_live_qa"):
+        yield
+
+
 def _run_async(coro):
     """Run an async coroutine in a fresh event loop (safe across tests)."""
     loop = asyncio.new_event_loop()
@@ -38,7 +46,8 @@ def _make_app(
     """Create a minimal mock app with auto-start and review loop fields."""
     app = MagicMock()
     app._auto_start = auto_start
-    app._auto_start_target = target
+    app._auto_start_targets = {target: {}} if target else {}
+    app._auto_start_all = False
     app._auto_start_run_id = run_id
     app._review_loops = review_loops or {}
     app._root = root or Path("/tmp/pm-test")
@@ -49,15 +58,13 @@ def _make_app(
     return app
 
 
-def _make_running_state(pr_id: str = "pr-001", iteration: int = 3,
-                        stop_on_suggestions: bool = False) -> ReviewLoopState:
+def _make_running_state(pr_id: str = "pr-001", iteration: int = 3) -> ReviewLoopState:
     """Create a ReviewLoopState that looks like a running loop."""
     state = ReviewLoopState(
         pr_id=pr_id,
         running=True,
         iteration=iteration,
         latest_verdict="NEEDS_WORK",
-        stop_on_suggestions=stop_on_suggestions,
         loop_id="ab12",
         _transcript_dir="/tmp/pm-test/transcripts/autostart-pr-001-abcd1234",
     )
@@ -104,8 +111,8 @@ class TestSaveBreadcrumbReviewLoops:
         loop_data = loops["pr-001"]
         assert loop_data["iteration"] == 3
         assert loop_data["latest_verdict"] == "NEEDS_WORK"
-        assert loop_data["stop_on_suggestions"] is False
         assert loop_data["loop_id"] == "ab12"
+        assert "stop_on_suggestions" not in loop_data
         assert len(loop_data["history"]) == 3
         assert loop_data["history"][0]["verdict"] == "NEEDS_WORK"
         assert loop_data["history"][0]["iteration"] == 1
@@ -231,7 +238,6 @@ class TestConsumeBreadcrumbReviewLoops:
                 "pr-001": {
                     "iteration": 3,
                     "latest_verdict": "NEEDS_WORK",
-                    "stop_on_suggestions": False,
                     "loop_id": "ab12",
                     "input_required": False,
                     "_transcript_dir": "/tmp/transcripts",
@@ -261,14 +267,13 @@ class TestConsumeBreadcrumbReviewLoops:
 
         # Check auto-start was restored
         assert app._auto_start is True
-        assert app._auto_start_target == "pr-001"
+        assert list(app._auto_start_targets) == ["pr-001"]
 
         # Check review loop state was restored
         assert "pr-001" in app._review_loops
         rstate = app._review_loops["pr-001"]
         assert rstate.iteration == 3
         assert rstate.latest_verdict == "NEEDS_WORK"
-        assert rstate.stop_on_suggestions is False
         assert rstate.loop_id == "ab12"
         assert len(rstate.history) == 3
 
@@ -276,6 +281,33 @@ class TestConsumeBreadcrumbReviewLoops:
         mock_start.assert_called_once()
         _, kwargs = mock_start.call_args
         assert kwargs.get("resume_state") is rstate
+
+    def test_resume_summary_is_last_log_message(self, tmp_path):
+        """The auto-start summary must not be overwritten by the per-loop
+        resume messages (one is sticky) before it is ever painted."""
+        breadcrumb_data = {
+            "auto_start": True,
+            "targets": [{"pr_id": "pr-001"}, {"pr_id": "pr-002"}],
+            "run_id": "autostart-pr-001-abcd1234",
+            "review_loops": {"pr-002": {"iteration": 1, "history": []}},
+        }
+        (tmp_path / "autostart-resume.json").write_text(json.dumps(breadcrumb_data))
+        app = _make_app(auto_start=False, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start", new_callable=AsyncMock), \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tui.review_loop_ui._start_loop"):
+            mock_store.get_pr.return_value = {"id": "pr-002", "status": "in_review"}
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+
+        msgs = [c.args[0] for c in app.log_message.call_args_list]
+        assert "Review loop resumed for pr-002 at iteration 1" in msgs
+        assert msgs[-1] == "Auto-start: resumed after merge restart → pr-001, pr-002"
+        assert app.log_message.call_args.kwargs.get("sticky", 0) > 0
 
     def test_skips_loop_restart_if_pr_not_in_review(self, tmp_path):
         breadcrumb_data = {
@@ -285,7 +317,6 @@ class TestConsumeBreadcrumbReviewLoops:
                 "pr-001": {
                     "iteration": 2,
                     "latest_verdict": "NEEDS_WORK",
-                    "stop_on_suggestions": True,
                     "loop_id": "xy99",
                     "history": [],
                 }
@@ -335,7 +366,6 @@ class TestConsumeBreadcrumbReviewLoops:
                 "pr-001": {
                     "iteration": 2,
                     "latest_verdict": "NEEDS_WORK",
-                    "stop_on_suggestions": True,
                     "loop_id": "mn56",
                     "input_required": False,
                     "_transcript_dir": "/tmp/transcripts",
@@ -376,6 +406,9 @@ class TestConsumeBreadcrumbReviewLoops:
         mock_start.assert_called_once()
         _, kwargs = mock_start.call_args
         assert kwargs.get("resume_state") is rstate
+        # Resumed in its saved transcript dir, not a fresh manual-<hex> one
+        # (an in-flight iteration's transcript lives there).
+        assert kwargs.get("transcript_dir") == "/tmp/transcripts"
 
     def test_breadcrumb_deleted_after_consumption(self, tmp_path):
         breadcrumb_data = {"target": "pr-001", "run_id": "run-123"}
@@ -415,7 +448,6 @@ class TestStartLoopResumeState:
             pr_id="pr-001",
             iteration=3,
             latest_verdict="NEEDS_WORK",
-            stop_on_suggestions=False,
             loop_id="ab12",
         )
         state.history = [
@@ -430,7 +462,7 @@ class TestStartLoopResumeState:
              patch("pm_core.tui.review_loop_ui.start_review_loop_background") as mock_bg, \
              patch("pm_core.tui.review_loop_ui._ensure_poll_timer"):
             mock_store.find_project_root.return_value = Path("/tmp/pm")
-            _start_loop(app, "pr-001", pr, stop_on_suggestions=False,
+            _start_loop(app, "pr-001", pr, transcript_dir="/tmp",
                         resume_state=state)
 
         # State should be in app._review_loops
@@ -459,12 +491,11 @@ class TestStartLoopResumeState:
              patch("pm_core.tui.review_loop_ui.start_review_loop_background"), \
              patch("pm_core.tui.review_loop_ui._ensure_poll_timer"):
             mock_store.find_project_root.return_value = Path("/tmp/pm")
-            _start_loop(app, "pr-002", pr, stop_on_suggestions=True)
+            _start_loop(app, "pr-002", pr, transcript_dir="/tmp")
 
         state = app._review_loops["pr-002"]
         assert state.pr_id == "pr-002"
         assert state.iteration == 0
-        assert state.stop_on_suggestions is True
         assert state.history == []
 
 
@@ -481,7 +512,6 @@ class TestBreadcrumbRoundTrip:
 
         # Build app with running review loop
         state = _make_running_state("pr-001", iteration=5)
-        state.stop_on_suggestions = True
         state.loop_id = "ff99"
         save_app = _make_app(
             review_loops={"pr-001": state},
@@ -513,7 +543,6 @@ class TestBreadcrumbRoundTrip:
         assert "pr-001" in restore_app._review_loops
         rstate = restore_app._review_loops["pr-001"]
         assert rstate.iteration == 5
-        assert rstate.stop_on_suggestions is True
         assert rstate.loop_id == "ff99"
         assert rstate.latest_verdict == "NEEDS_WORK"
         assert len(rstate.history) == 3

@@ -1,8 +1,9 @@
 """QA instructions pane widget for the TUI.
 
-Replaces the old tests_pane.py.  Shows two sections with visual dividers:
+Replaces the old tests_pane.py.  Shows three sections with visual dividers:
 1. QA Instructions — from pm/qa/instructions/
 2. Regression Tests — from pm/qa/regression/
+3. Artifact Recipes — from pm/qa/artifacts/
 """
 
 from textual.message import Message
@@ -38,11 +39,13 @@ class QAPane(Widget):
     def update_items(self, all_items: dict) -> None:
         """Update the items data and refresh.
 
-        *all_items* should be {"instructions": [...], "regression": [...]}.
+        *all_items* should be {"instructions": [...], "regression": [...],
+        "artifacts": [...]}.  Missing keys are treated as empty.
         """
         flat: list[dict] = []
         for category, label in [("instructions", "Instructions"),
-                                ("regression", "Regression Tests")]:
+                                ("regression", "Regression Tests"),
+                                ("artifacts", "Artifact Recipes")]:
             items = all_items.get(category, [])
             # Section header marker
             flat.append({"_section": label, "_count": len(items)})

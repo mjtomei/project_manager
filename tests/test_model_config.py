@@ -61,6 +61,16 @@ class TestResolveModel:
     def test_unknown_session_type(self):
         assert resolve_model("unknown-type") is None
 
+    def test_signoff_falls_back_to_review(self):
+        # signoff inherits review's model when only review is configured.
+        data = {"project": {"model_config": {"session_models": {"review": "sonnet"}}}}
+        assert resolve_model("signoff", project_data=data) == "sonnet"
+
+    def test_signoff_explicit_overrides_fallback(self):
+        data = {"project": {"model_config": {
+            "session_models": {"review": "sonnet", "signoff": "opus"}}}}
+        assert resolve_model("signoff", project_data=data) == "opus"
+
 
 class TestEffortResolution:
     def test_defaults_are_none(self):
@@ -262,3 +272,66 @@ class TestQaSubtypeFallback:
         assert result.effort == "high"
         result = resolve_model_and_provider("qa_scenario", project_data=data)
         assert result.effort == "low"
+
+    def test_qa_concretize_falls_back_to_qa(self):
+        data = {"project": {"model_config": {"session_models": {"qa": "sonnet"}}}}
+        assert resolve_model("qa_concretize", project_data=data) == "sonnet"
+
+    def test_qa_finalize_falls_back_to_qa(self):
+        data = {"project": {"model_config": {"session_models": {"qa": "haiku"}}}}
+        assert resolve_model("qa_finalize", project_data=data) == "haiku"
+
+    def test_qa_concretize_and_finalize_independently_targetable(self):
+        data = {"project": {"model_config": {"session_models": {
+            "qa": "haiku",
+            "qa_concretize": "opus",
+            "qa_finalize": "sonnet",
+        }}}}
+        assert resolve_model("qa_concretize", project_data=data) == "opus"
+        assert resolve_model("qa_finalize", project_data=data) == "sonnet"
+        assert resolve_model("qa_scenario", project_data=data) == "haiku"
+
+
+class TestSessionTypes:
+    def test_new_qa_substeps_registered(self):
+        assert "qa_concretize" in SESSION_TYPES
+        assert "qa_finalize" in SESSION_TYPES
+
+
+class TestValidateModelConfig:
+    def test_valid_config_returns_no_errors(self):
+        from pm_core.model_config import validate_model_config
+        data = {"project": {"model_config": {
+            "session_models": {"review": "opus", "qa_finalize": "sonnet"},
+            "session_effort": {"review": "high"},
+        }}}
+        assert validate_model_config(data) == []
+
+    def test_none_and_empty_are_valid(self):
+        from pm_core.model_config import validate_model_config
+        assert validate_model_config(None) == []
+        assert validate_model_config({}) == []
+
+    def test_unknown_session_type_in_models_flagged(self):
+        from pm_core.model_config import validate_model_config
+        data = {"project": {"model_config": {
+            "session_models": {"qa_scenrio": "opus"},  # typo
+        }}}
+        errors = validate_model_config(data)
+        assert errors and "qa_scenrio" in errors[0]
+
+    def test_unknown_session_type_in_effort_flagged(self):
+        from pm_core.model_config import validate_model_config
+        data = {"project": {"model_config": {
+            "session_effort": {"bogus": "high"},
+        }}}
+        errors = validate_model_config(data)
+        assert any("bogus" in e for e in errors)
+
+    def test_invalid_effort_level_flagged(self):
+        from pm_core.model_config import validate_model_config
+        data = {"project": {"model_config": {
+            "session_effort": {"review": "extreme"},
+        }}}
+        errors = validate_model_config(data)
+        assert any("extreme" in e for e in errors)

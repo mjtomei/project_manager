@@ -8,6 +8,7 @@ import pytest
 
 from pm_core.container import (
     ContainerConfig,
+    ContainerError,
     qa_container_name,
     load_container_config,
     is_container_mode_enabled,
@@ -24,14 +25,18 @@ from pm_core.container import (
     wrap_claude_cmd,
     container_is_running,
     find_containers_by_keywords,
-    _docker_available,
+    _runtime_available,
     _build_git_setup_script,
     _get_dockerfile_path,
+    _get_runtime,
+    _detect_default_runtime,
+    _nested_podman_run_args,
     _make_container_name,
     _resolve_claude_binary,
     DEFAULT_IMAGE,
     DEFAULT_MEMORY_LIMIT,
     DEFAULT_CPU_LIMIT,
+    DEFAULT_RUNTIME,
     CONTAINER_PREFIX,
     _CONTAINER_WORKDIR,
     _CONTAINER_SCRATCH,
@@ -50,7 +55,8 @@ class TestDefaultImage:
 
 class TestBuildImage:
     @patch("subprocess.run")
-    def test_builds_with_tag(self, mock_run):
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_builds_with_tag(self, mock_runtime, mock_run):
         mock_run.return_value = MagicMock(returncode=0)
         build_image(tag="pm-dev:test", quiet=True)
         args = mock_run.call_args[0][0]
@@ -65,22 +71,91 @@ class TestBuildImage:
         with pytest.raises(RuntimeError, match="Image build failed"):
             build_image(quiet=True)
 
+    @patch("subprocess.run")
+    @patch("pm_core.container._nested_podman_enabled", return_value=True)
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    def test_nested_podman_build_shares_uts_namespace(
+        self, mock_runtime, mock_nested, mock_run
+    ):
+        # Under nested rootless podman the default isolation makes RUN
+        # steps create a UTS namespace and call sethostname(2), which dies
+        # with EPERM.  --uts=host shares the host UTS namespace, skipping
+        # the syscall (mirrors _nested_podman_run_args' run accommodation).
+        mock_run.return_value = MagicMock(returncode=0)
+        build_image(tag="pm-dev:test", quiet=True)
+        args = mock_run.call_args[0][0]
+        assert "--uts" in args
+        assert args[args.index("--uts") + 1] == "host"
+
+    @patch("subprocess.run")
+    @patch("pm_core.container._nested_podman_enabled", return_value=False)
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    def test_non_nested_build_omits_uts_host(
+        self, mock_runtime, mock_nested, mock_run
+    ):
+        mock_run.return_value = MagicMock(returncode=0)
+        build_image(tag="pm-dev:test", quiet=True)
+        args = mock_run.call_args[0][0]
+        assert "--uts" not in args
+
+    @patch("subprocess.run")
+    @patch("pm_core.container._nested_podman_enabled", return_value=True)
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_docker_build_omits_uts_host(
+        self, mock_runtime, mock_nested, mock_run
+    ):
+        # --uts=host is applied only for podman; docker's nested story differs.
+        mock_run.return_value = MagicMock(returncode=0)
+        build_image(tag="pm-dev:test", quiet=True)
+        args = mock_run.call_args[0][0]
+        assert "--uts" not in args
+
 
 class TestImageExists:
+    def setup_method(self):
+        # image_exists caches results across calls; clear between tests.
+        from pm_core.container import _invalidate_image_exists_cache
+        _invalidate_image_exists_cache()
+
     @patch("subprocess.run")
-    def test_exists(self, mock_run):
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_exists(self, mock_runtime, mock_run):
         mock_run.return_value = MagicMock(returncode=0)
         assert image_exists("pm-dev:latest") is True
 
     @patch("subprocess.run")
-    def test_not_exists(self, mock_run):
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_not_exists(self, mock_runtime, mock_run):
         mock_run.return_value = MagicMock(returncode=1)
         assert image_exists("pm-dev:latest") is False
 
     @patch("subprocess.run")
-    def test_docker_not_installed(self, mock_run):
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_runtime_not_installed(self, mock_runtime, mock_run):
         mock_run.side_effect = FileNotFoundError
         assert image_exists("pm-dev:latest") is False
+
+    @patch("subprocess.run")
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_result_is_cached_across_calls(self, mock_runtime, mock_run):
+        """Concurrent callers coalesce onto one ``podman image inspect``."""
+        mock_run.return_value = MagicMock(returncode=0)
+        for _ in range(5):
+            assert image_exists("pm-dev:latest") is True
+        assert mock_run.call_count == 1
+
+    @patch("subprocess.run")
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_cache_invalidated_on_build(self, mock_runtime, mock_run):
+        from pm_core.container import _invalidate_image_exists_cache
+        # Cache a False result
+        mock_run.return_value = MagicMock(returncode=1)
+        assert image_exists("pm-dev:latest") is False
+        # Simulate a successful build clearing the cache
+        _invalidate_image_exists_cache("pm-dev:latest")
+        mock_run.return_value = MagicMock(returncode=0)
+        assert image_exists("pm-dev:latest") is True
+        assert mock_run.call_count == 2
 
 
 class TestContainerConfig:
@@ -145,20 +220,25 @@ class TestLoadContainerConfig:
             "container-image": "custom:v2",
             "container-memory-limit": "16g",
             "container-cpu-limit": "8.0",
+            "container-runtime": "podman",
         }.get(name, default)
 
         cfg = load_container_config()
         assert cfg.image == "custom:v2"
         assert cfg.memory_limit == "16g"
         assert cfg.cpu_limit == "8.0"
+        assert cfg.runtime == "podman"
 
+    @patch("pm_core.container._detect_default_runtime", return_value="podman")
     @patch("pm_core.paths.get_global_setting_value")
-    def test_falls_back_to_defaults(self, mock_get):
+    def test_falls_back_to_defaults(self, mock_get, mock_detect):
         mock_get.side_effect = lambda name, default="": default
         cfg = load_container_config()
         assert cfg.image == DEFAULT_IMAGE
         assert cfg.memory_limit == DEFAULT_MEMORY_LIMIT
         assert cfg.cpu_limit == DEFAULT_CPU_LIMIT
+        # No explicit container-runtime → auto-detected (prefers podman).
+        assert cfg.runtime == "podman"
 
 
 class TestIsContainerModeEnabled:
@@ -174,28 +254,251 @@ class TestIsContainerModeEnabled:
         assert is_container_mode_enabled() is False
 
 
-class TestDockerAvailable:
+class TestRuntimeAvailable:
     @patch("subprocess.run")
-    def test_available(self, mock_run):
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_available(self, mock_runtime, mock_run):
         mock_run.return_value = MagicMock(returncode=0)
-        assert _docker_available() is True
+        assert _runtime_available() is True
 
     @patch("subprocess.run")
-    def test_not_available(self, mock_run):
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_not_available(self, mock_runtime, mock_run):
         mock_run.side_effect = FileNotFoundError
-        assert _docker_available() is False
+        assert _runtime_available() is False
 
     @patch("subprocess.run")
-    def test_daemon_not_running(self, mock_run):
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_daemon_not_running(self, mock_runtime, mock_run):
         mock_run.return_value = MagicMock(returncode=1)
-        assert _docker_available() is False
+        assert _runtime_available() is False
+
+    @patch("subprocess.run")
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    def test_podman_runtime(self, mock_runtime, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+        assert _runtime_available() is True
+        mock_run.assert_called_once()
+        assert mock_run.call_args[0][0][0] == "podman"
+
+
+class TestDetectDefaultRuntime:
+    @patch("shutil.which", side_effect=lambda cmd: "/usr/bin/podman" if cmd == "podman" else None)
+    def test_prefers_podman(self, mock_which):
+        assert _detect_default_runtime() == "podman"
+
+    @patch("shutil.which", side_effect=lambda cmd: "/usr/bin/docker" if cmd == "docker" else None)
+    def test_falls_back_to_docker(self, mock_which):
+        assert _detect_default_runtime() == "docker"
+
+    @patch("shutil.which", side_effect=lambda cmd: f"/usr/bin/{cmd}")
+    def test_podman_over_docker_when_both(self, mock_which):
+        assert _detect_default_runtime() == "podman"
+
+    @patch("shutil.which", return_value=None)
+    def test_returns_default_when_neither(self, mock_which):
+        assert _detect_default_runtime() == DEFAULT_RUNTIME
+
+
+class TestGetRuntime:
+    @patch("pm_core.paths.get_global_setting_value", return_value="docker")
+    def test_explicit_setting_wins(self, mock_get):
+        # Explicit setting overrides auto-detection (which would pick podman).
+        assert _get_runtime() == "docker"
+
+    @patch("pm_core.paths.get_global_setting_value", return_value="")
+    @patch("pm_core.container._detect_default_runtime", return_value="podman")
+    def test_auto_detects_when_unset(self, mock_detect, mock_get):
+        assert _get_runtime() == "podman"
+
+
+class TestNestedPodmanRunArgs:
+    @patch("pm_core.container._selinux_enabled", return_value=False)
+    @patch("pm_core.container._apparmor_enforcing", return_value=False)
+    def test_includes_uts_host(self, mock_apparmor, mock_selinux):
+        # Sharing the host UTS namespace skips podman's sethostname() call,
+        # which a restrictive outer sandbox denies — without it every nested
+        # podman run dies before any workload starts.
+        args = _nested_podman_run_args()
+        assert "--uts=host" in args
+
+    @patch("pm_core.container._selinux_enabled", return_value=False)
+    @patch("pm_core.container._apparmor_enforcing", return_value=False)
+    def test_includes_fuse_and_unmask(self, mock_apparmor, mock_selinux):
+        args = _nested_podman_run_args()
+        assert "/dev/fuse" in args
+        assert "unmask=ALL" in args
 
 
 @patch("pm_core.container.container_is_running", return_value=False)
-class TestCreateContainer:
+class TestCreateContainerPodman:
+    """Podman-specific create_container tests."""
+
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_creates_with_workdir(self, mock_docker, mock_rm, _mock_running):
+    @patch("pm_core.container._run_runtime")
+    def test_userns_keep_id_added_for_podman(self, mock_runtime_cmd, mock_rm,
+                                              mock_exists, mock_get_runtime,
+                                              _mock_running):
+        """Podman runtime adds --userns=keep-id to run commands."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        run_call = mock_runtime_cmd.call_args_list[0]
+        args = run_call[0]
+        assert "--userns=keep-id" in args
+
+    @patch("pm_core.container._nested_podman_enabled", return_value=True)
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_nested_podman_omits_cgroup_limits(self, mock_runtime_cmd, mock_rm,
+                                               mock_exists, mock_get_runtime,
+                                               mock_nested, _mock_running):
+        """Nested podman drops --memory/--cpus (no delegated cgroup
+        controllers → ``podman run`` would die finding the cgroup mount)."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        args = mock_runtime_cmd.call_args_list[0][0]
+        assert "--memory" not in args
+        assert "--cpus" not in args
+        # The relaxed-sandbox accommodations still apply.
+        assert "--uts=host" in args
+
+    @patch("pm_core.container._nested_podman_enabled", return_value=False)
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_non_nested_podman_keeps_cgroup_limits(self, mock_runtime_cmd,
+                                                   mock_rm, mock_exists,
+                                                   mock_get_runtime,
+                                                   mock_nested, _mock_running):
+        """Without nested podman, resource caps are passed as usual."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        args = mock_runtime_cmd.call_args_list[0][0]
+        assert "--memory" in args
+        assert "--cpus" in args
+
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_podman_skips_useradd(self, mock_runtime_cmd, mock_rm,
+                                   mock_exists, mock_get_runtime,
+                                   _mock_running):
+        """Podman setup script does NOT run groupadd/useradd."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        run_call = mock_runtime_cmd.call_args_list[0]
+        setup_script = run_call[0][-1]  # last arg is the bash -c script
+        assert "groupadd" not in setup_script
+        assert "useradd" not in setup_script
+        assert "mkdir -p /home/pm" in setup_script
+
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_podman_no_su_in_git_config(self, mock_runtime_cmd, mock_rm,
+                                         mock_exists, mock_get_runtime,
+                                         _mock_running):
+        """Podman setup script does NOT use su for git config."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        run_call = mock_runtime_cmd.call_args_list[0]
+        setup_script = run_call[0][-1]
+        assert "su -" not in setup_script
+        assert "su -c" not in setup_script
+
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_userns_keep_id_not_added_for_docker(self, mock_runtime_cmd, mock_rm,
+                                                  mock_exists, mock_get_runtime,
+                                                  _mock_running):
+        """Docker runtime does NOT add --userns=keep-id."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        run_call = mock_runtime_cmd.call_args_list[0]
+        args = run_call[0]
+        assert "--userns=keep-id" not in args
+
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_pm_host_home_exported(self, mock_runtime_cmd, mock_rm,
+                                    mock_exists, mock_get_runtime,
+                                    _mock_running):
+        """create_container exports PM_HOST_HOME=<host home> so hook_install
+        inside the container writes the host path into the bind-mounted
+        settings.json instead of /home/pm/."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        run_call = mock_runtime_cmd.call_args_list[0]
+        args = list(run_call[0])
+        host_home = str(Path.home())
+        assert f"PM_HOST_HOME={host_home}" in args
+
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_docker_uses_useradd(self, mock_runtime_cmd, mock_rm,
+                                  mock_exists, mock_get_runtime,
+                                  _mock_running):
+        """Docker setup script runs groupadd/useradd."""
+        mock_runtime_cmd.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch.object(Path, "is_dir", return_value=False):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        run_call = mock_runtime_cmd.call_args_list[0]
+        setup_script = run_call[0][-1]
+        assert "groupadd" in setup_script
+        assert "useradd" in setup_script
+
+
+@patch("pm_core.container._get_runtime", return_value="docker")
+@patch("pm_core.container.container_is_running", return_value=False)
+class TestCreateContainer:
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_creates_with_workdir(self, mock_docker, mock_rm, mock_exists, _mock_running, _mock_runtime):
         mock_docker.return_value = MagicMock(stdout="abc123\n", returncode=0)
 
         config = ContainerConfig(image="test:v1", memory_limit="2g", cpu_limit="1.0")
@@ -222,8 +525,8 @@ class TestCreateContainer:
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_extra_ro_mounts(self, mock_docker, mock_rm, mock_exists, _mock_running):
+    @patch("pm_core.container._run_runtime")
+    def test_extra_ro_mounts(self, mock_docker, mock_rm, mock_exists, _mock_running, _mock_runtime):
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
 
@@ -239,8 +542,8 @@ class TestCreateContainer:
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_extra_rw_mounts(self, mock_docker, mock_rm, mock_exists, _mock_running):
+    @patch("pm_core.container._run_runtime")
+    def test_extra_rw_mounts(self, mock_docker, mock_rm, mock_exists, _mock_running, _mock_runtime):
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
 
@@ -258,8 +561,8 @@ class TestCreateContainer:
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_passes_env_vars(self, mock_docker, mock_rm, mock_exists, _mock_running):
+    @patch("pm_core.container._run_runtime")
+    def test_passes_env_vars(self, mock_docker, mock_rm, mock_exists, _mock_running, _mock_runtime):
         mock_docker.return_value = MagicMock(stdout="id123\n", returncode=0)
 
         config = ContainerConfig(env={"CUSTOM_VAR": "custom_val"})
@@ -277,8 +580,8 @@ class TestCreateContainer:
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_mounts_claude_config_rw(self, mock_docker, mock_rm, mock_bin, mock_exists, _mock_running):
+    @patch("pm_core.container._run_runtime")
+    def test_mounts_claude_config_rw(self, mock_docker, mock_rm, mock_bin, mock_exists, _mock_running, _mock_runtime):
         """~/.claude is mounted read-write so Claude can write session state."""
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
@@ -296,8 +599,34 @@ class TestCreateContainer:
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_copies_claude_json(self, mock_docker, mock_rm, mock_bin, mock_exists, _mock_running):
+    @patch("pm_core.container._run_runtime")
+    def test_mounts_pm_hooks_dir_and_receiver(self, mock_docker, mock_rm, mock_bin, mock_exists, _mock_running, _mock_runtime):
+        """Host ~/.pm/hooks and ~/.pm/hook_receiver.py are bind-mounted so
+        Claude Code hooks running inside the container surface events to
+        the host (R-Container-Mounts)."""
+        mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
+        config = ContainerConfig()
+
+        with patch("pm_core.container.Path.home", return_value=Path("/home/user")), \
+             patch.object(Path, "mkdir", return_value=None), \
+             patch.object(Path, "is_dir", return_value=True), \
+             patch.object(Path, "is_file", return_value=True), \
+             patch.object(Path, "exists", return_value=True):
+            create_container(name="test", config=config, workdir=Path("/w"))
+
+        args_str = " ".join(mock_docker.call_args_list[0][0])
+        # Hooks dir bind-mount: host ~/.pm/hooks → $CONTAINER_HOME/.pm/hooks
+        assert f"/home/user/.pm/hooks:{_CONTAINER_HOME}/.pm/hooks" in args_str
+        # Standalone receiver bind-mounted at the same absolute host path,
+        # read-only, so the hook command (which embeds that absolute path)
+        # works identically on the host and inside the container.
+        assert "/home/user/.pm/hook_receiver.py:/home/user/.pm/hook_receiver.py:ro" in args_str
+
+    @patch("pm_core.container.image_exists", return_value=True)
+    @patch("pm_core.container._resolve_claude_binary", return_value=None)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_copies_claude_json(self, mock_docker, mock_rm, mock_bin, mock_exists, _mock_running, _mock_runtime):
         """.claude.json is copied (not bind-mounted) into the container."""
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
@@ -318,8 +647,8 @@ class TestCreateContainer:
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary")
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_mounts_claude_binary(self, mock_docker, mock_rm, mock_resolve, mock_exists, _mock_running):
+    @patch("pm_core.container._run_runtime")
+    def test_mounts_claude_binary(self, mock_docker, mock_rm, mock_resolve, mock_exists, _mock_running, _mock_runtime):
         """Host claude binary is bind-mounted at /usr/local/bin/claude."""
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         # Simulate a resolved binary that exists
@@ -337,8 +666,8 @@ class TestCreateContainer:
     @patch("pm_core.container.build_image")
     @patch("pm_core.container.image_exists", return_value=False)
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_auto_builds_default_image(self, mock_docker, mock_rm, mock_exists, mock_build, _mock_running):
+    @patch("pm_core.container._run_runtime")
+    def test_auto_builds_default_image(self, mock_docker, mock_rm, mock_exists, mock_build, _mock_running, _mock_runtime):
         """Default image is auto-built if it doesn't exist locally."""
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()  # uses DEFAULT_IMAGE
@@ -351,8 +680,8 @@ class TestCreateContainer:
     @patch("pm_core.container.build_image")
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_skips_build_if_image_exists(self, mock_docker, mock_rm, mock_exists, mock_build, _mock_running):
+    @patch("pm_core.container._run_runtime")
+    def test_skips_build_if_image_exists(self, mock_docker, mock_rm, mock_exists, mock_build, _mock_running, _mock_runtime):
         """Skips auto-build when the default image already exists."""
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
@@ -364,23 +693,34 @@ class TestCreateContainer:
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_no_auto_build_for_custom_image(self, mock_docker, mock_rm, mock_exists, _mock_running):
-        """Custom images are not auto-built."""
+    @patch("pm_core.container._run_runtime")
+    def test_no_auto_build_for_custom_image(self, mock_docker, mock_rm, mock_exists, _mock_running, _mock_runtime):
+        """Custom images are not auto-built, but existence is checked."""
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig(image="custom:v1")
 
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        # image_exists should not be called for non-default images
-        mock_exists.assert_not_called()
+        # image_exists is called to verify the custom image exists,
+        # but build_image should NOT be called
+        mock_exists.assert_called_once_with("custom:v1")
+
+    @patch("pm_core.container.image_exists", return_value=False)
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_missing_custom_image_raises(self, mock_docker, mock_rm, mock_exists, _mock_running, _mock_runtime):
+        """Missing custom image raises a clear error."""
+        config = ContainerConfig(image="custom:v1")
+
+        with pytest.raises(ContainerError, match="not found in docker"):
+            create_container(name="test", config=config, workdir=Path("/w"))
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
-    def test_no_binary_still_creates_container(self, mock_docker, mock_rm, mock_resolve, mock_exists, _mock_running):
+    @patch("pm_core.container._run_runtime")
+    def test_no_binary_still_creates_container(self, mock_docker, mock_rm, mock_resolve, mock_exists, _mock_running, _mock_runtime):
         """Container creation succeeds even if claude binary is not found."""
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
@@ -394,10 +734,11 @@ class TestCreateContainer:
         assert "/usr/local/bin/claude" not in args_str
 
 
+@patch("pm_core.container._get_runtime", return_value="docker")
 class TestContainerReuse:
     @patch("pm_core.container.container_is_running", return_value=True)
-    @patch("pm_core.container._run_docker")
-    def test_reuses_running_container(self, mock_docker, mock_running):
+    @patch("pm_core.container._run_runtime")
+    def test_reuses_running_container(self, mock_docker, mock_running, _mock_runtime):
         """An existing running container is reused instead of recreated."""
         mock_docker.return_value = MagicMock(
             returncode=0, stdout="abc123deadbeef\n")
@@ -406,7 +747,7 @@ class TestContainerReuse:
         cid = create_container(name="pm-test", config=config,
                                workdir=Path("/w"))
         assert cid == "abc123deadbeef"
-        # Should only call docker inspect, not docker run
+        # Should only call inspect, not run
         calls = [c[0][0] for c in mock_docker.call_args_list]
         assert "inspect" in calls
         assert "run" not in calls
@@ -414,9 +755,9 @@ class TestContainerReuse:
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.container_is_running", return_value=False)
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_creates_new_when_not_running(self, mock_docker, mock_rm,
-                                          mock_running, mock_exists):
+                                          mock_running, mock_exists, _mock_runtime):
         """A new container is created when none exists."""
         mock_docker.return_value = MagicMock(stdout="newid\n", returncode=0)
         config = ContainerConfig()
@@ -512,7 +853,8 @@ class TestCreateQAContainer:
 
 
 class TestBuildExecCmd:
-    def test_basic(self):
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_basic(self, mock_runtime):
         cmd = build_exec_cmd("my-container", "claude 'hello world'")
         assert "docker exec -it" in cmd
         assert f"-u {_CONTAINER_USER}" in cmd
@@ -520,38 +862,66 @@ class TestBuildExecCmd:
         assert "claude" in cmd
         assert "hello world" in cmd
 
-    def test_includes_cleanup_by_default(self):
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_includes_cleanup_by_default(self, mock_runtime):
         cmd = build_exec_cmd("my-container", "claude 'hi'")
         assert "docker rm -f" in cmd
-        # Cleanup is wrapped in an EXIT trap inside bash -c
+        # Cleanup is wrapped in a bash trap for robustness against kill-pane
         assert cmd.startswith("bash -c ")
-        assert "trap" in cmd
+        assert "trap " in cmd
+        assert "EXIT" in cmd
 
-    def test_cleanup_removes_proxy_socket(self):
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_cleanup_removes_proxy_socket(self, mock_runtime):
         cmd = build_exec_cmd("my-container", "claude 'hi'",
                              proxy_socket_path="/tmp/pm-push-proxy-x/push.sock")
         assert "rm -f" in cmd
         assert "/tmp/pm-push-proxy-x/push.sock" in cmd
         assert "rmdir" in cmd
         assert "/tmp/pm-push-proxy-x" in cmd
-        # Socket removal should come before docker rm
+        # Socket removal should come before container rm
         rm_pos = cmd.index("rm -f")
-        docker_pos = cmd.index("docker rm")
-        assert rm_pos < docker_pos
+        runtime_rm_pos = cmd.index("docker rm")
+        assert rm_pos < runtime_rm_pos
 
-    def test_no_cleanup_when_disabled(self):
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_no_cleanup_when_disabled(self, mock_runtime):
         cmd = build_exec_cmd("my-container", "claude 'hi'", cleanup=False)
         assert "docker rm -f" not in cmd
 
-    def test_shell_safety(self):
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_shell_safety(self, mock_runtime):
         cmd = build_exec_cmd("name-with-special", "claude 'prompt with $vars'")
-        # The outer command is bash -c '...' wrapping the exec with a trap.
-        # Verify the docker exec portion is present with correct structure.
-        assert "docker exec -it" in cmd
-        assert f"-u {_CONTAINER_USER}" in cmd
-        assert "name-with-special" in cmd
-        # Ensure the prompt content is preserved (not mangled by quoting)
-        assert "prompt with $vars" in cmd
+        # The command is wrapped in bash -c with a trap, so parse the outer layer
+        outer = shlex.split(cmd)
+        assert outer[0] == "bash"
+        assert outer[1] == "-c"
+        # The inner script should contain a proper docker exec invocation
+        inner = outer[2]
+        assert "docker exec -it" in inner
+        assert f"-u {_CONTAINER_USER}" in inner
+        assert "name-with-special" in inner
+
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    def test_uses_configured_runtime(self, mock_runtime):
+        cmd = build_exec_cmd("my-container", "claude 'hi'")
+        assert "podman exec -it" in cmd
+        assert "podman rm -f" in cmd
+        # Podman should NOT use -u pm (user is already mapped via --userns=keep-id)
+        assert f"-u {_CONTAINER_USER}" not in cmd
+
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    def test_fake_claude_bare_name_passes_through_unchanged(self, mock_runtime):
+        # fake-claude is invoked by bare name (resolved from PATH via the
+        # /opt/pm-src/bin entry in the image, just like the host), so the
+        # command needs no host->container path translation — it must reach
+        # the container verbatim.
+        cmd = build_exec_cmd(
+            "my-container",
+            "fake-claude --verdict PASS --preamble 1",
+            cleanup=False,
+        )
+        assert "fake-claude --verdict PASS --preamble 1" in cmd
 
 
 class TestWrapClaudeCmd:
@@ -605,23 +975,34 @@ class TestWrapClaudeCmd:
 
 
 class TestRemoveContainer:
-    @patch("pm_core.memory_governor.capture_and_record")
-    @patch("pm_core.container._run_docker")
-    def test_removes_container(self, mock_docker, _mock_capture):
+    @patch("pm_core.container._run_runtime")
+    def test_removes_container(self, mock_docker):
+        # After rm, remove_container polls with inspect until the container is gone.
+        # Simulate inspect returning non-zero (container gone) on first poll.
+        mock_docker.return_value.returncode = 1
         remove_container("test-container")
-        # First call is rm -f, then inspect polling
-        rm_call = mock_docker.call_args_list[0]
-        assert rm_call[0] == ("rm", "-f", "test-container")
-        assert rm_call[1] == {"check": False, "timeout": 30}
+        # First call is rm -f, second is inspect (wait loop)
+        mock_docker.assert_any_call(
+            "rm", "-f", "test-container", check=False, timeout=30)
+        mock_docker.assert_any_call(
+            "inspect", "test-container", check=False, timeout=5)
 
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.memory_governor.capture_and_record")
+    @patch("pm_core.container._run_runtime")
+    def test_removes_container_after_capture(self, mock_docker, _mock_capture):
+        mock_docker.return_value = MagicMock(returncode=1)
+        remove_container("test-container")
+        mock_docker.assert_any_call(
+            "rm", "-f", "test-container", check=False, timeout=30)
+
+    @patch("pm_core.container._run_runtime")
     @patch("pm_core.memory_governor.capture_and_record")
     def test_capture_called_with_container_name(self, mock_capture, mock_docker):
         mock_docker.return_value = MagicMock(returncode=1)
         remove_container("pm-impl")
         mock_capture.assert_called_once_with("pm-impl")
 
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     @patch("pm_core.push_proxy.stop_push_proxy")
     @patch("pm_core.memory_governor.capture_and_record")
     def test_capture_before_docker_rm(self, mock_capture, mock_proxy, mock_docker):
@@ -639,7 +1020,7 @@ class TestRemoveContainer:
                       if c == call.docker("rm", "-f", "pm-impl", check=False, timeout=30))
         assert capture_idx < rm_idx
 
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     @patch("pm_core.push_proxy.stop_push_proxy")
     @patch("pm_core.memory_governor.capture_and_record", side_effect=RuntimeError("stats failed"))
     def test_capture_failure_does_not_block_removal(self, mock_capture, mock_proxy, mock_docker):
@@ -650,7 +1031,7 @@ class TestRemoveContainer:
 
 class TestCleanupContainers:
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_cleans_up_qa_containers(self, mock_docker, mock_rm):
         mock_docker.return_value = MagicMock(
             returncode=0,
@@ -664,7 +1045,7 @@ class TestCleanupContainers:
         mock_rm.assert_any_call("pm-qa-pr1-loop1-s2")
 
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_cleans_up_session_tagged_qa_containers(self, mock_docker, mock_rm):
         """Cleanup finds session-tagged containers."""
         mock_docker.side_effect = [
@@ -675,20 +1056,20 @@ class TestCleanupContainers:
         count = cleanup_qa_containers("pr1", "loop1", session_tag="repo-abc")
         assert count == 2
 
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_no_containers(self, mock_docker):
         mock_docker.return_value = MagicMock(returncode=0, stdout="")
         count = cleanup_qa_containers("pr1", "loop1")
         assert count == 0
 
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_docker_failure(self, mock_docker):
         mock_docker.return_value = MagicMock(returncode=1, stdout="")
         count = cleanup_qa_containers("pr1", "loop1")
         assert count == 0
 
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_cleanup_session(self, mock_docker, mock_rm):
         mock_docker.return_value = MagicMock(
             returncode=0,
@@ -699,7 +1080,7 @@ class TestCleanupContainers:
         mock_rm.assert_any_call("pm-repo-abc-impl-pr1")
 
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_cleanup_all(self, mock_docker, mock_rm):
         mock_docker.return_value = MagicMock(
             returncode=0,
@@ -737,6 +1118,19 @@ class TestBuildGitSetupScript:
     def test_safe_directory_always_set(self):
         script = _build_git_setup_script()
         assert "safe.directory" in script
+
+    def test_installs_fake_claude_shim_onto_path(self):
+        # The setup always installs a fake-claude shim onto ~/.local/bin (first
+        # on PATH) so it resolves by bare name inside the container — no
+        # Dockerfile PATH change / image rebuild needed.  The shim resolves the
+        # real binary via `pm which` at run time, so it picks up the pm_core the
+        # wrapper selects (e.g. the /workspace checkout under test).
+        from pm_core.container import _CONTAINER_HOME
+        for proxy in (False, True):
+            script = _build_git_setup_script(has_push_proxy=proxy)
+            assert f"{_CONTAINER_HOME}/.local/bin/fake-claude" in script
+            assert "pm which" in script
+            assert '"$(dirname "$core")/bin/fake-claude" "$@"' in script
 
     def test_push_proxy_installs_wrapper(self):
         script = _build_git_setup_script(has_push_proxy=True)
@@ -794,6 +1188,7 @@ class TestBuildGitSetupScript:
         assert '"workdir"' not in script
 
 
+@patch("pm_core.container._get_runtime", return_value="docker")
 @patch("pm_core.container.container_is_running", return_value=False)
 class TestCreateContainerPushProxy:
     @patch("pm_core.container.image_exists", return_value=True)
@@ -801,10 +1196,10 @@ class TestCreateContainerPushProxy:
            return_value="/tmp/pm-push-proxy-test/push.sock")
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_starts_proxy_and_mounts_socket(self, mock_docker, mock_rm,
                                              mock_bin, mock_proxy,
-                                             mock_exists, _mock_running):
+                                             mock_exists, _mock_running, _mock_runtime):
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
 
@@ -822,9 +1217,9 @@ class TestCreateContainerPushProxy:
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_no_proxy_without_branch(self, mock_docker, mock_rm,
-                                      mock_bin, mock_exists, _mock_running):
+                                      mock_bin, mock_exists, _mock_running, _mock_runtime):
         """No push proxy started if no allowed_push_branch specified."""
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
@@ -840,10 +1235,10 @@ class TestCreateContainerPushProxy:
            return_value="/tmp/pm-push-proxy-test/push.sock")
     @patch("pm_core.container._resolve_claude_binary", return_value=None)
     @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_entrypoint_has_wrapper(self, mock_docker, mock_rm,
                                      mock_bin, mock_proxy,
-                                     mock_exists, _mock_running):
+                                     mock_exists, _mock_running, _mock_runtime):
         """Container entrypoint installs the git push proxy wrapper."""
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
@@ -863,7 +1258,7 @@ class TestCreateContainerPushProxy:
            return_value=ContainerConfig())
     @patch("pm_core.container.is_container_mode_enabled", return_value=True)
     def test_wrap_passes_branch(self, mock_enabled, mock_config,
-                                 mock_create, mock_exec, _mock_running):
+                                 mock_create, mock_exec, _mock_running, _mock_runtime):
         wrap_claude_cmd("claude", "/w", label="impl",
                         allowed_push_branch="pm/pr-123")
         call_kwargs = mock_create.call_args[1]
@@ -878,7 +1273,7 @@ class TestCreateContainerPushProxy:
     @patch("pm_core.container.is_container_mode_enabled", return_value=True)
     def test_wrap_passes_proxy_socket_to_exec(self, mock_enabled, mock_config,
                                                mock_create, mock_exec,
-                                               mock_sock, _mock_running):
+                                               mock_sock, _mock_running, _mock_runtime):
         wrap_claude_cmd("claude", "/w", label="impl",
                         allowed_push_branch="pm/pr-123")
         call_kwargs = mock_exec.call_args[1]
@@ -893,7 +1288,7 @@ class TestCreateContainerPushProxy:
     @patch("pm_core.container.is_container_mode_enabled", return_value=True)
     def test_shared_proxy_not_cleaned_inline(self, mock_enabled, mock_config,
                                               mock_create, mock_exec,
-                                              mock_sock, _mock_running):
+                                              mock_sock, _mock_running, _mock_runtime):
         """Shared proxies should NOT have their socket deleted by inline cleanup."""
         wrap_claude_cmd("claude", "/w", label="impl",
                         allowed_push_branch="pm/pr-123",
@@ -968,13 +1363,13 @@ class TestFindContainersByKeywords:
             stdout = self.MOCK_STDOUT
         return MagicMock(stdout=stdout, returncode=returncode)
 
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_single_type_match(self, mock_docker):
         mock_docker.return_value = self._mock_result()
         result = find_containers_by_keywords("pr-123", "impl")
         assert result == ["pm-repo-abc-impl-pr-123"]
 
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_multi_match_by_type(self, mock_docker):
         mock_docker.return_value = self._mock_result()
         result = find_containers_by_keywords("pr-123", "qa")
@@ -983,7 +1378,7 @@ class TestFindContainersByKeywords:
             "pm-repo-abc-qa-pr-123-loop1-s1",
         ]
 
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_broad_match_single_keyword(self, mock_docker):
         mock_docker.return_value = self._mock_result()
         result = find_containers_by_keywords("pr-123")
@@ -994,26 +1389,26 @@ class TestFindContainersByKeywords:
             "pm-repo-abc-qa-pr-123-loop1-s1",
         ]
 
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_no_match(self, mock_docker):
         mock_docker.return_value = self._mock_result()
         result = find_containers_by_keywords("pr-999")
         assert result == []
 
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_docker_nonzero_exit(self, mock_docker):
         mock_docker.return_value = self._mock_result(stdout="", returncode=1)
         result = find_containers_by_keywords("pr-123")
         assert result == []
 
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_docker_exception(self, mock_docker):
         import subprocess
         mock_docker.side_effect = subprocess.TimeoutExpired(cmd="docker", timeout=10)
         result = find_containers_by_keywords("pr-123")
         assert result == []
 
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_all_keywords_must_match(self, mock_docker):
         mock_docker.return_value = self._mock_result()
         result = find_containers_by_keywords("impl", "pr-456")
@@ -1022,7 +1417,7 @@ class TestFindContainersByKeywords:
         result = find_containers_by_keywords("impl", "qa")
         assert result == []
 
-    @patch("pm_core.container._run_docker")
+    @patch("pm_core.container._run_runtime")
     def test_zero_keywords_returns_all(self, mock_docker):
         mock_docker.return_value = self._mock_result()
         result = find_containers_by_keywords()

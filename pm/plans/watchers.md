@@ -6,14 +6,21 @@ Pluggable always-on watcher framework with specialized watchers for session heal
 
 The existing watcher/auto-start loop is a monolithic piece that handles too many concerns. This plan refactors it into a pluggable framework where each watcher is a focused, independent unit that shares common infrastructure (polling, TUI integration, prompt templates, tmux pane management).
 
+> **Review note (2026-05-25) — reconcile with the sign-off / plan-watcher work (`plan-regression` Phase 11) and revisit the trust-prompt approach.** While QA'd PR #225 (sign-off step), the workspace-trust prompt repeatedly blocked QA scenario panes, and the decided handling is a **context-aware agent** — a Claude session / watcher that *verifies the workspace and presses Enter itself*, NOT a programmatic always-on bypass (no global `--dangerously-skip-permissions`). That contradicts `pr-b53bfe2`'s current framing ("trust prompt — simpler as a programmatic fix"). When this plan is next picked up, review:
+> 1. **`pr-b53bfe2`** — re-scope from "programmatic fix" to context-aware-agent handling (verify the workspace path, then accept), consistent with the decision above.
+> 2. **`pr-18ac983`** (session-health watcher — detects stalled sessions) — decide whether it should own trust-prompt clearing (a stalled session sitting on a trust prompt is exactly its domain), or whether that overlaps the `plan-regression` plan auto-start watcher (`pr-ff9b728`) enough that one should be dropped/merged. (The plan auto-start watcher generalizes the old impl watchers + `AutoStartWatcher`; check for overlap before building both.)
+> 3. Whether the headless/benchmark mode (`plan-regression` `pr-6f9301e`) needs the same context-aware trust handling rather than a blanket skip.
+
+> **Cross-plan note (2026-08-31, [[plan-jurisdiction]]):** the trust-prompt handling (`pr-b53bfe2`, per the decided context-aware-agent approach above) is relocated to plan-jurisdiction Set A as a session-health recovery playbook — build it there, not here. `pr-18ac983` (#184, in review) and `pr-871dbf5` (#144, qa) are landing dependencies of that plan's always-on MVP. Review item 2's overlap question resolves via plan-regression Phase 11: the plan auto-start watcher (`pr-ff9b728`) is the auto-start engine; the session-health watcher stays separate and owns stall recovery (including trust prompts).
+
 ## Phases
 
 ### Phase 1: Foundation
 
-- **pr-7122c11**: Refine watcher INPUT_REQUIRED to distinguish project-wide vs branch-specific issues (in_progress, GH #115)
+- **pr-7122c11**: Refine watcher INPUT_REQUIRED to distinguish project-wide vs branch-specific issues (merged, GH #115)
   - Standalone fix to the current watcher. Prevents a single branch needing human input from blocking all other branches.
 
-- **pr-3032fb6**: Watcher core framework — BaseWatcher, WatcherManager, auto-start refactor
+- **pr-3032fb6**: Watcher core framework — BaseWatcher, WatcherManager, auto-start refactor (merged, GH #132)
   - The critical path item. All other watchers depend on this.
   - BaseWatcher abstract class with shared polling, prompt templates, tmux pane management, state persistence
   - WatcherManager orchestrator for scheduling, notification dedup, unified interaction layer
@@ -39,15 +46,16 @@ The existing watcher/auto-start loop is a monolithic piece that handles too many
 
 ### Phase 3: Advanced watchers (depend on phase 1/2)
 
-- **pr-871dbf5**: High-effort watcher supervisors (depends on pr-3032fb6)
+- **pr-871dbf5**: High-effort watcher supervisors (QA, depends on pr-3032fb6, GH #144)
   - Opus-level watchers that monitor lower-effort sessions and inject feedback
+  - Implementation delegates target discovery and feedback injection to Claude via prompt (not programmatic)
   - Configurable targeting, feedback logging, runtime scaling
 
 - **pr-a94befb**: Replace guide flow with project-level watcher using prompt addendums (depends on pr-3032fb6, pr-945546e)
   - Dynamic addendums based on project state gaps (no project.yaml, no plans, no deps, etc.)
   - Extends to general-purpose status checks: API health, disk space, branch divergence, etc.
 
-- **pr-f84cf3e**: LLM API health and failover watcher (depends on pr-3032fb6, pr-dad0069)
+- **pr-f84cf3e**: LLM API health and failover watcher (pending, depends on pr-3032fb6, pr-dad0069)
   - Health watcher that monitors all LLM API endpoints and routes/failovers automatically
   - Graceful degradation across providers (Opus → Sonnet → local)
   - Note: multi-provider LLM support already delivered by pr-dad0069 (merged) and pr-8463df9 (merged)
@@ -102,7 +110,7 @@ Convergence is a decision made by either human or machine. For now, humans are b
   - Scales to large trees: progressive disclosure, search, breadcrumb navigation
   - Manual testing required: both view modes, mode switching, branch targeting, keyboard navigation
 
-- **pr-3f7815c**: Spec tree branching (depends on pr-942aa21)
+- **pr-3f7815c**: Spec tree branching (depends on pr-942aa21, pr-848ba9b)
   - Extend spec generation to produce multiple candidate specs from a base (title + short description)
   - Each candidate spec is a branch of a decision point
   - Each spec branch can have its own implementation workdir
@@ -128,13 +136,13 @@ Convergence is a decision made by either human or machine. For now, humans are b
 ## Dependency graph
 
 ```
-pr-7122c11 (standalone, in_progress)
+pr-7122c11 (standalone — MERGED)
 
 pr-dad0069 (local LLM provider — MERGED)
-  └── pr-9a5b86e (harden local LLM — QA)
+  └── pr-9a5b86e (harden local LLM — in_review)
         └── pr-4bd08d7 (translation proxy)
 
-pr-3032fb6 (core framework — QA)
+pr-3032fb6 (core framework — MERGED)
   ├── pr-18ac983 (session health)
   ├── pr-945546e (project state)
   │     └── pr-a94befb (replace guide flow)
@@ -149,7 +157,7 @@ pr-848ba9b (decision point entity + CLI — standalone)
   ├── pr-d925d69 (TUI decision tree explorer)
   └── pr-df6cd9f (prompt awareness)
 
-pr-942aa21 (spec generation — QA, plan-qa)
+pr-942aa21 (spec generation — MERGED, plan-qa)
   └── pr-3f7815c (spec tree branching — also depends on pr-848ba9b)
 ```
 
@@ -164,7 +172,7 @@ These standalone PRs were closed in favor of built-in watchers in this framework
 
 These remain as separate fixes outside the watcher framework:
 - pr-757a140 (SSH disconnect garbage) — outside tmux, can't be handled by a watcher
-- pr-b53bfe2 (trust prompt blocking) — simpler as a programmatic fix, saves tokens vs watcher approach
+- pr-b53bfe2 (trust prompt blocking) — ⚠️ **contested, see Review note (2026-05-25) at top.** Was "simpler as a programmatic fix"; the decided direction is a context-aware agent (verify the workspace, then press Enter), NOT a programmatic always-on bypass. Re-scope when revisiting.
 
 ## Manual testing notes
 
@@ -176,4 +184,6 @@ These PRs will need human-guided testing (INPUT_REQUIRED during review):
 - **pr-1f35c6d**: Hardware-dependent — local model process lifecycle, VRAM/RAM detection
 - **pr-4bd08d7**: Requires a running local LLM server to test proxy translation end-to-end
 - **pr-848ba9b**: CLI commands for creating/resolving/removing decision points, workdir lifecycle
+- **pr-a94befb**: Addendum injection behavior — verify addendums appear when gaps exist and disappear once filled
+- **pr-094939c**: Hardware detection, provider auto-configuration — depends on local LLM availability
 - **pr-d925d69**: TUI decision tree navigation, branch comparison, progressive disclosure at scale

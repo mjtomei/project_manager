@@ -1,0 +1,320 @@
+"""pr-list home-window provider — runs `pm pr list -t --open` on a poll.
+
+The window runs a small in-process Python loop (no `watch` shell dep).
+The loop wakes on a short tick, on sentinel touch, or on SIGWINCH —
+each is just a *check* trigger; whether to actually repaint is
+decided by hashing the rendered output and comparing to the last
+written hash. A quiet pm produces a quiet pm-home: no flicker, no
+wasted clears.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import signal
+import sys
+import time
+import unicodedata
+from pathlib import Path
+
+from pm_core import tmux as tmux_mod
+from pm_core.paths import pm_home
+
+
+WINDOW_NAME = "pm-home"
+TICK_SECONDS = 0.75
+DEFAULT_SIZE = (80, 24)
+
+
+def _refresh_sentinel(session: str) -> Path:
+    """Per-base-session sentinel file: touched by refresh(), polled by the loop."""
+    base = session.split("~")[0]
+    runtime = pm_home() / "runtime"
+    runtime.mkdir(parents=True, exist_ok=True)
+    return runtime / f"home-refresh-{base}"
+
+
+class PrListProvider:
+    name = "pr-list"
+    window_name = WINDOW_NAME
+
+    def ensure_window(self, session: str) -> str:
+        existing = tmux_mod.find_window_by_name(session, WINDOW_NAME)
+        if existing:
+            return WINDOW_NAME
+
+        from pm_core import store
+        try:
+            project_root = store.find_project_root()
+        except FileNotFoundError:
+            project_root = Path.cwd()
+
+        py = sys.executable or "python3"
+        cmd = (
+            f"{py} -m pm_core.home_window.pr_list "
+            f"--session {session}"
+        )
+        tmux_mod.new_window(
+            session, WINDOW_NAME, cmd, str(project_root), switch=False,
+        )
+        new_win = tmux_mod.find_window_by_name(session, WINDOW_NAME)
+        if new_win:
+            tmux_mod.set_shared_window_size(session, new_win["id"])
+        return WINDOW_NAME
+
+    def refresh(self, session: str) -> None:
+        sentinel = _refresh_sentinel(session)
+        try:
+            sentinel.touch()
+        except OSError:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Loop entrypoint: python -m pm_core.home_window.pr_list --session <name>
+# ---------------------------------------------------------------------------
+
+def _terminal_size() -> tuple[int, int]:
+    try:
+        ts = os.get_terminal_size()
+        return (ts.columns, ts.lines)
+    except OSError:
+        return DEFAULT_SIZE
+
+
+def _char_width(ch: str) -> int:
+    # Display columns a single character occupies in a terminal.
+    # Combining marks add nothing; East-Asian Wide/Fullwidth glyphs
+    # (including the PR status emoji like ⏳/🔨/👀) take two cells.
+    if unicodedata.combining(ch):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
+def _display_width(s: str) -> int:
+    return sum(_char_width(c) for c in s)
+
+
+def _truncate(line: str, width: int) -> str:
+    # Truncate by *display width*, not code-point count: format_pr_line
+    # prepends a 2-cell status emoji, so a line cut to `width` code
+    # points would render `width+1` cells and soft-wrap on the pane —
+    # scrolling the header off-screen. Measure in cells so the result
+    # never exceeds the pane width.
+    if width <= 0:
+        return ""
+    if _display_width(line) <= width:
+        return line
+    if width == 1:
+        return "…"
+    budget = width - 1  # reserve one cell for the trailing ellipsis
+    out: list[str] = []
+    used = 0
+    for ch in line:
+        w = _char_width(ch)
+        if used + w > budget:
+            break
+        out.append(ch)
+        used += w
+    return "".join(out) + "…"
+
+
+def _format_relative(seconds: float) -> str:
+    # Bucket coarsely so the staleness header doesn't drive a repaint
+    # every second on an otherwise-idle window. "just now" covers the
+    # first minute (matches the no-flicker quietness test), then we
+    # step in minutes, then hours.
+    s = int(seconds)
+    if s < 60:
+        return "just now"
+    m = s // 60
+    if m < 60:
+        return f"{m}m ago"
+    h = m // 60
+    return f"{h}h ago"
+
+
+def _render_content(width: int, height: int) -> str:
+    """Render the size-fitted content body, *without* the staleness suffix.
+
+    Splitting body rendering from the staleness header lets us hash the
+    size+content independently of the relative-time phrasing, so the
+    'last changed' clock only resets on real content changes.
+    """
+    from pm_core import store
+    from pm_core.cli.helpers import format_pr_line
+
+    try:
+        root = store.find_project_root()
+        data = store.load(root)
+    except Exception as e:
+        return _truncate(f"pm pr list (home): error loading project: {e}",
+                         width)
+
+    prs = data.get("prs") or []
+    prs = [p for p in prs if p.get("status") not in ("closed", "merged")]
+    prs = sorted(
+        prs,
+        key=lambda p: p.get("updated_at") or p.get("created_at") or "",
+        reverse=True,
+    )
+
+    # `or {}` (not a `{}` default) so a present-but-null `project:` key
+    # in project.yaml doesn't blow up with AttributeError — mirrors the
+    # `data.get("prs") or []` guard above. store.load returns raw YAML,
+    # so null values are possible.
+    active_pr = (data.get("project") or {}).get("active_pr")
+    body_lines: list[str] = []
+
+    if not prs:
+        body_lines.append(_truncate("No open PRs.", width))
+    else:
+        # Reserve: 2 header rows (title + ruler), and 1 footer row when
+        # the list overflows the visible area.
+        rows_for_prs = max(height - 2, 0)
+        overflow = len(prs) > rows_for_prs
+        visible_n = max(rows_for_prs - 1, 0) if overflow else rows_for_prs
+
+        for p in prs[:visible_n]:
+            body_lines.append(_truncate(
+                format_pr_line(p, active_pr=active_pr, with_timestamp=True),
+                width,
+            ))
+        if overflow:
+            more = len(prs) - visible_n
+            body_lines.append(_truncate(f"(… and {more} more)", width))
+
+    return "\n".join(body_lines)
+
+
+def _compose(header_text: str, body: str, width: int, height: int) -> str:
+    head = _truncate(header_text, width)
+    ruler = _truncate("=" * _display_width(head), width)
+    # Clamp by *line* count, not element count: `body` is a multi-line
+    # string, so it must be split before the height clamp can act as a
+    # genuine safety net (independent of _render_content's own budgeting).
+    lines = [head, ruler]
+    if body:
+        lines.extend(body.split("\n"))
+    if height >= 1 and len(lines) > height:
+        lines = lines[:height]
+    return "\n".join(lines)
+
+
+def _hash(*parts: str) -> str:
+    h = hashlib.blake2b(digest_size=16)
+    for p in parts:
+        h.update(p.encode("utf-8", "replace"))
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+class _PaintState:
+    """Paint-decision state machine for the home loop.
+
+    Tracks the last painted hash and the monotonic time the *content*
+    last changed (used to phrase staleness). ``step`` folds in the
+    freshly-computed content hash and reports whether a repaint is due —
+    i.e. whether either the content or the bucketed staleness label moved
+    since the last paint. Pulled out of ``_loop_main`` so the central
+    "quiet pm -> quiet pm-home" invariant is unit-testable: the loop body
+    itself is an infinite select/sleep that resists direct testing.
+    """
+
+    def __init__(self, now: float) -> None:
+        self.last_paint_hash: str | None = None
+        self.last_content_hash: str | None = None
+        self.last_change_mono: float = now
+
+    def step(self, content_hash: str, now: float) -> tuple[bool, str]:
+        """Advance one tick; return (should_paint, staleness_label)."""
+        if content_hash != self.last_content_hash:
+            self.last_change_mono = now
+            self.last_content_hash = content_hash
+        label = _format_relative(now - self.last_change_mono)
+        # Paint hash includes the bucketed staleness so we repaint when
+        # the bucket flips ("just now" -> "1m ago" -> "2m ago" -> ...),
+        # without burning a repaint every sub-second tick when content
+        # hasn't changed.
+        paint_hash = _hash(content_hash, label)
+        should_paint = paint_hash != self.last_paint_hash
+        self.last_paint_hash = paint_hash
+        return should_paint, label
+
+
+def _loop_main(session: str) -> None:
+    sentinel = _refresh_sentinel(session)
+    try:
+        last_mtime: float = sentinel.stat().st_mtime
+    except FileNotFoundError:
+        last_mtime = 0.0
+
+    winch_flag = {"set": False}
+
+    def _on_winch(signum, frame):  # pragma: no cover - signal path
+        winch_flag["set"] = True
+
+    try:
+        signal.signal(signal.SIGWINCH, _on_winch)
+    except (ValueError, OSError):
+        pass
+
+    paint = _PaintState(time.monotonic())
+
+    while True:
+        width, height = _terminal_size()
+
+        try:
+            body = _render_content(width, height)
+        except Exception as e:
+            body = _truncate(f"pm pr list (home): render error: {e}", width)
+
+        content_hash = _hash(f"{width}x{height}", body)
+        should_paint, label = paint.step(content_hash, time.monotonic())
+        if should_paint:
+            header = f"pm pr list -t --open  (updated {label})"
+            screen = _compose(header, body, width, height)
+            # No trailing newline: `screen` is already clamped to the
+            # pane height, so writing one more newline on the bottom row
+            # would scroll the terminal up by one line and push the
+            # header off-screen — defeating the most-recent-at-top goal
+            # exactly when the list fills the pane.
+            sys.stdout.write("\033[2J\033[H")
+            sys.stdout.write(screen)
+            sys.stdout.flush()
+
+        deadline = time.monotonic() + TICK_SECONDS
+        while True:
+            if winch_flag["set"]:
+                winch_flag["set"] = False
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                mtime = sentinel.stat().st_mtime
+            except FileNotFoundError:
+                mtime = 0.0
+            if mtime > last_mtime:
+                last_mtime = mtime
+                break
+            time.sleep(min(0.1, remaining))
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--session", required=True)
+    args = parser.parse_args(argv)
+
+    try:
+        _loop_main(args.session)
+    except KeyboardInterrupt:
+        return 0
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

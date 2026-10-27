@@ -12,57 +12,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from pm_core import store, git_ops, graph
+from pm_core import store, git_ops, graph, gh_ops
 from pm_core.backend import get_backend
 from pm_core.cli.helpers import _record_status_timestamp
 from pm_core.paths import configure_logger
+from pm_core.pr_utils import usable_prs
 
 _log = configure_logger("pm.pr_sync")
 
 
 def _trigger_tui_refresh() -> None:
-    """Send refresh key to TUI pane if running in a pm session."""
-    try:
-        import subprocess
-        import hashlib
-
-        # Get current working directory to compute session name
-        cwd = Path.cwd()
-
-        # Find the pm root to get repo_id
-        try:
-            root = store.find_project_root()
-            data = store.load(root, validate=False)
-            repo_id = data.get("project", {}).get("repo_id", "")
-            name = data.get("project", {}).get("name", "unknown")
-            if repo_id:
-                session_hash = repo_id[:8]
-            else:
-                session_hash = hashlib.sha256(str(root).encode()).hexdigest()[:8]
-            session_name = f"pm-{name}-{session_hash}"
-        except Exception:
-            return
-
-        # Find TUI pane in the session
-        from pm_core.tmux import _tmux_cmd
-        result = subprocess.run(
-            _tmux_cmd("list-panes", "-t", session_name, "-F", "#{pane_id}:#{pane_current_command}"),
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode != 0:
-            return
-
-        for line in result.stdout.strip().split("\n"):
-            if ":pm" in line or ":python" in line:
-                pane_id = line.split(":")[0]
-                subprocess.run(
-                    _tmux_cmd("send-keys", "-t", f"{session_name}:{pane_id}", "R"),
-                    check=False, timeout=5
-                )
-                _log.debug("Sent refresh to TUI pane %s", pane_id)
-                break
-    except Exception as e:
-        _log.debug("Could not trigger TUI refresh: %s", e)
+    """Ask the TUI to reload state via SIGUSR1 (focus-independent)."""
+    from pm_core.cli.helpers import trigger_tui_reload
+    trigger_tui_reload()
 
 
 # Minimum interval between syncs (in seconds)
@@ -217,7 +179,7 @@ def sync_prs(
             error="No workdirs found. Run 'pm pr start' on a PR first."
         )
 
-    prs = data.get("prs") or []
+    prs = usable_prs(data.get("prs"))
     base_branch = data.get("project", {}).get("base_branch", "master")
     backend_name = data.get("project", {}).get("backend", "vanilla")
     backend = get_backend(data)
@@ -229,7 +191,7 @@ def sync_prs(
     # Local/vanilla backends rely on `pm pr merge` for explicit tracking.
     if backend_name == "github":
         for pr_entry in prs:
-            if pr_entry.get("status") not in ("in_review", "in_progress", "qa"):
+            if pr_entry.get("status") not in ("in_review", "in_progress", "qa", "sign_off"):
                 continue
 
             branch = pr_entry.get("branch", "")
@@ -250,12 +212,21 @@ def sync_prs(
             except Exception as e:
                 _log.warning("Error checking merge status for %s: %s", pr_entry["id"], e)
 
-    # Update timestamp
-    set_last_sync_timestamp(data, datetime.now(timezone.utc))
-
     # Save if requested and there were changes
+    # Note: the pr_entry status mutations above (lines 244-248) are intentionally
+    # applied to the in-memory `data` so that graph.ready_prs(prs) below sees
+    # merged PRs correctly. The locked_update below persists the authoritative save.
     if save_state:
-        store.save(data, root)
+        merged_set = set(merged_prs)
+
+        def apply(fresh_data):
+            for pr in usable_prs(fresh_data.get("prs")):
+                if pr["id"] in merged_set:
+                    pr["status"] = "merged"
+                    _record_status_timestamp(pr, "merged")
+            set_last_sync_timestamp(fresh_data, datetime.now(timezone.utc))
+
+        store.locked_update(root, apply)
 
     # Get ready PRs
     ready = graph.ready_prs(prs)
@@ -313,8 +284,7 @@ def sync_from_github(
     Returns:
         SyncResult with sync outcome details
     """
-    import subprocess
-    import json
+    import subprocess  # for subprocess.TimeoutExpired in the except clause
 
     if data is None:
         data = store.load(root)
@@ -326,7 +296,7 @@ def sync_from_github(
             error="GitHub sync only works with the GitHub backend"
         )
 
-    prs = data.get("prs") or []
+    prs = usable_prs(data.get("prs"))
     updated = 0
     merged_prs = []
     closed_prs = []
@@ -341,15 +311,11 @@ def sync_from_github(
         old_status = pr_entry.get("status", "pending")
 
         try:
-            result = subprocess.run(
-                ["gh", "pr", "view", str(gh_pr_number), "--json", "state,isDraft,mergedAt"],
-                capture_output=True, text=True, timeout=30
-            )
-            if result.returncode != 0:
+            info = gh_ops.get_pr_state(gh_pr_number)
+            if info is None:
                 _log.warning("Could not fetch GitHub PR #%s for %s", gh_pr_number, pr_id)
                 continue
 
-            info = json.loads(result.stdout)
             gh_state = info.get("state")
             is_draft = info.get("isDraft", False)
             merged_at = info.get("mergedAt")
@@ -360,8 +326,8 @@ def sync_from_github(
             elif gh_state == "CLOSED":
                 new_status = "closed"
             elif gh_state == "OPEN":
-                # Preserve "qa" status — it's a local refinement of in_review
-                if old_status == "qa":
+                # Preserve "qa"/"sign_off" — local refinements of in_review
+                if old_status in ("qa", "sign_off"):
                     continue
                 new_status = "in_progress" if is_draft else "in_review"
             else:
@@ -384,11 +350,16 @@ def sync_from_github(
         except Exception as e:
             _log.warning("Error fetching GitHub status for %s: %s", pr_id, e)
 
-    # Update timestamp
-    set_last_sync_timestamp(data, datetime.now(timezone.utc))
-
     if save_state and updated:
-        store.save(data, root)
+        def apply(fresh_data):
+            for pr in usable_prs(fresh_data.get("prs")):
+                new_status = status_updates.get(pr["id"])
+                if new_status and pr.get("status") != new_status:
+                    pr["status"] = new_status
+                    _record_status_timestamp(pr, new_status)
+            set_last_sync_timestamp(fresh_data, datetime.now(timezone.utc))
+
+        store.locked_update(root, apply)
 
     # Closed PRs keep status "closed" in the yaml but are not auto-removed.
     # This avoids losing PRs that were auto-closed by GitHub (e.g. when a

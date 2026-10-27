@@ -27,6 +27,7 @@ class StatusBar(Static):
                        show_assist: bool = False,
                        auto_start: bool = False,
                        watcher_status: str = "",
+                       auto_label: str = "",
                        memory_status: str = "") -> None:
         sync_icons = {
             "synced": "[green]synced[/green]",
@@ -41,15 +42,20 @@ class StatusBar(Static):
         filter_display = f"    [dim]filter:[/dim] [italic]{filter_text}[/italic]" if filter_text else ""
         sort_display = f"    [dim]sort:[/dim] [italic]{sort_text}[/italic]" if sort_text else ""
         assist_display = "    [dim]\\[H] Assist[/dim]" if show_assist else ""
-        auto_display = "    [bold yellow]AUTO[/bold yellow]" if auto_start else ""
+        auto_suffix = f" {auto_label}" if auto_label else ""
+        auto_display = (f"    [bold yellow]AUTO{auto_suffix}[/bold yellow]"
+                        if auto_start else "")
         if watcher_status == "input_required":
             watcher_display = "    [bold red]WCH!![/bold red]"
         elif watcher_status == "running":
             watcher_display = "    [bold cyan]WCH[/bold cyan]"
         else:
             watcher_display = ""
-        memory_display = f"    [bold cyan]{memory_status}[/bold cyan]" if memory_status else ""
-        self.update(f" Project: [bold]{project_name}[/bold]    {pr_info}{filter_display}{sort_display}    repo: [cyan]{safe_repo}[/cyan]    {sync_display}{auto_display}{watcher_display}{memory_display}{assist_display}")
+        memory_display = (f"    [bold cyan]{escape(memory_status)}[/bold cyan]"
+                          if memory_status else "")
+        # The bar is one row and clips on narrow terminals: running-automation
+        # indicators (AUTO ×N, WCH, memory) go first, the long repo path last.
+        self.update(f" Project: [bold]{project_name}[/bold]{auto_display}{watcher_display}{memory_display}    {pr_info}{filter_display}{sort_display}    {sync_display}{assist_display}    repo: [cyan]{safe_repo}[/cyan]")
 
 
 class SessionBar(Static):

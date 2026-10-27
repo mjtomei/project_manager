@@ -21,15 +21,16 @@ def container_group():
 def container_status():
     """Show current container isolation settings."""
     from pm_core.container import (
-        is_container_mode_enabled, load_container_config, _docker_available,
+        is_container_mode_enabled, load_container_config, _runtime_available,
     )
 
     enabled = is_container_mode_enabled()
     cfg = load_container_config()
-    docker_ok = _docker_available()
+    runtime_ok = _runtime_available()
 
     click.echo(f"Container mode:  {'enabled' if enabled else 'disabled'}")
-    click.echo(f"Docker available: {'yes' if docker_ok else 'no'}")
+    click.echo(f"Runtime:         {cfg.runtime}")
+    click.echo(f"Runtime available: {'yes' if runtime_ok else 'no'}")
     click.echo(f"Image:           {cfg.image}")
     click.echo(f"Memory limit:    {cfg.memory_limit}")
     click.echo(f"CPU limit:       {cfg.cpu_limit}")
@@ -76,9 +77,9 @@ def container_status():
     click.echo(f"  review:        {'on' if get_stop_idle_policy('review') else 'off'}")
     click.echo(f"  qa:            {'on' if get_stop_idle_policy('qa_scenario') else 'off'}")
 
-    if enabled and not docker_ok:
+    if enabled and not runtime_ok:
         click.echo(
-            "\nWarning: Container mode is enabled but Docker is not available.",
+            f"\nWarning: Container mode is enabled but {cfg.runtime} is not available.",
             err=True,
         )
 
@@ -87,10 +88,11 @@ def container_status():
 def container_enable():
     """Enable container isolation for Claude sessions."""
     from pm_core.paths import set_global_setting
-    from pm_core.container import _docker_available
+    from pm_core.container import _runtime_available, _get_runtime
 
-    if not _docker_available():
-        click.echo("Error: Docker is not available. Install and start Docker first.",
+    if not _runtime_available():
+        runtime = _get_runtime()
+        click.echo(f"Error: {runtime} is not available. Install and start {runtime} first.",
                     err=True)
         raise SystemExit(1)
 
@@ -109,7 +111,7 @@ def container_disable():
 
 @container_group.command("set")
 @click.argument("key", type=click.Choice([
-    "image", "memory-limit", "cpu-limit",
+    "image", "memory-limit", "cpu-limit", "runtime",
     "system-memory-target", "system-memory-scope",
     "system-memory-default-projection", "system-memory-history-size",
     "system-memory-queue-policy",
@@ -119,7 +121,7 @@ def container_disable():
 def container_set(key: str, value: str):
     """Set a container configuration value.
 
-    Keys: image, memory-limit, cpu-limit,
+    Keys: image, memory-limit, cpu-limit, runtime,
           system-memory-target, system-memory-scope,
           system-memory-default-projection, system-memory-history-size,
           system-memory-queue-policy,
@@ -128,6 +130,10 @@ def container_set(key: str, value: str):
     from pm_core.paths import set_global_setting_value
 
     # Validate specific keys
+    if key == "runtime" and value not in ("docker", "podman"):
+        click.echo(f"Error: runtime must be 'docker' or 'podman', got '{value}'",
+                    err=True)
+        raise SystemExit(1)
     if key == "system-memory-scope" and value not in ("pm", "system"):
         click.echo("Error: system-memory-scope must be 'pm' or 'system'", err=True)
         raise SystemExit(1)
@@ -163,9 +169,9 @@ def container_set(key: str, value: str):
     click.echo(f"Set {key} = {value}")
 
 
-@container_group.command("build-image")
+@container_group.command("build-base")
 @click.option("--tag", default=None, help="Image tag (default: pm-dev:latest)")
-def container_build_image(tag: str | None):
+def container_build_base(tag: str | None):
     """Build the pm developer base image with pre-installed tools.
 
     The image includes git, python3, pip, node/npm, curl, jq, and
@@ -186,7 +192,7 @@ def container_build_image(tag: str | None):
 
 @container_group.command("build")
 @click.option("--tag", default=None, help="Image tag (default: pm-project-<name>:latest)")
-@click.option("--base", default=None, help="Base image (default: current container image)")
+@click.option("--base", default=None, help="Base image (default: pm-dev:latest)")
 def container_build(tag: str | None, base: str | None):
     """Launch a Claude session to build a project-specific Docker image.
 
@@ -199,7 +205,7 @@ def container_build(tag: str | None, base: str | None):
     """
     from pm_core import tmux as tmux_mod
     from pm_core.claude_launcher import find_claude, build_claude_shell_cmd
-    from pm_core.container import load_container_config
+    from pm_core.container import DEFAULT_IMAGE, load_container_config
 
     root = state_root()
 
@@ -216,7 +222,7 @@ def container_build(tag: str | None, base: str | None):
         project_dir = root
 
     config = load_container_config()
-    base_image = base or config.image
+    base_image = base or DEFAULT_IMAGE
     image_tag = tag or f"pm-project-{project_name}:latest"
 
     prompt = _build_container_build_prompt(
@@ -224,6 +230,7 @@ def container_build(tag: str | None, base: str | None):
         project_dir=str(project_dir),
         base_image=base_image,
         image_tag=image_tag,
+        runtime=config.runtime,
     )
 
     if not find_claude():
@@ -233,7 +240,7 @@ def container_build(tag: str | None, base: str | None):
         click.echo(prompt)
         raise SystemExit(1)
 
-    claude_cmd = build_claude_shell_cmd(prompt=prompt)
+    claude_cmd = build_claude_shell_cmd(prompt=prompt, session_type="container")
 
     # Try to launch in tmux
     pm_session = _get_pm_session()
@@ -259,7 +266,7 @@ def container_build(tag: str | None, base: str | None):
     click.echo("Launching Claude...")
     from pm_core.claude_launcher import launch_claude
     launch_claude(prompt, cwd=str(project_dir), session_key="container:build",
-                  pm_root=root)
+                  pm_root=root, session_type="container")
 
 
 def _build_container_build_prompt(
@@ -267,16 +274,20 @@ def _build_container_build_prompt(
     project_dir: str,
     base_image: str,
     image_tag: str,
+    runtime: str = "docker",
 ) -> str:
     """Build the prompt for the container build Claude session."""
 
     return f"""\
-You are building a project-specific Docker image for "{project_name}".
+You are building a project-specific container image for "{project_name}".
 
 ## Goal
 
-Create a Dockerfile that installs all project dependencies on top of the base
-image, build it, tag it, and update the pm container config to use it.
+Set up the dependencies that containers used for implementation, review, or QA
+of this project will need on top of the base image. The base image already
+provides pm's runtime contract (pm user, PATH, git + host git identity, tmux,
+sudo, python, no ENTRYPOINT) — you only need to add what *this project* needs
+on top.
 
 ## Project directory
 
@@ -292,30 +303,38 @@ image, build it, tag it, and update the pm container config to use it.
 
 ## Instructions
 
-1. Scan the project directory for dependency files (requirements.txt, pyproject.toml,
-   package.json, Cargo.toml, go.mod, Gemfile, etc.) and any existing Dockerfiles.
-   Identify:
-   - Language runtimes and versions needed
-   - System packages (apt/yum) required for native extensions
-   - Package manager dependencies (pip, npm, cargo, etc.)
+1. Discover what this project needs by scanning:
+   - **Language/runtime manifests**: requirements.txt, pyproject.toml,
+     package.json, Cargo.toml, go.mod, Gemfile, etc. — note language
+     versions, package-manager deps, and any system packages required for
+     native extensions.
+   - **Existing Dockerfiles**: use as reference for system deps, but do not
+     modify them — create Dockerfile.pm-project separately.
+   - **pm QA instruction files**: read every file under {project_dir}/pm/qa/
+     (these are instruction docs added via `pm qa` and consumed by the pm
+     QA step). Any tool, binary, or service they reference must be
+     available inside the container, since QA runs there. Also check any
+     project-level CI / lint config (.github/, pre-commit, etc.) for tools
+     that aren't already declared as language-level deps.
+   - **Implementation/review needs**: anything else an interactive Claude
+     session working on this project would expect to find (build tools,
+     codegen utilities, project-specific CLIs).
 
-2. Create a Dockerfile at {project_dir}/Dockerfile.pm-project with:
-   - FROM {base_image}
-   - System package installation (if needed)
-   - COPY and install of dependency files
-   - Any build steps needed for native extensions
-   - Keep the image minimal — don't copy the full source tree, just dependency specs
+2. Create a Dockerfile at {project_dir}/Dockerfile.pm-project that:
+   - Starts `FROM {base_image}`
+   - Installs the project's system + language deps
+   - Installs QA/review tooling discovered above
+   - Stays minimal — copy dependency specs, not the full source tree
+   - For pm-on-pm or other cases where the base already covers everything
+     this project needs, the file may be a near-empty thin wrapper. That's
+     fine — don't invent work.
 
 3. Build the image:
    ```bash
-   docker build -t {image_tag} -f {project_dir}/Dockerfile.pm-project {project_dir}
+   {runtime} build -t {image_tag} -f {project_dir}/Dockerfile.pm-project {project_dir}
    ```
 
 4. If the build fails, analyze the error, fix the Dockerfile, and retry.
-   Common issues:
-   - Missing system packages for native extensions
-   - Wrong Python/Node version
-   - Network issues (retry or use different mirrors)
 
 5. Once the image builds successfully, update the pm container config:
    ```bash
@@ -326,49 +345,6 @@ image, build it, tag it, and update the pm container config to use it.
    ```bash
    pm container status
    ```
-
-## pm container runtime requirements
-
-The pm tool runs a setup script inside the container at start time. The
-image MUST satisfy these constraints or the setup will fail silently:
-
-1. **A `pm` user must exist** with home at /home/pm. Create it in the
-   Dockerfile (e.g. `RUN useradd -m -s /bin/bash pm`). The setup script
-   will try to create it if missing, but this may fail on read-only layers.
-
-2. **PATH must include /home/pm/.local/bin before /usr/bin**. The setup
-   installs a git wrapper at /home/pm/.local/bin/git that must shadow
-   /usr/bin/git. Set this with:
-   `ENV PATH="/home/pm/.local/bin:${{PATH}}"`
-
-3. **The image may set USER pm** — the setup script runs as whatever user
-   the image specifies and does not require root. It will write to
-   /home/pm/.local/bin/ (must be writable by pm) and /tmp/.
-
-4. **Do NOT set an ENTRYPOINT** — pm passes the setup script as the CMD
-   via `docker run ... image bash -c "setup"`. An entrypoint that runs
-   before the CMD can interfere with the setup or delay container readiness.
-   If you need project-specific init steps, add them to a script in the
-   image and document them — don't use ENTRYPOINT.
-
-5. **git must be installed** at /usr/bin/git (the base image includes it).
-
-## Tips
-
-- If the project has a Dockerfile already, use it as a reference but don't
-  modify it — create Dockerfile.pm-project separately.
-- For Python projects, prefer installing from requirements.txt or pyproject.toml.
-- For Node.js projects, copy package.json and package-lock.json, then run npm ci.
-- If you're unsure about system dependencies, try building first and fix errors.
-- The goal is a reusable image — dependencies change rarely, so this image
-  avoids reinstalling them on every container start.
-- Ensure the host git user identity is available inside the container. Read
-  the host's git config (git config user.name / user.email) and set it in
-  two ways: (1) ENV for GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME,
-  GIT_COMMITTER_EMAIL, and (2) a RUN step that writes to the container user's
-  ~/.gitconfig via `git config --global user.name` / `git config --global
-  user.email`. Both are needed — some tools read the env vars, others query
-  git config.
 """
 
 
@@ -376,9 +352,9 @@ image MUST satisfy these constraints or the setup will fail silently:
 @click.option("--pr", "pr_id", default=None, help="Filter by PR ID")
 def container_cleanup(pr_id: str | None):
     """Remove stale pm containers."""
-    from pm_core.container import _run_docker, remove_container, CONTAINER_PREFIX
+    from pm_core.container import _run_runtime, remove_container, CONTAINER_PREFIX
 
-    result = _run_docker(
+    result = _run_runtime(
         "ps", "-a", "--filter", f"name={CONTAINER_PREFIX}",
         "--format", "{{.Names}}\t{{.Status}}",
         check=False, timeout=30,

@@ -33,9 +33,13 @@ class TestValidPRStates:
         """VALID_PR_STATES includes closed."""
         assert "closed" in VALID_PR_STATES
 
-    def test_has_exactly_six_states(self):
-        """VALID_PR_STATES has exactly 6 states (including qa)."""
-        assert len(VALID_PR_STATES) == 6
+    def test_contains_sign_off(self):
+        """VALID_PR_STATES includes sign_off."""
+        assert "sign_off" in VALID_PR_STATES
+
+    def test_has_exactly_seven_states(self):
+        """VALID_PR_STATES has exactly 7 states (including qa and sign_off)."""
+        assert len(VALID_PR_STATES) == 7
 
 
 class TestIsValidPRStatus:
