@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T22:22:37.750700+00:00'
+  updated_at: '2026-10-27T22:52:24.293210+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25909,6 +25909,39 @@ prs:
       so that bug PR is redundant. (2026-10-27T22:28:00Z)'
     created_at: '2026-10-27T22:22:37Z'
     last_edited: '2026-10-27T22:22:37Z'
+  - id: note-32e3505
+    text: 'Review-loop 3dd4 i2 (3dfd8fe8): no other functional defects found in the
+      recovery machinery — handle() bounds, the completed-verdict guard, grace-window
+      idle processing, QA tick-loop episode bookkeeping, planner stop ordering and
+      the pr-8efa789 merge coordination all hold under adversarial tracing. Fixed
+      four remaining instances of the classes this PR targets: (1) STOPPED was not
+      a hold verdict — auto_start.QA_HOLD_VERDICTS listed only PASS/INPUT_REQUIRED,
+      so a QA run the user stopped during planning was relaunched by the scheduler
+      on the next pass (silently undoing the S2 clean-teardown fix; every stop used
+      to end INPUT_REQUIRED, which held). STOPPED is now held and autostart_state._derive
+      reports it as waiting with "last QA run was stopped; press t / z t to re-run
+      QA". (2) _run_qa_finalize_pane surfaced [finalize: NO_VERDICT] for a user-stopped
+      run (handle checks its deferral bound before its own stop_check) — it now re-checks
+      stop_check and returns None, the same spurious-teardown-failure class i1/i4/i5
+      fixed elsewhere. (3) Both QA tick-loop exhaustion handlers now re-scan the transcript
+      before marking a scenario INPUT_REQUIRED: the scan runs at the idle hook (races
+      the transcript write) and no_progress is raised before handle verdict_check,
+      so a verdict landing just after the deadline tick scan was retired as no_response/no_progress
+      — i3 fixed the ordering, not the write race. (4) max_deferrals is documented
+      as bounding *consecutive* refreshes but accumulated over the tracker lifetime;
+      a nudge now starts a fresh budget so an answered session cannot later be retired
+      with no_progress. Also combined the duplicated pass-through branches in _concretize_failure_label.
+      New tests all fail on the pre-fix code. Full suite: 3810 passed, 1 skipped;
+      43F+17E reproduce identically on origin/master here (test_signoff_integration/test_merge_publish,
+      test_git_ops::test_keeps_unpushed_merge on git 2.34.1, test_hook_events::test_installer_writes_standalone_receiver).
+      Residuals unchanged: verdict-recovery-response-timeout (1 h) can retire a silently-busy
+      worker; a poller that starts while its session is already idle (review adoption)
+      is bounded only by overall_timeout/pane death; a recovery nudge can still land
+      in a permission hold that begins during an open episode. Note: pr-f2fee05 (verifier
+      re-check hang) is subsumed by this PR i2 change (the re-check uses poll_for_verdict),
+      so that bug PR is redundant.'
+    created_at: '2026-10-27T22:52:24Z'
+    last_edited: '2026-10-27T22:52:24Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
