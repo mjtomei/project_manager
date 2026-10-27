@@ -663,5 +663,8 @@ def get_queue_status() -> dict:
     process takes the lock and prunes the file.
     """
     data = _load_queue()
-    data["entries"] = _clean_stale(data["entries"])
+    # Filter without _clean_stale: it logs "Removing stale queue entry",
+    # which would read as a prune although the file is left as it is.
+    now = time.time()
+    data["entries"] = [e for e in data["entries"] if not _stale_reason(e, now)]
     return data

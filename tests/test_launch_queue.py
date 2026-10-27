@@ -497,6 +497,19 @@ class TestGetQueueStatus:
             # Display only: the file is pruned by the next locked walk.
             assert len(_load_queue()["entries"]) == 2
 
+    def test_display_filter_does_not_log_removal(self, tmp_path):
+        """Only a real prune logs "Removing stale queue entry"."""
+        with _patch_home(tmp_path):
+            _save_queue({"entries": [{
+                "id": "dead", "pid": 999999999, "container_type": "qa_scenario",
+                "status": "waiting", "enqueued_at": time.time(),
+                "heartbeat_at": time.time(),
+            }], "last_served_qa_run": None})
+            with patch("pm_core.launch_queue._log") as log:
+                assert get_queue_status()["entries"] == []
+            assert not any("Removing stale queue entry" in c.args[0]
+                           for c in log.info.call_args_list)
+
 
 # ---------------------------------------------------------------------------
 # Queue policy setting
