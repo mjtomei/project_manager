@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T00:31:58.421986+00:00'
+  updated_at: '2026-10-27T01:46:30.339195+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33261,6 +33261,22 @@ prs:
       do not take this branch block wholesale.'
     created_at: '2026-10-27T00:31:58Z'
     last_edited: '2026-10-27T00:31:58Z'
+  - id: note-a32c8da
+    text: 'QA scenario 14 PASS at 481644d5 — no code change. Harness notes for the
+      next run: (1) the scenario literal fixture no longer reproduces a metadata conflict
+      — `pm pr start` records the workdir/status state on master and the branch record
+      lands in a different hunk, so the check says "merges cleanly"; commit the post-`pm
+      pr start` state on master FIRST, fast-forward the branch to it, and only then
+      let each side append its own record at the same position (that reproduces `resolved:
+      pm/project.yaml (by record id)`). (2) In this build the review window diff pane
+      is pane `.1` (pane `.0` is the review agent), not `.0` as the scenario says.
+      (3) `pm pr list --workdirs` is ordered by PR id, not by recency — select the
+      workdir by grepping the target PR id or you will commit into another PR workdir.
+      (4) Story 4: `base-only.txt` already exists on master from story 1, so `echo
+      "base only" > base-only.txt` is a no-op; rewrite it with new content to get
+      the clean base move. Captures: /pm-captures/scenarios/14/.'
+    created_at: '2026-10-27T01:46:30Z'
+    last_edited: '2026-10-27T01:46:30Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
