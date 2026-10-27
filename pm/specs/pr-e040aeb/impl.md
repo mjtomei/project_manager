@@ -480,3 +480,49 @@ previous episode's attempt count while the resumed loop runs; the launch
 artifact's prompt copy can name the stale session's prompt when the failed
 attempt died before rewriting the transcript symlink (the artifact records
 that session id, so the mismatch is visible).
+
+## Review iteration 8 (385e) — refinements
+
+Findings from the eighth review pass, applied on top of iteration 7:
+
+1. **A TUI restart mid-retry no longer resets the retry budget
+   (correctness fix).** `consume_breadcrumb` restored loop state before
+   `check_and_start` but resumed (started) the loops after it.  A re-armed
+   loop keeps `latest_verdict == LAUNCH_FAILED` and `launch_retryable` while
+   it runs, so a restored-but-not-yet-started loop looked exactly like a
+   *completed* retryable failure: `_auto_start_review_loops` re-armed it,
+   clearing `launch_attempts` (fresh 3-attempt budget), dropping the
+   remaining backoff and burning one of the bounded episodes.  The resume now
+   runs *before* the scheduler pass; `_start_loop` marks the loop running
+   synchronously, so the pass skips it and the saved budget/deadline is
+   honoured (requirement 2's "merge-restart resume continues the same
+   episode").  Covered by
+   `tests/test_breadcrumb_review_loop.py::TestConsumeBreadcrumbReviewLoops::
+   test_restored_loop_is_running_before_the_scheduler_pass` (fails pre-fix).
+2. **Cancellation while waiting for another loop's lease is KILLED, not
+   LAUNCH_FAILED.** `_wait_for_claim` returns False both for "another loop
+   still owns the lease" and for "the loop was cancelled while waiting"; the
+   second surfaced as a non-retryable LAUNCH_FAILED ("needs attention")
+   after a user stop.  It now raises `PaneKilledError` → `KILLED`, matching
+   the other cancellation paths.  Covered by
+   `test_cancellation_while_waiting_for_the_lease_is_killed` (fails
+   pre-fix).
+3. **A HOLD records the hold's own message.** `_on_complete_from_thread`
+   wrote `last_launch_error or latest_output` for `HOLD`, so a hold that
+   followed a retried attempt reported the earlier attempt's launch error in
+   `pm autostart status` instead of the trust/permission prompt the loop is
+   sitting at.  It now prefers `latest_output`.  Covered by
+   `test_hold_records_the_hold_message_not_a_stale_launch_error` (fails
+   pre-fix).
+4. **Dead condition removed.** The retry notice also required
+   `latest_verdict != VERDICT_PASS`; a loop stops on PASS, so a running
+   retry never carries a PASS verdict — the condition was unreachable.
+5. **Artifact header reports characters.** The stderr/stdout section headers
+   said "bytes" while measuring `len()` of a decoded string.
+
+Not changed (documented residuals): `review_loop.py` is ~1395 lines; two
+lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
+`runtime_state.claim_action_lease`); the retry re-arm's `_progress` label can
+show the previous episode's attempt count while the resumed loop runs; the
+launch artifact's prompt copy can name the stale session's prompt when the
+failed attempt died before rewriting the transcript symlink.

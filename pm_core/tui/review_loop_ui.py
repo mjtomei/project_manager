@@ -394,10 +394,12 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
             retry_ready_at=getattr(state, "retry_ready_at", 0.0) or 0.0,
         )
     elif state.latest_verdict == VERDICT_HOLD:
+        # The hold's own message (the trust/permission prompt) — not a stale
+        # launch error from an earlier attempt of the same episode.
         extras.update(
             retryable=False,
-            error=getattr(state, "last_launch_error", "") or
-                  state.latest_output,
+            error=(state.latest_output
+                   or getattr(state, "last_launch_error", "") or ""),
         )
     else:
         # A clean (or non-launch-failure) completion must not leave a prior
@@ -491,8 +493,7 @@ def _poll_loop_state_inner(app) -> None:
             attempts = int(getattr(state, "launch_attempts", 0) or 0)
             err = (getattr(state, "last_launch_error", "") or "").strip()
             if attempts > 1 and err \
-                    and attempts != state._ui_notified_retry \
-                    and state.latest_verdict != VERDICT_PASS:
+                    and attempts != state._ui_notified_retry:
                 state._ui_notified_retry = attempts
                 msg = (f"[yellow]Review launch retry[/] for {state.pr_id} "
                        f"(attempt {attempts}): {err[:200]}")

@@ -344,14 +344,11 @@ async def consume_breadcrumb(app) -> None:
 
     app._update_display()
 
-    if had_auto_start:
-        # Adopt in-flight QA runs (qa_resume.json) into app._qa_loops before
-        # the scheduler pass — otherwise _auto_start_qa_loops would see no
-        # loop and launch a duplicate before the poll-timer resume scan.
-        _adopt_live_qa(app)
-        await check_and_start(app)
-
-    # Restart review loops that were running before the restart
+    # Restart review loops that were running before the restart *before* the
+    # scheduler pass.  `_start_loop` marks the loop running synchronously, so
+    # the pass sees it as live; a restored loop is otherwise indistinguishable
+    # from a completed retryable failure, and re-arming it here would reset
+    # its saved retry budget and burn one of the bounded episodes.
     if review_loops_data:
         from pm_core.tui.review_loop_ui import _start_loop
         for pr_id in review_loops_data:
@@ -374,6 +371,13 @@ async def consume_breadcrumb(app) -> None:
                            f"at iteration {rstate.iteration}")
                     _log.info("consume_breadcrumb: %s", msg)
                     app.log_message(msg)
+
+    if had_auto_start:
+        # Adopt in-flight QA runs (qa_resume.json) into app._qa_loops before
+        # the scheduler pass — otherwise _auto_start_qa_loops would see no
+        # loop and launch a duplicate before the poll-timer resume scan.
+        _adopt_live_qa(app)
+        await check_and_start(app)
 
     # Resume watchers (list format, or legacy single-watcher dict)
     watchers_data = data.get("watchers", [])

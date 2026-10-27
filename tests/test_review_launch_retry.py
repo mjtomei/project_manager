@@ -1503,6 +1503,48 @@ def test_closed_pr_while_waiting_for_another_loops_lease_is_closed(
     assert result.latest_verdict == VERDICT_CLOSED
 
 
+def test_cancellation_while_waiting_for_the_lease_is_killed(
+        tmp_path, monkeypatch):
+    """A user stop while waiting out another loop's launch lease is a
+    cancellation, not a launch failure (LAUNCH_FAILED would tell the user
+    the launch failed and would not read as KILLED)."""
+    state = ReviewLoopState(pr_id=PR)
+
+    def wait_and_cancel(*_a, **_k):
+        state.stop_requested = True
+        return False
+
+    monkeypatch.setattr(review_loop, "_claim_launch", lambda *a, **k: False)
+    monkeypatch.setattr(review_loop, "_wait_for_claim", wait_and_cancel)
+    with patch.object(review_loop, "_run_claude_review") as run:
+        result = _run(state, tmp_path)
+    run.assert_not_called()
+    assert result.latest_verdict == VERDICT_KILLED
+
+
+def test_hold_records_the_hold_message_not_a_stale_launch_error(
+        tmp_path, monkeypatch):
+    """A HOLD after a retried launch must report the trust/permission prompt
+    it is actually sitting at, not the earlier attempt's launch error."""
+    from pm_core import runtime_state as rs
+    from pm_core.tui import review_loop_ui
+
+    monkeypatch.setattr(rs, "_runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(review_loop_ui, "_is_active_loop", lambda _s: True)
+    state = ReviewLoopState(
+        pr_id=PR, iteration=2, latest_verdict=VERDICT_HOLD,
+        latest_output="workspace trust prompt in review pane",
+        last_launch_error="container setup failed")
+    review_loop_ui._on_complete_from_thread(MagicMock(), state)
+
+    entry = rs.get_action_state(PR, "review-loop")
+    assert entry["state"] == "failed"
+    assert entry["verdict"] == VERDICT_HOLD
+    assert entry["retryable"] is False
+    assert "trust prompt" in entry["error"]
+    assert "container setup failed" not in entry["error"]
+
+
 def test_auto_start_keeps_the_failure_retryable_when_rearm_raises(tmp_path):
     """A starter that raises must restore the retry episode too, not leave
     the target disarmed."""

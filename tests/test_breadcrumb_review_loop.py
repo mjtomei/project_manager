@@ -309,6 +309,76 @@ class TestConsumeBreadcrumbReviewLoops:
         assert msgs[-1] == "Auto-start: resumed after merge restart → pr-001, pr-002"
         assert app.log_message.call_args.kwargs.get("sticky", 0) > 0
 
+    def test_restored_loop_is_running_before_the_scheduler_pass(self, tmp_path):
+        """A restored loop must be running when check_and_start runs.
+
+        A re-armed loop keeps ``latest_verdict == LAUNCH_FAILED`` and
+        ``launch_retryable`` while it runs, so a restored-but-not-yet-started
+        loop looks exactly like a completed retryable failure.  If the
+        scheduler pass ran first it would re-arm that loop — clearing the
+        saved ``launch_attempts`` and burning one of the bounded episodes
+        instead of continuing the budget across the restart.
+        """
+        from pm_core.tui import auto_start
+
+        breadcrumb_data = {
+            "target": "pr-001",
+            "run_id": "autostart-pr-001-abcd1234",
+            "review_loops": {
+                "pr-001": {
+                    "iteration": 2,
+                    "latest_verdict": "LAUNCH_FAILED",
+                    "loop_id": "ab12",
+                    "retry_iteration": 2,
+                    "launch_attempts": 2,
+                    "next_retry_at": 0,
+                    "launch_retryable": True,
+                    "retry_episodes": 0,
+                    "iteration_attempted": True,
+                    "_transcript_dir": str(tmp_path),
+                    "history": [{"iteration": 1, "verdict": "NEEDS_WORK"}],
+                }
+            },
+        }
+        (tmp_path / "autostart-resume.json").write_text(json.dumps(breadcrumb_data))
+
+        app = _make_app(
+            auto_start=True, root=tmp_path,
+            prs=[{"id": "pr-001", "status": "in_review",
+                  "workdir": str(tmp_path)}],
+        )
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        def fake_start(_app, _pr_id, _pr, **kw):
+            # _start_loop marks the loop running synchronously.
+            kw["resume_state"].running = True
+            return True
+
+        async def fake_check_and_start(_app):
+            auto_start._auto_start_review_loops(_app, _app._data["prs"])
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start",
+                   side_effect=fake_check_and_start), \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tui.review_loop_ui._start_loop",
+                   side_effect=fake_start) as mock_start, \
+             patch("pm_core.tmux.in_tmux", return_value=True):
+            mock_store.get_pr.return_value = app._data["prs"][0]
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+
+        assert mock_start.call_count == 1
+        state = app._review_loops["pr-001"]
+        assert state.running is True
+        # The saved bounded budget survives the restart.
+        assert state.launch_attempts == 2
+        assert state.retry_episodes == 0
+        msgs = [c.args[0] for c in app.log_message.call_args_list]
+        assert not any("retrying review launch" in m for m in msgs), (
+            "the restored loop must be resumed, not re-armed")
+
     def test_skips_loop_restart_if_pr_not_in_review(self, tmp_path):
         breadcrumb_data = {
             "target": "pr-001",

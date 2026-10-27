@@ -273,10 +273,10 @@ def _write_launch_artifact(*, transcript: str | None, pr_id: str,
                 except OSError:
                     parts.append(f"prompt: {prompt_file} (copy failed)")
         parts.append("")
-        parts.append(f"--- stderr ({len(stderr)} bytes) ---")
+        parts.append(f"--- stderr ({len(stderr)} chars) ---")
         parts.append(stderr)
         parts.append("")
-        parts.append(f"--- stdout ({len(stdout)} bytes) ---")
+        parts.append(f"--- stdout ({len(stdout)} chars) ---")
         parts.append(stdout)
         path.write_text("\n".join(parts), encoding="utf-8")
         return str(path)
@@ -1034,6 +1034,12 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
         next_attempt = state.launch_attempts + 1
         if not _claim_launch(state, iteration, next_attempt):
             if not _wait_for_claim(state, pm_root, iteration):
+                if state.stop_requested:
+                    # Cancelled while waiting: this is a user stop, not a
+                    # launch failure (it must not surface as LAUNCH_FAILED).
+                    raise PaneKilledError(
+                        "Review loop stopped while waiting for the launch "
+                        "lease")
                 if _pr_is_terminal(pr_id, pm_root):
                     raise ReviewClosedError(
                         f"PR {pr_id} merged/closed during review launch")
