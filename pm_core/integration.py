@@ -1554,8 +1554,17 @@ def _write_artifacts(pr_id: str, record: dict) -> None:
     if path is not None:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(record, indent=2) + "\n")
-        except OSError as e:
+            # ``default=str``: project.yaml is hand-editable state, and a
+            # carried list (``base_behavior_changes``) can hold a value YAML
+            # parses as a non-JSON type (an unquoted date, a ``!!set``).  The
+            # record is written for a person to read, so render it instead of
+            # raising ``TypeError`` out of every integration check and the
+            # sign-off launch (the same tolerance ``_resolution_digest`` has).
+            path.write_text(json.dumps(record, indent=2, default=str) + "\n")
+        except (OSError, TypeError, ValueError) as e:
+            # Last resort: the artifact is provenance, but failing to write it
+            # must not take the check down (the state record was already
+            # written by the caller).
             _log.warning("integration.json for %s: %s", pr_id, e)
 
 

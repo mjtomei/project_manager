@@ -631,7 +631,12 @@ tests):
     de-duplicates order-preservingly and skips only the de-duplication for a
     value `dict.fromkeys` would have raised on (which took every integration
     check down, so the launch recorded nothing and the merge gate lost the
-    evidence requirement). A non-string key inside a resolution's `records`
+    evidence requirement). The same list can also carry a value YAML parses
+    as a *non-JSON* type (an unquoted date, a `!!set`); writing the full
+    record to `integration.json` renders it (`default=str`) instead of
+    raising `TypeError` out of every check and the sign-off launch, which then
+    reported only "Integration check failed" even though the state record had
+    already been written. A non-string key inside a resolution's `records`
     map is not an action path and is dropped from the compact record (a
     mapping mixing YAML's int keys with pm's string paths made
     `_resolution_digest`'s `sort_keys` raise), and the digest itself

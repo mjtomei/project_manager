@@ -1299,6 +1299,27 @@ def test_recompacting_a_compact_record_keeps_the_base_file_count():
     assert integration.compact(once)["base_files_count"] == 2
 
 
+def test_artifact_write_tolerates_a_non_json_carried_value(w):
+    """integration.json must not raise on a hand-edited YAML value.
+
+    ``base_behavior_changes`` is hand-editable project.yaml state and is
+    carried forward onto later records.  An unquoted YAML date (or a ``!!set``)
+    parses as a non-JSON type; ``json.dumps`` raised ``TypeError`` out of every
+    integration check — and out of the sign-off launch, which then reported
+    only "Integration check failed" — even though the state record had already
+    been written.  The artifact renders it instead.
+    """
+    import datetime
+    record = {"status": integration.UP_TO_DATE, "base_sha": "a" * 40,
+              "head": "b" * 40,
+              "base_behavior_changes": [datetime.date(2026, 1, 2)]}
+    integration._write_artifacts(PR, record)
+    path = integration.integration_json_path(PR)
+    assert path is not None and path.is_file()
+    written = json.loads(path.read_text())
+    assert written["base_behavior_changes"] == ["2026-01-02"]
+
+
 def test_recorded_evidence_lists_are_bounded(w):
     """The evidence block is rewritten into project.yaml: bound its lists."""
     rec = _metadata_conflict(w)
