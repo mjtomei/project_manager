@@ -230,16 +230,27 @@ def _get_dockerfile_path() -> Path:
 
 
 def _host_git_identity() -> tuple[str, str]:
-    """Return (name, email) from the host's global git config, or empty strings."""
+    """Return (name, email) from the host's git config, or empty strings.
+
+    The user's own (global) config wins; the system config is the fallback,
+    so a host whose identity lives only in /etc/gitconfig does not bake
+    empty GIT_AUTHOR_*/GIT_COMMITTER_* into the image.  Those env vars
+    override every gitconfig in the container, so empty values make every
+    commit there fail with "empty ident name".  Repository-local config is
+    deliberately not consulted: the image is shared by all projects.
+    """
     def _read(key: str) -> str:
-        try:
-            r = subprocess.run(
-                ["git", "config", "--global", key],
-                capture_output=True, text=True, timeout=5,
-            )
-            return r.stdout.strip() if r.returncode == 0 else ""
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return ""
+        for scope in ("--global", "--system"):
+            try:
+                r = subprocess.run(
+                    ["git", "config", scope, key],
+                    capture_output=True, text=True, timeout=5,
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                return ""
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip()
+        return ""
     return _read("user.name"), _read("user.email")
 
 

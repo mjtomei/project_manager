@@ -111,6 +111,35 @@ class TestBuildImage:
         assert "--uts" not in args
 
 
+class TestHostGitIdentity:
+    """The image bakes the host identity; empty values break every commit."""
+
+    def _env(self, monkeypatch, tmp_path, system=None, global_=None):
+        for path, ident in (("system", system), ("global", global_)):
+            f = tmp_path / f"{path}.gitconfig"
+            if ident:
+                f.write_text(f"[user]\n\tname = {ident[0]}\n\temail = {ident[1]}\n")
+            monkeypatch.setenv(f"GIT_CONFIG_{path.upper()}", str(f))
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+
+    def test_system_identity_used_when_no_global(self, monkeypatch, tmp_path):
+        from pm_core.container import _host_git_identity
+        self._env(monkeypatch, tmp_path, system=("Sys User", "sys@example.com"))
+        assert _host_git_identity() == ("Sys User", "sys@example.com")
+
+    def test_global_identity_wins_over_system(self, monkeypatch, tmp_path):
+        from pm_core.container import _host_git_identity
+        self._env(monkeypatch, tmp_path, system=("Sys User", "sys@example.com"),
+                  global_=("Me", "me@example.com"))
+        assert _host_git_identity() == ("Me", "me@example.com")
+
+    def test_no_identity_anywhere(self, monkeypatch, tmp_path):
+        from pm_core.container import _host_git_identity
+        self._env(monkeypatch, tmp_path)
+        assert _host_git_identity() == ("", "")
+
+
 class TestImageExists:
     def setup_method(self):
         # image_exists caches results across calls; clear between tests.
