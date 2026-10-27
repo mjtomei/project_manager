@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T14:45:32.557538+00:00'
+  updated_at: '2026-10-27T15:25:55.705031+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14020,6 +14020,38 @@ prs:
       is ~3.1k lines.'
     created_at: '2026-10-27T14:45:32Z'
     last_edited: '2026-10-27T14:45:32Z'
+  - id: note-f784240
+    text: 'Review-loop f54b i2 (2026-10-27, deepseek-v4.1-flash-1017/high): reviewed
+      origin/master...HEAD at 047d3138 after i1 (4163 passed). One fix, pushed as
+      047d3138.
+
+
+      (1) `pm container status` resolved the runtime identity 4+ times per invocation
+      (measured 4 with an empty state dir; more with retained markers / release records).
+      `_echo_reaper_state` now runs inside one `runtime_domain_scope()`, so a single
+      successful `runtime info` probe serves the whole report. Unknown identities
+      are still retried (the scope caches only successful probes), so a transient
+      outage is not cached away. Regression test `test_status_resolves_the_runtime_identity_once`
+      seeds a persisted failure + pending owner release (so every helper that needs
+      the identity runs) and asserts exactly one probe. This closes the i1 "worth
+      a later look" item for status.
+
+
+      Not changed, still worth a later look (carried from i1): container.py is ~3.1k
+      lines; and `_note_pid_pressure` runs a second full container inventory per full
+      reconcile pass because `pids_usage()` re-inventories even though `_run` already
+      holds `out.inventory`. Left alone because several tests stub `pids_usage()`
+      with no-arg lambdas, so plumbing the inventory through is churn for a modest
+      gain (`stats --no-stream` dominates that path).
+
+
+      No unresolved spec ambiguities; spec remains consistent with the code (R4''s
+      operation-scoped reuse covers the status change). Full suite 4164 passed, 2
+      skipped (evidence /tmp/claude-1000/-workspace/ef38cd20-c4c2-4966-bb38-a9d91c4509d2/scratchpad/fullsuite-i2-final.log,
+      not durable). No new pyflakes findings vs origin/master. `verify-s22-followup.md`
+      intentionally left untracked.'
+    created_at: '2026-10-27T15:25:55Z'
+    last_edited: '2026-10-27T15:25:55Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
