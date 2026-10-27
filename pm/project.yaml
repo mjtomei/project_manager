@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T08:47:23.923171+00:00'
+  updated_at: '2026-10-27T09:26:24.656815+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -13946,6 +13946,25 @@ prs:
       container.py is ~3.1k lines (_create_fresh ~350, _ensure_reusable ~220).'
     created_at: '2026-10-27T08:47:23Z'
     last_edited: '2026-10-27T08:47:23Z'
+  - id: note-140f84c
+    text: 'Review-loop 75b8 i7: fixed a re-clamp regression from i6. _container_headroom_cap
+      re-clamped the already-clamped batch, and _clamp_to_container_headroom never
+      raises a cap, so a container-max-running batch reduced to one (unreadable inventory
+      at run start, or a momentarily full runtime) could only stay or shrink — the
+      run stayed serialized for the rest of the run, and the per-iteration resume
+      snapshot recorded the clamped value as the desired batch, so a TUI restart inherited
+      it too. The poll now re-clamps from the run''s original batch size (desired_cap,
+      plumbed through _poll_tmux_verdicts/_execute_and_finalize/_finalize_scenarios
+      and persisted in qa_resume.json; older snapshots fall back to concurrency_cap).
+      Also hardened container_reaper.last_state(): a malformed last_run (string, NaN/inf,
+      absurd value) is coerced or dropped instead of crashing pm container status
+      via time.localtime — same malformed-persisted-state class as i6 item 4. Tests:
+      test_reclamp_grows_a_reduced_batch_back_to_the_desired_size, test_poll_reclamps_from_the_desired_batch_not_the_clamped_one,
+      resume round-trip desired_cap, test_malformed_last_run_is_normalized_not_fatal,
+      test_absurd_last_run_values_are_dropped. Sanitized full suite 4150 passed, 2
+      skipped.'
+    created_at: '2026-10-27T09:25:54Z'
+    last_edited: '2026-10-27T09:26:24Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
