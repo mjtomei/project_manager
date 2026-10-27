@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T23:56:00.895973+00:00'
+  updated_at: '2026-10-27T23:58:34.673883+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14554,6 +14554,23 @@ prs:
       A is planned. Apply ran under LC_ALL=C; python enables UTF-8 mode under C.'
     created_at: '2026-10-27T23:25:58Z'
     last_edited: '2026-10-27T23:25:58Z'
+  - id: note-1ec0885
+    text: 'QA S55 PASS (c8effeda = a696fa52 + refine note; real rootless Podman 3.4.4
+      private overlay store, unmodified build-base passed, fake agents; evidence /pm-captures/scenarios/55/manifest.md).
+      S1: 9 containers (4 owners exact/64-hex/12-hex/carrier, 5 mentions incl. odd-byte
+      argv); LC_ALL=C.UTF-8 and LC_ALL=C previews byte-identical, would remove 5 keep
+      4; LC_ALL=C apply removed 5 kept 4 failed 0; kept IDs/StartedAt unchanged; mention/odd-byte
+      panes and carrier payload alive; no Traceback/UnicodeDecodeError/ownership unknown.
+      S2: gated recheck + concurrent 12-hex exec -> skipped: pane %27 attached concurrently,
+      removed 0 kept 1. S3: gate held 12 s past the 10 s recheck timeout -> FAILED
+      + container identity unknown during removal re-check, exit 1, T2 kept same ID,
+      status lists the failure, ungated retry removed it. S4: tmux gate on -L default
+      probe + concurrent retain -> skipped: retained concurrently, B owned by decoy
+      %33 (same pane number as A former pane), second release+reap removed A (released
+      by its run). Fixture note: tmux 3.2a ignores an OSC 2 title with invalid UTF-8,
+      so an odd pane title cannot exist (and pm does not read titles).'
+    created_at: '2026-10-27T23:58:34Z'
+    last_edited: '2026-10-27T23:58:34Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
