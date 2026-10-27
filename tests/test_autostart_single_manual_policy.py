@@ -252,6 +252,14 @@ def test_breadcrumb_malformed_targets_fails_closed():
     assert targets == {} and all_mode is False and migrated
 
 
+def test_breadcrumb_unusable_list_entry_is_reported():
+    """An entry with no recoverable id is dropped (nothing to hold) but the
+    corrupt shape must still be reported, not silently ignored."""
+    targets, _all, migrated = st.targets_from_breadcrumb(
+        {"targets": [{"pr_id": "f"}, 42, {"added_at": "t", "source": "x"}]})
+    assert list(targets) == ["f"] and migrated
+
+
 def test_breadcrumb_all_mode_must_be_literal_true():
     targets, all_mode, _mig = st.targets_from_breadcrumb(
         {"targets": [], "all_mode": "false", "stop_before_merge": ["a"]})

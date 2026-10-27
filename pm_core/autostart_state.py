@@ -307,6 +307,11 @@ def targets_from_breadcrumb(data: dict, prs: list[dict] | None = None
                 rec.setdefault("added_at", now_iso())
                 rec.setdefault("source", "breadcrumb")
                 targets.setdefault(entry["pr_id"], rec)
+            else:
+                # An entry with no recoverable id (wrong type, or a record
+                # missing ``pr_id``): nothing to hold, but surface the
+                # corrupt shape in the restart log rather than hiding it.
+                migrated = True
         all_mode = data.get("all_mode") is True
     elif raw is not None:
         # Malformed ``targets`` (not a list): fail closed — no targets and

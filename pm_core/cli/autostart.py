@@ -232,8 +232,8 @@ def autostart():
     A dependency shared by several targets is held while any active
     wait-for-merge target needs it; removing the target (or changing its
     policy to auto-merge) releases only the holds it caused.
-    ``--stop-before-merge`` is accepted as a deprecated alias for
-    ``--wait-for-merge`` and never creates a separate target-only hold.
+    --stop-before-merge is accepted as a deprecated alias for
+    --wait-for-merge and never creates a separate target-only hold.
 
     \b
     Examples:
@@ -268,8 +268,8 @@ def autostart_add(pr_ids, wait, auto, stop, session, timeout, as_json):
 
     Re-adding a target without a policy flag keeps its current policy; a
     flag replaces it.  New targets default to --wait-for-merge.  At most
-    one distinct policy flag may be given.  ``--stop-before-merge`` is a
-    deprecated alias for ``--wait-for-merge``.
+    one distinct policy flag may be given.  --stop-before-merge is a
+    deprecated alias for --wait-for-merge.
 
     \b
     Run a whole dependency chain with manual merges:

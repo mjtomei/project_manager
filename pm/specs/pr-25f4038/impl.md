@@ -96,6 +96,9 @@ and folds the legacy fields:
   `O` from `A`; fail closed and migrate it to a `wait_for_merge` target.
 - A bare-string entry in `targets` (no pm version wrote one) has an unknown
   policy; fail closed to `wait_for_merge` and report `migrated`.
+- A list entry with no recoverable id (wrong type, or a record missing
+  `pr_id`) is dropped — there is nothing to hold — but still reports
+  `migrated`, so the corrupt shape surfaces in the restart log.
 - Current-format keys without a usable `targets` list (`targets: null`, or
   `all_mode` present with no `targets` key) are corrupt/mixed-version: honour
   only a literal `all_mode: true` and never fall back to the legacy
