@@ -1301,8 +1301,8 @@ def acquire_launch_admission(name: str, action: str) -> str | None:
     def _refuse(reason: str) -> ContainerError:
         mg.record_blocked(action, reason)
         return ContainerError(
-            f"Memory governor blocked {action}: {reason}. Free memory by "
-            f"closing finished sessions (their containers then stop), or "
+            f"Memory governor blocked {action}: {reason.rstrip('.')}. Free "
+            f"memory by closing finished sessions (their containers then stop), or "
             f"raise/unset the target with 'pm container set "
             f"system-memory-target'.")
 

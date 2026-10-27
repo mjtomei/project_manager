@@ -1552,6 +1552,17 @@ class TestLaunchAdmission:
             with pytest.raises(ContainerError, match="rc=125"):
                 acquire_launch_admission("pm-t-review-pr-1", "review pr-1")
 
+    def test_single_container_refusal_has_one_period(self, _isolated_memory_governor):
+        """The E1 reason ends in a period; the refusal must not double it."""
+        from pm_core.container import acquire_launch_admission
+        self._settings(_isolated_memory_governor, system_memory_target="1g")
+        with patch("pm_core.container.container_is_running", return_value=False), \
+             patch("pm_core.memory_governor.project_memory", return_value=4422):
+            with pytest.raises(ContainerError) as exc:
+                acquire_launch_admission("pm-t-review-pr-1", "review pr-1")
+        assert "a single container cannot fit" in str(exc.value)
+        assert ".." not in str(exc.value)
+
     def test_invalid_target_refuses(self, _isolated_memory_governor):
         from pm_core.container import acquire_launch_admission
         self._settings(_isolated_memory_governor, system_memory_target="48 gigs")
