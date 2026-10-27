@@ -16,6 +16,7 @@ from pm_core import store, git_ops, graph, gh_ops
 from pm_core.backend import get_backend
 from pm_core.cli.helpers import _record_status_timestamp
 from pm_core.paths import configure_logger
+from pm_core.pr_utils import usable_prs
 
 _log = configure_logger("pm.pr_sync")
 
@@ -178,7 +179,7 @@ def sync_prs(
             error="No workdirs found. Run 'pm pr start' on a PR first."
         )
 
-    prs = data.get("prs") or []
+    prs = usable_prs(data.get("prs"))
     base_branch = data.get("project", {}).get("base_branch", "master")
     backend_name = data.get("project", {}).get("backend", "vanilla")
     backend = get_backend(data)
@@ -219,7 +220,7 @@ def sync_prs(
         merged_set = set(merged_prs)
 
         def apply(fresh_data):
-            for pr in fresh_data.get("prs") or []:
+            for pr in usable_prs(fresh_data.get("prs")):
                 if pr["id"] in merged_set:
                     pr["status"] = "merged"
                     _record_status_timestamp(pr, "merged")
@@ -295,7 +296,7 @@ def sync_from_github(
             error="GitHub sync only works with the GitHub backend"
         )
 
-    prs = data.get("prs") or []
+    prs = usable_prs(data.get("prs"))
     updated = 0
     merged_prs = []
     closed_prs = []
@@ -351,7 +352,7 @@ def sync_from_github(
 
     if save_state and updated:
         def apply(fresh_data):
-            for pr in fresh_data.get("prs") or []:
+            for pr in usable_prs(fresh_data.get("prs")):
                 new_status = status_updates.get(pr["id"])
                 if new_status and pr.get("status") != new_status:
                     pr["status"] = new_status
