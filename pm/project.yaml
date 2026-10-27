@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T07:38:24.622490+00:00'
+  updated_at: '2026-10-27T08:06:19.389859+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25656,6 +25656,24 @@ prs:
       only after that scan fails.'
     created_at: '2026-10-27T07:38:24Z'
     last_edited: '2026-10-27T07:38:24Z'
+  - id: note-02c0aac
+    text: 'Review-loop 7d34 i2 (c9a7a9c0): no functional defects found in the recovery
+      machinery — handle()/deferral bounds, the completed-verdict guard, the QA tick-loop
+      episode bookkeeping and the planner stop ordering all hold up under adversarial
+      tracing; merge coordination with pr-8efa789 is intact (recovery runs only after
+      the verdict scan, so swapping in find_verdict_turn needs no change here). Fixed:
+      QA scenario-worker exhaustion now sets state.latest_output + calls _notify()
+      like every other INPUT_REQUIRED transition (it was silent in the TUI log); refiner
+      marker pairs hoisted to _CONCRETIZE_BLOCKS; documented max_deferrals<=0 = unbounded
+      and that retry_prompt must be a single tmux line. Spec updated with the documented
+      residual: a poller that starts while its session is ALREADY idle (review-loop
+      adoption after a TUI restart) is bounded only by overall_timeout / pane death
+      — nudging the pre-existing turn was rejected because a session that already
+      started its next turn would get queued input. Full suite: 3716 passed, 1 skipped
+      (test_git_ops::test_keeps_unpushed_merge fails standalone here — git version,
+      untouched by this PR).'
+    created_at: '2026-10-27T08:06:19Z'
+    last_edited: '2026-10-27T08:06:19Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
