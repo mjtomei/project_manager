@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T20:02:24.310259+00:00'
+  updated_at: '2026-10-27T20:09:09.181957+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -10977,6 +10977,23 @@ prs:
       resume leaves its status pane at waiting_memory with no Overall. Captures /pm-captures/scenarios/52.'
     created_at: '2026-10-27T20:02:24Z'
     last_edited: '2026-10-27T20:02:24Z'
+  - id: note-54fe2ad
+    text: 'QA S55 (2026-10-27, e7ebba77, nested rootless podman, two sessions sharing
+      ~/.pm): all 5 stories held live; no code change. Race x3: impl won every time
+      this run; losers refused with own action, used+8G reserved <= T. fifo A s3,B1,B2,B3
+      (timed re-run shows impl refused "+ 8G reserved"; untimed, A 15 s retry wins
+      the raise and the reason shows growth instead); drain impl,A3,B1,B2,B3; rr impl,B1,A3,B2,B3.
+      E17 literal harness-limited (qa peak 7842MB -> P 7.7G < 8G impl); variant default-projection
+      2g admitted the 2G impl behind a non-fitting 7.7G fifo head. Lock: refused after
+      36 s, admitted 1 s after release. Dead TUI (reaped, not Z): Queue depth 6->3
+      at once, A got the slot. Observation: during a held lock the QA loop stalls
+      ~60 s per cycle (try_acquire 30 s, then keepalive waits another 30 s before
+      the status write), so the lock-busy reason reaches the pane after ~60 s. Scenario
+      fix: `pm container cleanup <id>` -> `--pr <id>`. Harness: fake-claude lives
+      in ~/.local/bin; keep it on PATH (symlink) or planner panes die 127. Captures
+      /pm-captures/scenarios/55.'
+    created_at: '2026-10-27T20:09:09Z'
+    last_edited: '2026-10-27T20:09:09Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
