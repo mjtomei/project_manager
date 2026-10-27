@@ -14370,6 +14370,20 @@ prs:
       ordinary nested podman.'
     created_at: '2026-10-27T19:09:23Z'
     last_edited: '2026-10-27T19:09:23Z'
+  - id: note-5074b3c
+    text: 'S41 refine (2026-10-27): all 3 stories verified live on 8c5fad86 with raw
+      pm-named containers in a private podman store. Fixture trap: closing a PM-launched
+      pane (kill-window/exit) writes an owner-release record that overrides any later
+      owner (reap says ''released by its run'' and removes it). Make unowned past-grace
+      fixtures with ''pm container restart --force <name>'' instead (new generation
+      makes the old release stale), then wait >120 s for the launch lease. Restarting
+      an unowned container right before a reap keeps it as ''launching (no pane yet)''.
+      The post-inventory gate anchor is the removal recheck ''podman inspect -f {{.Id}}
+      <name>''. It has a 10 s timeout, so release the gate within ~8 s or it becomes
+      ''identity unknown''. GNU ps and tmux 3.2a escape invalid bytes, so the decision
+      stays decidable rather than unknown.'
+    created_at: '2026-10-27T19:14:26Z'
+    last_edited: '2026-10-27T19:14:26Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
