@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T15:16:02.010734+00:00'
+  updated_at: '2026-10-27T15:22:46.246109+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36957,6 +36957,36 @@ prs:
       AND take the base project.active_pr. Captures: /pm-captures/scenarios/27/{story1..story6}.'
     created_at: '2026-10-27T15:16:01Z'
     last_edited: '2026-10-27T15:16:01Z'
+  - id: note-b5d36ac
+    text: 'QA scenario 30 (publication guards + recovery) PASS at 91011ee4 — all six
+      triples held live, no code change. Verified: (1) a legacy HEAD-only SIGNOFF_MERGE
+      (no integration key) is refused with the exact "predates integration-aware sign-off
+      (bound to HEAD only)" message, nothing published, record untouched; (2) an edited
+      report.html re-blocks ("report.html changed since the recorded approval"), re-recording
+      publishes the candidate; (3a) a branch moved after approval and re-checked refuses
+      "is stale (HEAD moved since)"; (3b) resetting back to the approved sha still
+      refuses "re-checked at another HEAD (H2 != H)"; (3c) a base move + re-check
+      at the same HEAD refuses "the integration candidate changed since sign-off (T2
+      != T)"; (4) a failed re-check (workdir removed) records Status: error with no
+      candidate tree and the merge refuses without blaming report.html; (5) a hand
+      merge outside pm is recovered ("already in master; recovering."), marked merged,
+      base sha unchanged, no new resolution; (6) after an applied resolution the base
+      moving again is refused twice (merge refused -> approval no longer valid) and
+      the integration record is byte-identical before/after, so the merge never re-resolves.
+      Captures: /pm-captures/scenarios/30/ (7 dirs, cast+mp4+run.log+manifest). Harness
+      facts for the next run: (a) `pm session` ATTACHES the TUI and hijacks a recorded
+      pane — skip it when $TMUX is set; `pm session tag` works without creating a
+      session, so CAP_ROOT still resolves; (b) pm is fast (~1 s for a whole story),
+      so pace recordings with a small sleep after each pm call or the mp4 flashes
+      past; (c) `pm pr add` prints two lines — parse "Created <id>:"; (d) story 6
+      fixture: `pm pr add` on the branch and on master at the same YAML position gives
+      the metadata conflict; `integrate --apply` resolves it and the evidence tags
+      review@aaaaaaa,qa@bbbbbbb are accepted by `signoff record`; (e) the ▲ marker
+      on the `pm pr show` status line means an approval exists — it disappears after
+      invalidation, so compare only the "## Integration" section when asserting the
+      merge wrote nothing.'
+    created_at: '2026-10-27T15:22:46Z'
+    last_edited: '2026-10-27T15:22:46Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
