@@ -14540,6 +14540,20 @@ prs:
       (tmux session gone); run fixtures sequentially.'
     created_at: '2026-10-27T23:56:00Z'
     last_edited: '2026-10-27T23:56:00Z'
+  - id: note-daf427c
+    text: 'S55 refine (2026-10-27, HEAD a696fa52): code unchanged on the S41 paths
+      since a44a70dc; reuse /pm-captures/scenarios/41/drivers. Late gate release:
+      the removal recheck inspect has a 10 s timeout and the S41 shim auto-forwards
+      after 8 s, so a late-release run needs a shim that holds >=12 s; outcome is
+      a FAILED row ''container identity unknown during removal re-check'', exit 1,
+      container kept with same ID (not a keep row). Story 3: a released container
+      is decided with no tmux call, so gate the reaper''s ''tmux -L default list-panes
+      -a'' (decoy server = default socket under the private TMUX_TMPDIR, always probed)
+      with hold <=4.5 s (5 s timeout); clear earlier stories'' containers first and
+      create A before decoy-owned B so the first default-server probe happens after
+      A is planned. Apply ran under LC_ALL=C; python enables UTF-8 mode under C.'
+    created_at: '2026-10-27T23:25:58Z'
+    last_edited: '2026-10-27T23:25:58Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
