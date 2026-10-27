@@ -189,6 +189,26 @@ Reference an artifact recipe from a QA scenario by its filename stem
 in the `ARTIFACT:` field (comma-separated when a scenario uses more
 than one recipe).
 
+### Shared helpers
+
+Executable helpers that ship beside the recipes are copied into the
+scenario's `qa-artifacts/` directory along with the recipe that
+references them (the QA library loader only globs `*.md`, so a helper
+is not listed by `pm qa list`). Currently the only one is
+`wait-for-job.sh`, used by the recording recipes for the agg→ffmpeg
+render step.
+
+Use `wait-for-job.sh` for any renderer or long-running capture step.
+It starts the job as one background process, waits on that job's
+captured PID, bounds the wait, returns the real exit status, and
+requires a fresh (rewritten by this run), non-empty, optionally
+validated artifact before reporting success. It deliberately does not
+poll process names: `until ! pgrep -f "<renderer>"` matches the
+waiting shell's own command line and never ends, and a bare `wait`
+blocks on every child, including a deliberately persistent observer.
+A leftover artifact from an earlier run, or a killed/timed-out wait,
+is not evidence that a capture succeeded.
+
 A minimal example:
 
 ```text

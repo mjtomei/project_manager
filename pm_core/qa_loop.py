@@ -1964,6 +1964,10 @@ def _install_artifact_files(pm_root: Path, scenario: QAScenario,
     execution time, so the scenario prompt surfaces paths rather than
     bodies.
 
+    Executable helpers that ship beside the recipes (e.g.
+    ``wait-for-job.sh``) are copied too, so a recipe can invoke the
+    helper in its own directory without assuming the repo is the cwd.
+
     Rewrites ``scenario.artifact_paths`` to absolute paths the agent
     sees (``{scratch_dir}/qa-artifacts/{filename}``). Recipes that
     can't be located on disk are dropped from the list with a warning.
@@ -1985,6 +1989,16 @@ def _install_artifact_files(pm_root: Path, scenario: QAScenario,
         shutil.copy2(src, dest)
         new_paths.append(f"{scratch_dir}/qa-artifacts/{src.name}")
         _log.info("Copied artifact recipe %s -> %s", src, dest)
+    # Ship sibling shell helpers (wait-for-job.sh) with the recipes that
+    # call them. Non-markdown files are invisible to the QA library loader,
+    # so this is the only place a recipe's helper reaches the worker.
+    artifacts_src = pm_root / "qa" / "artifacts"
+    if artifacts_src.is_dir():
+        for helper in sorted(artifacts_src.glob("*.sh")):
+            dest = dest_dir / helper.name
+            shutil.copy2(helper, dest)
+            dest.chmod(dest.stat().st_mode | 0o111)
+            _log.info("Copied artifact helper %s -> %s", helper, dest)
     scenario.artifact_paths = new_paths
 
 
@@ -3180,6 +3194,11 @@ recipe calls for** — not a weaker substitute. In particular, a recipe that
 calls for a replayable recording (e.g. an asciinema `.cast`) is **not**
 satisfied by a plain-text scrollback dump alone; a static `.log` or
 `.txt` capture does not stand in for the required recording.
+
+Presence alone is not proof. The artifact must have been produced by **this
+run** — freshly written, not a leftover from an earlier run — be non-empty,
+and be valid where a validator exists (e.g. `ffprobe` for a video). A killed
+or timed-out wait and a stale file are not a successful capture.
 
 A missing or downgraded artifact is acceptable **only** if the transcript
 states a specific, valid reason it could not be produced — for example the

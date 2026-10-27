@@ -23,7 +23,9 @@ substitutes the actual captures directory for `<capture-dir>`):
   via a plain `<video controls>` element — native pause / scrub, no
   player library, works offline. H.264/mp4 plays everywhere including
   iOS Safari (VP8/VP9 webm does not decode on iOS). The `.cast` stays
-  as the small, exact-replay/grep source.
+  as the small, exact-replay/grep source. It counts as produced only
+  when this run wrote it and `ffprobe` decodes it as H.264; a leftover
+  file from an earlier run is not evidence.
 - `manifest.md` — frontmatter + prose: workdir, the exact command(s)
   recorded, what the recording demonstrates, pre/post-fix state if
   relevant. Include a `## Files` section listing every non-default
@@ -100,25 +102,55 @@ renders the cast to frames (GIF), then `ffmpeg` encodes H.264 — there is
 no single cast→video tool worth using (the dedicated ones are orders of
 magnitude slower and fragile). The intermediate GIF is discarded.
 
+Run the render through the shared `wait-for-job.sh` helper. It starts
+the render as one background job, waits on that job's captured PID
+(never a process-name poll), bounds the run, checks the exit status, and
+refuses a stale or invalid artifact:
+
 ```
+# The helper ships beside this recipe: pm/qa/artifacts/ in the repo, and
+# the qa-artifacts/ directory the QA prompt names. Set RECIPE_DIR to the
+# directory holding the recipe you are reading.
+RECIPE_DIR="${RECIPE_DIR:-pm/qa/artifacts}"
+JOB_WAIT="$RECIPE_DIR/wait-for-job.sh"
+
 cast=<capture-dir>/<short-name>/recording.cast
-agg --idle-time-limit 2 "$cast" "$cast.gif"
-# 2x nearest-neighbor upscale for crisp text — but only while the result
-# stays within iOS hardware-decode limits (4096x2304, H.264 level 5.1).
-# A terminal large enough to blow that budget is already crisp at native
-# size; then just round dimensions down to even (H.264 requires even).
-vf="scale=trunc(iw/2)*2:trunc(ih/2)*2"
-IFS=, read -r gw gh < <(ffprobe -v error -select_streams v:0 \
-    -show_entries stream=width,height -of csv=p=0 "$cast.gif")
-if [ -n "$gw" ] && [ -n "$gh" ] && \
-   [ "$((gw * 2))" -le 4096 ] && [ "$((gh * 2))" -le 2304 ]; then
-    vf="scale=iw*2:ih*2:flags=neighbor"
-fi
-ffmpeg -y -i "$cast.gif" -vf "$vf" \
-    -c:v libx264 -profile:v high -level:v 5.1 -pix_fmt yuv420p -crf 18 \
-    -movflags +faststart "${cast%.cast}.mp4"
-rm -f "$cast.gif"
+mp4="${cast%.cast}.mp4"
+export cast mp4
+
+"$JOB_WAIT" --timeout 1800 --artifact "$mp4" \
+    --validate 'ffprobe -v error -select_streams v:0 \
+        -show_entries stream=codec_name -of csv=p=0 "$ARTIFACT" \
+        | grep -qx h264' \
+    -c '
+      set -e
+      agg --idle-time-limit 2 "$cast" "$cast.gif"
+      # 2x nearest-neighbor upscale for crisp text — but only while the result
+      # stays within iOS hardware-decode limits (4096x2304, H.264 level 5.1).
+      # A terminal large enough to blow that budget is already crisp at native
+      # size; then just round dimensions down to even (H.264 requires even).
+      vf="scale=trunc(iw/2)*2:trunc(ih/2)*2"
+      IFS=, read -r gw gh < <(ffprobe -v error -select_streams v:0 \
+          -show_entries stream=width,height -of csv=p=0 "$cast.gif")
+      if [ -n "$gw" ] && [ -n "$gh" ] && \
+         [ "$((gw * 2))" -le 4096 ] && [ "$((gh * 2))" -le 2304 ]; then
+          vf="scale=iw*2:ih*2:flags=neighbor"
+      fi
+      ffmpeg -y -i "$cast.gif" -vf "$vf" \
+          -c:v libx264 -profile:v high -level:v 5.1 -pix_fmt yuv420p -crf 18 \
+          -movflags +faststart "$mp4"
+      rm -f "$cast.gif"
+    '
 ```
+
+The helper exits non-zero and names the failure when `agg`/`ffmpeg` fail,
+the job exceeds the bound, or `recording.mp4` is missing, empty, stale
+(not rewritten by this run), or not H.264. Do not wrap the render in
+`until ! pgrep -f ...` — the pattern matches the waiting shell's own
+command line, so the loop never ends — and do not use a bare `wait`,
+which blocks on every child, including any long-lived observer/reaper
+you started. A leftover `.mp4` from a previous run is not a completed
+render.
 
 Notes:
 - `--idle-time-limit 2` caps the long pauses a terminal session

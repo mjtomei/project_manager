@@ -56,6 +56,40 @@ If you don't, file a separate bug PR so it doesn't get lost:
 """
 
 
+def _background_jobs_block() -> str:
+    """Shared guidance for waiting on background jobs and test runs.
+
+    Injected into impl, review (including the review loop), and QA scenario
+    prompts.  Both reproductions of pr-b19db15 were improvised worker
+    commands: ``until ! pgrep -f "<renderer>"`` matched the waiting shell
+    itself, and a bare ``wait`` blocked on a deliberately persistent reaper.
+    """
+    return """
+## Background Jobs and Test Runs
+
+When a command outlives one shell step (a renderer, a test suite, a build):
+
+- Start it and capture its handle: `cmd & pid=$!`. Wait on that exact PID
+  (`wait "$pid"`) — never bare `wait`, which blocks on every child including
+  a deliberately persistent observer/reaper, and never `pgrep -f`/`pkill -f`
+  on a process name, which also matches the waiting shell's own command line
+  so the wait never ends.
+- Bound the wait (e.g. `timeout`) and treat expiry as failure. Reap the PID
+  and use its exit status; a finished-but-unreaped (zombie) PID is not live
+  work, and killing a wait is never a passing result.
+- Preserve pipeline status: run pipelines under `set -o pipefail` (or check
+  `PIPESTATUS`) so `pytest ... | tail` cannot report success when the tests
+  failed.
+- Declare success only on exit status 0 **and** a fresh expected artifact —
+  created or rewritten by this run, non-empty, and valid where a validator
+  exists (e.g. `ffprobe` for video). A leftover file alone is not evidence.
+
+For renderer jobs, use the shared `pm/qa/artifacts/wait-for-job.sh` helper
+(`--timeout`, `--artifact`, optional `--validate`); the recording recipes show
+it in use.
+"""
+
+
 def _pr_notes_handoff_block(pr_id: str | None = None) -> str:
     """Ungated guidance: use pm PR notes for cross-session/cross-PR handoff.
 
@@ -411,6 +445,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 - This workdir is a clone managed by pm. The base pm state (project.yaml, PR status) lives in a separate directory and is not automatically synced with this clone. Commands like `pm pr start` and `pm pr review` should be run from the base directory, not here — your session for {pr_id} is already running.
 {_remote_sync_tip(data, branch)}
 {_base_branch_sync_tip(data, base_branch)}
+{_background_jobs_block()}
 
 ## Workflow
 {instructions}
@@ -544,6 +579,7 @@ with spec generation enabled.
     tail = ""
     if _is_bug_pr(pr):
         tail += _bug_fix_review_block(pr)
+    tail += "\n" + _background_jobs_block()
     tail += "\n" + _OUT_OF_SCOPE_BUGS_BLOCK
     tail += "\n" + _pr_notes_handoff_block(pr_id)
     tail += review_specific_block
@@ -2587,6 +2623,12 @@ named subdirectory per capture). Captures are how reviewers confirm
 what the test demonstrated, so produce one even if the scenario
 itself passes.
 
+Recipes may ship helper scripts (e.g. `wait-for-job.sh`) in the same
+directory as the recipe. When a recipe refers to `RECIPE_DIR`, set it
+to the directory holding that recipe (the path printed above); the
+default `pm/qa/artifacts` only resolves when the repo root is the
+current directory.
+
 Aim for the capture to look as close as possible to a user actually
 exercising the feature. A couple of things to watch out for: status
 strings that read like real results but don't depend on one (printed
@@ -2736,7 +2778,7 @@ drive each triple in turn. For each:
 If you can't drive the user surface in this environment, report
 INPUT_REQUIRED with a specific blocker instead of substituting a
 different methodology.
-{instruction_block}{artifact_block}
+{instruction_block}{artifact_block}{_background_jobs_block()}
 ## Execution
 
 {execution_block}
