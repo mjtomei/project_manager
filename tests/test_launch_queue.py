@@ -21,6 +21,10 @@ from pm_core.launch_queue import (
     keepalive_during,
     try_acquire_detailed,
     adopt_run,
+    awaiting_adoption,
+    cancel_adoption,
+    dequeue_run,
+    expect_adoption,
     GovernorLockTimeout,
     _INSTANCE,
     _WAITING_TTL,
@@ -711,6 +715,60 @@ class TestOwnership:
             entries = _load_queue()["entries"]
         assert entries[0]["pid"] == os.getppid()
         assert entries[1]["instance"] == "pre-restart"  # not cleaned yet
+
+    def test_expected_adoption_survives_another_runs_clean(self, tmp_path):
+        """A resumed run whose adoption met a busy lock keeps its
+        pre-restart entries when another resumed run's loop takes the lock
+        first and cleans (QA S52); it then adopts them with their ids."""
+        with _patch_home(tmp_path):
+            enqueue("qa_scenario", qa_run_id="a", keys=["a:s1", "a:s2"])
+            enqueue("qa_scenario", qa_run_id="b", keys=["b:s1", "b:s2"])
+            q = _load_queue()
+            for e in q["entries"]:
+                e["instance"] = "pre-restart"
+            _save_queue(q)
+            before = {e["key"]: e["id"] for e in q["entries"]}
+            expect_adoption(["a", "b"])
+            # Run a adopted; run b's adoption timed out.  a's loop cleans.
+            adopt_run("a", ["a:s1", "a:s2"])
+            assert not awaiting_adoption("a")
+            enqueue("qa_scenario", qa_run_id="a", keys=["a:s1"])
+            assert {e["key"] for e in _load_queue()["entries"]} == set(before)
+            assert awaiting_adoption("b")
+            b = adopt_run("b", ["b:s1", "b:s2"])
+            assert not awaiting_adoption("b")
+        assert b == {"b:s1": before["b:s1"], "b:s2": before["b:s2"]}
+
+    @pytest.mark.parametrize("release", ["cancel", "dequeue_run", "adopt"])
+    def test_pre_restart_entries_stale_once_no_adoption_expected(
+            self, tmp_path, release):
+        """A run that will not resume (cancelled), ended (dequeue_run), or
+        adopted only some keys gives the rest up to the next clean."""
+        with _patch_home(tmp_path):
+            enqueue("qa_scenario", qa_run_id="a", keys=["a:s1", "a:s2"])
+            q = _load_queue()
+            for e in q["entries"]:
+                e["instance"] = "pre-restart"
+            _save_queue(q)
+            expect_adoption(["a"])
+            if release == "cancel":
+                cancel_adoption(["a"])
+            elif release == "dequeue_run":
+                assert dequeue_run("a")
+            else:
+                adopt_run("a", ["a:s1"])
+            enqueue("impl", keys=["pm-x-impl"])
+            keys = [e["key"] for e in _load_queue()["entries"]]
+        assert not awaiting_adoption("a")
+        assert keys == (["a:s1", "pm-x-impl"] if release == "adopt"
+                        else ["pm-x-impl"])
+
+    def test_expected_adoption_still_expires_by_ttl(self):
+        now = time.time()
+        expect_adoption(["a"])
+        e = self._entry(pid=os.getpid(), instance="pre-restart", qa_run_id="a",
+                        heartbeat_at=now - _WAITING_TTL - 1)
+        assert _clean_stale([e], now) == []
 
     def test_keepalive_during_renews_while_blocked(self, tmp_path):
         """A QA launch blocks on its refiners for minutes; the scenarios

@@ -524,6 +524,11 @@ def _resume_incomplete_qa(app) -> None:
         # second loop on the same PR and stop_qa report "No QA running".
         for state, _pr, _cb in to_resume:
             state.running = True
+        # Until each run adopts its entries, no clean in this process may
+        # drop them, even if another run's loop gets the lock first.
+        from pm_core import launch_queue
+        run_ids = [qa_loop._qa_run_key(state) for state, _p, _c in to_resume]
+        launch_queue.expect_adoption(run_ids)
         # Adoption takes the governor lock, which another pm process may
         # hold for seconds while it measures runtime stats: not on the UI
         # thread.
@@ -533,9 +538,10 @@ def _resume_incomplete_qa(app) -> None:
         except Exception:
             # Otherwise the runs would stay "running" with no loop behind
             # them, blocking t / zz t until the next TUI restart.  Nothing
-            # was adopted yet, and the pre-restart entries are already stale
-            # to the next clean, so no release (and no lock on this thread).
+            # was adopted yet: give the pre-restart entries up to the next
+            # clean rather than release them (no lock on this thread).
             _log.exception("Could not start QA resume thread")
+            launch_queue.cancel_adoption(run_ids)
             for state, _pr, _cb in to_resume:
                 state.running = False
                 state.latest_verdict = "ERROR"

@@ -52,7 +52,8 @@ def _isolated_memory_governor(tmp_path_factory, monkeypatch):
     for mod in (launch_queue, memory_governor):
         monkeypatch.setattr(mod, "pm_home", lambda: home)
         monkeypatch.setattr(mod, "get_global_setting_value", _setting)
-    # Cached status text is process-global; start each test clean.
+    # Process-global state; start each test clean.
+    monkeypatch.setattr(launch_queue, "_awaiting_adoption", set())
     monkeypatch.setattr(memory_governor, "_status_text", "")
     monkeypatch.setattr(memory_governor, "_status_at", 0.0)
     monkeypatch.setattr(memory_governor, "_status_refreshing", False)

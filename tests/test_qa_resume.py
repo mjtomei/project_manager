@@ -672,6 +672,30 @@ def test_resume_whose_adopt_thread_cannot_start_reports_error(tmp_path):
     assert not state.running
     assert state.latest_verdict == "ERROR"
     resume_bg.assert_not_called()
+    # Not resuming: its pre-restart entries go to the next clean.
+    from pm_core import launch_queue as lq
+    assert not lq.awaiting_adoption(qa_loop._qa_run_key(state))
+
+
+def test_resume_whose_adoption_times_out_keeps_expecting_it(tmp_path):
+    """QA S52: adoption met a held lock.  The run keeps expecting adoption
+    when its loop starts, so no clean drops its pre-restart entries before
+    the loop retries."""
+    from pm_core import launch_queue as lq
+
+    app = _make_app(tmp_path)
+    _seed_run(tmp_path)
+    expecting = []
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "adopt_queue_entries",
+                      return_value=({}, set())), \
+         patch.object(qa_loop, "resume_qa_background",
+                      side_effect=lambda state, *a: expecting.append(
+                          lq.awaiting_adoption(qa_loop._qa_run_key(state)))):
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    assert expecting == [True]
 
 
 @pytest.mark.parametrize("failure", ["no_session", "thread_crash"])

@@ -70,7 +70,16 @@ meanwhile (review 05f6 i1, i2).  A resume that ends before its poll
 loop (no pm session, missing workdir, thread crash) releases the
 adopted entries itself (review 05f6 i3); if the adoption thread cannot
 start at all, the runs end ERROR instead of staying "running" with no
-loop (review 05f6 i4).  impl/review/signoff/QA all walk the
+loop (review 05f6 i4).  Adoption can time out while another process
+holds the lock (QA S52: a 180 s hold).  So the TUI marks the resumed runs as
+expecting adoption (`launch_queue.expect_adoption`) before the adoption
+thread starts.  Until a run adopts, or `dequeue_run` / `cancel_adoption`
+releases it, this process's cleans keep its pre-restart entries; the
+waiting/acquired TTLs still apply, so a hold past ~300 s still costs them.
+A resumed loop that still expects adoption retries it for all its queued
+scenarios before its first enqueue (review 0149 i2).  An admission attempt
+also counts as the waiting entries' keepalive, so a busy lock costs a QA
+cycle one 30 s wait, not two (QA S55).  impl/review/signoff/QA all walk the
 same queue under the same lock (`enqueue_and_try_acquire` uses the full
 policy walk).
 

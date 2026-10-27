@@ -408,6 +408,47 @@ class TestQueuedAdmission:
                        (e["id"], e["enqueued_at"]) for e in _queue_entries()))
         assert (old, 1.0) in ids_seen
 
+    def test_busy_lock_costs_one_wait_per_cycle(self, tmp_path):
+        """QA S55: a lock-busy admission attempt already waited the lock
+        timeout; a keepalive straight after would wait it again before the
+        status pane learns why the scenarios wait."""
+        s2, s3 = (_scenario(i, launched=False) for i in (2, 3))
+        state = _state([s2, s3])
+        [e2, e3] = lq.enqueue("qa_scenario", qa_run_id="pr-1-loop",
+                              keys=["pr-1-loop:s2", "pr-1-loop:s3"])
+        busy = lq.AcquireResult(reason="governor lock busy")
+        with _governor(used_g=44), \
+             patch("pm_core.launch_queue.try_acquire_detailed",
+                   return_value=busy) as acquire, \
+             patch("pm_core.launch_queue.keepalive") as keepalive:
+            _drive(tmp_path, state, queued=[s2, s3],
+                   entry_id_map={2: e2, 3: e3}, pending_entry_ids={e2, e3},
+                   max_sleeps=2)
+        acquire.assert_called()
+        keepalive.assert_not_called()
+
+    def test_resumed_run_adopts_whole_line_after_busy_lock(self, tmp_path):
+        """QA S52: the TUI's adoption timed out on a held lock, so the
+        resumed loop adopts every queued scenario's pre-restart entry, not
+        just its head (the rest would be kept only until the first clean
+        after the run stops expecting adoption)."""
+        queued = [_scenario(i, launched=False) for i in (2, 3)]
+        state = _state(list(queued))
+        old = lq.enqueue("qa_scenario", qa_run_id="pr-1-loop",
+                         keys=["pr-1-loop:s2", "pr-1-loop:s3"])
+        q = lq._load_queue()
+        for e in q["entries"]:
+            e["instance"] = "pre-restart"
+        lq._save_queue(q)
+        lq.expect_adoption(["pr-1-loop"])
+        seen = []
+        with _governor(used_g=44):
+            _drive(tmp_path, state, queued=queued, max_sleeps=2,
+                   on_sleep=lambda n: seen.append(
+                       sorted((e["id"], e["instance"])
+                              for e in _queue_entries())))
+        assert seen[0] == sorted((eid, lq._INSTANCE) for eid in old)
+
 
 class TestKeepaliveDuringLaunch:
     def test_queued_launch_keeps_waiting_entries_alive(self, tmp_path):

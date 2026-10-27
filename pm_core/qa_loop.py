@@ -2793,11 +2793,20 @@ def _poll_tmux_verdicts(
 
     def _ensure_queue_entries(scenarios: list[QAScenario]) -> None:
         """Give *scenarios* launch-queue entries (idempotent per scenario)."""
+        from pm_core import container as container_mod
+        from pm_core.launch_queue import (awaiting_adoption, enqueue,
+                                          GovernorLockTimeout)
+        if awaiting_adoption(_qa_run_id):
+            # A resumed run whose adoption met a busy lock: take back every
+            # queued scenario's pre-restart entry (and place in line) now.
+            adopted, adopted_ids = adopt_queue_entries(
+                state, {sc.index for sc in _launch_queue}
+                - set(_entry_id_map))
+            _entry_id_map.update(adopted)
+            _pending_entry_ids.update(adopted_ids)
         missing = [sc for sc in scenarios if sc.index not in _entry_id_map]
         if not missing:
             return
-        from pm_core import container as container_mod
-        from pm_core.launch_queue import enqueue, GovernorLockTimeout
         try:
             ids = enqueue(
                 "qa_scenario", qa_run_id=_qa_run_id,
@@ -2815,7 +2824,7 @@ def _poll_tmux_verdicts(
 
     def _admit_queued_head() -> tuple[bool, str]:
         """Ask the memory governor to admit the head of ``_launch_queue``."""
-        nonlocal _last_mem_attempt
+        nonlocal _last_mem_attempt, _last_keepalive
         from pm_core import memory_governor as _mg
         try:
             active = _mg.governor_active()
@@ -2831,9 +2840,13 @@ def _poll_tmux_verdicts(
         _ensure_queue_entries([head])
         eid = _entry_id_map.get(head.index)
         if eid is None:
+            _last_keepalive = time.monotonic()  # the lock is busy
             return False, "waiting to join the launch queue (governor lock busy)"
         from pm_core.launch_queue import try_acquire_detailed
         result = try_acquire_detailed([eid], keepalive=list(_pending_entry_ids))
+        # That renewed every waiting entry, or met a busy lock the separate
+        # keepalive would wait out again before the status write (QA S55).
+        _last_keepalive = time.monotonic()
         if eid in result.granted:
             _pending_entry_ids.discard(eid)
             return True, ""
