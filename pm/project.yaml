@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T07:14:36.812234+00:00'
+  updated_at: '2026-10-27T15:50:20.079908+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38215,6 +38215,27 @@ prs:
       (qa-run-bg outlives pm session kill and recreates containers).'
     created_at: '2026-10-27T07:14:36Z'
     last_edited: '2026-10-27T07:14:36Z'
+  - id: note-f133f08
+    text: 'QA S93 (2026-10-27, host, all fake-claude, two clones sharing ~/.pm; captures
+      /pm-captures/scenarios/93, REPORT.md): CODE CHANGE ad5eed13 needs normal re-review.
+      Story 2 reproduced the af0d5519-class leak through the PR-keyed ~/.pm/runtime/<pr>.json
+      on HEAD a16a87af: B qa-run-bg wrote running over A INPUT_REQUIRED record, so
+      `pm autostart add P` in A relaunched QA (Auto-start: QA, killed A qa windows,
+      extra note) and A picker showed [working]; B done/PASS then made A hand P to
+      sign-off ("already ended PASS", "Auto-start: P -> sign-off", P sign_off in A)
+      and the picker showed [done PASS]. Fix ad5eed13: runtime dir is per pm session
+      (~/.pm/runtime/pm-<tag>/, resolved once per process: tmux pane/popup session,
+      else cwd clone session; shared path outside a session; old shared records not
+      read after upgrade). Held live post-fix (p3): A logged only "already ended INPUT_REQUIRED",
+      picker [done INPUT_REQUIRED], P stays qa. Story 1 (hold + closed qa window +
+      B PASS mid-re-run) PASS pre- and post-fix: 105 A ticks running: qa until own
+      PASS, one clear ~1 s after release, one note. Story 3 (both TUIs restart mid-run)
+      PASS. Story 4 PASS on clear/relaunch; observation: z t / 2nd zz t over an existing
+      qa-<pr> window leave a TUI-window client in place (select only on first-time
+      creation); same live on control 450a6362 and in 2620c116 code, matches #243
+      spec text, so a spec decision, not changed. Full suite on fix 4369 passed.'
+    created_at: '2026-10-27T15:50:20Z'
+    last_edited: '2026-10-27T15:50:20Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
