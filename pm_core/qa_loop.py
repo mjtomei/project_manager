@@ -739,6 +739,15 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
         _log.warning("QA finalize: %s", e)
         return None
     except VerdictRecoveryExhausted as e:
+        if stop_check is not None and stop_check():
+            # A stop that landed while recovery was deciding is teardown,
+            # not a missing outcome: `handle` checks its deferral bound
+            # before its own ``stop_check``, so a stopped run could
+            # otherwise surface "[finalize: NO_VERDICT]" — a failure state
+            # for a run the user stopped.  Mirrors the ``not content`` path
+            # below (the poller returns None when stop_check fires).
+            _log.info("QA finalize: stopped during recovery")
+            return None
         # The finalizer idled without FINALIZE_DONE/BLOCKED and bounded
         # recovery is exhausted.  Surface the explicit terminal verdict
         # (rendered as "[finalize: NO_VERDICT]") instead of silently
@@ -1709,9 +1718,9 @@ _RECOVERY_EXHAUSTED_PREFIX = "no refiner outcome: "
 
 def _concretize_failure_label(reason: str) -> str:
     """Verdict reason for a scenario whose concretizer did not produce steps."""
-    if reason.startswith(_TRUST_BLOCKED_PREFIX):
-        return reason
-    if reason.startswith(_RECOVERY_EXHAUSTED_PREFIX):
+    # Trust-prompt blocks and recovery exhaustion are not refiner rejections:
+    # they name a distinct failure, so pass them through unchanged.
+    if reason.startswith((_TRUST_BLOCKED_PREFIX, _RECOVERY_EXHAUSTED_PREFIX)):
         return reason
     return f"refiner rejected: {reason}"
 
@@ -3187,11 +3196,21 @@ def _poll_tmux_verdicts(
                         # a verdict: never persist a spurious
                         # INPUT_REQUIRED reason into the resume snapshot.
                         continue
-                    _recovery_exhausted(scenario, e)
-                    pending.discard(scenario.index)
-                    verdicts_changed = True
-                    _launch_next_queued()
-                    continue
+                    # The deadline can expire on the very tick the verdict
+                    # lands: the scan above runs at the idle event, which
+                    # races the transcript write.  Re-scan before retiring so
+                    # a completed outcome is never treated as absent; a
+                    # non-None verdict falls through to the recording block
+                    # below.
+                    verdict = extract_verdict_from_transcript(
+                        scenario.transcript_path, ALL_VERDICTS,
+                    )
+                    if verdict is None:
+                        _recovery_exhausted(scenario, e)
+                        pending.discard(scenario.index)
+                        verdicts_changed = True
+                        _launch_next_queued()
+                        continue
 
             # Bounded missing-output recovery: an idle turn without a
             # verdict means the worker ended a turn without its outcome.
@@ -3246,35 +3265,45 @@ def _poll_tmux_verdicts(
                             # verdict: leave the worker pending instead of
                             # recording an INPUT_REQUIRED reason.
                             continue
-                        _recovery_exhausted(scenario, e)
-                        pending.discard(scenario.index)
-                        verdicts_changed = True
-                        _launch_next_queued()
-                        continue
-                    if result.status == "deferred":
-                        # A newer turn landed while we settled: give *it*
-                        # the settle window rather than nudging straight
-                        # away.  Repeated refreshes cannot defer forever —
-                        # MissingOutputRecovery bounds them with
-                        # ``max_deferrals`` (no_progress exhaustion).  Record
-                        # the deferred event (not the one this tick started
-                        # from) as accounted for, so the next comparison is
-                        # against the turn we actually decided about.
-                        _no_verdict_since[scenario.index] = time.time()
-                        _recovery_ev_ts[scenario.index] = float(
-                            (result.event or {}).get("timestamp")
-                            or ev_ts or last_ts)
-                    elif result.status == "completed":
-                        # The verdict landed while we settled: record it
-                        # below instead of nudging a completed worker.
+                        # ``no_progress`` is raised from the settle branch
+                        # *before* ``handle``'s own ``verdict_check`` runs,
+                        # so an outcome that landed during the settle could
+                        # still be in the transcript.  Re-scan before
+                        # retiring (same guard as the ``no_response`` path).
                         verdict = extract_verdict_from_transcript(
                             scenario.transcript_path, ALL_VERDICTS,
                         )
+                        if verdict is None:
+                            _recovery_exhausted(scenario, e)
+                            pending.discard(scenario.index)
+                            verdicts_changed = True
+                            _launch_next_queued()
+                            continue
                     else:
-                        # A nudge was sent — or a stop was requested during
-                        # teardown — so the next no-verdict turn starts a
-                        # fresh settle window.
-                        _close_episode(scenario.index)
+                        if result.status == "deferred":
+                            # A newer turn landed while we settled: give *it*
+                            # the settle window rather than nudging straight
+                            # away.  Repeated refreshes cannot defer forever —
+                            # MissingOutputRecovery bounds them with
+                            # ``max_deferrals`` (no_progress exhaustion).  Record
+                            # the deferred event (not the one this tick started
+                            # from) as accounted for, so the next comparison is
+                            # against the turn we actually decided about.
+                            _no_verdict_since[scenario.index] = time.time()
+                            _recovery_ev_ts[scenario.index] = float(
+                                (result.event or {}).get("timestamp")
+                                or ev_ts or last_ts)
+                        elif result.status == "completed":
+                            # The verdict landed while we settled: record it
+                            # below instead of nudging a completed worker.
+                            verdict = extract_verdict_from_transcript(
+                                scenario.transcript_path, ALL_VERDICTS,
+                            )
+                        else:
+                            # A nudge was sent — or a stop was requested during
+                            # teardown — so the next no-verdict turn starts a
+                            # fresh settle window.
+                            _close_episode(scenario.index)
 
             if verdict:
                 _drop_recovery(scenario.index)

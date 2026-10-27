@@ -305,6 +305,41 @@ class TestMissingOutputRecovery:
         # The session was never nudged — it is alive but not making progress.
         assert sent == []
 
+    def test_deferral_budget_is_consecutive_not_lifetime(self, tmp_path):
+        """A nudge restarts the deferral budget.
+
+        ``max_deferrals`` bounds *consecutive* hook refreshes of one turn.
+        Accumulating the count over the tracker's lifetime would retire a
+        session that answered every earlier nudge with ``no_progress`` for a
+        handful of refreshes spread across many turns.
+        """
+        rec, sent = _recovery(tmp_path, max_attempts=3, settle=5.0,
+                              max_deferrals=2)
+        transcript = _transcript_with_assistant(tmp_path, "still thinking")
+
+        def always_newer(_timeout, ts):
+            return {"event_type": "idle_prompt", "timestamp": ts + 1}
+
+        assert rec.handle(str(transcript), ev_ts=1.0,
+                          wait_for_newer=always_newer).status == "deferred"
+        assert rec.handle(str(transcript), ev_ts=2.0,
+                          wait_for_newer=always_newer).status == "deferred"
+        assert rec.deferrals == 2
+
+        # A settle window with no newer turn nudges the session ...
+        assert rec.handle(str(transcript), ev_ts=3.0,
+                          wait_for_newer=lambda t, ts: None).status == "nudged"
+        assert rec.attempts == 1
+        assert rec.deferrals == 0, "a nudge must start a fresh deferral budget"
+
+        # ... so later refreshes are tolerated again instead of exhausting
+        # with no_progress on the very next one.
+        assert rec.handle(str(transcript), ev_ts=4.0,
+                          wait_for_newer=always_newer).status == "deferred"
+        assert rec.handle(str(transcript), ev_ts=5.0,
+                          wait_for_newer=always_newer).status == "deferred"
+        assert len(sent) == 1
+
     def test_newer_non_idle_event_is_not_a_new_turn(
             self, tmp_path, monkeypatch):
         """A Stop/permission write must not look like a newer turn.
@@ -866,6 +901,47 @@ class TestQARecoveryWiring:
 
         assert verdict == VERDICT_NO_VERDICT
 
+    def test_finalize_stop_during_recovery_is_not_no_verdict(self, tmp_path):
+        """A stop that lands while recovery decides is teardown, not failure.
+
+        ``handle`` checks its deferral bound before its own ``stop_check``,
+        so a user-stopped run could surface ``[finalize: NO_VERDICT]`` — a
+        failure state — instead of the clean unfinalized result.
+        """
+        from pm_core import qa_loop
+        from pm_core.qa_loop import QALoopState
+
+        state = QALoopState(pr_id="pr-001")
+        state.scenario_verdicts = {1: "PASS"}
+        state.verified_scenarios = {1}
+        scenario = qa_loop.QAScenario(index=1, title="S", focus="f",
+                                      worktree_path=str(tmp_path))
+        state.scenarios = [scenario]
+
+        def stop_mid_recovery(*_a, **_kw):
+            # Simulates the TUI thread setting stop_requested while
+            # ``handle`` was deciding, then the exhaustion it surfaces.
+            state.stop_requested = True
+            raise VerdictRecoveryExhausted("no finalize outcome", attempts=3)
+
+        with patch("pm_core.tmux.find_window_by_name",
+                   return_value={"index": "0"}), \
+             patch("pm_core.tmux.get_pane_indices",
+                   return_value=[("%1", 0)]), \
+             patch("pm_core.tmux.split_pane_at", return_value="%2"), \
+             patch("pm_core.pane_layout.register_and_rebalance"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="cmd"), \
+             patch("pm_core.qa_loop.poll_for_verdict",
+                   side_effect=stop_mid_recovery):
+            verdict = qa_loop._run_qa_finalize_pane(
+                state, {"branch": "b", "title": "t"},
+                "pm-test", "qa-window", str(tmp_path),
+                stop_check=lambda: state.stop_requested,
+            )
+
+        assert verdict is None
+
     def test_verifier_exhaustion_returns_failure_reason(self, tmp_path):
         """A verifier that never emits VERIFIED/FLAGGED blocks finalize."""
         from pm_core import qa_loop
@@ -1294,6 +1370,90 @@ class TestQARecoveryWiring:
             )
 
         assert nudged["sent"], "worker was never nudged"
+        assert state.scenario_verdicts[1] == "PASS"
+        assert 1 not in state.scenario_verdict_reasons
+
+    def test_verdict_landing_after_the_response_timeout_scan_is_recorded(
+            self, tmp_path, monkeypatch):
+        """A verdict written just after the deadline tick's scan still wins.
+
+        The scan runs at the idle hook, which can precede the transcript
+        write; the response deadline can expire on that very tick.  Retiring
+        there would report ``no_response`` for a worker whose outcome is
+        already on disk (the "completed result treated as absent" failure),
+        so exhaustion re-scans before marking the scenario INPUT_REQUIRED.
+        """
+        from pm_core import qa_loop
+        from pm_core.qa_loop import QALoopState, QAScenario
+
+        scenario = QAScenario(index=1, title="S", focus="f")
+        scenario.window_name = "qa-s1"
+        scenario.session_id = "sid-s1"
+        scenario.pane_id = "%1"
+        scenario.transcript_path = str(
+            _transcript_with_assistant(tmp_path, "still testing"))
+
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+        state.qa_workdir = None
+
+        clock = {"t": 1000.0}
+
+        def fake_time():
+            clock["t"] += 1.0
+            return clock["t"]
+
+        nudged = {"sent": False}
+        post_nudge_scans = {"n": 0}
+
+        def fake_send(_pane, _msg):
+            nudged["sent"] = True
+
+        def fake_read_event(_sid):
+            # One idle before the nudge, then a fresh one for the answer.
+            return {"event_type": "idle_prompt",
+                    "timestamp": 200.0 if nudged["sent"] else 100.0,
+                    "session_id": "sid-s1"}
+
+        def fake_extract(*_a, **_kw):
+            if not nudged["sent"]:
+                return None
+            post_nudge_scans["n"] += 1
+            # The scan at the answer's idle event races the transcript
+            # write; the re-scan inside the exhaustion handler sees it.
+            return None if post_nudge_scans["n"] == 1 else "PASS"
+
+        monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+        monkeypatch.setattr(qa_loop, "recovery_max_attempts", lambda: 3)
+        monkeypatch.setattr(qa_loop, "recovery_settle_seconds", lambda: 5.0)
+        # Expired by the tick that reads the answer's idle event.
+        monkeypatch.setattr(qa_loop, "recovery_response_timeout", lambda: 1.0)
+        monkeypatch.setattr(qa_loop, "_is_verification_enabled",
+                            lambda: False)
+        monkeypatch.setattr(qa_loop, "_get_verdict_reminder_timeout",
+                            lambda: None)
+
+        with patch("pm_core.hook_events.read_event",
+                   side_effect=fake_read_event), \
+             patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   side_effect=fake_extract), \
+             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
+                   return_value=None), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.time", side_effect=fake_time), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=fake_time), \
+             patch("pm_core.tmux.send_keys", side_effect=fake_send), \
+             patch("pm_core.tmux.pane_exists", return_value=True):
+            qa_loop._poll_tmux_verdicts(
+                state, {}, {}, "sess", str(tmp_path),
+                tmp_path / "status.json", lambda *a: None,
+            )
+
+        assert nudged["sent"], "worker was never nudged"
+        assert post_nudge_scans["n"] >= 2, "the exhaustion path never re-scanned"
         assert state.scenario_verdicts[1] == "PASS"
         assert 1 not in state.scenario_verdict_reasons
 

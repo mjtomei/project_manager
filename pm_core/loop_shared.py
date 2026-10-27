@@ -283,6 +283,8 @@ class MissingOutputRecovery:
     (no new transcript text) may defer the nudge before recovery gives up
     with ``no_progress``; ``None`` uses the default and ``<= 0`` disables
     the bound (only useful when a caller is certain refreshes terminate).
+    The count is *consecutive*: it restarts whenever a nudge is sent or a
+    genuinely newer turn is seen.
     """
 
     def __init__(
@@ -457,6 +459,12 @@ class MissingOutputRecovery:
             raise self.exhausted(kind)
 
         self.attempts += 1
+        # ``max_deferrals`` bounds *consecutive* hook refreshes of one turn,
+        # so a nudge starts a fresh deferral budget.  Accumulating the count
+        # over the tracker's whole lifetime would retire a session that
+        # answered every earlier nudge with ``no_progress`` for a handful of
+        # refreshes spread across many turns.
+        self.deferrals = 0
         message = self._message(kind)
         _log.warning("%s: idle turn without outcome (%s) — recovery request "
                      "%d/%d (session %s)", self.log_prefix, kind,

@@ -228,9 +228,12 @@ non-blocking `hook_events.read_event` that counts **only** a newer
 
 `max_deferrals` is bounded by default (`DEFAULT_MAX_DEFERRALS = 10`); passing
 `None` uses that default and passing `<= 0` disables the bound entirely (only
-safe when a caller knows hook refreshes terminate). `retry_prompt` /
-`resume_request` must be a single line: it is delivered through
-`tmux send-keys`, so embedded newlines would submit partial input.
+safe when a caller knows hook refreshes terminate). The count is
+**consecutive**: it restarts whenever a nudge is sent (or a genuinely newer
+turn is seen), so a session that answers every nudge cannot later be retired
+with `no_progress` for a handful of refreshes spread across many turns.
+`retry_prompt` / `resume_request` must be a single line: it is delivered
+through `tmux send-keys`, so embedded newlines would submit partial input.
 
 `poll_for_verdict` grows the kwargs in R1 and, after a non-matching idle:
 
@@ -287,7 +290,10 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
 ### QA loop (`pm_core/qa_loop.py`)
 
 * **finalize** — relies on the settings-driven defaults; catch exhaustion →
-  return `"NO_VERDICT"`.
+  return `"NO_VERDICT"`. A stop that landed while `handle` was deciding
+  (`stop_check()` true inside the catch) is teardown, not a missing outcome:
+  it returns `None` (the unfinalized result), like the `not content` path, so
+  a user-stopped run never surfaces `[finalize: NO_VERDICT]`.
 * **refiner** (`_concretize_scenario`) — pass a block outcome request;
   catch → `(None, "no refiner outcome: …")`; teach
   `_concretize_failure_label` to pass that prefix through unchanged.
@@ -337,8 +343,14 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   `state.stop_requested` before retiring: a stop can land while `handle`
   is deciding (its deferral bound is checked before its own `stop_check`,
   and the tick loop's settle read is non-blocking), and teardown must not
-  persist an `INPUT_REQUIRED` reason. The planner honours `stop_requested`
-  the same way before its `check_response`.
+  persist an `INPUT_REQUIRED` reason. Those handlers additionally re-scan
+  the transcript before retiring: the scan at the idle event races
+  the transcript write and `handle`'s `no_progress` bound is checked before
+  its own `verdict_check`, so an outcome that landed as the deadline
+  expired must be recorded rather than retired as `no_response` /
+  `no_progress` (the "completed result treated as absent" failure). The
+  planner honours `stop_requested` the same way before its
+  `check_response`.
 * **planner** — per-attempt `MissingOutputRecovery` with a `QA_PLAN_START/END`
   outcome request and a resume request; on exhaustion break out with
   `INPUT_REQUIRED` + `_error` (reusing the existing "plan incomplete" surface
@@ -361,6 +373,14 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   — no verdict recorded` and skips both the lifecycle transition and the
   QA note for it. `STOPPED` is not in `ALL_VERDICTS`: nothing about the PR
   was determined, so it must never parse as a result.
+* **STOPPED is a hold verdict for auto-start** — `STOPPED` is recorded in
+  runtime_state like any finished run (state `done`), so
+  `auto_start.QA_HOLD_VERDICTS` must include it: otherwise
+  `_auto_start_qa_loops` restarts QA on the next scheduler pass and silently
+  undoes the user's stop (every stop used to end `INPUT_REQUIRED`, which
+  held). `autostart_state._derive` reports it as `waiting` with "last QA run
+  was stopped; press t / z t to re-run QA" — an explicit re-run (which
+  overwrites the record) is the way back.
 
 ### Settings (all optional, defaulted)
 
@@ -471,22 +491,26 @@ unbounded.
   response timeout; recovery disabled keeps legacy behaviour; an idle inside
   the grace window is processed rather than dropped (the poller would
   otherwise wait for a turn that never comes); `stop_check`
-  during settle does not nudge; a verdict flushed during the settle window
+  during settle does not nudge; the deferral budget is *consecutive* (a
+  nudge restarts it, so an answered session is not later retired with
+  `no_progress`); a verdict flushed during the settle window
   returns `"completed"` and is never nudged (unit, `poll_for_verdict`, and
   QA-tick-loop cases). Also holds the loop wiring tests below.
 * `tests/test_loop_recovery.py` (review/watcher wiring): exhaustion →
   `NO_VERDICT`, history entry, callback fired; QA refiner label, verifier
   reason (initial poll and the machine-driven re-check follow-up, which must
   call the shared poller rather than the unbounded human wait), finalize
-  `NO_VERDICT`, scenario-worker exhaustion
+  `NO_VERDICT` (and `None` — not `NO_VERDICT` — when the stop lands inside
+  recovery), scenario-worker exhaustion
   (`INPUT_REQUIRED` + reason, slot freed); a verdict landing on the tick the
   post-nudge response deadline expires is recorded, not retired as
-  `no_response`; a stop that lands between ticks does not retire a worker as
-  `no_response`, and a stop set *inside* `handle` (after the `stopping`
-  snapshot) does not retire it either (both are spurious-exhaustion guards
-  during teardown); a review/watcher stop that lands inside `handle` does
-  not record `NO_VERDICT` (the review loop keeps its prior verdict, the
-  watcher records the `KILLED` stop convention).
+  `no_response`, and one that lands *after* that tick's scan is found by the
+  exhaustion re-scan; a stop that lands between ticks does not retire a
+  worker as `no_response`, and a stop set *inside* `handle` (after the
+  `stopping` snapshot) does not retire it either (both are
+  spurious-exhaustion guards during teardown); a review/watcher stop that
+  lands inside `handle` does not record `NO_VERDICT` (the review loop keeps
+  its prior verdict, the watcher records the `KILLED` stop convention).
 * `tests/test_qa_planner_handoff.py`: a stop that lands inside `handle`
   ends the run in `STOPPED` (clean teardown), not `INPUT_REQUIRED`; planner
   exhaustion surfaces
@@ -497,7 +521,9 @@ unbounded.
   re-read rather than being asked for again.
 * `tests/test_review_loop_terminal_state.py`: `NO_VERDICT` → `failed`.
 * `tests/test_autostart_multi_target.py`: `NO_VERDICT` review loop → phase
-  state `failed` in the status builder.
+  state `failed` in the status builder; a recorded `STOPPED` QA run is a
+  hold verdict (the scheduler does not relaunch it) and reports as
+  `waiting` with the manual re-run hint.
 * `tests/test_loop_recovery.py` (settings): the three keys are settable and
   listed through `pm set` (including a sub-second float), non-numeric values
   are rejected, a negative settle clamps to 0, and corrupt stored values fall
