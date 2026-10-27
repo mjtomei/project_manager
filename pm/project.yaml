@@ -14491,7 +14491,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T07:19:45.341547+00:00'
+  updated_at: '2026-10-27T07:49:36.874007+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14668,6 +14668,38 @@ prs:
       the same guard. (2026-10-27T07:19:37Z)'
     created_at: '2026-10-27T07:19:45Z'
     last_edited: '2026-10-27T07:19:45Z'
+  - id: note-533ff24
+    text: 'Review-loop db89 i3 (2026-10-27): reviewed 848ab98c (unchanged since db89
+      i2). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact); test_impl_and_qa_get_distinct_proxies fails at
+      74462d76 (2-part key -> all three containers on one socket). Four fixes applied,
+      each with a test that fails at 848ab98c for the right reason: (1) start_push_proxy
+      legacy path registered _container_to_proxy_key after releasing _start_lock,
+      so a concurrent stop_push_proxy could pass its re-check and unlink the socket
+      the restart had just spawned (the shared path registers under the lock); it
+      now registers under the lock via a new _drop_old_ref() shared with _add_proxy_ref().
+      (2) flock locks the inode, not the name: a lock file unlinked between open()
+      and flock() left the holder with an invisible lock, letting a third process
+      create a fresh file and enter check-and-spawn concurrently; _start_lock now
+      verifies with _fd_is_path_file() that the locked file is still the one at the
+      lock path and retries (bounded; blocking raises PushProxyError), and _clear_lock_file
+      refuses to unlink a replacement. (3) _shared_sock_dir discovery symlink is best-effort
+      again: an OSError (name too long) no longer fails proxy start; teardown finds
+      hashed dirs via the registry. (4) Docstring: PushProxy is no longer "single-client
+      for one container". Tests: tests/test_push_proxy.py 92 passed, tests/test_container.py
+      101 passed; full suite 3781 passed, 1 skipped, 13 failed (all pre-existing environment:
+      12 test_markdown_render missing markdown module + test_hook_events::test_installer_writes_standalone_receiver),
+      run with PATH=/usr/bin:/bin, PYTHONPATH=/workspace. Incidental (pre-existing,
+      out of the spec scope "dangerous-flag rejection unchanged"): filed pr-a9803aa
+      - git push --repo=<local path> bypasses the local-path-origin rejection because
+      _extract_remote_name only inspects the first positional remote. Residual, unchanged
+      and out of scope: in-process refcounts only (cross-process cleanup stays with
+      #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request, remains
+      the cleaner long-term design); stop_all_proxies (no non-test callers) still
+      sweeps without the start-lock guard.'
+    created_at: '2026-10-27T07:49:36Z'
+    last_edited: '2026-10-27T07:49:36Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -35731,6 +35763,44 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T01:30:16.482567+00:00'
   updated_at: '2026-10-27T01:30:16.482567+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a9803aa
+  plan: bugs
+  title: 'Bug: push proxy local-path origin rejection is bypassed by git push --repo=<path>'
+  branch: pm/pr-a9803aa-bug-push-proxy-local-path-origin-rejection-is-bypa
+  status: pending
+  depends_on: []
+  description: 'pm_core/push_proxy.py `_execute_push` rejects a push whose remote
+    resolves to a local path (fail-closed, since a local-path push would write into
+    another host clone), but the check only inspects the remote named by the first
+    positional arg (default origin). `git push --repo=<path>` names the repository
+    through the option instead, so `_extract_remote_name` returns "origin", `_resolve_local_remote_url(workdir,
+    "origin")` returns None (origin is the real upstream), and `_local_push` then
+    runs `git -C <workdir> push --repo=<path>` as the host user. Verified with git
+    2.34.1: `git push --repo=/tmp/x.git` (no positional) pushes the current branch
+    to that local repo.
+
+
+    Reachability: the in-container ~/.local/bin/git wrapper forwards push/fetch/pull/ls-remote
+    args verbatim to the proxy, so a container process can run `git push --repo=/home/<user>/any/repo`
+    and write the allowed branch into any host local git repo outside its mounted
+    workdir. The allowed-branch restriction still holds; the path restriction does
+    not.
+
+
+    Repro (host): start a proxy for a clone whose origin is a real URL (or mock _resolve_local_remote_url
+    -> None), send {"cmd":"push","args":["--repo=/tmp/victim.git"]}; observe the response
+    runs git push with --repo. Fix idea: treat `--repo`/`--repo=` like the local-path
+    origin check (reject when the named repository is a local path, or reject the
+    option outright since the proxy is origin-scoped).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T07:45:34.452329+00:00'
+  updated_at: '2026-10-27T07:45:34.452329+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

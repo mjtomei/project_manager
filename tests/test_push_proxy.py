@@ -1,5 +1,6 @@
 """Tests for the host-side git push proxy."""
 
+import contextlib
 import glob
 import fcntl
 import json
@@ -383,6 +384,44 @@ class TestPushProxyLifecycle:
         assert container_socket_path() == _CONTAINER_SOCKET_PATH
         assert container_socket_path() == "/run/pm-push-proxy/push.sock"
 
+    def test_legacy_registration_happens_under_the_start_lock(self):
+        """A concurrent legacy stop must see the registration before killing.
+
+        stop_push_proxy re-checks _container_to_proxy_key while holding the
+        per-directory start lock.  That guard is only effective if
+        start_push_proxy registers *before* releasing the lock — otherwise
+        the stop can slip in after the spawn and kill the fresh socket (the
+        shared path already registers under the lock).
+        """
+        cname = "legacy-registration-test"
+        registered_at_release = []
+        real_lock = push_proxy_mod._start_lock
+
+        @contextlib.contextmanager
+        def tracking_lock(sock_dir, blocking=True):
+            with real_lock(sock_dir, blocking=blocking) as locked:
+                yield locked
+            # Runs when start_push_proxy exits the with-block.
+            with push_proxy_mod._proxy_lock:
+                registered_at_release.append(
+                    cname in push_proxy_mod._container_to_proxy_key)
+
+        def fake_start(sock_path, workdir, branch):
+            os.makedirs(os.path.dirname(sock_path), exist_ok=True)
+            Path(sock_path).touch()
+            return True
+
+        try:
+            with patch("pm_core.push_proxy._start_proxy_subprocess",
+                       side_effect=fake_start), \
+                 patch("pm_core.push_proxy._start_lock", tracking_lock):
+                start_push_proxy(cname, "/w", "pm/pr-123")
+            assert registered_at_release == [True], (
+                "the legacy proxy was registered after the start lock was "
+                "released; a concurrent stop could kill the fresh socket")
+        finally:
+            stop_push_proxy(cname)
+
     def test_get_proxy_socket_path(self):
         with patch("pm_core.push_proxy.PushProxy.start"), \
              patch("pm_core.push_proxy.PushProxy.stop"):
@@ -497,6 +536,62 @@ class TestPushProxyLifecycle:
                 "daemon wait loop did not notice the replaced socket")
         finally:
             proxy.stop()
+
+
+class TestStartLock:
+    """The per-directory start lock must survive a racing teardown (R7).
+
+    ``flock`` locks the inode, not the name: a lock file unlinked between
+    ``open()`` and ``flock()`` leaves the holder with a lock no other
+    process can see, so a second process can create a fresh file and enter
+    the check-and-spawn critical section concurrently.
+    """
+
+    def test_start_lock_retries_when_the_lock_file_is_replaced(self,
+                                                               tmp_path):
+        sock_dir = str(tmp_path / "lockdir")
+        lock_path = sock_dir + ".lock"
+        real_flock = fcntl.flock
+        raced = []
+
+        def racy_flock(fd, flags):
+            real_flock(fd, flags)
+            if not raced:
+                raced.append(True)
+                # A teardown clears the lock file in the open→flock window.
+                os.unlink(lock_path)
+
+        with patch("pm_core.push_proxy.fcntl.flock", side_effect=racy_flock):
+            with push_proxy_mod._start_lock(sock_dir) as locked:
+                assert locked is True
+                assert os.path.exists(lock_path), (
+                    "lock held on an unlinked inode; a concurrent start "
+                    "could create a fresh lock file and bypass it")
+                with push_proxy_mod._start_lock(sock_dir,
+                                                blocking=False) as second:
+                    assert second is False, (
+                        "the retried lock must be exclusive")
+
+    def test_clear_lock_file_keeps_a_replacement(self, tmp_path):
+        """A lock file replaced in the open→flock window is not ours to delete."""
+        lock_path = str(tmp_path / "x.lock")
+        Path(lock_path).write_text("old")
+        real_flock = fcntl.flock
+        raced = []
+
+        def racy_flock(fd, flags):
+            real_flock(fd, flags)
+            if not raced:
+                raced.append(True)
+                os.unlink(lock_path)
+                Path(lock_path).write_text("new")
+
+        with patch("pm_core.push_proxy.fcntl.flock", side_effect=racy_flock):
+            push_proxy_mod._clear_lock_file(lock_path)
+
+        assert Path(lock_path).exists(), (
+            "teardown deleted a replacement lock file another process owns")
+        assert Path(lock_path).read_text() == "new"
 
 
 class TestSharedProxy:
@@ -1110,6 +1205,27 @@ class TestWorkdirKeyedProxies:
 
         stop_session_proxies(self.TAG)
         assert not os.path.exists(sock_dir)
+
+    def test_discovery_symlink_failure_does_not_break_start(
+            self, tmp_path, live_proxies):
+        """The long-name symlink is optional; losing it must not fail a start.
+
+        A session tag long enough to force the hashed directory can also
+        make the discovery symlink fail (name too long).  The proxy must
+        still start, and session teardown must still find it through the
+        in-process registry.
+        """
+        impl = self._workdir(tmp_path, "impl")
+        tag = "t" * 80
+        with patch("pm_core.push_proxy.os.symlink",
+                   side_effect=OSError("name too long")):
+            sock = self._start("impl-nosym", impl, tag=tag)
+        try:
+            assert push_proxy_mod.proxy_is_alive(sock)
+            assert stop_session_proxies(tag) >= 1
+            assert not push_proxy_mod.proxy_is_alive(sock)
+        finally:
+            stop_session_proxies(tag)
 
     def test_stop_session_finds_hashed_dir_without_long_symlink(
             self, tmp_path, live_proxies):

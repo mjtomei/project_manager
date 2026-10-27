@@ -184,7 +184,10 @@ def _unlink_socket_file(path: str) -> None:
 
 
 class PushProxy:
-    """A single-client push proxy daemon for one container.
+    """A push proxy daemon for one host workdir.
+
+    Every container whose clone is that workdir shares the daemon; a
+    request naming any other clone is rejected (see the module docstring).
 
     Args:
         socket_path: Host path for the Unix socket.
@@ -699,15 +702,13 @@ _proxy_refs: dict[str, set[str]] = {}
 _container_to_proxy_key: dict[str, str] = {}
 
 
-def _add_proxy_ref(container_name: str, key: str) -> None:
-    """Record that *container_name* uses the proxy for *key*.
+def _drop_old_ref(container_name: str, key: str) -> None:
+    """Drop *container_name*'s reference to any proxy key other than *key*.
 
-    Caller must hold ``_proxy_lock``.  The ref set is *added to*, never
-    replaced: a respawned daemon must keep the other containers that share
-    the same workdir.  A container references only one proxy at a time, so
-    a previous reference under a different key is dropped rather than
-    pinned forever (the old daemon itself is left for session teardown,
-    like any other unreferenced proxy).
+    Caller must hold ``_proxy_lock``.  A container references only one
+    proxy at a time, so a previous reference is dropped rather than pinned
+    forever (the old daemon itself is left for session teardown, like any
+    other unreferenced proxy).
     """
     old = _container_to_proxy_key.get(container_name)
     if old is not None and old != key:
@@ -716,6 +717,16 @@ def _add_proxy_ref(container_name: str, key: str) -> None:
             old_refs.discard(container_name)
             if not old_refs:
                 del _proxy_refs[old]
+
+
+def _add_proxy_ref(container_name: str, key: str) -> None:
+    """Record that *container_name* uses the shared proxy for *key*.
+
+    Caller must hold ``_proxy_lock``.  The ref set is *added to*, never
+    replaced: a respawned daemon must keep the other containers that share
+    the same workdir.
+    """
+    _drop_old_ref(container_name, key)
     _proxy_refs.setdefault(key, set()).add(container_name)
     _container_to_proxy_key[container_name] = key
 
@@ -774,7 +785,10 @@ def _shared_sock_dir(session_tag: str, pr_id: str,
 
     os.makedirs(short_dir, exist_ok=True)
 
-    # Create long-named symlink for discoverability/cleanup
+    # Create long-named symlink for discoverability/cleanup.  Best effort:
+    # a name too long for the filesystem (or an unwritable /tmp) must not
+    # stop the proxy — session teardown also derives hashed directories
+    # from the in-process registry.
     try:
         os.symlink(short_dir, long_dir)
     except FileExistsError:
@@ -785,7 +799,35 @@ def _shared_sock_dir(session_tag: str, pr_id: str,
                 os.symlink(short_dir, long_dir)
             except FileExistsError:
                 pass  # race — another process created it
+            except OSError:
+                _log.warning("Push proxy: could not create discovery "
+                             "symlink %s", long_dir, exc_info=True)
+    except OSError:
+        _log.warning("Push proxy: could not create discovery symlink %s",
+                     long_dir, exc_info=True)
     return short_dir
+
+
+# How many times _start_lock re-opens the lock file when the one it locked
+# was unlinked/replaced between open() and flock().  Realistic churn is one
+# or two attempts; the cap only bounds a pathological (or hostile) loop.
+_LOCK_ATTEMPTS = 100
+
+
+def _fd_is_path_file(fd: int, path: str) -> bool:
+    """True when *path* still names the same file *fd* is open on.
+
+    ``flock`` locks the *inode*, not the name: if a teardown unlinks (or
+    another process replaces) the lock file between our ``open()`` and
+    ``flock()``, the lock we hold is invisible to a process that creates a
+    fresh file at the same path.  Comparing the inode closes that window.
+    """
+    try:
+        st_fd = os.fstat(fd)
+        st_path = os.stat(path)
+    except OSError:
+        return False
+    return (st_fd.st_dev, st_fd.st_ino) == (st_path.st_dev, st_path.st_ino)
 
 
 @contextlib.contextmanager
@@ -799,23 +841,39 @@ def _start_lock(sock_dir: str, blocking: bool = True):
     is only attempted (``LOCK_NB``): on contention the context yields False
     immediately, so teardown can skip a directory that a proxy start is
     using right now instead of stalling behind it.
+
+    A lock taken on a file that a teardown unlinked (or another process
+    replaced) is discarded and retried against the current file, so two
+    processes can never both believe they hold the lock.
     """
     os.makedirs(sock_dir, exist_ok=True)
     lock_path = os.path.realpath(sock_dir) + ".lock"
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-    try:
-        flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+    flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+    for _attempt in range(_LOCK_ATTEMPTS):
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            fcntl.flock(fd, flags)
-        except BlockingIOError:
-            yield False
-            return
-        try:
-            yield True
+            try:
+                fcntl.flock(fd, flags)
+            except BlockingIOError:
+                yield False
+                return
+            if _fd_is_path_file(fd, lock_path):
+                try:
+                    yield True
+                finally:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                return
+            # The file we locked is gone or replaced — try the new one.
+            _log.info("Push proxy start lock %s was replaced; retrying",
+                      lock_path)
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-    finally:
-        os.close(fd)
+            os.close(fd)
+
+    if blocking:
+        raise PushProxyError(
+            f"could not acquire push proxy start lock {lock_path} "
+            f"after {_LOCK_ATTEMPTS} attempts")
+    yield False
 
 
 def _clear_lock_file(path: str) -> None:
@@ -823,7 +881,9 @@ def _clear_lock_file(path: str) -> None:
 
     Deleting a lock file that another process has flocked would let a third
     process create a fresh one and bypass the cross-process serialisation
-    in :func:`_start_lock`.
+    in :func:`_start_lock`.  The inode check additionally covers a file
+    that was replaced between our ``open()`` and ``flock()`` — that
+    replacement is not ours to remove.
     """
     try:
         fd = os.open(path, os.O_RDWR)
@@ -834,6 +894,8 @@ def _clear_lock_file(path: str) -> None:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             return  # in use — its owner (or a later teardown) clears it
+        if not _fd_is_path_file(fd, path):
+            return  # replaced in the open→flock window — not ours
         try:
             os.unlink(path)
         except OSError:
@@ -980,9 +1042,14 @@ def start_push_proxy(container_name: str, workdir: str,
                 f"push proxy did not become ready at {sock_path} "
                 f"(workdir={workdir}, branch={allowed_branch})")
 
-    with _proxy_lock:
-        _active_proxies[container_name] = sock_path
-        _container_to_proxy_key[container_name] = container_name
+        # Register while still holding the start lock: stop_push_proxy
+        # re-checks this registry under the same lock before killing the
+        # socket, so a concurrent stop must be able to see the proxy we
+        # just spawned (the shared path registers under the lock too).
+        with _proxy_lock:
+            _drop_old_ref(container_name, container_name)
+            _active_proxies[container_name] = sock_path
+            _container_to_proxy_key[container_name] = container_name
 
     return sock_path
 

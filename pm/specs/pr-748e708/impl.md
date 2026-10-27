@@ -381,3 +381,46 @@ Tests: `test_stop_does_not_unlink_a_socket_it_never_bound`,
 `test_rejects_non_object_request`. The `never_bound` and `hashed_dir`
 tests fail at 6941c923 for the right reason (the socket is unlinked;
 `stop_session_proxies` returns 0).
+
+## Review iteration 6 refinements
+
+Added during the sixth review pass (consistent with R6/R7/R8; no
+requirement changed):
+
+- **The legacy start registers under the start lock.** `start_push_proxy`'s
+  legacy (no session tag) path spawned the daemon under `_start_lock` but
+  registered `_container_to_proxy_key` *after* releasing it.
+  `stop_push_proxy` re-checks that registry under the same lock before
+  killing the socket, so a stop that slipped into the spawn→register window
+  could unlink a socket the restart had just created, leaving the caller
+  with a dead proxy (the shared path already registered under the lock).
+  Registration now happens inside the lock, through a new `_drop_old_ref()`
+  helper shared with `_add_proxy_ref()` so a container that changes keys
+  does not pin its old proxy.
+- **A lock file replaced in the open→flock window is re-acquired.**
+  `flock` locks the inode, not the name. `_clear_lock_file` already
+  probed with `LOCK_NB` before unlinking, but a teardown that unlinked the
+  file between a start's `open()` and `flock()` left that start holding a
+  lock no other process could see; a third process could then create a
+  fresh file and enter the check-and-spawn section concurrently (R7's
+  failure through the lock file itself). `_start_lock` now verifies with
+  `_fd_is_path_file()` that the file it locked is still the one at the
+  lock path (inode+device) and retries otherwise; `_clear_lock_file`
+  refuses to unlink a file that was replaced in the same window. Blocking
+  acquisition raises `PushProxyError` after a bounded number of retries;
+  the non-blocking form yields `False`, so teardown still skips a busy
+  directory.
+- **A failed discovery symlink no longer fails the start.** `_shared_sock_dir`
+  creates the long-name symlink for discoverability only, but an
+  `OSError` (name too long, unwritable `/tmp`) propagated out of
+  `start_push_proxy` and surfaced as a misleading container error.
+  Creation is now best-effort; teardown still finds hashed directories
+  through the in-process registry (iteration 5).
+
+Tests: `test_legacy_registration_happens_under_the_start_lock`,
+`test_start_lock_retries_when_the_lock_file_is_replaced`,
+`test_clear_lock_file_keeps_a_replacement`,
+`test_discovery_symlink_failure_does_not_break_start`. All four fail at
+848ab98c for the right reason (registration observed after lock release;
+lock path missing after a racing unlink; a replacement lock file deleted;
+`OSError` escaping `start_push_proxy`).
