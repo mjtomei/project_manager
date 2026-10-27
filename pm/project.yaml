@@ -34032,7 +34032,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T05:17:40.318848+00:00'
+  updated_at: '2026-10-27T05:44:43.921006+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34834,6 +34834,32 @@ prs:
       the last QA pass; exercise it, plus its suppression after a bounce or PR work.'
     created_at: '2026-10-27T05:17:40Z'
     last_edited: '2026-10-27T05:17:40Z'
+  - id: note-ebc689a
+    text: 'review-loop c70c i2: closed four residual gaps, each with a test that fails
+      on the pre-fix code. (1) `integration.unresolved_paths` built a set from `resolution.*[].path`,
+      so a hand-edited list/mapping path raised TypeError (unhashable) out of `pm
+      pr signoff integrate` and the sign-off launch; only strings are paths now and
+      both membership sites guard the operand. (2) the `base_behavior_changes` carry-forward
+      used `dict.fromkeys`, which raises on an unhashable member — every integration
+      check raised, so the launch recorded nothing and the merge gate lost the evidence
+      requirement; new `_dedupe` keeps such members and skips only the de-duplication.
+      (3) `_compact_resolution` kept non-string `records` keys (YAML `1:` -> int),
+      making `_resolution_digest` sort_keys raise on mixed key types; only string
+      action paths are kept. (4) `pm pr show` — the reader `integration_pointer` points
+      sessions at — rendered nothing about a resolved record; it now names the candidate
+      tree, per-path ids (with "... N more" from the record total), unresolved, applied
+      merge, digest and the delta basename. Also: every record revision interpolated
+      into a command the agent is told to run (`git diff <rev> HEAD`, `git merge <rev>`)
+      is now a git object name (`_sha_like`), falling back to `<base>`/`<old head>`/the
+      base branch — the rule contained_base already follows. Tests: 4 new (all mutation-checked);
+      focused 377; full suite 3681 passed, 1 skipped, 1 known pre-existing hook-installer
+      env failure (fails on an origin/master worktree too). Spec R8/R9 synced. Next
+      reviewer: the malformed-state contract now covers non-hashable list members,
+      not just non-list/non-mapping values; the remaining display of a malformed base_sha
+      in prose (return text "Integration with ... @ <rev>") is deliberate (display,
+      not a command).'
+    created_at: '2026-10-27T05:44:43Z'
+    last_edited: '2026-10-27T05:44:43Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
