@@ -34032,7 +34032,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T03:53:53.010266+00:00'
+  updated_at: '2026-10-27T04:34:07.666842+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34789,6 +34789,30 @@ prs:
       older notes no longer applies.'
     created_at: '2026-10-27T03:53:52Z'
     last_edited: '2026-10-27T03:53:52Z'
+  - id: note-7462c7b
+    text: 'impl 2026-10-27: added the "Why sign-off is running again" pointer (f5f762ca)
+      on top of the master merge. (1) invalidate_signoff now also writes pr["signoff_invalidated"]
+      = {reason, at, verdict, sha, base_sha} because the driver clears pr["signoff"]
+      before relaunching, so the re-run prompt otherwise knew neither why it was running
+      nor which revision it had approved; a new verdict clears the marker (record_signoff_verdict).
+      (2) prompt_gen._signoff_invalidated_block emits a block naming the refusal reason,
+      the previous verdict + approved revision, and pointing at $CAP/report.html as
+      readable/reusable — but ONLY when the PR own changes are unchanged since that
+      approval: the relaunch may apply the base merge (HEAD moves without being PR
+      work), so "unchanged" means the current check head equals the approved revision
+      OR the applied resolution resolved_from.head does. Real PR work after the refusal,
+      and a verdict bounce (which writes signoff_return instead), never emit it. Malformed
+      signoff_invalidated (non-string sha/reason) reads as absent, never raises. Tests:
+      6 new in test_signoff_resolution.py, all mutation-checked against the pre-fix
+      HEAD (pointer suppressed / unchanged-guard removed / clearing removed each fail
+      their test). Full suite 3669 passed, 1 skipped, 1 known pre-existing hook-receiver
+      env failure (fails on an origin/master worktree too). NOTE: a concurrent review-loop
+      3911 session committed 4 commits (715a5f63..1c2216a3) into this workdir while
+      this change was being written; f5f762ca sits on top of them and preserves them
+      (only the two invalidate_signoff lines were intentionally rewritten). Spec R6
+      synced.'
+    created_at: '2026-10-27T04:34:07Z'
+    last_edited: '2026-10-27T04:34:07Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
