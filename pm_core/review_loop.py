@@ -1053,6 +1053,16 @@ def _reset_launch_retry(state: ReviewLoopState) -> None:
     state.launch_retryable = False
     state.retry_episodes = 0
     state.retry_ready_at = 0.0
+    # This iteration is over, so nothing of ours is in flight any more.
+    # Clearing the flag here (not only at the next episode's start) keeps
+    # the restart handoff's fabrication guard intact across the counter
+    # bump: `run_review_loop_sync` increments ``state.iteration`` *before*
+    # ``_run_iteration_with_retry`` re-snapshots the episode, and a merge
+    # restart landing in that window would otherwise persist this
+    # iteration's ``True`` for the *next* iteration number — letting the
+    # handoff adopt an earlier run's ``review-<pr>-i<N>.jsonl`` verdict for
+    # an iteration this loop never launched.
+    state.iteration_attempted = False
     # The TUI announces each retry attempt once, keyed on the attempt
     # number; without this a *later* iteration's attempt 2 would look
     # already-announced and be silently swallowed.

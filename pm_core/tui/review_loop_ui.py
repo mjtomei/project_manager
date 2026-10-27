@@ -396,11 +396,15 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
         )
     elif state.latest_verdict == VERDICT_HOLD:
         # The hold's own message (the trust/permission prompt) — not a stale
-        # launch error from an earlier attempt of the same episode.
+        # launch error from an earlier attempt of the same episode.  The
+        # artifact and the re-arm deadline belong to that failed attempt,
+        # not to a hold, so they are dropped with it.
         extras.update(
             retryable=False,
             error=(state.latest_output
                    or getattr(state, "last_launch_error", "") or ""),
+            artifact=None,
+            retry_ready_at=None,
         )
     else:
         # A clean (or non-launch-failure) completion must not leave a prior

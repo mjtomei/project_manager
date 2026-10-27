@@ -218,6 +218,60 @@ def test_restart_handoff_relaunches_when_the_transcript_has_no_session(
     poll.assert_not_called()
 
 
+def test_restart_between_iterations_does_not_adopt_the_old_run(
+        tmp_path, monkeypatch):
+    """A completed iteration clears ``iteration_attempted``.
+
+    ``run_review_loop_sync`` bumps the iteration counter *before*
+    ``_run_iteration_with_retry`` re-snapshots the episode, so a merge
+    restart landing in that window persists whatever the finished iteration
+    left behind.  If that is still ``True``, the restart handoff allows
+    recovery and adopts an earlier run's ``review-<pr>-i<N>.jsonl`` verdict
+    for an iteration this loop never launched — the fabrication guard's
+    blind spot for N >= 2 (iteration 6 only covered the loop's first
+    iteration, where the flag starts out ``False``).
+    """
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
+
+    # An earlier run of this PR already produced iteration 2 with a PASS.
+    old_sid = str(uuid.uuid4())
+    _make_symlink(tmp_path, "review-pr-001-i2.jsonl", old_sid)
+    (tmp_path / f"{old_sid}.jsonl").write_text(json.dumps({
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "old\n\n**PASS**"}]},
+    }) + "\n")
+
+    # The state a merge restart would persist right after each bump.
+    at_bump: list[tuple[int, bool]] = []
+    orig = review_loop._run_iteration_with_retry
+
+    def spy(state, *args, **kwargs):
+        at_bump.append((state.iteration, state.iteration_attempted))
+        return orig(state, *args, **kwargs)
+
+    state = ReviewLoopState(pr_id=PR)
+    with patch.object(review_loop, "_run_iteration_with_retry",
+                      side_effect=spy), \
+         patch.object(review_loop, "_run_claude_review",
+                      side_effect=["nope\n\n**NEEDS_WORK**",
+                                   "fresh\n\n**PASS**"]) as run:
+        result = _run(state, tmp_path, max_iterations=2)
+    assert run.call_count == 2, "iteration 2 must run its own review"
+    assert result.latest_verdict == VERDICT_PASS
+    assert at_bump == [(1, False), (2, False)]
+
+    # Resuming on that persisted state must relaunch, not adopt the old
+    # iteration-2 transcript.
+    resumed = ReviewLoopState(pr_id=PR, iteration=2, retry_iteration=1,
+                              iteration_attempted=at_bump[-1][1])
+    resumed.history.append(ReviewIteration(iteration=1,
+                                           verdict=VERDICT_NEEDS_WORK,
+                                           output=""))
+    assert review_loop._adopt_in_flight_review(
+        resumed, _pr(tmp_path), str(tmp_path)) is None
+
+
 def test_recovered_attempt_is_adopted_not_relaunched(tmp_path, monkeypatch):
     state = ReviewLoopState(pr_id=PR)
     err = ReviewLaunchError("boom", retryable=True)
@@ -1694,7 +1748,9 @@ def test_hold_records_the_hold_message_not_a_stale_launch_error(
     state = ReviewLoopState(
         pr_id=PR, iteration=2, latest_verdict=VERDICT_HOLD,
         latest_output="workspace trust prompt in review pane",
-        last_launch_error="container setup failed")
+        last_launch_error="container setup failed",
+        last_launch_artifact=str(tmp_path / "a.log"),
+        retry_ready_at=time.time() + 60)
     review_loop_ui._on_complete_from_thread(MagicMock(), state)
 
     entry = rs.get_action_state(PR, "review-loop")
@@ -1703,6 +1759,9 @@ def test_hold_records_the_hold_message_not_a_stale_launch_error(
     assert entry["retryable"] is False
     assert "trust prompt" in entry["error"]
     assert "container setup failed" not in entry["error"]
+    # The failed attempt's artifact/deadline are not the hold's evidence.
+    assert "artifact" not in entry
+    assert "retry_ready_at" not in entry
 
 
 def test_auto_start_keeps_the_failure_retryable_when_rearm_raises(tmp_path):

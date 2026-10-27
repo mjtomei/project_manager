@@ -611,3 +611,41 @@ Not changed (documented residuals): `review_loop.py` is ~1470 lines; two
 lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
 `runtime_state.claim_action_lease`); discovery still adopts a transcript
 verdict without requiring an idle hook event (rationale in iteration 9).
+
+## Review iteration 1 (0688) — refinements
+
+Findings from the next review pass, applied on top of iteration 10:
+
+1. **A completed iteration clears `iteration_attempted` (correctness fix —
+   fabricated verdict).** Iteration 6 made the restart handoff share
+   discovery's `allow_recovery` gate so a merge restart between the
+   iteration-counter bump and the first launch cannot adopt a previous
+   run's transcript.  That reasoning only held for a loop's *first*
+   iteration: the flag starts out `False` there, but a finished iteration
+   left it `True`.  `run_review_loop_sync` bumps `state.iteration` and only
+   then does `_run_iteration_with_retry` re-snapshot the episode, so a
+   merge restart landing in that window persisted `iteration_attempted=True`
+   for the *new* iteration number; the resumed handoff then allowed
+   recovery and adopted an earlier run's `review-<pr>-i<N>.jsonl` verdict
+   (e.g. `PASS`) for an iteration this loop never launched.
+   `_reset_launch_retry` (run when an iteration produces its verdict) now
+   clears the flag, so the persisted state at the bump is `False` and the
+   handoff relaunches.  A restart *during* an in-flight iteration still
+   adopts it: the flag is set before the launch and only cleared once the
+   iteration completes.  Covered by
+   `test_restart_between_iterations_does_not_adopt_the_old_run` (fails
+   pre-fix: the persisted flag is `True` for iteration 2).
+2. **A HOLD drops the failed attempt's artifact and re-arm deadline.**
+   `_on_complete_from_thread` already reported the hold's own prompt rather
+   than an earlier attempt's launch error (iteration 8), but it kept that
+   attempt's `artifact` and `retry_ready_at` in `runtime_state`, so
+   `pm autostart status` could point a human at the wrong evidence for a
+   hold.  Both fields are now dropped with the failure they belong to.
+
+Not changed (documented residuals): `review_loop.py` is ~1480 lines; two
+lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
+`runtime_state.claim_action_lease`); discovery still adopts a transcript
+verdict without requiring an idle hook event (rationale in iteration 9);
+`other_owner` stand-down surfaces as a non-retryable `LAUNCH_FAILED` after
+the bounded claim wait, so a second TUI driving the same PR reports
+"needs attention" for a review another loop is actually running.
