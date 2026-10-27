@@ -11830,7 +11830,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-22T14:17:54.192707+00:00'
+  updated_at: '2026-10-27T17:58:00.042338+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -11866,6 +11866,17 @@ prs:
       WIP; preserve its work and finish integrations/tests.'
     created_at: '2026-10-22T15:34:41Z'
     last_edited: '2026-10-22T15:34:41Z'
+  - id: note-404a5b1
+    text: 'Shared helper from pr-8cdbe60 (container git proxy scope fix): pm_core/push_proxy.py
+      now has module-level _long_option_match(arg, options), which returns the long
+      option git would read arg as (an exact match or any prefix, with or without
+      =value; ambiguous prefixes match, failing closed). pr-8cdbe60 uses it with _BROAD_PUSH_OPTIONS
+      (--all/--branches/--mirror/--tags) and deliberately left _check_dangerous_flags
+      unchanged to avoid a double edit. Whichever PR merges second: route _check_dangerous_flags
+      through it (matched = _long_option_match(arg, cls._DANGEROUS_GIT_OPTIONS)) so
+      there is one prefix-matching helper.'
+    created_at: '2026-10-27T17:57:59Z'
+    last_edited: '2026-10-27T17:57:59Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -31386,7 +31397,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T22:54:04.987012+00:00'
-  updated_at: '2026-10-12T22:56:41.644886+00:00'
+  updated_at: '2026-10-27T17:58:01.051250+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31400,6 +31411,94 @@ prs:
       --show-toplevel == the container workdir, else exec real git.'
     created_at: '2026-10-12T22:56:41Z'
     last_edited: '2026-10-12T22:56:41Z'
+  - id: note-fcae10a
+    text: 'Scope extension 2026-10-27 (user-approved). This bug caused a production
+      incident. At 16:15:36 UTC a read-only review subagent of #241 (session 14a2d740,
+      subagent a42e1db1aa3bd6a93) created a throwaway bare repo under a temp dir and
+      ran `git push origin --mir` against it to check git''s option parsing. The in-container
+      wrapper forwarded the command to the host proxy, which replayed it in #241''s
+      workdir against the real GitHub origin with the user''s credentials. The proxy''s
+      broad-push check matches only the exact strings --all/--mirror/--tags, so the
+      abbreviated mirror push was accepted. Result: GitHub master force-rewound 450a6362
+      -> c0765071, 223 branches deleted, 71 open PRs auto-closed. All of it has been
+      restored from GitHub''s activity log and the PRs reopened. Evidence and backups:
+      ~/.pm/backups/incident-2026-10-27/; proxy log ~/.pm/debug/default.log 11:15:30-11:15:38
+      local.
+
+
+      Do all three in this PR:
+
+      1. Original fix: the wrapper forwards push/fetch/pull/ls-remote only when the
+      command''s repository (honouring -C and the cwd) is /workspace. Otherwise it
+      runs the real git locally.
+
+      2. Broad-push check: reject any option git would expand to --all, --mirror or
+      --tags (unambiguous prefixes, with or without =value), plus the --branches spelling
+      of --all. Use the prefix-matching approach #241 added for the program-executing
+      options in _check_dangerous_flags, sharing one helper if #241 lands first.
+
+      3. Regression tests against a sandboxed local bare remote, never a network remote.
+      (a) Replay the incident''s commands from the log above through the wrapper and
+      proxy. Assert that no ref except the allowed branch changes on the remote, checking
+      the remote''s actual refs rather than only the exit code. (b) A remote command
+      issued from a scratch repo outside /workspace runs against that scratch repo''s
+      own remote and never reaches the proxy.
+
+
+      Longer-term redesign (allow-list grammar, isolation from repo settings, least-privilege
+      identity, audit trail, red-team suite) is going into a separate plan; keep this
+      PR to the three items above.'
+    created_at: '2026-10-27T17:30:45Z'
+    last_edited: '2026-10-27T17:30:45Z'
+  - id: note-e8aad67
+    text: Safety for this PR's own sessions (impl, review, QA), 2026-10-27. You run
+      inside a container whose ~/.local/bin/git is the UNFIXED wrapper this PR repairs.
+      Any git push/fetch/pull/ls-remote typed in the container, in any directory,
+      is forwarded to the host proxy and run against the real GitHub origin with the
+      user's credentials. That is exactly how the incident happened. Until your fix
+      is installed in the container, run every git experiment and every test that
+      performs remote operations with the real binary (/usr/bin/git, or PATH without
+      /home/pm/.local/bin), and point it only at local bare repos under a temp dir.
+      Never replay the incident commands through the live wrapper or proxy. Tests
+      must exercise the wrapper script and PushProxy from the source tree against
+      a local test socket and remote, not the installed ones. GitHub ruleset 25978556
+      now blocks force pushes and branch deletions, but it does not stop branch creation,
+      and it does nothing about commands that run programs on the host.
+    created_at: '2026-10-27T17:41:45Z'
+    last_edited: '2026-10-27T17:41:45Z'
+  - id: note-f961bd1
+    text: 'Impl 2026-10-27: all three items done. (1) container.py _build_git_wrapper_script()
+      (new, testable: socket_path/container_workdir/real_git kwargs) forwards push/fetch/pull/ls-remote
+      only when `git [-C ...] rev-parse --show-toplevel --absolute-git-dir` equals
+      the workdir (pwd -P plus its git dir with GIT_DIR/GIT_WORK_TREE/GIT_COMMON_DIR
+      unset). Leading -C <dir> is honoured, so -C /workspace is now forwarded; any
+      other leading global (-c, --git-dir, ...) runs locally. (2) push_proxy._long_option_match
+      + _BROAD_PUSH_OPTIONS rejects --mir/--al/--br/--ta/--a/--t/--mirror=x etc. #241
+      has not landed, so _check_dangerous_flags is untouched (cross-PR note left on
+      pr-1139060). (3) tests/test_git_proxy_scope.py: sandboxed (real git forced first
+      on PATH, temp socket, file:// bare remote). It replays the 4 incident commands
+      (taken from the subagent transcript ~/.claude/projects/-workspace/14a2d740-.../subagents/agent-a42e1db1aa3bd6a93.jsonl)
+      from the scratch repo and from the workspace, and checks remote for-each-ref
+      snapshots. 12/19 fail on pre-fix code. Captures: /pm-captures/impl/{pre-fix,post-fix}/
+      (repro.sh shared), test log /pm-captures/impl/test-evidence/targeted.log (206
+      passed). Run tests with PATH=/usr/bin:/bin PYTHONPATH=/workspace. Out of scope
+      (redesign plan): repo-config broad pushes (remote.*.mirror, push.default=matching,
+      multiple pushurls; the incident push also hit a local pushurl).'
+    created_at: '2026-10-27T17:58:00Z'
+    last_edited: '2026-10-27T17:58:00Z'
+  model: provider:claude-work
+  session_models:
+    impl: provider:claude-work
+    review: provider:claude-work
+    qa: provider:claude-work
+    qa_planning: provider:claude-work
+    qa_scenario: provider:claude-work
+    qa_concretize: provider:claude-work
+    qa_verification: provider:claude-work
+    qa_finalize: provider:claude-work
+    qa_interactive: provider:claude-work
+    signoff: provider:claude-work
+    merge: provider:claude-work
 - id: pr-22c92ef
   plan: bugs
   title: 'Bug: status bar clips "AUTO ×N" to "AUTO …" when the TUI pane is ~40 cols
