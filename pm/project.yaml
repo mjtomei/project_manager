@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T09:26:24.656815+00:00'
+  updated_at: '2026-10-27T14:45:32.557538+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -13983,6 +13983,43 @@ prs:
       PRs or broad host pressure tests.'
     created_at: '2026-10-27T14:23:00.488199+00:00'
     last_edited: '2026-10-27T14:23:00.488199+00:00'
+  - id: note-8fbc767
+    text: 'Review-loop f54b i1: resumed after the OOM restart. reviewer75b8i8''s uncommitted
+      work was preserved intact (source/tests byte-identical to /pm-captures/post-oom-restart-20261027/workdir-before.diff)
+      and completed. Eight fixes now committed. (1) QA re-clamp computes the run''s
+      *total* batch as active workers + remaining container-max-running headroom,
+      capped by the desired size, so a capped run no longer stalls at roughly half
+      the configured concurrency; the value stays >= 1 instead of encoding "unlimited"
+      when the runtime is momentarily full. (2) A queued dequeue persists the resume
+      snapshot immediately, even when the launch raises, so a crash cannot relaunch
+      an already-running worker. (3) A stopped run downgrades a PASS whose verification
+      never ran to INPUT_REQUIRED and skips the finalize pane (its poll aborts on
+      the first stop check, so it would only leave an abandoned session). (4) A fatal
+      push-proxy accept error retires the socket so readiness probes fail and the
+      next launch repairs it; best effort, since an unavailable lifecycle lock must
+      not kill the daemon thread. (5) The proxy readiness loop checks the child before
+      a possibly-stale socket. (6) Podman renders no mounts as null, so that counts
+      as empty; a captured identity with non-integer parts is skipped rather than
+      wedging every reap. (7) A socket/owner-file failure after the container is gone
+      is a classified, retryable ContainerError, not a raw OSError escaping remove_container.
+      (8) _file_lock fails closed on an unverifiable/unwritable lock inode; _list_names
+      reports an unresponsive runtime as None; release pruning confirms the captured
+      ID is really gone before dropping a record; discard_unowned_container removes
+      by name+captured id so remove_container releases the shared proxy under the
+      real name; pm container restart pins the allocation before the ownership check
+      and reports a confirmed-missing container; pm container cleanup --pr matches
+      the exact PR-id token so --pr pr-ab no longer removes pr-abc containers. Tests
+      updated for the two contract changes (remove_container name+id; classified socket
+      release) and added for the CLI token filter, the missing-container restart,
+      and a re-clamp spy. Spec R6/R8 updated. Full suite 4163 passed, 2 skipped (evidence
+      /pm-captures/review-f54b-i1-fullsuite-final.log); the last test-only assertion
+      addition was verified by running that file (13 passed). verify-s22-followup.md
+      intentionally stays untracked: it is a QA verification prompt, already preserved
+      under /pm-captures/post-oom-restart-20261027/. Not changed, worth a later look:
+      pm container status probes the runtime domain ~5 times per invocation, and container.py
+      is ~3.1k lines.'
+    created_at: '2026-10-27T14:45:32Z'
+    last_edited: '2026-10-27T14:45:32Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
