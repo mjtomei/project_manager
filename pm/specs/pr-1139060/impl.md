@@ -137,6 +137,9 @@ operations do not take PM's launch lock.
   launcher releases it only after checking live/unknown ownership under the
   launch lock. Pane discovery failure is not proof that attachment failed;
   implementation launch must not fall back to a duplicate host worker then.
+  Every launcher (implementation, review, sign-off) therefore treats a window
+  that exists after a failed pane lookup as launched (with a setup warning)
+  instead of reporting failure and releasing an allocation a live pane owns.
   If the allocation's old name disappears during failed-attachment cleanup,
   confirm absence by its captured immutable ID before reporting disposal or
   allowing host fallback. A surviving renamed allocation or unknown ID check
@@ -252,6 +255,10 @@ operations do not take PM's launch lock.
   Owner release captures the launch's container ID and restart generation in
   scenario/resume state. It persists that identity atomically before inventory or
   reaper-lock acquisition; later passes retry it even when inventory was unavailable.
+  A release that had to fall back to ordinary ownership checks is reported as
+  refused ("cleanup deferred") only while the allocation survives — kept or
+  with a failed removal; one those checks removed anyway is complete, not
+  pending work a retry could clear.
   Owner releases follow runtime-domain/container-ID identity through runtime renames,
   including targeted release and later retries; pruning does not mistake a renamed
   allocation for an absent one. Successful creation/reuse and restart record an
@@ -495,7 +502,9 @@ concurrent failures; inability to persist an outcome is itself reported.
 - `container-max-running` (default 0 = unlimited; supersedes the
   `qa-max-containers` name from 7b6dc7b9): QA clamps its launch batch to the
   remaining headroom (≥1), counting renamed managed allocations as well as legacy
-  names through the shared inventory; the rest queue through the existing
+  names through the shared inventory — an inventory that cannot be read is
+  unknown, not zero running containers, so the batch clamps to one and the
+  next poll re-clamps with a fresh count; the rest queue through the existing
   queued-scenario mechanism. Settled scenarios release their allocations before
   handing slots to queued work (after PASS verification, with the same human,
   retention and viewed-window exceptions). The cap bounds the launch batch, not

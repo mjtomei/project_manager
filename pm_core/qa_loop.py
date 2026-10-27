@@ -2329,6 +2329,11 @@ def _launch_scenarios_in_containers(
         )
         if state.stop_requested:
             return
+        # Record the name before the attempt: create_container's own cleanup is
+        # best-effort, so a failed launch must still be retryable by this run's
+        # release (and by the reconciler) instead of leaking an unnamed
+        # allocation nobody can target.
+        scenario.container_name = cname
         allocation_identity: dict[str, str] = {}
         try:
             scenario.container_id = container_mod.create_qa_container(
@@ -2343,12 +2348,17 @@ def _launch_scenarios_in_containers(
                 scenario=scenario.index,
                 allocation_identity=allocation_identity,
             )
-            scenario.container_name = cname
             scenario.container_generation = allocation_identity.get("generation")
         except Exception as exc:
             _log.error("Failed to create container for scenario %d — aborting scenario",
                        scenario.index, exc_info=True)
             _record_launch_failure(state, scenario, str(exc))
+            # A partial allocation may survive a best-effort discard inside
+            # create_container; release it here under the same ownership checks
+            # (retained, live or unknown owners are preserved).
+            container_mod.discard_unowned_container(
+                cname, container_id=allocation_identity.get("id"),
+                generation=allocation_identity.get("generation"))
             return
 
         # Creation can wait on launch backpressure or runtime setup. Keep its
@@ -4307,7 +4317,14 @@ def _clamp_to_container_headroom(cap: int) -> int:
     limit = container_mod.max_running_containers()
     if limit <= 0:
         return cap
-    running = container_mod.running_container_count() or 0
+    running = container_mod.running_container_count()
+    if running is None:
+        # An unavailable inventory is not zero running containers — a busy
+        # runtime is exactly when the cap matters.  Launch one scenario and
+        # re-clamp on the next poll with a fresh count.
+        _log.warning("container-max-running=%d: running-container count "
+                     "unavailable; launching one scenario at a time", limit)
+        return 1
     headroom = max(1, limit - running)
     if cap <= 0 or headroom < cap:
         _log.info("QA launch batch clamped to %d (container-max-running=%d, "
@@ -4533,6 +4550,11 @@ def _release_scenario_containers(state: QALoopState, session: str, *,
         if viewed and sc.pane_id:
             try:
                 window_id = tmux_mod.pane_window_id(sc.pane_id)
+                # ``None`` is "no window id" — either the pane is gone or the
+                # lookup failed, and the two are indistinguishable here. Keep
+                # the allocation: a failed inspection must never be read as
+                # "nobody is watching" (R3). An unowned container left this
+                # way is removed by the reconciler on its next pass.
                 if not window_id or window_id in viewed:
                     continue
             except Exception:

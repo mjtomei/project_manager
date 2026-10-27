@@ -549,6 +549,15 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             claude_pane = tmux_mod.new_window_get_pane(
                 pm_session, window_name, claude_cmd, workdir, switch=switch)
             if not claude_pane:
+                # new_window_get_pane returns None when it cannot find the
+                # window or list its panes *after* tmux created the window and
+                # started the session in it.  Treat an existing window as
+                # launched (pr_start uses the same guard) instead of reporting
+                # failure and releasing a container a live pane may own.
+                if tmux_mod.find_window_by_name(pm_session, window_name):
+                    print(f"Opened sign-off window '{window_name}' "
+                          f"(pane lookup failed; the session may still be starting).")
+                    return
                 print(f"Sign-off window: failed to create tmux window '{window_name}'.")
                 discard_unowned_container(
                     _cname, container_id=allocation_identity.get("id"),

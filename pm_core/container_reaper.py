@@ -1399,7 +1399,9 @@ def release_containers(names: list[str], *, reason: str = "release",
     It must supply the captured container IDs and recovery generations; these
     are persisted before inventory/locking so a later pass can retry safely.
     Missing identity falls back to ordinary ownership checks, never name-only
-    force removal. Retention and an in-flight launch defer the request.
+    force removal. Retention and an in-flight launch defer the request, and a
+    refusal is reported only while the allocation survives the pass (kept, or
+    its removal failed) — a container those checks removed anyway is done.
     """
     if not names:
         return Outcome(scope="no containers")
@@ -1424,7 +1426,17 @@ def release_containers(names: list[str], *, reason: str = "release",
                           expected_generations=dict(expected_generations or {})),
                     wait=wait, reason=reason)
     if out is not None:
-        out.release_refused.update(refused)
+        # A refusal is only pending work while the allocation is still there.
+        # The ordinary ownership checks can remove an unowned container anyway
+        # (e.g. an old resume snapshot without a captured id), and reporting
+        # that as "cleanup deferred" would contradict the removal it made.
+        if out.error or out.skipped:
+            out.release_refused.update(refused)
+        else:
+            pending = {d.info.name for d in out.decisions if d.action == "keep"}
+            pending |= set(out.failures)
+            out.release_refused.update(
+                {n: why for n, why in refused.items() if n in pending})
     return out
 
 

@@ -92,6 +92,25 @@ def test_queue_releases_completed_containers_before_next_launch(
         assert qa_loop._is_launch_failure(state, 2)
 
 
+def test_unknown_running_count_does_not_disable_the_cap(monkeypatch):
+    """An unavailable inventory must not read as "zero running containers".
+
+    ``running_container_count`` returns None when the runtime cannot be
+    inventoried — exactly the pressure the cap protects against.  Treating
+    that as 0 launched a full batch.  Clamping to one still starts queued
+    work and re-clamps on the next poll.
+    """
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 4)
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: None)
+    assert qa_loop._clamp_to_container_headroom(4) == 1
+    assert qa_loop._clamp_to_container_headroom(0) == 1
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 1)
+    assert qa_loop._clamp_to_container_headroom(4) == 3
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 3)
+    assert qa_loop._clamp_to_container_headroom(4) == 1
+
+
 @pytest.mark.parametrize("verdict", ["PASS", "NEEDS_WORK", "INPUT_REQUIRED"])
 def test_resume_does_not_relaunch_settled_scenarios(tmp_path, monkeypatch, verdict):
     scenario = qa_loop.QAScenario(

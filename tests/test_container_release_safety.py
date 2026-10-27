@@ -125,6 +125,19 @@ class TestOwnerReleaseIdentity:
         assert "owned by live pane" in out.decisions[0].reason
         assert reaper.pending_releases() == {}
 
+    def test_refusal_dropped_when_ordinary_checks_remove_it(self, fake_env):
+        """An identity-less release the regular checks complete is not "deferred".
+
+        Old resume snapshots carry no captured id/generation.  The ordinary
+        ownership checks remove an unowned container anyway, so reporting that
+        as "cleanup deferred ... retry with pm container reap" would contradict
+        the removal and leave a message no retry can clear.
+        """
+        fake_env["containers"] = [_info(NAME)]
+        out = reaper.release_containers([NAME], owner_release=True)
+        assert out.removed == [NAME]
+        assert NAME not in out.release_refused
+
     @pytest.mark.parametrize("missing", ["id", "generation"])
     def test_partial_identity_is_refused(self, fake_env, missing):
         fake_env["containers"] = [_info(NAME)]

@@ -115,6 +115,39 @@ def test_concretizer_launch_failure_keeps_real_error(scenario_state, monkeypatch
         discard.assert_not_called()
 
 
+def test_failed_container_create_stays_targetable(scenario_state, monkeypatch):
+    """A partial allocation from a failed create must keep its name.
+
+    create_container's own discard is best-effort, so the scenario has to
+    record the name: run-end release (and the reconciler) can then retry it
+    under the usual ownership checks instead of leaking an allocation no
+    record points at.
+    """
+    state, scenario = scenario_state
+    scenario.window_name = None
+    scenario.container_name = None  # nothing recorded yet
+    clone = Path(scenario.worktree_path)
+    monkeypatch.setattr(qa_loop, "create_scenario_workdir",
+                        lambda *a, **k: (clone, clone.parent / "scratch"))
+
+    def create(**kwargs):
+        raise container.ContainerError("container 'x' could not start: keyring exhausted")
+
+    monkeypatch.setattr(container, "create_qa_container", create)
+    discard = MagicMock()
+    monkeypatch.setattr(container, "discard_unowned_container", discard)
+
+    qa_loop._launch_scenarios_in_containers(
+        state, {}, {"id": state.pr_id}, "pm-t", None, str(clone))
+
+    assert scenario.container_name == "pm-t-qa-pr-aaaa-L-s1"
+    assert qa_loop._is_launch_failure(state, 1)
+    assert "keyring exhausted" in state.scenario_verdict_reasons[1]
+    assert not state.scenario_verdicts
+    discard.assert_called_once_with(scenario.container_name,
+                                    container_id=None, generation=None)
+
+
 @pytest.mark.parametrize("failure", ["clone", "instruction", "artifact"])
 @pytest.mark.parametrize("containers", [True, False])
 def test_preparation_failure_keeps_real_error_without_verdict(
