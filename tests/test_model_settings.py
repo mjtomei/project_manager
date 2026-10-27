@@ -532,3 +532,35 @@ async def test_tui_project_view_shows_ok_route_status(project_root,
         line = next(x for x in body.splitlines()
                     if x.strip().startswith(f"{ROUTE}  type=router"))
         assert line.rstrip().endswith("[OK]")
+
+
+@async_test
+async def test_tui_long_refusal_wraps_inside_the_popup(project_root,
+                                                      pm_home_dir,
+                                                      monkeypatch):
+    long = "held by pm edit; " + "the remedy names a command. " * 12
+    def busy(*a, **k):
+        raise store.StoreLockTimeout(long)
+    monkeypatch.setattr(store, "locked_update", busy)
+    app = _screen_app(project_root, "pr-001")
+    async with app.run_test(size=(200, 50)) as pilot:
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        status = app.screen_obj.query_one("#model-status")
+        box = app.screen_obj.query_one("#model-container")
+        assert status.region.width <= box.content_region.width
+        assert status.region.height > 1
+        assert status.render().plain.rstrip().endswith("command.")
+
+
+def test_badge_ignores_blank_entries():
+    # Hand-edited blank entries select nothing (launches and the rows treat
+    # them as absent), so they don't earn the ⇄ badge either.
+    assert not model_settings.has_pr_override(
+        {"id": "p", "session_models": {"signoff": None},
+         "session_effort": {"impl": "  "}, "model": ""})
+    assert model_settings.has_pr_override(
+        {"id": "p", "session_models": {"signoff": None, "impl": "opus"}})
+    assert model_settings.has_pr_override({"id": "p", "effort": "high"})
+    assert model_settings.has_pr_override({"id": "p", "session_models": "x"})

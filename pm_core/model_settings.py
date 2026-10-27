@@ -19,8 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pm_core.model_config import (
-    EFFORT_LEVELS, PR_SESSION_TYPES, SESSION_TYPES, config_block,
-    project_model_config, resolve_model_and_provider,
+    EFFORT_LEVELS, PR_SESSION_TYPES, SESSION_TYPES, _is_model_value,
+    config_block, project_model_config, resolve_model_and_provider,
 )
 
 # PR-level keys: the all-role value and the per-role mapping.
@@ -195,5 +195,15 @@ def set_project_value(data: dict, kind: str, role: str,
 
 
 def has_pr_override(pr: dict) -> bool:
-    """Whether *pr* sets any model or effort of its own."""
-    return any(pr.get(k) for keys in _PR_KEYS.values() for k in keys)
+    """Whether *pr* sets any model or effort of its own.  A blank or
+    non-string entry counts as absent, as at launch and in the rows."""
+    for all_key, role_key in _PR_KEYS.values():
+        if _is_model_value(pr.get(all_key)):
+            return True
+        entries = pr.get(role_key)
+        if isinstance(entries, dict):
+            if any(_is_model_value(v) for v in entries.values()):
+                return True
+        elif entries is not None:  # malformed: the rows report it
+            return True
+    return False

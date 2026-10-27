@@ -87,7 +87,7 @@ class ModelSettingsScreen(ModalScreen):
         align: center middle;
     }
     #model-container {
-        width: auto;
+        width: auto;  /* set from the rows in _refresh */
         min-width: 60;
         max-width: 96%;
         height: auto;
@@ -102,6 +102,7 @@ class ModelSettingsScreen(ModalScreen):
         margin-bottom: 1;
     }
     #model-status {
+        width: 100%;  /* wraps a long refusal inside the box */
         margin-top: 1;
     }
     """
@@ -184,8 +185,17 @@ class ModelSettingsScreen(ModalScreen):
             lines.append("[dim]↑↓ row  Enter set model  e cycle effort  "
                          f"p {'PR' if self._project_view else 'project'} view"
                          "  Esc close[/]")
-        self.query_one("#model-body", Label).update("\n".join(lines))
+        body = "\n".join(lines)
+        self.query_one("#model-body", Label).update(body)
         self.query_one("#model-status", Label).update(self._status)
+        # Size the box to its rows (CSS caps it at 96% of the screen) so
+        # no column is clipped; the status line wraps inside that width.
+        from rich.cells import cell_len
+        from textual.markup import to_content
+        widest = max(cell_len(line) for line in
+                     [title, *to_content(body).plain.splitlines()])
+        # + border, padding and room for a vertical scrollbar
+        self.query_one("#model-container").styles.width = widest + 8
 
     def _table_lines(self) -> list[str]:
         from pm_core import model_settings
