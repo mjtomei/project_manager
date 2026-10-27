@@ -267,14 +267,22 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   recovery kwargs);
 * `run_review_loop_sync` catches exhaustion around `_run_claude_review` /
   `_adopt_in_flight_review`, appends a `ReviewIteration` with verdict
-  `NO_VERDICT`, calls `on_iteration`, breaks.
+  `NO_VERDICT`, calls `on_iteration`, breaks. A stop that landed while
+  `handle` was deciding (`state.stop_requested` set inside the catch) is
+  teardown, not a missing verdict: it breaks like the stop check at the top
+  of the loop, recording no `NO_VERDICT` iteration (the poller itself is
+  not passed `stop_check`, so this only covers a stop racing the exhaustion
+  decision).
 
 ### Watcher loop (`pm_core/watcher_base.py`)
 
 * `_poll_for_verdict` relies on the settings-driven defaults (it passes
   `stop_check` but no recovery kwargs);
 * `run_sync` catches exhaustion, records a `WatcherIteration` with
-  `NO_VERDICT`, sets `latest_summary`, breaks.
+  `NO_VERDICT`, sets `latest_summary`, breaks. A stop that landed while
+  `handle` was deciding (`stop_requested` set inside the catch) is teardown,
+  not a missing verdict: it mirrors the `PaneKilledError` stop convention
+  (`KILLED`) instead of recording `NO_VERDICT`.
 
 ### QA loop (`pm_core/qa_loop.py`)
 
@@ -336,9 +344,15 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   `INPUT_REQUIRED` + `_error` (reusing the existing "plan incomplete" surface
   block, and naming the validator's last rejection when the planner did emit
   a block that could not be consumed). A `completed` result re-reads and
-  accepts the plan. A stop request is honoured before `check_response`, so
-  teardown never surfaces a spurious
-  exhaustion. Keep `_PLANNER_TIMEOUT` as the outer deadline.
+  accepts the plan. A stop request is honoured before `check_response`, and
+  both `except VerdictRecoveryExhausted` handlers (the `check_response` one
+  and the `handle` one) re-check `state.stop_requested` before setting
+  `planner_exhausted`: `handle`'s deferral bound runs *before* its own
+  `stop_check`, so a stop set from the TUI thread while it decides can
+  surface as a spurious exhaustion. Without the re-check that would end a
+  user-stopped run with `INPUT_REQUIRED` + a QA note (the bug the `STOPPED`
+  path fixes), so it falls through to the clean `STOPPED` teardown instead.
+  Keep `_PLANNER_TIMEOUT` as the outer deadline.
   A stop before any plan was accepted ends the run in the terminal
   `STOPPED` state (`latest_output = "QA stopped during planning"`): the
   no-scenarios path would otherwise report `INPUT_REQUIRED` with "Planner
@@ -470,8 +484,12 @@ unbounded.
   `no_response`; a stop that lands between ticks does not retire a worker as
   `no_response`, and a stop set *inside* `handle` (after the `stopping`
   snapshot) does not retire it either (both are spurious-exhaustion guards
-  during teardown).
-* `tests/test_qa_planner_handoff.py`: planner exhaustion surfaces
+  during teardown); a review/watcher stop that lands inside `handle` does
+  not record `NO_VERDICT` (the review loop keeps its prior verdict, the
+  watcher records the `KILLED` stop convention).
+* `tests/test_qa_planner_handoff.py`: a stop that lands inside `handle`
+  ends the run in `STOPPED` (clean teardown), not `INPUT_REQUIRED`; planner
+  exhaustion surfaces
   `INPUT_REQUIRED` + error and stops planning; exhaustion after a malformed
   block names the validator's rejection (e.g. non-contiguous numbering) in
   `_error`; a plan written while recovery

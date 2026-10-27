@@ -270,6 +270,17 @@ class BaseWatcher(ABC):
                     state.latest_summary = str(e)
                     break
                 except VerdictRecoveryExhausted as e:
+                    if state.stop_requested:
+                        # A stop that landed while recovery was deciding is
+                        # teardown, not a missing verdict.  Mirror the
+                        # PaneKilledError stop convention instead of
+                        # recording NO_VERDICT for a user-stopped run.
+                        _log.info("watcher[%s]: stopped during recovery on "
+                                  "iteration %d", self.WATCHER_TYPE,
+                                  state.iteration)
+                        state.latest_verdict = "KILLED"
+                        state.latest_summary = "Watcher stopped by user"
+                        break
                     # The watcher session idled without emitting its
                     # expected verdict and bounded recovery is exhausted.
                     _log.warning("watcher[%s]: no verdict on iteration %d: %s",

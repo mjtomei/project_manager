@@ -126,7 +126,8 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
                   idle_events: int = 1, grace: float | None = 0,
                   extra_patches: tuple = (),
                   settle_transcript_turns: list[tuple[str, str]] | None = None,
-                  end_with_stop: bool = False):
+                  end_with_stop: bool = False,
+                  state_hook=None):
     """Drive run_qa_sync's planning phase with a fake tmux + hook layer.
 
     Returns the final state.  The PR has no QA spec, so when a plan is
@@ -156,6 +157,10 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
     data = {"project": {"name": "p"}, "prs": [pr]}
     state = QALoopState(pr_id="pr-001")
     state.qa_workdir = str(tmp_path / "qa")
+    if state_hook is not None:
+        # Let a test reach the state mid-run (e.g. to simulate a stop that
+        # lands while recovery is deciding).
+        state_hook(state)
 
     transcript_paths: dict[str, Path] = {}
 
@@ -619,6 +624,86 @@ class TestPlannerRecovery:
 
         assert [s.title for s in state.scenarios] == TITLES
         assert "QA_PLAN_START" in state.plan_output
+
+    def test_stop_during_recovery_is_a_clean_teardown(
+            self, tmp_path, monkeypatch):
+        """A stop that lands while recovery is deciding must not be reported
+        as a missing plan.
+
+        ``MissingOutputRecovery.handle`` checks its deferral bound *before*
+        its own ``stop_check``, so a stop set from the TUI thread can surface
+        as ``VerdictRecoveryExhausted``.  Treating that as a real exhaustion
+        would end a user-stopped run with INPUT_REQUIRED (and record a QA
+        note), the same bug the non-recovery stop path fixed.
+        """
+        state_holder: dict = {}
+
+        class _ExhaustedWhileStopping:
+            enabled = True
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def handle(self, *args, **kwargs):
+                state_holder["state"].stop_requested = True
+                raise qa_loop.VerdictRecoveryExhausted(
+                    "the session re-announced its idle turn 11 time(s)",
+                    attempts=0, reason="no_progress")
+
+            def check_response(self):
+                pass
+
+        monkeypatch.setattr(qa_loop, "MissingOutputRecovery",
+                            _ExhaustedWhileStopping)
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=TEMPLATE_PROMPT,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", "Still reading the diff...")],
+            extra_patches=(patch("pm_core.qa_loop._add_status_pane"),),
+            state_hook=lambda s: state_holder.__setitem__("state", s))
+
+        assert state.latest_verdict == qa_loop.VERDICT_STOPPED
+        assert state.latest_verdict != qa_loop.VERDICT_INPUT_REQUIRED
+        assert state._error == ""
+        assert state.latest_output == "QA stopped during planning"
+
+    def test_stop_during_response_timeout_is_a_clean_teardown(
+            self, tmp_path, monkeypatch):
+        """The same guard on the ``check_response`` exhaustion path.
+
+        No idle event ever arrives, so the planner sits in the post-nudge
+        response deadline; a stop set just before it fires must not surface
+        INPUT_REQUIRED either.
+        """
+        state_holder: dict = {}
+
+        class _ResponseTimeoutWhileStopping:
+            enabled = True
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def handle(self, *args, **kwargs):
+                raise AssertionError("no idle event should reach handle()")
+
+            def check_response(self):
+                state_holder["state"].stop_requested = True
+                raise qa_loop.VerdictRecoveryExhausted(
+                    "no new turn arrived within 3600s", attempts=1,
+                    reason="no_response")
+
+        monkeypatch.setattr(qa_loop, "MissingOutputRecovery",
+                            _ResponseTimeoutWhileStopping)
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=TEMPLATE_PROMPT,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", "Still reading the diff...")],
+            idle_events=0,
+            extra_patches=(patch("pm_core.qa_loop._add_status_pane"),),
+            state_hook=lambda s: state_holder.__setitem__("state", s))
+
+        assert state.latest_verdict == qa_loop.VERDICT_STOPPED
+        assert state._error == ""
 
 
 TEMPLATE_PLUS_SUFFIX = TEMPLATE_PROMPT + "\n...redraw...\n" + PANE_SUFFIX

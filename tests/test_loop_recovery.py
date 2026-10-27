@@ -705,6 +705,36 @@ class TestReviewLoopRecovery:
         assert state.history[0].verdict == VERDICT_NO_VERDICT
         assert seen == [VERDICT_NO_VERDICT]
 
+    def test_stop_during_recovery_is_not_a_no_verdict(self):
+        """A stop that lands while recovery is deciding is teardown.
+
+        ``handle``'s deferral bound runs before its own ``stop_check``, so a
+        user stop can surface as ``VerdictRecoveryExhausted``.  Recording
+        NO_VERDICT then would show a user-caused failure and a history entry
+        for a loop the user stopped.
+        """
+        from pm_core.review_loop import (
+            ReviewLoopState, run_review_loop_sync, VERDICT_NO_VERDICT,
+        )
+        state = ReviewLoopState(pr_id="pr-001")
+
+        def _stop_then_exhaust(*_a, **_kw):
+            state.stop_requested = True
+            raise VerdictRecoveryExhausted("session never emitted a verdict",
+                                           attempts=3, reason="no_progress")
+
+        with patch("pm_core.review_loop._run_claude_review",
+                   side_effect=_stop_then_exhaust):
+            run_review_loop_sync(
+                state, "/tmp",
+                {"id": "pr-001", "title": "t", "workdir": "/tmp"},
+                transcript_dir="/tmp",
+            )
+
+        assert state.latest_verdict != VERDICT_NO_VERDICT
+        assert state.history == []
+        assert state.running is False
+
 
 # ---------------------------------------------------------------------------
 # Watcher loop wiring
@@ -741,6 +771,46 @@ class TestWatcherLoopRecovery:
         assert len(result.history) == 1
         assert result.history[0].verdict == VERDICT_NO_VERDICT
         assert "never emitted" in result.latest_summary
+
+    def test_stop_during_recovery_is_a_clean_kill(self):
+        """A stop that lands while recovery is deciding is teardown.
+
+        Mirror the ``PaneKilledError`` stop convention (``KILLED``) instead
+        of recording a NO_VERDICT failure for a user-stopped run.
+        """
+        from pm_core.watcher_base import (
+            BaseWatcher, VERDICT_NO_VERDICT,
+        )
+
+        class W(BaseWatcher):
+            WATCHER_TYPE = "test"
+            DISPLAY_NAME = "Test"
+            WINDOW_NAME = "test"
+
+            def generate_prompt(self, iteration):
+                return ""
+
+            def build_launch_cmd(self, iteration, transcript=None):
+                return ["echo"]
+
+            def parse_verdict(self, output):
+                return "READY"
+
+        w = W("/tmp")
+
+        def _stop_then_exhaust(*_a, **_kw):
+            w.state.stop_requested = True
+            raise VerdictRecoveryExhausted("session never emitted a verdict",
+                                           attempts=3, reason="no_progress")
+
+        with patch("pm_core.watcher_base.BaseWatcher._run_iteration",
+                   side_effect=_stop_then_exhaust):
+            result = w.run_sync(max_iterations=1)
+
+        assert result.latest_verdict == "KILLED"
+        assert result.latest_verdict != VERDICT_NO_VERDICT
+        assert result.history == []
+        assert result.running is False
 
 
 # ---------------------------------------------------------------------------

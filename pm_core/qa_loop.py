@@ -4224,6 +4224,12 @@ def run_qa_sync(
                 try:
                     planner_recovery.check_response()
                 except VerdictRecoveryExhausted as e:
+                    if state.stop_requested:
+                        # A stop that landed between the check above and
+                        # this raise is teardown, not a missing plan:
+                        # never surface INPUT_REQUIRED (and record a QA
+                        # note) for a run the user stopped.
+                        break
                     planner_exhausted = e
                     break
                 continue
@@ -4287,6 +4293,13 @@ def run_qa_sync(
                         scenario_start).scenarios),
                 )
             except VerdictRecoveryExhausted as e:
+                if state.stop_requested:
+                    # ``handle``'s deferral bound is checked before its own
+                    # ``stop_check``, so a stop that landed while it was
+                    # deciding can surface here as a spurious exhaustion.
+                    # Teardown is not a missing plan: end the run in the
+                    # clean STOPPED path below instead of INPUT_REQUIRED.
+                    break
                 planner_exhausted = e
                 break
             if result.status == "stopped":

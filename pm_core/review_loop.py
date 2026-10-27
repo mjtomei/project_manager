@@ -357,6 +357,15 @@ def run_review_loop_sync(
                 state.latest_output = str(e)
                 break
             except VerdictRecoveryExhausted as e:
+                if state.stop_requested:
+                    # A stop that landed while recovery was deciding is
+                    # teardown, not a missing verdict: never record
+                    # NO_VERDICT (a user-visible failure) for a loop the
+                    # user stopped.  Mirrors the stop check at the top of
+                    # the loop.
+                    _log.info("review_loop: stopped during recovery on "
+                              "iteration %d", state.iteration)
+                    break
                 # The session idled without ever emitting a review verdict
                 # and the bounded recovery attempts are spent.  Record the
                 # iteration and surface an explicit terminal state rather
