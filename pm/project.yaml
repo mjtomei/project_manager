@@ -14508,7 +14508,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T18:10:50.685110+00:00'
+  updated_at: '2026-10-27T18:32:02.838374+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15017,6 +15017,31 @@ prs:
       session teardown.'
     created_at: '2026-10-27T18:10:50Z'
     last_edited: '2026-10-27T18:10:50Z'
+  - id: note-24a8bcd
+    text: 'Review-loop 6280 i5 (2026-10-27): reviewed 61389980. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at 74462d76 for the right reason.
+      One defect fixed: the two remaining teardown paths that take the per-directory
+      start lock (_stop_shared_proxy_socket, and the legacy per-container stop_push_proxy
+      branch) called _start_lock on a socket-dir path that can be a symlink planted
+      in world-writable /tmp; _start_lock resolves the directory, so a planted link
+      made it create and lock <target>.lock next to an arbitrary directory the planter
+      can write. Neither path is ever legitimately a symlink (_shared_sock_dir_path
+      returns the real readable dir or the hashed dir), so both now run _drop_foreign_discovery_link(sock_dir)
+      first — the guard _stop_socket_under_lock already uses — unlinking the link
+      and never its target. Tests: test_shared_stop_does_not_follow_a_planted_symlinked_dir
+      and test_legacy_stop_does_not_follow_a_planted_symlinked_dir both fail at 61389980
+      for the right reason (the victim .lock is created through the planted symlink)
+      and pass at HEAD. tests/test_push_proxy.py + tests/test_container.py: 229 passed.
+      Spec updated with Review iteration 16 refinements. Residual, unchanged and out
+      of scope: in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir (option (3), workdir-per-request, remains the cleaner
+      long-term design); proxy_is_alive cannot distinguish a busy daemon from a dead
+      one beyond the backlog of 16; the daemon serves one request at a time; a shared
+      stop still leaves its .lock beside the kept directory until session teardown.'
+    created_at: '2026-10-27T18:32:02Z'
+    last_edited: '2026-10-27T18:32:02Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
