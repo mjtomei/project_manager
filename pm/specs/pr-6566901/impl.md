@@ -360,9 +360,18 @@ values (e.g. `0.5`) are accepted by `pm set`.
   passes the previously handled event timestamp, see Design).
 * **Autostart** treats a `NO_VERDICT` review-loop verdict as `failed`
   (`pm_core/autostart_state.py`), like `ERROR`/`KILLED`.
-* **Grace periods** (`review 20s`, `QA 30s`) still gate verdict acceptance; a
-  nudge sent before grace elapses is harmless (its turn produces a later
-  event), but we only nudge on post-grace idles.
+* **Grace periods** (`review 20s`, `QA 30s`) still gate verdict acceptance, so
+  we only nudge on post-grace idles. An idle that arrives *inside* the grace
+  window is not discarded: the poller waits out the remaining grace (honouring
+  `stop_check`, pane death and `overall_timeout`) and then processes that same
+  event — verdict scan, then bounded recovery. Discarding it (the old
+  behaviour) advanced the hook baseline, so a session whose only idle landed
+  early (a fast verdict or an immediate provider error) left the poller
+  waiting for a turn that never came: the very hang recovery exists to
+  prevent. Verdicts come from the transcript's latest assistant turn, so an
+  early idle is a real turn boundary rather than the pane echoing the prompt
+  (the original reason for the grace). The QA tick loop already behaved this
+  way (`in_grace` skips the tick without advancing its hook baseline).
 * **Panes that die after a nudge** → `pane_exists` returns `None` as today.
 * **Multiple markers** (refiner emits both blocks) — rejection precedence is
   unchanged; recovery only fires when neither END marker matched.
@@ -396,7 +405,9 @@ values (e.g. `0.5`) are accepted by `pm set`.
   still does not reset the nudge budget; `retry_prompt` reaches the session
   through `poll_for_verdict` (the "re-send the original prompt" knob);
   a newer non-idle event (`Stop`) is not a new turn; overall timeout;
-  response timeout; recovery disabled keeps legacy behaviour; `stop_check`
+  response timeout; recovery disabled keeps legacy behaviour; an idle inside
+  the grace window is processed rather than dropped (the poller would
+  otherwise wait for a turn that never comes); `stop_check`
   during settle does not nudge; a verdict flushed during the settle window
   returns `"completed"` and is never nudged (unit, `poll_for_verdict`, and
   QA-tick-loop cases). Also holds the loop wiring tests below.
@@ -405,7 +416,9 @@ values (e.g. `0.5`) are accepted by `pm set`.
   reason, finalize `NO_VERDICT`, scenario-worker exhaustion
   (`INPUT_REQUIRED` + reason, slot freed).
 * `tests/test_qa_planner_handoff.py`: planner exhaustion surfaces
-  `INPUT_REQUIRED` + error and stops planning.
+  `INPUT_REQUIRED` + error and stops planning; a plan written while recovery
+  settles (the idle-hook/transcript-write race) is accepted from the settle
+  re-read rather than being asked for again.
 * `tests/test_review_loop_terminal_state.py`: `NO_VERDICT` → `failed`.
 * `tests/test_autostart_multi_target.py`: `NO_VERDICT` review loop → phase
   state `failed` in the status builder.

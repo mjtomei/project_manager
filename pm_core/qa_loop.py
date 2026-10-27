@@ -3194,9 +3194,14 @@ def _poll_tmux_verdicts(
                         # the settle window rather than nudging straight
                         # away.  Repeated refreshes cannot defer forever —
                         # MissingOutputRecovery bounds them with
-                        # ``max_deferrals`` (no_progress exhaustion).
+                        # ``max_deferrals`` (no_progress exhaustion).  Record
+                        # the deferred event (not the one this tick started
+                        # from) as accounted for, so the next comparison is
+                        # against the turn we actually decided about.
                         _no_verdict_since[scenario.index] = time.time()
-                        _recovery_ev_ts[scenario.index] = ev_ts
+                        _recovery_ev_ts[scenario.index] = float(
+                            (result.event or {}).get("timestamp")
+                            or ev_ts or last_ts)
                     elif result.status == "completed":
                         # The verdict landed while we settled: record it
                         # below instead of nudging a completed worker.

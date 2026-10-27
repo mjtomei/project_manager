@@ -761,10 +761,34 @@ def poll_for_verdict(
             # An idle turn means the session is past any startup dialog.
             trust_watch = None
             hook_baseline = float(ev.get("timestamp") or hook_baseline)
-            if grace_period > 0 and (
-                    time.monotonic() - poll_start) < grace_period:
-                ev = None
-                continue
+            if grace_period > 0:
+                remaining_grace = grace_period - (
+                    time.monotonic() - poll_start)
+                if remaining_grace > 0:
+                    # Verdicts are read from the transcript's latest
+                    # assistant turn, so an early idle is a real turn
+                    # boundary (not the pane echoing the prompt).  Wait the
+                    # grace out instead of discarding the event: a session
+                    # whose *only* idle — a fast error or verdict — lands
+                    # inside the window would otherwise leave the poller
+                    # waiting for a turn that never comes, which is exactly
+                    # the hang bounded recovery exists to prevent.
+                    _log.debug("%s: idle %.1fs inside grace window — "
+                               "waiting it out before processing",
+                               log_prefix, time.monotonic() - poll_start)
+                    grace_end = time.monotonic() + remaining_grace
+                    while time.monotonic() < grace_end:
+                        if stop_check and stop_check():
+                            return None
+                        if deadline is not None and (
+                                time.monotonic() >= deadline):
+                            raise recovery.exhausted("overall_timeout")
+                        if not tmux_mod.pane_exists(pane_id):
+                            _log.warning("%s: pane %s disappeared",
+                                         log_prefix, pane_id)
+                            return None
+                        time.sleep(min(0.25, max(
+                            0.0, grace_end - time.monotonic())))
 
         verdict = extract_verdict_from_transcript(transcript_path, verdicts)
         if verdict:

@@ -616,6 +616,38 @@ class TestPollForVerdictRecovery:
             )
         assert exc.value.reason == "overall_timeout"
 
+    def test_idle_inside_grace_window_is_processed_not_dropped(
+            self, tmp_path, monkeypatch):
+        """An idle that lands inside the grace window must still be handled.
+
+        A fast turn (a verdict produced in seconds, or an immediate provider
+        error) emits its only idle inside the grace window.  Discarding that
+        event leaves the poller waiting for a turn that never comes — the
+        same unbounded hang bounded recovery exists to prevent — so the
+        grace is waited out and the event processed instead.
+        """
+        link, target = _uuid_transcript(tmp_path)
+        _write_transcript(target, [("user", "review"),
+                                   ("assistant", "PASS")])
+        calls = {"n": 0}
+
+        def fake_wait(*_a, **_kw):
+            calls["n"] += 1
+            assert calls["n"] < 100, "poller hung after dropping the idle"
+            return _idle(1) if calls["n"] == 1 else None
+
+        from pm_core import hook_events, tmux
+        monkeypatch.setattr(hook_events, "wait_for_event", fake_wait)
+        monkeypatch.setattr(tmux, "pane_exists", lambda _p: True)
+
+        content = loop_shared.poll_for_verdict(
+            "%1", str(link), ("PASS",),
+            grace_period=0.05, wait_timeout=0.01,
+            send=lambda _m: pytest.fail("a completed turn must not be nudged"),
+            log_prefix="test",
+        )
+        assert "PASS" in content
+
     def test_recovery_disabled_keeps_waiting(self, tmp_path, monkeypatch):
         """max_missing=0 preserves the legacy unbounded wait."""
         link, target = _uuid_transcript(tmp_path)

@@ -124,7 +124,8 @@ def _write_transcript(path: Path, turns: list[tuple[str, str]]) -> None:
 def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
                   transcript_turns: list[tuple[str, str]] | None,
                   idle_events: int = 1, grace: float | None = 0,
-                  extra_patches: tuple = ()):
+                  extra_patches: tuple = (),
+                  settle_transcript_turns: list[tuple[str, str]] | None = None):
     """Drive run_qa_sync's planning phase with a fake tmux + hook layer.
 
     Returns the final state.  The PR has no QA spec, so when a plan is
@@ -132,6 +133,10 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
     before any scenario launch — leaving ``state.scenarios`` as the
     accepted plan.  When no plan is accepted the spec gate is skipped and
     the harness stops at the first Phase 2 tmux call.
+
+    *settle_transcript_turns*, when given, is written to the planner's
+    transcript during the recovery settle wait (the "the plan landed just
+    after the idle hook" race) and the wait reports no newer event.
     """
     monkeypatch.setenv("HOME", str(tmp_path))
     if grace is not None:
@@ -145,19 +150,29 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
     state = QALoopState(pr_id="pr-001")
     state.qa_workdir = str(tmp_path / "qa")
 
+    transcript_paths: dict[str, Path] = {}
+
     def fake_build_cmd(**kw):
+        path = transcript_path_for(kw["cwd"], kw["session_id"])
+        transcript_paths["planner"] = path
         if transcript_turns is not None:
-            _write_transcript(
-                transcript_path_for(kw["cwd"], kw["session_id"]),
-                transcript_turns)
+            _write_transcript(path, transcript_turns)
         return "planner-cmd"
 
     calls = {"n": 0}
+    settle_writes = {"pending": settle_transcript_turns}
 
     def fake_wait_for_event(session_id, **kw):
         calls["n"] += 1
         if calls["n"] <= idle_events:
             return {"event_type": "idle_prompt", "timestamp": time.time()}
+        if settle_writes["pending"] is not None:
+            # The transcript write trails the idle hook: the plan lands
+            # while recovery is settling, with no newer event.
+            _write_transcript(transcript_paths["planner"],
+                              settle_writes["pending"])
+            settle_writes["pending"] = None
+            return None
         state.stop_requested = True
         return None
 
@@ -507,6 +522,26 @@ class TestPlannerRecovery:
         assert "complete QA_PLAN block" in state._error
         assert state.planning_phase is False
         assert state.running is False
+
+    def test_plan_landing_during_settle_is_accepted_not_renudged(
+            self, tmp_path, monkeypatch):
+        """A plan written after the idle hook (the transcript-write race) is
+        accepted from the settle re-read instead of being asked for again.
+
+        ``MissingOutputRecovery.handle`` returns ``"completed"`` when the
+        outcome appears while it settles; the planner must re-read and use
+        that plan rather than waiting for another idle turn that may never
+        come.
+        """
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=TEMPLATE_PROMPT,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", "Still reading the diff...")],
+            settle_transcript_turns=[("user", TEMPLATE_PROMPT),
+                                     ("assistant", FULL_PLAN)])
+
+        assert [s.title for s in state.scenarios] == TITLES
+        assert "QA_PLAN_START" in state.plan_output
 
 
 TEMPLATE_PLUS_SUFFIX = TEMPLATE_PROMPT + "\n...redraw...\n" + PANE_SUFFIX
