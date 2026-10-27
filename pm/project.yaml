@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T08:30:10.604103+00:00'
+  updated_at: '2026-10-27T09:21:27.117897+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25689,6 +25689,24 @@ prs:
       as on master.'
     created_at: '2026-10-27T08:30:10Z'
     last_edited: '2026-10-27T08:30:10Z'
+  - id: note-0abe128
+    text: 'Review-loop 0bb3 i3 (4113650a): no functional defects found in the recovery
+      machinery — handle()/deferral bounds, the completed-verdict guard, QA tick-loop
+      episode bookkeeping (_no_verdict_since/_recovery_ev_ts), planner stop ordering
+      and the pr-8efa789 merge coordination all hold under adversarial tracing. Fixed
+      a test gap and a spec inaccuracy: (1) new TestRecoverySettings covers the three
+      verdict-recovery settings end to end through `pm set` — the _FLOAT_SETTINGS
+      branch had no coverage at all, so a sub-second settle value (0.5), rejection
+      of non-numeric values without clobbering the stored one, negative-settle clamping,
+      and corrupt hand-edited settings falling back to defaults are now asserted;
+      (2) the spec poll_for_verdict step list now says the settle window + classification
+      live inside MissingOutputRecovery.handle (it previously read as if the poller
+      settled then called handle), and the review/watcher bullets say they rely on
+      the settings-driven defaults instead of passing recovery kwargs. Full suite:
+      3786 passed, 1 skipped; 43F+17E all reproduce identically on origin/master (git
+      2.34.1 / hook-install env; test_git_ops::test_keeps_unpushed_merge included).'
+    created_at: '2026-10-27T09:21:27Z'
+    last_edited: '2026-10-27T09:21:27Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
