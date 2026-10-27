@@ -511,6 +511,11 @@ def test_follow_up_verdict_honors_a_pre_prompt_baseline(
     transcript at call time would see the answer already there, treat it as
     the verdict that prompted the wait, and block for a second verdict that
     never comes.
+
+    The answer's own ``idle_prompt`` predates the waiter's ``hook_baseline``
+    (it fired during the settle), so the waiter can never be woken by it: it
+    must inspect the transcript once *before* blocking.  No hook event is
+    written here — exactly the state the real caller is in.
     """
     import json as _json
     hook_events = _reload_hook_events()
@@ -549,24 +554,17 @@ def test_follow_up_verdict_honors_a_pre_prompt_baseline(
     monkeypatch.setattr(loop_shared, "find_claude_pane",
                         lambda session, window: "%0")
 
-    def writer():
-        time.sleep(0.1)
-        _write_event(tmp_hooks_home, sid, "idle_prompt", ts=time.time() + 5)
-
-    t = threading.Thread(target=writer)
-    t.start()
+    # No idle event: the verifier's answer already landed, so its event is
+    # older than the waiter's baseline and would never wake the loop.
     deadline = time.monotonic() + 0.5
-    try:
-        content = loop_shared.wait_for_follow_up_verdict(
-            "pm-session", "verify-x", str(transcript_link),
-            verdicts=("VERIFIED", "FLAGGED_END"),
-            wait_timeout=0.2,
-            stop_check=lambda: time.monotonic() > deadline,
-            log_prefix="test",
-            baseline_line=1,
-        )
-    finally:
-        t.join()
+    content = loop_shared.wait_for_follow_up_verdict(
+        "pm-session", "verify-x", str(transcript_link),
+        verdicts=("VERIFIED", "FLAGGED_END"),
+        wait_timeout=0.2,
+        stop_check=lambda: time.monotonic() > deadline,
+        log_prefix="test",
+        baseline_line=1,
+    )
     assert content is not None
     assert "VERIFIED" in content
     assert "re-checked" in content

@@ -262,6 +262,15 @@ These extend the requirements above; they are implemented and covered by tests.
   `line_index` *before* `send_keys` and passes it. Callers that wait on a human
   answering a question the pane already asked (review/watcher) omit it and keep the
   call-time snapshot.
+- **The waiter checks the transcript before blocking (review 5e61 i2).** The i4
+  baseline makes an answer that landed during the send/settle *acceptable*, but not
+  *observed*: that answer's own `idle_prompt` fired before `wait_for_follow_up_verdict`
+  set `hook_baseline`, and `hook_events.wait_for_event` only returns events with
+  `timestamp > newer_than`, so the loop would never be woken by it and blocked until
+  `stop_check`/pane death. The waiter now scans once *before* entering the event
+  loop with the same `line_index > baseline_line` guard, which is a no-op for the
+  human-answer callers (their baseline is the newest verdict at call time) and
+  closes the i4 gap for `qa_loop`'s re-verification.
 - **Only visible text can carry a verdict (review 5e61 i1).** The task-scoped scan
   reaches records the latest-turn scan never entered, and the verdict pattern is
   matched against the raw JSONL bytes — so a keyword that appears only inside a

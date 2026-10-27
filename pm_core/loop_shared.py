@@ -230,7 +230,9 @@ def wait_for_follow_up_verdict(
     scanning here would then treat it as the verdict that prompted the call
     and wait forever for a second one.  When omitted, the scan happens now —
     correct for callers that wait on a human answering a question the pane
-    has already asked.
+    has already asked.  A verdict newer than the baseline that is already in
+    the transcript is returned immediately, without waiting for a hook event
+    (its idle event predates this call, so it would never wake the loop).
 
     Hook-driven only — requires *transcript_path*.
     """
@@ -252,6 +254,21 @@ def wait_for_follow_up_verdict(
         baseline_hit = find_verdict_turn(transcript_path, verdicts)
         baseline_line = baseline_hit.line_index if baseline_hit else -1
 
+    def _new_verdict():
+        hit = find_verdict_turn(transcript_path, verdicts)
+        return hit if hit and hit.line_index > baseline_line else None
+
+    # A caller that prompted the pane itself snapshotted the baseline before
+    # sending, so the answer may already be in the transcript.  Its
+    # ``idle_prompt`` fired during the send/settle window and therefore
+    # predates ``hook_baseline``: the event loop below would never be woken
+    # by it.  Check the transcript once before blocking.
+    hit = _new_verdict()
+    if hit is not None:
+        _log.info("%s: follow-up verdict %s (already in transcript)",
+                  log_prefix, hit.verdict)
+        return hit.text or hit.verdict
+
     while not (stop_check and stop_check()):
         pane_id = find_claude_pane(session, window_name)
         if not pane_id:
@@ -271,8 +288,8 @@ def wait_for_follow_up_verdict(
             continue
         hook_baseline = float(ev.get("timestamp") or hook_baseline)
 
-        hit = find_verdict_turn(transcript_path, verdicts)
-        if hit and hit.line_index > baseline_line:
+        hit = _new_verdict()
+        if hit is not None:
             _log.info("%s: hook-driven follow-up verdict %s",
                       log_prefix, hit.verdict)
             return hit.text or hit.verdict

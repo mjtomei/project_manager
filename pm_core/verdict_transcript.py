@@ -412,6 +412,10 @@ _REASON_RE = re.compile(
 )
 
 
+# Mirrors the QA / review loops' ``ALL_VERDICTS`` so a caller that does not
+# care which task the verdict belongs to (or only wants a reason for a
+# scenario verdict) does not have to pass the tuple.  Kept local rather than
+# imported: ``qa_loop`` imports this module, so importing back would cycle.
 _DEFAULT_REASON_VERDICTS = ("INPUT_REQUIRED", "NEEDS_WORK", "PASS")
 
 
