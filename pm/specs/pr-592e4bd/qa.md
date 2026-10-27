@@ -14,6 +14,25 @@ roles (`session_models: {<type>: …}`). Implementation, review and
 sign-off containers use the same router bridge and fail closed. RQ2/RQ6
 describe the project default; RQ39–RQ41 cover the PR-level routing.
 
+Scope update (2026-10-27, impl.md header and R10–R13; user decisions
+note-985fb4d, note-e3ca18a, note-7131c29, note-0c8ce8a; commits
+bbabcb8d, 87fd093f, ff5db9c8): router providers are generic and pm no
+longer manages credentials. RQ48–RQ51 cover this. Where older Thens
+below name the retired behaviour, RQ48–RQ51 win:
+- No credential checks or refresh anywhere (RQ1 credentials path/expiry,
+  RQ3 "credentials not expired", RQ9/RQ40 "sign-in expired", E3 and the
+  credentials-file fixture are retired). A pane on an expired upstream
+  sign-in shows the router's own API error.
+- Wording is neutral. Messages say "route '<name>'", not "work route".
+  The stop reason is "stopped while waiting for the route". Unrouted
+  sessions show `route=none` (formerly `route=main`). The remedy says
+  "move it off this route: change the PR's model setting if it selects
+  this route ('pm pr model show <pr>') …". The literal strings in RQ10,
+  RQ40 and older passes are historical.
+- QA fixtures may keep a `work/`-prefix stub contract, but the R10
+  stories use a router whose model has another name, to show that nothing
+  in pm assumes `work/`.
+
 ## 1. Requirements (Given / When / Then)
 
 ### Route definition and visibility
@@ -932,6 +951,110 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     that session. After a `pm tui restart` the picker and auto-start
     must neither lose that run nor start a second driver.
 
+### Generic providers and per-PR configuration (2026-10-27; impl.md R10–R13)
+- **RQ48** (R10, 87fd093f) Generic router provider. Given a router
+  provider whose `model` has no `work/` prefix (e.g. `acme-opus`, or
+  `team/x`), When sessions launch on it (host or container), Then:
+  - `ANTHROPIC_BASE_URL` comes only from its `api_base`. Nothing in
+    output, launch commands or help names claude-mixed, `8790`, `work/`,
+    `~/.claude-work` or "main account".
+  - The default launch env has the subagent pin plus FORCE, the
+    unknown-model flag, and unsets `ANTHROPIC_API_KEY` and
+    `ANTHROPIC_AUTH_TOKEN`. `CLAUDE_CODE_AUTO_MODE_MODEL` is present only
+    when `classifier_model` is set, and then has exactly that value. It is
+    never derived as `<prefix>/claude-sonnet-5`.
+  - `env: {VAR: value}` adds or replaces a variable. `VAR: null` drops a
+    default. A null pin drops FORCE too, and a null FORCE keeps the pin.
+    `env` wins over `alias_models`. `unset_env: [...]` replaces the
+    default unset list, and `unset_env: []` lets an exported
+    `ANTHROPIC_API_KEY` through. What the session's claude process
+    actually sees matches `pm provider show`'s "launch env" and
+    "launch unsets", in host and container mode.
+  - A configured `remedy` replaces the router-down hint wherever that
+    hint appears: the QA wait/stall line, the `pm pr start/review/signoff`
+    stderr line, and `pm provider show`/`test` status.
+  - `pm provider test <route> --live`: every model Claude requested must
+    be the route's `model`. Without `probe_models`, any model the
+    transcript records is accepted and shown. With `probe_models`, it must
+    be `model` (minus `[...]`) or one of them, otherwise `Live: FAILED`
+    names it, exit 1.
+- **RQ49** (R11) No credential management. Given a providers.yaml entry
+  that still sets `credentials_file` (missing, unreadable or expired) and
+  `refresh_command` (a command that leaves a marker when run), When any
+  launch, preflight, `pm provider test` or TUI view runs, Then the file is
+  never read, the command never runs (no marker), and the outcome depends
+  only on the router. `pm provider list` and `show` warn: "<name>:
+  ignoring credentials_file, refresh_command (pm no longer checks or
+  refreshes credentials …; remove with 'pm provider edit <name> --clear
+  credentials_file --clear refresh_command')". After those clears the
+  warning is gone and nothing else in the entry changed. No credential
+  value or path appears anywhere else.
+- **RQ50** (R12, ff5db9c8) Effort per provider and per PR. The `--effort`
+  every launch passes (impl, review, sign-off, merge, every QA role, host
+  and container) follows: `PM_EFFORT` > PR `session_effort[role]` (with
+  the parent-role fallback, `qa_*` → `qa`, `signoff` → `review`) > PR
+  `effort` > the selected provider's `effort` > project `session_effort`
+  > global > built-in. A model without effort support (haiku) gets no
+  `--effort` at any level. An invalid hand-edited PR level (`effort:
+  extreme`) is ignored at launch, so the next level applies, and `pm model
+  show` reports it under Problems. `pm pr model show`, `pm model show`
+  (PR overrides now include `effort`/`session_effort`) and the TUI `o`
+  rows name the deciding setting ("PR qa", "PR", "provider <name>",
+  "project <type>", "global <type>", "built-in", "PM_EFFORT"), and they
+  agree with what launches use. s0 with only a plain-model project
+  `qa_scenario` shows and runs "<setting> (s0 legacy)". A provider
+  `qa_scenario`, or a PR worker exception, never reaches s0.
+- **RQ51** (R13) View and apply configurations.
+  - CLI providers: `pm provider add` takes every field. `edit` changes
+    only the given fields plus `--clear`, then prints the result. An
+    invalid result (router plus `--api-key`, a router without model or
+    api_base, bad effort, non-string `env`) is refused with one Error line
+    and leaves the file byte-for-byte unchanged. Editing an unknown name
+    says how to add it. `show` prints settings, launch env and status.
+    Values of variables whose names contain KEY, TOKEN, SECRET, PASSWORD,
+    CREDENTIAL, AUTH or HEADER print as `<redacted>`. A literal
+    `api_key` prints as `set`, and a `${VAR}` reference is printed as is.
+  - CLI per PR: `pm pr model show <pr>` lists every PR session type (not
+    the watcher) with model/provider, effort, command (launcher, `claude`,
+    or `claude (container route bridge)`) and what decided each, plus a
+    `!` line for a provider that is not configured. `set <pr> VALUE
+    [--effort] [--role …]` refuses an unconfigured `provider:` before
+    writing; `set` with neither VALUE nor `--effort` is an error. `unset`
+    without `--role` removes the PR-wide setting and keeps role entries.
+    `--role` removes those entries (an emptied mapping disappears).
+    `--model`/`--effort` limit the kind, and `--all` removes everything.
+    Every write goes through the project.yaml lock and keeps unrelated
+    fields, notes and other PRs intact. Running sessions keep their
+    settings, and the next launch uses the new ones.
+  - TUI `o` on a selected PR opens "Model settings for <pr>": row 0 "(all
+    roles)" then one row per role. Enter opens a picker: (clear), every
+    configured provider, then model names already used in the project. `e`
+    cycles the effort of the row's own setting (none → low → medium →
+    high → none). `p` toggles the project view: per-role `model_config`
+    plus the provider list with `[OK]` / `[UNAVAILABLE: …]` route status.
+    In the plans or QA view, `o` opens the project view directly. A save
+    shows "<where>: <kind> for <scope> -> <value> (new launches use it)"
+    and the tree reloads. A PR with settings of its own shows `⇄` on its
+    node, which goes when they are cleared. A busy (locked past the
+    timeout) or unparseable project.yaml shows "Not saved: …" and writes
+    nothing. A provider removed after the popup opened is refused at
+    apply. Esc closes the picker, then the popup.
+  - Open points (the thirty-seventh pass decides them):
+    (a) `save_providers` writes `~/.pm/providers.yaml` in place, with no
+    lock and no atomic rename. Concurrent `pm provider add/edit/remove`
+    may lose an update, and a launch, `pm pr model set` check or TUI
+    provider list reading mid-write may see an empty or partial file
+    ("not configured" / NOT READ). A lost update, or a reader seeing a
+    truncated file, is a finding.
+    (b) The popup keeps the data it loaded until its own next save. A CLI
+    change made while it is open is not shown. A popup save must not
+    undo the CLI's change to another role or PR, because `locked_update`
+    applies the edit to fresh data. `e` computes the next level from the
+    stale value, which is an observation.
+    (c) `⇄` uses truthiness, so a blank hand-edited `session_models:
+    {signoff: }` (absent for launches per RQ41) still shows the badge.
+    This is an observation unless the popup and launches disagree.
+
 ## 2. Setup
 
 - Install pm from this PR's clone (`./install.sh --local` or venv per
@@ -959,7 +1082,8 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
   account, not the stub).
 - Credentials-file fixture: a JSON file with `claudeAiOauth.expiresAt`
   (ms) far in the future, or in the past for the expiry case; never a real
-  token.
+  token. Since R11 (2026-10-27) it is used only to show that pm ignores
+  the retired key (RQ49).
 - Set the concurrency cap (global setting `qa-max-scenarios`) to 1 for
   queue scenarios.
 - **Lessons from the first QA run (2026-10-22):**
@@ -1882,6 +2006,49 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
       clone, and a shell outside tmux in the PR's workdir (open point a).
       `pm tui restart` while a `qa-run-bg` driver is alive in the
       session (open point b).
+  - Thirty-seventh pass (S98+), delta-only, planner 2026-10-27. S95 and
+    S96 passed (note-187d8cf, note-84b55db). S97 never reported, so its
+    open points (RQ47 a/b) are carried into S101. Product changes since
+    that run: bbabcb8d (generic router providers, credentials removed,
+    effort per provider/PR, `pm provider edit/show`, `pm pr model`, the
+    TUI `o` popup and `⇄`), 87fd093f (env overrides the subagent pin and
+    FORCE, wider show redaction, TUI provider cache) and ff5db9c8 (s0
+    legacy resolved in model_config, so every view agrees). None has run
+    live. RQ48–RQ51 are new. Controls: 34fa3d24 (pre-rework) for
+    upgrade and wording comparisons.
+    - S98: provider configuration on the CLI, host, real claude against
+      a stub router whose model is not `work/`-named plus a main stub.
+      add/edit/show/list, redaction, env/unset_env/classifier_model/
+      FORCE overrides verified in the live process environment, a
+      configured remedy on router-down, `--live` with and without
+      `probe_models`, retired keys with an expired credentials file and a
+      marker refresh_command (RQ48, RQ49). Concurrent `pm provider edit`
+      from several shells while launches and listings read the file
+      (open point a).
+    - S99: per-PR model and effort from the CLI, host and container mode,
+      two PRs. Each precedence level checked against the `--effort`
+      actually launched, for impl, review, sign-off and QA roles. s0
+      legacy display versus launch. Invalid hand-edited levels. An
+      unknown provider refused. A PR routed by `pm pr model set` gets the
+      bridge mount in container mode, and the other PR does not. Running
+      sessions keep their settings. Concurrent `pm pr model set` /
+      `pm model set --project` against the project.yaml lock (RQ50,
+      RQ51 CLI).
+    - S100: the TUI `o` popup end to end: PR and project views, picker,
+      effort cycle, `⇄`, Not saved under a held lock, a provider removed
+      while the popup is open, a CLI edit while it is open (open points b
+      and c), then launches from the TUI that pick up the new settings
+      (RQ51 TUI).
+    - S101: upgrade from 34fa3d24 with a pre-rework providers.yaml
+      (credentials_file, refresh_command, a `work/` model, no
+      classifier_model) in container mode. A routed QA run with route-down
+      wait, stop and recovery lines in the new wording and with the
+      configured remedy. The classifier env is gone until
+      `--classifier-model` is set.
+    - S102: S97 carried forward unchanged (it never reported): where the
+      runtime records land depending on how pm is run, and `pm tui
+      restart` while a `qa-run-bg` driver is alive (RQ47 open points a
+      and b). Host, fake-claude.
 
 ## 3. Edge cases
 
@@ -1892,10 +2059,11 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
   `pm provider test nosuch`, Then it is refused with a "not configured"
   problem and the remedy names configuring the provider or moving both
   routed types back to a model — never a silent launch on built-in claude.
-- **E3** Given credentials `expiresAt` within 2 min and a
-  `refresh_command` that extends it, When preflight runs, Then refresh runs
-  once and launch proceeds; if refresh doesn't help, the expiry problem and
-  sign-in remedy are shown; refresh isn't retried within 5 min.
+- **E3** *(retired 2026-10-27, R11; see RQ49.)* Given an entry with
+  `credentials_file` pointing at an expired file and a
+  `refresh_command`, When preflight runs, Then neither is read or run:
+  the launch depends only on the router answering, and list/show warn
+  about the ignored keys.
 - **E4** Given a stub that pauses >10 s mid-stream, When a container worker
   streams through the bridge, Then the response completes (no EOF at the
   connect timeout).
