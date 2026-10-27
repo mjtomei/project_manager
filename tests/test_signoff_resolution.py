@@ -4760,3 +4760,55 @@ def test_a_non_string_resolution_path_is_not_reported_as_resolved(w):
         r = CliRunner().invoke(pr_mod.pr, ["signoff", "integrate", PR])
     assert r.exit_code == 0, r.output
     assert "resolved: [" not in r.output
+
+
+def test_a_malformed_unresolved_value_is_never_labelled_resolved(w):
+    """A truthy non-list ``unresolved`` is a refusal everywhere; the labels agree.
+
+    ``pm`` never records a RESOLVED candidate with unresolved conflicts, but
+    project.yaml is hand-editable.  ``valid_for`` and the merge gate read the
+    value's truthiness (a refusal), and the sign-off prompt labels the attempt
+    "NOT resolved" — so the one-line summary and the per-path lines the CLI
+    and ``pm pr show`` print must not claim the path was resolved either.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    # A check without ``prepare``: the resolved candidate is *not* applied, so
+    # the stored record stays RESOLVED and the path labels are its outcome.
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED, rec
+    assert not rec["resolution"].get("applied_merge_sha")
+
+    def _tamper(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["unresolved"] = \
+            "garbage"
+    store.locked_update(w.pm_dir, _tamper)
+
+    pr = pr_entry(w)
+    integ = pr["integration"]
+    # The malformed value cannot name what failed; every recorded path is an
+    # attempt (never labelled resolved).
+    assert integration.unresolved_paths(integ) == {"pm/project.yaml"}
+    # The summary must agree with the per-path lines.
+    assert "unresolved conflicts remain" in integration.summary(integ)
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "Resolution attempted (NOT resolved): pm/project.yaml" in r.output
+    assert "Resolved: pm/project.yaml" not in r.output
+
+    # The sign-off prompt already reads the value's truthiness: the same
+    # "NOT resolved" wording, so the two surfaces agree.
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "attempted (pm, by record id) — NOT resolved" in text
+    # The Result line renders the (honest) one-line summary.
+    assert "metadata resolution attempted but unresolved conflicts remain" \
+        in text

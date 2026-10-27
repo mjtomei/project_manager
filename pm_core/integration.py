@@ -2063,8 +2063,17 @@ def unresolved_paths(record: dict | None) -> set[str]:
     # the CLI and the sign-off launch instead of reading as absent.
     paths = {e["path"] for e in resolution_entries(resolution, "unresolved")
              if isinstance(e.get("path"), str)}
-    if record.get("status") == CONFLICT \
-            and not revision_of(resolution.get("applied_merge_sha")):
+    # A malformed ``unresolved`` value cannot name the paths it could not
+    # reconcile, but it is still a refusal everywhere else (the merge gate and
+    # the router read its truthiness, and the sign-off prompt labels the
+    # attempt "NOT resolved").  Conservatively treat every recorded path as an
+    # attempt so the CLI / launch / ``pm pr show`` cannot claim pm resolved a
+    # path the record itself says is unresolved.
+    unenumerable = bool(resolution.get("unresolved")) \
+        and not isinstance(resolution.get("unresolved"), list)
+    if unenumerable or (
+            record.get("status") == CONFLICT
+            and not revision_of(resolution.get("applied_merge_sha"))):
         paths |= {p["path"]
                   for p in resolution_entries(resolution, "paths")
                   if isinstance(p.get("path"), str)}
@@ -2214,7 +2223,17 @@ def summary(record: dict) -> str:
         return (f"merges cleanly with {base}"
                 + (f" ({n} file(s) changed on both sides)" if n else ""))
     if status == RESOLVED:
-        entries = resolution_entries(resolution_of(record), "paths")
+        resolution = resolution_of(record)
+        if resolution.get("unresolved"):
+            # ``pm`` never records a RESOLVED candidate with unresolved
+            # conflicts, but project.yaml is hand-editable: a truthy value is
+            # a refusal everywhere else (``valid_for``, the merge gate, the
+            # router).  The one-line summary must not claim a resolution the
+            # record itself says is incomplete — it is printed beside the
+            # per-path "attempted — NOT resolved" lines.
+            return (f"conflicts with {base}: metadata resolution attempted "
+                    "but unresolved conflicts remain")
+        entries = resolution_entries(resolution, "paths")
         paths = [p.get("path") for p in entries
                  if isinstance(p.get("path"), str) and p.get("path")]
         ours = sum(_added_count(p, "added_ours") for p in entries)

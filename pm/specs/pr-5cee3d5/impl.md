@@ -619,7 +619,14 @@ tests):
     `TypeError` on it — while the "is this resolution unresolved?" checks
     stay conservative: a malformed value is still a refusal (it never grants
     a merge), and the message falls back to "unresolved conflicts recorded
-    without details". A malformed member *inside* a well-formed entry (the
+    without details". Because that refusal is a *truthiness* test, a
+    malformed (present, truthy, non-list) `unresolved` value also makes every
+    recorded path an attempt: `unresolved_paths` cannot enumerate what failed,
+    so the CLI / sign-off launch / `pm pr show` must not label a path
+    "resolved" while the prompt labels it "NOT resolved", and `summary` must
+    not claim "resolved by record" for a record whose own `unresolved` is
+    truthy (the summary, the per-path line and the unresolved line agree). A
+    malformed member *inside* a well-formed entry (the
     four id lists, `records`, `path`/`resolver`/`blob`) reads as absent in the
     compact record instead of raising (`list(5)`) or splitting a string into
     characters (`list("abc")`). A `path` member that is not a string is not a
