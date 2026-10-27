@@ -14508,7 +14508,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T10:42:37.133191+00:00'
+  updated_at: '2026-10-27T16:36:22.922399+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14880,6 +14880,39 @@ prs:
       stop leaves its .lock beside the kept directory until session teardown. (2026-10-27)'
     created_at: '2026-10-27T10:42:37Z'
     last_edited: '2026-10-27T10:42:37Z'
+  - id: note-6c70773
+    text: 'Review-loop 6280 i1 (2026-10-27): reviewed f74c4e70. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact),
+      and test_impl_and_qa_get_distinct_proxies fails at 74462d76 with assert 1 ==
+      3 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock). Two
+      defects in the new teardown code fixed, each with a test that fails at f74c4e70
+      for the right reason: (1) _remove_proxy_dirs unlinked a matching discovery symlink
+      before deciding what to do with its target, so a sweep that left a directory
+      in place (a start in flight, or a live proxy) also destroyed the long-name link
+      — the only way a later process with an empty registry finds a hashed directory
+      to sweep, i.e. the iteration-5 leak through the sweep; the link is now unlinked
+      only when the target is removed, is not a proxy dir, or is not a dir. (2) PushProxy.stop()
+      unlinked the proxy.json sidecar with only FileNotFoundError handled, but the
+      socket dir is bind-mounted writable into the container, so a container can create
+      a *directory* named proxy.json — IsADirectoryError escaped stop() on the daemon
+      exit path (and in the in-process teardown); it now ignores OSError, matching
+      _kill_proxy_socket. Test gap closed: R1 realpath edge case (a symlinked/trailing-slash
+      spelling of one workdir shares one proxy) had no test; added test_same_workdir_via_a_symlink_shares_one_proxy,
+      which also pins R4 realpath comparison. Tests: tests/test_push_proxy.py + tests/test_container.py
+      214 passed; full suite 3814 passed, 1 skipped, 1 failed (pre-existing environment:
+      test_hook_events::test_installer_writes_standalone_receiver), run with PATH=/usr/bin:/bin,
+      PYTHONPATH=/workspace. Spec updated with Review iteration 12 refinements. Cross-PR
+      note left on pr-ac12b47 (#143) pointing its stale-proxy cleanup at the new helpers
+      instead of a fresh /tmp sweep. Residual, unchanged and out of scope: in-process
+      refcounts only (cross-process cleanup stays with #241/pr-ac12b47); one daemon
+      per workdir (option (3), workdir-per-request, remains the cleaner long-term
+      design); proxy_is_alive still cannot distinguish a busy daemon from a dead one
+      beyond the backlog of 16; the daemon serves one request at a time, so a long
+      push serialises other requests on the same workdir; a shared stop leaves its
+      .lock beside the kept directory until session teardown. (2026-10-27)'
+    created_at: '2026-10-27T16:36:22Z'
+    last_edited: '2026-10-27T16:36:22Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
