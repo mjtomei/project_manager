@@ -31078,7 +31078,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-27T08:33:04.701806+00:00'
+  updated_at: '2026-10-27T08:57:23.660026+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31218,6 +31218,21 @@ prs:
       and the interrupt path is covered by tests. (2026-10-27T09:00:00Z)'
     created_at: '2026-10-27T08:33:04Z'
     last_edited: '2026-10-27T08:33:04Z'
+  - id: note-4f327ce
+    text: 'Review loop i11: both recording recipes now `mkdir -p` their capture directory
+      before recording — verified that `asciinema rec` prints "asciicast saved" and
+      exits 0 while writing nothing when the directory is missing, so the three main
+      cli-recording forms (only the no-TTY scaffold created it) and the tmux recipe
+      could produce a capture that looks successful and does not exist. Added `TestRecipes::test_capture_section_creates_the_capture_dir`
+      (fails on the previous recipes). Also added `TestHelperBasics::test_missing_timeout_is_a_usage_failure`:
+      the documented exit-2 contract for a missing coreutils `timeout` was untested,
+      and without the guard the missing tool surfaces as "job failed with exit status
+      127". No change to wait-for-job.sh. New file: 72 pass. Full suite: 3822 passed,
+      1 known baseline failure (test_installer_writes_standalone_receiver, reproduced
+      on origin/master); the 12 markdown tests pass with the markdown dep installed.
+      (2026-10-27T09:20:00Z)'
+    created_at: '2026-10-27T08:57:23Z'
+    last_edited: '2026-10-27T08:57:23Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
