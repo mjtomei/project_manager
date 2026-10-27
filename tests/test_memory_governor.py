@@ -1,5 +1,6 @@
 """Tests for pm_core.memory_governor."""
 
+import time
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -506,6 +507,30 @@ class TestMemoryStatus:
     def test_fractional_and_sub_gigabyte(self):
         assert self._status(1536) == "mem 1.5G/48G (pm)"
         assert self._status(500) == "mem 500M/48G (pm)"
+
+    def test_near_whole_gigabytes_drop_the_decimal(self):
+        """Regression: 49151 MiB rendered as "48.0G"."""
+        assert self._status(48 * 1024 - 1) == "mem 48G/48G (pm)"
+        assert self._status(10 * 1024 - 1) == "mem 10G/48G (pm)"
+
+    def test_blocked_entries_survive_concurrent_writers(self):
+        """Refusals come from separate processes: none may be dropped."""
+        import threading
+        actions = [f"impl pr-{i}" for i in range(8)]
+        threads = [threading.Thread(target=mg.record_blocked, args=(a, "over"))
+                   for a in actions]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert sorted(a for a, _ in mg.recent_blocked()) == sorted(actions)
+
+    def test_old_blocked_entries_are_pruned(self, monkeypatch):
+        mg.record_blocked("impl pr-old", "over")
+        later = time.time() + mg._BLOCKED_DISPLAY_SECONDS + 1
+        monkeypatch.setattr(mg.time, "time", lambda: later)
+        mg.record_blocked("impl pr-new", "over")
+        assert list(mg._load_blocked()) == ["impl pr-new"]
 
     def test_unmeasurable_is_shown_not_hidden(self):
         """Regression: a failed measurement used to blank the indicator."""

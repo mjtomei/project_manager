@@ -120,7 +120,7 @@ project name and may itself contain words like `impl` or `review`.
 interval refreshes it off the UI thread (runtime stats take seconds).
 Text: `mem 34G/48G (pm)`, `mem ?/48G (pm) unmeasurable` on failure, and
 `blocked: impl pr-1 [+N]` for launches refused in the last 10 min
-(`~/.pm/governor-blocked.json`, cleared when the action launches).
+(`~/.pm/governor-blocked.json`, cleared when the action launches; written under the governor lock because refusals come from separate CLI processes, entries past the window pruned).  The used figure is committed usage — measured plus expected growth — the number admission compares with the target.  The TUI also refreshes once at startup.
 `pm container status` prints usage, growth, host free/reserve, the
 unmeasurable reason and blocked launches.  The QA status pane counts
 `waiting_memory` as not complete and shows "N waiting for memory".
@@ -159,7 +159,7 @@ the outer cgroup, so `podman stats` and `memory.peak` report the
 
 ### R2: Memory projection before launch
 
-**What:** Before launching any container, the governor checks: `current_used + projected_new <= target`. Projection uses a rolling average of peak memory per container type (`impl`, `review`, `qa_scenario`, `qa_planner`), observed from `docker stats` and persisted across sessions.
+**What:** Before launching any container, the governor checks: `current_used + projected_new <= target`. Projection uses a rolling window of peak memory samples per container type (`impl`, `review`, `signoff`, `qa_scenario`, `qa_debug`), observed through the container runtime and persisted across sessions (90th percentile since 2026-10-27, see A7).
 
 **Grounded in code:**
 - Container creation goes through `pm_core/container.py:create_container()` (line 338) and `pm_core/container.py:create_qa_container()` (line 620). The governor gate must run before these calls.
@@ -259,7 +259,7 @@ the outer cgroup, so `podman stats` and `memory.peak` report the
   }
   ```
 - Sample list capped at `system-memory-history-size` per type (default 20). Oldest samples dropped when full.
-- **Age-aware projection:** When projecting memory for a new container, use the average of stored samples. Since samples are captured at end-of-life, they naturally represent peak usage for typical session durations. No need for complex age-duration modeling initially — the rolling average of end-of-life peaks is a good estimator. If a user's sessions are consistently long or short, the samples reflect that pattern.
+- **Age-aware projection:** When projecting memory for a new container, use the stored samples (**revised 2026-10-27:** 90th percentile, snapshots ×1.5 — see A7; the text below said "average"). Since samples are captured at end-of-life, they naturally represent peak usage for typical session durations. No need for complex age-duration modeling initially — the rolling average of end-of-life peaks is a good estimator. If a user's sessions are consistently long or short, the samples reflect that pattern.
 
 **Note on current-usage polling:** End-of-life recording replaces the background `StatsCollector` thread for *historical stats*. However, the governor still needs to know current live container memory for the gate check (`current_used + projected_new <= target`). In `pm` scope mode, this requires a one-shot `docker stats --no-stream` call at gate-check time (not a background poller). In `system` scope mode, it reads `/proc/meminfo`. Both are fast enough to do synchronously in the gate check.
 
@@ -303,7 +303,7 @@ the outer cgroup, so `podman stats` and `memory.peak` report the
 **Design:**
 
 #### Single governor file lock
-All governor operations serialize through `~/.pm/governor.lock` using `fcntl.flock` (same pattern as `pane_registry.py:locked_read_modify_write()`). This one lock covers stats file writes, gate checks, and queue mutations. Lock timeout: 10 seconds (generous because docker stats takes 1-2s under the lock).
+All governor operations serialize through `~/.pm/governor.lock` using `fcntl.flock` (same pattern as `pane_registry.py:locked_read_modify_write()`). This one lock covers stats file writes, gate checks, and queue mutations. Lock timeout: 30 seconds (admission measures runtime stats under the lock; a timeout refuses — see E15).
 
 #### Global launch queue
 New file `~/.pm/launch-queue.json`, managed by new module `pm_core/launch_queue.py`.
@@ -345,7 +345,7 @@ When an entry is granted by `try_acquire`, it stays in the queue briefly (status
 
 #### `pm_core/launch_queue.py` public API
 ```python
-def governor_lock(timeout=10.0) -> contextmanager
+def governor_lock(timeout=30.0) -> contextmanager
     # Cross-process file lock on ~/.pm/governor.lock
     # Reusable by memory_governor.py for stats operations
 
@@ -372,7 +372,7 @@ def get_queue_status() -> dict
 
 #### try_acquire walk logic
 ```
-1. Clean stale entries (check PID alive via os.kill(pid, 0))
+1. Clean stale entries (dead/recycled pid, pre-restart instance, expired TTL — see E14)
 2. Sort by policy (_sort_queue)
 3. Compute: used = current_docker_stats + sum(projected for acquired entries)
 4. Walk sorted waiting entries:
@@ -463,7 +463,7 @@ The key principle: any real observation beats a configured default, and a config
 
 ### A10: Container age and its use in projection
 **Ambiguity:** Should projection account for how long the new container is expected to run?
-**Resolution:** Not initially. The rolling average of end-of-life samples already reflects typical session durations for each type (QA scenarios are short, impl sessions are long). The age is stored in each sample for future refinement — e.g., if we later want to project differently for a quick QA scenario vs. a long impl session. For now, average of all samples per type is sufficient.
+**Resolution:** Not initially. The rolling average of end-of-life samples already reflects typical session durations for each type (QA scenarios are short, impl sessions are long). The age is stored in each sample for future refinement — e.g., if we later want to project differently for a quick QA scenario vs. a long impl session. For now, the 90th percentile of all samples per type is sufficient.
 
 ## 4. Edge Cases
 
@@ -548,7 +548,7 @@ Stats are keyed by container type, but container names encode the type: `pm-{tag
    - `get_container_age_minutes(name: str) -> float | None` — `docker inspect` StartedAt, returns age in minutes
    - `load_stats() -> dict` / `save_stats(stats)` — read/write `~/.pm/container-stats.json` (atomic write via temp+rename). Uses `governor_lock()` from `launch_queue.py` for cross-process safety.
    - `record_sample(container_type: str, memory_mb: int, age_minutes: float)` — append sample to stats file under `governor_lock()`, drop oldest if over `system-memory-history-size`
-   - `project_memory(container_type: str) -> int` — average of stored end-of-life samples (uses whatever samples exist, even if fewer than `history-size`); only falls back to `system-memory-default-projection` / `memory-limit` when zero samples
+   - `project_memory(container_type: str) -> int` — 90th percentile of stored end-of-life samples (snapshots ×1.5) (uses whatever samples exist, even if fewer than `history-size`); only falls back to `system-memory-default-projection` / `memory-limit` when zero samples
    - `get_history_size() -> int` — read `system-memory-history-size` setting, default 20
    - `take_snapshot()` / `admit(snapshot, projected, inflight)` — the gate math; production admission runs it inside the launch-queue walk (`launch_queue._admit_locked`). (The earlier standalone `check_launch()` was removed in review 2026-10-27: nothing used it and its in-flight accounting diverged from the queue walk.)
    - `get_memory_target() -> int | None` — read setting, None if unset (governor inactive)
@@ -556,13 +556,13 @@ Stats are keyed by container type, but container names encode the type: `pm-{tag
    - No threading locks (`_gate_lock`, `_stats_lock`) — cross-process file lock from `launch_queue.py` replaces them.
 
 2. **`pm_core/launch_queue.py`** — Cross-process launch queue:
-   - `governor_lock(timeout=10.0) -> contextmanager` — `fcntl.flock` on `~/.pm/governor.lock`. Shared by `memory_governor.py`.
+   - `governor_lock(timeout=30.0) -> contextmanager` — `fcntl.flock` on `~/.pm/governor.lock`. Shared by `memory_governor.py`.
    - `enqueue(container_type, qa_run_id=None, count=1) -> list[str]` — add entries to `~/.pm/launch-queue.json`, return entry IDs.
    - `try_acquire(entry_ids: list[str]) -> list[str]` — under lock: clean stale PIDs, sort by policy, walk and grant entries that are next in line AND fit in memory. Accounts for acquired entries' projected memory.
    - `enqueue_and_try_acquire(container_type, qa_run_id=None) -> tuple[str, bool]` — atomic fast path for impl/review (one lock round-trip).
    - `dequeue(entry_ids: list[str]) -> None` — remove entries post-launch or on cancellation.
    - `get_queue_status() -> dict` — read-only snapshot for status display.
-   - Internal: `_sort_queue(entries, policy, last_served)` — sort by FIFO / priority-drain / priority-round-robin. `_clean_stale(entries)` — remove entries from dead PIDs via `os.kill(pid, 0)`.
+   - Internal: `_sort_queue(entries, policy, last_served)` — sort by FIFO / priority-drain / priority-round-robin. `_clean_stale(entries)` — remove entries whose owner is gone or that expired (E14).
 
 3. **`tests/test_memory_governor.py`** — Unit tests for the governor module
 
@@ -570,8 +570,8 @@ Stats are keyed by container type, but container names encode the type: `pm-{tag
 
 ### Modified files:
 1. **`pm_core/cli/container.py`** — Add `system-memory-target`, `system-memory-scope`, `system-memory-default-projection`, `system-memory-history-size`, `system-memory-queue-policy`, `stop-idle-impl`, `stop-idle-review`, `stop-idle-qa` to `container_set` choices. Add validation for `system-memory-queue-policy` (`fifo|priority-drain|priority-round-robin`). Add memory info and queue status to `container_status` output.
-2. **`pm_core/container.py`** — Add `stop_container()` (captures memory before stopping), modify `remove_container()` to capture memory before removal, modify `create_container()` to handle stopped container restart. Replace direct `check_launch()` call in `wrap_claude_cmd()` with `enqueue_and_try_acquire()` for impl/review gating; `dequeue()` after container creation or on denial.
-3. **`pm_core/qa_loop.py`** — At phase 2 entry: `enqueue("qa_scenario", qa_run_id, count=N)` for all scenarios. In `_launch_next_queued()`: call `try_acquire(pending_entry_ids)` instead of direct `check_launch()`. Track `_entry_id_map` (scenario index → queue entry ID) and `_pending_entry_ids`. `dequeue()` on verdict completion or `stop_requested`. Add `"waiting_memory"` status. Call `stop_container()` for completed QA scenarios when stop-on-idle is enabled.
+2. **`pm_core/container.py`** — Add `stop_container()` (captures memory before stopping), modify `remove_container()` to capture memory before removal (stopped-container restart dropped — see IR4). Replace direct `check_launch()` call in `wrap_claude_cmd()` with `enqueue_and_try_acquire()` for impl/review gating; `dequeue()` after container creation or on denial.
+3. **`pm_core/qa_loop.py`** — At phase 2 entry: `enqueue("qa_scenario", qa_run_id, keys=…)` for the scenarios with a free concurrency slot (`_admit_initial_batch`). In `_launch_next_queued()`: `try_acquire_detailed([head_entry])`, keeping the other waiting entries alive. Track `_entry_id_map` (scenario index → queue entry ID) and `_pending_entry_ids`. `dequeue()` on verdict completion or `stop_requested`. Add `"waiting_memory"` status. Call `stop_container()` for completed QA scenarios when stop-on-idle is enabled.
 4. **`pm_core/tui/widgets.py`** — Add `memory_status` parameter to `StatusBar.update_status()`.
 5. **`pm_core/tui/app.py`** — Compute and pass memory status to status bar.
 6. **`pm_core/qa_status.py`** — Render `"waiting_memory"` verdict state with distinct indicator.

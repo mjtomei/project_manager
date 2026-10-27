@@ -552,6 +552,7 @@ class ProjectManagerApp(App):
         # Memory governor usage/target: measured off the UI thread (runtime
         # stats take seconds) and pushed to the status bar when it changes.
         self.set_interval(15, self._refresh_memory_status)
+        self.run_worker(self._refresh_memory_status(), exclusive=False)
         # Run heavier startup tasks (heal_registry, tmux bindings) in a
         # background thread so they don't block input processing.
         self.run_worker(self._deferred_startup(), exclusive=False)

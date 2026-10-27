@@ -149,8 +149,8 @@ def parse_runtime_memory(s: str) -> int:
 
 def _fmt_mb(mb: int) -> str:
     if mb >= 1024:
-        g = mb / 1024
-        return f"{g:.0f}G" if g == int(g) else f"{g:.1f}G"
+        g = round(mb / 1024, 1)  # 49151 MiB is "48G", not "48.0G"
+        return f"{g:.0f}G" if g.is_integer() else f"{g:.1f}G"
     return f"{mb}M"
 
 
@@ -864,18 +864,42 @@ def _save_blocked(data: dict) -> None:
         _log.debug("Failed to save %s: %s", path, e)
 
 
+def _update_blocked(mutate) -> None:
+    """Read-modify-write the blocked-launch file under the governor lock.
+
+    Launches are refused from separate pm processes (each ``pm pr start``
+    / review / sign-off runs its own CLI), so an unlocked update could
+    drop another process's entry or collide on the temp file.  Entries
+    older than the display window are pruned.  Best-effort: a busy lock
+    skips the update (the file only feeds the status display).
+    """
+    from pm_core.launch_queue import governor_lock, GovernorLockTimeout
+    try:
+        with governor_lock(timeout=_CAPTURE_TIMEOUT):
+            data = _load_blocked()
+            mutate(data)
+            cutoff = time.time() - _BLOCKED_DISPLAY_SECONDS
+            data = {k: v for k, v in data.items()
+                    if isinstance(v, dict) and v.get("at", 0) >= cutoff}
+            _save_blocked(data)
+    except GovernorLockTimeout as e:
+        _log.debug("Skipping blocked-launch update: %s", e)
+
+
 def record_blocked(action: str, reason: str) -> None:
     """Remember that *action* (e.g. ``"impl pr-123"``) was refused."""
-    data = _load_blocked()
-    data[action] = {"reason": reason, "at": time.time()}
-    _save_blocked(data)
+    def _add(data: dict) -> None:
+        data[action] = {"reason": reason, "at": time.time()}
+    _update_blocked(_add)
 
 
 def clear_blocked(action: str) -> None:
     """Forget a refused *action* once it launches."""
-    data = _load_blocked()
-    if data.pop(action, None) is not None:
-        _save_blocked(data)
+    # Every admitted launch calls this: skip the lock when there is
+    # nothing to forget.
+    if action not in _load_blocked():
+        return
+    _update_blocked(lambda data: data.pop(action, None))
 
 
 def recent_blocked(window: float = _BLOCKED_DISPLAY_SECONDS) -> list[tuple[str, str]]:
