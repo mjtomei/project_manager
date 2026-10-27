@@ -66,3 +66,16 @@ def test_owner_publication_precedes_proxy_start(tmp_path, monkeypatch):
         push_proxy.start_push_proxy("pm-tag-impl-pr-aaaa", "/work", "branch",
                                     session_tag="tag", pr_id="pr-aaaa")
     spawn.assert_not_called()
+
+
+def test_malformed_owner_record_is_not_a_legacy_proxy(tmp_path, monkeypatch):
+    """An unreadable/malformed record must not be reported as a legacy owner.
+
+    Fabricating tag+PR from the directory name would let a later caller act
+    on an identity nobody verified.
+    """
+    directory = tmp_path / "pm-push-proxy-tag-pr-aaaa"
+    directory.mkdir()
+    (directory / "owner.json").write_text("{")
+    monkeypatch.setattr("glob.glob", lambda _pattern: [str(directory)])
+    assert push_proxy.list_shared_proxies() == []

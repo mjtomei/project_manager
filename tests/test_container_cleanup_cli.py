@@ -69,6 +69,19 @@ def test_retain_release_reports_runtime_outage(monkeypatch):
     assert "No such file" in result.output
 
 
+def test_retain_release_reports_unknown_runtime_identity(monkeypatch):
+    """An unknown runtime identity must not claim the marker was absent."""
+    monkeypatch.setattr(container_reaper, "_runtime_domain", lambda: None)
+    marker = container.container_state_dir() / "retain" / "pm-x"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("{}")
+    result = CliRunner().invoke(cli, ["container", "retain", "pm-x", "--release"])
+    assert result.exit_code == 1, result.output
+    assert "runtime identity is unavailable" in result.output
+    assert "was not retained" not in result.output
+    assert marker.exists(), "the marker must survive an unverified release"
+
+
 def test_empty_reap_still_reports_recovery_counts():
     outcome = container_reaper.Outcome(
         scope="all pm containers", running_before=0, running_after=0,

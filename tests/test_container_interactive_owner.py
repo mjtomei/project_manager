@@ -60,8 +60,11 @@ def test_interactive_command_keeps_exit_release(monkeypatch):
 
 
 @pytest.mark.parametrize("returncode,stdout,expected", [
-    (0, "pm-t\t@1\npm-t~2\t@2\npm-other\t@3\n", {"@1", "@2"}),
+    (0, "pm-t:@1\npm-t~2:@2\npm-other:@3\n", {"@1", "@2"}),
     (1, "", None), (0, "malformed", None), (0, "", set()),
+    # tmux rewrites a tab separator to '_' unless the client is UTF-8, so the
+    # old tab-delimited output must be treated as malformed (fail closed).
+    (0, "pm-t_@1\n", None),
 ])
 def test_viewed_windows_fail_closed(monkeypatch, returncode, stdout, expected):
     monkeypatch.setattr(qa_loop.subprocess, "run", lambda *a, **k:

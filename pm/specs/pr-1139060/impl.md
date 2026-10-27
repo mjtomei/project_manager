@@ -78,6 +78,10 @@ removed by automatic or scoped cleanup) when any of:
    Query the current process tree with a bounded, non-truncated process listing
    and refresh it at the locked deletion check; failed/malformed
    listings or missing live pane roots mean unknown ownership, never absence.
+   The tmux pane query uses a printable field separator: tmux rewrites control
+   characters (a tab) to `_` unless the client is UTF-8, so a tab-delimited
+   format is unparseable in a C locale and would report every container as
+   ownership-unknown, silently disabling cleanup.
    This covers runtime execs started later from an existing shell or script (S13);
    foreground QA debug instead holds host activity locks for the lifetime
    of its interactive exec, including when it runs outside tmux. An additional
@@ -142,7 +146,11 @@ operations do not take PM's launch lock.
   except scenarios whose verdict is `INPUT_REQUIRED` (awaiting a human), that
   are explicitly retained, or whose window is currently being viewed by an
   attached client. Failed client/window inspection defers owner release;
-  it must not be interpreted as nobody viewing. Those stay until their pane goes away, the PR is
+  it must not be interpreted as nobody viewing. The inspection output format
+  must survive every locale: tmux rewrites a control-character separator
+  (a tab) to `_` unless the client is UTF-8, which would make every line
+  malformed and silently defer every release, so a printable separator is
+  used. Those stay until their pane goes away, the PR is
   merged/closed, or a later run supersedes them; then the reconciler takes
   them.  A scenario whose container/window fails to launch releases its
   partial container immediately. QA worker-split and relaunch failures (including
@@ -185,7 +193,15 @@ operations do not take PM's launch lock.
   later pass reaches a definitive answer for — released, or proven still in use
   by a live container — has no pending work, so an earlier transient failure for
   it is cleared instead of being reported (and failing ``pm container reap``)
-  forever.
+  forever. Only those two definitive answers clear it: a pass that could not
+  evaluate the proxy at all (busy proxy lock, foreign or unreadable owner
+  record) neither releases nor clears it, so the earlier failure stays visible
+  and retryable. The reaper therefore classifies each proxy explicitly
+  (released / in-use / inventory-unavailable / undetermined); the
+  bool-returning wrapper other callers use keeps its old meaning. A directory
+  at the socket path is removed like a stale socket instead of wedging release
+  forever, and an unreadable or malformed ``owner.json`` is never reinterpreted
+  as a missing legacy record (no owner is fabricated from the directory name).
   A per-container (unshared: qa-debug, untagged) proxy is stopped whenever
   its container is removed, by whichever process removes it. Proxy daemons
   track the published socket identity, retire when replaced (not only when
@@ -329,7 +345,14 @@ intact to protect concurrent waiters and delayed releases.
   owning pane and cannot be finished, raise
   instead of killing it. Explicit retention also blocks recreation of stopped
   or incomplete containers and automatic pressure-recovery restart; safe
-  idempotent setup completion is still allowed.
+  idempotent setup completion is still allowed. Pressure recovery does not
+  stop at the restart: a restarted container whose host-side completion marker
+  is absent (every container created before that marker existed lacks it) is
+  finished in place by the same idempotent post-setup, not reported as a failed
+  restart. Proxy verification during reuse classifies its failures too: an
+  unanswered proxy inspect is a retryable `timeout` launch error and any other
+  proxy-helper failure is a `proxy` launch error, both naming the container
+  rather than the immutable id the helper inspected.
 - Failed/unknown running-state or ID inspection refuses recreation; it is not proof
   of absence. Only explicit missing-container/object errors establish absence;
   missing runtime socket paths and empty successful ID output are unknown. Any
@@ -337,7 +360,9 @@ intact to protect concurrent waiters and delayed releases.
   the completion-sentinel write, a restart or its start-time probe, the startup
   log fetch, or the push-proxy ownership inspect — is a retryable `timeout`
   launch error naming the container, not evidence that setup is incomplete or
-  that the allocation is stopped. Every setup/post-setup/restart failure names
+  that the allocation is stopped. An *answered* probe failure keeps its
+  classified cause instead of being swallowed until the setup deadline turns
+  into a bare timeout. Every setup/post-setup/restart failure names
   the container, never its immutable id, so the printed recovery command is
   runnable. Required setup commands fail before readiness is written. Fresh
   creation verifies push-proxy connectivity as well as reuse.
@@ -400,10 +425,19 @@ an allocation preserves retention and same-name or cloned-ID allocations in
 other runtime stores do not overwrite each other's retention. Legacy name+ID
 markers remain readable after renames. Explicit retention release resolves the
 current ID even when a stale marker has the same name, so renamed allocations
-can actually be released. Full
+can actually be released. An explicit release with an unknown runtime identity
+fails and says so instead of reporting "was not retained" while the marker
+stays behind. Full
 reconcile passes prune retention and pending release records only when their
 recorded runtime domain matches the successfully inventoried domain; unknown
-or legacy domains are preserved. Even scoped passes use the complete inventory
+or legacy domains are preserved. A full pass is one with no PR/session/kind/
+name filter: `--include-retained` is a retention policy, not a scope filter, so
+it still prunes retention markers, launch-lock files and stale failures. Pruning
+never fails the pass — an unremovable marker is logged and kept, because an
+escaping error would discard the pass's removals and their failures (pruning
+runs after removal, before the outcome is persisted) — and a container this
+pass removed no longer counts as present when its old lock file is considered.
+Even scoped passes use the complete inventory
 for release pruning: a renamed ID omitted from scoped decisions is not absent,
 and a replacement under its old name does not make its release stale. Known foreign-domain release records cannot
 authorize removal even when a cloned runtime store has identical container IDs.
@@ -425,7 +459,12 @@ record written without a runtime identity is preserved by full passes and can
 never authorize removal, so status lists it as a diagnostic, not as a
 retryable cleanup failure that `pm container reap` could clear.
 Reap prints its outcome/count summary even when no
-containers remain in scope. Existing `pm container cleanup` (remove all / by PR)
+containers remain in scope. Explicit PR resource cleanup (`cleanup_pr_containers`,
+used by `pm pr cleanup --resources`) covers every kind for the PR; when the
+caller has no pm session (the command run from a plain terminal) it matches
+every session tag rather than only untagged legacy names, so the PR's running
+containers are not left behind while the command reports success. Existing
+`pm container cleanup` (remove all / by PR)
 is kept as explicit force cleanup, but bulk removal captures each allocation's
 ID/generation before dispatch and rechecks it under the launch lock. A concurrent
 replacement or reused allocation is skipped, and removal plus proxy release
@@ -453,7 +492,11 @@ concurrent failures; inability to persist an outcome is itself reported.
   names through the shared inventory; the rest queue through the existing
   queued-scenario mechanism. Settled scenarios release their allocations before
   handing slots to queued work (after PASS verification, with the same human,
-  retention and viewed-window exceptions). Resume must not recreate already
+  retention and viewed-window exceptions). The cap bounds the launch batch, not
+  the sum of deliberately kept containers: a scenario held for a human or a
+  viewed window keeps its allocation, and queued work still proceeds (at least
+  one scenario always launches) rather than stalling behind a pane that may
+  never close. Resume must not recreate already
   settled workers. Final resume snapshots contain only unattempted queued
   scenarios; older stale queue entries cannot relaunch settled or failed work.
   Failed queued launches leave no worker/verdict and must not strand the remaining queue.

@@ -441,11 +441,31 @@ class TestQueryServer:
     def test_socket_exists_queries_tmux(self, tmp_path, monkeypatch):
         sock = tmp_path / "default"
         sock.touch()
+        # The start command is last: any ':' of its own stay in that field.
+        command = f"podman exec -it {NAME} sh -c 'echo a:b'"
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(
-            a[0], 0, stdout=f"0\t%1\tpm-x\t123\tpodman exec -it {NAME} x\n", stderr=""))
+            a[0], 0, stdout=f"0:%1:pm-x:123:{command}\n", stderr=""))
         monkeypatch.setattr(reaper, "_pane_process_commands", lambda pids: {123: []})
         snap = reaper._query_server(reaper._server_for_socket(str(sock)))
-        assert snap.panes == [("%1", "pm-x", f"podman exec -it {NAME} x")]
+        assert snap.panes == [("%1", "pm-x", command)]
+
+    def test_pane_format_has_no_control_character_separator(self, tmp_path, monkeypatch):
+        """tmux rewrites a tab separator to '_' unless the client is UTF-8.
+
+        A mangled row is unparseable, which would report every container as
+        ownership-unknown and silently disable automatic cleanup.
+        """
+        sock = tmp_path / "default"
+        sock.touch()
+        captured = {}
+
+        def run(args, **kwargs):
+            captured["fmt"] = args[args.index("-F") + 1]
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        monkeypatch.setattr(subprocess, "run", run)
+        reaper._query_server(reaper._server_for_socket(str(sock)))
+        fmt = captured["fmt"]
+        assert not any(ch in fmt for ch in "\t\n\r"), fmt
 
 
 # ---------------------------------------------------------------------------

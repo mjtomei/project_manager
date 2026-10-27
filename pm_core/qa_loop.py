@@ -4474,15 +4474,19 @@ def _viewed_window_ids(session: str) -> set[str] | None:
     """Window ids an attached client is currently looking at (any grouped session)."""
     from pm_core import tmux as tmux_mod
     try:
+        # ':' is printable ASCII, so it survives tmux's format output in every
+        # locale; a tab is rewritten to '_' unless the client is UTF-8, which
+        # would make every line malformed and defer all container releases.
+        # tmux rewrites ':' inside session names, so the separator is unique.
         result = subprocess.run(
-            tmux_mod._tmux_cmd("list-clients", "-F", "#{session_name}\t#{window_id}"),
+            tmux_mod._tmux_cmd("list-clients", "-F", "#{session_name}:#{window_id}"),
             capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
             return None
         viewed: set[str] = set()
         base = session.split("~", 1)[0]
         for line in result.stdout.splitlines():
-            parts = line.split("\t")
+            parts = line.rsplit(":", 1)
             if len(parts) != 2 or not parts[1].startswith("@"):
                 return None
             if parts[0] == base or parts[0].startswith(base + "~"):

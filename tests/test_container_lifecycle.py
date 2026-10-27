@@ -366,6 +366,49 @@ class TestReaperOwnership:
         reaper.reconcile(reason="manual")
         assert reaper.is_retained(late, "id-" + late)
 
+    def test_include_retained_is_still_a_full_pass(self, fake_env):
+        """--include-retained is a retention policy, not a scope filter."""
+        name = "pm-repo-ab12-review-pr-aaaa"
+        fake_env["containers"] = [_info(name)]
+        reaper.retain(name, "discussion", container_id="id-" + name)
+        self._backdate_marker(name)
+        lock = cm.container_state_dir() / "locks" / f"container-{name}.lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("")
+        old = time.time() - 7200
+        import os
+        os.utime(lock, (old, old))
+
+        out = reaper.reconcile(Scope(include_retained=True), reason="manual")
+
+        assert out.removed == [name]
+        assert not reaper.is_retained(name, "id-" + name), "marker outlived its container"
+        assert not lock.exists(), "a removed container's old lock file is prunable"
+
+    def test_unprunable_marker_does_not_discard_the_pass(self, fake_env, monkeypatch):
+        """A marker that cannot be unlinked must not erase the pass outcome.
+
+        Pruning runs after removals but before the outcome is persisted, so an
+        escaping OSError would lose the removals and their failures.
+        """
+        name, gone = "pm-repo-ab12-review-pr-aaaa", "pm-repo-ab12-review-pr-bbbb"
+        fake_env["containers"] = [_info(name)]
+        reaper.retain(gone)  # name-keyed marker for a container that is gone
+        self._backdate_marker(gone)
+        real_unlink = Path.unlink
+
+        def unlink(self, *args, **kwargs):
+            if self.name == gone:
+                raise PermissionError("denied")
+            return real_unlink(self, *args, **kwargs)
+        monkeypatch.setattr(Path, "unlink", unlink)
+
+        out = reaper.reconcile(reason="manual")
+
+        assert not out.error
+        assert out.removed == [name]
+        assert reaper.last_state().get("removed") == [name]
+
     def test_launch_grace_and_launch_lock(self, fake_env):
         fresh = _info("pm-repo-ab12-impl-pr-aaaa", created=time.time())
         locked = _info("pm-repo-ab12-review-pr-aaaa")

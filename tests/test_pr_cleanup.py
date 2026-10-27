@@ -44,6 +44,23 @@ class TestCleanupPrContainers:
         assert removed == []
         mock_remove.assert_not_called()
 
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container_reaper.list_containers")
+    def test_no_session_covers_every_session_tag(self, mock_runtime, mock_remove):
+        """'pm pr cleanup --resources' outside a pm session cleans the PR.
+
+        Without a known session the caller still means "every resource of
+        this PR"; matching only untagged legacy names would leave every
+        session-tagged container running while reporting success.
+        """
+        mock_runtime.return_value = _inventory([
+            "pm-sessA-review-pr-001", "pm-sessB-impl-pr-001",
+            "pm-sessA-review-pr-002", "pm-sessA-qa-debug-pr-001"])
+        removed = container_mod.cleanup_pr_containers("pr-001")
+        assert sorted(removed) == ["pm-sessA-review-pr-001",
+                                   "pm-sessB-impl-pr-001"]
+        assert mock_remove.call_count == 2
+
     @patch("pm_core.container_reaper.list_containers")
     def test_parallel_removal(self, mock_runtime):
         # Simulate four containers each taking 0.5s to remove. Sequential

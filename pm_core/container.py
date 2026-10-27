@@ -1633,6 +1633,16 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
         try:
             restart_container(name, container_id=container_id)
             complete = True
+        except ContainerLaunchError as exc:
+            if exc.kind != "incomplete":
+                raise
+            # The restart cleared the pressure and kept the filesystem; only
+            # the host-side completion marker is missing (every container
+            # created before that marker existed lacks it). That is not a
+            # failed recovery — finish the idempotent post-setup below.
+            _log.info("Container %s restarted; its host setup completion "
+                      "marker is missing, finishing it in place", name)
+            complete = False
         except ContainerError:
             _log.warning("Restart of %s failed — preserving its filesystem", name, exc_info=True)
             raise
@@ -1703,23 +1713,35 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
         )
         guard = (proxy_lock(session_tag, pr_id) if session_tag and pr_id
                  else contextlib.nullcontext(True))
-        with guard as locked:
-            if not locked:
-                raise launch_error(name, "proxy", "shared proxy lock unavailable", stage="be reused")
-            # Always pass through start_push_proxy's domain validation, even
-            # when a healthy socket already exists. Serialize dead-socket repair.
-            if session_tag and pr_id:
-                from pm_core.push_proxy import validate_shared_proxy_mount
-                validate_shared_proxy_mount(container_id, session_tag, pr_id)
-                sock = start_push_proxy(name, str(workdir), allowed_push_branch,
-                                        session_tag=session_tag, pr_id=pr_id)
-            else:
-                from pm_core.push_proxy import repair_unshared_proxy
-                sock = repair_unshared_proxy(container_id, str(workdir), allowed_push_branch)
-            if not proxy_is_alive(sock):
-                raise launch_error(name, "proxy",
-                                   f"push proxy at {sock} is not accepting connections",
-                                   stage="be reused")
+        try:
+            with guard as locked:
+                if not locked:
+                    raise launch_error(name, "proxy", "shared proxy lock unavailable", stage="be reused")
+                # Always pass through start_push_proxy's domain validation, even
+                # when a healthy socket already exists. Serialize dead-socket repair.
+                if session_tag and pr_id:
+                    from pm_core.push_proxy import validate_shared_proxy_mount
+                    validate_shared_proxy_mount(container_id, session_tag, pr_id)
+                    sock = start_push_proxy(name, str(workdir), allowed_push_branch,
+                                            session_tag=session_tag, pr_id=pr_id)
+                else:
+                    from pm_core.push_proxy import repair_unshared_proxy
+                    sock = repair_unshared_proxy(container_id, str(workdir), allowed_push_branch)
+                if not proxy_is_alive(sock):
+                    raise launch_error(name, "proxy",
+                                       f"push proxy at {sock} is not accepting connections",
+                                       stage="be reused")
+        except ContainerLaunchError:
+            raise
+        except ContainerError as exc:
+            # The proxy helpers inspect by the immutable id and report no
+            # kind. A launch error must name the container (so the printed
+            # recovery command is runnable) and keep an unanswered inspect
+            # retryable as a timeout rather than a bare runtime failure.
+            kind = ("timeout" if isinstance(exc.__cause__, subprocess.TimeoutExpired)
+                    else "proxy")
+            raise launch_error(name, kind, str(exc),
+                               stage="verify its push proxy") from exc
     return container_id
 
 
@@ -2117,7 +2139,18 @@ def _wait_for_setup(name: str, *, started_ns: int | None = None) -> None:
                 # container whose startup command already failed.
                 try:
                     exited = not container_is_running(name)
+                except ContainerLaunchError as exc:
+                    if exc.kind in ("keyring", "memory", "pids"):
+                        # The runtime answered with an actionable cause; no
+                        # amount of polling will clear an exhausted container.
+                        raise launch_error(name, exc.kind, exc.stderr,
+                                           stage="finish setup") from exc
+                    # A transient inspect error is not proof that the container
+                    # died: keep polling, but carry its cause into the deadline
+                    # error instead of reporting a bare timeout.
+                    last_err = f"{err}\nrunning-state probe: {exc.stderr}".strip()
                 except (ContainerError, subprocess.TimeoutExpired):
+                    # Unanswered probe: not evidence either way.
                     exited = False
             if exited:
                 try:
@@ -2925,9 +2958,14 @@ def cleanup_pr_containers(pr_id: str,
     inventory = container_reaper.list_containers()
     if inventory is None:
         raise ContainerError("Cannot inventory PR containers; cleanup not performed")
-    tags = {session_tag, None}
+    # No session means "every resource of this PR" — e.g. 'pm pr cleanup
+    # --resources' run from a plain terminal. Restricting that to untagged
+    # legacy names would leave every session-tagged container running while
+    # the command reported success.
+    tags = None if session_tag is None else {session_tag, None}
     candidates = [info.name for info in inventory
-                  if info.session_tag in tags and info.pr_id == pr_id
+                  if (tags is None or info.session_tag in tags)
+                  and info.pr_id == pr_id
                   and info.kind != "qa-debug"
                   and (include_retained or not container_reaper.is_retained(info.name, info.id))]
 

@@ -51,6 +51,21 @@ REMOVE_WORKERS = 4
 _TERMINAL_PR_STATES = ("merged", "closed")
 
 
+def _unlink_state_file(path: Path, what: str) -> None:
+    """Drop one of our own state records; never fail the pass for it.
+
+    A marker left behind by another user (``sudo pm``) or a directory in its
+    place raises OSError.  Pruning runs after removals but before the outcome
+    is persisted, so an escaping error would discard the whole pass — the
+    removals already done and their failures would never be recorded.  Keep
+    the record instead and let a later pass retry it.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        _log.warning("could not prune %s %s: %s", what, path, exc)
+
+
 # ---------------------------------------------------------------------------
 # Retention markers
 # ---------------------------------------------------------------------------
@@ -188,6 +203,13 @@ def _retention_records() -> list[tuple[Path, dict]]:
 
 def unretain(name: str) -> bool:
     domain = _runtime_domain()
+    if domain is None:
+        # Without an identity we cannot tell this runtime's marker from
+        # another store's, so silently reporting "not retained" while the
+        # marker stays behind would be a lie the caller cannot detect.
+        raise container_mod.ContainerError(
+            "Cannot release retention: the runtime identity is unavailable; "
+            "retry once the runtime is responsive")
     removed = False
     records = _retention_records()
     # A stale same-name marker may belong to a removed allocation while the
@@ -234,7 +256,7 @@ def _prune_retain_markers(inventory: dict[str, str], since: float) -> None:
                 continue
         except (TypeError, ValueError):
             pass
-        path.unlink(missing_ok=True)
+        _unlink_state_file(path, "retention marker")
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +368,7 @@ def _prune_releases(out: "Outcome", scope: "Scope", since: float) -> None:
             info.id != rec["id"] or
             allocation_generation(rec["name"], info.id) not in (None, rec["generation"]))
         if absent or stale or info is not None and info.name in out.removed:
-            path.unlink(missing_ok=True)
+            _unlink_state_file(path, "owner release")
 
 
 # ---------------------------------------------------------------------------
@@ -549,9 +571,15 @@ def _query_server(server: _Server) -> _PaneSnapshot:
             return _PaneSnapshot(panes=None)  # inaccessible is not absent
     env = {k: v for k, v in os.environ.items() if k != "TMUX"}
     try:
+        # ':' is printable ASCII, so it survives tmux's format output in every
+        # locale. A control character (tab) is rewritten to '_' unless the
+        # client is UTF-8, which would make every row malformed and report
+        # every container as ownership-unknown in a C locale. tmux rewrites
+        # ':' inside session names, so the separator is unique; the start
+        # command is last, so any ':' of its own stay in the final field.
         r = subprocess.run(
             ["tmux", *server.args, "list-panes", "-a", "-F",
-             "#{pane_dead}\t#{pane_id}\t#{session_name}\t#{pane_pid}\t#{pane_start_command}"],
+             "#{pane_dead}:#{pane_id}:#{session_name}:#{pane_pid}:#{pane_start_command}"],
             capture_output=True, text=True, timeout=5, env=env)
     except (OSError, subprocess.TimeoutExpired):
         return _PaneSnapshot(panes=None)
@@ -563,7 +591,7 @@ def _query_server(server: _Server) -> _PaneSnapshot:
         return _PaneSnapshot(panes=None)
     panes = []
     for line in r.stdout.splitlines():
-        parts = line.split("\t", 4)
+        parts = line.split(":", 4)
         if len(parts) != 5 or parts[0] not in {"0", "1"}:
             return _PaneSnapshot(panes=None)
         if parts[0] == "1":
@@ -850,6 +878,19 @@ class Scope:
         return ", ".join(bits) or "all pm containers"
 
 
+def _is_full_scope(scope: "Scope") -> bool:
+    """True when *scope* covers every pm container on this runtime.
+
+    ``include_retained`` is a retention policy, not a filter: a pass with
+    ``--include-retained`` and no PR/session still has the complete
+    inventory, so it must prune retention markers, launch-lock files and
+    stale failure records like any other full pass.
+    """
+    return (scope.names is None and scope.pr_id is None
+            and scope.session_tag is None and scope.loop_id is None
+            and not scope.kinds and not scope.owner_release)
+
+
 @dataclass
 class Decision:
     info: ContainerInfo
@@ -1074,7 +1115,7 @@ def _prune_lock_files(inventory: set[str]) -> None:
             continue
         with container_mod.launch_lock(name, timeout=0) as free:
             if free:
-                path.unlink(missing_ok=True)
+                _unlink_state_file(path, "launch lock")
 
 
 def spawn_detached_reap(pr_id: str | None = None,
@@ -1127,10 +1168,11 @@ def _release_unused_proxies(scope: Scope, failures: dict[str, str],
                             checked: list[str] | None = None) -> list[str]:
     """Release unused proxies; append definitively-evaluated keys to *checked*.
 
-    A shared proxy that is still in use (``False``) is *checked*, not failed:
-    nothing is pending for it, so an earlier transient failure must not be
-    carried forward forever.  Only an unanswered inventory (``None``) or an
-    exception stays a retryable failure.
+    Only a definitive answer — released, or proven still in use by a live
+    container — means there is no pending work, so only those clear an
+    earlier failure.  An unanswered inventory stays a retryable failure; a
+    proxy this pass could not evaluate (busy lock, foreign/unreadable owner
+    record) is neither released nor cleared.
     """
     from pm_core import push_proxy
     released = push_proxy.retry_unshared_releases(scope, failures)
@@ -1146,13 +1188,16 @@ def _release_unused_proxies(scope: Scope, failures: dict[str, str],
             continue
         key = f"{prox['session_tag']}/{prox['pr_id']}"
         try:
-            result = push_proxy.release_proxy_if_unused(prox["session_tag"], prox["pr_id"])
-            if result:
+            decision = push_proxy.release_proxy_decision(
+                prox["session_tag"], prox["pr_id"])
+            if decision == push_proxy.PROXY_RELEASED:
                 released.append(key)
-            elif result is None:
+            elif decision == push_proxy.PROXY_UNAVAILABLE:
                 failures[f"push proxy {key}"] = "runtime inventory unavailable; proxy preserved"
-            elif checked is not None:
+            elif decision == push_proxy.PROXY_IN_USE and checked is not None:
                 checked.append(key)
+            # PROXY_UNDETERMINED: this pass could not evaluate it, so an
+            # earlier failure stays visible and retryable.
         except Exception as exc:
             failures[f"push proxy {key}"] = str(exc)
             _log.warning("proxy release for %s failed", prox, exc_info=True)
@@ -1242,13 +1287,15 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
         out.keyring_after = container_mod.keyring_summary()
         if scope.names is None:
             _note_pid_pressure(out)
-        full_pass = scope == Scope()
+        full_pass = _is_full_scope(scope)
         inventory = {d.info.name for d in out.decisions}
         _prune_releases(out, scope, listed_at)
         _record(out, scope, reason, inventory=inventory if full_pass else None,
                 observed_at=listed_at)
         if full_pass:
-            _prune_lock_files(inventory)
+            # A container this pass removed has no lock to keep: excluding it
+            # lets an old lock file go now instead of on a later pass.
+            _prune_lock_files(inventory - set(out.removed))
             _prune_retain_markers({d.info.name: d.info.id for d in out.decisions
                                    if d.info.name not in out.removed},
                                   since=listed_at)

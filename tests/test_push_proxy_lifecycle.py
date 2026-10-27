@@ -164,3 +164,21 @@ def test_old_server_notices_replacement_without_missing_path(tmp_path):
     finally:
         old.stop()
         replacement.stop()
+
+
+def test_kill_proxy_socket_removes_a_directory_at_the_socket_path(tmp_path):
+    """A directory at push.sock must not wedge cleanup forever.
+
+    The bind-mounted socket source need not exist, so a container or tool can
+    create a directory there. Without handling it the proxy could never be
+    released and every reap would retry the same failure.
+    """
+    sock_dir = tmp_path / "pm-push-proxy-tag-pr-aaaa"
+    sock = sock_dir / "push.sock"
+    sock.mkdir(parents=True)
+    (sock / "junk").write_text("x")
+
+    push_proxy._kill_proxy_socket(str(sock))
+
+    assert not sock.exists()
+    assert not sock_dir.exists()

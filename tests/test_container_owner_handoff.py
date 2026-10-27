@@ -115,8 +115,8 @@ def test_proxy_sweep_requires_matching_runtime_domain(monkeypatch, current, owne
     monkeypatch.setattr(pp, "runtime_domain", lambda: current)
     monkeypatch.setattr(pp, "list_shared_proxies", lambda: [
         {"session_tag":"tag", "pr_id":"pr-aaaa", "runtime_domain":owner}])
-    release = MagicMock(return_value=True)
-    monkeypatch.setattr(pp, "release_proxy_if_unused", release)
+    release = MagicMock(return_value=pp.PROXY_RELEASED)
+    monkeypatch.setattr(pp, "release_proxy_decision", release)
     result = reaper._release_unused_proxies(reaper.Scope(), {})
     assert bool(result) is allowed
     assert release.called is allowed

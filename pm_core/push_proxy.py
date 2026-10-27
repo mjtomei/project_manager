@@ -758,6 +758,13 @@ def _kill_proxy_socket(sock_path: str, expected_identity: tuple[int, int, int] |
             os.unlink(sock_path)
         except FileNotFoundError:
             pass
+        except IsADirectoryError:
+            # The bind-mounted socket source need not exist, so a container or
+            # tool can create a directory at this path (as start_push_proxy
+            # anticipates). Leaving it would make the proxy unreleasable: every
+            # reap would retry this failure while the directory kept it alive.
+            import shutil
+            shutil.rmtree(sock_path, ignore_errors=True)
         # Clean up the symlink if sock_dir is one
         if os.path.islink(sock_dir):
             try:
@@ -871,9 +878,17 @@ def list_shared_proxies() -> list[dict]:
         if real in seen or not os.path.isdir(real):
             continue
         owner = None
+        legacy = False
         try:
             owner = json.loads(Path(real, _OWNER_FILE).read_text())
+        except FileNotFoundError:
+            legacy = True
         except (OSError, ValueError):
+            # An unreadable or malformed record is not a missing legacy one:
+            # fabricating an owner from the directory name would report (and
+            # let a future caller act on) an identity nobody verified.
+            continue
+        if legacy:
             # Legacy dir without owner file: only the readable long name
             # (the dir itself, or the symlink to a hashed dir) says whose it
             # is.  A per-container proxy dir (``pm-push-proxy-<container
@@ -896,29 +911,37 @@ def list_shared_proxies() -> list[dict]:
     return out
 
 
-def release_proxy_if_unused(session_tag: str, pr_id: str,
-                            exclude: "set[str] | frozenset[str]" = frozenset()
-                            ) -> bool | None:
-    """Stop the shared (session, PR) proxy if no container still uses it.
+PROXY_RELEASED = "released"      # stopped (or already absent): nothing pending
+PROXY_IN_USE = "in-use"          # a live container still needs it (definitive)
+PROXY_UNAVAILABLE = "unavailable"  # runtime inventory unreadable: retry later
+PROXY_UNDETERMINED = "undetermined"  # not evaluated: busy lock / foreign owner
 
-    The decision comes from the container runtime (any container, any
-    state, any pm process), checked under the cross-process proxy lock that
-    ``create_container`` holds from proxy start until its container exists —
-    so a concurrent launch can't lose its proxy.  Returns True when stopped,
-    False when still in use (or the lock is busy), None when the runtime
-    couldn't be queried (nothing done).
+
+def release_proxy_decision(session_tag: str, pr_id: str,
+                           exclude: "set[str] | frozenset[str]" = frozenset()
+                           ) -> str:
+    """Classify a shared (session, PR) proxy for cleanup.
+
+    ``PROXY_IN_USE`` is a *definitive* answer from the runtime (any container,
+    any state, any pm process), checked under the cross-process proxy lock
+    that ``create_container`` holds from proxy start until its container
+    exists — so a concurrent launch can't lose its proxy.  Only ``IN_USE``
+    and ``RELEASED`` say there is no pending work; ``UNAVAILABLE`` must stay
+    retryable and ``UNDETERMINED`` (lock busy, foreign/unreadable owner
+    record) is neither a release nor proof of use, so callers must not clear
+    an earlier failure for it.
     """
     from pm_core import container as container_mod
     with container_mod.proxy_lock(session_tag, pr_id, timeout=30) as locked:
         if not locked:
-            return False
+            return PROXY_UNDETERMINED
         if not _owner_domain_matches(_shared_sock_dir_path(session_tag, pr_id)):
-            return False
+            return PROXY_UNDETERMINED
         users = container_mod.containers_for_pr(session_tag, pr_id)
         if users is None:
-            return None
+            return PROXY_UNAVAILABLE
         if users - set(exclude):
-            return False
+            return PROXY_IN_USE
         key = _shared_proxy_key(session_tag, pr_id)
         with _proxy_lock:
             for cname in _proxy_refs.pop(key, set()):
@@ -944,7 +967,25 @@ def release_proxy_if_unused(session_tag: str, pr_id: str,
         if existed:
             _log.info("Stopped unused shared push proxy for %s/%s",
                       session_tag, pr_id)
-        return existed
+        return PROXY_RELEASED
+
+
+def release_proxy_if_unused(session_tag: str, pr_id: str,
+                            exclude: "set[str] | frozenset[str]" = frozenset()
+                            ) -> bool | None:
+    """Stop the shared (session, PR) proxy if no container still uses it.
+
+    Returns True when stopped, False when still in use (or this pass could not
+    evaluate it: busy lock, foreign/unreadable owner record), None when the
+    runtime couldn't be queried (nothing done).  See
+    :func:`release_proxy_decision` for the exact classification.
+    """
+    decision = release_proxy_decision(session_tag, pr_id, exclude)
+    if decision == PROXY_RELEASED:
+        return True
+    if decision == PROXY_UNAVAILABLE:
+        return None
+    return False
 
 
 def _proxy_container_info(name: str) -> dict | None:

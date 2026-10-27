@@ -306,3 +306,102 @@ def test_completion_sentinel_timeout_is_a_retryable_launch_error(monkeypatch, tm
         cm._post_setup(cid, tmp_path, True)
     assert error.value.kind == "timeout"
     assert "record completed setup" in str(error.value)
+
+
+def test_restart_finishes_missing_host_setup_in_place(monkeypatch, tmp_path):
+    """A restarted container without the completion marker is still recovered.
+
+    Every container created before that marker existed lacks it. The restart
+    clears the pressure and keeps the filesystem, so the launch must finish
+    the idempotent post-setup instead of reporting a failed recovery.
+    """
+    name, cid = "pm-tag-review-pr-cccc", "legacy-allocation"
+    monkeypatch.setattr(cm, "recent_launch", lambda *a: False)
+    monkeypatch.setattr(cm, "current_container_id", lambda target: cid)
+    monkeypatch.setattr(cm, "container_is_running", lambda target: True)
+    monkeypatch.setattr(cm, "_host_claude_json", lambda: tmp_path / "absent-config")
+    monkeypatch.setattr(cm, "running_container_count", lambda: 1)
+    monkeypatch.setattr(reaper, "is_retained", lambda *a: False)
+    monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
+    monkeypatch.setattr(cm, "_renew_launch", Mock())
+
+    def restart(target, *, container_id=None):
+        raise cm.launch_error(name, "incomplete", "setup markers missing after restart",
+                              stage="restart")
+    monkeypatch.setattr(cm, "restart_container", restart)
+
+    completed = {"done": False}
+    probes = {"setup": 0}
+
+    def runtime(*args, **kwargs):
+        assert args[:2] == ("exec", cid)
+        if args[2:4] == ("test", "-f"):  # readiness marker after the restart
+            return subprocess.CompletedProcess(args, 0, "", "")
+        probes["setup"] += 1
+        if probes["setup"] == 1:  # wedged: cannot exec at all
+            return subprocess.CompletedProcess(args, 125, "", "cannot fork")
+        return subprocess.CompletedProcess(args, 0 if completed["done"] else 1, "", "")
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+
+    post = Mock(side_effect=lambda *a: completed.update(done=True))
+    monkeypatch.setattr(cm, "_post_setup", post)
+    remove, fresh = Mock(), Mock(return_value="replacement")
+    monkeypatch.setattr(cm, "remove_container", remove)
+    monkeypatch.setattr(cm, "_create_fresh", fresh)
+
+    assert cm.create_container(name, cm.ContainerConfig(), tmp_path) == cid
+    post.assert_called_once_with(cid, tmp_path, "podman" in cm._get_runtime())
+    remove.assert_not_called()
+    fresh.assert_not_called()
+
+
+def test_proxy_probe_timeout_names_the_container(monkeypatch, tmp_path):
+    """An unanswered proxy inspect must be a classified error naming the container."""
+    from pm_core import push_proxy
+    name, cid = "pm-tag-impl-pr-dddd", "e3b0c44298fc1c149afbf4c8996fb924"
+    monkeypatch.setattr(cm, "recent_launch", lambda *a: False)
+    monkeypatch.setattr(cm, "current_container_id", lambda target: cid)
+    monkeypatch.setattr(cm, "container_is_running", lambda target: True)
+    monkeypatch.setattr(cm, "_probe_setup", lambda target: (True, "", ""))
+    monkeypatch.setattr(cm, "_host_claude_json", lambda: tmp_path / "absent-config")
+    monkeypatch.setattr(reaper, "is_retained", lambda *a: False)
+    monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
+    monkeypatch.setattr(cm, "_renew_launch", Mock())
+
+    def validate(target, session_tag, pr_id):
+        try:
+            raise subprocess.TimeoutExpired(["podman", "inspect"], 10)
+        except subprocess.TimeoutExpired as exc:
+            raise cm.ContainerError(
+                f"Cannot inspect mounted push proxy for '{target}': {exc}") from exc
+    monkeypatch.setattr(push_proxy, "validate_shared_proxy_mount", validate)
+
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm.create_container(name, cm.ContainerConfig(), tmp_path,
+                            allowed_push_branch="b", session_tag="tag",
+                            pr_id="pr-dddd")
+    assert error.value.kind == "timeout"
+    assert str(error.value).startswith(f"Container '{name}'")
+
+
+def test_setup_wait_keeps_running_state_probe_cause(monkeypatch, tmp_path):
+    """A failed inspect during the setup wait must not become a bare timeout."""
+    name = "pm-tag-review-pr-eeee"
+    monkeypatch.setattr(cm, "_SETUP_TIMEOUT", 0.05)
+    monkeypatch.setattr(cm, "_SETUP_POLL_INTERVAL", 0.005)
+
+    def runtime(*args, **kwargs):
+        return subprocess.CompletedProcess(args, 1, "", "container state improper")
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+
+    def running(target):
+        raise cm.launch_error(name, "runtime", "storage lock unavailable",
+                              stage="inspect existing container")
+    monkeypatch.setattr(cm, "container_is_running", running)
+
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm._wait_for_setup(name)
+    assert error.value.kind == "timeout"
+    assert "storage lock unavailable" in str(error.value)
+    assert "container state improper" in str(error.value)
