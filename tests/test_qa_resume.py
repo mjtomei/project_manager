@@ -20,6 +20,7 @@ Covers:
 """
 
 import json
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -38,6 +39,24 @@ from pm_core.qa_loop import (
 )
 from pm_core import store
 from pm_core.tui import qa_loop_ui
+
+
+class _InlineThread:
+    """Runs the adopt-and-resume thread inline so tests can assert on it."""
+
+    def __init__(self, target, args=(), **_kw):
+        self._target, self._args = target, args
+
+    def start(self):
+        self._target(*self._args)
+
+
+@pytest.fixture(autouse=True)
+def _inline_adopt_thread():
+    # Only qa_loop_ui's reference: the real threading module stays intact.
+    with patch.object(qa_loop_ui, "threading",
+                      SimpleNamespace(Thread=_InlineThread)):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -580,3 +599,33 @@ def test_resume_adopts_every_queued_entry_of_every_run(tmp_path):
     assert len(started) == 2
     assert after == before
     assert all(sorted(m) == [1, 2] for m in started)
+
+
+def test_resume_adoption_runs_off_the_ui_thread(tmp_path):
+    """Adoption waits on the governor lock, which another pm process may
+    hold for seconds while it measures runtime stats; the poll tick that
+    finds the run must not wait with it."""
+    import threading
+
+    app = _make_app(tmp_path)
+    qa_dir = _seed_run(tmp_path)
+    state = build_resume_state(_load_resume_file(qa_dir))
+    _write_resume_file(state, use_containers=True, concurrency_cap=4,
+                       queued_indices={1})
+    lock_free = threading.Event()
+    resumed = threading.Event()
+
+    def _adopt(state, *a):
+        assert lock_free.wait(5)
+        return {}, set()
+
+    with patch.object(qa_loop_ui, "threading", threading), \
+         patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "adopt_queue_entries", side_effect=_adopt), \
+         patch.object(qa_loop, "resume_qa_background",
+                      side_effect=lambda *a: resumed.set()):
+        qa_loop_ui._resume_incomplete_qa(app)
+        assert "pr-001" in app._qa_loops
+        assert not resumed.is_set()
+        lock_free.set()
+        assert resumed.wait(5)

@@ -3039,17 +3039,19 @@ def _poll_tmux_verdicts(
                         verdicts_changed = True
                         _notify()
                     else:
+                        gone = ("QA stopped" if state.stop_requested
+                                else "window gone")
                         _log.warning("Cannot send follow-up to scenario %d — "
-                                     "window gone, marking INPUT_REQUIRED",
-                                     scenario_idx)
+                                     "%s, marking INPUT_REQUIRED",
+                                     scenario_idx, gone)
                         state.scenario_verdicts[scenario_idx] = VERDICT_INPUT_REQUIRED
                         state.scenario_verdict_reasons[scenario_idx] = (
-                            "window gone during PASS verification before a "
-                            "re-checked verdict could be recorded"
+                            f"{gone} during PASS verification before a "
+                            f"re-checked verdict could be recorded"
                         )
                         state.latest_output = (
                             f"Scenario {scenario_idx} ({scenario.title}): "
-                            f"INPUT_REQUIRED (window gone during verification)"
+                            f"INPUT_REQUIRED ({gone} during verification)"
                         )
                         verdicts_changed = True
                         _notify()

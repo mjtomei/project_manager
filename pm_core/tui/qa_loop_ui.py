@@ -9,6 +9,8 @@ Keybinding variants (set up by app.action_start_qa_on_pr):
   zz t   — start/stop QA loop
 """
 
+import threading
+
 from rich.markup import escape
 
 from pm_core.paths import configure_logger, get_global_setting_value
@@ -515,11 +517,29 @@ def _resume_incomplete_qa(app) -> None:
         _log.info("Resuming incomplete QA from disk: %s", pr_id)
         to_resume.append((state, pr, _on_update))
 
-    # Adopt every resumed run's launch-queue entries before any resumed
-    # loop runs: a loop's first queue access cleans entries still owned by
-    # the pre-restart instance, which would drop the other runs' entries.
+    if to_resume:
+        # Adoption takes the governor lock, which another pm process may
+        # hold for seconds while it measures runtime stats: not on the UI
+        # thread.
+        threading.Thread(target=_adopt_and_resume, args=(app, to_resume),
+                         daemon=True, name="qa-resume-adopt").start()
+
+
+def _adopt_and_resume(app, to_resume: list) -> None:
+    """Adopt every resumed run's launch-queue entries, then resume the runs.
+
+    Adoption comes before any resumed loop runs: a loop's first queue
+    access cleans entries still owned by the pre-restart instance, which
+    would drop the other runs' entries.
+    """
+    from pm_core import qa_loop
+
     for state, _pr, _cb in to_resume:
-        qa_loop.adopt_queue_entries(state)
+        try:
+            qa_loop.adopt_queue_entries(state)
+        except Exception:
+            _log.warning("Launch-queue adoption failed for %s", state.pr_id,
+                         exc_info=True)
     for state, pr, cb in to_resume:
         qa_loop.resume_qa_background(state, app._root, pr, cb)
 

@@ -1893,6 +1893,7 @@ class TestScenarioRetryLogic:
 
         mock_send.assert_not_called()
         assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+        assert state.scenario_verdict_reasons[1].startswith("QA stopped")
 
     def test_backoff_formula(self):
         """Verify exponential backoff: 5 * 2^retries = 5, 10, 20, 40..."""
