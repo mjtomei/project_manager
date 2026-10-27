@@ -118,8 +118,10 @@ Rules, in order:
   an actionable diagnostic via `app.log_message`, and **quarantine** the
   file (rename to `autostart-resume.rejected-<UTC stamp>.json`) instead of
   silently deleting the evidence. Never enable autostart.
-- Parse via `targets_from_breadcrumb`. If `error` is set: remain OFF,
-  log + `app.log_message("Auto-start: <error>; auto-start remains off")`,
+- Parse via `targets_from_breadcrumb`. If `error` is set: clear the
+  in-memory autostart fields (so a rejected restore can never leave a
+  previous/wildcard scope active), log +
+  `app.log_message("Auto-start: <error>; auto-start remains off")`,
   quarantine the file, and **do not** call `check_and_start`.
   - Still restore non-autostart state that is safe and useful: a valid
     `stop_before_merge` list and review-loop state (so merge gates and
