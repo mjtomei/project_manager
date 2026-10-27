@@ -123,6 +123,14 @@ def _compute_review_window_name(pr_data: dict) -> str:
     return f"review-{display_id}"
 
 
+class ReviewLaunchError(RuntimeError):
+    """``pm pr review`` exited non-zero; its stderr is already logged.
+
+    An expected failure (a work route down, a container that cannot be
+    created): the loop reports it as its ERROR verdict without a traceback.
+    """
+
+
 def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
                           loop_id: str = "",
                           transcript: str | None = None) -> None:
@@ -157,7 +165,8 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
         _log.error("review_loop: launch failed (rc=%d) stderr=%s stdout=%s",
                    result.returncode, stderr[:1000], stdout[:500])
         detail = stderr[:500] or stdout[:500]
-        raise RuntimeError(f"Review window launch failed (rc={result.returncode}): {detail}")
+        raise ReviewLaunchError(
+            f"Review window launch failed (rc={result.returncode}): {detail}")
     _log.info("relauncher: pr=%s rc=%d elapsed=%.2fs",
               pr_id, result.returncode, elapsed)
 
@@ -407,6 +416,12 @@ def run_review_loop_sync(
             except PaneKilledError as e:
                 _log.warning("review_loop: pane killed on iteration %d: %s", state.iteration, e)
                 state.latest_verdict = VERDICT_KILLED
+                state.latest_output = str(e)
+                break
+            except ReviewLaunchError as e:
+                _log.error("review_loop: review failed on iteration %d: %s",
+                           state.iteration, e)
+                state.latest_verdict = "ERROR"
                 state.latest_output = str(e)
                 break
             except Exception as e:

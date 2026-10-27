@@ -697,6 +697,36 @@ class TestGenerateReviewPromptInputRequired:
         assert "needs the user's attention" in prompt
 
 
+# --- _launch_review_window failure ---
+
+def test_launch_failure_is_an_error_verdict_without_traceback(caplog):
+    """A ``pm pr review`` launch that exits non-zero (a work route down)
+    ends the loop with an ERROR verdict naming the child's stderr, and is
+    logged without a traceback (S84: one per launch in the pm debug log)."""
+    import logging
+    from pm_core import review_loop
+    err = "work route 'w' unavailable: router not reachable at 127.0.0.1:1"
+
+    def launch_only(pr_id, pm_root, pr_data, **kw):
+        review_loop._launch_review_window(pr_id, pm_root, iteration=kw["iteration"])
+
+    logger = logging.getLogger("pm.review_loop")  # propagate=False
+    logger.addHandler(caplog.handler)
+    try:
+        with patch.object(review_loop.subprocess, "run", return_value=MagicMock(
+                returncode=1, stdout="", stderr=err)), \
+                patch.object(review_loop, "_run_claude_review", side_effect=launch_only):
+            state = ReviewLoopState(pr_id="pr-001")
+            run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+    finally:
+        logger.removeHandler(caplog.handler)
+    assert state.latest_verdict == "ERROR"
+    assert state.latest_output == f"Review window launch failed (rc=1): {err}"
+    failed = [r for r in caplog.records if "review failed on iteration" in r.getMessage()]
+    assert len(failed) == 1 and err in failed[0].getMessage()
+    assert caplog.records and all(r.exc_info is None for r in caplog.records)
+
+
 # --- _launch_review_window child timeout ---
 
 def test_launch_child_outlives_the_return_clear_wait():
