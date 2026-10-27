@@ -867,3 +867,32 @@ directories its containers bind-mount — the S18 failure this lifecycle
 exists to prevent.  The test now patches ``_SOCKET_DIR_PREFIX`` to a
 test-only value and pins that a stand-in live directory survives.
 
+
+## Review iteration 18 refinements
+
+Eighteenth review pass (consistent with R3; no requirement changed).  The
+daemon's exit path had a time-of-check/time-of-use window:
+
+- **A daemon no longer unlinks a socket bound after its own was removed.**
+  `PushProxy.stop()` calls `_owns_socket_path()` and then unlinks the
+  socket.  `_owns_socket_path()` treated `FileNotFoundError` as "already
+  gone — the unlink below is a no-op" and returned True.  A daemon exits
+  exactly when its socket was removed (a shared stop unlinks it and keeps
+  the directory), and a restart for the same workdir can bind a fresh
+  socket at that path in the microseconds between the stat and the unlink
+  — which would then delete the replacement's socket, leaving the
+  container pointing at a dead socket (the S18 failure through the daemon
+  exit path rather than teardown).  A missing/unreadable path now reports
+  "not owned", so `stop()` leaves it alone; anything of ours is already
+  gone, and the metadata sidecar is best-effort (a later start rewrites
+  it, session teardown removes it).  The inode-absent fallback
+  (`_sock_ino is None`) is unchanged.
+
+Tests: `test_owns_socket_path_is_false_once_removed` (returns True at
+2f8fcda3) and `test_stop_does_not_unlink_a_socket_bound_after_removal`
+(the replacement file is deleted at 2f8fcda3, and the test's read raises
+`FileNotFoundError`).
+
+Simplification (no behaviour change): `glob` is imported once at module
+level instead of as `_glob` inside `_remove_proxy_dirs`,
+`stop_all_proxies` and `stop_session_proxies`.

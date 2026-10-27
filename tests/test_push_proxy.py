@@ -518,6 +518,48 @@ class TestPushProxyLifecycle:
         proxy.stop()
         assert Path(sock_path).read_text() == "someone else's socket"
 
+    def test_owns_socket_path_is_false_once_removed(self, sock_path):
+        """A removed socket is no longer ours — not a licence to unlink.
+
+        ``stop()`` runs in the daemon right after it notices its path is
+        gone (a shared stop unlinks the socket and keeps the directory).  A
+        restart for the same workdir can bind a fresh socket at that path in
+        the window between the ownership check and the unlink that follows,
+        so "missing" must mean "leave the path alone", not "go ahead".
+        """
+        proxy = PushProxy(sock_path, "/w", "branch")
+        proxy.start()
+        try:
+            assert proxy._owns_socket_path()
+            os.unlink(sock_path)
+            assert not proxy._owns_socket_path()
+        finally:
+            proxy.stop()
+
+    def test_stop_does_not_unlink_a_socket_bound_after_removal(self,
+                                                               sock_path):
+        """A replacement bound during the exit race must survive stop()."""
+        proxy = PushProxy(sock_path, "/w", "branch")
+        proxy.start()
+        os.unlink(sock_path)  # our socket is gone: a shared stop removed it
+        # A restart for the same workdir binds the path in the window
+        # between stop()'s ownership check and the unlink that follows.
+        Path(sock_path).write_text("new daemon socket")
+
+        real_stat = os.stat
+
+        def stat_seeing_the_gap(path, *args, **kwargs):
+            if path == sock_path:
+                # At the check the path still looks missing.
+                raise FileNotFoundError(path)
+            return real_stat(path, *args, **kwargs)
+
+        with patch("pm_core.push_proxy.os.stat",
+                   side_effect=stat_seeing_the_gap):
+            proxy.stop()
+
+        assert Path(sock_path).read_text() == "new daemon socket"
+
     def test_stop_tolerates_a_planted_metadata_directory(self, sock_path):
         """A container can plant a directory on the sidecar name.
 

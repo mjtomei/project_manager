@@ -32,6 +32,7 @@ Legacy requests without ``cmd`` are treated as push (backward compat).
 
 import contextlib
 import fcntl
+import glob
 import hashlib
 import json
 import os
@@ -323,9 +324,15 @@ class PushProxy:
             return True
         try:
             return os.stat(self.socket_path).st_ino == self._sock_ino
-        except FileNotFoundError:
-            return True  # already gone — the unlink below is a no-op
         except OSError:
+            # Missing or unreadable: do *not* treat "missing" as permission
+            # to unlink.  A daemon exits when its socket was removed (a
+            # shared stop unlinks it and keeps the directory), and a restart
+            # for the same workdir can bind a fresh socket at the same path
+            # in the window between this stat and the unlink that follows.
+            # Reporting "not owned" leaves that replacement alone; anything
+            # of ours is already gone, and the metadata sidecar is best-effort
+            # (a later start rewrites it, session teardown removes it).
             return False
 
     def socket_is_current(self) -> bool:
@@ -364,7 +371,7 @@ class PushProxy:
                       self.socket_path)
             return
         if not self._owns_socket_path():
-            _log.info("Push proxy socket replaced by another daemon; "
+            _log.info("Push proxy socket replaced or already removed; "
                       "leaving it in place: %s", self.socket_path)
             return
         # Same shapes as the other teardown paths (a directory left by
@@ -1589,7 +1596,6 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
     directory to sweep, so unlinking it while keeping the directory would
     leak the proxy past teardown after a restart.
     """
-    import glob as _glob
     # Resolve the parent too: on platforms where /tmp is a symlink (macOS:
     # /tmp -> /private/tmp) the literal glob parent never matches the
     # resolved entry path, so every directory would be refused and teardown
@@ -1628,7 +1634,7 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
         except OSError:
             pass
 
-    for path in _glob.glob(glob_pattern):
+    for path in glob.glob(glob_pattern):
         if path.endswith(".lock"):
             continue
         # A discovery link may only lead to its own hashed directory; a
@@ -1670,7 +1676,7 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
                 os.unlink(real + ".lock")
             except OSError:
                 pass
-    for lock in _glob.glob(glob_pattern + ".lock"):
+    for lock in glob.glob(glob_pattern + ".lock"):
         _clear_lock_file(lock)
 
 
@@ -1698,14 +1704,13 @@ def _stop_socket_under_lock(sock_path: str) -> bool:
 
 def stop_all_proxies() -> None:
     """Stop all running push proxies."""
-    import glob as _glob
     with _proxy_lock:
         _active_proxies.clear()
         _proxy_refs.clear()
         _container_to_proxy_key.clear()
 
     # Kill all proxy sockets on disk
-    for sock in sorted(_glob.glob(f"/tmp/{_SOCKET_DIR_PREFIX}*/push.sock")):
+    for sock in sorted(glob.glob(f"/tmp/{_SOCKET_DIR_PREFIX}*/push.sock")):
         _stop_socket_under_lock(sock)
     _remove_proxy_dirs(f"/tmp/{_SOCKET_DIR_PREFIX}*")
 
@@ -1715,7 +1720,6 @@ def stop_session_proxies(session_tag: str) -> int:
 
     Returns the number of proxies stopped.
     """
-    import glob as _glob
     prefix = f"{session_tag}\0"
     with _proxy_lock:
         keys_to_remove = {
@@ -1737,8 +1741,8 @@ def stop_session_proxies(session_tag: str) -> int:
     # contain glob metacharacters.  Unescaped, a tag like ``repo[1]-abcd``
     # would match nothing of its own (leaking its proxies past teardown) and
     # could match — and delete — another session's ``repo1-abcd-…`` directory.
-    pattern = f"/tmp/{_SOCKET_DIR_PREFIX}{_glob.escape(session_tag)}-*"
-    socks = set(_glob.glob(pattern + "/push.sock"))
+    pattern = f"/tmp/{_SOCKET_DIR_PREFIX}{glob.escape(session_tag)}-*"
+    socks = set(glob.glob(pattern + "/push.sock"))
     for k in keys_to_remove:
         parts = k.split("\0")
         if len(parts) == 3:
