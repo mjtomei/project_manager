@@ -784,6 +784,8 @@ def _wait_for_claim(state: ReviewLoopState, pm_root: str | None) -> bool:
         if state.stop_requested:
             return False
         _interruptible_sleep(2.0, state, pm_root)
+        if state.stop_requested:
+            return False
         if _claim_launch(state, state.iteration, state.launch_attempts + 1):
             return True
     return False
