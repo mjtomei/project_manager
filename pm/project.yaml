@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T22:52:24.293210+00:00'
+  updated_at: '2026-10-27T23:20:26.895678+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25942,6 +25942,29 @@ prs:
       so that bug PR is redundant.'
     created_at: '2026-10-27T22:52:24Z'
     last_edited: '2026-10-27T22:52:24Z'
+  - id: note-ec35a02
+    text: 'Review-loop 3dd4 i3 (fd1218d1): no functional defects found in the recovery
+      machinery — handle() bounds, the completed-verdict guard, grace-window idle
+      processing, QA tick-loop episode bookkeeping, planner stop ordering and the
+      pr-8efa789 merge coordination all hold under adversarial tracing. Fixed two
+      gaps: (1) the planner recovery nudge ignored the validator rejection, so a planner
+      whose QA_PLAN block was refused (non-contiguous numbering/truncated) got the
+      same generic "re-emit your completed result" request as a planner that emitted
+      nothing and could repeat the malformed block until exhaustion; the outcome request
+      is now a callable naming the current plan_problem on one line (no plan supplied
+      or inferred), with a regression test that fails on the old message. (2) the
+      retained qa-verdict-reminder-timeout settle override had zero coverage; new
+      tick-loop test proves a 1 s override nudges within a couple of ticks against
+      a 100 s shared settle (old behavior: tick 51). Spec updated. Full suite: 3784
+      passed, 1 skipped; 43F+17E reproduce identically on origin/master here (test_signoff_integration/test_merge_publish,
+      test_git_ops::test_keeps_unpushed_merge on git 2.34.1, test_hook_events::test_installer_writes_standalone_receiver).
+      Residuals unchanged: verdict-recovery-response-timeout (1 h) can retire a silently-busy
+      worker; a poller that starts while its session is already idle (review adoption)
+      is bounded only by overall_timeout/pane death; a recovery nudge can still land
+      in a permission hold that begins during an open episode. Note: pr-f2fee05 (verifier
+      re-check hang) remains subsumed by this PR i2. (2026-10-27T23:20:26Z)'
+    created_at: '2026-10-27T23:20:26Z'
+    last_edited: '2026-10-27T23:20:26Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
