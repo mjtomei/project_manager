@@ -47,7 +47,7 @@ _log = configure_logger("pm.tui.auto_start")
 _MERGE_RESTART_MARKER = "merge-restart"
 _BREADCRUMB_FILE = "autostart-resume.json"
 _REPLY_MAX_AGE = 600  # seconds
-# How long a "targets +=" / "ON (all …)" confirmation holds the log line
+# How long a "targets +=" / target-removed confirmation holds the log line
 # against the scheduler messages it triggers, so it stays readable.
 CONFIRM_HOLD_SECONDS = 3.0
 
@@ -524,11 +524,20 @@ async def consume_breadcrumb(app) -> None:
     # Summarise last: the per-loop resume messages above (one of them
     # sticky) would otherwise overwrite this before it is ever painted.
     if had_auto_start:
-        desc = ", ".join(targets)
-        note = " (migrated legacy breadcrumb)" if migrated else ""
-        msg = f"Auto-start: resumed after merge restart → {desc}{note}"
-        _log.info("consume_breadcrumb: %s", msg)
-        app.log_message(msg, sticky=5)
+        # Report what is actually still active.  A restored target that
+        # completed during downtime was pruned by the scheduler pass above
+        # (which already logged the "auto-start OFF" line); painting a stale
+        # "resumed → <target>" over that would claim a scope that is gone.
+        remaining = get_targets(app)
+        if remaining:
+            desc = ", ".join(remaining)
+            note = " (migrated legacy breadcrumb)" if migrated else ""
+            msg = f"Auto-start: resumed after merge restart → {desc}{note}"
+            _log.info("consume_breadcrumb: %s", msg)
+            app.log_message(msg, sticky=5)
+        else:
+            _log.info("consume_breadcrumb: restored targets all completed "
+                      "during downtime; auto-start remains off")
     elif review_loops_data:
         # A rejected restore's diagnostic is the message the user must see;
         # do not paint this informational summary over it.  (It is still
@@ -650,7 +659,7 @@ def add_targets(app, ids: list[str], policy: str | None = None,
     own previous one (its stop mark / wait flag); marks on other PRs are
     never touched.  The policy is in place before the scheduler pass this
     queues, so a wait target's dependencies are held before any starts.
-    Never touches other targets and never enables all-mode.
+    Never touches other targets; there is no all-PR mode to enable.
 
     *confirm* replaces the "targets +=" log-line confirmation (e.g. the
     ``O`` key's "Auto-sequence armed …"); it gets the same hold.

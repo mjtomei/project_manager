@@ -371,6 +371,65 @@ class TestConsumeFailClosed:
         assert app.launched == []
         assert any("not found" in m for m in app.logs)
 
+    def test_current_format_unknown_target_rejects_whole_restore(self, tmp_path):
+        """A known target does not license restoring alongside an unknown id:
+        the saved set cannot be resolved, so nothing is restored."""
+        app = FakeApp([_pr("pr-a")], tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "auto_start": True,
+            "targets": [{"pr_id": "pr-a"}, {"pr_id": "pr-gone"}],
+            "run_id": "r",
+        })
+        _consume(app, tmp_path)
+        assert app._auto_start is False
+        assert auto_start.get_targets(app) == []
+        assert app.launched == []
+        assert any("not found" in m and "pr-gone" in m for m in app.logs)
+        assert _rejected_files(tmp_path)
+
+    def test_restored_target_completed_during_downtime_turns_off(self, tmp_path):
+        """A target that merged while the TUI was down is restored and then
+        pruned; the resume summary must not claim a scope that is gone."""
+        app = FakeApp([_pr("pr-a", status="merged")], tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "auto_start": True, "targets": [{"pr_id": "pr-a"}], "run_id": "r"})
+        _consume(app, tmp_path)
+        assert app._auto_start is False
+        assert auto_start.get_targets(app) == []
+        assert any("auto-start OFF" in m for m in app.logs)
+        assert not any("resumed after merge restart" in m for m in app.logs)
+
+    def test_resume_summary_lists_only_remaining_targets(self, tmp_path):
+        app = FakeApp([_pr("pr-done", status="merged"), _pr("pr-live")],
+                      tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "auto_start": True,
+            "targets": [{"pr_id": "pr-done"}, {"pr_id": "pr-live"}],
+            "run_id": "r",
+        })
+        _consume(app, tmp_path)
+        assert auto_start.get_targets(app) == ["pr-live"]
+        summaries = [m for m in app.logs
+                     if "resumed after merge restart" in m]
+        assert summaries and summaries[-1].endswith("→ pr-live")
+
+    def test_quarantine_failure_leaves_evidence_in_place(self, tmp_path):
+        """If the evidence cannot be renamed aside it must be left in place,
+        never deleted; auto-start stays off either way."""
+        app = FakeApp([_pr("pr-a")], tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "auto_start": True, "all_mode": False,
+            "targets": {"pr-a": {}}, "run_id": "incident",
+        })
+        with patch.object(auto_start.os, "replace",
+                          side_effect=OSError("read-only directory")):
+            _consume(app, tmp_path)
+        assert app._auto_start is False
+        assert app.launched == []
+        assert (tmp_path / "autostart-resume.json").exists()
+        assert _rejected_files(tmp_path) == []
+        assert any("remains off" in m for m in app.logs)
+
     def test_valid_multi_target_restore_only_runs_closure(self, tmp_path):
         prs = [_pr("pr-dep", status="merged"), _pr("pr-a", deps=["pr-dep"]),
                _pr("pr-b"), _pr("pr-unrelated")]
@@ -760,6 +819,9 @@ class TestWatcherScopeFailClosed:
         assert "Auto-Start Scope" in prompt
         assert "no PR is managed" in prompt
         assert "Do not start" in prompt
+        # The generic "fix what you can" / "take corrective actions" sections
+        # follow the block; the restriction must say it overrides them.
+        assert "overrides" in prompt
 
     def test_no_scope_argument_leaves_prompt_unchanged(self):
         from pm_core.prompt_gen import generate_watcher_prompt

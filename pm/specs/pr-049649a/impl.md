@@ -156,7 +156,10 @@ Rules, in order:
   is only a defensive path.)
 - `had_auto_start = bool(targets)` only. Resume summary says
   `→ <targets>` (plus "migrated legacy breadcrumb" when applicable); never
-  "all".
+  "all". It reports the targets still active *after* the scheduler pass:
+  a restored target that completed during downtime is pruned (which logs
+  "auto-start OFF"), so it is omitted from the summary, and no summary is
+  painted when none remain (that would claim a scope that is gone).
 - `save_breadcrumb` writes `auto_start`, `targets`, `run_id`, and
   `stop_before_merge`; it never writes `all_mode`. If autostart is enabled
   with an empty target map (impossible through the public API), skip the
@@ -173,6 +176,9 @@ Rules, in order:
   but resolves to no targets, emit an explicit fail-closed scope block:
   "Auto-start has no targets: no PR is managed. Do not start, restart, fix,
   merge, or otherwise act on any PR or window; observation/reporting only."
+  Because the prompt's later generic "Auto-Fix Issues" / "take corrective
+  actions" sections would otherwise contradict it, the block also states
+  that the restriction overrides them.
   When the argument is `None` (callers that never had a scope, e.g. plain
   `generate_watcher_prompt(data)`), behavior is unchanged.
 - No other background driver may derive scope without `is_enabled` +
@@ -244,6 +250,8 @@ Rules, in order:
   truthy / run_id present) is rejected.
 - **Legacy target now merged/closed** — reject or restore+prune? →
   Restore+prune: it is the exact validated target, and completion is normal.
+  The resume summary lists only the remaining targets and is omitted when
+  none remain, so it never claims a scope the prune just turned off.
 - **Legacy target unknown to the project** — reject migration entirely
   (remain OFF, diagnostic), never enable a scope that cannot be resolved.
 - **Malformed stop_before_merge** — reject autostart for that restore but

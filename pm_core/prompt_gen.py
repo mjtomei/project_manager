@@ -1497,7 +1497,9 @@ Auto-start has no targets: no PR is managed.
 
 **IMPORTANT**: Do not start, restart, fix, merge, or otherwise take corrective
 action on any PR or tmux window. Observation and reporting only; surface issues
-to the human instead of acting on them.
+to the human instead of acting on them. This restriction overrides any general
+"fix what you can" or "take corrective actions" instruction elsewhere in this
+prompt.
 """
 
     id_label = f" [{loop_id}]" if loop_id else ""
