@@ -1,6 +1,5 @@
 """Failure-boundary regressions for lifecycle setup and launcher integration."""
 import subprocess
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 

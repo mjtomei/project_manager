@@ -293,7 +293,7 @@ def test_reuse_probe_timeout_names_the_container_not_its_id(monkeypatch, tmp_pat
 
 def test_completion_sentinel_timeout_is_a_retryable_launch_error(monkeypatch, tmp_path):
     """A slow `touch` of the completion sentinel is a classified launch error."""
-    name, cid = "pm-tag-review-pr-aaaa", "existing-allocation"
+    cid = "existing-allocation"
     monkeypatch.setattr(cm, "_host_claude_json", lambda: tmp_path / "absent-config")
 
     def runtime(*args, **kwargs):

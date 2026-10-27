@@ -1,6 +1,5 @@
 """Implementation launch failures preserve runtime stderr without double launching."""
 import subprocess
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 

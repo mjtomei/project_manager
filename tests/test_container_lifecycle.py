@@ -1184,7 +1184,6 @@ class TestProxyRelease:
             shutil.rmtree(real, ignore_errors=True)
 
     def test_reused_proxy_without_owner_file_is_not_attributed(self, monkeypatch, tmp_path):
-        import json
         from pm_core import push_proxy
         sock_dir = tmp_path / "proxy"
         sock_dir.mkdir()
