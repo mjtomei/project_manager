@@ -420,6 +420,25 @@ class TestPickerMergeDispatch:
         assert "boom: branch protected" in echoed
         assert wait_mock.called
 
+    def test_run_picker_command_surfaces_stdout_on_success(self):
+        """A successful direct dispatch re-emits the command's stdout.
+
+        `pr review` on a QA/sign-off PR prints its inspection notice there,
+        so the picker must not swallow it."""
+        fake_result = MagicMock(
+            returncode=0,
+            stdout="PR #42 is in QA — opened review window 'review-#42' "
+                   "without changing status.\n",
+            stderr="")
+        with patch("pm_core.cli.session.subprocess.run",
+                   return_value=fake_result), \
+             patch("pm_core.cli.session.click.echo") as echo_mock:
+            _run_picker_command("pr review pr-123", "sess")
+        echoed = " ".join(
+            str(c.args[0]) if c.args else "" for c in echo_mock.call_args_list
+        )
+        assert "without changing status" in echoed
+
     def test_run_picker_command_silent_on_success(self):
         """Successful direct-CLI dispatch should not block waiting for a
         keypress (popup closes promptly)."""

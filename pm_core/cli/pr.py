@@ -1259,6 +1259,48 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
     click.echo("Added companion pane.")
 
 
+# Statuses at or past the review step.  ``pm pr review`` on one of these is
+# an *inspection* of the earlier review, not a new review: it must never move
+# the PR backwards (QA/sign-off own the branch and may be mid-flight).
+_REVIEW_INSPECTION_PHASES = {
+    "qa": "QA",
+    "sign_off": "sign-off",
+}
+
+
+def _focus_review_window(pr_entry: dict) -> str | None:
+    """Focus the PR's existing review window; never start a new session.
+
+    Used when the PR is past the review step (``qa`` / ``sign_off``) and the
+    user asks to read the earlier review.  Returns the focused window name, or
+    ``None`` when there is nothing to focus.
+
+    Deliberately does **not** create a window, remove/launch a container,
+    generate a prompt, touch project state or clear a sign-off return: merely
+    viewing an old review while QA/sign-off runs must not start a second agent
+    or disturb the running phase.  (``_launch_review_window`` is the opposite:
+    it creates a fresh review session and clears a REVIEW return.)
+    """
+    if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
+        _log.info("focus review window: not in tmux")
+        return None
+    pm_session = _get_pm_session()
+    if not pm_session or not tmux_mod.session_exists(pm_session):
+        _log.info("focus review window: session %r not found", pm_session)
+        return None
+    window_name = f"review-{_pr_display_id(pr_entry)}"
+    existing = tmux_mod.find_window_by_name(pm_session, window_name)
+    if not existing:
+        _log.info("focus review window: no window %r", window_name)
+        return None
+    # select_window targets the caller's grouped/popup session, so the
+    # window switches in the client that asked for it (picker popup too).
+    if not tmux_mod.select_window(pm_session, existing["id"]):
+        _log.info("focus review window: select failed for %r", window_name)
+        return None
+    return window_name
+
+
 def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                           background: bool = False,
                           review_loop: bool = False, review_iteration: int = 0,
@@ -1519,6 +1561,12 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: bool, review_iteration: int, review_loop_id: str, transcript: str | None, no_window: bool):
     """Mark a PR as in_review and launch a review window.
 
+    On a PR that is already past the review step (``qa`` / ``sign_off``) this
+    is an *inspection*: it focuses the existing review window and never
+    changes the phase, so a running QA loop / sign-off router is not
+    disturbed.  ``--fresh`` / ``--review-loop`` are refused there because they
+    would start a second agent against the in-flight phase.
+
     If PR_ID is omitted, infers from cwd (if inside a workdir) or
     auto-selects when there's exactly one in_progress PR.
     """
@@ -1541,11 +1589,13 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
 
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
+    status = pr_entry.get("status")
+    display_id = _pr_display_id(pr_entry)
 
-    if pr_entry.get("status") == "merged":
-        click.echo(f"PR {pr_id} is already merged.", err=True)
+    if status in ("merged", "closed"):
+        click.echo(f"PR {pr_id} is already {status}.", err=True)
         raise SystemExit(1)
-    if pr_entry.get("status") == "in_review":
+    if status == "in_review":
         click.echo(f"PR {pr_id} is already in_review.")
         if no_window:
             return
@@ -1555,9 +1605,37 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
                               review_loop_id=review_loop_id,
                               transcript=transcript)
         return
-    if pr_entry.get("status") == "pending":
+    if status == "pending":
         click.echo(f"PR {pr_id} is pending — start it first with: pm pr start {pr_id}", err=True)
         raise SystemExit(1)
+    if status in _REVIEW_INSPECTION_PHASES:
+        # The review step has already happened (or the PR is past it).  A
+        # plain `pm pr review` opens the earlier review for reading and must
+        # NOT write status/timestamps or start a second agent — the running
+        # QA loop / sign-off router owns the PR, and demoting it to
+        # in_review strands that phase (sign-off refuses to collect a
+        # verdict unless the PR is still sign_off).
+        phase = _REVIEW_INSPECTION_PHASES[status]
+        if fresh or review_loop:
+            click.echo(
+                f"PR {display_id} is in {phase} — a fresh review is refused "
+                f"while the PR is in this phase (it would start a second "
+                f"agent). Open the existing review window for inspection "
+                f"with: pm pr review {pr_id}", err=True)
+            raise SystemExit(1)
+        if no_window:
+            click.echo(f"PR {display_id} is in {phase} — status unchanged.")
+            return
+        focused = _focus_review_window(pr_entry)
+        if focused:
+            click.echo(
+                f"PR {display_id} is in {phase} — opened review window "
+                f"'{focused}' without changing status.")
+        else:
+            click.echo(
+                f"PR {display_id} is in {phase} — no review window to open; "
+                f"status unchanged (no new review started).")
+        return
 
     # For GitHub backend: upgrade draft PR to ready for review (before lock)
     backend_name = data["project"].get("backend", "vanilla")
