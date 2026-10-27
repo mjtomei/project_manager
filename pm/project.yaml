@@ -14508,7 +14508,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T20:49:42.015827+00:00'
+  updated_at: '2026-10-27T21:12:30.613177+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15150,6 +15150,37 @@ prs:
       start lock without a deadline.'
     created_at: '2026-10-27T20:49:41Z'
     last_edited: '2026-10-27T20:49:41Z'
+  - id: note-7d1da53
+    text: 'Review-loop 6280 i9 (2026-10-27): reviewed 15c41573. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes with real subprocess daemons
+      (distinct socket per workdir, the restarted impl proxy lands the new impl commit,
+      QA stop leaves the impl socket dir intact); test_impl_and_qa_get_distinct_proxies
+      fails at 74462d76 with assert 1 == 3 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      Two teardown paths unlinked the long-name discovery symlink while keeping its
+      directory, leaking a hashed socket dir past a registry-less sweep (the iteration-12
+      leak class through the kill/sweep ordering): (1) _kill_proxy_socket unlinked
+      the link before os.rmdir — the socket dir is bind-mounted writable, so a container
+      can leave an entry (or an unremovable socket / a proxy.json directory) that
+      makes the rmdir fail; reproduced: link gone, dir survives. (2) _remove_proxy_dirs
+      unlinked the link before shutil.rmtree(ignore_errors=True); a removal the host
+      cannot complete left the dir with no link. Both now unlink the link only when
+      the directory is actually gone (the sweep logs the refusal). Tests: test_kill_keeps_the_discovery_link_when_the_dir_survives
+      (a leftover file keeps the dir; the link survives and the next registry-less
+      sweep then removes both) and test_sweep_keeps_the_link_when_rmtree_fails (rmtree
+      patched to a no-op); both fail at 15c41573 for the right reason (os.path.islink(long_dir)
+      is False while the dir exists). Tests: tests/test_push_proxy.py + tests/test_container.py
+      235 passed; full suite 3836 passed, 1 skipped, 0 failed (env -u PM_HOST_HOME,
+      PATH=/usr/bin:/bin, PYTHONPATH=/workspace plus pytest<9 and markdown in a scratch
+      dir). Spec updated with Review iteration 20 refinements. Residual, unchanged
+      and out of scope: in-process refcounts only (cross-process cleanup stays with
+      #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request, remains
+      the cleaner long-term design); proxy_is_alive cannot distinguish a busy daemon
+      from a dead one beyond the backlog of 16; the daemon serves one request at a
+      time; a shared stop still leaves its .lock beside the kept directory until session
+      teardown; a blocking start waits on the directory start lock without a deadline;
+      the proxy socket is chmod 0o777 in world-writable /tmp (filed as pr-e618b9c).'
+    created_at: '2026-10-27T21:12:30Z'
+    last_edited: '2026-10-27T21:12:30Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
