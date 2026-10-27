@@ -713,7 +713,10 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
             title = title[:120].rstrip() + "…"
             truncated = True
         verdict = s.get("verdict", "?")
-        reason = " ".join((s.get("verdict_reason") or "").split())
+        # Hand-edited evidence: a non-string reason is not text (``" ".join``
+        # would raise TypeError out of the sign-off prompt), so it renders
+        # through ``str`` like the title above.
+        reason = " ".join(str(s.get("verdict_reason") or "").split())
         if len(reason) > _QA_SCENARIO_REASON_CHARS:
             reason = reason[:_QA_SCENARIO_REASON_CHARS].rstrip() + "…"
             truncated = True

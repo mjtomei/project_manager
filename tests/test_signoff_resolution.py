@@ -749,6 +749,29 @@ def test_malformed_qa_scenarios_does_not_crash_the_signoff_prompt(w):
     assert "Overall QA verdict: **PASS**" in text
 
 
+def test_a_non_string_scenario_reason_does_not_crash_the_signoff_prompt(w):
+    """A scenario member that is not text must render, not raise.
+
+    ``verdict_reason`` is normalised with ``" ".join(...)``; a hand-edited
+    non-string value would raise ``TypeError`` out of the sign-off prompt — the
+    same malformed-evidence contract the non-list ``scenarios`` guard follows
+    (the title already renders through ``str``).
+    """
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps(
+        {"overall": "PASS", "scenarios": [
+            {"index": 1, "title": "a scenario",
+             "verdict": "PASS", "verdict_reason": ["not", "text"]}]}))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": "f" * 40, "planner_code_changes": []}))
+
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(store.load(w.pm_dir), PR)
+    assert "Scenario 1 — a scenario: **PASS**" in text
+
+
 def test_malformed_qa_resume_revision_does_not_crash_the_prompt(w):
     """A non-string ``planner_head`` is malformed evidence, not a revision.
 
@@ -5151,3 +5174,76 @@ def test_a_hand_edited_resolved_from_is_not_rendered_as_a_revision(w):
     assert f"Resolved from PR HEAD `{head[:12]}`" in \
         signoff.format_signoff_return(pr)
     assert f"Resolved from PR HEAD `{head[:12]}`" in _signoff_prompt(w)
+
+
+def test_a_transient_error_after_the_hand_merge_keeps_the_assessment(w):
+    """A failed check *after* implementation merged the base keeps the summary.
+
+    The failed metadata attempt (never applied) records the base interaction at
+    the pre-merge head.  Implementation reconciles the conflict by hand (the
+    return text tells it to ``git merge`` the base), so the branch moves.  A
+    transient check then records ``error`` at the *new* head: it cannot name the
+    base itself, and the earlier assessment's head is now behind it.  The next
+    successful check sees the base inside HEAD and must still carry the files
+    the base changed and its behaviour-relevant changes (and the merge gate's
+    evidence requirement) from the stored record.
+    """
+    rec = _status_conflict(w)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["base_files"] == ["pm/project.yaml"], rec
+
+    # Implementation reconciles the conflict by hand, as the return text
+    # instructs ("git fetch the base and git merge ...").
+    git(w.wd, "fetch", "-q", "origin")
+    merged = subprocess.run(["/usr/bin/git", "merge", "--no-commit",
+                             "origin/master"], cwd=w.wd, capture_output=True,
+                            text=True)
+    assert merged.returncode != 0
+    ours = subprocess.run(["/usr/bin/git", "show", ":2:pm/project.yaml"],
+                          cwd=w.wd, capture_output=True, text=True, check=True)
+    (w.wd / "pm" / "project.yaml").write_text(ours.stdout)
+    data = store.load(w.wd / "pm")
+    store.get_pr(data, PR)["status"] = "in_review"
+    store.save(data, w.wd / "pm")
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "merge base, reconcile status")
+
+    # A transient failure at the integrated head cannot fetch the base itself.
+    with patch("pm_core.integration.fetch_base",
+               lambda *a, **k: (None, "network down")):
+        err = integration.check_integration(w.pm_dir, PR)
+    assert err["status"] == integration.ERROR
+    assert err["head"] == git(w.wd, "rev-parse", "HEAD")
+    # The error record keeps the base the earlier check assessed (it is never
+    # mergeable) even though the branch moved past that assessment.
+    assert err["base_sha"] == rec["base_sha"], err
+    assert err["base_files_count"] == 1, err
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert again["base_files_count"] == 1, again
+    assert any("status" in c for c in again["base_behavior_changes"]), again
+    stored = pr_entry(w)["integration"]
+    assert signoff.approval_justification_problem(PR, stored, again["head"])
+
+
+def test_a_moved_branch_that_does_not_carry_the_base_keeps_no_assessment(w):
+    """A failure after unrelated PR work must not adopt another base's summary.
+
+    The earlier check assessed a base the branch does not contain.  The branch
+    then moves on its own work and a check fails: the error record must not
+    claim that base (nor its file count/behaviour changes) — the next
+    successful check computes its own summary for the base it actually sees.
+    """
+    rec = _status_conflict(w)
+    assert rec["status"] == integration.CONFLICT
+    commit(w.wd, "more.txt", "more\n", "unrelated PR work")
+
+    with patch("pm_core.integration.fetch_base",
+               lambda *a, **k: (None, "network down")):
+        err = integration.check_integration(w.pm_dir, PR)
+    assert err["status"] == integration.ERROR
+    assert err["head"] != rec["head"]
+    assert not err.get("base_sha"), err
+    assert not err.get("base_files_count"), err
+    assert not err.get("base_behavior_changes"), err

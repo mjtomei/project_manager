@@ -1391,6 +1391,19 @@ def _cwd_checkout_of(pr: dict) -> str | None:
     return top if cur == pr["branch"] else None
 
 
+def _checkout_of(pr_entry: dict) -> str | None:
+    """The checkout to resolve ancestry in: the recorded workdir, else cwd.
+
+    ``run_check`` falls back the same way when the recorded host workdir is not
+    visible (the container case), so ancestry resolved here describes the same
+    repository the check ran in.
+    """
+    workdir = pr_entry.get("workdir")
+    if isinstance(workdir, str) and Path(workdir).is_dir():
+        return workdir
+    return _cwd_checkout_of(pr_entry)
+
+
 def compact(record: dict) -> dict:
     """The project.yaml form of an integration record (lists truncated)."""
     out = {k: v for k, v in record.items()
@@ -1740,7 +1753,8 @@ def _carry_base_interaction(record: dict, old: dict) -> None:
     _copy_base_interaction(record, old, new_base)
 
 
-def _carry_assessed_base(record: dict, old: dict) -> None:
+def _carry_assessed_base(record: dict, old: dict,
+                         pr_entry: dict | None = None) -> None:
     """Keep the base an earlier check assessed on a *failed* check.
 
     A transient failure (the base fetch, a broken workdir) records ``error``
@@ -1753,9 +1767,14 @@ def _carry_assessed_base(record: dict, old: dict) -> None:
     hand" silently drops the files/behaviour the base changed, and with them
     the merge gate's evidence requirement.
 
+    The same holds when the failure comes *after* the hand merge: the branch
+    moved past the assessment (which still describes the same base revision),
+    so the assessment is kept while the branch descends from the revision it
+    assessed.  The next check re-verifies that the branch contains the base
+    before carrying anything forward.
+
     The record keeps ``error`` (it is never mergeable, so nothing binds to
-    this carried base), and a later check re-verifies that the branch really
-    contains it before carrying anything forward.
+    this carried base).
     """
     if record.get("status") != ERROR:
         return
@@ -1766,9 +1785,24 @@ def _carry_assessed_base(record: dict, old: dict) -> None:
     old_base = revision_of(old.get("base_sha"))
     if not old_base:
         return
-    if not record.get("head") or record.get("head") != old.get("head"):
-        # The branch moved: the stored assessment describes another revision.
+    old_head = revision_of(old.get("head"))
+    new_head = revision_of(record.get("head"))
+    if not new_head or not old_head:
+        # A check that could not resolve HEAD cannot show it descends from the
+        # assessed revision.
         return
+    if new_head != old_head:
+        # The branch moved past the assessment (implementation merged the base
+        # by hand, as the sign-off return instructs).  Keep the assessment only
+        # when the branch descends from the revision that assessed it *and* now
+        # contains that base: then the summary still describes the base the
+        # next check will see inside HEAD.  Otherwise the branch does not carry
+        # this base and the next check computes its own summary.
+        checkout = _checkout_of(pr_entry or {})
+        if not (checkout
+                and is_ancestor(checkout, old_head, new_head)
+                and is_ancestor(checkout, old_base, new_head)):
+            return
     if _copy_base_interaction(record, old, old_base):
         record["base_sha"] = old_base
 
@@ -1813,13 +1847,11 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
     old_resolution = resolution_of(old)
     if not record.get("resolution") and old_resolution:
         applied = revision_of(old_resolution.get("applied_merge_sha"))
-        workdir = pr_entry.get("workdir")
-        if not isinstance(workdir, str) or not Path(workdir).is_dir():
-            # ``run_check`` may have computed this check from the current
-            # checkout when the recorded workdir is not visible (e.g. inside
-            # a container); resolve the ancestry from that same checkout so
-            # the applied resolution is not silently dropped.
-            workdir = _cwd_checkout_of(pr_entry)
+        # ``run_check`` may have computed this check from the current checkout
+        # when the recorded workdir is not visible (e.g. inside a container);
+        # resolve the ancestry from that same checkout so the applied
+        # resolution is not silently dropped.
+        workdir = _checkout_of(pr_entry)
         new_head = revision_of(record.get("head"))
         verified = bool(
             applied and workdir and new_head and Path(workdir).is_dir()
@@ -1897,18 +1929,21 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
             # error record keeps the assessed base (and its summary) so the
             # next check can still carry it after a hand merge.
             _carry_failed_check_behavior(record, old)
-            _carry_assessed_base(record, old)
     elif record.get("status") == ERROR:
         # A transient failure (e.g. the base fetch) must not drop what the
         # approval was required to assess, nor the base revision that makes
         # the summary usable by a later check.
         _carry_failed_check_behavior(record, old)
-        _carry_assessed_base(record, old)
     elif not record.get("resolution") and not old_resolution:
         # No resolution on either side: this is the clean-bounce path (or a
         # plain re-check).  The base-interaction summary must survive the
         # base moving into HEAD the same way it does for a resolution.
         _carry_base_interaction(record, old)
+    # A failed check keeps the base the stored record assessed, on every path
+    # (an unapplied resolution, no resolution at all, an earlier failure): the
+    # next check needs it to recognise that the branch now contains that base
+    # and carry its summary forward.  No-op unless *record* is ``error``.
+    _carry_assessed_base(record, old, pr_entry)
     return record
 
 
@@ -1921,14 +1956,12 @@ def _check_is_stale(record: dict, pr_entry: dict) -> bool:
     describes the revision the branch is on now.
     """
     old = _mapping(pr_entry.get("integration"))
-    workdir = pr_entry.get("workdir")
-    if not isinstance(workdir, str) or not Path(workdir).is_dir():
-        # The recorded host workdir is not visible (the container case): the
-        # check may have run from the current checkout (``run_check`` falls
-        # back the same way), so the stale check must be recognised there
-        # too — otherwise a loser's stale record overwrites the winner's
-        # applied one and drops the resolution provenance.
-        workdir = _cwd_checkout_of(pr_entry)
+    # The recorded host workdir may not be visible (the container case): the
+    # check may have run from the current checkout (``run_check`` falls back
+    # the same way), so the stale check must be recognised there too —
+    # otherwise a loser's stale record overwrites the winner's applied one and
+    # drops the resolution provenance.
+    workdir = _checkout_of(pr_entry)
     if not workdir:
         return False
     now = _out(_git("rev-parse", "HEAD", cwd=workdir))

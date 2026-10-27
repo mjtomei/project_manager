@@ -182,15 +182,21 @@ record still assessed it — `_carry_forward` falls back to
 new attempt on the current check replaces it, as above.
 
 That carry chain must survive a **transient failure** in between: a check that
-could not resolve the base (a failed fetch) records `error` at the same head,
-and the record after it is what a later check carries from. Such an error
-record therefore keeps the base the earlier check assessed
+could not resolve the base (a failed fetch) records `error` without a base of
+its own, and the record after it is what a later check carries from. Such an
+error record therefore keeps the base the earlier check assessed
 (`integration._carry_assessed_base` copies `base_sha`, the file count/overlap,
 `base_range_from` and the behaviour summary; the record keeps `error` and is
 never mergeable, and a later check re-verifies that the branch contains that
-base before carrying anything forward). Without it, a network hiccup between
-"the base was assessed" and "implementation merged the base by hand" silently
-drops the summary and the merge gate's evidence requirement.
+base before carrying anything forward). That holds on every carry path — an
+unapplied resolution attempt, no resolution at all, or an earlier failure — and
+also when the failure comes *after* the hand merge, so the recorded head is
+behind the current one: the assessment is kept while the branch descends from
+the revision it assessed (`integration._checkout_of` + `is_ancestor`; a
+rewritten branch has no claim to it). Without it, a network hiccup between
+"the base was assessed" and "implementation merged the base by hand" — or
+between that merge and the next successful check — silently drops the summary
+and the merge gate's evidence requirement.
 
 ### R4. Apply the resolved merge to the PR branch before sign-off runs
 For the GitHub backend `gh pr merge` cannot merge a conflicted branch, and
@@ -526,7 +532,12 @@ tests):
    check sees the same base inside HEAD with no applied resolution: the file
    count, the overlap, the behaviour changes and the prompt's base range
    survive (and the gate still requires the statement when the base changed
-   behaviour-relevant configuration). A **newer** base merged by a bounce
+   behaviour-relevant configuration). That carry must also survive a
+   **transient failure after the hand merge**: a check that cannot fetch the
+   base records `error` at the integrated head (past the assessment's head),
+   keeps the assessed base because the branch descends from it, and the next
+   successful check still carries the file count and behaviour changes. A
+   **newer** base merged by a bounce
    after an applied resolution starts the base-changes range at the applied
    base (not the resolution's pre-apply merge base, which would re-list the
    already-merged commits and disagree with the file count). A resolution
@@ -601,7 +612,10 @@ tests):
     changes);
     a `qa_status.json` that is valid JSON but not a mapping, and one whose
     `scenarios` member is not a list, are reported as malformed evidence
-    instead of raising out of the sign-off prompt; a verdict recorded
+    instead of raising out of the sign-off prompt, and a scenario whose
+    `verdict_reason` is not text renders through `str` (the same rule the
+    scenario title follows) rather than raising `TypeError` from the
+    whitespace normalisation; a verdict recorded
     without a revision does not inherit a *headless* stored check's
     candidate/resolution; a `HEAD_MOVED` bounce apply is reported as a
     concurrent branch move, not as "pm did not merge the base";
