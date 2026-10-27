@@ -853,6 +853,8 @@ class ProjectManagerApp(App):
         A non-sticky message is dropped while a sticky one is showing,
         unless *force* (used for confirmations the user must see, e.g. a
         CLI ``autostart remove``); forcing doesn't extend the sticky window.
+        A forced hold replaces the old sticky protection with its own hold,
+        so deferred progress can resume when that confirmation ends.
 
         *hold* keeps this message up for that many seconds against the
         follow-on messages it triggers in the same frame (e.g. auto-start's
@@ -908,6 +910,10 @@ class ProjectManagerApp(App):
         if queue:
             queue[:] = [q for q in queue if q[-1] > _seq]
         if hold > 0:
+            # A forced hold replaces the old sticky line and its protection;
+            # otherwise its deferred follow-up is dropped when the hold ends.
+            if force and sticky <= 0:
+                self._log_sticky_until = 0.0
             # Only a message that is actually shown holds the line.
             self._log_hold_until = now + hold
             self.set_timer(hold, self._flush_held_log_message)

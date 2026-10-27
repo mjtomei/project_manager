@@ -154,9 +154,11 @@ def new_window(session: str, name: str, cmd: str, cwd: str,
               (win or {}).get("id"), (win or {}).get("index"), switch)
     if switch and win:
         current = current_or_base_session(session)
-        _run(
+        result = _run(
             _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
         )
+        _log.info("new_window: select-window target=%s:%s rc=%d",
+                  current, win["index"], result.returncode)
 
 
 def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
@@ -183,9 +185,11 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     if switch:
         # Switch the current grouped session to the new window
         current = current_or_base_session(session)
-        _run(
+        result = _run(
             _tmux_cmd("select-window", "-t", f"{current}:{win['index']}"),
         )
+        _log.info("new_window_get_pane: select-window target=%s:%s rc=%d",
+                  current, win["index"], result.returncode)
     # Discover the pane ID
     panes = get_pane_indices(session, win["index"])
     if panes:
@@ -313,7 +317,9 @@ def get_session_name() -> str:
     """
     pane = os.environ.get("TMUX_PANE")
     popup_session = os.environ.get(POPUP_SESSION_ENV)
-    if not pane and popup_session:
+    # The variable is inherited by anything the popup spawns, so only
+    # trust it while that session still exists ("=" = exact name match).
+    if not pane and popup_session and session_exists(f"={popup_session}"):
         return popup_session
     if pane:
         # Target the specific pane to get accurate session name
@@ -650,29 +656,39 @@ def pane_window_id(pane_id: str) -> str | None:
     return result.stdout.strip() or None
 
 
-def attached_active_window(session: str, socket_path: str | None = None) -> str | None:
-    """Return *session*'s active window id, but only if a client is attached.
+def attached_group_active_windows(base: str, socket_path: str | None = None) -> dict[str, str]:
+    """Map attached sessions in a group to active windows in one tmux query.
 
     Used by the popup picker to show which windows a *collaborator* is
     currently viewing.  An unattached session (e.g. the base session when
     the TUI runs in grouped sessions) has an "active window" in tmux's
-    bookkeeping but no client focusing it, so we treat it as not-selected
-    and return ``None``.  Returns ``None`` on any tmux error.
+    bookkeeping but no client focusing it, so it is omitted.  Returns an
+    empty map on any tmux error.
+
+    The separator must be printable: tmux rewrites control characters in
+    format output to ``_`` when the server runs under a non-UTF-8 locale
+    (``LC_ALL=C``), which silently turned a tab-separated query into one
+    unparsable field.  The session name comes last (``maxsplit=2``) so it
+    may itself contain the separator.
     """
     result = _run(
-        _tmux_cmd("display-message", "-t", session, "-p",
-                   "#{session_attached} #{window_id}", socket_path=socket_path),
+        _tmux_cmd("list-sessions", "-F",
+                  "#{session_attached}|#{window_id}|#{session_name}",
+                  socket_path=socket_path),
         text=True,
     )
     if result.returncode != 0:
-        return None
-    parts = result.stdout.strip().split(None, 1)
-    if len(parts) != 2:
-        return None
-    attached, wid = parts
-    if attached == "0":
-        return None
-    return wid or None
+        return {}
+    active = {}
+    for line in result.stdout.splitlines():
+        parts = line.split("|", 2)
+        if len(parts) != 3:
+            continue
+        attached, wid, name = parts
+        if (name == base or name.startswith(base + "~")) and attached.isdigit():
+            if int(attached) > 0 and wid:
+                active[name] = wid
+    return active
 
 
 def sessions_on_window(base: str, window_id: str) -> list[str]:

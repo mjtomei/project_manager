@@ -221,6 +221,10 @@ class QALoopState:
     # planning.  Non-empty forces the overall verdict to NEEDS_WORK so the
     # change gets reviewed before sign-off.
     planner_code_changes: list[str] = field(default_factory=list)
+    # Select the new qa-<pr> window on first-time creation.  Only
+    # user-initiated starts (t / z t / zz t) set this; scheduler-driven
+    # starts leave attached clients where they are.
+    focus_on_create: bool = False
     # Error message for status display (e.g. missing spec, no scenarios)
     _error: str = ""
     # Set by qa_loop_ui after the completion callback has run once
@@ -3525,9 +3529,64 @@ def _verify_single_scenario(
 # Core orchestration
 # ---------------------------------------------------------------------------
 
+# Placeholder command for the main pane of a QA window that has no planner
+# (execution-only `pm qa run`, or a run restarted after its window was killed).
+# It must stay alive: the pane anchors the status-pane split and the
+# qa-planner registry entry, and a command that exits takes the window with it.
+_QA_MAIN_PANE_CMD = "echo 'QA execution'; exec sleep infinity"
+
+
+def _ensure_qa_main_pane(session: str, window_name: str,
+                         workdir_path: str | None) -> str | None:
+    """Return the QA window's main pane, creating the window when it is gone.
+
+    Execution-only runs (no planner pane) and windows recreated after the
+    previous one was killed land here. The main pane anchors the status-pane
+    split and the qa-planner registry entry, so the window has to outlive the
+    pane lookup: a bare ``echo`` exits at once (there is no remain-on-exit),
+    the window vanished before its pane could be found, and the run ended with
+    no QA window, no status pane and no registration.
+    """
+    from pm_core import tmux as tmux_mod
+
+    win = tmux_mod.find_window_by_name(session, window_name)
+    if win:
+        panes = tmux_mod.get_pane_indices(session, win["index"])
+        return panes[0][0] if panes else None
+    return tmux_mod.new_window_get_pane(
+        session, window_name, _QA_MAIN_PANE_CMD, cwd=workdir_path,
+        switch=False,
+    )
+
+
+def _register_qa_planner(session: str, planner_pane: str) -> None:
+    """Register the main pane once, without making layout failures fatal to QA."""
+    from pm_core import tmux as tmux_mod, pane_layout, pane_registry
+
+    try:
+        qa_win_id = tmux_mod.pane_window_id(planner_pane)
+        if not qa_win_id:
+            return
+        # Registration only reconciles the window it writes, so panes of a QA
+        # window killed between runs (the execution-only restart path) would
+        # linger under their old @id. Drop those entries as we register.
+        pane_registry.prune_dead_windows(session)
+        data = pane_registry.load_registry(session)
+        panes = pane_registry.get_window_data(data, qa_win_id)["panes"]
+        if not any(p["id"] == planner_pane for p in panes):
+            pane_layout.register_and_rebalance(session, qa_win_id, [
+                (planner_pane, "qa-planner", "planner"),
+            ])
+    except Exception:
+        _log.exception("Failed to register QA planner pane")
+
+
 def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
     """Split the qa_status.py dashboard next to the planner pane."""
     from pm_core import tmux as tmux_mod, pane_layout
+    # Execution-only runs and recreated windows have not registered a planner;
+    # also retry a failed early registration without duplicating an existing one.
+    _register_qa_planner(session, planner_pane)
     try:
         # Use the script path directly (avoids PYTHONPATH issues)
         _qa_status_script = Path(__file__).parent / "qa_status.py"
@@ -3538,11 +3597,10 @@ def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
             planner_pane, "h", status_cmd, background=True,
         )
 
-        # Register both panes and rebalance the main window only
+        # Keep the main pane ahead of the newly registered status pane.
         qa_win_id = tmux_mod.pane_window_id(planner_pane)
         if qa_win_id:
             pane_layout.register_and_rebalance(session, qa_win_id, [
-                (planner_pane, "qa-planner", "planner"),
                 (status_pane, "qa-status", status_cmd),
             ])
     except Exception:
@@ -3568,7 +3626,6 @@ def run_qa_sync(
     Returns the updated state.
     """
     from pm_core import tmux as tmux_mod, prompt_gen, git_ops, store
-    from pm_core import pane_layout, pane_registry
     from pm_core.claude_launcher import build_claude_shell_cmd
     _qa_planning_resolution = _resolve_qa_model(pr_data, store.load(pm_root), session_type="qa_planning")
 
@@ -3749,10 +3806,12 @@ def run_qa_sync(
         if sessions_on_qa:
             tmux_mod.switch_sessions_to_window(
                 sessions_on_qa, session, window_name)
-        elif not existing_win:
-            # First-time creation — select the window so user sees it,
-            # unless the popup spinner was dismissed (q/Esc) and the
-            # user explicitly asked to keep focus where they were.
+        elif not existing_win and state.focus_on_create:
+            # First-time creation of a user-initiated run — select the
+            # window so user sees it, unless the popup spinner was
+            # dismissed (q/Esc) and the user explicitly asked to keep
+            # focus where they were.  Background starts skip this (and
+            # leave the suppress flag for the user start it belongs to).
             from pm_core import runtime_state as _rs
             if not _rs.consume_suppress_switch(state.pr_id, "qa"):
                 tmux_mod.select_window(session, window_name)
@@ -3766,6 +3825,11 @@ def run_qa_sync(
             state.latest_verdict = "ERROR"
             state.latest_output = "Could not find planner pane"
             return state
+
+        # Identify the live planner before waiting for its result. Pane
+        # actions and registry readers must not see an unowned QA window
+        # throughout a potentially long planning phase.
+        _register_qa_planner(session, planner_pane)
 
         # Poll until the planner produces a QA Plan or exits.
         # Each fresh idle_prompt event triggers one read of the planner's
@@ -4050,16 +4114,7 @@ def run_qa_sync(
     repo_root = Path(workdir_path) if workdir_path and Path(workdir_path).is_dir() else None
 
     # Ensure the main QA window exists (has the planner pane)
-    win = tmux_mod.find_window_by_name(session, window_name)
-    planner_pane = None
-    if not win:
-        planner_pane = tmux_mod.new_window_get_pane(
-            session, window_name, "echo 'QA execution'", cwd=workdir_path,
-            switch=False,
-        )
-    else:
-        panes = tmux_mod.get_pane_indices(session, win["index"])
-        planner_pane = panes[0][0] if panes else None
+    planner_pane = _ensure_qa_main_pane(session, window_name, workdir_path)
 
     # Write initial status file and add the status pane before launching
     # scenarios — scenario launch blocks until all concretizers finish, so
@@ -4311,7 +4366,15 @@ def start_qa_background(
                 on_update(state)
 
     t = threading.Thread(target=_run, daemon=True, name=f"qa-{state.pr_id}")
-    t.start()
+    # Publish the accepted launch before the worker can block on model/state
+    # loading.  Otherwise the TUI's first poll can stop its timer while this
+    # run has no workdir and still looks idle.
+    state.running = True
+    try:
+        t.start()
+    except Exception:
+        state.running = False
+        raise
     return t
 
 
