@@ -197,15 +197,18 @@ operations do not take PM's launch lock.
   sandbox escape the dangerous-flag guard blocks. The same applies to every
   host-side pm git command that runs inside the container-writable PR workdir,
   including plain ref updates (`fetch`/`update-ref` fire
-  `reference-transaction`): every `pm_core.integration` git call (the
+  `reference-transaction`) and dirtiness probes (`status` rewrites a stale
+  index — the normal state after a container edit — and fires
+  `post-index-change`): every `pm_core.integration` git call (the
   integration check's fetch/`update-ref`, candidate worktree, sign-off merge),
   the merge publish pushes (`_publish_vanilla` / `_publish_github`) and
   `_publish_local`'s workdir `update-ref`s, `pr start`'s
-  pull/checkout/commit/push, the workdir provisioning checkout, and QA's
-  `_publish_planner_head` push all pass `no_hooks=True`
-  (`pm_core.git_ops.NO_HOOKS_ARGS`), so a planted `post-merge`, `pre-push`,
-  `pre-commit`, `post-checkout` or `reference-transaction` hook never runs
-  on the host. Reuse holds the same
+  pull/checkout/commit/push, the workdir provisioning checkout,
+  `_workdir_is_dirty` (`pr start`, `pr list --workdirs`, `pr cleanup`), and
+  every QA planner hand-off git call (`qa_loop._git_capture`: status, fetch,
+  push) run with `NO_HOOKS_ARGS` (`no_hooks=True`), so a planted
+  `post-merge`, `pre-push`, `pre-commit`, `post-checkout`,
+  `reference-transaction` or `post-index-change` hook never runs on the host. Reuse holds the same
   proxy lock while validating its runtime domain or repairing a dead socket;
   a dead foreign-domain proxy directory is not reassigned.
   If runtime inventory is unavailable, preserve the shared proxy for a later

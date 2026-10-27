@@ -2877,8 +2877,13 @@ def pr_import_github(gh_state: str):
 
 
 def _workdir_is_dirty(work_path: Path) -> bool:
-    """Check if a workdir has uncommitted changes."""
-    result = git_ops.run_git("status", "--porcelain", cwd=work_path, check=False)
+    """Check if a workdir has uncommitted changes.
+
+    No hooks: ``status`` refreshes a stale index and fires
+    ``post-index-change`` from the container-writable workdir.
+    """
+    result = git_ops.run_git("status", "--porcelain", cwd=work_path,
+                             check=False, no_hooks=True)
     return bool(result.stdout.strip())
 
 

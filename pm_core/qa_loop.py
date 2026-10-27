@@ -346,17 +346,17 @@ class PlannerHandoffError(RuntimeError):
     """The planner's committed head cannot be handed to scenario workers."""
 
 
-def _git_capture(workdir: str | Path, *args: str, timeout: float = 120,
-                 no_hooks: bool = False) -> subprocess.CompletedProcess:
+def _git_capture(workdir: str | Path, *args: str,
+                 timeout: float = 120) -> subprocess.CompletedProcess:
     """Run git in *workdir* without raising; network ops get a timeout.
 
-    ``no_hooks`` disables repository hooks for the invocation — the QA/PR
-    workdir is container-writable, so its hooks are container-authored code
-    (see :data:`pm_core.git_ops.NO_HOOKS_ARGS`).  Used for the planner
-    hand-off pushes.
+    Always with repository hooks disabled: every call runs in the
+    container-writable PR workdir, whose hooks are container-authored code,
+    and not only the pushes run them — ``status`` refreshes a stale index and
+    fires ``post-index-change`` (see :data:`pm_core.git_ops.NO_HOOKS_ARGS`).
     """
     from pm_core import git_ops
-    cmd = ["git", *git_ops.NO_HOOKS_ARGS, *args] if no_hooks else ["git", *args]
+    cmd = ["git", *git_ops.NO_HOOKS_ARGS, *args]
     try:
         return subprocess.run(cmd, cwd=str(workdir),
                               capture_output=True, text=True, timeout=timeout)
@@ -463,7 +463,7 @@ def _publish_planner_head(workdir_path: str, branch: str) -> str:
     # The PR workdir's origin may push to several URLs (local source +
     # upstream); what matters is that the upstream now has the head.
     refspec = f"refs/heads/{branch}:refs/heads/{branch}"
-    push = _git_capture(workdir_path, "push", "origin", refspec, no_hooks=True)
+    push = _git_capture(workdir_path, "push", "origin", refspec)
     published = _remote_branch_sha(workdir_path, real_url, branch)
     if published != head:
         # origin may not push to the upstream at all — e.g. a workdir whose
@@ -473,7 +473,7 @@ def _publish_planner_head(workdir_path: str, branch: str) -> str:
         _log.info("planner handoff: origin push left %s at %s; pushing to "
                   "%s directly", branch, (published or "absent")[:12],
                   real_url)
-        push = _git_capture(workdir_path, "push", real_url, refspec, no_hooks=True)
+        push = _git_capture(workdir_path, "push", real_url, refspec)
         published = _remote_branch_sha(workdir_path, real_url, branch)
     if published != head:
         detail = (push.stderr or push.stdout).strip()

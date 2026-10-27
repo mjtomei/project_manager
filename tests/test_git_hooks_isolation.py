@@ -3,8 +3,9 @@
 A PR workdir is bind-mounted read-write into containers, so ``.git/hooks/*``
 is container-authored code.  Any host-side pm git command that runs a hook
 from that directory (``merge``, ``push``, ``commit``, ``checkout``,
-``pull``, and any ref update — ``fetch``/``update-ref`` fire
-``reference-transaction``) would execute it with the host user's credentials — the same
+``pull``, any ref update — ``fetch``/``update-ref`` fire
+``reference-transaction`` — and even ``status``, which rewrites a stale
+index and fires ``post-index-change``) would execute it with the host user's credentials — the same
 sandbox escape the push proxy blocks for container-initiated git.  pm's own
 operations pass ``no_hooks=True`` (``-c core.hooksPath=/dev/null``).
 
@@ -125,7 +126,8 @@ class TestRunGitNoHooks:
         assert run.call_args.kwargs["no_hooks"] is True
 
     def test_qa_planner_handoff_git_capture_no_hooks(self, monkeypatch, tmp_path):
-        """The planner hand-off pushes from the container-writable PR workdir."""
+        """Every planner hand-off git call runs in the container-writable PR
+        workdir, so the helper is hookless without being asked."""
         from pm_core import qa_loop
         seen = {}
 
@@ -134,7 +136,7 @@ class TestRunGitNoHooks:
             return subprocess.CompletedProcess(cmd, 0, "", "")
 
         monkeypatch.setattr(qa_loop.subprocess, "run", fake_run)
-        qa_loop._git_capture(tmp_path, "push", "origin", "ref", no_hooks=True)
+        qa_loop._git_capture(tmp_path, "push", "origin", "ref")
         assert seen["cmd"] == ["git", "-c", "core.hooksPath=/dev/null",
                                "push", "origin", "ref"]
 
@@ -236,3 +238,50 @@ class TestWorkdirHooksDoNotRun:
         assert git(wd, "rev-parse", "refs/heads/master") == merge_sha
         assert not marker.exists(), (
             "the workdir's reference-transaction hook ran on the host")
+
+    @staticmethod
+    def _stale_index_workdir(tmp_path: Path, marker: Path) -> Path:
+        """A workdir whose index is stale, as after a container edit: the
+        next ``status`` rewrites it and so fires ``post-index-change``."""
+        wd = _repo(tmp_path / "wd")
+        commit(wd, "a.txt", "a", "base")
+        plant_hook(wd, "post-index-change", marker)
+        f = wd / "a.txt"
+        st = f.stat()
+        os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+        return wd
+
+    def test_workdir_is_dirty_skips_post_index_change(self, tmp_path):
+        """``pm pr start``/``pr list --workdirs``/``pr cleanup`` probe the PR
+        workdir with ``status``."""
+        marker = tmp_path / "hook-ran"
+        wd = self._stale_index_workdir(tmp_path, marker)
+        # Sanity: the planted hook does fire for a plain status here.
+        git(wd, "status", "--porcelain")
+        assert marker.exists()
+        marker.unlink()
+        self._stale_again(wd)
+
+        assert pr_mod._workdir_is_dirty(wd) is False
+        assert not marker.exists(), (
+            "the workdir's post-index-change hook ran on the host")
+
+    def test_planner_handoff_status_skips_post_index_change(self, tmp_path):
+        from pm_core import qa_loop
+        marker = tmp_path / "hook-ran"
+        wd = self._stale_index_workdir(tmp_path, marker)
+        git(wd, "checkout", "-q", "-b", BRANCH)
+        marker.unlink(missing_ok=True)
+        self._stale_again(wd)
+
+        # No real upstream: the hand-off returns after its status probe.
+        assert qa_loop._publish_planner_head(str(wd), BRANCH) == git(
+            wd, "rev-parse", "HEAD")
+        assert not marker.exists(), (
+            "the workdir's post-index-change hook ran on the host")
+
+    @staticmethod
+    def _stale_again(wd: Path) -> None:
+        f = wd / "a.txt"
+        st = f.stat()
+        os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
