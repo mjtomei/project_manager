@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T23:50:47.255496+00:00'
+  updated_at: '2026-10-27T23:55:32.524430+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11146,6 +11146,19 @@ prs:
       empty status, no footer, readable (A6). Captures /pm-captures/scenarios/69.'
     created_at: '2026-10-27T23:50:47Z'
     last_edited: '2026-10-27T23:50:47Z'
+  - id: note-edc4f1b
+    text: 'QA S68 (2026-10-27, 17c4a8d2, nested rootless podman, fake-claude): all
+      5 stories PASS live, no code change. Restart: 8 keys/ids/enqueued_at kept, 0
+      stale removals. 180 s lock: h/l max 0.048 s (77 samples), t focuses, zz t stops,
+      busy reason reached P3 pane 153.8 s after restart, P3 ids kept after release,
+      P4 entries gone. SIGKILL (Z defunct) + 60 s lock: new PID adopted all 8 at release,
+      raise launched P3 s1 first. Stale acquired s5 removed 1 s after restart, no
+      reserved term, growth 5.8G->3.0G on s5 removal. Workdir-missing abort: reason
+      + ERROR, P4 entries gone, second restart skips P4, z t after restore makes 4
+      new entries. Harness: pm session typed in a TTY cli pane attaches a nested client
+      (C-b d). Captures /pm-captures/scenarios/68.'
+    created_at: '2026-10-27T23:55:32Z'
+    last_edited: '2026-10-27T23:55:32Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
