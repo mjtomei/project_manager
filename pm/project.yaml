@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T21:21:28.445542+00:00'
+  updated_at: '2026-10-27T21:35:19.037139+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25868,6 +25868,22 @@ prs:
       /pm-captures/scenarios/3/.'
     created_at: '2026-10-27T21:21:28Z'
     last_edited: '2026-10-27T21:21:28Z'
+  - id: note-3aeb377
+    text: 'QA S2 (2026-10-27): found and fixed a clean-teardown hole in story 2. Stopping
+      a QA run while the verdictless planner was still planning fell through to the
+      no-scenarios path and surfaced INPUT_REQUIRED ("Planner produced no parseable
+      scenarios — needs human review" / "QA complete: INPUT_REQUIRED — …" / "QA INPUT_REQUIRED
+      … paused for human input") plus a QA note. The planner now ends a stopped run
+      in a terminal STOPPED state and qa_loop_ui logs "QA stopped for <pr> — no verdict
+      recorded" with no lifecycle transition and no note. Verified end-to-end (stop
+      mid-planning, then restart) with pre/post captures at /pm-captures/scenarios/2/{pre-fix,post-fix}/;
+      story 1 (bounded planner exhaustion -> actionable INPUT_REQUIRED) passed, capture
+      at /pm-captures/scenarios/2/story1-plan-verdictless/. Full suite after rebase:
+      3861 passed, 1 skipped. The planner-handoff test harness now ends its poll loop
+      via the planner deadline (qa_loop-local fake clock) instead of faking a user
+      stop.'
+    created_at: '2026-10-27T21:35:18Z'
+    last_edited: '2026-10-27T21:35:18Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
