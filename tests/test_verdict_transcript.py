@@ -285,6 +285,18 @@ def _meta_line(kind: str) -> str:
     return json.dumps({"type": kind, "message": {}})
 
 
+def _streamed_block_line(block: dict) -> str:
+    # Claude Code writes a message's content blocks as separate records while
+    # it streams and only fills ``stop_reason`` in once the message is
+    # complete (so these records carry ``stop_reason: null``).
+    return json.dumps({
+        "type": "assistant",
+        "apiBlockIndex": 0,
+        "message": {"role": "assistant", "content": [block],
+                    "stop_reason": None},
+    })
+
+
 def test_turn_state_missing_paths() -> None:
     assert latest_turn_state(None) == "unknown"
     assert latest_turn_state("/nonexistent/none.jsonl") == "unknown"
@@ -360,6 +372,29 @@ def test_turn_state_ignores_bang_shell_records(tmp_path: Path) -> None:
 def test_turn_state_tool_use_block_is_in_progress(tmp_path: Path) -> None:
     p = _write(tmp_path, [_user_line("do it"), _assistant_tool_line()])
     assert latest_turn_state(p) == "in_progress"
+
+
+def test_turn_state_streamed_thinking_block_is_in_progress(tmp_path: Path) -> None:
+    # A long thinking block is written as its own ``stop_reason: null`` record
+    # before the answer text; while it is the newest record the turn is still
+    # running.  Reading it as "complete" would start the fresh-autostart
+    # review over in-flight work (the thinking window lasts tens of seconds,
+    # so the 5 s poll would often land inside it).
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _streamed_block_line({"type": "thinking", "thinking": "hmm"}),
+    ])
+    assert latest_turn_state(p) == "in_progress"
+
+
+def test_turn_state_streamed_text_block_is_complete(tmp_path: Path) -> None:
+    # The answer text is the last thing a turn writes; a ``stop_reason: null``
+    # text record ends it (this is how every finished pm transcript tails).
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _streamed_block_line({"type": "text", "text": "done"}),
+    ])
+    assert latest_turn_state(p) == "complete"
 
 
 def test_turn_state_tool_use_stop_reason_without_block(tmp_path: Path) -> None:

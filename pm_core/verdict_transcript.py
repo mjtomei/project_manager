@@ -134,11 +134,14 @@ def latest_turn_state(transcript_path: str | Path | None) -> str:
     """Whether the transcript's newest turn is finished.
 
     Returns ``"complete"`` when the newest record is an assistant message
-    that is not waiting on a tool (no ``tool_use`` block and no
-    ``stop_reason == "tool_use"``), ``"in_progress"`` when a newer user
-    record (a submitted prompt or a ``tool_result``) means the agent still
-    owes a response, and ``"unknown"`` when the transcript is missing,
-    empty or unparseable.
+    that is not waiting on a tool (no ``tool_use`` block, no
+    ``stop_reason == "tool_use"``) and, when its ``stop_reason`` is still
+    unset (a record written mid-stream), carries the answer ``text``.
+    Returns ``"in_progress"`` when a newer user record (a submitted prompt or
+    a ``tool_result``) means the agent still owes a response, or when the
+    newest assistant record is a partial one with no answer yet (a streamed
+    thinking block), and ``"unknown"`` when the transcript is missing, empty
+    or unparseable.
 
     Used by the explicit fresh-autostart handoff: a completed turn is the
     signal that the user's implementation feedback turn is over.
@@ -210,6 +213,26 @@ def _turn_state_from_tail(text: str) -> str:
                 return "in_progress"
             if isinstance(msg, dict) and msg.get("stop_reason") == "tool_use":
                 return "in_progress"
+            if isinstance(msg, dict) and msg.get("stop_reason") is None:
+                # Claude Code streams a message's content blocks as separate
+                # records and only fills ``stop_reason`` in once the message
+                # is complete.  A trailing record with no answer text is
+                # therefore a turn still in progress — the thinking block of
+                # a turn whose answer (or tool call) has not been written
+                # yet.  Verified against real transcripts: every
+                # ``stop_reason: null`` thinking-only record is followed by
+                # another assistant record, while the answer ``text`` record
+                # is the last thing a turn writes.  Reading the former as
+                # "complete" would start the fresh-autostart review over
+                # in-flight work.
+                has_text = (
+                    isinstance(content, str)
+                    or (isinstance(content, list) and any(
+                        isinstance(block, dict)
+                        and block.get("type") == "text"
+                        for block in content)))
+                if not has_text:
+                    return "in_progress"
             return "complete"
         # Other record kinds (system/meta) are not turn boundaries.
     return "unknown"

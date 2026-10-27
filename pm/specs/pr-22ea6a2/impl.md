@@ -497,3 +497,27 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   three near-identical 20-line blocks in `app.py`; they now call
   `_fresh_autostart_from_key(policy, source, no_selection)`.  No behavior
   change (the existing key-wiring tests still pin policy/source).
+
+## Review-iteration notes (2aac i2)
+
+* **Shared review-window teardown** — the ``z d`` path, the ``zz d`` supersede
+  path and ``autostart_fresh`` each carried their own find-window → park →
+  kill copy; they now share ``park_and_kill_review_window()`` in
+  ``review_loop_ui`` (same park-by-id / kill-by-name behavior, only when the
+  window is found, failures logged at debug).  No behavior change.
+
+## Review-iteration notes (2aac i3)
+
+* **A streamed thinking block is not a completed turn** — Claude Code writes
+  a message's content blocks as separate records while it streams and only
+  fills ``stop_reason`` in once the message is complete.  ``latest_turn_state``
+  read a trailing ``stop_reason: null`` assistant record as ``complete`` even
+  when it carried only a thinking block, so a fresh attempt could hand off to
+  review while the implementation agent was still mid-turn (the thinking
+  window measured 4–42 s in real transcripts, which the 5 s poll lands in).
+  A ``stop_reason: null`` record with no answer ``text`` now reads as
+  ``in_progress``; the answer text record — the last thing a turn writes —
+  still ends it.  Verified against every transcript under
+  ``~/.claude/projects`` (all 9 ``stop_reason: null`` thinking-only records
+  are followed by another assistant record; the 7252 ``text`` ones are all
+  followed by a user record or EOF).  Pinned by two direct tests.
