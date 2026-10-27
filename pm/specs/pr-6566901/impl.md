@@ -261,7 +261,11 @@ non-blocking `hook_events.read_event` that counts **only** a newer
   `INPUT_REQUIRED` with a reason of the form
   `"worker produced no verdict (<reason>): …"` (`str(exc)` already carries the
   attempt/deferral count, so no separate "after N attempt(s)" prefix),
-  `pending` is discarded and the slot freed. The legacy
+  `pending` is discarded and the slot freed. The retirement is surfaced
+  like every other `INPUT_REQUIRED` transition in the loop — a
+  `state.latest_output` line ("Scenario N (title): INPUT_REQUIRED (worker
+  produced no verdict: <reason>)") plus `_notify()`, so the TUI log names
+  it rather than leaving it only in the status pane. The legacy
   `qa-verdict-reminder-timeout` path is replaced by this bounded recovery
   (setting retained but now only tunes the settle interval). A `deferred`
   result restarts the settle window rather than closing the episode; a
@@ -333,6 +337,14 @@ values (e.g. `0.5`) are accepted by `pm set`.
   re-checks `stop_check` before nudging and returns `None`.
 * **Transcript missing/unreadable** → `classify` treats it as `no_output`
   (resume), which is the safer request.
+* **A session that never idles again is not bounded by default.** Recovery is
+  driven by `idle_prompt` events, so a poller that starts while its session is
+  *already* idle (review-loop adoption after a TUI restart, `_adopt_in_flight_review`)
+  waits for the next turn boundary; if none comes, it waits until the pane
+  dies or `stop_check` fires. `overall_timeout` is the opt-in bound. Nudging on
+  the pre-existing idle event instead was rejected: a session that had already
+  started its next turn would receive queued input, which the audit lists as
+  something recovery must not do.
 * **`VerdictRecoveryExhausted` is a `RuntimeError`** so any caller that has not
   been updated still fails loudly (generic `except Exception` handlers set
   `ERROR`) rather than hanging.

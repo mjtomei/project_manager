@@ -1522,6 +1522,13 @@ def _resolve_qa_model(pr_data: dict, project_data: dict | None = None,
 _CONCRETIZE_VERDICTS = ("REFINED_STEPS_END", "REFINER_REJECT_END")
 _CONCRETIZE_KEYWORDS = ("REFINED_STEPS_START", "REFINED_STEPS_END",
                         "REFINER_REJECT_START", "REFINER_REJECT_END")
+# (START, END) marker pairs the refiner may emit; used for the bounded
+# missing-output recovery requests so they name the same vocabulary as
+# _CONCRETIZE_VERDICTS.
+_CONCRETIZE_BLOCKS = (
+    ("REFINED_STEPS_START", "REFINED_STEPS_END"),
+    ("REFINER_REJECT_START", "REFINER_REJECT_END"),
+)
 _CONCRETIZE_GRACE = 15
 
 
@@ -1738,14 +1745,8 @@ def _concretize_scenario(
             grace_period=_CONCRETIZE_GRACE,
             log_prefix=f"qa-concretize-{scenario.index}",
             workdir=scenario_cwd,
-            outcome_request=build_block_outcome_request((
-                ("REFINED_STEPS_START", "REFINED_STEPS_END"),
-                ("REFINER_REJECT_START", "REFINER_REJECT_END"),
-            )),
-            resume_request=build_block_resume_request((
-                ("REFINED_STEPS_START", "REFINED_STEPS_END"),
-                ("REFINER_REJECT_START", "REFINER_REJECT_END"),
-            )),
+            outcome_request=build_block_outcome_request(_CONCRETIZE_BLOCKS),
+            resume_request=build_block_resume_request(_CONCRETIZE_BLOCKS),
         )
     except WorkspaceTrustBlocked as e:
         return None, _TRUST_BLOCKED_PREFIX + str(e)
@@ -2841,6 +2842,13 @@ def _poll_tmux_verdicts(
         # recovery never ran.
         state.scenario_verdict_reasons[scenario.index] = (
             f"worker produced no verdict ({exc.reason}): {exc}")
+        # Surface the transition like every other INPUT_REQUIRED path in
+        # this loop: the TUI log line is how the user learns a worker was
+        # retired, and it would otherwise only appear in the status pane.
+        state.latest_output = (
+            f"Scenario {scenario.index} ({scenario.title}): "
+            f"INPUT_REQUIRED (worker produced no verdict: {exc.reason})")
+        _notify()
         _recoveries.pop(scenario.index, None)
         _no_verdict_since.pop(scenario.index, None)
 

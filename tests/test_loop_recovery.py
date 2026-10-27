@@ -745,6 +745,7 @@ class TestQARecoveryWiring:
                     "session_id": "sid-s1"}
 
         sent: list[str] = []
+        notified: list[str] = []
         monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
         monkeypatch.setattr(qa_loop, "recovery_max_attempts", lambda: 1)
         monkeypatch.setattr(qa_loop, "recovery_settle_seconds", lambda: 0.0)
@@ -766,12 +767,17 @@ class TestQARecoveryWiring:
              patch("pm_core.tmux.pane_exists", return_value=True):
             qa_loop._poll_tmux_verdicts(
                 state, {}, {}, "sess", str(tmp_path),
-                tmp_path / "status.json", lambda *a: None,
+                tmp_path / "status.json",
+                lambda: notified.append(state.latest_output),
             )
 
         assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
         reason = state.scenario_verdict_reasons[1]
         assert "no verdict" in reason and "recovery" in reason
+        # The retirement is surfaced to the TUI like every other
+        # INPUT_REQUIRED transition in this loop (status pane + log line).
+        assert "INPUT_REQUIRED" in state.latest_output
+        assert any("INPUT_REQUIRED" in m for m in notified if m)
 
     def test_scenario_worker_hook_refresh_is_bounded(
             self, tmp_path, monkeypatch):

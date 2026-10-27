@@ -259,6 +259,11 @@ class MissingOutputRecovery:
     the nudge and resets the attempt counter, so recovery never races a
     native one.  After *max_attempts* nudges, :class:`VerdictRecoveryExhausted`
     is raised.
+
+    *max_deferrals* bounds how many hook *refreshes* of the same turn
+    (no new transcript text) may defer the nudge before recovery gives up
+    with ``no_progress``; ``None`` uses the default and ``<= 0`` disables
+    the bound (only useful when a caller is certain refreshes terminate).
     """
 
     def __init__(
@@ -283,6 +288,7 @@ class MissingOutputRecovery:
         self.max_attempts = max(0, int(max_attempts))
         self.settle_seconds = max(0.0, float(settle_seconds))
         self.response_timeout = response_timeout
+        # None -> default bound; <= 0 -> no bound (see the class docstring).
         self.max_deferrals = (DEFAULT_MAX_DEFERRALS if max_deferrals is None
                               else max(0, int(max_deferrals)))
         self._resume_request = resume_request
@@ -409,7 +415,8 @@ class MissingOutputRecovery:
                 # Same turn re-announced (hook refresh): no new output to
                 # process, so this is a no-progress deferral.
                 self.deferrals += 1
-                if self.max_deferrals and self.deferrals > self.max_deferrals:
+                if (self.max_deferrals > 0
+                        and self.deferrals > self.max_deferrals):
                     raise self.exhausted("no_progress")
                 _log.debug("%s: idle hook refresh without new output "
                            "(deferral %d/%d, session %s)", self.log_prefix,
@@ -637,6 +644,11 @@ def poll_for_verdict(
     idle after a nudge (``<= 0`` disables).  *retry_prompt* overrides the
     resume request with the caller's original prompt; *send* overrides how
     a recovery message reaches the session (default: tmux ``send-keys``).
+
+    Note that a recovery message is delivered through ``tmux send-keys`` as
+    one line: a multi-line *retry_prompt* would submit partial input, which
+    is why the in-tree callers use the short resume/outcome requests (the
+    original prompt is already in the session's context).
     """
     from pm_core import tmux as tmux_mod
     from pm_core import hook_events
