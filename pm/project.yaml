@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T08:06:19.389859+00:00'
+  updated_at: '2026-10-27T08:30:10.604103+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25674,6 +25674,21 @@ prs:
       untouched by this PR).'
     created_at: '2026-10-27T08:06:19Z'
     last_edited: '2026-10-27T08:06:19Z'
+  - id: note-dfbb915
+    text: 'Review-loop 0bb3 i1 (f4b15398): no blocking defects in the recovery machinery
+      — handle()/deferral bounds, the completed-verdict guard, the QA tick-loop episode
+      bookkeeping, planner stop ordering and merge coordination with pr-8efa789 all
+      hold up. Fixed one classifier inconsistency: _looks_like_provider_error() matched
+      a provider/transport error on ANY line, contradicting its "ended on" contract,
+      so a completed review quoting a log excerpt ("API Error: Connection lost" mid-output)
+      was classified no_output and asked to resume finished work; it now matches only
+      the turn''s last non-empty line (new test). Spec updated to document max_deferrals<=0
+      = unbounded and that retry_prompt/resume_request must be a single tmux line
+      (i2 note claimed these but the spec lacked them). Full suite: 3717 passed, 1
+      skipped; test_git_ops::test_keeps_unpushed_merge fails on this git version (2.34.1)
+      as on master.'
+    created_at: '2026-10-27T08:30:10Z'
+    last_edited: '2026-10-27T08:30:10Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
