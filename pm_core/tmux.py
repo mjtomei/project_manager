@@ -129,6 +129,17 @@ def kill_window(session: str, window: str) -> None:
     _run(
         _tmux_cmd("kill-window", "-t", f"{session}:{window}"),
     )
+    # The tmux ``after-kill-pane`` hook does not fire for ``kill-window``, so
+    # the killed window's registry entry would linger under a stale ``@id``
+    # until some later pane event happened to reconcile it.  Readers of the
+    # pane registry (``find_live_pane_by_role``, the picker badges) would then
+    # see orphaned panes — e.g. a bounced-out sign-off window, or the review
+    # window a re-launch replaced.  Prune the dead windows now.
+    try:
+        from pm_core import pane_registry
+        pane_registry.prune_dead_windows(session)
+    except Exception:
+        _log.debug("kill_window: registry prune failed", exc_info=True)
 
 
 def new_window(session: str, name: str, cmd: str, cwd: str,
