@@ -34197,7 +34197,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T00:26:04.150027+00:00'
-  updated_at: '2026-10-27T21:18:11.361529+00:00'
+  updated_at: '2026-10-27T21:45:52.566741+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34292,6 +34292,27 @@ prs:
       — correct for a GitHub-URL repo, possible noise for a local mirror. (2026-10-27T21:20:00Z)'
     created_at: '2026-10-27T21:18:11Z'
     last_edited: '2026-10-27T21:18:11Z'
+  - id: note-fb11b36
+    text: 'Review loop d49c i1 (2026-10-27): reviewed 1237f48d (i3 state) and pushed
+      13ece19c. i3 holds: all three sync paths verify detected merges against the
+      bound SIGNOFF_MERGE via pm_core/merge_integrity.py, record merge_integrity +
+      one note, never let a failed check stop merge detection; pre/post captures under
+      /pm-captures/impl remain convincing and the new tests still fail on pre-fix
+      code for the right reason. i1 change (one verifier-neutral fix): the startup/sync-github
+      callbacks (tui/sync.py::apply_github and pr_sync.sync_from_github::apply) applied
+      the verification only when the fresh state still showed a different status.
+      The sync verifies from its own possibly-stale copy, so a concurrent writer can
+      finalize the status first, leaving the log line but no persistent record. Both
+      now apply the evidence whenever the sync new status is merged (idempotent; note
+      dedupe), matching spec R3 and the other two sync paths. Tests added: failing-then-passing
+      race tests for both callbacks (verified they fail pre-fix: KeyError merge_integrity)
+      and a pm pr sync approved-merge control (no record/note/WARNING). Full suite
+      3842 passed, 1 skipped (pytest 8.4.2) — /pm-captures/review-d49c-i1/full-suite.log.
+      Still for QA (unchanged): the TUI sync worker thread runs integration.fetch_base
+      once per detected merge of a bound-approved PR, serialized by <git-common-dir>/pm-integration.lock
+      with a 300 s bound; PRs without a bound approval never fetch.'
+    created_at: '2026-10-27T21:45:52Z'
+    last_edited: '2026-10-27T21:45:52Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
