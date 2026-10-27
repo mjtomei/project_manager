@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e102089
+  active_pr: pr-049649a
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -36146,7 +36146,7 @@ prs:
   title: Remove all-PR autostart and fail closed on malformed or targetless saved
     state
   branch: pm/pr-049649a-remove-all-pr-autostart-and-fail-closed-on-malform
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Remove every route to whole-backlog/all-PR autostart. Autostart must
     require a validated explicit nonempty collection of target PR IDs; only their
@@ -36186,15 +36186,31 @@ prs:
     and merge callbacks; never test whole-backlog start or merge against a live PM
     project. Do not merge any product PR or change global provider policy. Keep this
     bug independent of the separate AutoRunsScreen dismissal crash.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/267
+  gh_pr_number: 267
   created_at: '2026-10-27T19:03:40.643246+00:00'
-  updated_at: '2026-10-27T19:03:40.643246+00:00'
-  started_at: null
+  updated_at: '2026-10-27T19:58:06.990503+00:00'
+  started_at: '2026-10-27T19:04:56.616056+00:00'
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-093d1b8
+    text: 'IMPL complete @66f99cc1. Autostart now requires an explicit, validated,
+      non-empty target set; all-PR mode is fully removed (parser, managed_ids wildcard
+      sentinel, command/IPC ''all'', _auto_start_all/enable_all, status/label/popup/help).
+      Breadcrumb parsing is fail-closed: dict/string/null targets, malformed records,
+      empty/targetless requests, all_mode true, and corrupt JSON restore nothing,
+      log an actionable diagnostic, and quarantine the evidence (autostart-resume.rejected-*.json).
+      Valid stop_before_merge marks and review loops are still restored; malformed
+      merge-gate sets keep autostart off. Legacy single-target migrates only to that
+      exact id, validated against loaded PRs. Watcher with an explicit empty target
+      set is observation-only. Regression suite: tests/test_autostart_fail_closed.py
+      (50 tests); full suite 3722 passed excluding pre-existing env failures in test_signoff_integration/test_merge_publish/test_markdown_render/test_hook_events/test_git_ops
+      (same failures on master in this container). Captures: /pm-captures/impl/{pre-fix,post-fix}/.
+      Do not merge: manual merge gate applies.'
+    created_at: '2026-10-27T19:58:06Z'
+    last_edited: '2026-10-27T19:58:06Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -36208,3 +36224,4 @@ prs:
     qa_interactive: provider:deepseek-flash
     signoff: provider:claude-work
     merge: provider:deepseek-flash
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027
