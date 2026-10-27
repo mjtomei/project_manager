@@ -1,5 +1,6 @@
 """Queued QA work releases settled allocations rather than accumulating them."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -337,3 +338,144 @@ def test_resume_does_not_relaunch_settled_scenarios(tmp_path, monkeypatch, verdi
         state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json", lambda: None)
     relaunch.assert_not_called()
     assert state.scenario_verdicts == {1: verdict}
+
+
+def test_failed_settled_release_is_retried_so_the_batch_grows_back(
+        tmp_path, monkeypatch):
+    """A settled worker whose release failed (e.g. during an inventory outage)
+    is retried on a later poll rather than only at run end.
+
+    ``container-max-running`` counts every running pm container, including
+    this run's settled-but-unreleased workers. Marking a failed release as
+    done left those containers counted against the headroom for the rest of
+    the run, so after the runtime recovered the re-clamp kept the queue
+    serialized (one worker at a time) instead of growing back.
+    """
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in range(1, 6)
+    ]
+    running = set()      # containers the runtime still runs (this run only)
+    launched = []
+    outage = {"polls_left": 2}
+
+    def launch(scenario):
+        launched.append(scenario.index)
+        running.add(scenario.index)
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    for sc in state.scenarios[:2]:
+        launch(sc)
+
+    def release(st, session, *, scenarios=None):
+        if outage["polls_left"] > 0:
+            return True  # deferred: inventory unreadable, containers survive
+        for sc in scenarios:
+            running.discard(sc.index)
+        return False
+
+    # Workers 1 and 2 settle on the first poll; later workers stay verdictless
+    # so the run's progress is decided by how far the batch grows back.
+    verdict_for = {1: "PASS", 2: "PASS"}
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        outage["polls_left"] -= 1
+        if ticks >= 6:
+            state.stop_requested = True
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 2)
+    monkeypatch.setattr(container_mod, "running_container_count",
+                        lambda: len(running))
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop, "_POLL_INTERVAL", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers", release)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(
+        qa_loop, "extract_verdict_from_transcript",
+        lambda path, *a: verdict_for.get(int(Path(path).stem[1:])))
+    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript",
+                        lambda *a: None)
+
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios[2:],
+        concurrency_cap=2, desired_cap=2, use_containers=True)
+
+    # While the release is deferred, the two stale workers fill the limit and
+    # the floor admits one queued worker. Once the retried release succeeds,
+    # the batch grows back to the desired two active workers.
+    assert running.isdisjoint({1, 2}), "the deferred release must be retried in-run"
+    assert launched == [1, 2, 3, 4]
+
+
+def test_queued_scenarios_stay_queued_on_the_dashboard_during_launches(
+        tmp_path, monkeypatch):
+    """Launch-time status writes keep the not-yet-launched queue visible.
+
+    The launchers rewrite the dashboard while workers prepare. Without the
+    run's queued set those writes dropped the "queued" label (and the initial
+    batch's write dropped the queued scenarios entirely) until a verdict
+    happened to rewrite the status.
+    """
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in range(1, 5)
+    ]
+    seen = []
+
+    def launch(st, *a, _status_scenarios=None, _queued_indices=None, **k):
+        seen.append(([s.index for s in _status_scenarios], set(_queued_indices)))
+        sc = st.scenarios[0]
+        sc.window_name = f"qa-s{sc.index}"
+        sc.pane_id = f"%{sc.index}"
+        sc.session_id = f"sid-{sc.index}"
+        sc.transcript_path = str(tmp_path / f"s{sc.index}.jsonl")
+        state.scenario_verdicts[sc.index] = "PASS"
+
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 0)
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", lambda s: None)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers",
+                        lambda st, session, *, scenarios=None: False)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers", launch)
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(qa_loop, "extract_verdict_from_transcript", lambda *a: "PASS")
+    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript",
+                        lambda *a: None)
+
+    state.scenarios[0].window_name = "qa-s1"
+    state.scenarios[0].pane_id = "%1"
+    state.scenarios[0].session_id = "sid-1"
+    state.scenarios[0].transcript_path = str(tmp_path / "s1.jsonl")
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios[1:],
+        concurrency_cap=1, use_containers=True)
+
+    assert seen == [([1, 2, 3, 4], {3, 4}), ([1, 2, 3, 4], {4}),
+                    ([1, 2, 3, 4], set())]

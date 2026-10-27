@@ -2035,6 +2035,7 @@ def _launch_scenarios_in_tmux(
     workdir_path: str,
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _queued_indices: set[int] | None = None,
 ) -> None:
     """Launch each scenario in its own tmux window (with worktree isolation).
 
@@ -2150,6 +2151,7 @@ def _launch_scenarios_in_tmux(
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
+            queued_scenarios=_queued_indices,
             verdict_reasons=state.scenario_verdict_reasons,
         )
 
@@ -2258,6 +2260,7 @@ def _launch_scenarios_in_containers(
     workdir_path: str,
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _queued_indices: set[int] | None = None,
 ) -> None:
     """Launch each scenario in a Docker container, presented via a tmux window.
 
@@ -2436,6 +2439,7 @@ def _launch_scenarios_in_containers(
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
+            queued_scenarios=_queued_indices,
             verdict_reasons=state.scenario_verdict_reasons,
         )
 
@@ -2894,6 +2898,7 @@ def _poll_tmux_verdicts(
             # sees the result (race condition).
 
     released_indices: set[int] = set()
+    release_retry_at = 0.0
 
     def _launch_next_queued() -> bool:
         """Release settled allocations, then launch one queued scenario.
@@ -2903,16 +2908,24 @@ def _poll_tmux_verdicts(
         fill loops stop on False so a full batch does not re-inventory once
         per queued scenario.
         """
-        nonlocal concurrency_cap
+        nonlocal concurrency_cap, release_retry_at
         if use_containers:
             settled = [s for s in state.scenarios
                        if s.index not in pending and s.index not in verifying
                        and s.index not in released_indices
                        and s.index in state.scenario_verdicts]
-            if settled:
+            if settled and time.monotonic() >= release_retry_at:
                 if _release_scenario_containers(state, session, scenarios=settled):
+                    # A failed or deferred release (e.g. an unreadable
+                    # inventory) leaves these workers running, and
+                    # container-max-running counts them against this run's
+                    # headroom. Retry on a later poll rather than only at run
+                    # end, or the re-clamp keeps the rest of the queue
+                    # serialized long after the runtime recovers.
+                    release_retry_at = time.monotonic() + _POLL_INTERVAL
                     _notify()
-                released_indices.update(s.index for s in settled)
+                else:
+                    released_indices.update(s.index for s in settled)
         if not _launch_queue or state.stop_requested:
             return False
         # Count currently active (pending + verifying)
@@ -2944,11 +2957,13 @@ def _poll_tmux_verdicts(
                 _launch_scenarios_in_containers(
                     state, data, pr_data, session, repo_root, workdir_path,
                     pm_root=pm_root, _status_scenarios=orig,
+                    _queued_indices=_queued_indices,
                 )
             else:
                 _launch_scenarios_in_tmux(
                     state, data, pr_data, session, repo_root, workdir_path,
                     pm_root=pm_root, _status_scenarios=orig,
+                    _queued_indices=_queued_indices,
                 )
         finally:
             state.scenarios = orig
@@ -4330,12 +4345,14 @@ def run_qa_sync(
             if use_containers:
                 _launch_scenarios_in_containers(
                     state, data, pr_data, session, repo_root, workdir_path,
-                    pm_root=pm_root,
+                    pm_root=pm_root, _status_scenarios=all_scenarios,
+                    _queued_indices=queued_indices,
                 )
             else:
                 _launch_scenarios_in_tmux(
                     state, data, pr_data, session, repo_root, workdir_path,
-                    pm_root=pm_root,
+                    pm_root=pm_root, _status_scenarios=all_scenarios,
+                    _queued_indices=queued_indices,
                 )
         finally:
             state.scenarios = all_scenarios
@@ -4651,7 +4668,7 @@ def _release_scenario_containers(state: QALoopState, session: str, *,
     from pm_core import tmux as tmux_mod
     viewed = _viewed_window_ids(session) if session else set()
     if viewed is None:
-        state.latest_output += " [container cleanup deferred: viewed windows unavailable]"
+        _note_cleanup(state, " [container cleanup deferred: viewed windows unavailable]")
         return True
     names: list[str] = []
     for sc in state.scenarios if scenarios is None else scenarios:
@@ -4700,14 +4717,19 @@ def _release_scenario_containers(state: QALoopState, session: str, *,
             expected_ids=identities, expected_generations=generations)
     if outcome.error or outcome.release_refused:
         detail = outcome.error or str(outcome.release_refused)
-        state.latest_output += f" [container cleanup deferred: {detail} — retry with 'pm container reap']"
+        _note_cleanup(state, f" [container cleanup deferred: {detail} — retry with 'pm container reap']")
         return True
     if outcome.failures:
-        state.latest_output += (
-            f" [container cleanup failed for {len(outcome.failures)}"
-            " — retry with 'pm container reap']")
+        _note_cleanup(state, f" [container cleanup failed for {len(outcome.failures)}"
+                             " — retry with 'pm container reap']")
         return True
     return False
+
+
+def _note_cleanup(state: QALoopState, note: str) -> None:
+    """Append a cleanup note once; queued releases retry it every poll."""
+    if note not in state.latest_output:
+        state.latest_output += note
 
 
 def resume_qa_sync(
