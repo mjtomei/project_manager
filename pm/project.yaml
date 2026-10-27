@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T20:03:18.340291+00:00'
+  updated_at: '2026-10-27T20:29:57.191680+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37172,6 +37172,30 @@ prs:
       Spec R3/R9 updated. Full suite: 3989 passed, 1 skipped (/pm-captures/review-640d-i7/full-suite-final.log).'
     created_at: '2026-10-27T20:03:18Z'
     last_edited: '2026-10-27T20:03:18Z'
+  - id: note-3bdf9e9
+    text: 'review-loop 640d i8: closed a residual carry-chain gap and hardened the
+      QA scenario listing. (1) A transient check that fails *after* implementation
+      hand-merges the base (the branch moved past the assessment, so the recorded
+      head is behind it) dropped the base assessment: `integration._carry_assessed_base`
+      now keeps the base the earlier check assessed when the branch descends from
+      the assessing revision AND now contains that base (`integration._checkout_of`
+      + two `is_ancestor` probes; the record stays `error`, never mergeable, and the
+      next check re-verifies containment before carrying anything forward). It now
+      runs on every carry path, not just the two it was wired into. Verified by a
+      new real-git test that reproduces the sequence (assess -> hand merge -> failed
+      check -> success) and fails on the pre-fix HEAD: without it the final up-to-date
+      record had no `base_files_count`/`base_behavior_changes`, so the merge gate
+      silently stopped requiring the evidence statement. A guard test also pins that
+      a branch which moved on unrelated PR work (and does not contain the base) adopts
+      nothing. (2) The sign-off prompt QA listing normalised `verdict_reason` with
+      `" ".join(...)`, so a hand-edited non-string value raised `TypeError` out of
+      prompt generation; it now renders through `str` like the scenario title (new
+      test fails pre-fix). Also folded the duplicated recorded-workdir/fallback-checkout
+      resolution into `integration._checkout_of` (used by `_carry_forward` and `_check_is_stale`).
+      Spec R3/R9 updated. Focused: tests/test_signoff_resolution.py 190 passed; full
+      suite in the commit message.'
+    created_at: '2026-10-27T20:29:57Z'
+    last_edited: '2026-10-27T20:29:57Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
