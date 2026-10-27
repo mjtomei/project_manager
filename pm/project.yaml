@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T15:50:20.079908+00:00'
+  updated_at: '2026-10-27T16:01:27.633114+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38236,6 +38236,30 @@ prs:
       spec text, so a spec decision, not changed. Full suite on fix 4369 passed.'
     created_at: '2026-10-27T15:50:20Z'
     last_edited: '2026-10-27T15:50:20Z'
+  - id: note-fa23948
+    text: 'QA S92 (2026-10-27, container mode podman 3, real claude 2.1.311 vs work/
+      router + main stubs, R routed QA roles / U claude-opus-5-5; captures /pm-captures/scenarios/92,
+      REPORT.md): CODE CHANGE 207545e6 needs normal re-review. Picker qa spinner:
+      a plain qa start after a finished run saw the runtime entry still at the prior
+      run done PASS (new run writes state only once its windows exist), so the spinner
+      printed "qa: done (PASS)" and closed at once; q/Esc was never read and the new
+      run select_window-ed the client to qa-<pr> (live pre-fix on a16a87af). Fix:
+      the stale-terminal guard (fresh-only before) applies to any action whose entry
+      was terminal at popup start; label "queued" until it changes; 2 tests fail on
+      HEAD; full suite 4367 passed. Held live: scheduler/REQA starts never moved a
+      client; t before qa-<pr> exists = "QA already running" + focus at creation for
+      the TUI grouped session only; second t "Focused QA window"; post-fix q consumed
+      at creation, no switch; story 4 hop inside a 60 s hold: 132 ticks running: qa
+      rc 0, 0 (launched), no qa-run-bg, one loop, one clear after release, ts unchanged;
+      routing FLAGS 0 incl. Agent children + classifier (200 on router, RQ43); leak
+      0 files. Spec notes for the next pass: story 3 Given cannot be reached in the
+      stated order (pm autostart remove R before the REQA routes leaves R in sign_off
+      with its verdict unrouted; remove after Starting QA instead); story 4 U clause
+      is vacuous after a terminal U sign-off (U paused BLOCKED); the S88 125 KB padded
+      refined reply made podman exec refiner panes exit (claude kept running), so
+      keep refined_kb 0 and start the stubs after allprs exists.'
+    created_at: '2026-10-27T16:01:27Z'
+    last_edited: '2026-10-27T16:01:27Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
