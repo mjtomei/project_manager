@@ -8,6 +8,9 @@ Verdicts:
   PASS            — No changes needed, code is ready to merge.
   NEEDS_WORK      — Blocking issues found; loop iterates after fixes.
   INPUT_REQUIRED  — Human-guided testing needed before sign-off.
+  NO_VERDICT      — The review session idled without ever emitting a
+                    verdict and bounded recovery attempts were exhausted
+                    (terminal; see ``loop_shared.MissingOutputRecovery``).
 
 The loop stops on PASS.
 
@@ -35,6 +38,8 @@ from pm_core.loop_shared import (
     match_verdict,
     poll_for_verdict as _poll_for_verdict_shared,
     wait_for_follow_up_verdict as _wait_for_follow_up_shared,
+    VerdictRecoveryExhausted,
+    VERDICT_NO_VERDICT,
 )
 
 _log = configure_logger("pm.review_loop")
@@ -350,6 +355,26 @@ def run_review_loop_sync(
                 _log.warning("review_loop: pane killed on iteration %d: %s", state.iteration, e)
                 state.latest_verdict = VERDICT_KILLED
                 state.latest_output = str(e)
+                break
+            except VerdictRecoveryExhausted as e:
+                # The session idled without ever emitting a review verdict
+                # and the bounded recovery attempts are spent.  Record the
+                # iteration and surface an explicit terminal state rather
+                # than blocking forever.
+                _log.warning("review_loop: no verdict on iteration %d: %s",
+                             state.iteration, e)
+                state.latest_verdict = VERDICT_NO_VERDICT
+                state.latest_output = str(e)
+                state.history.append(ReviewIteration(
+                    iteration=state.iteration,
+                    verdict=VERDICT_NO_VERDICT,
+                    output=str(e),
+                ))
+                if on_iteration:
+                    try:
+                        on_iteration(state)
+                    except Exception:
+                        _log.exception("review_loop: on_iteration callback failed")
                 break
             except Exception as e:
                 _log.exception("review_loop: review failed on iteration %d", state.iteration)

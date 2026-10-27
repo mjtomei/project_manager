@@ -2,10 +2,30 @@
 
 Extracts functions that were duplicated between the loop engines
 so all can import from a single source.
+
+This module also hosts the shared *missing-output recovery* machinery used
+by every verdict poller (review, watcher, QA planner / refiner / verifier /
+finalize, and the QA scenario workers).  A session can end a turn without
+the outcome its caller expects — Claude asks a clarifying question, hits a
+provider connection loss, or completes the work but writes
+``NEEDS_WORK — explanation`` instead of a standalone keyword.  Recovery:
+
+  * bounds the wait (a configurable number of idle turns without an
+    outcome, plus an optional wall-clock deadline),
+  * asks the *same* session for its own standalone outcome (a completed
+    result needing format repair) or to resume the same task after a
+    connection loss, and
+  * surfaces an explicit :class:`VerdictRecoveryExhausted` failure instead
+    of blocking forever.
+
+Recovery never supplies or infers a verdict, never replays completed work
+or tests, and defers to a newer hook event (a provider-native retry or
+queued input) instead of racing it.
 """
 
 import re
 import time
+from dataclasses import dataclass
 from typing import Callable
 
 from pm_core.paths import configure_logger
@@ -29,6 +49,353 @@ def find_claude_pane(session: str, window_name: str) -> str | None:
     if panes:
         return panes[0][0]
     return None
+
+
+# Terminal verdict used when a session never produces an expected outcome
+# even after bounded recovery.  Distinct from "ERROR" (launch/runtime
+# failures) and "KILLED" (pane died) so the TUI and QA can name the failure.
+VERDICT_NO_VERDICT = "NO_VERDICT"
+
+# Recovery defaults (overridable via ~/.pm/settings/*).
+DEFAULT_MAX_MISSING = 3            # recovery nudges per session
+DEFAULT_SETTLE_SECONDS = 5.0       # wait for a newer idle before nudging
+DEFAULT_RESPONSE_TIMEOUT = 3600.0   # nudge -> next idle deadline (0 = off)
+
+
+# ---------------------------------------------------------------------------
+# Recovery settings
+# ---------------------------------------------------------------------------
+
+def _setting_int(name: str, default: int) -> int:
+    from pm_core.paths import get_global_setting_value
+    raw = get_global_setting_value(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        _log.warning("ignoring invalid %s=%r (want an integer)", name, raw)
+        return default
+
+
+def _setting_float(name: str, default: float) -> float:
+    from pm_core.paths import get_global_setting_value
+    raw = get_global_setting_value(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        _log.warning("ignoring invalid %s=%r (want a number)", name, raw)
+        return default
+
+
+def recovery_max_attempts() -> int:
+    """Recovery nudges allowed per session (``<= 0`` disables recovery)."""
+    return _setting_int("verdict-recovery-max-attempts", DEFAULT_MAX_MISSING)
+
+
+def recovery_settle_seconds() -> float:
+    """Seconds to wait for a newer idle before sending a recovery nudge."""
+    return max(0.0, _setting_float(
+        "verdict-recovery-settle-seconds", DEFAULT_SETTLE_SECONDS))
+
+
+def recovery_response_timeout() -> float:
+    """Seconds from a nudge to the next idle before declaring exhaustion.
+
+    ``<= 0`` disables the check (a session that keeps working emits no idle
+    and is not considered missing output).
+    """
+    return _setting_float(
+        "verdict-recovery-response-timeout", DEFAULT_RESPONSE_TIMEOUT)
+
+
+# ---------------------------------------------------------------------------
+# Recovery exception + message builders
+# ---------------------------------------------------------------------------
+
+class VerdictRecoveryExhausted(RuntimeError):
+    """Raised when a session never produces an expected verdict/marker.
+
+    Callers catch this and surface a terminal ``NO_VERDICT`` state (review /
+    watcher), an ``INPUT_REQUIRED`` scenario/planner result (QA), or a
+    verification failure — never a silent hang.
+    """
+
+    def __init__(self, message: str, *, attempts: int = 0,
+                 last_output: str = "", reason: str = "no_verdict",
+                 session_id: str = "", pane_id: str = "",
+                 verdicts: tuple[str, ...] = ()):
+        super().__init__(message)
+        self.attempts = attempts
+        self.last_output = last_output
+        self.reason = reason
+        self.session_id = session_id
+        self.pane_id = pane_id
+        self.verdicts = verdicts
+
+
+def _expected_outcomes(verdicts: tuple[str, ...]) -> str:
+    return " / ".join(v for v in verdicts if v) or "the expected outcome"
+
+
+# A turn that ended on a provider/transport error (rather than completing
+# the task) must be *resumed*, not asked to re-emit an outcome.  Claude Code
+# surfaces these as a short assistant line such as "API Error: Connection
+# lost" / "Request failed: network error".  Match only line-leading forms so
+# a genuine review discussing network-error handling is not misclassified.
+_PROVIDER_ERROR_RE = re.compile(
+    r"(?i)^\W*(?:api error|request failed|connection (?:lost|error|reset|"
+    r"refused)|network error|socket hang up|econnreset|etimedout|"
+    r"server (?:error|unavailable)|overloaded|"
+    r"error\s*:\s*(?:socket hang up|connection (?:lost|reset|refused)|"
+    r"network error|api error|econnreset|etimedout))\b"
+)
+
+
+def _looks_like_provider_error(text: str) -> bool:
+    return any(_PROVIDER_ERROR_RE.match(line) for line in text.splitlines())
+
+
+def build_outcome_request(verdicts: tuple[str, ...]) -> str:
+    """Message asking only for the agent's own standalone outcome.
+
+    Used when a turn *completed* but its output lacks a standalone verdict
+    (e.g. ``NEEDS_WORK — explanation``).  It lists the allowed vocabulary
+    but never supplies or infers a verdict, and it never asks the agent to
+    redo work or replay tests.
+    """
+    outcomes = _expected_outcomes(verdicts)
+    return (
+        "Your last turn ended without a standalone outcome line. Re-emit "
+        "only your own conclusion from the work already completed: exactly "
+        f"one of {outcomes}, alone on its own line, with no other text on "
+        "that line. Do not redo work, re-run tests, or restate evidence. If "
+        "you have not finished, continue the task instead."
+    )
+
+
+def build_resume_request() -> str:
+    """Message resuming the same task after a turn that produced no output.
+
+    Covers provider connection loss and other empty turns.  It deliberately
+    does *not* replay the original prompt (which risks duplicating completed
+    work); the session still holds that prompt in its context.
+    """
+    return (
+        "Your previous turn ended without any output (for example a "
+        "provider connection loss). Resume the same task in this session "
+        "from where you left off: keep partial edits, evidence and any "
+        "queued input, and do not restart completed work or repeat "
+        "completed tests. When the task is complete, emit your required "
+        "outcome as instructed."
+    )
+
+
+def build_block_outcome_request(
+    blocks: tuple[tuple[str, str], ...],
+) -> str:
+    """Outcome request for block-marker roles (planner, refiner).
+
+    *blocks* is a sequence of ``(START, END)`` marker pairs.  The agent is
+    asked to re-emit its own completed result wrapped in one of the blocks,
+    or to continue if it has not finished.
+    """
+    rendered = " or ".join(f"{start} ... {end}" for start, end in blocks)
+    return (
+        "Your last turn ended without the required outcome block. Re-emit "
+        "your own completed result from the work already done, wrapped in "
+        f"{rendered} (each marker alone on its own line). Do not redo work, "
+        "re-run tests, or restate evidence. If you have not finished, "
+        "continue the task instead."
+    )
+
+
+@dataclass
+class RecoveryResult:
+    """Outcome of one :meth:`MissingOutputRecovery.handle` call."""
+    status: str                     # "deferred" | "nudged"
+    event: dict | None = None       # newer idle event when deferred
+
+
+class MissingOutputRecovery:
+    """Bounded recovery for one polling session.
+
+    The poller calls :meth:`handle` once per idle turn that did **not**
+    produce the expected outcome.  A newer idle event that lands during the
+    settle window (a provider-native retry, a queued user message) defers
+    the nudge and resets the attempt counter, so recovery never races a
+    native one.  After *max_attempts* nudges, :class:`VerdictRecoveryExhausted`
+    is raised.
+    """
+
+    def __init__(
+        self,
+        *,
+        session_id: str,
+        pane_id: str,
+        verdicts: tuple[str, ...],
+        send: Callable[[str], None],
+        max_attempts: int = DEFAULT_MAX_MISSING,
+        settle_seconds: float = DEFAULT_SETTLE_SECONDS,
+        response_timeout: float | None = DEFAULT_RESPONSE_TIMEOUT,
+        resume_request: str | Callable[[], str] | None = None,
+        outcome_request: str | Callable[[], str] | None = None,
+        log_prefix: str = "loop_shared",
+    ):
+        self.session_id = session_id
+        self.pane_id = pane_id
+        self.verdicts = tuple(verdicts)
+        self._send = send
+        self.max_attempts = max(0, int(max_attempts))
+        self.settle_seconds = max(0.0, float(settle_seconds))
+        self.response_timeout = response_timeout
+        self._resume_request = resume_request
+        self._outcome_request = outcome_request
+        self.log_prefix = log_prefix
+        self.attempts = 0
+        self.last_output = ""
+        self.last_kind = ""
+        self._last_nudge_ts: float | None = None
+
+    @property
+    def enabled(self) -> bool:
+        return self.max_attempts > 0
+
+    def reset(self) -> None:
+        """Newer activity was seen — the session is making progress again."""
+        self.attempts = 0
+        self._last_nudge_ts = None
+
+    # -- classification -----------------------------------------------------
+
+    def classify(self, transcript_path: str) -> str:
+        """Return ``"no_output"`` or ``"no_verdict"`` for the latest turn.
+
+        ``no_output`` (no assistant text at all, or a turn that ended on a
+        provider/transport error) is treated as a possible connection loss
+        and resumed; ``no_verdict`` means the agent completed a turn but did
+        not emit a standalone outcome.
+        """
+        from pm_core.verdict_transcript import read_latest_assistant_text
+        text = read_latest_assistant_text(transcript_path) or ""
+        self.last_output = text
+        if not text.strip():
+            return "no_output"
+        if _looks_like_provider_error(text):
+            # The turn died on a transport/provider error — resume the same
+            # task rather than demanding an outcome it never computed.
+            return "no_output"
+        return "no_verdict"
+
+    # -- messages -----------------------------------------------------------
+
+    def _message(self, kind: str) -> str:
+        override = (self._resume_request if kind == "no_output"
+                    else self._outcome_request)
+        if override is None:
+            if kind == "no_output":
+                return build_resume_request()
+            return build_outcome_request(self.verdicts)
+        return override() if callable(override) else override
+
+    # -- main entry point ---------------------------------------------------
+
+    def handle(self, transcript_path: str, ev_ts: float, *,
+               wait_for_newer: Callable[[float, float], dict | None]
+               | None = None) -> RecoveryResult:
+        """Handle one idle turn that produced no expected outcome.
+
+        *wait_for_newer(timeout, newer_than)* may block up to the settle
+        window looking for a newer idle event.  When omitted, a non-blocking
+        hook read is used (for tick-based loops).
+
+        Returns ``RecoveryResult("deferred", event)`` when a newer event
+        landed (do not nudge; process that turn instead), or
+        ``RecoveryResult("nudged")`` after sending a recovery request.
+        Raises :class:`VerdictRecoveryExhausted` once attempts run out.
+        """
+        kind = self.classify(transcript_path)
+        self.last_kind = kind
+
+        # Let a provider-native retry / queued input land before nudging.
+        if self.settle_seconds > 0:
+            if wait_for_newer is not None:
+                newer = wait_for_newer(self.settle_seconds, ev_ts)
+            else:
+                newer = self._newer_event(ev_ts)
+            if newer is not None:
+                self.reset()
+                _log.info("%s: newer idle event during settle — deferring "
+                          "recovery (session %s)", self.log_prefix,
+                          self.session_id)
+                return RecoveryResult("deferred", newer)
+
+        if self.attempts >= self.max_attempts:
+            raise self.exhausted(kind)
+
+        self.attempts += 1
+        message = self._message(kind)
+        _log.warning("%s: idle turn without outcome (%s) — recovery request "
+                     "%d/%d (session %s)", self.log_prefix, kind,
+                     self.attempts, self.max_attempts, self.session_id)
+        try:
+            self._send(message)
+        except Exception:
+            # A dead pane / closed stdin must not crash the loop: the
+            # poller's next pane_exists check reports the real failure.
+            _log.warning("%s: recovery request could not be delivered",
+                         self.log_prefix, exc_info=True)
+        self._last_nudge_ts = time.monotonic()
+        return RecoveryResult("nudged")
+
+    def check_response(self) -> None:
+        """Raise when a recovery nudge has gone unanswered too long.
+
+        Called by pollers when their event wait times out.  A session that
+        is actively working emits no idle event, so the default timeout is
+        generous and ``<= 0`` disables the check entirely.
+        """
+        if not self.response_timeout or self.response_timeout <= 0:
+            return
+        if self._last_nudge_ts is None:
+            return
+        if time.monotonic() - self._last_nudge_ts >= self.response_timeout:
+            raise self.exhausted("no_response")
+
+    def exhausted(self, reason: str) -> VerdictRecoveryExhausted:
+        """Build the exhaustion error for *reason*."""
+        if reason == "overall_timeout":
+            detail = "the overall poll deadline elapsed"
+        elif reason == "no_response":
+            detail = (f"no new turn arrived within "
+                      f"{float(self.response_timeout):.0f}s after recovery "
+                      f"attempt {self.attempts}")
+        elif reason == "no_output":
+            detail = (f"the session idled {self.attempts} time(s) without any "
+                      f"output; recovery attempts are exhausted")
+        else:
+            detail = (f"the session idled {self.attempts} time(s) without a "
+                      f"standalone outcome; recovery attempts are exhausted")
+        return VerdictRecoveryExhausted(
+            f"{self.log_prefix}: session {self.session_id} produced no "
+            f"expected outcome ({_expected_outcomes(self.verdicts)}): "
+            f"{detail}. The pane was left open for inspection.",
+            attempts=self.attempts,
+            last_output=self.last_output,
+            reason=reason,
+            session_id=self.session_id,
+            pane_id=self.pane_id,
+            verdicts=self.verdicts,
+        )
+
+    def _newer_event(self, ev_ts: float) -> dict | None:
+        from pm_core import hook_events
+        ev = hook_events.read_event(self.session_id)
+        if ev and float(ev.get("timestamp") or 0) > ev_ts:
+            return ev
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +482,13 @@ def poll_for_verdict(
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
     workdir: str | None = None,
+    max_missing: int | None = None,
+    overall_timeout: float | None = None,
+    response_timeout: float | None = None,
+    resume_request: str | Callable[[], str] | None = None,
+    outcome_request: str | Callable[[], str] | None = None,
+    retry_prompt: str | Callable[[], str] | None = None,
+    send: Callable[[str], None] | None = None,
 ) -> str | None:
     """Block until Claude signals idle, then extract a verdict from the
     JSONL transcript.
@@ -134,6 +508,18 @@ def poll_for_verdict(
     session was launched for).  Raises
     :class:`~pm_core.claude_launcher.WorkspaceTrustBlocked` when it stays
     there past the grace period.
+
+    Missing-output recovery (bounded, see :class:`MissingOutputRecovery`):
+    an idle turn without a matching verdict asks the same session for its
+    own standalone outcome (or to resume after an empty/connection-loss
+    turn) up to *max_missing* times, then raises
+    :class:`VerdictRecoveryExhausted`.  ``max_missing=None`` reads the
+    ``verdict-recovery-max-attempts`` setting (default 3); ``<= 0`` disables
+    recovery (legacy unbounded behaviour).  *overall_timeout* optionally
+    bounds the whole poll; *response_timeout* bounds the wait for the next
+    idle after a nudge (``<= 0`` disables).  *retry_prompt* overrides the
+    resume request with the caller's original prompt; *send* overrides how
+    a recovery message reaches the session (default: tmux ``send-keys``).
     """
     from pm_core import tmux as tmux_mod
     from pm_core import hook_events
@@ -152,19 +538,57 @@ def poll_for_verdict(
             f"transcript={transcript_path!r}"
         )
 
+    if max_missing is None:
+        max_missing = recovery_max_attempts()
+    if response_timeout is None:
+        response_timeout = recovery_response_timeout()
+
+    if send is None:
+        def _send_message(message: str) -> None:
+            tmux_mod.send_keys(pane_id, message)
+        send = _send_message
+
+    recovery = MissingOutputRecovery(
+        session_id=session_id,
+        pane_id=pane_id,
+        verdicts=verdicts,
+        send=send,
+        max_attempts=max_missing,
+        settle_seconds=recovery_settle_seconds(),
+        response_timeout=response_timeout,
+        resume_request=retry_prompt or resume_request,
+        outcome_request=outcome_request,
+        log_prefix=log_prefix,
+    )
+
     _log.info("%s: poll_for_verdict (hook+jsonl) — pane_id=%s, "
-              "transcript=%s, session_id=%s, verdicts=%s, grace=%.0fs",
+              "transcript=%s, session_id=%s, verdicts=%s, grace=%.0fs, "
+              "max_missing=%d",
               log_prefix, pane_id, transcript_path, session_id, verdicts,
-              grace_period)
+              grace_period, recovery.max_attempts)
 
     poll_start = time.monotonic()
+    deadline = (poll_start + overall_timeout) if overall_timeout else None
     hook_baseline = time.time()
     trust_watch: WorkspacePromptWatch | None = WorkspacePromptWatch(
         pane_id, workdir, transcript_path=transcript_path)
+    ev: dict | None = None
+
+    def _wait_newer(timeout: float, newer_than: float) -> dict | None:
+        return hook_events.wait_for_event(
+            session_id,
+            event_types={"idle_prompt"},
+            timeout=timeout,
+            newer_than=newer_than,
+            stop_check=stop_check,
+        )
 
     while True:
         if stop_check and stop_check():
             return None
+
+        if deadline is not None and time.monotonic() >= deadline:
+            raise recovery.exhausted("overall_timeout")
 
         if not tmux_mod.pane_exists(pane_id):
             _log.warning("%s: pane %s disappeared", log_prefix, pane_id)
@@ -176,32 +600,58 @@ def poll_for_verdict(
                 _log.warning("%s: %s", log_prefix, blocked)
                 raise WorkspaceTrustBlocked(blocked)
 
-        # Stop fires every turn, not only at session exit — listening to
-        # it caused false "session gone" returns.  pane_exists is the
-        # authoritative session-gone signal; we only consume idle_prompt.
-        ev = hook_events.wait_for_event(
-            session_id,
-            event_types={"idle_prompt"},
-            timeout=wait_timeout,
-            newer_than=hook_baseline,
-            stop_check=stop_check,
-        )
-        if stop_check and stop_check():
-            return None
         if ev is None:
-            continue
+            timeout = wait_timeout
+            if deadline is not None:
+                timeout = max(0.0, min(timeout,
+                                       deadline - time.monotonic()))
+            # Stop fires every turn, not only at session exit — listening to
+            # it caused false "session gone" returns.  pane_exists is the
+            # authoritative session-gone signal; we only consume idle_prompt.
+            ev = hook_events.wait_for_event(
+                session_id,
+                event_types={"idle_prompt"},
+                timeout=timeout,
+                newer_than=hook_baseline,
+                stop_check=stop_check,
+            )
+            if stop_check and stop_check():
+                return None
+            if ev is None:
+                recovery.check_response()
+                continue
 
-        # An idle turn means the session is past any startup dialog.
-        trust_watch = None
-        hook_baseline = float(ev.get("timestamp") or hook_baseline)
-        if grace_period > 0 and (time.monotonic() - poll_start) < grace_period:
-            continue
+            # An idle turn means the session is past any startup dialog.
+            trust_watch = None
+            hook_baseline = float(ev.get("timestamp") or hook_baseline)
+            if grace_period > 0 and (
+                    time.monotonic() - poll_start) < grace_period:
+                ev = None
+                continue
 
         verdict = extract_verdict_from_transcript(transcript_path, verdicts)
         if verdict:
             _log.info("%s: hook-driven verdict %s (session_id=%s)",
                       log_prefix, verdict, session_id)
             return read_latest_assistant_text(transcript_path) or verdict
+
+        if not recovery.enabled:
+            # Legacy behaviour: keep waiting for a later idle turn.
+            ev = None
+            continue
+
+        result = recovery.handle(
+            transcript_path,
+            float(ev.get("timestamp") or hook_baseline),
+            wait_for_newer=_wait_newer,
+        )
+        if result.status == "deferred" and result.event is not None:
+            # Process the newer turn in this same iteration instead of
+            # re-waiting for an event we already consumed.
+            ev = result.event
+            hook_baseline = float(ev.get("timestamp") or hook_baseline)
+        else:
+            ev = None
 
 
 def wait_for_follow_up_verdict(
@@ -218,6 +668,11 @@ def wait_for_follow_up_verdict(
     the assistant text of the follow-up turn (or ``None``).
 
     Hook-driven only — requires *transcript_path*.
+
+    This wait is an intentional human interaction after ``INPUT_REQUIRED``
+    (the user works in the pane), so it is deliberately **not** bounded by
+    missing-output recovery: a genuine ``INPUT_REQUIRED`` is not a failure
+    to produce an expected verdict.
     """
     from pm_core import hook_events
     from pm_core.claude_launcher import session_id_from_transcript

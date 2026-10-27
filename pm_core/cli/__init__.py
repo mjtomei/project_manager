@@ -261,7 +261,10 @@ _BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanu
                      "qa-verify-pass"}
 _INT_SETTINGS = {"min-pane-width", "mobile-width-threshold",
                  "qa-max-scenarios", "qa-verify-retries",
-                 "qa-verdict-reminder-timeout", "trust-prompt-grace-seconds"}
+                 "qa-verdict-reminder-timeout", "trust-prompt-grace-seconds",
+                 "verdict-recovery-max-attempts",
+                 "verdict-recovery-settle-seconds",
+                 "verdict-recovery-response-timeout"}
 _ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
                   "container-runtime": {"docker", "podman"}}
 _SETTING_DEFAULTS = {
@@ -276,6 +279,9 @@ _SETTING_DEFAULTS = {
     "qa-verify-retries": "(unset)",
     "qa-verdict-reminder-timeout": "(unset)",
     "trust-prompt-grace-seconds": str(DEFAULT_PROMPT_GRACE_SECONDS),
+    "verdict-recovery-max-attempts": "3",
+    "verdict-recovery-settle-seconds": "5",
+    "verdict-recovery-response-timeout": "3600",
     "spec-mode": "prompt",
 }
 _LIST_ALIASES = {"list", "ls", "l"}
@@ -329,6 +335,15 @@ def set_cmd(setting, value):
 
       qa-verdict-reminder-timeout  Seconds of pane silence before sending a verdict-format
                                    reminder to a scenario agent (0 or unset = disabled)
+
+      verdict-recovery-max-attempts  Recovery nudges a loop session gets when it idles
+                                     without its expected verdict (default 3; 0 = off)
+
+      verdict-recovery-settle-seconds  Seconds to wait for a newer idle event (native
+                                       retry / queued input) before nudging (default 5)
+
+      verdict-recovery-response-timeout  Seconds from a recovery nudge to the next idle
+                                         before declaring NO_VERDICT (default 3600; 0 = off)
 
       qa-verify-pass       Enable/disable PASS verdict verification (on/off, default on)
 

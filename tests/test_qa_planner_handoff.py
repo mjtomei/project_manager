@@ -470,6 +470,45 @@ class TestQAPlanProblem:
         assert qa_loop.qa_plan_problem(text, sc, 2) is None
 
 
+class TestPlannerRecovery:
+    def test_recovery_exhaustion_surfaces_input_required(
+            self, tmp_path, monkeypatch):
+        """A planner that never emits a complete plan must fail bounded.
+
+        The poll loop must stop with an actionable INPUT_REQUIRED instead of
+        waiting out the full one-hour planner timeout.
+        """
+
+        class _Exhausted:
+            enabled = True
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def handle(self, *args, **kwargs):
+                raise qa_loop.VerdictRecoveryExhausted(
+                    "planner produced no complete QA_PLAN block",
+                    attempts=3)
+
+            def check_response(self):
+                pass
+
+        monkeypatch.setattr(qa_loop, "MissingOutputRecovery", _Exhausted)
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=TEMPLATE_PROMPT,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", "Still reading the diff...")],
+            extra_patches=(
+                patch("pm_core.qa_loop._add_status_pane"),
+            ))
+
+        assert state.scenarios == []
+        assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
+        assert "complete QA_PLAN block" in state._error
+        assert state.planning_phase is False
+        assert state.running is False
+
+
 TEMPLATE_PLUS_SUFFIX = TEMPLATE_PROMPT + "\n...redraw...\n" + PANE_SUFFIX
 
 

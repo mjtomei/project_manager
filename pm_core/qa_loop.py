@@ -38,7 +38,14 @@ from pm_core.loop_shared import (
     find_claude_pane,
     get_pm_session,
     poll_for_verdict,
+    build_block_outcome_request,
+    MissingOutputRecovery,
+    VerdictRecoveryExhausted,
+    recovery_max_attempts,
+    recovery_settle_seconds,
+    recovery_response_timeout,
     VERDICT_TAIL_LINES,
+    VERDICT_NO_VERDICT,
 )
 from pm_core.verdict_transcript import (
     extract_verdict_from_transcript,
@@ -725,6 +732,13 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
     except WorkspaceTrustBlocked as e:
         _log.warning("QA finalize: %s", e)
         return None
+    except VerdictRecoveryExhausted as e:
+        # The finalizer idled without FINALIZE_DONE/BLOCKED and bounded
+        # recovery is exhausted.  Surface the explicit terminal verdict
+        # (rendered as "[finalize: NO_VERDICT]") instead of silently
+        # treating the run as unfinalized.
+        _log.warning("QA finalize: no outcome: %s", e)
+        return VERDICT_NO_VERDICT
     except Exception:
         _log.warning("QA finalize: polling failed", exc_info=True)
         return None
@@ -1677,11 +1691,14 @@ def _build_concretize_cmd(
 
 
 _TRUST_BLOCKED_PREFIX = "blocked at workspace-trust prompt: "
+_RECOVERY_EXHAUSTED_PREFIX = "no refiner outcome: "
 
 
 def _concretize_failure_label(reason: str) -> str:
     """Verdict reason for a scenario whose concretizer did not produce steps."""
     if reason.startswith(_TRUST_BLOCKED_PREFIX):
+        return reason
+    if reason.startswith(_RECOVERY_EXHAUSTED_PREFIX):
         return reason
     return f"refiner rejected: {reason}"
 
@@ -1720,9 +1737,18 @@ def _concretize_scenario(
             grace_period=_CONCRETIZE_GRACE,
             log_prefix=f"qa-concretize-{scenario.index}",
             workdir=scenario_cwd,
+            outcome_request=build_block_outcome_request((
+                ("REFINED_STEPS_START", "REFINED_STEPS_END"),
+                ("REFINER_REJECT_START", "REFINER_REJECT_END"),
+            )),
         )
     except WorkspaceTrustBlocked as e:
         return None, _TRUST_BLOCKED_PREFIX + str(e)
+    except VerdictRecoveryExhausted as e:
+        # The refiner never emitted REFINED_STEPS_END / REFINER_REJECT_END
+        # and bounded recovery is exhausted.  Surface a distinct reason so
+        # this is not mislabelled as a deliberate refiner rejection.
+        return None, _RECOVERY_EXHAUSTED_PREFIX + str(e)
 
     if not content:
         _log.warning("Concretization timed out or pane died for scenario %d",
@@ -2638,9 +2664,20 @@ def _poll_tmux_verdicts(
     # Results from background verification threads
     verification_results: dict[int, tuple[bool, str]] = {}
     verification_lock = threading.Lock()
-    # Idle-reminder state: when we last sent a reminder, keyed by scenario index.
+    # Idle-reminder / missing-output recovery state.  ``qa-verdict-reminder-timeout``
+    # (when set) tunes the settle interval between recovery nudges; otherwise
+    # the shared ``verdict-recovery-settle-seconds`` setting applies.
     _reminder_timeout = _get_verdict_reminder_timeout()
-    _last_reminder_sent: dict[int, float] = {}
+    _recovery_max = recovery_max_attempts()
+    _recovery_settle = (float(_reminder_timeout)
+                        if _reminder_timeout is not None
+                        else recovery_settle_seconds())
+    _recovery_response = recovery_response_timeout()
+    # Per-scenario bounded recovery: a worker that idles without a verdict is
+    # asked for its own standalone outcome (or to resume after an empty turn);
+    # after the configured attempts it is marked INPUT_REQUIRED with a
+    # specific reason instead of hanging QA forever.
+    _recoveries: dict[int, MissingOutputRecovery] = {}
     # Hook-driven idle detection: gate verdict extraction on fresh
     # idle_prompt events for each scenario's Claude session.  Scenarios
     # without a session_id cannot be polled and are marked INPUT_REQUIRED.
@@ -2757,6 +2794,39 @@ def _poll_tmux_verdicts(
     # a later verdict triggers ``_launch_next_queued``.
     for _ in range(len(_launch_queue)):
         _launch_next_queued()  # returns immediately once cap is reached
+
+    def _recovery_for(scenario: QAScenario,
+                      pane_id: str) -> MissingOutputRecovery:
+        """Return the bounded recovery tracker for *scenario*.
+
+        A relaunched scenario gets a fresh tracker (new pane/session), so
+        attempt counts never leak across worker identities.
+        """
+        rec = _recoveries.get(scenario.index)
+        if (rec is None or rec.pane_id != pane_id
+                or rec.session_id != (scenario.session_id or "")):
+            rec = MissingOutputRecovery(
+                session_id=scenario.session_id or "",
+                pane_id=pane_id,
+                verdicts=ALL_VERDICTS,
+                send=lambda msg, p=pane_id: tmux_mod.send_keys(p, msg),
+                max_attempts=_recovery_max,
+                settle_seconds=_recovery_settle,
+                response_timeout=_recovery_response,
+                log_prefix=f"qa-scenario-{scenario.index}",
+            )
+            _recoveries[scenario.index] = rec
+        return rec
+
+    def _recovery_exhausted(scenario: QAScenario,
+                            exc: VerdictRecoveryExhausted) -> None:
+        """Mark a worker that never produced a verdict as INPUT_REQUIRED."""
+        _log.warning("Scenario %d: %s", scenario.index, exc)
+        state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+        state.scenario_verdict_reasons[scenario.index] = (
+            f"worker produced no verdict after {_recovery_max} recovery "
+            f"attempt(s): {exc}")
+        _recoveries.pop(scenario.index, None)
 
     while (pending or verifying or _launch_queue) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
@@ -2981,6 +3051,21 @@ def _poll_tmux_verdicts(
                 verdicts_changed = True
                 _launch_next_queued()
                 continue
+
+            # A recovery nudge with no following turn means the worker has
+            # gone silent.  Check this before the fresh-event gate so it is
+            # caught even when no new idle_prompt ever arrives.
+            _rec = _recoveries.get(scenario.index)
+            if _rec is not None:
+                try:
+                    _rec.check_response()
+                except VerdictRecoveryExhausted as e:
+                    _recovery_exhausted(scenario, e)
+                    pending.discard(scenario.index)
+                    verdicts_changed = True
+                    _launch_next_queued()
+                    continue
+
             ev = _hook_events.read_event(scenario.session_id)
             ev_ts = float((ev or {}).get("timestamp") or 0)
             last_ts = _last_scenario_hook_ts.get(scenario.index, 0.0)
@@ -2990,7 +3075,6 @@ def _poll_tmux_verdicts(
                 # on it here would drift from spec R9 and introduce
                 # false turn-boundary signals for multi-turn work.
                 continue
-            _last_scenario_hook_ts[scenario.index] = ev_ts
 
             # Read verdict straight from the JSONL transcript.  The hook
             # event is the turn-boundary gate; the transcript is the
@@ -2999,27 +3083,37 @@ def _poll_tmux_verdicts(
                 scenario.transcript_path, ALL_VERDICTS,
             )
 
-            # Idle-reminder: when the agent emits idle_prompt without a
-            # verdict, nudge once per _reminder_timeout window.
-            if (verdict is None and _reminder_timeout is not None
-                    and scenario.pane_id):
-                now = time.monotonic()
-                last_reminded = _last_reminder_sent.get(scenario.index, 0.0)
-                if now - last_reminded >= _reminder_timeout:
-                    reminder = (
-                        "Reminder: your verdict must appear alone on its own "
-                        "line — the line must contain only PASS, NEEDS_WORK, "
-                        "or INPUT_REQUIRED with no other text. Please output "
-                        "your verdict now if you have reached a conclusion."
-                    )
-                    tmux_mod.send_keys(pane_id, reminder)
-                    _last_reminder_sent[scenario.index] = now
-                    _log.info(
-                        "Sent verdict-format reminder to scenario %d",
-                        scenario.index,
-                    )
+            # Bounded missing-output recovery: an idle_prompt without a
+            # verdict means the worker ended a turn without its outcome.
+            # Ask the same session for its own standalone outcome (or to
+            # resume after an empty/connection-loss turn), deferring to a
+            # newer hook event (native retry / queued input).  After the
+            # configured attempts the worker is marked INPUT_REQUIRED
+            # instead of hanging the whole QA run.
+            if verdict is None and pane_id:
+                rec = _recovery_for(scenario, pane_id)
+                if rec.enabled:
+                    # Non-blocking settle: leave the event unacknowledged
+                    # until the settle window elapses, so a newer turn
+                    # (native retry / queued input) supersedes it.
+                    if (time.time() - ev_ts) < _recovery_settle:
+                        continue
+                    _last_scenario_hook_ts[scenario.index] = ev_ts
+                    try:
+                        rec.handle(scenario.transcript_path, ev_ts)
+                    except VerdictRecoveryExhausted as e:
+                        _recovery_exhausted(scenario, e)
+                        pending.discard(scenario.index)
+                        verdicts_changed = True
+                        _launch_next_queued()
+                        continue
+                else:
+                    _last_scenario_hook_ts[scenario.index] = ev_ts
+            else:
+                _last_scenario_hook_ts[scenario.index] = ev_ts
 
             if verdict:
+                _recoveries.pop(scenario.index, None)
                 state.scenario_verdicts[scenario.index] = verdict
                 reason = extract_verdict_reason_from_transcript(
                     scenario.transcript_path,
@@ -3449,9 +3543,25 @@ def _verify_single_scenario(
                 stop_check=stop_check,
                 log_prefix=f"qa-verify-{scenario.index}",
                 workdir=verify_cwd,
+                outcome_request=(
+                    "Your last turn ended without a standalone outcome. "
+                    "Re-emit only your own conclusion from the work already "
+                    "completed: either VERIFIED alone on its own line, or "
+                    "the complete FLAGGED_START ... FLAGGED_END block. Do "
+                    "not redo work, re-run tests, or restate evidence. If "
+                    "you have not finished, continue the task instead."
+                ),
             )
         except WorkspaceTrustBlocked as e:
             return (False, _TRUST_BLOCKED_PREFIX + str(e),
+                    scenario.verifier_pane_id)
+        except VerdictRecoveryExhausted as e:
+            # Bounded recovery could not get VERIFIED / FLAGGED out of the
+            # verifier.  A failed verification blocks finalize, which is
+            # exactly the desired safety outcome.
+            _log.warning("Verification: no verdict for scenario %d: %s",
+                         scenario.index, e)
+            return (False, f"verifier produced no verdict: {e}",
                     scenario.verifier_pane_id)
         except Exception:
             _log.warning("Verification: initial polling failed for scenario %d",
@@ -3859,6 +3969,23 @@ def run_qa_sync(
             transcript_path=transcript_path_for(workdir_path,
                                                 planner_session_id))
         trust_blocked: str | None = None
+        # Bounded missing-output recovery for the planner: an idle turn with
+        # no complete plan is asked to re-emit its own QA_PLAN block (or to
+        # resume after an empty/connection-loss turn).  Exhaustion surfaces
+        # an actionable INPUT_REQUIRED instead of burning the whole timeout.
+        planner_recovery = MissingOutputRecovery(
+            session_id=planner_session_id,
+            pane_id=planner_pane,
+            verdicts=("QA_PLAN_END",),
+            send=lambda msg: tmux_mod.send_keys(planner_pane, msg),
+            max_attempts=recovery_max_attempts(),
+            settle_seconds=recovery_settle_seconds(),
+            response_timeout=recovery_response_timeout(),
+            outcome_request=build_block_outcome_request(
+                (("QA_PLAN_START", "QA_PLAN_END"),)),
+            log_prefix="qa-planner",
+        )
+        planner_exhausted: VerdictRecoveryExhausted | None = None
         while time.monotonic() < deadline:
             if state.stop_requested:
                 break
@@ -3894,6 +4021,11 @@ def run_qa_sync(
             )
             if ev is None:
                 # No idle_prompt yet — loop so we re-check deadline/stop.
+                try:
+                    planner_recovery.check_response()
+                except VerdictRecoveryExhausted as e:
+                    planner_exhausted = e
+                    break
                 continue
             trust_watch = None
             _hook_baseline = float(ev.get("timestamp") or _hook_baseline)
@@ -3926,6 +4058,58 @@ def run_qa_sync(
             else:
                 _log.info("planner poll: no QA_PLAN_END in latest turn "
                           "(elapsed=%.0fs) — continuing", elapsed)
+
+            # No complete plan this turn: ask the same planner session for
+            # its own complete QA_PLAN block (or to resume), deferring to a
+            # newer hook event instead of racing a native retry.
+            if state.stop_requested:
+                break
+            if not planner_recovery.enabled:
+                continue
+            try:
+                planner_recovery.handle(
+                    planner_transcript,
+                    float(ev.get("timestamp") or _hook_baseline),
+                    wait_for_newer=lambda timeout, ts: _hook_events.wait_for_event(
+                        planner_session_id,
+                        event_types={"idle_prompt"},
+                        timeout=timeout,
+                        newer_than=ts,
+                        stop_check=lambda: state.stop_requested,
+                    ),
+                )
+            except VerdictRecoveryExhausted as e:
+                planner_exhausted = e
+                break
+
+        if planner_exhausted:
+            # The planner idled without ever emitting a complete plan and
+            # bounded recovery is spent.  Surface an actionable error; the
+            # pane is left open so a human can inspect / continue it.
+            _log.warning("QA planner for %s exhausted recovery: %s",
+                         state.pr_id, planner_exhausted)
+            state.latest_verdict = VERDICT_INPUT_REQUIRED
+            state.latest_output = (
+                "QA planner produced no complete plan after recovery — "
+                "no scenarios planned")
+            state._error = (
+                "QA planning did not produce a complete QA_PLAN block.\n\n"
+                f"{planner_exhausted}\n\n"
+                "The planner pane was left open. Ask it to re-emit the full "
+                "QA_PLAN_START ... QA_PLAN_END block, or restart QA from the "
+                "TUI."
+            )
+            state.planning_phase = False
+            _write_status_file(status_path, state.pr_id, [],
+                               state.scenario_verdicts,
+                               overall=state.latest_verdict,
+                               scenario_0=state.scenario_0,
+                               error=state._error)
+            if planner_pane and tmux_mod.pane_exists(planner_pane):
+                _add_status_pane(session, planner_pane, status_path)
+            _notify()
+            state.running = False
+            return state
 
         if trust_blocked:
             # Planning never started.  Stop here: no execution phase and no

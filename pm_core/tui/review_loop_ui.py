@@ -20,6 +20,7 @@ from pm_core.review_loop import (
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
+    VERDICT_NO_VERDICT,
 )
 
 _log = configure_logger("pm.tui.review_loop_ui")
@@ -29,6 +30,7 @@ VERDICT_ICONS = {
     VERDICT_PASS: "[green bold]✓ PASS[/]",
     VERDICT_NEEDS_WORK: "[red bold]✗ NEEDS_WORK[/]",
     VERDICT_INPUT_REQUIRED: "[red bold]⏸ INPUT_REQUIRED[/]",
+    VERDICT_NO_VERDICT: "[red bold]! NO_VERDICT[/]",
     "KILLED": "[red bold]☠ KILLED[/]",
     "TIMEOUT": "[red bold]⏱ TIMEOUT[/]",
     "ERROR": "[red bold]! ERROR[/]",
@@ -321,12 +323,13 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
                    "superseded loop_id=%s verdict=%s",
                    state.loop_id, state.latest_verdict)
         return
-    # ERROR/KILLED are runtime failures, not clean completions; record
-    # them as state="failed" so the popup spinner can distinguish a
+    # ERROR/KILLED/NO_VERDICT are runtime failures, not clean completions;
+    # record them as state="failed" so the popup spinner can distinguish a
     # successful loop end from a failure and surface the verdict to the
     # user instead of silently dismissing.
     final_state = ("failed"
-                   if state.latest_verdict in ("ERROR", "KILLED")
+                   if state.latest_verdict in ("ERROR", "KILLED",
+                                               VERDICT_NO_VERDICT)
                    else "done")
     _rs.set_action_state(state.pr_id, "review-loop", final_state,
                          iteration=state.iteration,
@@ -439,7 +442,7 @@ def _poll_loop_state_inner(app) -> None:
             f"Review loop done for {state.pr_id}: {verdict_icon} "
             f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})"
         )
-        if state.latest_verdict == "ERROR" and state.latest_output:
+        if state.latest_verdict in ("ERROR", VERDICT_NO_VERDICT) and state.latest_output:
             # Truncate for display but show enough to be useful
             err_text = state.latest_output[:300]
             msg += f"\n  Error: {err_text}"

@@ -42,6 +42,7 @@ VERDICT_MARKERS = {
     "KILLED": "☠",
     "TIMEOUT": "⏱",
     "ERROR": "!",
+    "NO_VERDICT": "!",
     "INPUT_REQUIRED": "⏸",
 }
 
@@ -51,6 +52,7 @@ VERDICT_STYLES = {
     "KILLED": "bold red",
     "TIMEOUT": "bold red",
     "ERROR": "bold red",
+    "NO_VERDICT": "bold red",
     "INPUT_REQUIRED": "bold red",
 }
 
