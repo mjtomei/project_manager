@@ -598,3 +598,28 @@ def test_update_prs_drops_idless_entries():
     tree = TechTree([_pr("pr-a")])
     tree.update_prs([_pr("pr-a"), {"status": "merged"}])
     assert [p["id"] for p in tree._prs] == ["pr-a"]
+
+
+@async_test
+async def test_null_and_nonstring_titles_render_without_crashing():
+    """QA S31: a project.yaml with a null title (or a YAML integer title, or
+    control characters) must render, not take the TUI down.  PRNode.render
+    called cell_len(title) directly, so title: null raised TypeError and the
+    TUI unmounted on mount."""
+    ctrl = "Ctrl\nLine\rTab\tNUL\x00Esc\x1b[31mRed"
+    prs = [_pr("pr-null", title=None), _pr("pr-zero", title=0),
+           _pr("pr-ctrl", title=ctrl)]
+    app = _TreeApp(prs)
+    async with app.run_test(size=(160, 40)) as pilot:
+        await pilot.pause()
+        nodes = {n.pr_id: n for n in app.query(PRNode)}
+        null_lines = nodes["pr-null"].render().plain.splitlines()
+        zero_lines = nodes["pr-zero"].render().plain.splitlines()
+        ctrl_lines = nodes["pr-ctrl"].render().plain.splitlines()
+        assert null_lines[2].strip("│ ") == ""
+        assert "0" in zero_lines[2]
+        # Control characters are replaced by spaces: exactly one title row,
+        # no newline splitting the box and no live escape sequence.
+        assert len(ctrl_lines) == 5
+        assert ctrl_lines[2].startswith("║ Ctrl Line Tab NUL E")
+        assert "\x1b" not in "".join(ctrl_lines)

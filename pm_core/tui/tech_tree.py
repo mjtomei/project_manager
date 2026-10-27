@@ -559,6 +559,14 @@ class PRNode(Widget):
         id_line = f"{side} {id_content:<{max_id_len}} {side}"
 
         title = pr.get("title", "???")
+        # A null or non-string title (e.g. a YAML integer) must not crash the
+        # node: cell_len() raises on None/int.  Normalise the same way the
+        # popup picker does — None renders blank, other scalars stringify —
+        # and replace non-printables (newline/tab/NUL/ESC) so the 5-line box
+        # never gains a row or emits an escape sequence.
+        if not isinstance(title, str):
+            title = "" if title is None else str(title)
+        title = "".join(ch if ch.isprintable() else " " for ch in title)
         max_title_len = NODE_W - 4
         # Pad/truncate by display cell width (not char count) so double-width
         # cells (e.g. emoji) don't push the right border off the box.
