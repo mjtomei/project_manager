@@ -34032,7 +34032,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T08:13:43.052863+00:00'
+  updated_at: '2026-10-27T08:20:57.058463+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34982,6 +34982,27 @@ prs:
       reason from history.'
     created_at: '2026-10-27T08:13:42Z'
     last_edited: '2026-10-27T08:13:42Z'
+  - id: note-cf1e11d
+    text: 'QA scenario 21 PASS (2026-10-27) at 25fb1918. All three triples held live:
+      (1) launch applied the resolved pm/project.yaml conflict (up to date with master@…,
+      resolved … by record id, applied … as <merge12>), prompt showed 20 of 46 overlap
+      paths + "(+26 more; read $(pm qa captures-path <pr>)/integration.json or run
+      pm pr show <pr>)", the resolution block (added from PR/base, resolved-from,
+      applied merge) and 20 of 26 behaviour changes + "- … 6 more"; pm pr show gave
+      Overlap (46) … (+6 more) plus Resolved / Applied merge / digest / delta / Full
+      record, and integration.json held all 46. (2) clean base with 23 behaviour changes
+      listed 20 + "- … 3 more" (stored in full, no base_behavior_count); the MERGE
+      record gate refused without evidence/checks then accepted with pm-signoff-checks.
+      (3) two auto-sequence ticks bounced SIGNOFF_IMPL; the ⇤ return marker showed
+      in pm pr list and pm tui view, and pm prompt carried the bounded overlap + resolution
+      + applied merge + contained-base hint + behaviour line; pm pr show lost nothing.
+      Captures: /pm-captures/scenarios/21/. Harness: pm pr add prints two lines, so
+      use head -1 before awk; the launcher writes pm/prompts/pm_prompt_*.txt only
+      when fake-claude is NOT configured (clear it before a stub-claude launch); to
+      re-drive an already-applied launch, reset the PR branch to its pre-apply head
+      and clean pm/prompts; agg aarch64 v1.9.0 must be downloaded.'
+    created_at: '2026-10-27T08:20:57Z'
+    last_edited: '2026-10-27T08:20:57Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
