@@ -94,6 +94,8 @@ and folds the legacy fields:
     missing-target prune owns them later).
 - Legacy single-target breadcrumb (`target: X`, no stop list) cannot tell
   `O` from `A`; fail closed and migrate it to a `wait_for_merge` target.
+- A bare-string entry in `targets` (no pm version wrote one) has an unknown
+  policy; fail closed to `wait_for_merge` and report `migrated`.
 - Legacy record fields are normalised:
   - `wait_for_merge` truthy → `WAIT_KEY`; falsy → removed;
   - `policy` / `merge_policy` == `stop_before_merge`/`wait_for_merge` →
@@ -197,6 +199,7 @@ No **[UNRESOLVED]** items.
   in targets become wait; standalone ids become wait targets; terminal ids
   dropped; parse is idempotent.
 - Legacy single-target breadcrumb → wait target, `migrated` log.
+- Bare-string `targets` entry → wait target, `migrated` log.
 - Mixed record `{"policy": "stop_before_merge"}` / `{"wait_for_merge":
   false}` normalisation.
 - Shared prerequisite held by two wait targets; removing one keeps the hold

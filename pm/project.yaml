@@ -36153,7 +36153,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/261
   gh_pr_number: 261
   created_at: '2026-10-27T04:42:06.128850+00:00'
-  updated_at: '2026-10-27T05:49:51.017824+00:00'
+  updated_at: '2026-10-27T06:12:37.323775+00:00'
   started_at: '2026-10-27T04:42:19.589247+00:00'
   reviewed_at: null
   merged_at: null
@@ -36192,6 +36192,14 @@ prs:
       are identical on base 450a6362.'
     created_at: '2026-10-27T05:49:50Z'
     last_edited: '2026-10-27T05:49:50Z'
+  - id: note-3ea78dd
+    text: 'review-loop 82bf i2: fail closed on bare-string breadcrumb target entries
+      (unknown policy -> wait_for_merge, source=legacy-breadcrumb) instead of silently
+      auto-merging; refreshed stale docstrings in signoff_ui/review_loop_ui that still
+      described the removed "ready to merge"/stop line; spec R4 synced. Focused suites:
+      254 passed; full suite unchanged vs base (only pre-existing env failures: markdown/gh/git-push).'
+    created_at: '2026-10-27T06:12:37Z'
+    last_edited: '2026-10-27T06:12:37Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

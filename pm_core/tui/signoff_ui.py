@@ -4,8 +4,9 @@ The TUI is an auto-sequence driver just like ``pm pr auto-sequence``: a QA
 PASS (or, with ``skip_qa``, a review PASS) hands the PR to the ``sign_off``
 step, and the same state machine (:func:`pm_core.signoff.step_signoff`)
 adopts / records / routes the router's verdict.  Only a fresh
-``SIGNOFF_MERGE`` on the current HEAD reaches ``_maybe_auto_merge`` — O then
-stops with the ready line, A merges.  Bounce verdicts restart the matching
+``SIGNOFF_MERGE`` on the current HEAD reaches ``_maybe_auto_merge`` — a
+wait-for-merge hold stops with the waiting-for-manual-merge line, an
+auto-merge target merges.  Bounce verdicts restart the matching
 TUI loop (QA, review loop, implementation); ``SIGNOFF_BLOCKED`` waits for a
 human.
 

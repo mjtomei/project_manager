@@ -587,9 +587,10 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     never trigger merges — merge is an auto-start-only action.
 
     Sign-off gate first: without a fresh ``SIGNOFF_MERGE`` on the current
-    HEAD nothing merges and nothing claims "ready to merge" — a ``qa`` (or
-    skip_qa ``in_review``) PR is handed to the sign-off step instead, and a
-    ``sign_off`` PR is left to the sign-off driver (``signoff_ui``).
+    HEAD nothing merges and nothing claims "waiting for manual merge" — a
+    ``qa`` (or skip_qa ``in_review``) PR is handed to the sign-off step
+    instead, and a ``sign_off`` PR is left to the sign-off driver
+    (``signoff_ui``).
 
     Then the effective merge hold (``auto_start.merge_hold``: a
     ``wait_for_merge`` target whose closure contains the PR) stops with the

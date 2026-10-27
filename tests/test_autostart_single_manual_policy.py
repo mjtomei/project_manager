@@ -210,12 +210,13 @@ def test_breadcrumb_stop_marks_dropped_when_auto_start_was_off():
 
 
 def test_breadcrumb_string_target_is_a_legacy_shape():
-    """No pm version wrote bare-string targets; keep the record it implies
-    (plain auto-merge) and report the migration."""
+    """No pm version wrote bare-string targets, so the policy is unknown:
+    fail closed to wait-for-merge (as for ``target: X``) and report it."""
     targets, _all, migrated = st.targets_from_breadcrumb(
         {"auto_start": True, "targets": ["f"]})
     assert list(targets) == ["f"] and migrated
-    assert not targets["f"].get(st.WAIT_KEY)
+    assert targets["f"].get(st.WAIT_KEY) is True
+    assert targets["f"]["source"] == "legacy-breadcrumb"
 
 
 def test_breadcrumb_parse_is_idempotent():

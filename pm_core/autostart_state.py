@@ -289,11 +289,14 @@ def targets_from_breadcrumb(data: dict, prs: list[dict] | None = None
     if isinstance(raw, list):
         for entry in raw:
             if isinstance(entry, str):
-                # No pm version wrote bare-string targets; treat one as a
-                # legacy shape.  It carries no policy field, so it gets the
-                # same plain (auto-merge) record a bare dict would.
+                # No pm version wrote bare-string targets, so the record's
+                # policy is unknown: fail closed to the single manual policy
+                # (as for the legacy ``target: X`` shape) instead of letting
+                # a corrupted/mixed-version record silently auto-merge.
                 migrated = True
-                targets.setdefault(entry, make_target_record("breadcrumb"))
+                rec = make_target_record("legacy-breadcrumb")
+                rec[WAIT_KEY] = True
+                targets.setdefault(entry, rec)
             elif isinstance(entry, dict) and entry.get("pr_id"):
                 rec, legacy_seen = _normalize_record(entry)
                 migrated = migrated or legacy_seen
