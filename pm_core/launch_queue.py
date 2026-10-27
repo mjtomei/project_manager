@@ -169,29 +169,40 @@ def get_queue_policy() -> str:
 # Ownership and stale entry cleanup
 # ---------------------------------------------------------------------------
 
-def _proc_start_time(pid: int) -> str | None:
-    """Kernel start time of *pid* (clock ticks since boot), or None."""
+def _proc_stat_fields(pid: int) -> list[str] | None:
+    """Fields of ``/proc/<pid>/stat`` from field 3 (state) on, or None."""
     try:
         stat = Path(f"/proc/{pid}/stat").read_text()
     except OSError:
         return None
-    # comm (field 2) may contain spaces; fields after the closing paren
-    # start at field 3, so starttime (field 22) is index 19 there.
-    try:
-        return stat.rsplit(")", 1)[1].split()[19]
-    except IndexError:
+    # comm (field 2) may contain spaces; split after its closing paren.
+    return stat.rsplit(")", 1)[-1].split()
+
+
+def _proc_start_time(pid: int) -> str | None:
+    """Kernel start time of *pid* (clock ticks since boot), or None."""
+    fields = _proc_stat_fields(pid)
+    # starttime is field 22, i.e. index 19 counting from field 3.
+    if not fields or len(fields) < 20:
         return None
+    return fields[19]
 
 
 def _is_pid_alive(pid: int) -> bool:
-    """Check if a process is still alive."""
+    """Check if a process is still alive.
+
+    A zombie (killed but not yet reaped by its parent, e.g. a SIGKILLed TUI
+    whose tmux server has not waited on it) still answers ``kill(pid, 0)``
+    but can never renew or release its entries, so it counts as dead.
+    """
     try:
         os.kill(pid, 0)
-        return True
     except PermissionError:
-        return True  # exists, owned by someone else
+        pass  # exists, owned by someone else
     except (OSError, ProcessLookupError):
         return False
+    fields = _proc_stat_fields(pid)
+    return not (fields and fields[0] in ("Z", "X"))
 
 
 def _owner_fields() -> dict:

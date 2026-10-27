@@ -3,6 +3,7 @@
 import contextlib
 import os
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -24,6 +25,7 @@ from pm_core.launch_queue import (
     _ACQUIRED_TTL,
     _sort_queue,
     _clean_stale,
+    _proc_start_time,
     _load_queue,
     _save_queue,
     VALID_POLICIES,
@@ -557,6 +559,22 @@ class TestOwnership:
     def test_recycled_pid_is_stale(self):
         e = self._entry(pid=os.getppid(), pid_start="1")
         assert _clean_stale([e]) == []
+
+    def test_unreaped_zombie_owner_is_stale(self):
+        """A SIGKILLed owner its parent has not reaped yet is dead."""
+        pid = os.fork()
+        if pid == 0:
+            os._exit(0)
+        try:
+            deadline = time.time() + 5
+            while (Path(f"/proc/{pid}/stat").read_text()
+                   .rsplit(")", 1)[1].split()[0] != "Z"
+                   and time.time() < deadline):
+                time.sleep(0.01)
+            e = self._entry(pid=pid, pid_start=_proc_start_time(pid))
+            assert _clean_stale([e]) == []
+        finally:
+            os.waitpid(pid, 0)
 
     def test_waiting_without_heartbeat_expires(self):
         now = time.time()
