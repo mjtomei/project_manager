@@ -36,9 +36,10 @@ R1. **Reusable, safe wait helper.** Add a checked-in helper
      non-empty, *fresh for this run* (not a stale leftover), plus an optional
      `--validate` command (e.g. `ffprobe`);
    - if the helper itself is signalled (Ctrl-C, or a supervisor killing the
-     waiting shell), terminates the job's own process group and reports the
-     interruption (exit 130) — a killed wait must not masquerade as a job
-     failure, nor leave a renderer running behind it;
+     waiting shell), terminates the job's own process group — escalating to
+     SIGKILL after a short grace period (`WAIT_FOR_JOB_KILL_GRACE`, default
+     5s) — and reports the interruption (exit 130) — a killed wait must not
+     masquerade as a job failure, nor leave a renderer running behind it;
    - emits actionable diagnostics on every failure path.
 
 R2. **Recipe guidance.** `pm/qa/artifacts/tmux-screen-recording.md` and
@@ -86,6 +87,12 @@ covering at minimum:
    - unreaped zombie sibling does not stall the helper;
    - signal-killed job → failure with its status; a signalled helper → exit
      130, the job is terminated, and the diagnostic says "interrupted";
+   - a job that ignores SIGTERM → the interrupted helper still exits 130
+     within `KILL_GRACE` and the job's group is gone;
+   - the `-- CMD [ARG...]` (non-`-c`) form runs the command and reports its
+     status;
+   - the shared background-job block reaches the impl, review (incl. review
+     loop) and QA-child prompts, and the QA-child prompt explains `RECIPE_DIR`;
    - recipe/helper content assertions (helper referenced, `--timeout`,
      `--artifact`, `pipefail`; helper copied by `_install_artifact_files`).
 
@@ -153,7 +160,10 @@ verifier's FLAGGED rule is asserted there too, not only the prose paragraph.
 - Job killed by a signal → reported as failure with status.
 - Helper itself signalled (TERM/INT/HUP) → the job's process group is
   terminated, the helper exits 130 and says "interrupted" — never a bogus job
-  status, never an orphaned renderer.
+  status, never an orphaned renderer. A job (or the shell running it) that
+  ignores SIGTERM is SIGKILLed once `KILL_GRACE` expires, so the interrupt
+  path is explicitly bounded instead of depending on `timeout`'s own
+  `--kill-after`.
 - `--validate` command fails → artifact invalid → fail.
 - Artifact path is a directory / symlink to nothing → fail as not a regular
   file.

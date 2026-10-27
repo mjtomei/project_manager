@@ -21,9 +21,11 @@
 # On timeout only the job's own process group is signalled, so unrelated jobs
 # (including a deliberately persistent observer started by the caller) are
 # left alone. If the helper itself is signalled (Ctrl-C, or a supervisor killing
-# the waiting shell) it terminates the job's process group and reports the
-# interruption — a killed wait is never passed off as a job failure, and never
-# leaves a renderer running behind it to race a later run over the artifact.
+# the waiting shell) it terminates the job's process group — escalating to
+# SIGKILL after a short grace period — and reports the interruption: a killed
+# wait is never passed off as a job failure, never hangs on a job that ignores
+# SIGTERM, and never leaves a renderer running behind it to race a later run
+# over the artifact.
 #
 # Exit status:
 #   0  job exited 0 and the artifact is fresh (and --validate passed)
@@ -89,17 +91,40 @@ command -v timeout >/dev/null 2>&1 || die "the 'timeout' command is required"
 
 job_pid=""
 
+# How long an interrupted job gets to honour SIGTERM before it is killed
+# outright. A job (or a shell it runs under) that ignores TERM keeps the trap
+# blocked in `wait`, and a second Ctrl-C does nothing because the trap has been
+# cleared — so the interrupt path needs its own explicit bound rather than
+# relying on `timeout`'s `--kill-after` (an implementation detail that costs
+# ~10s here and is not available everywhere).
+KILL_GRACE=${WAIT_FOR_JOB_KILL_GRACE:-5}
+case "$KILL_GRACE" in ''|*[!0-9]*) KILL_GRACE=5 ;; esac
+
+# Signal the job's process group. `timeout` made itself a process-group
+# leader, so `-$job_pid` is the job's own group; the fallback covers a timeout
+# that could not become leader (e.g. run in the terminal's foreground group).
+signal_job() {
+  kill -"$1" -- "-$job_pid" 2>/dev/null || \
+      kill -"$1" "$job_pid" 2>/dev/null || true
+}
+
 # If the helper is signalled, stop the job too. Without this the `wait` would
 # return 143 and be reported as a *job* failure while the renderer kept running
 # — a misleading diagnostic and an orphan that can race a retry over the same
-# artifact. `timeout` made itself a process-group leader, so `-$job_pid` is the
-# job's own group; the fallback covers a timeout that could not become leader.
+# artifact.
 on_signal() {
   trap - TERM INT HUP
   if [ -n "$job_pid" ]; then
-    kill -TERM -- "-$job_pid" 2>/dev/null || \
-        kill -TERM "$job_pid" 2>/dev/null || true
+    signal_job TERM
+    # Escalator: a child of this shell (so it inherits no ignored disposition)
+    # that SIGKILLs the job's group if the grace period runs out. It is
+    # cancelled as soon as the job is reaped; if this helper is itself killed
+    # outright, the escalator still stops the orphaned renderer.
+    ( sleep "$KILL_GRACE"; signal_job KILL ) &
+    escalator=$!
     wait "$job_pid" 2>/dev/null || true
+    kill "$escalator" 2>/dev/null || true
+    wait "$escalator" 2>/dev/null || true
   fi
   printf 'wait-for-job: interrupted before the job finished — this is a failure, not a result\n' >&2
   exit 130

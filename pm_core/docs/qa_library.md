@@ -207,7 +207,10 @@ poll process names: `until ! pgrep -f "<renderer>"` matches the
 waiting shell's own command line and never ends, and a bare `wait`
 blocks on every child, including a deliberately persistent observer.
 A leftover artifact from an earlier run, or a killed/timed-out wait,
-is not evidence that a capture succeeded.
+is not evidence that a capture succeeded. If the helper itself is
+interrupted it stops the job's process group (escalating to SIGKILL
+after a short grace period) and exits 130 — a killed wait is reported
+as a failure, never as a finished render.
 
 A minimal example:
 

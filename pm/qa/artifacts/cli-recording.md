@@ -85,8 +85,11 @@ tmux -L scaffold send-keys -t rec:0.0 \
 #    on the same scaffold socket; if you wrapped a single command or
 #    a `bash -c` script, just wait for it to finish.
 
-# 4. Stop: have the recorded process exit (it'll flush the cast),
-#    or `pkill -TERM -f 'asciinema rec.*<capture-dir>'`.
+# 4. Stop: have the recorded process exit (it'll flush the cast), or
+#    send Ctrl-C to the pane. Do NOT reach for `pkill -f 'asciinema
+#    rec.*'` — that pattern can match the shell running it, and killing
+#    by process name is the anti-pattern the render step warns about.
+tmux -L scaffold send-keys -t rec:0.0 C-c
 tmux -L scaffold kill-server   # cleanup
 ```
 
