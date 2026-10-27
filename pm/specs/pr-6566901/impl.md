@@ -238,6 +238,14 @@ safe when a caller knows hook refreshes terminate). `retry_prompt` /
 
 `wait_for_follow_up_verdict` is **not** changed (human wait; see Ambiguities).
 
+For tick-based loops the tracker is handed the hook timestamp it has already
+accounted for (the episode's opening event, then the last deferred event),
+never the event just read: `_newer_event` compares against that value, so
+passing the current event would make every refresh look like "no new event"
+and the worker would be nudged instead of exhausting with `no_progress`. The
+QA tick loop keeps that per-scenario value in `_recovery_ev_ts` and drops it
+alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
+
 ### Review loop (`pm_core/review_loop.py`)
 
 * import `VerdictRecoveryExhausted`, `VERDICT_NO_VERDICT`;
@@ -334,7 +342,11 @@ values (e.g. `0.5`) are accepted by `pm set`.
   (bounded, instead of hanging) — implemented via the content-aware deferral
   bound: a refresh that does not change the transcript counts against
   `max_deferrals` and raises `no_progress`, so the fake is never nudged (a
-  nudge would close its stdin) and `NO_VERDICT` is surfaced.
+  nudge would close its stdin) and `NO_VERDICT` is surfaced. This holds for
+  both `poll_for_verdict` (blocking settle) and the QA tick loop (which
+  passes the previously handled event timestamp, see Design).
+* **Autostart** treats a `NO_VERDICT` review-loop verdict as `failed`
+  (`pm_core/autostart_state.py`), like `ERROR`/`KILLED`.
 * **Grace periods** (`review 20s`, `QA 30s`) still gate verdict acceptance; a
   nudge sent before grace elapses is harmless (its turn produces a later
   event), but we only nudge on post-grace idles.

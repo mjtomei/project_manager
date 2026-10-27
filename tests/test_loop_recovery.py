@@ -860,6 +860,82 @@ class TestQARecoveryWiring:
         assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
         assert "no_progress" in state.scenario_verdict_reasons[1]
 
+    def test_scenario_worker_refresh_between_ticks_is_no_progress(
+            self, tmp_path, monkeypatch):
+        """A refresh that lands between ticks is a refresh, not a new turn.
+
+        Production shape: the hook file's timestamp advances every ~2s while
+        the tick loop polls every 5s, so a second ``read_event`` within one
+        tick returns the same event.  Recovery must hand the tracker the
+        event it has already accounted for, otherwise every refresh looks
+        like "no new event" and the worker is nudged (closing a FakeClaude's
+        stdin) instead of exhausting with ``no_progress``.
+        """
+        from pm_core import loop_shared, qa_loop
+        from pm_core.qa_loop import QALoopState, QAScenario
+
+        scenario = QAScenario(index=1, title="S", focus="f")
+        scenario.window_name = "qa-s1"
+        scenario.session_id = "sid-s1"
+        scenario.pane_id = "%1"
+        scenario.transcript_path = str(
+            _transcript_with_assistant(tmp_path, "still testing"))
+
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+        state.qa_workdir = None
+
+        clock = {"t": 1000.0, "ev": 100.0}
+        ticks = {"n": 0}
+
+        def fake_sleep(_seconds):
+            # One tick: the wall clock and the hook timestamp advance, and
+            # the hook stays stable for the rest of the tick.
+            ticks["n"] += 1
+            assert ticks["n"] <= 200, "QA tick loop hung: no recovery"
+            clock["t"] += 5.0
+            clock["ev"] += 2.0
+
+        def fake_read_event(_sid):
+            return {"event_type": "idle_prompt",
+                    "timestamp": clock["ev"],
+                    "session_id": "sid-s1"}
+
+        sent: list[str] = []
+
+        monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+        monkeypatch.setattr(qa_loop, "recovery_max_attempts", lambda: 2)
+        monkeypatch.setattr(qa_loop, "recovery_settle_seconds", lambda: 5.0)
+        monkeypatch.setattr(qa_loop, "recovery_response_timeout", lambda: 0.0)
+        monkeypatch.setattr(qa_loop, "_is_verification_enabled",
+                            lambda: False)
+        monkeypatch.setattr(qa_loop, "_get_verdict_reminder_timeout",
+                            lambda: None)
+        monkeypatch.setattr(loop_shared.time, "monotonic",
+                            lambda: clock["t"])
+
+        with patch("pm_core.hook_events.read_event",
+                   side_effect=fake_read_event), \
+             patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value=None), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep), \
+             patch("pm_core.qa_loop.time.time",
+                   side_effect=lambda: clock["t"]), \
+             patch("pm_core.tmux.send_keys",
+                   side_effect=lambda _p, m: sent.append(m)), \
+             patch("pm_core.tmux.pane_exists", return_value=True):
+            qa_loop._poll_tmux_verdicts(
+                state, {}, {}, "sess", str(tmp_path),
+                tmp_path / "status.json", lambda *a: None,
+            )
+
+        assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
+        assert "no_progress" in state.scenario_verdict_reasons[1]
+        assert not sent, "a refresh-only worker must not be nudged"
+
     def test_scenario_worker_single_idle_then_silent_is_bounded(
             self, tmp_path, monkeypatch):
         """A worker that emits ONE no-verdict idle then goes silent must not

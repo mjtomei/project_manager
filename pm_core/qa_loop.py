@@ -2690,6 +2690,13 @@ def _poll_tmux_verdicts(
     # held-open FakeClaude refreshes its hook every 2s) would otherwise keep
     # pushing the window forward and QA would hang without ever nudging.
     _no_verdict_since: dict[int, float] = {}
+    # Hook timestamp last handed to the scenario's recovery tracker.  The
+    # tracker decides "new turn" vs "refresh of the same turn" by comparing
+    # against this, so it must be the *previously handled* event, not the
+    # one just read: passing the current event would make every refresh look
+    # like no new event at all, and the worker would be nudged instead of
+    # exhausting with ``no_progress`` (a nudge closes a FakeClaude's stdin).
+    _recovery_ev_ts: dict[int, float] = {}
     # Hook-driven idle detection: gate verdict extraction on fresh
     # idle_prompt events for each scenario's Claude session.  Scenarios
     # without a session_id cannot be polled and are marked INPUT_REQUIRED.
@@ -2851,6 +2858,7 @@ def _poll_tmux_verdicts(
         _notify()
         _recoveries.pop(scenario.index, None)
         _no_verdict_since.pop(scenario.index, None)
+        _recovery_ev_ts.pop(scenario.index, None)
 
     while (pending or verifying or _launch_queue) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
@@ -3021,6 +3029,7 @@ def _poll_tmux_verdicts(
                         # attempt counts never leak across panes/sessions.
                         _recoveries.pop(scenario.index, None)
                         _no_verdict_since.pop(scenario.index, None)
+                        _recovery_ev_ts.pop(scenario.index, None)
                         continue
                     # Relaunch failed — will retry on next poll iteration
                     continue
@@ -3092,6 +3101,7 @@ def _poll_tmux_verdicts(
                     or _rec.session_id != (scenario.session_id or "")):
                 _recoveries.pop(scenario.index, None)
                 _no_verdict_since.pop(scenario.index, None)
+                _recovery_ev_ts.pop(scenario.index, None)
                 _rec = None
             if _rec is not None:
                 try:
@@ -3127,6 +3137,7 @@ def _poll_tmux_verdicts(
                     # re-announcing the same turn) cannot push the nudge
                     # forward forever.
                     _no_verdict_since.setdefault(scenario.index, time.time())
+                    _recovery_ev_ts.setdefault(scenario.index, ev_ts)
 
             # Bounded missing-output recovery: an idle turn without a
             # verdict means the worker ended a turn without its outcome.
@@ -3149,12 +3160,18 @@ def _poll_tmux_verdicts(
                     # Recovery disabled: legacy behaviour — leave the
                     # worker running; a later turn may still produce it.
                     _no_verdict_since.pop(scenario.index, None)
+                    _recovery_ev_ts.pop(scenario.index, None)
                 elif (time.time()
                       - _no_verdict_since[scenario.index]) >= _recovery_settle:
                     try:
                         result = rec.handle(
                             scenario.transcript_path,
-                            ev_ts or last_ts,
+                            # The tracker compares this against the hook
+                            # file to tell a genuine new turn from a refresh
+                            # of the same one, so hand it the event it has
+                            # already accounted for.
+                            _recovery_ev_ts.get(
+                                scenario.index, ev_ts or last_ts),
                             # Never nudge a worker while the run is being
                             # torn down (its pane is left for inspection).
                             stop_check=lambda: state.stop_requested,
@@ -3179,6 +3196,7 @@ def _poll_tmux_verdicts(
                         # MissingOutputRecovery bounds them with
                         # ``max_deferrals`` (no_progress exhaustion).
                         _no_verdict_since[scenario.index] = time.time()
+                        _recovery_ev_ts[scenario.index] = ev_ts
                     elif result.status == "completed":
                         # The verdict landed while we settled: record it
                         # below instead of nudging a completed worker.
@@ -3190,10 +3208,12 @@ def _poll_tmux_verdicts(
                         # teardown — so the next no-verdict turn starts a
                         # fresh settle window.
                         _no_verdict_since.pop(scenario.index, None)
+                        _recovery_ev_ts.pop(scenario.index, None)
 
             if verdict:
                 _recoveries.pop(scenario.index, None)
                 _no_verdict_since.pop(scenario.index, None)
+                _recovery_ev_ts.pop(scenario.index, None)
                 state.scenario_verdicts[scenario.index] = verdict
                 reason = extract_verdict_reason_from_transcript(
                     scenario.transcript_path,

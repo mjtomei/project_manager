@@ -36201,3 +36201,39 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-f2fee05
+  plan: bugs
+  title: 'Bug: QA verifier re-verification follow-up wait hangs when the verifier
+    emits no verdict'
+  branch: pm/pr-f2fee05-bug-qa-verifier-re-verification-follow-up-wait-han
+  status: pending
+  depends_on: []
+  description: "## Location\n\n`pm_core/qa_loop.py` `_verify_single_scenario` (re-verification\
+    \ branch) →\n`pm_core/loop_shared.wait_for_follow_up_verdict`.\n\n## Symptom\n\
+    \nThe initial verification poll is bounded by pr-6566901's MissingOutputRecovery,\n\
+    but the re-verification follow-up (after a FLAGGED verdict sends the scenario\n\
+    back to run again) waits on `wait_for_follow_up_verdict`, which loops until a\n\
+    verdict newer than the baseline appears, the pane disappears, or the run is\n\
+    stopped. It has no deadline and no recovery, so a verifier that ends its\nfollow-up\
+    \ turn without `VERIFIED` or a complete `FLAGGED_START … FLAGGED_END`\nblock leaves\
+    \ QA's verification phase blocked indefinitely.\n\n## Repro\n\n1. A scenario emits\
+    \ PASS; the verifier flags it (FLAGGED_END).\n2. The scenario re-runs and is re-verified:\
+    \ `_verify_single_scenario` sends the\n   follow-up message and calls `wait_for_follow_up_verdict`.\n\
+    3. The verifier replies with prose (no standalone VERIFIED / FLAGGED block) and\n\
+    \   goes idle → QA waits forever (until `z t`/stop or the pane dies).\n\n## Why\
+    \ pr-6566901 left it\n\nThat PR deliberately leaves `wait_for_follow_up_verdict`\
+    \ unbounded because the\nsame helper serves the genuine human INPUT_REQUIRED follow-up\
+    \ wait (audit: a\nreal INPUT_REQUIRED is not a missing-output failure). The verifier\
+    \ use is\nmachine-driven, not a human wait.\n\n## Suggested fix\n\nBound the machine-driven\
+    \ follow-up only (e.g. reuse MissingOutputRecovery or an\nexplicit deadline in\
+    \ the re-verification branch), keeping the human\nINPUT_REQUIRED follow-up waits\
+    \ unbounded. Preserve the baseline-line snapshot\nsemantics from pr-8efa789."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T08:55:07.647281+00:00'
+  updated_at: '2026-10-27T08:55:07.647281+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
