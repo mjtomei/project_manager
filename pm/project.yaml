@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T16:34:06.257643+00:00'
+  updated_at: '2026-10-27T17:21:52.927201+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14082,6 +14082,25 @@ prs:
       execute on the host via the proxy ls-remote/fetch and needs a design decision.'
     created_at: '2026-10-27T16:34:06Z'
     last_edited: '2026-10-27T16:34:06Z'
+  - id: note-d971b1d
+    text: 'Review-loop f54b i5 (incidental security fix): host-side git in the container-writable
+      PR workdir no longer runs its repository hooks. i4 closed this escape on the
+      push proxy, but pm''s own git commands in the same directory still ran container-authored
+      hooks with host credentials: `integration.apply_integration` merges the clean
+      base into the PR branch there (sign-off routing -> pre-merge-commit/post-merge),
+      `_publish_vanilla` / `_publish_github` push the approved head from it (pre-push),
+      `pr start` pulls/checks out/commits/pushes there, and QA''s `_publish_planner_head`
+      pushes the planner head. New `git_ops.run_git(..., no_hooks=True)` prepends
+      `-c core.hooksPath=/dev/null` (`git_ops.NO_HOOKS_ARGS`, now also used by integration''s
+      candidate worktree); `checkout_branch`/`pull_rebase`/`integration._git`/`qa_loop._git_capture`
+      forward it and those call sites pass it. tests/test_git_hooks_isolation.py plants
+      real post-merge/pre-merge-commit/pre-push hooks that touch a marker and asserts
+      the merge/push succeed with the marker absent; verified the same hooks do fire
+      when the flag is dropped. Still open and noted on pr-c558b14: the config-based
+      equivalents in that workdir (core.fsmonitor on status/diff, core.sshCommand
+      on ssh pushes, remote.*.uploadpack). Full suite 4213 passed, 2 skipped.'
+    created_at: '2026-10-27T17:21:52Z'
+    last_edited: '2026-10-27T17:21:52Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -34048,8 +34067,26 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-27T16:31:43.269298+00:00'
-  updated_at: '2026-10-27T16:31:43.269298+00:00'
+  updated_at: '2026-10-27T17:10:21.232046+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-0ded9ef
+    text: 'Additional trigger surfaces found while reviewing pr-1139060 (f54b i5):
+      the same container-authored-git-config escape exists on host-side pm git commands
+      that run inside the container-writable PR workdir, not only the push proxy.
+      (1) `integration.apply_integration` runs `git merge` in the PR workdir when
+      sign-off routes work back — a repo-configured `core.fsmonitor` (and any future
+      hook-like config) executes on the host; its `git status --porcelain` guard does
+      too. (2) `_publish_vanilla` / `_publish_github` push the approved head from
+      the PR workdir, so `core.sshCommand` in that repo config runs on the host for
+      ssh remotes (and `remote.<name>.uploadpack` for the fetch-url side). (3) `pr
+      start` runs pull/checkout/commit/push in the same workdir. The *hook* half of
+      this is now closed on pr-1139060 (`no_hooks=True` -> `git -c core.hooksPath=/dev/null`
+      on integration.apply_integration, the publish pushes, and pr start); the config
+      keys still need the design decision this PR is about — neutralise them the same
+      way (`core.fsmonitor=`, `core.sshCommand=`? careful with real remotes) or run
+      host-side workdir git with a sanitised config (`GIT_CONFIG_*`).'
+    created_at: '2026-10-27T17:10:21Z'
+    last_edited: '2026-10-27T17:10:21Z'

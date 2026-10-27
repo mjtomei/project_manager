@@ -919,10 +919,11 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     else:
         if is_git:
             click.echo(f"Updating {work_path}...")
-            git_ops.pull_rebase(work_path)
+            # The PR workdir is container-writable: run its hooks never.
+            git_ops.pull_rebase(work_path, no_hooks=True)
 
         click.echo(f"Checking out branch {branch}...")
-        git_ops.checkout_branch(work_path, branch, create=True)
+        git_ops.checkout_branch(work_path, branch, create=True, no_hooks=True)
 
     # For GitHub backend: push branch and create draft PR if not already set
     backend_name = data["project"].get("backend", "vanilla")
@@ -934,10 +935,12 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
 
         # Create empty commit so the branch has something to push
         commit_msg = f"Start work on: {title}\n\nPR: {pr_id}"
-        git_ops.run_git("commit", "--allow-empty", "-m", commit_msg, cwd=work_path)
+        git_ops.run_git("commit", "--allow-empty", "-m", commit_msg,
+                        cwd=work_path, no_hooks=True)
 
         click.echo(f"Pushing branch {branch}...")
-        push_result = git_ops.run_git("push", "-u", "origin", branch, cwd=work_path, check=False)
+        push_result = git_ops.run_git("push", "-u", "origin", branch,
+                                      cwd=work_path, check=False, no_hooks=True)
         if push_result.returncode != 0:
             click.echo(f"Warning: Failed to push branch: {push_result.stderr}", err=True)
         else:
@@ -2216,7 +2219,7 @@ def _publish_vanilla(root: Path, pr_entry: dict, workdir: str,
         "push", "--porcelain", target_repo,
         f"{merge_sha}:refs/heads/{base_branch}",
         f"--force-with-lease=refs/heads/{base_branch}:{base_sha}",
-        cwd=workdir, check=False)
+        cwd=workdir, check=False, no_hooks=True)
     if push.returncode != 0:
         now = integration.remote_ref(workdir, target_repo,
                                      f"refs/heads/{base_branch}")
@@ -2284,7 +2287,7 @@ def _publish_github(root: Path, pr_entry: dict, workdir: str,
         lease = f"--force-with-lease=refs/heads/{branch}:{remote_head or ''}"
         push = git_ops.run_git("push", target_repo,
                                f"{head}:refs/heads/{branch}", lease,
-                               cwd=workdir, check=False)
+                               cwd=workdir, check=False, no_hooks=True)
         if push.returncode != 0:
             click.echo(f"Could not push the approved head to {branch}: "
                        f"{_git_detail(push)}", err=True)

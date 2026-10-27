@@ -194,7 +194,14 @@ operations do not take PM's launch lock.
   with repository hooks disabled (`core.hooksPath=/dev/null`): the workdir is
   container-writable, so a container-authored `.git/hooks/pre-push` (or a
   repo `core.hooksPath`) would otherwise execute on the host — the same
-  sandbox escape the dangerous-flag guard blocks. Reuse holds the same
+  sandbox escape the dangerous-flag guard blocks. The same applies to every
+  host-side pm git command that runs inside the container-writable PR workdir:
+  `integration.apply_integration`'s merge (sign-off routing), the merge
+  publish pushes (`_publish_vanilla` / `_publish_github`), `pr start`'s
+  pull/checkout/commit/push, and QA's `_publish_planner_head` push all pass
+  `no_hooks=True` (`pm_core.git_ops.NO_HOOKS_ARGS`), so a planted
+  `post-merge`, `pre-push`, `pre-commit` or `post-checkout` hook never runs
+  on the host. Reuse holds the same
   proxy lock while validating its runtime domain or repairing a dead socket;
   a dead foreign-domain proxy directory is not reassigned.
   If runtime inventory is unavailable, preserve the shared proxy for a later

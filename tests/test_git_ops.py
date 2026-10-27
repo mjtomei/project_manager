@@ -152,7 +152,8 @@ class TestCheckoutBranch:
     @patch("pm_core.git_ops.run_git")
     def test_simple_checkout(self, mock_rg):
         checkout_branch(Path("/tmp"), "main")
-        mock_rg.assert_called_once_with("checkout", "main", cwd=Path("/tmp"))
+        mock_rg.assert_called_once_with("checkout", "main", cwd=Path("/tmp"),
+                                        no_hooks=False)
 
     @patch("pm_core.git_ops.run_git")
     def test_create_branch_new(self, mock_rg):
@@ -198,7 +199,8 @@ class TestPullRebase:
     def test_calls_pull_rebase(self, mock_rg):
         mock_rg.return_value = MagicMock(returncode=0)
         pull_rebase(Path("/tmp"))
-        mock_rg.assert_called_once_with("pull", "--rebase=merges", cwd=Path("/tmp"), check=False)
+        mock_rg.assert_called_once_with("pull", "--rebase=merges", cwd=Path("/tmp"),
+                                        check=False, no_hooks=False)
 
     def test_keeps_unpushed_merge(self, tmp_path):
         """An unpushed merge of the base into the branch survives the pull
