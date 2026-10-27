@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T01:46:41.397928+00:00'
+  updated_at: '2026-10-27T01:56:46.476696+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33299,6 +33299,38 @@ prs:
       (3) `pm qa captures-path` must run with the test project as cwd.'
     created_at: '2026-10-27T01:46:41Z'
     last_edited: '2026-10-27T01:46:41Z'
+  - id: note-c5d93e3
+    text: 'S15 refined + verified live (481644d5) with tmux + fake-claude: a clean
+      bounce applies the base; the re-check reports up to date and keeps base_files_count/overlap/base_behavior_changes
+      via carry-forward (base_files list becomes base_files_count); record/merge refuse
+      a MERGE without pm-signoff-evidence+reason or pm-signoff-checks. Harness traps:
+      export PYTHONPATH=/workspace (container default /opt/pm-src shadows the PR);
+      keep fake-claude on PATH (e.g. /workspace/bin) or review/sign-off windows die
+      instantly; run pm in a shell window of the test tmux session, not the TUI pane;
+      the test repo needs an initial commit before pm init and pm/ committed before
+      pm pr start.'
+    created_at: '2026-10-27T01:38:18Z'
+    last_edited: '2026-10-27T01:38:18Z'
+  - id: note-a3bf15d
+    text: 'QA S15 PASS (481644d5) — all four triples verified end-to-end twice (hand-driven,
+      then scripted): (1) a clean bounce applies B2; the re-check says `up to date
+      with master@B2` and still shows both base-behaviour lines and `changed on both
+      sides`, and the recorded check keeps base_files_count 2 / overlap / base_behavior_changes
+      / base_range_from = the pre-B2 commit; (2) a MERGE report without reuse/checks
+      is refused at `pm pr signoff record` (exit 1) and `pm pr merge` (exit 1, nothing
+      published, master unmoved); (3) adding pm-signoff-checks is accepted and the
+      merge publishes master^{tree} == the recorded candidate tree, both pyproject.toml
+      sides, both PR records, and `pm pr list --status merged` shows it; (4) after
+      SIGNOFF_IMPL and a hand-merged pm/project.yaml conflict, the re-check still
+      surfaces the base model_config behaviour lines and overlap (base_files_count
+      1). Captures: /pm-captures/scenarios/15/{clean-bounce,hand-merge}. Harness:
+      `pm session` attaches and hijacks a pane that is being recorded — run it with
+      `</dev/null`; recording on a separate tmux socket is safe because pm routes
+      tmux through $TMUX and switch-client only targets clients of the pm session;
+      PR ids are deterministic per title, so a second fixture reuses pr-c0bbcff/pr-639bebd;
+      agg is not preinstalled — download agg-aarch64 v1.9.0.'
+    created_at: '2026-10-27T01:56:46Z'
+    last_edited: '2026-10-27T01:56:46Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
