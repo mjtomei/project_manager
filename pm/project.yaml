@@ -31078,7 +31078,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-27T08:07:06.024979+00:00'
+  updated_at: '2026-10-27T08:33:04.701806+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31201,6 +31201,23 @@ prs:
       reproduce on origin/master.'
     created_at: '2026-10-27T08:07:05Z'
     last_edited: '2026-10-27T08:07:05Z'
+  - id: note-9f4f5a2
+    text: 'Review loop i10: the wait helper''s interrupt handler now *ignores* repeat
+      signals (`trap '''' TERM INT HUP`) instead of restoring the default disposition
+      — a second Ctrl-C / repeated supervisor TERM killed it mid-cleanup (verified
+      rc -15, no diagnostic, cleanup left to the escalator alone). The escalator inherits
+      the ignored dispositions, so the cancel path now uses SIGKILL instead of TERM.
+      Both recording recipes fail with an actionable message when wait-for-job.sh
+      is missing or not executable at RECIPE_DIR (the default only resolves at the
+      repo root) instead of a bare "No such file or directory" with the render silently
+      skipped. The shared prompt block now reads "if it is present" since it also
+      reaches projects that ship no helper. New tests: test_second_interrupt_does_not_abandon_cleanup
+      (fails against the previous helper) and TestRecipeInvocation::test_missing_helper_fails_with_an_actionable_message
+      (both recipes). New file: 69 pass; full suite 3714 passed, 12 markdown-dep failures
+      + 2 known baselines deselected (env-only). Captures unchanged — they cover success/failure/timeout/stale,
+      and the interrupt path is covered by tests. (2026-10-27T09:00:00Z)'
+    created_at: '2026-10-27T08:33:04Z'
+    last_edited: '2026-10-27T08:33:04Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
