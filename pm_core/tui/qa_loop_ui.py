@@ -711,6 +711,11 @@ def _resume_incomplete_qa(app) -> None:
 
     if not hasattr(app, "_resumed_qa_pr_ids"):
         app._resumed_qa_pr_ids = set()
+    # Handled runs are remembered by QA workdir, not PR: a later run of the
+    # same PR whose `pm pr auto-sequence` driver died is a new orphan.  Keyed
+    # by PR, a TUI that had adopted one run of it never adopted another (S94).
+    if not isinstance(getattr(app, "_resumed_qa_workdirs", None), set):
+        app._resumed_qa_workdirs = set()
 
     # Defer the (relatively expensive) project load until a snapshot of a
     # PR not tracked here is found — this runs on the ~1s poll tick.
@@ -837,7 +842,8 @@ def _resume_incomplete_qa(app) -> None:
 
     for resume_file, rdata, overall in candidates:
         pr_id = rdata["pr_id"]
-        if pr_id in app._qa_loops or pr_id in app._resumed_qa_pr_ids:
+        if (pr_id in app._qa_loops
+                or str(resume_file.parent) in app._resumed_qa_workdirs):
             continue
         # Not orphaned: another live process (a `pm pr auto-sequence` QA
         # child) is driving it.  Re-checked each scan, so the run is still
@@ -883,6 +889,7 @@ def _resume_incomplete_qa(app) -> None:
             # doesn't linger on disk or get mistakenly picked up if the
             # PR ever returns to QA under a different loop_id.
             app._resumed_qa_pr_ids.add(pr_id)
+            app._resumed_qa_workdirs.add(str(resume_file.parent))
             qa_loop.clear_resume_file(resume_file.parent)
             continue
 
@@ -917,6 +924,7 @@ def _resume_incomplete_qa(app) -> None:
         # before processing)?  *overall* comes from the display status file.
         state = qa_loop.build_resume_state(rdata)
         app._resumed_qa_pr_ids.add(pr_id)
+        app._resumed_qa_workdirs.add(str(resume_file.parent))
 
         if overall:
             # Completed during downtime — process and clear the snapshot.

@@ -352,6 +352,21 @@ def _enabled_app(prs, targets, tmp_path, stop=()):
 
 
 class TestCheckAndStart:
+    def test_id_less_entry_does_not_break_the_pass(self, tmp_path):
+        """S94: a hand-edited entry without an id (status qa) ahead of the
+        targets is skipped, not raised on (KeyError: 'id')."""
+        prs = [{"title": "no id", "status": "qa"}, _pr("a"), _pr("x")]
+        app = _enabled_app(prs, ["a"], tmp_path, stop=["a"])
+        started = []
+
+        async def fake_start(_app, pr_id):
+            started.append(pr_id)
+
+        with patch.object(auto_start, "_start_pr_quiet", fake_start):
+            asyncio.run(auto_start.check_and_start(app))
+        assert started == ["a"]
+        assert app._stop_before_merge == {"a"}
+
     def test_two_independent_targets_both_launch(self, tmp_path):
         prs = [_pr("a"), _pr("b"), _pr("x")]
         app = _enabled_app(prs, ["a", "b"], tmp_path)
@@ -1458,3 +1473,12 @@ def test_predates_open_return_accepts_z_suffix():
                              "ts": "2026-10-22T01:00:00Z"}}
     assert _predates_open_return("2026-10-22T00:59:00Z", pr)
     assert not _predates_open_return("2026-10-22T01:00:05+00:00", pr)
+
+
+def test_closures_skip_id_less_entries():
+    """S94: sign-off's advance_all passes the raw project.yaml list; an
+    id-less entry raised KeyError: 'id' in transitive_deps (TUI poll died)."""
+    prs = [{"title": "no id", "status": "qa"}, _pr("d"), _pr("a", deps=["d"])]
+    assert st.managed_ids(prs, ["a"]) == {"a", "d"}
+    assert st.merge_holds(prs, {}, {"a"}) == {"a": {"explicit": True,
+                                                    "targets": []}}

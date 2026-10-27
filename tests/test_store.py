@@ -315,3 +315,14 @@ class TestYamlBackend:
             first = self._body(tmp_pm_root)
             store.save(store.load(tmp_pm_root, validate=False), tmp_pm_root)
             assert self._body(tmp_pm_root) == first
+
+
+def test_get_pr_skips_entries_without_an_id():
+    """S94: a hand-edited id-less entry ahead of the PR made a QA
+    completion's note write raise KeyError: 'id' and killed the TUI."""
+    pr = {"id": "pr-001", "status": "qa"}
+    data = {"prs": [{"title": "no id", "status": "qa"}, "junk", pr],
+            "plans": [{"name": "no id"}, {"id": "plan-1"}]}
+    assert store.get_pr(data, "pr-001") is pr
+    assert store.get_pr(data, "pr-002") is None
+    assert store.get_plan(data, "plan-1") == {"id": "plan-1"}

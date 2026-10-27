@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T16:01:27.633114+00:00'
+  updated_at: '2026-10-27T16:59:26.825006+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38260,6 +38260,26 @@ prs:
       keep refined_kb 0 and start the stubs after allprs exists.'
     created_at: '2026-10-27T16:01:27Z'
     last_edited: '2026-10-27T16:01:27Z'
+  - id: note-a6bf640
+    text: 'QA S94 (2026-10-27, host, real claude 2.1.311 routed refiner/worker via
+      a recording launcher, router/main stubs; captures /pm-captures/scenarios/94,
+      REPORT.md): CODE CHANGE 8416c20f needs normal re-review. Held: story 1 (router
+      down: one wait line, one driver, no main traffic for R, PASS + [done PASS];
+      U main only), 2b, 2c, 2d, story 4 steps 1-2. Fixed: (1) an id-less project.yaml
+      entry killed the TUI at a QA completion (store.get_pr KeyError in the QA note
+      + start_signoff, then autostart_state.transitive_deps via signoff advance_all):
+      get_pr/get_plan skip id-less entries, auto-start pass + autostart_state use
+      usable_prs; (2) a run ended by a provider setup error left ticks printing running:
+      qa forever (and the TUI adopted and re-failed it): record_setup_stop marks qa_status.json
+      stopped + drops the snapshot, tick relaunches (running: qa (relaunched)) or
+      prints the Error: line; (3) TUI resume scan was per PR, so a TUI that adopted
+      one run never adopted a later dead-driver run: now per QA workdir; (4) wait
+      lines name the PR. Open: 2a pm model set never releases an in-flight route wait
+      (filed pr-97fe1e3); picker shows the previous [done X] while a TUI run plans
+      (pr-f0dc81c). By design: pm tui restart drops auto-start targets. Suite 4373
+      passed.'
+    created_at: '2026-10-27T16:59:26Z'
+    last_edited: '2026-10-27T16:59:26Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -40872,6 +40892,59 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T01:30:16.482567+00:00'
   updated_at: '2026-10-27T01:30:16.482567+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-97fe1e3
+  plan: bugs
+  title: 'Bug: a QA run waiting on an unusable work route never sees a pm model set
+    fix (route resolved from the project.yaml loaded at run start)'
+  branch: pm/pr-97fe1e3-bug-a-qa-run-waiting-on-an-unusable-work-route-nev
+  status: pending
+  depends_on: []
+  description: 'Found in QA S94 (pr-592e4bd, /pm-captures/scenarios/94/story2a). Repro:
+    route qa_scenario to provider:nosuch (pm model set qa_scenario provider:nosuch
+    --project), start QA (tick or TUI). The worker waits with "Scenario N worker waiting
+    — work route nosuch unavailable ... Remedy: configure the provider on this host,
+    or run them on the main account: ... pm model set qa_scenario <model> --project".
+    Applying that second remedy (pm model set qa_scenario provider:work-stub --project)
+    never releases the wait: qa_loop._route_checker resolves the model from the project
+    data captured at run start, and _launch_scenarios_in_tmux/_containers compute
+    _qa_resolution once at start too. Only the providers.yaml-side fix (pm provider
+    add nosuch ...) releases it. Fix options: re-load project.yaml in the gate check
+    and recompute the worker/refiner resolution after the gate, or make the remedy
+    say the run must be restarted for a model-setting change.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T16:55:26.385215+00:00'
+  updated_at: '2026-10-27T16:55:26.385215+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-f0dc81c
+  plan: bugs
+  title: 'Bug: picker shows the previous QA verdict ([done X]) while a TUI-started
+    QA run plans and refines'
+  branch: pm/pr-f0dc81c-bug-picker-shows-the-previous-qa-verdict-done-x-wh
+  status: pending
+  depends_on: []
+  description: 'Found in QA S94 (pr-592e4bd, story2e/post-fix picker captures). qa-run-bg
+    marks ~/.pm/runtime/<pr>.json qa running at start, but a TUI start_qa run (t,
+    auto-start, sign-off REQA hop) only becomes "running" when its first scenario
+    pane registers (pane_idle mirror), about a minute later. Until then the popup
+    picker qa row still shows the previous run [done PASS]/[done ERROR] (or no badge).
+    Repro: R with a finished run [done ERROR]; pm autostart add R; open prefix+P on
+    the qa window during planning: "[done ERROR]" for ~60 s. Fix: set_action_state(pr,
+    "qa", "running", verdict=None) when the TUI starts a run (qa_loop_ui.start_qa),
+    as pr_qa_run_bg does.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T16:55:27.512054+00:00'
+  updated_at: '2026-10-27T16:55:27.512054+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

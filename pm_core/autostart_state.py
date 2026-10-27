@@ -23,6 +23,8 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 
+from pm_core.pr_utils import usable_prs
+
 SCHEMA = "pm.autostart.status/1"
 
 POLICY_STOP = "stop_before_merge"
@@ -71,8 +73,11 @@ def now_iso() -> str:
 # ---------------------------------------------------------------------------
 
 def transitive_deps(prs: list[dict], target_id: str) -> set[str]:
-    """Return the set of all PR IDs that ``target_id`` transitively depends on."""
-    pr_map = {pr["id"]: pr for pr in prs}
+    """Return the set of all PR IDs that ``target_id`` transitively depends on.
+
+    Entries without an id are skipped: callers pass the raw project.yaml
+    list, and a hand-edited id-less entry killed the TUI's poll (S94)."""
+    pr_map = {pr["id"]: pr for pr in usable_prs(prs)}
     deps: set[str] = set()
     stack = [target_id]
     while stack:
@@ -135,7 +140,7 @@ def merge_holds(prs: list[dict], targets: dict, stop) -> dict[str, dict]:
     Merged/closed closure members are not held (nothing left to merge, and
     they would otherwise show up as "released" when the target goes).
     """
-    status = {pr["id"]: pr.get("status") for pr in prs}
+    status = {pr["id"]: pr.get("status") for pr in usable_prs(prs)}
     holds: dict[str, dict] = {}
     for pr_id in stop or ():
         holds[pr_id] = {"explicit": True, "targets": []}
@@ -428,8 +433,8 @@ def build_status(inp: dict) -> dict:
     ``impl_idle``, ``windows`` (``{name: id}``), ``signoff``
     (``{pr_id: {verdict, fresh, stale_reason?}}``), ``skip_qa``, ``generated_at``.
     """
-    prs = inp.get("prs") or []
-    pr_map = {p["id"]: p for p in prs if p.get("id")}
+    prs = usable_prs(inp.get("prs"))
+    pr_map = {p["id"]: p for p in prs}
     targets: dict[str, dict] = inp.get("targets") or {}
     all_mode = bool(inp.get("all_mode"))
     enabled = bool(inp.get("enabled", bool(targets) or all_mode))

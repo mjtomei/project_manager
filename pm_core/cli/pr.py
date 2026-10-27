@@ -3614,6 +3614,26 @@ def _qa_run_driven_since(pr_id: str, iso_ts: str | None = None) -> bool:
     return own_run_driven_since(pr_id, since)
 
 
+def _qa_run_stopped(pr_id: str, status_path: Path | None) -> bool:
+    """Whether the latest QA run of *pr_id* (*status_path* is its status
+    file) ended on a provider setup error and nothing drives or replaced
+    it: no run of it this pm session started after that stop, and no live
+    driver of one (see :func:`pm_core.qa_loop.record_setup_stop`)."""
+    import json
+    from pm_core.qa_loop import own_run_started_since
+    if status_path is None:
+        return False
+    try:
+        data = json.loads(status_path.read_text())
+        stopped_at = status_path.stat().st_mtime
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict) or not data.get("stopped"):
+        return False
+    return (not own_run_started_since(pr_id, stopped_at)
+            and not _qa_run_driven_since(pr_id))
+
+
 def _qa_status_for(pr_id: str) -> tuple[str | None, Path | None]:
     """Find the latest QA status.json for *pr_id*; return (overall, path)."""
     import json
@@ -3893,6 +3913,14 @@ def pr_auto_sequence(pr_id: str):
                 if not claim_return_launch(root, pr_id, "qa"):
                     click.echo("running: qa")
                     return
+            elif _qa_run_stopped(pr_id, _path):
+                # The run ended on a provider setup error and nothing will
+                # finish it (its window stays open): relaunch.  While the
+                # setting is still broken the launch check prints the one
+                # Error: line and spawns nothing.
+                _launch_qa_detached(root, pr_id)
+                click.echo("running: qa (relaunched)")
+                return
             elif qa_win:
                 click.echo("running: qa")
                 return
@@ -4041,8 +4069,9 @@ def pr_qa_run_bg(pr_id: str):
     Used by ``pm pr auto-sequence`` to spawn a detached QA driver.  Not
     intended for direct human use — prefer the TUI ``t`` key.
     """
-    from pm_core.qa_loop import (QALoopState, _log_thread_end,
-                                 clear_resume_file, run_qa_sync)
+    from pm_core.qa_loop import (QALoopState, _is_setup_error,
+                                 _log_thread_end, clear_resume_file,
+                                 record_setup_stop, run_qa_sync)
 
     root = state_root()
     data = store.load(root)
@@ -4091,6 +4120,8 @@ def pr_qa_run_bg(pr_id: str):
     except Exception as e:
         _rs.set_action_state(pr_id, "qa", "failed")
         _log_thread_end(e, "pr_qa_run_bg: QA", pr_id)
+        if _is_setup_error(e):
+            record_setup_stop(state, e)
         raise SystemExit(1)
     if state.latest_verdict:
         _rs.set_action_state(pr_id, "qa", "done", verdict=state.latest_verdict)
