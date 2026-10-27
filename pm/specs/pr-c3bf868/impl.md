@@ -262,7 +262,9 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     `None` instead of raising; claim takes over and `submit_tui_command`
     reports `stale_pidfile` and removes it.
 9. `_install_reload_signal` publishes both caps only after handlers are
-   installed (tmp pidfile/queue paths).
+   installed, and the queue file already exists when each handler is
+   registered (I3 — captured inside the fake loop; verified to fail if
+   the queue creation is moved after `publish`).
 10. picker: `submit_tui_command` failure → message echoed, spinner not
     entered.
 11. spinner: `tui_owner_problem` continuously failing → aborts with a

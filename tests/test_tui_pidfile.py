@@ -660,7 +660,12 @@ class TestSignalGuards:
 
         class FakeLoop:
             def add_signal_handler(self, sig, callback):
-                seen.append((sig, tpf.read_pidfile(pidfile).caps))
+                # Capture the visible state at handler-install time: caps
+                # must still be empty (R3) *and* the queue must already
+                # exist (I3) so a caller that sees sigusr2 can never race
+                # a missing queue.
+                seen.append((sig, tpf.read_pidfile(pidfile).caps,
+                             queue.exists()))
 
         monkeypatch.setattr("asyncio.get_event_loop", lambda: FakeLoop())
         app = ProjectManagerApp.__new__(ProjectManagerApp)
@@ -674,8 +679,10 @@ class TestSignalGuards:
 
         assert app._startup_error is None
         # Both handlers installed while caps were still empty.
-        assert [sig for sig, _ in seen] == [signal.SIGUSR1, signal.SIGUSR2]
-        assert all(caps == frozenset() for _, caps in seen)
+        assert [sig for sig, _, _ in seen] == [signal.SIGUSR1, signal.SIGUSR2]
+        assert all(caps == frozenset() for _, caps, _ in seen)
+        # The queue must exist before any capability is advertised.
+        assert all(exists for _, _, exists in seen)
         desc = tpf.read_pidfile(pidfile)
         assert desc.caps == {tpf.CAP_RELOAD, tpf.CAP_COMMAND}
         assert queue.exists()
