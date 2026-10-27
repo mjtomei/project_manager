@@ -31505,6 +31505,18 @@ prs:
       master` in $N before `git push origin master`.'
     created_at: '2026-10-27T18:31:41Z'
     last_edited: '2026-10-27T18:31:41Z'
+  - id: note-1642e80
+    text: 'S2 refine (2026-10-27): verified live with source-tree wrapper+proxy. Proxy
+      log = $HOME/.pm/debug/<tag>.log of the HOME the proxy runs under (run proxy
+      with HOME=<sandbox>/home from a non-repo dir -> default.log). Reject text quotes
+      the whole shown string: ''--mir (read by git as --mirror)''. Container git 2.34.1
+      has no --branches: from scratch repo it errors "unknown option", --a errors
+      ambiguous, --mir mirrors into scratch origin only. Workspace fetch --upl=/bin/false
+      is forwarded and runs /bin/false proxy-side (fatal: Could not read from remote)
+      = known #241 residual. Commit before each legit-option push or re-push is a
+      no-op.'
+    created_at: '2026-10-27T18:19:44Z'
+    last_edited: '2026-10-27T18:19:57Z'
   model: provider:claude-work
   session_models:
     impl: provider:claude-work
