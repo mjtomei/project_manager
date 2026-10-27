@@ -16,7 +16,7 @@ def finalize_context(tmp_path, monkeypatch):
     state.qa_workdir = str(tmp_path)
     snapshots = []
     monkeypatch.setattr(qa_loop, "_write_resume_file",
-                        lambda st, containers, cap, queued: snapshots.append(set(queued)))
+                        lambda st, containers, cap, queued, **kw: snapshots.append(set(queued)))
     monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
     monkeypatch.setattr(qa_loop, "_persist_scenario_verdicts", MagicMock())
     monkeypatch.setattr(qa_loop, "_run_qa_finalize_pane", MagicMock())

@@ -196,6 +196,91 @@ def test_unlimited_cap_costs_no_inventory_per_launch(monkeypatch):
     assert qa_loop._container_headroom_cap(3) == 3
 
 
+def test_reclamp_grows_a_reduced_batch_back_to_the_desired_size(monkeypatch):
+    """Re-clamping the already-clamped batch could only keep or lower it.
+
+    A batch reduced to one by an unreadable inventory (or a momentarily full
+    runtime) must grow back to the run's batch once slots are free, otherwise
+    the rest of the run stays serialized.
+    """
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 4)
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 0)
+    assert qa_loop._container_headroom_cap(1, desired=4) == 4
+    assert qa_loop._container_headroom_cap(1, desired=0) == 4  # unlimited desired
+    # No desired batch (older callers): unchanged behaviour.
+    assert qa_loop._container_headroom_cap(1) == 1
+
+
+def test_poll_reclamps_from_the_desired_batch_not_the_clamped_one(
+        tmp_path, monkeypatch):
+    """The poll passes the run's original batch to the headroom clamp."""
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in range(1, 3)
+    ]
+    launched = []
+
+    def launch(scenario):
+        launched.append(scenario.index)
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    launch(state.scenarios[0])
+    seen = []
+
+    def reclamp(cap):
+        seen.append(cap)
+        return cap
+
+    class ImmediateThread:
+        def __init__(self, target, args, **kwargs):
+            self.target, self.args = target, args
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 4)
+    monkeypatch.setattr(qa_loop, "_clamp_to_container_headroom", reclamp)
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        assert ticks < 12, "the verdict poll must terminate"
+
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers",
+                        lambda st, session, *, scenarios=None: False)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(qa_loop, "extract_verdict_from_transcript", lambda *a: "PASS")
+    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript",
+                        lambda *a: None)
+
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios[1:],
+        concurrency_cap=1, desired_cap=3, use_containers=True)
+
+    assert seen, "the poll must re-clamp with a fresh running count"
+    assert seen[0] == 3, "re-clamp must start from the desired batch, not the clamped one"
+    assert launched == [1, 2]
+
+
 @pytest.mark.parametrize("verdict", ["PASS", "NEEDS_WORK", "INPUT_REQUIRED"])
 def test_resume_does_not_relaunch_settled_scenarios(tmp_path, monkeypatch, verdict):
     scenario = qa_loop.QAScenario(

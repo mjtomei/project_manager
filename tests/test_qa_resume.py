@@ -83,7 +83,7 @@ def _make_state(qa_workdir) -> QALoopState:
 def test_resume_roundtrip(tmp_path):
     state = _make_state(tmp_path)
     _write_resume_file(state, use_containers=True, concurrency_cap=2,
-                       queued_indices={2})
+                       queued_indices={2}, desired_cap=4)
 
     assert _resume_file_path(tmp_path).is_file()
     loaded = _load_resume_file(tmp_path)
@@ -91,6 +91,9 @@ def test_resume_roundtrip(tmp_path):
     assert loaded["pr_id"] == "pr-001"
     assert loaded["use_containers"] is True
     assert loaded["concurrency_cap"] == 2
+    # The pre-clamp batch travels with the snapshot so a restarted run can
+    # grow the batch back once the runtime recovers.
+    assert loaded["desired_cap"] == 4
     assert loaded["queued_indices"] == [2]
 
     rebuilt = build_resume_state(loaded)

@@ -125,3 +125,27 @@ def test_release_unused_proxies_reports_whether_it_enumerated(monkeypatch):
     monkeypatch.setattr(push_proxy, "runtime_domain", lambda: {"runtime": "test"})
     assert reaper._release_unused_proxies(reaper.Scope(), {}) == ([], True)
     assert listed
+
+
+def test_malformed_last_run_is_normalized_not_fatal(monkeypatch):
+    """A hand-edited state file must not crash 'pm container status'.
+
+    The status command formats ``last_run`` with ``time.localtime``, which
+    raises TypeError on a non-numeric value. ``last_state`` normalizes it so
+    the persisted diagnostics stay displayable.
+    """
+    state_file = reaper._state_file()
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text('{"last_run": "yesterday", "failures": {}}')
+    assert "last_run" not in reaper.last_state()
+    state_file.write_text('{"last_run": "1700000000", "failures": {}}')
+    assert reaper.last_state()["last_run"] == 1700000000.0
+
+
+def test_absurd_last_run_values_are_dropped(monkeypatch):
+    """Values ``time.localtime`` rejects are dropped, not passed through."""
+    state_file = reaper._state_file()
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    for bad in ("NaN", "Infinity", "1e30", "-5", "null"):
+        state_file.write_text('{"last_run": %s, "failures": {}}' % bad)
+        assert "last_run" not in reaper.last_state(), bad

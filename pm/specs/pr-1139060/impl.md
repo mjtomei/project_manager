@@ -544,8 +544,14 @@ crashing `pm container status`.
   names through the shared inventory — an inventory that cannot be read is
   unknown, not zero running containers, so the batch clamps to one and each
   later queued launch re-clamps with a fresh count before it starts (the
-  unlimited default performs no inventory); the rest queue through the existing
-  queued-scenario mechanism. Settled scenarios release their allocations before
+  unlimited default performs no inventory). The re-clamp is computed from the
+  run's original batch size, never from the already-clamped value — clamping a
+  batch that a start-time unreadable inventory (or a momentarily full runtime)
+  reduced to one could only keep or lower it, so the rest of the run would stay
+  serialized after the runtime recovered. The desired batch travels with the
+  resume snapshot so a restarted run can also grow back. The rest queue through
+  the existing queued-scenario mechanism. Settled scenarios release their
+  allocations before
   handing slots to queued work (after PASS verification, with the same human,
   retention and viewed-window exceptions). The cap bounds the launch batch, not
   the sum of deliberately kept containers: a scenario held for a human or a

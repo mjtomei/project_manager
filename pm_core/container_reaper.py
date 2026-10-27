@@ -1492,7 +1492,8 @@ def last_state() -> dict:
     """Persisted outcome, or ``{}`` when missing or not the shape we wrote.
 
     A hand-edited or truncated file must not abort a pass that already removed
-    containers (``_record_locked`` reads every failure entry as a dict).
+    containers (``_record_locked`` reads every failure entry as a dict) or crash
+    ``pm container status`` (which formats ``last_run`` as a timestamp).
     """
     try:
         state = json.loads(_state_file().read_text())
@@ -1504,6 +1505,17 @@ def last_state() -> dict:
     state["failures"] = ({name: value for name, value in failures.items()
                           if isinstance(value, dict)}
                          if isinstance(failures, dict) else {})
+    last_run = state.get("last_run")
+    try:
+        stamp = None if last_run is None else float(last_run)
+    except (TypeError, ValueError):
+        stamp = None
+    # ``time.localtime`` raises TypeError/ValueError/OverflowError for
+    # strings, NaN/inf and absurd values; drop anything unusable.
+    if stamp is None or not 0 < stamp < 1e12:
+        state.pop("last_run", None)
+    else:
+        state["last_run"] = stamp
     return state
 
 

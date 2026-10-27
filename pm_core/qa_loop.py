@@ -890,7 +890,8 @@ def _scenario_from_resume_dict(d: dict) -> QAScenario:
 
 def _write_resume_file(state: QALoopState, use_containers: bool,
                        concurrency_cap: int,
-                       queued_indices: set[int] | None = None) -> None:
+                       queued_indices: set[int] | None = None,
+                       *, desired_cap: int | None = None) -> None:
     """Atomically snapshot the run state needed to resume after a restart.
 
     Best-effort: failures are logged, never raised — a missing snapshot
@@ -910,6 +911,11 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
         "session_tag": state.session_tag,
         "use_containers": bool(use_containers),
         "concurrency_cap": int(concurrency_cap or 0),
+        # The batch size before any headroom clamp. A resumed run re-clamps
+        # from this, so a batch reduced by an unreadable inventory (or a full
+        # runtime) can grow back instead of staying serialized.
+        "desired_cap": int(concurrency_cap if desired_cap is None
+                           else desired_cap or 0),
         "finalize_verdict": state.finalize_verdict,
         "scenario_verdicts": {str(k): v for k, v in state.scenario_verdicts.items()},
         "scenario_verdict_reasons": {
@@ -2754,6 +2760,7 @@ def _poll_tmux_verdicts(
     _notify,
     queued_scenarios: list[QAScenario] | None = None,
     concurrency_cap: int = 0,
+    desired_cap: int | None = None,
     use_containers: bool = False,
     repo_root: Path | None = None,
     pm_root: Path | None = None,
@@ -2901,10 +2908,11 @@ def _poll_tmux_verdicts(
         if use_containers:
             # The batch was clamped at run start, when the running-container
             # count may have been unreadable (an unknown inventory clamps to
-            # one). Re-clamp with a fresh count before a launch so that
-            # degraded cap cannot serialize the rest of the run. The default
-            # (unlimited) path performs no inventory.
-            concurrency_cap = _container_headroom_cap(concurrency_cap)
+            # one). Re-clamp with a fresh count — from the run's desired batch,
+            # not the clamped value, which could only stay the same or shrink —
+            # so a degraded cap cannot serialize the rest of the run. The
+            # default (unlimited) path performs no inventory.
+            concurrency_cap = _container_headroom_cap(concurrency_cap, desired_cap)
             if concurrency_cap > 0 and active >= concurrency_cap:
                 return
         scenario = _launch_queue.pop(0)
@@ -2964,7 +2972,7 @@ def _poll_tmux_verdicts(
         # re-enter this loop with up-to-date scenario pane/session state
         # (queued launches and verdicts both mutate it).
         _write_resume_file(state, use_containers, concurrency_cap,
-                           _queued_indices)
+                           _queued_indices, desired_cap=desired_cap)
 
         in_grace = (time.monotonic() - grace_start) < _VERDICT_GRACE_PERIOD
         verdicts_changed = False
@@ -4237,10 +4245,14 @@ def run_qa_sync(
             _notify()
 
     # --- Phase 2: Execution ---
-    # Determine concurrency cap (0 = launch all at once)
-    concurrency_cap = max_scenarios if max_scenarios is not None else _get_max_scenarios()
+    # Determine concurrency cap (0 = launch all at once). Keep the desired
+    # batch separate from the headroom-clamped one: the poll re-clamps from
+    # the desired value each time, because a batch reduced to one by an
+    # unreadable inventory (or a momentarily full runtime) must grow back.
+    desired_cap = max_scenarios if max_scenarios is not None else _get_max_scenarios()
+    concurrency_cap = desired_cap
     if use_containers:
-        concurrency_cap = _clamp_to_container_headroom(concurrency_cap)
+        concurrency_cap = _clamp_to_container_headroom(desired_cap)
     if concurrency_cap > 0:
         launch_scenarios = state.scenarios[:concurrency_cap]
         queued_scenarios = state.scenarios[concurrency_cap:]
@@ -4320,6 +4332,7 @@ def run_qa_sync(
         workdir_path, status_path, repo_root,
         use_containers=use_containers,
         concurrency_cap=concurrency_cap,
+        desired_cap=desired_cap,
         queued_scenarios=queued_scenarios,
         notify=_notify,
     )
@@ -4351,19 +4364,21 @@ def _clamp_to_container_headroom(cap: int) -> int:
     return cap
 
 
-def _container_headroom_cap(cap: int) -> int:
-    """Re-clamp *cap* against a fresh running count, but only when configured.
+def _container_headroom_cap(cap: int, desired: int | None = None) -> int:
+    """Re-clamp the launch batch against a fresh running count.
 
     ``container-max-running`` is opt-in (0 = unlimited), so the default path
     performs no runtime inventory.  The verdict poll re-clamps before each
-    queued launch: a cap derived from an unreadable inventory at run start
-    clamps to one, and leaving it there would serialize the whole run long
-    after the runtime recovered.
+    queued launch: a batch derived from an unreadable inventory at run start
+    (or from a momentarily full runtime) clamps to one, and re-clamping the
+    *already clamped* value could only keep or lower it — the run would stay
+    serialized long after the runtime recovered.  ``desired`` is therefore the
+    run's original batch size; the clamp is recomputed from it each time.
     """
     from pm_core import container as container_mod
     if container_mod.max_running_containers() <= 0:
         return cap
-    return _clamp_to_container_headroom(cap)
+    return _clamp_to_container_headroom(cap if desired is None else desired)
 
 
 def _execute_and_finalize(
@@ -4380,13 +4395,14 @@ def _execute_and_finalize(
     concurrency_cap: int,
     queued_scenarios: list[QAScenario],
     notify: Callable[[], None],
+    desired_cap: int | None = None,
 ) -> QALoopState:
     """Finalize a run and release its allocations even if polling/persistence fails."""
     try:
         return _finalize_scenarios(
             state, pm_root, pr_data, data, session, window_name, workdir_path,
             status_path, repo_root, use_containers, concurrency_cap,
-            queued_scenarios, notify)
+            queued_scenarios, notify, desired_cap=desired_cap)
     finally:
         if use_containers:
             try:
@@ -4411,6 +4427,7 @@ def _finalize_scenarios(
     concurrency_cap: int,
     queued_scenarios: list[QAScenario],
     notify: Callable[[], None],
+    desired_cap: int | None = None,
 ) -> QALoopState:
     """Poll scenarios for verdicts, aggregate, persist, and finalize.
 
@@ -4430,12 +4447,14 @@ def _finalize_scenarios(
 
     # Snapshot resumable state before the blocking poll so an early
     # restart can pick the run back up.
-    _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
+    _write_resume_file(state, use_containers, concurrency_cap, queued_indices,
+                       desired_cap=desired_cap)
 
     _poll_tmux_verdicts(state, data, pr_data, session, workdir_path,
                         status_path, notify,
                         queued_scenarios=queued_scenarios,
                         concurrency_cap=concurrency_cap,
+                        desired_cap=desired_cap,
                         use_containers=use_containers,
                         repo_root=repo_root,
                         pm_root=pm_root)
@@ -4502,7 +4521,8 @@ def _finalize_scenarios(
     }
     # Refresh the snapshot with the overall + finalize verdict so a
     # restart between completion and TUI processing still carries them.
-    _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
+    _write_resume_file(state, use_containers, concurrency_cap, queued_indices,
+                       desired_cap=desired_cap)
 
     state.running = False
     finalize_suffix = ""
@@ -4675,6 +4695,8 @@ def resume_qa_sync(
     resume_data = _load_resume_file(state.qa_workdir) or {}
     use_containers = bool(resume_data.get("use_containers", False))
     concurrency_cap = int(resume_data.get("concurrency_cap", 0) or 0)
+    _desired = resume_data.get("desired_cap")
+    desired_cap = int(_desired) if _desired is not None else None
     queued_idx = set(resume_data.get("queued_indices") or [])
     queued_scenarios = [s for s in state.scenarios if s.index in queued_idx]
 
@@ -4692,6 +4714,7 @@ def resume_qa_sync(
         workdir_path, status_path, repo_root,
         use_containers=use_containers,
         concurrency_cap=concurrency_cap,
+        desired_cap=desired_cap,
         queued_scenarios=queued_scenarios,
         notify=_notify,
     )
