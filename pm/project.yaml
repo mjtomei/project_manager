@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T20:19:15.401294+00:00'
+  updated_at: '2026-10-27T20:27:44.454535+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11011,6 +11011,19 @@ prs:
       expected them torn down (only z t kills windows). Captures /pm-captures/scenarios/51.'
     created_at: '2026-10-27T20:19:15Z'
     last_edited: '2026-10-27T20:19:15Z'
+  - id: note-9b436c5
+    text: 'QA S54 (2026-10-27, nested rootless podman, fake-claude): fixed d32fcc91.
+      With stop-idle-impl on, an impl reopened with s on an in_review PR (the usual
+      way back to implementation after a review) stayed Up forever after idle, because
+      _poll_impl_idle consumed the idle edge only for in_progress PRs. Stop-on-idle
+      now runs for in_progress and in_review; auto-review stays in_progress only.
+      Regression test mutation-checked; full suite 4059 passed. The first run (all
+      fresh in_progress PRs) passed all 5 stories. Post-fix reruns of stories 2(b)-5
+      held, with every CLI step in an asciinema recording. New benign log line after
+      a loop ends on an in_review PR with a dead impl pane: "… is not running — nothing
+      to stop". Captures: /pm-captures/scenarios/54 (pre-fix/, post-fix/).'
+    created_at: '2026-10-27T20:27:44Z'
+    last_edited: '2026-10-27T20:27:44Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
