@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T01:58:42.418322+00:00'
+  updated_at: '2026-10-27T02:22:49.652205+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33359,6 +33359,35 @@ prs:
       with recordings plus the two-pane verification transcripts.'
     created_at: '2026-10-27T01:58:42Z'
     last_edited: '2026-10-27T01:58:42Z'
+  - id: note-e7a64e4
+    text: 'signoff (claude-work) 2026-10-27: SIGNOFF_IMPL — the code conflicts with
+      master@211a6128 (#250 merged pr-ace66e5) block the merge; the PR itself checks
+      out (QA 13-17 PASS at 481644d5, and code is unchanged at 4b6127a6). Re-checked,
+      the base has not moved. Five hunks to reconcile, all of which need BOTH behaviours:
+      (1) integration.py ~L1398: keep resolution_diff_path AND master omitted_path_count
+      + integration_pointer (adjacent additions, not alternatives). (2) prompt_gen._signoff_qa_scenarios_*:
+      master made the qa_status reader return a (text, extra) tuple; re-apply this
+      PR non-dict qa_status.json guard in the tuple form. (3) prompt_gen._signoff_integration_block:
+      keep this PR resolution/candidate/applied/behaviour/evidence rendering AND master
+      bounded_join + _list_note(omitted_path_count, integration_pointer) for overlap/conflicts
+      (conflicts_total/overlap_total); the base-range line must keep the PR base_range_from/contained-base
+      logic, not master simpler merge_base line. (4) signoff.build_return_record:
+      the integ dict needs the PR resolution + base_behavior_changes keys AND master
+      conflicts_total/overlap_total carry. (5) signoff.format_signoff_return: keep
+      master bounded conflict/overlap lists AND the PR resolution/applied/contained-base
+      text. Semantic (no textual conflict): master pr-ace66e5 bounds accumulating
+      lists only (never instructions) and fits prompts via _assemble/fit_prompt. The
+      new lists this PR adds to prompts (resolution ids, base_behavior_changes, evidence
+      lines) are accumulation, so check that they stay bounded under that policy and
+      that the sign-off/review/QA-planner prompts still go through master _assemble.
+      cli/pr.py and spec_gen.py changed on both sides but merged cleanly; still re-run
+      tests/test_prompt_bounds.py, test_signoff_resolution.py and test_review_window_quoting.py
+      on the merge. pm/project.yaml conflicts on appended records only. After the
+      merge: review the reconciled hunks; QA can reuse 13/16/17 and should re-run
+      the prompt-surface stories (11 decision surface, 14 launch/review diff, 15 behaviour
+      carry) on the integrated code.'
+    created_at: '2026-10-27T02:22:49Z'
+    last_edited: '2026-10-27T02:22:49Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
