@@ -603,3 +603,44 @@ link to it; a planted sidecar link is read and accepted),
 `get_proxy_socket_path(..., workdir=...)` lookup and the workdir a proxy
 restart uses (`test_reuse_finds_the_proxy_by_workdir`,
 `test_reuse_restarts_a_dead_proxy_for_the_same_workdir`).
+
+## Review iteration 11 refinements
+
+Eighth review pass (consistent with R1–R9; no requirement changed).  The
+behaviour is unchanged — this pass verified the fix again and only
+corrected documentation that had drifted from the implementation:
+
+- **`_active_proxies` is documented as legacy-only.** The registry comment
+  read as if `_active_proxies` held both keying schemes' entries; in fact
+  a shared proxy is tracked only through `_proxy_refs` (whose keys are the
+  registry of live shared proxies), which is why `stop_session_proxies`
+  has to union the two.  A future cleanup that read `_active_proxies`
+  alone would silently miss every shared proxy, so the invariant is now
+  stated explicitly.
+- **The shared-proxy test class names the real key.** `TestSharedProxy`'s
+  docstring still said `(session_tag, pr_id)`; the key has three parts.
+- **Teardown clears the start lock too.** `test_stop_session_removes_kept_socket_dirs`
+  now also asserts that the `.lock` file a shared stop deliberately leaves
+  next to the kept directory is removed by `stop_session_proxies` (R6's
+  "clean at teardown" covers the lock, not just the directory).
+- **Incidental:** dropped an unused `_CONTAINER_SOCKET_PATH` import from
+  `create_container`'s proxy block (`pyflakes`).
+
+Re-verified at HEAD: `/pm-captures/impl/post-fix/verify-proxy-key` passes
+(distinct socket per workdir, impl push lands its own commit, QA stop
+leaves the impl socket dir intact), and
+`test_impl_and_qa_get_distinct_proxies` fails at 74462d76 with
+`assert 1 == 3` (all three containers on
+`/tmp/pm-push-proxy-repo-wd-pr-wd/push.sock`).  Full suite: 3811 passed,
+1 skipped, 1 failed — `test_hook_events::test_installer_writes_standalone_receiver`,
+the pre-existing environment failure (a standalone hook receiver is not
+installed under a tmp HOME), unchanged by this PR.  Logs:
+`/pm-captures/review-db89-i8/`.
+
+Residual, unchanged and out of scope: in-process refcounts only
+(cross-process cleanup stays with #241/pr-ac12b47); one daemon per workdir
+(option (3), workdir-per-request, remains the cleaner long-term design);
+`proxy_is_alive` still cannot distinguish a busy daemon from a dead one
+beyond the backlog of 16; the daemon serves one request at a time, so a
+long push serialises other requests on the same workdir; a shared stop
+leaves its `.lock` beside the kept directory until session teardown.

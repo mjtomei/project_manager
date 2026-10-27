@@ -665,7 +665,7 @@ class TestStartLock:
 
 
 class TestSharedProxy:
-    """Tests for (session_tag, pr_id) shared proxy behaviour."""
+    """Tests for (session_tag, pr_id, workdir) shared proxy behaviour."""
 
     def _mock_start(self):
         """Patch _start_proxy_subprocess to create a dummy socket file."""
@@ -1346,9 +1346,13 @@ class TestWorkdirKeyedProxies:
 
         stop_push_proxy("impl-wd")
         assert os.path.isdir(sock_dir)  # kept for live container mounts
+        # The start lock lives next to the directory, so the shared stop
+        # leaves it behind too; session teardown must clear both.
+        assert os.path.exists(sock_dir + ".lock")
 
         stop_session_proxies(self.TAG)
         assert not os.path.exists(sock_dir)
+        assert not os.path.exists(sock_dir + ".lock")
 
     def test_discovery_symlink_failure_does_not_break_start(
             self, tmp_path, live_proxies):

@@ -805,7 +805,7 @@ def create_container(
     has_push_proxy = False
     if allowed_push_branch:
         from pm_core.push_proxy import (
-            start_push_proxy, _CONTAINER_SOCKET_DIR, _CONTAINER_SOCKET_PATH,
+            start_push_proxy, _CONTAINER_SOCKET_DIR,
         )
         sock_path = start_push_proxy(
             name, str(workdir), allowed_push_branch,

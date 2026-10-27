@@ -736,7 +736,12 @@ class PushProxy:
 #      proxy via _proxy_refs.  Containers on different workdirs (impl vs a
 #      QA scenario clone) get separate proxies so one can never replace or
 #      unlink the other's socket.
-_active_proxies: dict[str, str] = {}  # key -> socket path
+#
+# _active_proxies holds *legacy* keys only; a shared proxy is tracked
+# through _proxy_refs (whose keys are the registry of live shared proxies).
+# Teardown therefore unions the two — do not treat _active_proxies alone as
+# the complete set of running proxies.
+_active_proxies: dict[str, str] = {}  # legacy key -> socket path
 _proxy_lock = threading.Lock()
 
 # For shared proxies: which containers reference each proxy key
