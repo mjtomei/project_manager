@@ -438,8 +438,9 @@ def read_latest_assistant_text(transcript_path: str | Path | None) -> str:
     This *is* mildly schema-dependent: it parses each assistant JSONL
     record and looks for ``message.content[].type == "text"`` entries.
     If Anthropic changes that shape we update this helper.  Verdict
-    extraction (:func:`extract_verdict_from_transcript`) remains purely
-    text-based and is not affected.
+    detection (:func:`find_verdict_turn`) still matches the raw JSONL
+    bytes for the keyword, so a shape change would only cost the returned
+    turn *text*, not the verdict itself.
     """
     text = _read_transcript_text(transcript_path)
     if not text:

@@ -243,3 +243,12 @@ These extend the requirements above; they are implemented and covered by tests.
   stripped, not just one wrapper at each end; only text outside the reminders can
   make the record a task boundary. An unclosed reminder tag is left in place
   (fail closed).
+- **`wait_for_follow_up_verdict` only accepts a *new* verdict (review i3).** Its
+  callers (review/watcher INPUT_REQUIRED waits) want the worker's next turn, not the
+  verdict that prompted the call. Because the task-scoped scan crosses non-task
+  wakeups, a `/loop` tick or Monitor postscript arriving before the human answers
+  would otherwise re-deliver the stale INPUT_REQUIRED and the caller would coerce it
+  to NEEDS_WORK. The waiter snapshots the current verdict's `line_index` at call
+  start and ignores hits at or before it; the transcript only grows, so a genuinely
+  new verdict always sits later. `poll_for_verdict` keeps the unguarded scan because
+  it must return a verdict emitted just before it is called.

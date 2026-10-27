@@ -216,6 +216,12 @@ def wait_for_follow_up_verdict(
     """Block for the next hook-driven idle on an existing pane and return
     the assistant text of the follow-up turn (or ``None``).
 
+    Only a verdict emitted *after* this call counts as the follow-up: the
+    task-scoped scan crosses non-task wakeups, so without that baseline a
+    ``/loop`` tick or Monitor postscript arriving while the caller waits for
+    a human answer would re-return the INPUT_REQUIRED / flagged verdict that
+    prompted the call (pr-8efa789).
+
     Hook-driven only — requires *transcript_path*.
     """
     from pm_core import hook_events
@@ -229,6 +235,11 @@ def wait_for_follow_up_verdict(
         return None
 
     hook_baseline = time.time()
+    # Snapshot the verdict that prompted the call (if any) so a wakeup
+    # postscript cannot re-deliver it as the follow-up.  The transcript only
+    # grows, so a genuinely new verdict sits at a later line.
+    baseline_hit = find_verdict_turn(transcript_path, verdicts)
+    baseline_line = baseline_hit.line_index if baseline_hit else -1
 
     while not (stop_check and stop_check()):
         pane_id = find_claude_pane(session, window_name)
@@ -250,7 +261,7 @@ def wait_for_follow_up_verdict(
         hook_baseline = float(ev.get("timestamp") or hook_baseline)
 
         hit = find_verdict_turn(transcript_path, verdicts)
-        if hit:
+        if hit and hit.line_index > baseline_line:
             _log.info("%s: hook-driven follow-up verdict %s",
                       log_prefix, hit.verdict)
             return hit.text or hit.verdict

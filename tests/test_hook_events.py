@@ -406,6 +406,100 @@ def test_poll_for_verdict_returns_the_verdict_turn(tmp_hooks_home, monkeypatch,
     assert postscript not in content
 
 
+def test_follow_up_verdict_ignores_the_verdict_that_prompted_it(
+        tmp_hooks_home, monkeypatch, tmp_path):
+    """pr-8efa789: the follow-up waiter must not re-deliver the INPUT_REQUIRED
+    verdict that prompted it when a /loop wakeup adds a no-verdict turn.
+
+    The task-scoped scan crosses the wakeup, so without a baseline the waiter
+    would return immediately and the caller (review/watcher INPUT_REQUIRED)
+    would coerce the stale verdict to NEEDS_WORK instead of waiting for the
+    human's answer.
+    """
+    import json as _json
+    hook_events = _reload_hook_events()
+    from pm_core.hook_install import ensure_hooks_installed
+    ensure_hooks_installed(tmp_hooks_home / ".claude" / "settings.json")
+    assert hook_events.hooks_available()
+
+    from pm_core import loop_shared
+
+    sid = "12345678-1234-1234-1234-123456789abc"
+    transcript_target = tmp_path / f"{sid}.jsonl"
+
+    def user(text):
+        return _json.dumps({"type": "user", "message": {
+            "role": "user", "content": [{"type": "text", "text": text}]}})
+
+    def assistant(text):
+        return _json.dumps({"type": "assistant", "message": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": text}]}})
+
+    tick = _json.dumps({"type": "user", "isMeta": True, "message": {
+        "role": "user", "content": [
+            {"type": "text", "text": "# Autonomous loop tick"}]}})
+
+    initial = "\n".join([
+        user("run the scenario"),
+        assistant("Reason: need a decision\nINPUT_REQUIRED"),
+        tick,
+        assistant("Nothing left to do; ending the loop."),
+    ]) + "\n"
+    transcript_target.write_text(initial)
+    transcript_link = tmp_path / "t.jsonl"
+    transcript_link.symlink_to(transcript_target)
+
+    monkeypatch.setattr(loop_shared, "find_claude_pane",
+                        lambda session, window: "%0")
+
+    def writer():
+        time.sleep(0.1)
+        _write_event(tmp_hooks_home, sid, "idle_prompt", ts=time.time() + 5)
+
+    t = threading.Thread(target=writer)
+    t.start()
+    deadline = time.monotonic() + 0.5
+    try:
+        content = loop_shared.wait_for_follow_up_verdict(
+            "pm-session", "review-x", str(transcript_link),
+            verdicts=("INPUT_REQUIRED", "NEEDS_WORK", "PASS"),
+            wait_timeout=0.2,
+            stop_check=lambda: time.monotonic() > deadline,
+            log_prefix="test",
+        )
+    finally:
+        t.join()
+    # The stale INPUT_REQUIRED must not be returned as the follow-up.
+    assert content is None
+
+    # A verdict emitted after the call starts *is* the follow-up.
+    def writer2():
+        time.sleep(0.1)
+        with open(transcript_target, "a") as f:
+            f.write(user("here is the decision you asked for") + "\n")
+            f.write(assistant("Reason: decision applied\nPASS") + "\n")
+        _write_event(tmp_hooks_home, sid, "idle_prompt", ts=time.time() + 10)
+
+    deadline = time.monotonic() + 10
+    t = threading.Thread(target=writer2)
+    t.start()
+    try:
+        content = loop_shared.wait_for_follow_up_verdict(
+            "pm-session", "review-x", str(transcript_link),
+            verdicts=("INPUT_REQUIRED", "NEEDS_WORK", "PASS"),
+            wait_timeout=0.2,
+            stop_check=lambda: time.monotonic() > deadline,
+            log_prefix="test",
+        )
+    finally:
+        t.join()
+    assert content is not None
+    assert "PASS" in content
+    assert "decision applied" in content
+    assert "INPUT_REQUIRED" not in content
+
+
 def test_session_id_from_transcript(tmp_path):
     from pm_core.claude_launcher import session_id_from_transcript
 
