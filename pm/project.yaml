@@ -34032,7 +34032,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T05:57:58.919315+00:00'
+  updated_at: '2026-10-27T06:20:15.689669+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34884,6 +34884,30 @@ prs:
       merge); the only conflict now is the metadata one, which sign-off resolves.'
     created_at: '2026-10-27T05:57:58Z'
     last_edited: '2026-10-27T05:57:58Z'
+  - id: note-5111dc0
+    text: 'review-loop c70c i3: closed two residual gaps, each with a test that fails
+      on the pre-fix code. (1) `_resolution_digest` still raised TypeError on a hand-edited
+      *nested* mixed-key mapping — i2 filtered only the top-level keys of a resolution
+      `records` map, but `resolved_from`, an `unresolved` entry and a `records` value
+      are carried into the compact record as they are, so a YAML `1: x` beside pm
+      string keys made `json.dumps(..., sort_keys=True)` raise out of `compact` (every
+      recorded check, the sign-off launch, `pm pr signoff integrate --record`) and
+      out of the merge gate digest comparison (`pm pr merge`). The digest now normalises
+      every mapping key to a string recursively; a well-formed resolution digest is
+      byte-identical, so an approval already recorded against one stays valid. (2)
+      the sign-off prompt behaviour-change total now takes max(base_behavior_count,
+      len(stored list)), like `format_signoff_return` already does, so a recorded
+      count smaller than the list cannot hide entries behind the 20-line cap. Also
+      verified the real shape end-to-end (read-only, isolated candidate): this branch
+      vs origin/master (450a6362, 144 commits ahead) resolves metadata-only — sole
+      conflict pm/project.yaml, 1 record added from the PR and 7 from the base, none
+      lost, unresolved empty, candidate tree identical across runs; the overlap is
+      pm/project.yaml + pm_core/cli/pr.py, so sign-off must state the reuse/checks
+      evidence for the resolved MERGE. Tests: 2 new + 1 extended (all mutation-checked);
+      focused 172; full suite 3685 passed, 1 skipped, 1 deselected (known pre-existing
+      hook-installer env failure). Spec R6/R9 synced.'
+    created_at: '2026-10-27T06:20:15Z'
+    last_edited: '2026-10-27T06:20:15Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
