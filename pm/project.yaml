@@ -14613,6 +14613,23 @@ prs:
       or amend qa.md so the bound is L+1 plus deliberately kept containers.'
     created_at: '2026-10-28T00:11:48Z'
     last_edited: '2026-10-28T00:11:48Z'
+  - id: note-ed29ba1
+    text: 'S52 refine (2026-10-27, HEAD a696fa52): refined, not rejected. Reuses S36
+      (decoys via podman run sleep infinity, fake), S38 story 5 (master /opt/pm-src
+      legacy container, SIGKILL pane pgid, restart then immediate pr start) and S43
+      story 4c (labeled podman shim: exec <64-hex> test -f /tmp/.pm-ready -> rc126
+      "exec: cannot fork") fixtures. Facts: pm pr cleanup --force A deletes only the
+      workdir (windows stay); kill-window runs the EXIT trap at once, so a delayed
+      old impl exit for --fresh is made by a shim holding the release_on_exit process''s
+      first podman call (release persists its record before any runtime call, no launch
+      lock held). A deleted-cwd release may log to ~/.pm/debug/default.log, so grep
+      -a every ~/.pm/debug/*.log. pr review on a sign_off PR moves it back to in_review,
+      so re-run pm pr edit --status qa before signoff --fresh. pm pr start on a non-pending
+      PR still prints "is now in_progress" without changing status. Breadcrumb skip
+      line: "save_breadcrumb: nothing to persist, skipping" (INFO) before "action_restart:
+      reason=merge_restart_marker".'
+    created_at: '2026-10-27T23:26:39Z'
+    last_edited: '2026-10-27T23:26:39Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
