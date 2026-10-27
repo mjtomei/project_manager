@@ -33,6 +33,28 @@ def _run(*args, **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(*args, **kwargs)
 
 
+def _env_args(env: dict[str, str] | None) -> list[str]:
+    """Return ``-e NAME`` args, one per environment variable.
+
+    The value is deliberately not included: tmux reads it from the tmux
+    *client's* environment (passed to ``_run(env=...)``), so provider
+    secrets never enter the tmux command line — which is logged and kept
+    as ``#{pane_start_command}``.
+    """
+    args: list[str] = []
+    for name in (env or {}):
+        args.extend(["-e", name])
+    return args
+
+
+def _run_with_env(args: list[str], env: dict[str, str] | None,
+                  **kwargs) -> subprocess.CompletedProcess:
+    """Run tmux, exposing *env* to it so ``-e NAME`` can resolve values."""
+    if env:
+        kwargs["env"] = {**os.environ, **env}
+    return _run(args, **kwargs)
+
+
 def has_tmux() -> bool:
     """Check if tmux is installed."""
     import shutil
@@ -65,27 +87,37 @@ def grant_server_access(users: list[str], socket_path: str | None = None) -> Non
         )
 
 
-def create_session(name: str, cwd: str, cmd: str, socket_path: str | None = None) -> None:
-    """Create a detached tmux session running cmd."""
-    _run(
-        _tmux_cmd("new-session", "-d", "-s", name, "-n", "main", "-c", cwd, cmd,
-                   socket_path=socket_path),
+def create_session(name: str, cwd: str, cmd: str, socket_path: str | None = None,
+                   env: dict[str, str] | None = None) -> None:
+    """Create a detached tmux session running cmd.
+
+    *env* is exposed to the new session's panes by name (values come from
+    the tmux client's environment — see ``_env_args``).
+    """
+    _run_with_env(
+        _tmux_cmd("new-session", "-d", "-s", name, "-n", "main", "-c", cwd,
+                  *_env_args(env), cmd, socket_path=socket_path),
+        env,
         check=True,
     )
 
 
 def split_pane(session: str, direction: str, cmd: str,
-               window: str | None = None) -> str:
+               window: str | None = None,
+               env: dict[str, str] | None = None) -> str:
     """Split a pane and run cmd. Returns new pane ID.
 
     direction: 'h' for horizontal (left/right), 'v' for vertical (top/bottom)
     window: optional tmux window id/name to target. When omitted, splits
         the active pane of the session's active window.
+    env: environment variables for the new pane, passed by name.
     """
     flag = "-h" if direction == "h" else "-v"
     target = f"{session}:{window}" if window else session
-    result = _run(
-        _tmux_cmd("split-window", flag, "-t", target, "-P", "-F", "#{pane_id}", cmd),
+    result = _run_with_env(
+        _tmux_cmd("split-window", flag, "-t", target, "-P", "-F",
+                  "#{pane_id}", *_env_args(env), cmd),
+        env,
         text=True,
         check=True,
     )
@@ -132,7 +164,8 @@ def kill_window(session: str, window: str) -> None:
 
 
 def new_window(session: str, name: str, cmd: str, cwd: str,
-               switch: bool = True) -> None:
+               switch: bool = True,
+               env: dict[str, str] | None = None) -> None:
     """Create a new tmux window with the given name, running cmd.
 
     Uses 'session:' format to ensure numeric session names aren't
@@ -141,11 +174,15 @@ def new_window(session: str, name: str, cmd: str, cwd: str,
 
     Set *switch* to False to create the window without changing the
     active window (useful for background operations like the review loop).
+    *env* is passed to the new pane by name (values come from the tmux
+    client's environment).
     """
     # Use session: format to explicitly target session, not window index
     target = f"{session}:"
-    _run(
-        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
+    _run_with_env(
+        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd,
+                  *_env_args(env), cmd),
+        env,
         check=True,
     )
     win = find_window_by_name(session, name)
@@ -162,7 +199,8 @@ def new_window(session: str, name: str, cmd: str, cwd: str,
 
 
 def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
-                        switch: bool = True) -> str | None:
+                        switch: bool = True,
+                        env: dict[str, str] | None = None) -> str | None:
     """Create a new tmux window and return its initial pane ID.
 
     Like new_window but returns the pane ID so callers can split on it.
@@ -170,10 +208,14 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
 
     Set *switch* to False to create the window without changing the
     active window (useful for background operations like the review loop).
+    *env* is passed to the new pane by name (values come from the tmux
+    client's environment).
     """
     target = f"{session}:"
-    _run(
-        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
+    _run_with_env(
+        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd,
+                  *_env_args(env), cmd),
+        env,
         check=True,
     )
     win = find_window_by_name(session, name)
@@ -197,29 +239,36 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     return None
 
 
-def create_window(session: str, cmd: str) -> tuple[str, str]:
+def create_window(session: str, cmd: str,
+                  env: dict[str, str] | None = None) -> tuple[str, str]:
     """Create a new window in *session* running *cmd*.
 
     Returns ``(pane_id, window_id)`` of the newly created window.
+    *env* is passed to the new pane by name.
     """
-    result = _run(
+    result = _run_with_env(
         _tmux_cmd("new-window", "-t", f"{session}:",
-                  "-P", "-F", "#{pane_id} #{window_id}", cmd),
+                  "-P", "-F", "#{pane_id} #{window_id}", *_env_args(env), cmd),
+        env,
         text=True, check=True,
     )
     parts = result.stdout.strip().split()
     return parts[0], parts[1]
 
 
-def split_pane_background(session: str, direction: str, cmd: str) -> str:
+def split_pane_background(session: str, direction: str, cmd: str,
+                          env: dict[str, str] | None = None) -> str:
     """Split a pane without switching focus. Returns new pane ID.
 
     Like split_pane but uses -d to keep focus on the current pane.
     direction: 'h' for horizontal (left/right), 'v' for vertical (top/bottom)
+    *env* is passed to the new pane by name.
     """
     flag = "-h" if direction == "h" else "-v"
-    result = _run(
-        _tmux_cmd("split-window", "-d", flag, "-t", session, "-P", "-F", "#{pane_id}", cmd),
+    result = _run_with_env(
+        _tmux_cmd("split-window", "-d", flag, "-t", session, "-P", "-F",
+                  "#{pane_id}", *_env_args(env), cmd),
+        env,
         text=True,
         check=True,
     )
@@ -227,7 +276,8 @@ def split_pane_background(session: str, direction: str, cmd: str) -> str:
 
 
 def split_pane_at(pane_id: str, direction: str, cmd: str,
-                  background: bool = False, cwd: str | None = None) -> str:
+                  background: bool = False, cwd: str | None = None,
+                  env: dict[str, str] | None = None) -> str:
     """Split a specific pane. Returns new pane ID.
 
     direction: 'h' for horizontal (left/right), 'v' for vertical (top/bottom)
@@ -235,15 +285,17 @@ def split_pane_at(pane_id: str, direction: str, cmd: str,
         the target pane's current /proc cwd, which can drift if the
         target's shell has been chdir'd by a long-running process
         (e.g. Claude Code's persistent Bash tool).
+    *env* is passed to the new pane by name.
     """
     flag = "-h" if direction == "h" else "-v"
     args = ["split-window", flag, "-t", pane_id, "-P", "-F", "#{pane_id}"]
     if cwd:
         args += ["-c", cwd]
+    args += _env_args(env)
     args.append(cmd)
     if background:
         args.insert(2, "-d")
-    result = _run(_tmux_cmd(*args), text=True, check=True)
+    result = _run_with_env(_tmux_cmd(*args), env, text=True, check=True)
     return result.stdout.strip()
 
 

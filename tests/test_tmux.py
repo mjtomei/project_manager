@@ -628,3 +628,55 @@ class TestSessionsOnWindow:
     def test_display_error_skipped(self, mock_lg, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stdout="")
         assert sessions_on_window("proj", "@1") == []
+
+
+# ---------------------------------------------------------------------------
+# provider env transport (pr-84ebabf)
+# ---------------------------------------------------------------------------
+
+CANARY = "canary-84ebabf-do-not-use"
+
+
+class TestProviderEnvTransport:
+    """Provider secrets travel by name through the tmux client env.
+
+    The value must never be part of the tmux command line: that string is
+    logged and tmux keeps it as ``#{pane_start_command}``.
+    """
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_split_pane_passes_env_by_name(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="%5\n")
+        split_pane("sess", "h", "claude", env={"ANTHROPIC_API_KEY": CANARY})
+        cmd = mock_run.call_args[0][0]
+        assert cmd.count("-e") == 1
+        assert "ANTHROPIC_API_KEY" in cmd
+        assert CANARY not in " ".join(cmd)
+        assert mock_run.call_args.kwargs["env"]["ANTHROPIC_API_KEY"] == CANARY
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_split_pane_at_passes_env_by_name(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="%6\n")
+        split_pane_at("%1", "v", "claude", env={"OPENAI_API_KEY": CANARY})
+        cmd = mock_run.call_args[0][0]
+        assert "OPENAI_API_KEY" in cmd
+        assert CANARY not in " ".join(cmd)
+        assert mock_run.call_args.kwargs["env"]["OPENAI_API_KEY"] == CANARY
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_create_session_passes_env_by_name(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+        create_session("proj", "/tmp", "claude",
+                       env={"ANTHROPIC_API_KEY": CANARY})
+        cmd = mock_run.call_args[0][0]
+        assert "ANTHROPIC_API_KEY" in cmd
+        assert CANARY not in " ".join(cmd)
+        assert mock_run.call_args.kwargs["env"]["ANTHROPIC_API_KEY"] == CANARY
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_no_env_adds_no_flags(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="%7\n")
+        split_pane("sess", "v", "claude")
+        cmd = mock_run.call_args[0][0]
+        assert "-e" not in cmd
+        assert "env" not in mock_run.call_args.kwargs

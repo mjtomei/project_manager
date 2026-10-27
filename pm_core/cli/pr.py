@@ -1164,6 +1164,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
             # follows the tmux session, not the cwd — run from a PR workdir
             # (picker / prefix+M popup) the cwd tag names no session.
             _stag = pm_session.removeprefix("pm-") if pm_session else None
+            env: dict[str, str] = {}
             cmd = build_claude_shell_cmd(prompt=prompt,
                                          transcript=transcript,
                                          cwd=_claude_cwd,
@@ -1172,13 +1173,15 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                                          provider=resolved_provider,
                                          effort=_resolution.effort,
                                          session_tag=_stag,
-                                         session_type="impl")
+                                         session_type="impl",
+                                         env_out=env)
             # Optionally wrap in a container for isolation
             from pm_core.container import wrap_claude_cmd, ContainerError
             try:
                 cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
                                               allowed_push_branch=branch,
-                                              session_tag=_stag, pr_id=pr_id)
+                                              session_tag=_stag, pr_id=pr_id,
+                                              env=env)
             except ContainerError as e:
                 click.echo(str(e), err=True)
                 raise SystemExit(1)
@@ -1186,7 +1189,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 if use_companion:
                     claude_pane = tmux_mod.new_window_get_pane(
                         pm_session, window_name, cmd, str(work_path),
-                        switch=not background,
+                        switch=not background, env=env,
                     )
                     if claude_pane:
                         win = tmux_mod.find_window_by_name(pm_session, window_name)
@@ -1194,7 +1197,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                             _add_companion_pane(pm_session, win, str(work_path), "impl")
                 else:
                     tmux_mod.new_window(pm_session, window_name, cmd, str(work_path),
-                                        switch=not background)
+                                        switch=not background, env=env)
                     win = tmux_mod.find_window_by_name(pm_session, window_name)
                     if win:
                         tmux_mod.set_shared_window_size(pm_session, win["id"])
@@ -1386,6 +1389,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     # Session-scoped config (fake-claude, skip-permissions, the captures
     # bind-mount below) follows the tmux session, not the cwd.
     _review_stag = pm_session.removeprefix("pm-")
+    env: dict[str, str] = {}
     claude_cmd = build_claude_shell_cmd(prompt=review_prompt,
                                          transcript=transcript,
                                          cwd=_claude_cwd,
@@ -1394,7 +1398,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                          provider=_resolution.provider,
                                          effort=_resolution.effort,
                                          session_tag=_review_stag,
-                                         session_type="review")
+                                         session_type="review",
+                                         env_out=env)
     # Optionally wrap in a container for isolation.
     # Always remove any existing container for this review before creating a
     # new one.  The previous session's bash EXIT trap runs "docker rm -f"
@@ -1415,7 +1420,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
                                               allowed_push_branch=branch,
                                               session_tag=_review_stag,
-                                              pr_id=pr_id)
+                                              pr_id=pr_id,
+                                              env=env)
     except ContainerError as e:
         click.echo(str(e), err=True)
         raise SystemExit(1)
@@ -1495,7 +1501,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         # Explicit cwd: without -c tmux starts the split in the calling
         # process's cwd (the TUI's pm dir), not the PR workdir.
         claude_pane = tmux_mod.split_pane_at(diff_pane, "h", claude_cmd,
-                                             background=True, cwd=workdir)
+                                             background=True, cwd=workdir,
+                                             env=env)
 
         # Register review panes under the review window (multi-window safe).
         # Derive window ID from the pane we just created rather than
@@ -1999,13 +2006,15 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
 
     merge_prompt = prompt_gen.generate_merge_prompt(
         data, pr_id, error_output, session_name=pm_session)
+    env: dict[str, str] = {}
     claude_cmd = build_claude_shell_cmd(prompt=merge_prompt,
                                          transcript=transcript, cwd=workdir,
                                          model=_resolution.model,
                                          provider=_resolution.provider,
                                          effort=_resolution.effort,
                                          session_tag=pm_session.removeprefix("pm-"),
-                                         session_type="merge")
+                                         session_type="merge",
+                                         env_out=env)
     # Runs on the host — it updates the main repo checkout, which the
     # branch-scoped container push proxy is not set up for.
     window_name = f"merge-{display_id}"
@@ -2024,7 +2033,7 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         if use_companion:
             claude_pane = tmux_mod.new_window_get_pane(
                 pm_session, window_name, claude_cmd, workdir,
-                switch=not background,
+                switch=not background, env=env,
             )
             if claude_pane:
                 win = tmux_mod.find_window_by_name(pm_session, window_name)
@@ -2033,7 +2042,7 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
         else:
             tmux_mod.new_window(
                 pm_session, window_name, claude_cmd, workdir,
-                switch=not background,
+                switch=not background, env=env,
             )
         click.echo(f"Opened repo-update window '{window_name}'")
         # The vanilla/GitHub pull-from-origin window resolves in the project

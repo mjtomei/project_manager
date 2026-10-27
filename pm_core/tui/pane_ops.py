@@ -142,7 +142,8 @@ def get_session_and_window(app) -> tuple[str, str] | None:
 
 
 def launch_pane(app, cmd: str, role: str, fresh: bool = False,
-                target_window: str | None = None) -> None:
+                target_window: str | None = None,
+                env: dict[str, str] | None = None) -> None:
     """Launch a wrapped pane, register it, and rebalance.
 
     If a pane with this role already exists and is alive, focuses it instead
@@ -151,6 +152,9 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False,
     When *target_window* is provided, the pane is launched (and dedup'd) in
     that tmux window rather than the TUI's current window. Used by watchers
     that need to keep launched sessions alongside their own work log.
+
+    *env* carries provider values; it is passed to the new pane by name so
+    the values never appear in the command string.
     """
     info = get_session_and_window(app)
     if not info:
@@ -178,7 +182,8 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False,
     wrap = f"bash -c 'trap \"pm _pane-exited {session} {window} {gen} $TMUX_PANE\" EXIT; {escaped}'"
     try:
         direction = pane_layout.preferred_split_direction(session, window)
-        pane_id = tmux_mod.split_pane(session, direction, wrap, window=window)
+        pane_id = tmux_mod.split_pane(session, direction, wrap, window=window,
+                                      env=env)
         pane_layout.register_and_rebalance(session, window, [(pane_id, role, cmd)])
         tmux_mod.select_pane_smart(pane_id, session, window)
         # Forced: this answers the user's key, which may land while a
@@ -373,8 +378,10 @@ they can use dedicated shortcuts rather than typing commands.
 
 The user will tell you what they need."""
 
-    cmd = build_claude_shell_cmd(prompt=prompt, session_type="discuss")
-    launch_pane(app, cmd, "claude", fresh=fresh)
+    env: dict[str, str] = {}
+    cmd = build_claude_shell_cmd(prompt=prompt, session_type="discuss",
+                                 env_out=env)
+    launch_pane(app, cmd, "claude", fresh=fresh, env=env)
 
 
 def launch_discuss(app) -> None:
@@ -436,8 +443,10 @@ focused. Press Escape to return focus to the tree/plans view.
 
 Ask the user what they'd like to know about."""
 
-    cmd = build_claude_shell_cmd(prompt=prompt, session_type="discuss")
-    launch_pane(app, cmd, "discuss", fresh=fresh)
+    env: dict[str, str] = {}
+    cmd = build_claude_shell_cmd(prompt=prompt, session_type="discuss",
+                                 env_out=env)
+    launch_pane(app, cmd, "discuss", fresh=fresh, env=env)
 
 
 def launch_watcher_review(app) -> None:
@@ -488,8 +497,10 @@ def launch_watcher_review(app) -> None:
         transcript_dir=transcript_dir,
     )
 
-    cmd = build_claude_shell_cmd(prompt=prompt, session_type="watcher_review")
-    launch_pane(app, cmd, "watcher-review", fresh=fresh)
+    env: dict[str, str] = {}
+    cmd = build_claude_shell_cmd(prompt=prompt, session_type="watcher_review",
+                                 env_out=env)
+    launch_pane(app, cmd, "watcher-review", fresh=fresh, env=env)
 
 
 def launch_qa_item(app, item_id: str, target_window: str | None = None) -> None:
@@ -552,8 +563,10 @@ To interact with this session, use commands like:
 {body}
 """
 
-    cmd = build_claude_shell_cmd(prompt=full_prompt, session_type="qa_author")
-    launch_pane(app, cmd, "qa-item", target_window=target_window)
+    env: dict[str, str] = {}
+    cmd = build_claude_shell_cmd(prompt=full_prompt, session_type="qa_author",
+                                 env_out=env)
+    launch_pane(app, cmd, "qa-item", target_window=target_window, env=env)
 
 
 # ---------------------------------------------------------------------------
