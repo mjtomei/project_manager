@@ -835,3 +835,35 @@ Tests: `test_shared_stop_does_not_follow_a_planted_symlinked_dir` and
 `test_legacy_stop_does_not_follow_a_planted_symlinked_dir` both fail at
 61389980 for the right reason (`<victim>.lock` is created through the
 planted symlink) and pass at HEAD.
+
+## Review iteration 17 refinements
+
+Seventeenth review pass (consistent with R6; no requirement changed).  The
+session tag is derived from a directory name, and it was interpolated raw
+into the two teardown globs:
+
+- **A tag with glob metacharacters no longer breaks session teardown.**
+  `stop_session_proxies` built both its socket glob and its directory
+  sweep from ``f"/tmp/pm-push-proxy-{session_tag}-*"``.  A repository
+  directory such as ``repo[1]`` yields the tag ``repo[1]-abcd1234``, whose
+  ``[1]`` is a *character class*: the pattern matched nothing of its own
+  (after a restart the in-process registry is empty, so the glob is the
+  only way to find a proxy — the proxy and its socket directory survived
+  the session) and matched a sibling ``pm-push-proxy-repo1-abcd1234-…``
+  directory, which the sweep then **deleted** (a cross-session kill of the
+  kind iteration 13 guards against).  The tag is now passed through
+  ``glob.escape``.
+
+Tests: `test_stop_session_escapes_glob_metacharacters_in_the_tag` fails at
+61389980 for the right reason — with ``glob.escape`` neutralised it
+observes `count 0`, the proxy still alive, its directory left behind, and
+the sibling directory deleted.
+
+Test hygiene (no behaviour change): `test_stop_all_proxies_skips_a_busy_directory`
+called the real ``stop_all_proxies()``, which sweeps *every*
+``/tmp/pm-push-proxy-*`` entry.  Run on a machine with a live session, the
+suite would have stopped that session's proxies and deleted the socket
+directories its containers bind-mount — the S18 failure this lifecycle
+exists to prevent.  The test now patches ``_SOCKET_DIR_PREFIX`` to a
+test-only value and pins that a stand-in live directory survives.
+

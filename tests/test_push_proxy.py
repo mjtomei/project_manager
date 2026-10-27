@@ -1453,21 +1453,39 @@ class TestWorkdirKeyedProxies:
                 self._start("qa-wd", qa)
 
     def test_stop_all_proxies_skips_a_busy_directory(self, tmp_path,
-                                                     live_proxies):
-        """The whole-process sweep honours the per-directory start lock too."""
-        impl = self._workdir(tmp_path, "impl")
-        sock = self._start("impl-wd", impl)
-        sock_dir = os.path.dirname(sock)
+                                                     live_proxies,
+                                                     monkeypatch):
+        """The whole-process sweep honours the per-directory start lock too.
 
-        # A container start holds this directory's lock right now.
-        with push_proxy_mod._start_lock(sock_dir, blocking=False) as held:
-            assert held is True
+        The prefix is patched for this test: ``stop_all_proxies`` sweeps
+        every ``/tmp/pm-push-proxy-*`` entry, so run unpatched on a machine
+        with a live session it would stop that session's proxies and delete
+        the socket directories its containers bind-mount — the very failure
+        (S18) this lifecycle is built to prevent.
+        """
+        monkeypatch.setattr(push_proxy_mod, "_SOCKET_DIR_PREFIX",
+                            "pm-push-proxy-test-sweepall-")
+        # Stands in for a live session's proxy directory: it must survive.
+        live_dir = "/tmp/pm-push-proxy-livesession-standin"
+        os.makedirs(live_dir, exist_ok=True)
+        try:
+            impl = self._workdir(tmp_path, "impl")
+            sock = self._start("impl-wd", impl)
+            sock_dir = os.path.dirname(sock)
+
+            # A container start holds this directory's lock right now.
+            with push_proxy_mod._start_lock(sock_dir, blocking=False) as held:
+                assert held is True
+                stop_all_proxies()
+                assert push_proxy_mod.proxy_is_alive(sock), (
+                    "sweep killed a proxy whose start was in flight")
+
             stop_all_proxies()
-            assert push_proxy_mod.proxy_is_alive(sock), (
-                "sweep killed a proxy whose start was in flight")
-
-        stop_all_proxies()
-        assert not push_proxy_mod.proxy_is_alive(sock)
+            assert not push_proxy_mod.proxy_is_alive(sock)
+            assert os.path.isdir(live_dir), (
+                "stop_all_proxies swept a live session's directory")
+        finally:
+            shutil.rmtree(live_dir, ignore_errors=True)
 
     def test_stop_session_removes_kept_socket_dirs(self, tmp_path,
                                                    live_proxies):
@@ -1484,6 +1502,41 @@ class TestWorkdirKeyedProxies:
         stop_session_proxies(self.TAG)
         assert not os.path.exists(sock_dir)
         assert not os.path.exists(sock_dir + ".lock")
+
+    def test_stop_session_escapes_glob_metacharacters_in_the_tag(
+            self, tmp_path, live_proxies):
+        """A tag containing ``[``/``]`` must still find its own proxies.
+
+        The session tag is derived from a directory name, so it can contain
+        glob metacharacters.  Interpolated raw into the teardown glob,
+        ``repo[1]-abcd`` matched nothing of its own — the proxy and its
+        socket directory survived the session (after a restart the registry
+        is empty, so the glob is the only way to find them) — and the
+        character class matched a *sibling* ``repo1-abcd-…`` directory,
+        which the sweep then deleted.
+        """
+        tag = "repo[1]-abcd1234"
+        impl = self._workdir(tmp_path, "impl")
+        sock = self._start("impl-glob", impl, tag=tag)
+        sock_dir = os.path.dirname(sock)
+
+        # What the *unescaped* pattern would have matched instead.
+        sibling = "/tmp/pm-push-proxy-repo1-abcd1234-deadbeefcafe"
+        os.makedirs(sibling, exist_ok=True)
+        try:
+            # Simulate a TUI restart: the in-process registry is gone.
+            with push_proxy_mod._proxy_lock:
+                push_proxy_mod._active_proxies.clear()
+                push_proxy_mod._proxy_refs.clear()
+                push_proxy_mod._container_to_proxy_key.clear()
+
+            assert stop_session_proxies(tag) == 1
+            assert not push_proxy_mod.proxy_is_alive(sock)
+            assert not os.path.exists(sock_dir)
+            assert os.path.isdir(sibling), (
+                "session teardown deleted another session's directory")
+        finally:
+            shutil.rmtree(sibling, ignore_errors=True)
 
     def test_discovery_symlink_failure_does_not_break_start(
             self, tmp_path, live_proxies):

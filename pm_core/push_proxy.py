@@ -1732,8 +1732,13 @@ def stop_session_proxies(session_tag: str) -> int:
     # even when the long-name symlink is missing — the hashed directory does
     # not match the ``{tag}-*`` glob, so a lost symlink would otherwise leak
     # a live proxy past teardown).
-    socks = set(_glob.glob(
-        f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-*/push.sock"))
+    #
+    # The tag is escaped: it is derived from a directory name, so it may
+    # contain glob metacharacters.  Unescaped, a tag like ``repo[1]-abcd``
+    # would match nothing of its own (leaking its proxies past teardown) and
+    # could match — and delete — another session's ``repo1-abcd-…`` directory.
+    pattern = f"/tmp/{_SOCKET_DIR_PREFIX}{_glob.escape(session_tag)}-*"
+    socks = set(_glob.glob(pattern + "/push.sock"))
     for k in keys_to_remove:
         parts = k.split("\0")
         if len(parts) == 3:
@@ -1746,7 +1751,7 @@ def stop_session_proxies(session_tag: str) -> int:
 
     # Remove directories even when their socket was already stopped (shared
     # stops keep the directory for live container mounts).
-    _remove_proxy_dirs(f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-*")
+    _remove_proxy_dirs(pattern)
 
     if count:
         _log.info("Stopped %d session proxy(ies) for %s", count, session_tag)
