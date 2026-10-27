@@ -1110,7 +1110,9 @@ isolated candidate (your worktree and the base branch were not touched):
    membership and verdicts to a real QA run, so a report built from
    superseded or foreign evidence is detectable: the dashboard flags a
    report whose run is not the PR's current one, and `pm pr merge` refuses
-   it.
+   it. If the QA scenarios block above names no QA run (no
+   `$CAP/qa_manifest.json` — legacy evidence), omit this tag rather than
+   inventing an id; a report without it is neither flagged nor refused.
 
    A human approval (`pm pr signoff record`) is refused unless these match
    the current HEAD and the recorded integration check. Include an

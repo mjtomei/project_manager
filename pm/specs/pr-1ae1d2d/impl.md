@@ -34,7 +34,8 @@ Why the current code allows this:
    land on an index whose directory still holds foreign files.
 
 **Relationship to #264 / pr-1e9c117 (do not duplicate).** That PR (commit
-`2739187c`, still unmerged) makes `paths.captures_dir` fail closed when
+`2739187c`; its `PM_CAPTURES_PR` ownership guard is now on `master` — see
+`paths.captures_dir`) makes `captures_dir` fail closed when
 `PM_CAPTURES_PR` is absent/empty/mismatched, i.e. it *prevents* the nested
 write when the marker is missing. This PR does **not** touch that routing
 rule. It owns the complementary half: persisted evidence is self-identifying,
@@ -127,6 +128,10 @@ manifest still resolves).
 - **Early exits that produce no scenarios** (planner trust-blocked, QA spec
   missing): an empty-membership manifest still records that this run owns
   nothing, so an older run's directories cannot pass as its coverage.
+  `_sync_captures_evidence` therefore takes a `scenarios` override and those
+  exits pass `[]` — a run that planned but never launched a scenario must
+  not list its plan as membership (the audit would otherwise report each
+  planned scenario as "manifest member whose evidence is missing").
 
 `$CAP/integration.json` (`pm_core/integration.py:399`) is untouched.
 
@@ -207,12 +212,18 @@ listing arbitrary directories.
     anchored to real membership).
 - The dashboard-contract block (`:986-1000`) adds a required meta tag:
   `<meta name="pm-signoff-qa-run" content="<the QA run id you reviewed>">`,
-  documented as binding the report's scenario membership to that run.
+  documented as binding the report's scenario membership to that run. The
+  contract also says to omit the tag when the QA block names no run (legacy
+  evidence, no manifest) rather than invent one — the session would
+  otherwise bind its own report to a run that does not exist and the merge
+  gate would refuse it.
 
 ### R8 — Dashboard flags a report bound to another run
 `pm_core/behavior_report.py`:
 
-- `_DashRow` gains `qa_run: str` and `qa_run_stale: bool`.
+- `_DashRow` gains `qa_run: str`, `qa_current_run: str` and
+  `qa_run_stale: bool` (the current run id is carried so the marker's
+  `title` can name both runs).
 - `gather_dashboard_rows` (`:126`) reads `pm-signoff-qa-run` via
   `extract_signoff_meta` and the current manifest via
   `captures.read_manifest(captures_root_dir / pr_id, pr_id=pr_id)`; the row is

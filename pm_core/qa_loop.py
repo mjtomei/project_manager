@@ -2028,13 +2028,20 @@ def _captures_root_is_ours(base: Path, pr_id: str) -> bool:
     return os.environ.get(CAPTURES_PR_ENV) == pr_id
 
 
-def _sync_captures_evidence(state: "QALoopState", overall: str = "") -> None:
+def _sync_captures_evidence(state: "QALoopState", overall: str = "",
+                            scenarios: list[dict] | None = None) -> None:
     """Quarantine foreign scenario records and refresh the run manifest.
 
     Called at execution start (before any scenario prompt is written, so a
     foreign directory at a reused index is out of the way) and at
     completion (a nested fixture can write *during* the run — the observed
     incident).  Best effort: evidence bookkeeping must never abort a QA run.
+
+    *scenarios* overrides the membership written to the manifest.  An early
+    exit that launched nothing (planner trust-blocked, QA spec missing)
+    passes ``[]``: the run owns no evidence, and an older run's scenario
+    directories must not pass as its coverage just because the plan named
+    them.
     """
     from pm_core import captures
     from pm_core.paths import (
@@ -2062,7 +2069,9 @@ def _sync_captures_evidence(state: "QALoopState", overall: str = "") -> None:
                 CAPTURES_PR_ENV)
         captures.write_manifest(
             base, pr_id=state.pr_id, run_id=state.loop_id,
-            scenarios=_manifest_scenarios(state), overall=overall,
+            scenarios=(_manifest_scenarios(state)
+                       if scenarios is None else scenarios),
+            overall=overall,
         )
     except Exception:
         _log.warning("Failed to sync captures evidence for %s",
@@ -4066,7 +4075,8 @@ def run_qa_sync(
             # The run owns no scenarios; record that, so a stale scenario
             # directory from an earlier run cannot pass as this run's
             # coverage (pr-1ae1d2d).
-            _sync_captures_evidence(state, overall=state.latest_verdict)
+            _sync_captures_evidence(state, overall=state.latest_verdict,
+                                    scenarios=[])
             # Show the error block beside the dialog: the user looking at
             # the QA window otherwise sees only the prompt, no explanation.
             if planner_pane and tmux_mod.pane_exists(planner_pane):
@@ -4168,7 +4178,11 @@ def run_qa_sync(
             "Then restart QA from the TUI."
         )
         _notify()
-        _sync_captures_evidence(state, overall=state.latest_verdict)
+        # Scenarios were planned but none launched, so this run owns no
+        # evidence: bind it with an empty membership rather than letting the
+        # plan read as coverage (pr-1ae1d2d).
+        _sync_captures_evidence(state, overall=state.latest_verdict,
+                                scenarios=[])
         state.running = False
         return state  # Do not launch scenarios without a QA spec
 

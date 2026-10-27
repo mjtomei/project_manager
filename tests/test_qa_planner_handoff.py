@@ -383,6 +383,26 @@ class TestRunQaSyncHandoff:
         assert launched["changes"] == ["app.py"]
 
 
+class TestRunQaSyncEvidenceBinding:
+    def test_spec_gate_records_empty_membership(self, tmp_path, monkeypatch):
+        """Scenarios were planned but the QA spec gate stopped the run before
+        any launch, so the run owns no evidence.  The manifest written at
+        that early exit must claim no membership — listing the plan would let
+        a planned-but-never-run scenario read as coverage (pr-1ae1d2d)."""
+        sync = MagicMock()
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content="",
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", FULL_PLAN)],
+            extra_patches=(patch(
+                "pm_core.qa_loop._sync_captures_evidence", sync),))
+        assert state.scenarios  # the plan was accepted...
+        assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
+        # ...but the evidence sync at the early exit records no membership.
+        assert any(call.kwargs.get("scenarios") == []
+                   for call in sync.call_args_list)
+
+
 class TestQAPlanProblem:
     def test_complete_plan_ok(self):
         sc = parse_qa_plan(FULL_PLAN)

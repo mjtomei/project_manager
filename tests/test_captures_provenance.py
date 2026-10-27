@@ -466,6 +466,23 @@ def test_sync_writes_an_empty_membership_manifest(tmp_path, monkeypatch):
     assert m["scenarios"] == []
 
 
+def test_sync_early_exit_records_empty_membership(tmp_path, monkeypatch):
+    """A run that planned scenarios but launched none (QA spec missing) owns
+    no evidence.  Its manifest must say so instead of listing the plan as
+    coverage — otherwise a planned-but-never-run scenario reads as a scenario
+    this run covered and only "failed to demonstrate"."""
+    from pm_core import paths, qa_loop
+    root = _root(tmp_path)
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: root)
+    state = _fixture_state()  # scenario 1 is planned
+    qa_loop._sync_captures_evidence(state, overall="INPUT_REQUIRED",
+                                    scenarios=[])
+    m = captures.read_manifest(root, pr_id="pr-fixture")
+    assert m["run_id"] == "fixturerun"
+    assert m["scenarios"] == []
+    assert m["overall"] == "INPUT_REQUIRED"
+
+
 def test_sync_quarantines_when_the_mount_belongs_to_this_pr(tmp_path,
                                                              monkeypatch):
     """The guard does not disable legitimate quarantine: a mount marked as
@@ -578,6 +595,10 @@ def test_signoff_prompt_requires_report_bound_to_the_qa_run(tmp_path,
     assert "qa_manifest.json" in flat
     # The checklist tells the session to ignore directories outside the run.
     assert "must not be cited as coverage" in flat
+    # With no manifest there is no run id to put in the tag; the contract
+    # must say so, or the session invents one and the merge gate then
+    # refuses the approval it just recorded.
+    assert "omit this tag" in flat
 
 
 # ---------------------------------------------------------------------------
