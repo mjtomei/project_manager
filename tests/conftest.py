@@ -30,6 +30,35 @@ def _isolated_claude_config(tmp_path_factory, monkeypatch):
                        str(tmp_path_factory.mktemp("claude-config")))
 
 
+@pytest.fixture(autouse=True)
+def _isolated_memory_governor(tmp_path_factory, monkeypatch):
+    """Keep memory-governor state and settings out of the real ``~/.pm``.
+
+    The launch queue, lock, stats and blocked-launch files, and the
+    ``container-system-memory-*`` / ``container-stop-idle-*`` settings the
+    governor reads, resolve under a temp dir — so a target configured on
+    the machine running the tests never makes a test measure the real
+    container runtime.  Tests that patch these themselves still win.
+    """
+    from pm_core import launch_queue, memory_governor
+    home = tmp_path_factory.mktemp("pm-home")
+
+    def _setting(name: str, default: str = "") -> str:
+        try:
+            return (home / "settings" / name).read_text().strip()
+        except OSError:
+            return default
+
+    for mod in (launch_queue, memory_governor):
+        monkeypatch.setattr(mod, "pm_home", lambda: home)
+        monkeypatch.setattr(mod, "get_global_setting_value", _setting)
+    # Cached status text is process-global; start each test clean.
+    monkeypatch.setattr(memory_governor, "_status_text", "")
+    monkeypatch.setattr(memory_governor, "_status_at", 0.0)
+    monkeypatch.setattr(memory_governor, "_status_refreshing", False)
+    return home
+
+
 @pytest.fixture
 def fake_github():
     """Install a pure-metadata FakeGitHubBackend as the `gh` transport.

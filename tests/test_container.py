@@ -24,7 +24,6 @@ from pm_core.container import (
     cleanup_all_containers,
     wrap_claude_cmd,
     container_is_running,
-    find_containers_by_keywords,
     _runtime_available,
     _build_git_setup_script,
     _get_dockerfile_path,
@@ -1298,127 +1297,228 @@ class TestCreateContainerPushProxy:
 
 
 class TestStopContainer:
+    """stop_container removes a finished session's container — unless
+    something else (e.g. a person's shell) still has an exec session in it."""
+
+    @pytest.fixture
+    def running(self):
+        with patch("pm_core.container.container_is_running", return_value=True), \
+             patch("pm_core.container.foreign_exec_sessions", return_value=0) as f:
+            yield f
+
     @patch("pm_core.container.remove_container")
     @patch("pm_core.tmux.set_pane_option")
-    def test_set_pane_option_called_for_each_pane(self, mock_set_pane, mock_remove):
-        stop_container("pm-qa-s1", pane_ids=["%10", "%11", "%12"])
-        assert mock_set_pane.call_count == 3
-        mock_set_pane.assert_has_calls([
-            call("%10", "remain-on-exit", "on"),
-            call("%11", "remain-on-exit", "on"),
-            call("%12", "remain-on-exit", "on"),
-        ])
-
-        # Verify ordering: all set_pane_option calls before remove_container
+    def test_preserves_panes_then_removes(self, mock_set_pane, mock_remove, running):
         manager = MagicMock()
         manager.attach_mock(mock_set_pane, "set_pane")
         manager.attach_mock(mock_remove, "remove")
-        # Reset and replay to capture ordering
-        manager.reset_mock()
-        mock_set_pane.reset_mock()
-        mock_remove.reset_mock()
-        stop_container("pm-qa-s1", pane_ids=["%10", "%11", "%12"])
-        assert manager.mock_calls[:3] == [
+        assert stop_container("pm-qa-s1", pane_ids=["%10", "%11"]) is True
+        assert manager.mock_calls == [
             call.set_pane("%10", "remain-on-exit", "on"),
             call.set_pane("%11", "remain-on-exit", "on"),
-            call.set_pane("%12", "remain-on-exit", "on"),
+            call.remove("pm-qa-s1"),
         ]
-        assert manager.mock_calls[3] == call.remove("pm-qa-s1")
+        running.assert_called_once_with("pm-qa-s1", ["%10", "%11"])
 
     @patch("pm_core.container.remove_container")
     @patch("pm_core.tmux.set_pane_option")
-    def test_pane_ids_none_skips_set_pane_option(self, mock_set_pane, mock_remove):
-        stop_container("pm-qa-s1", pane_ids=None)
+    def test_no_panes(self, mock_set_pane, mock_remove, running):
+        assert stop_container("pm-qa-s1", pane_ids=None) is True
         mock_set_pane.assert_not_called()
         mock_remove.assert_called_once_with("pm-qa-s1")
 
     @patch("pm_core.container.remove_container")
     @patch("pm_core.tmux.set_pane_option")
-    def test_pane_ids_empty_list_skips_set_pane_option(self, mock_set_pane, mock_remove):
-        stop_container("pm-qa-s1", pane_ids=[])
-        mock_set_pane.assert_not_called()
-        mock_remove.assert_called_once_with("pm-qa-s1")
-
-    @patch("pm_core.container.remove_container")
-    @patch("pm_core.tmux.set_pane_option")
-    def test_set_pane_option_failure_is_nonfatal(self, mock_set_pane, mock_remove):
+    def test_set_pane_option_failure_is_nonfatal(self, mock_set_pane, mock_remove, running):
         mock_set_pane.side_effect = [None, RuntimeError("dead pane"), None]
         stop_container("pm-qa-s1", pane_ids=["%10", "%11", "%12"])
         assert mock_set_pane.call_count == 3
         mock_remove.assert_called_once_with("pm-qa-s1")
 
+    @patch("pm_core.container.remove_container")
+    def test_keeps_container_with_foreign_exec_session(self, mock_remove):
+        """A retained human session (someone attached) is never cut off."""
+        with patch("pm_core.container.container_is_running", return_value=True), \
+             patch("pm_core.container.foreign_exec_sessions", return_value=1):
+            assert stop_container("pm-qa-s1", pane_ids=["%10"]) is False
+        mock_remove.assert_not_called()
 
-class TestFindContainersByKeywords:
-    CONTAINER_NAMES = [
-        "pm-repo-abc-impl-pr-123",
-        "pm-repo-abc-review-pr-123",
-        "pm-repo-abc-qa-pr-123-loop1-s0",
-        "pm-repo-abc-qa-pr-123-loop1-s1",
-        "pm-other-impl-pr-456",
-    ]
-    MOCK_STDOUT = "\n".join(CONTAINER_NAMES)
+    @patch("pm_core.container.remove_container")
+    def test_keeps_container_when_ownership_unknown(self, mock_remove):
+        with patch("pm_core.container.container_is_running", return_value=True), \
+             patch("pm_core.container.foreign_exec_sessions", return_value=None):
+            assert stop_container("pm-qa-s1", pane_ids=["%10"]) is False
+        mock_remove.assert_not_called()
 
-    def _mock_result(self, stdout=None, returncode=0):
-        if stdout is None:
-            stdout = self.MOCK_STDOUT
-        return MagicMock(stdout=stdout, returncode=returncode)
+    @patch("pm_core.container.remove_container")
+    def test_not_running_is_left_alone(self, mock_remove):
+        with patch("pm_core.container.container_is_running", return_value=False):
+            assert stop_container("pm-qa-s1") is False
+        mock_remove.assert_not_called()
 
-    @patch("pm_core.container._run_runtime")
-    def test_single_type_match(self, mock_docker):
-        mock_docker.return_value = self._mock_result()
-        result = find_containers_by_keywords("pr-123", "impl")
-        assert result == ["pm-repo-abc-impl-pr-123"]
 
-    @patch("pm_core.container._run_runtime")
-    def test_multi_match_by_type(self, mock_docker):
-        mock_docker.return_value = self._mock_result()
-        result = find_containers_by_keywords("pr-123", "qa")
-        assert result == [
-            "pm-repo-abc-qa-pr-123-loop1-s0",
-            "pm-repo-abc-qa-pr-123-loop1-s1",
-        ]
+class TestForeignExecSessions:
+    def test_no_exec_sessions(self):
+        from pm_core.container import foreign_exec_sessions
+        with patch("pm_core.container._exec_session_count", return_value=0), \
+             patch("pm_core.container._owned_exec_clients") as owned:
+            assert foreign_exec_sessions("pm-x", ["%1"]) == 0
+        owned.assert_not_called()
 
-    @patch("pm_core.container._run_runtime")
-    def test_broad_match_single_keyword(self, mock_docker):
-        mock_docker.return_value = self._mock_result()
-        result = find_containers_by_keywords("pr-123")
-        assert result == [
-            "pm-repo-abc-impl-pr-123",
-            "pm-repo-abc-review-pr-123",
-            "pm-repo-abc-qa-pr-123-loop1-s0",
-            "pm-repo-abc-qa-pr-123-loop1-s1",
-        ]
+    def test_extra_session_is_foreign(self):
+        from pm_core.container import foreign_exec_sessions
+        with patch("pm_core.container._exec_session_count", return_value=3), \
+             patch("pm_core.container._owned_exec_clients", return_value=2):
+            assert foreign_exec_sessions("pm-x", ["%1", "%2"]) == 1
 
-    @patch("pm_core.container._run_runtime")
-    def test_no_match(self, mock_docker):
-        mock_docker.return_value = self._mock_result()
-        result = find_containers_by_keywords("pr-999")
-        assert result == []
+    def test_unknown_counts(self):
+        from pm_core.container import foreign_exec_sessions
+        with patch("pm_core.container._exec_session_count", return_value=None):
+            assert foreign_exec_sessions("pm-x", []) is None
+        with patch("pm_core.container._exec_session_count", return_value=1), \
+             patch("pm_core.container._owned_exec_clients", return_value=None):
+            assert foreign_exec_sessions("pm-x", ["%1"]) is None
 
-    @patch("pm_core.container._run_runtime")
-    def test_docker_nonzero_exit(self, mock_docker):
-        mock_docker.return_value = self._mock_result(stdout="", returncode=1)
-        result = find_containers_by_keywords("pr-123")
-        assert result == []
+    def test_owned_clients_count_podman_reexec_once(self):
+        """podman exec re-executes itself: parent + child are one session."""
+        from pm_core import container as c
+        table = {
+            100: (1, ["bash", "-c", "podman exec -it pm-x claude"]),
+            101: (100, ["podman", "exec", "-it", "pm-x", "bash", "-c", "claude"]),
+            102: (101, ["podman", "exec", "-it", "pm-x", "bash", "-c", "claude"]),
+            200: (1, ["bash"]),
+            201: (200, ["podman", "exec", "-it", "pm-y", "bash"]),
+        }
+        pane_info = {"%1": "100 0", "%2": "200 0"}
 
-    @patch("pm_core.container._run_runtime")
-    def test_docker_exception(self, mock_docker):
-        import subprocess
-        mock_docker.side_effect = subprocess.TimeoutExpired(cmd="docker", timeout=10)
-        result = find_containers_by_keywords("pr-123")
-        assert result == []
+        def fake_run(cmd, **kw):
+            pane = cmd[cmd.index("-t") + 1]
+            return MagicMock(returncode=0, stdout=pane_info[pane])
 
-    @patch("pm_core.container._run_runtime")
-    def test_all_keywords_must_match(self, mock_docker):
-        mock_docker.return_value = self._mock_result()
-        result = find_containers_by_keywords("impl", "pr-456")
-        assert result == ["pm-other-impl-pr-456"]
+        with patch("pm_core.tmux._run", side_effect=fake_run), \
+             patch("pm_core.container._process_table", return_value=table):
+            assert c._owned_exec_clients("pm-x", ["%1", "%2"]) == 1
+            assert c._owned_exec_clients("pm-y", ["%1", "%2"]) == 1
+            assert c._owned_exec_clients("pm-z", ["%1"]) == 0
 
-        result = find_containers_by_keywords("impl", "qa")
-        assert result == []
 
-    @patch("pm_core.container._run_runtime")
-    def test_zero_keywords_returns_all(self, mock_docker):
-        mock_docker.return_value = self._mock_result()
-        result = find_containers_by_keywords()
-        assert result == self.CONTAINER_NAMES
+class TestStopIdleInBackground:
+    def _run(self, policy=True, touched=False, **kw):
+        from pm_core import container as c
+        with patch("pm_core.container.is_container_mode_enabled", return_value=True), \
+             patch("pm_core.memory_governor.get_stop_idle_policy", return_value=policy), \
+             patch("pm_core.memory_governor.transcript_touched_since",
+                   return_value=touched), \
+             patch("pm_core.container.stop_container") as stop:
+            t = c.stop_idle_in_background("pm-qa-s1", "qa_scenario", ["%1"], **kw)
+            if t:
+                t.join(5)
+        return t, stop
+
+    def test_policy_off_does_nothing(self):
+        t, stop = self._run(policy=False)
+        assert t is None
+        stop.assert_not_called()
+
+    def test_stops_off_thread(self):
+        t, stop = self._run()
+        assert t is not None
+        stop.assert_called_once_with("pm-qa-s1", pane_ids=["%1"])
+
+    def test_resumed_session_is_kept(self):
+        t, stop = self._run(touched=True, transcript_path="/t.jsonl",
+                            idle_since=100.0)
+        stop.assert_not_called()
+
+
+class TestLaunchAdmission:
+    def _settings(self, home, **values):
+        (home / "settings").mkdir(exist_ok=True)
+        for k, v in values.items():
+            (home / "settings" / f"container-{k.replace('_', '-')}").write_text(v)
+
+    def test_governor_off_needs_no_admission(self):
+        from pm_core.container import acquire_launch_admission
+        with patch("pm_core.container.container_is_running") as running:
+            assert acquire_launch_admission("pm-t-impl-pr-1", "impl pr-1") is None
+        running.assert_not_called()
+
+    def test_reused_running_container_needs_no_admission(self, _isolated_memory_governor):
+        from pm_core.container import acquire_launch_admission
+        self._settings(_isolated_memory_governor, system_memory_target="48g")
+        with patch("pm_core.container.container_is_running", return_value=True), \
+             patch("pm_core.launch_queue.enqueue_and_try_acquire") as acq:
+            assert acquire_launch_admission("pm-t-impl-pr-1", "impl pr-1") is None
+        acq.assert_not_called()
+
+    def test_refusal_names_action_and_reason(self, _isolated_memory_governor):
+        from pm_core import memory_governor as mg
+        from pm_core.container import acquire_launch_admission
+        self._settings(_isolated_memory_governor, system_memory_target="48g")
+        with patch("pm_core.container.container_is_running", return_value=False), \
+             patch("pm_core.memory_governor.project_memory", return_value=8192), \
+             patch("pm_core.launch_queue.enqueue_and_try_acquire",
+                   return_value=("e1", False, "50G used + 8G projected > 48G target")), \
+             patch("pm_core.launch_queue.dequeue") as deq:
+            with pytest.raises(ContainerError, match=r"blocked impl pr-1: 50G used"):
+                acquire_launch_admission("pm-t-impl-pr-1", "impl pr-1")
+        deq.assert_called_once_with("e1")
+        assert mg.recent_blocked()[0][0] == "impl pr-1"
+
+    def test_unmeasurable_memory_refuses(self, _isolated_memory_governor):
+        """Regression: failed stats must not silently allow a launch."""
+        from pm_core import memory_governor as mg
+        from pm_core.container import acquire_launch_admission
+        self._settings(_isolated_memory_governor, system_memory_target="48g")
+        with patch("pm_core.container.container_is_running", return_value=False), \
+             patch("pm_core.memory_governor.project_memory", return_value=8192), \
+             patch("pm_core.memory_governor.read_host_memory",
+                   return_value=mg.HostMemory(65536, 40000)), \
+             patch("pm_core.memory_governor.get_pm_container_memory",
+                   side_effect=mg.MemoryMeasurementError(
+                       "podman stats failed (rc=125)")):
+            with pytest.raises(ContainerError, match="rc=125"):
+                acquire_launch_admission("pm-t-review-pr-1", "review pr-1")
+
+    def test_invalid_target_refuses(self, _isolated_memory_governor):
+        from pm_core.container import acquire_launch_admission
+        self._settings(_isolated_memory_governor, system_memory_target="48 gigs")
+        with pytest.raises(ContainerError, match="invalid system-memory-target"):
+            acquire_launch_admission("pm-t-impl-pr-1", "impl pr-1")
+
+    def test_admitted_returns_entry_and_clears_block(self, _isolated_memory_governor):
+        from pm_core import memory_governor as mg
+        from pm_core.container import acquire_launch_admission
+        self._settings(_isolated_memory_governor, system_memory_target="48g")
+        mg.record_blocked("impl pr-1", "earlier")
+        with patch("pm_core.container.container_is_running", return_value=False), \
+             patch("pm_core.memory_governor.project_memory", return_value=8192), \
+             patch("pm_core.launch_queue.enqueue_and_try_acquire",
+                   return_value=("e1", True, "")):
+            assert acquire_launch_admission("pm-t-impl-pr-1", "impl pr-1") == "e1"
+        assert mg.recent_blocked() == []
+
+    @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
+    @patch("pm_core.container.load_container_config",
+           return_value=ContainerConfig())
+    @patch("pm_core.container.is_container_mode_enabled", return_value=True)
+    def test_wrap_releases_admission_after_create_and_on_failure(
+            self, _enabled, _config, _exec):
+        with patch("pm_core.container.acquire_launch_admission",
+                   return_value="e1") as acq, \
+             patch("pm_core.container.release_launch_admission") as rel, \
+             patch("pm_core.container.create_container"):
+            wrap_claude_cmd("claude", "/w", label="signoff-pr-1",
+                            session_tag="t", pr_id="pr-1")
+        acq.assert_called_once_with(f"{CONTAINER_PREFIX}t-signoff-pr-1",
+                                    action="signoff pr-1")
+        rel.assert_called_once_with("e1")
+        with patch("pm_core.container.acquire_launch_admission",
+                   return_value="e2"), \
+             patch("pm_core.container.release_launch_admission") as rel, \
+             patch("pm_core.container.create_container",
+                   side_effect=RuntimeError("boom")), \
+             patch("pm_core.container._get_runtime", return_value="podman"):
+            with pytest.raises(ContainerError):
+                wrap_claude_cmd("claude", "/w", label="impl-pr-1")
+        rel.assert_called_once_with("e2")

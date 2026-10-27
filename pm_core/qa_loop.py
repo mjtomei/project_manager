@@ -64,6 +64,9 @@ _PLANNER_GRACE = 15  # seconds before accepting planner completion
 _DEFAULT_MAX_SCENARIOS = 0  # 0 = unlimited
 _SCENARIO_MAX_RETRIES = 10  # max times to relaunch a dead scenario
 _SCENARIO_RETRY_BASE = 5  # base seconds for exponential backoff
+# Seconds between memory-governor admission attempts for a queued scenario
+# that is waiting for memory (each attempt measures container stats).
+_MEMORY_RETRY_INTERVAL = 15
 _DEFAULT_VERIFICATION_MAX_RETRIES = 3
 
 
@@ -2610,22 +2613,22 @@ def _get_window_pane_ids(session: str, window_name: str | None) -> list[str]:
         return []
 
 
-def _maybe_stop_idle_container(container_name: str, container_type: str,
-                               pane_ids: list[str] | None = None) -> None:
-    """Stop a container if the stop-on-idle policy is enabled for its type.
+def _maybe_stop_idle_container(scenario: "QAScenario", session: str,
+                               idle_since: float | None) -> None:
+    """Stop a finished scenario's container if stop-on-idle is on for QA.
 
-    *pane_ids*: tmux panes to preserve (remain-on-exit) before stopping.
+    Never blocks the poll loop; keeps the container if the worker session
+    was resumed after the verdict (see ``stop_idle_in_background``).
     """
-    from pm_core.memory_governor import get_stop_idle_policy
-    from pm_core.container import stop_container
-    if get_stop_idle_policy(container_type):
-        _log.info("Stop-on-idle: stopping container %s (%s)",
-                  container_name, container_type)
-        try:
-            stop_container(container_name, pane_ids=pane_ids)
-        except Exception:
-            _log.warning("Failed to stop container %s", container_name,
-                         exc_info=True)
+    if not scenario.container_name:
+        return
+    from pm_core.container import stop_idle_in_background
+    stop_idle_in_background(
+        scenario.container_name, "qa_scenario",
+        pane_ids=_get_window_pane_ids(session, scenario.window_name),
+        transcript_path=scenario.transcript_path,
+        idle_since=idle_since,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2672,9 +2675,18 @@ def _poll_tmux_verdicts(
     _launch_queue: list[QAScenario] = list(queued_scenarios or [])
     _queued_indices: set[int] = {s.index for s in _launch_queue}
 
-    # Cross-process launch queue tracking
+    # Memory governor admission (containers only): scenario index ->
+    # launch-queue entry id, entries not yet admitted, and why the head
+    # of the queue is waiting for memory ("" when it is not).
+    _qa_run_id = _qa_run_key(state)
     _entry_id_map: dict[int, str] = dict(entry_id_map or {})
     _pending_entry_ids: set[str] = set(pending_entry_ids or set())
+    _mem_wait_reason = ""
+    _last_mem_attempt = 0.0
+    _last_keepalive = 0.0
+    # When each scenario's verdict was accepted (stop-on-idle keeps a
+    # container whose session was resumed after this).
+    _verdict_at: dict[int, float] = {}
 
     pending = {s.index for s in state.scenarios if s.window_name}
     retry_counts: dict[int, int] = {}  # scenario_index -> retries used
@@ -2757,58 +2769,95 @@ def _poll_tmux_verdicts(
 
     def _dequeue_scenario(scenario_index: int) -> None:
         """Remove a scenario's entry from the cross-process launch queue."""
-        eid = _entry_id_map.get(scenario_index)
+        eid = _entry_id_map.pop(scenario_index, None)
         if eid and use_containers:
-            try:
-                from pm_core.launch_queue import dequeue as lq_dequeue
-                lq_dequeue(eid)
-            except Exception:
-                _log.debug("Failed to dequeue entry for scenario %d",
-                           scenario_index, exc_info=True)
+            _pending_entry_ids.discard(eid)
+            from pm_core.launch_queue import dequeue as lq_dequeue
+            lq_dequeue(eid)
 
-    def _launch_next_queued():
-        """Launch the next queued scenario if concurrency and memory allow."""
-        if not _launch_queue:
+    def _ensure_queue_entries(scenarios: list[QAScenario]) -> None:
+        """Give *scenarios* launch-queue entries (idempotent per scenario)."""
+        missing = [sc for sc in scenarios if sc.index not in _entry_id_map]
+        if not missing:
             return
+        from pm_core import container as container_mod
+        from pm_core.launch_queue import enqueue, GovernorLockTimeout
+        try:
+            ids = enqueue(
+                "qa_scenario", qa_run_id=_qa_run_id,
+                keys=[f"{_qa_run_id}:s{sc.index}" for sc in missing],
+                container_names=[container_mod.qa_container_name(
+                    state.pr_id, state.loop_id, sc.index,
+                    session_tag=state.session_tag) for sc in missing],
+            )
+        except GovernorLockTimeout as e:
+            _log.info("Launch queue: cannot enqueue yet (%s)", e)
+            return
+        for sc, eid in zip(missing, ids):
+            _entry_id_map[sc.index] = eid
+            _pending_entry_ids.add(eid)
+
+    def _admit_queued_head() -> tuple[bool, str]:
+        """Ask the memory governor to admit the head of ``_launch_queue``."""
+        nonlocal _last_mem_attempt
+        from pm_core import memory_governor as _mg
+        try:
+            active = _mg.governor_active()
+        except _mg.GovernorConfigError as e:
+            return False, str(e)
+        head = _launch_queue[0]
+        if not active and _entry_id_map.get(head.index) not in _pending_entry_ids:
+            return True, ""  # governor off: only the concurrency cap applies
+        now = time.monotonic()
+        if _mem_wait_reason and now - _last_mem_attempt < _MEMORY_RETRY_INTERVAL:
+            return False, _mem_wait_reason
+        _last_mem_attempt = now
+        _ensure_queue_entries([head])
+        eid = _entry_id_map.get(head.index)
+        if eid is None:
+            return False, "waiting to join the launch queue (governor lock busy)"
+        from pm_core.launch_queue import try_acquire_detailed
+        result = try_acquire_detailed([eid], keepalive=list(_pending_entry_ids))
+        if eid in result.granted:
+            _pending_entry_ids.discard(eid)
+            return True, ""
+        if result.reason == "launch queue entry no longer present":
+            # Expired (e.g. the loop was blocked): rejoin next attempt.
+            _entry_id_map.pop(head.index, None)
+            _pending_entry_ids.discard(eid)
+        reason = result.reason or "waiting for memory"
+        held = [sc.index for sc in state.scenarios
+                if sc.container_name
+                and state.scenario_verdicts.get(sc.index) == VERDICT_INPUT_REQUIRED]
+        if held:
+            reason += (f" ({len(held)} INPUT_REQUIRED scenario container(s) "
+                       f"still held for the user)")
+        return False, reason
+
+    def _launch_next_queued() -> bool:
+        """Launch the next queued scenario if concurrency and memory allow.
+
+        Returns True when a scenario was taken off the queue.
+        """
+        nonlocal _mem_wait_reason
+        if not _launch_queue:
+            _mem_wait_reason = ""
+            return False
         # Count currently active (pending + verifying)
         active = len(pending) + len(verifying)
         if concurrency_cap > 0 and active >= concurrency_cap:
-            return
-        # Memory governor gate check via launch queue (containers only).
-        # Only try to acquire ONE entry at a time — passing all pending IDs
-        # could grant multiple entries, but this function only launches one.
-        # Orphaned "acquired" entries would consume phantom memory budget.
-        if use_containers and _pending_entry_ids:
-            from pm_core.launch_queue import try_acquire
-            # Find the first queued scenario with a pending entry ID
-            target_eid = None
-            target_idx = None
-            for i, s in enumerate(_launch_queue):
-                eid = _entry_id_map.get(s.index)
-                if eid and eid in _pending_entry_ids:
-                    target_eid = eid
-                    target_idx = i
-                    break
-            if target_eid is None:
-                # No pending entry IDs left — fall through to non-governor path
-                scenario = _launch_queue.pop(0)
-            else:
-                granted = try_acquire([target_eid])
-                if not granted:
-                    _log.info("Launch queue: entry not granted — waiting for memory")
-                    return
-                scenario = _launch_queue.pop(target_idx)
-                _pending_entry_ids.discard(target_eid)
-        elif use_containers:
-            # Governor inactive or no entry IDs — use old check_launch path
-            from pm_core.memory_governor import check_launch
-            allowed, reason = check_launch("qa_scenario")
-            if not allowed:
-                _log.info("Memory governor blocked queued launch: %s", reason)
-                return
-            scenario = _launch_queue.pop(0)
-        else:
-            scenario = _launch_queue.pop(0)
+            return False
+        if use_containers:
+            # Admit one scenario at a time: this function launches one.
+            admitted, reason = _admit_queued_head()
+            if not admitted:
+                if reason != _mem_wait_reason:
+                    _log.info("Queued scenario %d waiting for memory: %s",
+                              _launch_queue[0].index, reason)
+                _mem_wait_reason = reason
+                return False
+        _mem_wait_reason = ""
+        scenario = _launch_queue.pop(0)
         _queued_indices.discard(scenario.index)
         _log.info("Launching queued scenario %d (%s), %d remain in queue",
                   scenario.index, scenario.title, len(_launch_queue))
@@ -2845,15 +2894,16 @@ def _poll_tmux_verdicts(
                 scenario.index,
                 "worker window creation failed on dequeue; no verdict",
             )
+        return True
 
     # Fill any open slots that were freed by initial workdir failures.
     # Scenarios that fail workdir creation are marked INPUT_REQUIRED without
     # entering ``pending``, so their slots would otherwise stay empty until
     # a later verdict triggers ``_launch_next_queued``.
-    for _ in range(len(_launch_queue)):
-        _launch_next_queued()  # returns immediately once cap is reached
+    while _launch_next_queued():
+        pass  # stops once the cap is reached or memory is short
 
-    _prev_mem_waiting: set[int] = set()
+    _prev_mem_waiting: tuple[frozenset[int], str] = (frozenset(), "")
 
     while (pending or verifying or _launch_queue) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
@@ -2892,11 +2942,10 @@ def _poll_tmux_verdicts(
                 _notify()
                 # Dequeue the scenario's launch queue entry
                 _dequeue_scenario(scenario_idx)
-                # Stop-on-idle: stop the container now that scenario is done
-                if use_containers and scenario.container_name:
-                    _maybe_stop_idle_container(
-                        scenario.container_name, "qa_scenario",
-                        pane_ids=_get_window_pane_ids(session, scenario.window_name))
+                # Stop-on-idle: the scenario is done
+                if use_containers:
+                    _maybe_stop_idle_container(scenario, session,
+                                               _verdict_at.get(scenario_idx))
             else:
                 fails = verification_failures.get(scenario_idx, 0) + 1
                 verification_failures[scenario_idx] = fails
@@ -2920,10 +2969,9 @@ def _poll_tmux_verdicts(
                     # Dequeue the scenario's launch queue entry
                     _dequeue_scenario(scenario_idx)
                     # Stop-on-idle: scenario is done
-                    if use_containers and scenario.container_name:
-                        _maybe_stop_idle_container(
-                            scenario.container_name, "qa_scenario",
-                            pane_ids=_get_window_pane_ids(session, scenario.window_name))
+                    if use_containers:
+                        _maybe_stop_idle_container(scenario, session,
+                                                   _verdict_at.get(scenario_idx))
                 else:
                     # Send the scenario a follow-up message and put back in pending.
                     # Use the stored pane_id to target the original scenario
@@ -3132,6 +3180,7 @@ def _poll_tmux_verdicts(
 
             if verdict:
                 state.scenario_verdicts[scenario.index] = verdict
+                _verdict_at[scenario.index] = ev_ts or time.time()
                 reason = extract_verdict_reason_from_transcript(
                     scenario.transcript_path,
                 )
@@ -3181,11 +3230,9 @@ def _poll_tmux_verdicts(
                     _dequeue_scenario(scenario.index)
                     # Stop-on-idle: NEEDS_WORK is done; INPUT_REQUIRED
                     # must stay alive for user interaction
-                    if (use_containers and scenario.container_name
-                            and verdict != VERDICT_INPUT_REQUIRED):
-                        _maybe_stop_idle_container(
-                            scenario.container_name, "qa_scenario",
-                            pane_ids=_get_window_pane_ids(session, scenario.window_name))
+                    if use_containers and verdict != VERDICT_INPUT_REQUIRED:
+                        _maybe_stop_idle_container(scenario, session,
+                                                   _verdict_at.get(scenario.index))
                     # Scenario fully done — launch next queued if available
                     _launch_next_queued()
 
@@ -3195,27 +3242,31 @@ def _poll_tmux_verdicts(
 
         # Periodic retry: memory may have been freed externally (other pm
         # processes stopping containers, user running docker stop, etc.).
-        # Try on each poll cycle when scenarios are queued — concurrency and
-        # memory checks inside _launch_next_queued gate the actual launch.
-        if _launch_queue:
-            for _ in range(len(_launch_queue)):
-                _launch_next_queued()
+        # _launch_next_queued rate-limits governor attempts while waiting.
+        while _launch_next_queued():
+            pass
+        if (_pending_entry_ids and use_containers
+                and time.monotonic() - _last_keepalive >= _MEMORY_RETRY_INTERVAL):
+            # Hold our place in line while we wait for a concurrency slot
+            # or memory (entries that stop being renewed expire).
+            from pm_core.launch_queue import keepalive as _lq_keepalive
+            _lq_keepalive(list(_pending_entry_ids))
+            _last_keepalive = time.monotonic()
 
-        # Determine which queued scenarios are waiting for memory vs
-        # waiting for a concurrency slot.
-        _mem_waiting: set[int] = set()
-        if _launch_queue and use_containers:
-            from pm_core.memory_governor import check_launch as _cl
-            _allowed, _ = _cl("qa_scenario")
-            if not _allowed:
-                _mem_waiting = {s.index for s in _launch_queue}
-
-        _mem_waiting_changed = _mem_waiting != _prev_mem_waiting
-        _prev_mem_waiting = set(_mem_waiting)
+        # Queued scenarios whose launch is blocked on memory (rather than
+        # on a concurrency slot) show as waiting_memory with the reason.
+        _mem_waiting: set[int] = (
+            {sc.index for sc in _launch_queue} if _mem_wait_reason else set())
+        _mem_state = (frozenset(_mem_waiting), _mem_wait_reason)
+        _mem_waiting_changed = _mem_state != _prev_mem_waiting
+        _prev_mem_waiting = _mem_state
 
         if verdicts_changed or completed_verifications or _mem_waiting_changed:
             with verification_lock:
                 verifying_snapshot = set(verifying)
+            _reasons = dict(state.scenario_verdict_reasons)
+            for _i in _mem_waiting:
+                _reasons[_i] = f"waiting for memory: {_mem_wait_reason}"
             _write_status_file(status_path, state.pr_id, state.scenarios,
                                state.scenario_verdicts,
                                scenario_0=state.scenario_0,
@@ -3223,17 +3274,20 @@ def _poll_tmux_verdicts(
                                queued_scenarios=_queued_indices,
                                verification_failures=verification_failures,
                                memory_waiting_scenarios=_mem_waiting,
-                               verdict_reasons=state.scenario_verdict_reasons)
+                               verdict_reasons=_reasons)
 
-    # Cleanup: dequeue any remaining entries (stop requested or loop exited)
-    if _pending_entry_ids and use_containers:
-        try:
-            from pm_core.launch_queue import dequeue as lq_dequeue
-            lq_dequeue(list(_pending_entry_ids))
-            _pending_entry_ids.clear()
-        except Exception:
-            _log.debug("Failed to dequeue remaining entries on exit",
-                       exc_info=True)
+    # Stop requested or loop finished: release this run's queue entries
+    # (_execute_and_finalize also does this if the loop raises).
+    if use_containers:
+        from pm_core.launch_queue import dequeue_run
+        dequeue_run(_qa_run_id)
+        _entry_id_map.clear()
+        _pending_entry_ids.clear()
+
+
+def _qa_run_key(state: "QALoopState") -> str:
+    """Launch-queue run id: stable across restarts of the same QA loop."""
+    return f"{state.pr_id}-{state.loop_id}"
 
 
 # ---------------------------------------------------------------------------
@@ -3758,6 +3812,50 @@ def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
         _log.exception("Failed to create status pane")
 
 
+def _admit_initial_batch(
+    state: "QALoopState", launch_scenarios: list["QAScenario"],
+) -> tuple[list, list, dict[int, str], set[str], str]:
+    """Memory-governor admission for the first batch of QA scenarios.
+
+    Returns ``(admitted, blocked, entry_id_map, pending_entry_ids,
+    wait_reason)``.  With the governor off everything is admitted without
+    queue entries.  Blocked scenarios keep their (waiting) entries so they
+    hold their place in line; ``wait_reason`` says why they wait.
+    """
+    from pm_core import container as container_mod
+    from pm_core import launch_queue as lq
+    from pm_core import memory_governor as mg
+
+    try:
+        if not mg.governor_active():
+            return list(launch_scenarios), [], {}, set(), ""
+    except mg.GovernorConfigError as e:
+        return [], list(launch_scenarios), {}, set(), str(e)
+
+    run_id = _qa_run_key(state)
+    try:
+        ids = lq.enqueue(
+            "qa_scenario", qa_run_id=run_id,
+            keys=[f"{run_id}:s{sc.index}" for sc in launch_scenarios],
+            container_names=[container_mod.qa_container_name(
+                state.pr_id, state.loop_id, sc.index,
+                session_tag=state.session_tag) for sc in launch_scenarios],
+        )
+    except lq.GovernorLockTimeout as e:
+        return [], list(launch_scenarios), {}, set(), str(e)
+    entry_map = {sc.index: eid for sc, eid in zip(launch_scenarios, ids)}
+    result = lq.try_acquire_detailed(ids)
+    granted = set(result.granted)
+    admitted = [sc for sc in launch_scenarios if entry_map[sc.index] in granted]
+    blocked = [sc for sc in launch_scenarios if entry_map[sc.index] not in granted]
+    pending = {entry_map[sc.index] for sc in blocked}
+    reason = (result.reason or "waiting for memory") if blocked else ""
+    if blocked:
+        _log.info("Memory governor admitted %d/%d initial QA scenarios: %s",
+                  len(admitted), len(launch_scenarios), reason)
+    return admitted, blocked, entry_map, pending, reason
+
+
 def run_qa_sync(
     state: QALoopState,
     pm_root: Path,
@@ -4252,35 +4350,6 @@ def run_qa_sync(
     # Determine concurrency cap (0 = launch all at once)
     concurrency_cap = max_scenarios if max_scenarios is not None else _get_max_scenarios()
 
-    # Memory governor: further constrain how many scenarios launch at once
-    _mem_all_blocked = False
-    _pre_mem_cap = concurrency_cap  # preserve for poll loop
-    mem_target = None  # set below if governor is active
-    if use_containers:
-        from pm_core.memory_governor import (
-            get_memory_target, get_current_used_mb, project_memory,
-        )
-        mem_target = get_memory_target()
-        if mem_target is not None:
-            current = get_current_used_mb()
-            projected = project_memory("qa_scenario")
-            if current is not None and projected > 0:
-                headroom = max(0, mem_target - current)
-                mem_cap = headroom // projected
-            else:
-                mem_cap = len(state.scenarios)  # can't measure — allow all
-
-            if mem_cap > 0 and (concurrency_cap <= 0 or mem_cap < concurrency_cap):
-                _log.info("Memory governor limits QA launch to %d scenarios "
-                          "(concurrency_cap was %d)", mem_cap, concurrency_cap)
-                concurrency_cap = mem_cap
-            elif mem_cap == 0:
-                # Even one doesn't fit — queue everything and let
-                # _launch_next_queued retry periodically
-                _log.info("Memory governor: no scenarios fit — all queued")
-                _mem_all_blocked = True
-                concurrency_cap = 1  # enable queuing (launch 0, queue rest)
-
     if concurrency_cap > 0:
         launch_scenarios = state.scenarios[:concurrency_cap]
         queued_scenarios = state.scenarios[concurrency_cap:]
@@ -4288,46 +4357,18 @@ def run_qa_sync(
         launch_scenarios = state.scenarios
         queued_scenarios = []
 
-    # When the memory governor blocked even the first scenario, move all
-    # launch_scenarios into the queue — they'll be retried by the poll loop.
-    # Restore the original concurrency cap so the poll loop uses the right
-    # limit — the memory governor gate in _launch_next_queued dynamically
-    # constrains launches based on actual available memory.
-    if _mem_all_blocked:
-        queued_scenarios = launch_scenarios + queued_scenarios
-        launch_scenarios = []
-        concurrency_cap = _pre_mem_cap
-
-    # Enqueue all scenarios in the cross-process launch queue.
-    # Scenarios that launch immediately are dequeued after creation;
-    # queued scenarios are dequeued on verdict or stop.
-    _qa_run_id = f"{state.pr_id}-{int(time.time())}"
+    # Memory governor: admit the initial batch in one queue walk — as many
+    # as fit launch now, the rest wait at the head of the queue (retried
+    # by _poll_tmux_verdicts as memory frees).  Only scenarios that could
+    # launch now get queue entries, so ones held back by the concurrency
+    # cap don't reserve memory other launches could use.
     _entry_id_map: dict[int, str] = {}  # scenario index -> queue entry ID
     _pending_entry_ids: set[str] = set()
-    if use_containers and mem_target is not None:
-        from pm_core.launch_queue import enqueue, try_acquire, dequeue as lq_dequeue
-        all_entry_ids = enqueue(
-            "qa_scenario", qa_run_id=_qa_run_id,
-            count=len(state.scenarios),
-        )
-        for scenario, eid in zip(state.scenarios, all_entry_ids):
-            _entry_id_map[scenario.index] = eid
-        # Immediately acquire entries for scenarios we're launching now
-        launch_eids = [_entry_id_map[s.index] for s in launch_scenarios]
-        if launch_eids:
-            granted = try_acquire(launch_eids)
-            granted_set = set(granted)
-            # Move any non-granted launch scenarios to the queue
-            still_launch = []
-            for s in launch_scenarios:
-                eid = _entry_id_map[s.index]
-                if eid in granted_set:
-                    still_launch.append(s)
-                else:
-                    queued_scenarios.insert(0, s)
-            launch_scenarios = still_launch
-        # Track pending entry IDs for queued scenarios
-        _pending_entry_ids = {_entry_id_map[s.index] for s in queued_scenarios}
+    _mem_wait_reason = ""
+    if use_containers and launch_scenarios:
+        launch_scenarios, blocked, _entry_id_map, _pending_entry_ids, \
+            _mem_wait_reason = _admit_initial_batch(state, launch_scenarios)
+        queued_scenarios = blocked + queued_scenarios
 
     _log.info("QA execution phase: %d scenarios for %s (%d to launch, %d queued)",
               len(state.scenarios), state.pr_id,
@@ -4342,14 +4383,17 @@ def run_qa_sync(
     # scenarios — scenario launch blocks until all concretizers finish, so
     # the status pane must be up first so users can see progress.
     queued_indices = {s.index for s in queued_scenarios}
-    _mem_waiting_indices = queued_indices if _mem_all_blocked else None
+    _mem_waiting_indices = queued_indices if _mem_wait_reason else None
+    _initial_reasons = dict(state.scenario_verdict_reasons)
+    for _i in _mem_waiting_indices or ():
+        _initial_reasons[_i] = f"waiting for memory: {_mem_wait_reason}"
     _write_status_file(status_path, state.pr_id, state.scenarios,
                        state.scenario_verdicts,
                        scenario_0=state.scenario_0,
                        queued_scenarios=queued_indices,
                        memory_waiting_scenarios=_mem_waiting_indices,
                        error=state._error,
-                       verdict_reasons=state.scenario_verdict_reasons)
+                       verdict_reasons=_initial_reasons)
 
     # Add status pane to the main QA window (split planner pane horizontally)
     if planner_pane:
@@ -4371,18 +4415,12 @@ def run_qa_sync(
         )
     state.scenarios = all_scenarios
 
-    # Dequeue entries for successfully launched scenarios
+    # Launched (or failed) initial-batch scenarios release their queue
+    # entries: a running container's stats now carry its memory.
     if use_containers and _entry_id_map:
         from pm_core.launch_queue import dequeue as _lq_dequeue
-        launched_eids = [
-            _entry_id_map[s.index] for s in launch_scenarios
-            if s.index in _entry_id_map and s.window_name
-        ]
-        if launched_eids:
-            try:
-                _lq_dequeue(launched_eids)
-            except Exception:
-                _log.debug("Failed to dequeue launched entries", exc_info=True)
+        _lq_dequeue([_entry_id_map.pop(s.index) for s in launch_scenarios
+                     if s.index in _entry_id_map])
 
     if state.scenarios:
         state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
@@ -4438,15 +4476,21 @@ def _execute_and_finalize(
     # restart can pick the run back up.
     _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
 
-    _poll_tmux_verdicts(state, data, pr_data, session, workdir_path,
-                        status_path, notify,
-                        queued_scenarios=queued_scenarios,
-                        concurrency_cap=concurrency_cap,
-                        use_containers=use_containers,
-                        repo_root=repo_root,
-                        pm_root=pm_root,
-                        entry_id_map=entry_id_map,
-                        pending_entry_ids=pending_entry_ids)
+    try:
+        _poll_tmux_verdicts(state, data, pr_data, session, workdir_path,
+                            status_path, notify,
+                            queued_scenarios=queued_scenarios,
+                            concurrency_cap=concurrency_cap,
+                            use_containers=use_containers,
+                            repo_root=repo_root,
+                            pm_root=pm_root,
+                            entry_id_map=entry_id_map,
+                            pending_entry_ids=pending_entry_ids)
+    finally:
+        if use_containers:
+            # Never leave this run's memory reservations behind.
+            from pm_core.launch_queue import dequeue_run
+            dequeue_run(_qa_run_key(state))
 
     # --- Aggregate verdicts ---
     verdicts = list(state.scenario_verdicts.values())

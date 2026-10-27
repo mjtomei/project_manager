@@ -1,16 +1,31 @@
 """Cross-process launch queue with fairness policies.
 
-Serialises memory governor operations across multiple pm processes via
-``fcntl.flock`` and provides a global launch queue so that concurrent
-QA runs share memory fairly.
+Serialises memory governor admission across pm processes via
+``fcntl.flock`` and keeps a global launch queue so concurrent pm sessions
+(and concurrent QA runs) share the memory budget fairly.
 
 Queue file: ``~/.pm/launch-queue.json``
 Lock file:  ``~/.pm/governor.lock``
 
 Queue policy (``pm container set system-memory-queue-policy``):
   fifo                 — strict time ordering, no type priority
-  priority-drain       — impl > review > qa; drain one QA run before next
-  priority-round-robin — impl > review > qa; alternate between QA runs
+  priority-drain       — impl > review > rest; drain one QA run before next
+  priority-round-robin — impl > review > rest; alternate between QA runs
+
+Safety rules:
+  - The lock never degrades to "proceed unlocked": a timeout raises
+    :class:`GovernorLockTimeout` and callers treat it as "not admitted".
+  - Admission never treats an unmeasurable host as empty: a memory
+    measurement failure grants nothing (see
+    :func:`pm_core.memory_governor.take_snapshot`).
+  - An acquired entry reserves its projected memory until the container it
+    was granted for is visibly running (its real usage and remaining growth
+    are then counted from runtime stats) or the entry is dequeued.
+  - Entries are owned by a process *instance* (pid + start time + a nonce
+    regenerated on every exec), so entries from a dead process, a recycled
+    PID, or this process's own pre-restart incarnation are dropped.  Waiting
+    entries must be kept alive by their owner's retries; an owner that stops
+    retrying loses its entries after ``_WAITING_TTL`` seconds.
 """
 
 import fcntl
@@ -19,6 +34,7 @@ import os
 import time
 import uuid
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from pm_core.paths import configure_logger, pm_home, get_global_setting_value
@@ -27,17 +43,31 @@ _log = configure_logger("pm.launch_queue")
 
 _QUEUE_FILE = "launch-queue.json"
 _LOCK_FILE = "governor.lock"
-_DEFAULT_LOCK_TIMEOUT = 10.0
+# Admission measures runtime stats while holding the lock (seconds).
+_DEFAULT_LOCK_TIMEOUT = 30.0
+
+# A waiting entry whose owner has not retried for this long is abandoned.
+_WAITING_TTL = 300.0
+# An acquired entry whose container never appeared is released after this.
+_ACQUIRED_TTL = 1800.0
+
+# Identifies this process image.  ``pm`` restarts re-exec in place (same
+# PID), so the PID alone cannot tell a live owner from its previous self.
+_INSTANCE = uuid.uuid4().hex
 
 # Type priority for priority modes (lower = higher priority)
 _TYPE_PRIORITY = {
     "impl": 0,
     "review": 1,
-    "qa_scenario": 2,
-    "qa_planner": 2,
+    "signoff": 1,
 }
+_QA_PRIORITY = 2
 
 VALID_POLICIES = ("fifo", "priority-drain", "priority-round-robin")
+
+
+class GovernorLockTimeout(RuntimeError):
+    """The cross-process governor lock could not be acquired in time."""
 
 
 # ---------------------------------------------------------------------------
@@ -46,36 +76,31 @@ VALID_POLICIES = ("fifo", "priority-drain", "priority-round-robin")
 
 @contextmanager
 def governor_lock(timeout: float = _DEFAULT_LOCK_TIMEOUT):
-    """Acquire an exclusive cross-process lock on ``~/.pm/governor.lock``.
+    """Hold an exclusive cross-process lock on ``~/.pm/governor.lock``.
 
-    Uses ``fcntl.flock`` following the same pattern as
-    ``pane_registry.locked_read_modify_write``.  The lock serialises all
-    governor operations: stats file writes, gate checks, and queue
-    mutations.
-
-    On timeout, logs a warning and yields anyway (graceful degradation —
-    better to allow a launch than to deadlock).
+    Serialises stats writes, admission decisions and queue mutations.
+    Raises :class:`GovernorLockTimeout` when the lock cannot be taken
+    within *timeout* seconds (or the lock file cannot be opened) — callers
+    must treat that as "not admitted", never as permission to proceed.
     """
     lock_path = pm_home() / _LOCK_FILE
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-
-    lock_fd = open(lock_path, "w")
-    acquired = False
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_fd = open(lock_path, "w")
+    except OSError as e:
+        raise GovernorLockTimeout(f"cannot open governor lock {lock_path}: {e}") from e
     try:
         deadline = time.monotonic() + timeout
         while True:
             try:
                 fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                acquired = True
                 break
             except (OSError, BlockingIOError):
                 if time.monotonic() >= deadline:
-                    _log.warning(
-                        "Could not acquire governor lock within %.1fs "
-                        "— proceeding without lock", timeout)
-                    break
+                    raise GovernorLockTimeout(
+                        f"governor lock busy for {timeout:.0f}s ({lock_path})")
                 time.sleep(0.01)
-        yield acquired
+        yield True
     finally:
         lock_fd.close()  # closing fd releases the flock
 
@@ -88,21 +113,27 @@ def _queue_path() -> Path:
     return pm_home() / _QUEUE_FILE
 
 
+def _empty_queue() -> dict:
+    return {"entries": [], "last_served_qa_run": None}
+
+
 def _load_queue() -> dict:
     """Load queue from disk.  Returns empty structure on missing/corrupt file."""
     path = _queue_path()
     if not path.exists():
-        return {"entries": [], "last_served_qa_run": None}
+        return _empty_queue()
     try:
         data = json.loads(path.read_text())
-        if not isinstance(data, dict):
-            return {"entries": [], "last_served_qa_run": None}
-        data.setdefault("entries", [])
-        data.setdefault("last_served_qa_run", None)
-        return data
     except (json.JSONDecodeError, OSError) as e:
         _log.warning("Failed to load queue file %s: %s", path, e)
-        return {"entries": [], "last_served_qa_run": None}
+        return _empty_queue()
+    if not isinstance(data, dict) or not isinstance(data.get("entries", []), list):
+        return _empty_queue()
+    data.setdefault("entries", [])
+    data.setdefault("last_served_qa_run", None)
+    data["entries"] = [e for e in data["entries"]
+                       if isinstance(e, dict) and e.get("id")]
+    return data
 
 
 def _save_queue(data: dict) -> None:
@@ -132,26 +163,79 @@ def get_queue_policy() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Stale entry cleanup
+# Ownership and stale entry cleanup
 # ---------------------------------------------------------------------------
+
+def _proc_start_time(pid: int) -> str | None:
+    """Kernel start time of *pid* (clock ticks since boot), or None."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return None
+    # comm (field 2) may contain spaces; fields after the closing paren
+    # start at field 3, so starttime (field 22) is index 19 there.
+    try:
+        return stat.rsplit(")", 1)[1].split()[19]
+    except IndexError:
+        return None
+
 
 def _is_pid_alive(pid: int) -> bool:
     """Check if a process is still alive."""
     try:
         os.kill(pid, 0)
         return True
+    except PermissionError:
+        return True  # exists, owned by someone else
     except (OSError, ProcessLookupError):
         return False
 
 
-def _clean_stale(entries: list[dict]) -> list[dict]:
-    """Remove entries from dead processes."""
+def _owner_fields() -> dict:
+    pid = os.getpid()
+    return {"pid": pid, "pid_start": _proc_start_time(pid),
+            "instance": _INSTANCE}
+
+
+def _is_mine(entry: dict) -> bool:
+    return entry.get("pid") == os.getpid() and entry.get("instance") == _INSTANCE
+
+
+def _stale_reason(entry: dict, now: float) -> str:
+    """Why *entry* is stale, or "" when it is still owned."""
+    pid = entry.get("pid")
+    if pid is not None:
+        if pid == os.getpid():
+            if entry.get("instance") not in (None, _INSTANCE):
+                return "owned by this process's pre-restart instance"
+        elif not _is_pid_alive(pid):
+            return f"pid {pid} dead"
+        else:
+            recorded = entry.get("pid_start")
+            current = _proc_start_time(pid) if recorded else None
+            if recorded and current and recorded != current:
+                return f"pid {pid} recycled"
+    status = entry.get("status")
+    if status == "waiting":
+        beat = entry.get("heartbeat_at") or entry.get("enqueued_at") or 0
+        if now - beat > _WAITING_TTL:
+            return "owner stopped retrying"
+    elif status == "acquired":
+        since = entry.get("acquired_at") or entry.get("enqueued_at") or 0
+        if now - since > _ACQUIRED_TTL:
+            return "acquired reservation expired"
+    return ""
+
+
+def _clean_stale(entries: list[dict], now: float | None = None) -> list[dict]:
+    """Remove entries whose owner is gone or that have expired."""
+    now = time.time() if now is None else now
     alive = []
     for entry in entries:
-        pid = entry.get("pid")
-        if pid is not None and not _is_pid_alive(pid):
-            _log.info("Removing stale queue entry %s (pid %d dead)",
-                      entry.get("id", "?"), pid)
+        why = _stale_reason(entry, now)
+        if why:
+            _log.info("Removing stale queue entry %s (%s)",
+                      entry.get("id", "?"), why)
             continue
         alive.append(entry)
     return alive
@@ -161,6 +245,10 @@ def _clean_stale(entries: list[dict]) -> list[dict]:
 # Policy sorting
 # ---------------------------------------------------------------------------
 
+def _priority(entry: dict) -> int:
+    return _TYPE_PRIORITY.get(entry.get("container_type", ""), _QA_PRIORITY)
+
+
 def _sort_queue(entries: list[dict], policy: str,
                 last_served_qa_run: str | None) -> list[dict]:
     """Sort queue entries according to the active policy."""
@@ -168,16 +256,10 @@ def _sort_queue(entries: list[dict], policy: str,
         return sorted(entries, key=lambda e: e.get("enqueued_at", 0))
 
     # Priority modes: split into non-QA and QA
-    non_qa = [e for e in entries
-              if _TYPE_PRIORITY.get(e.get("container_type", ""), 2) < 2]
-    qa = [e for e in entries
-          if _TYPE_PRIORITY.get(e.get("container_type", ""), 2) >= 2]
+    non_qa = [e for e in entries if _priority(e) < _QA_PRIORITY]
+    qa = [e for e in entries if _priority(e) >= _QA_PRIORITY]
 
-    # Sort non-QA by (priority, enqueue time)
-    non_qa.sort(key=lambda e: (
-        _TYPE_PRIORITY.get(e.get("container_type", ""), 2),
-        e.get("enqueued_at", 0),
-    ))
+    non_qa.sort(key=lambda e: (_priority(e), e.get("enqueued_at", 0)))
 
     if policy == "priority-drain":
         qa = _sort_qa_drain(qa)
@@ -187,275 +269,322 @@ def _sort_queue(entries: list[dict], policy: str,
     return non_qa + qa
 
 
-def _sort_qa_drain(entries: list[dict]) -> list[dict]:
-    """Group QA entries by run, order groups by earliest entry, concatenate."""
+def _group_by_run(entries: list[dict]) -> dict[str, list[dict]]:
     groups: dict[str, list[dict]] = {}
     for e in entries:
-        run_id = e.get("qa_run_id") or "__none__"
-        groups.setdefault(run_id, []).append(e)
-
-    # Sort entries within each group by enqueue time
+        groups.setdefault(e.get("qa_run_id") or "__none__", []).append(e)
     for group in groups.values():
         group.sort(key=lambda e: e.get("enqueued_at", 0))
+    return groups
 
-    # Order groups by their earliest entry
-    ordered_groups = sorted(
-        groups.values(),
-        key=lambda g: g[0].get("enqueued_at", 0),
-    )
 
-    result = []
-    for group in ordered_groups:
-        result.extend(group)
-    return result
+def _sort_qa_drain(entries: list[dict]) -> list[dict]:
+    """Group QA entries by run, order groups by earliest entry, concatenate."""
+    groups = _group_by_run(entries)
+    ordered = sorted(groups.values(), key=lambda g: g[0].get("enqueued_at", 0))
+    return [e for group in ordered for e in group]
 
 
 def _sort_qa_round_robin(entries: list[dict],
                          last_served: str | None) -> list[dict]:
     """Interleave QA entries across runs, starting after last_served."""
-    groups: dict[str, list[dict]] = {}
-    for e in entries:
-        run_id = e.get("qa_run_id") or "__none__"
-        groups.setdefault(run_id, []).append(e)
-
-    # Sort entries within each group
-    for group in groups.values():
-        group.sort(key=lambda e: e.get("enqueued_at", 0))
-
-    # Order group keys by earliest entry
-    group_keys = sorted(
-        groups.keys(),
-        key=lambda k: groups[k][0].get("enqueued_at", 0),
-    )
+    groups = _group_by_run(entries)
+    group_keys = sorted(groups, key=lambda k: groups[k][0].get("enqueued_at", 0))
 
     # Rotate so we start after last_served
     if last_served and last_served in group_keys:
         idx = group_keys.index(last_served)
         group_keys = group_keys[idx + 1:] + group_keys[:idx + 1]
 
-    # Interleave: take one from each group in order, repeat
     result = []
     while any(groups[k] for k in group_keys):
         for k in group_keys:
             if groups[k]:
                 result.append(groups[k].pop(0))
-
     return result
+
+
+# ---------------------------------------------------------------------------
+# Admission walk
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AcquireResult:
+    """Outcome of an admission attempt."""
+    granted: list[str] = field(default_factory=list)
+    # Why (the first of) the requested entries was not granted; "" if all
+    # were granted.
+    reason: str = ""
+
+
+def _reserved_mb(entry: dict, snapshot, projections: dict[str, int]) -> int:
+    """Memory an acquired entry still reserves on top of runtime stats."""
+    cname = entry.get("container_name")
+    if cname and cname in snapshot.running_names:
+        # The container is up: its usage and remaining growth to its
+        # projection are already in the snapshot.
+        return 0
+    return projections[entry.get("container_type") or "other"]
+
+
+def _admit_locked(queue: dict, my_ids: set[str]) -> AcquireResult:
+    """Walk the queue and grant fitting entries in *my_ids*.  Lock held."""
+    from pm_core import memory_governor as mg
+
+    result = AcquireResult()
+    waiting_mine = [e for e in queue["entries"]
+                    if e["id"] in my_ids and e.get("status") == "waiting"]
+    if not waiting_mine:
+        return result
+
+    try:
+        target = mg.get_memory_target()
+    except mg.GovernorConfigError as e:
+        result.reason = str(e)
+        return result
+    if target is None:
+        # Governor inactive — admit everything requested.
+        for e in waiting_mine:
+            e["status"] = "acquired"
+            e["acquired_at"] = time.time()
+            result.granted.append(e["id"])
+        return result
+
+    stats = mg.load_stats()
+    snapshot = mg.take_snapshot(stats=stats)
+    if snapshot.error:
+        result.reason = f"memory measurement unavailable: {snapshot.error}"
+        return result
+
+    projections: dict[str, int] = {}
+    for e in queue["entries"]:
+        ctype = e.get("container_type") or "other"
+        if ctype not in projections:
+            projections[ctype] = mg.project_memory(ctype, stats=stats)
+
+    inflight = sum(_reserved_mb(e, snapshot, projections)
+                   for e in queue["entries"] if e.get("status") == "acquired")
+
+    sorted_waiting = _sort_queue(
+        [e for e in queue["entries"] if e.get("status") == "waiting"],
+        get_queue_policy(), queue.get("last_served_qa_run"),
+    )
+    for entry in sorted_waiting:
+        projected = projections[entry.get("container_type") or "other"]
+        ok, why = mg.admit(snapshot, projected, inflight)
+        if entry["id"] in my_ids:
+            if ok:
+                inflight += projected
+                entry["status"] = "acquired"
+                entry["acquired_at"] = time.time()
+                result.granted.append(entry["id"])
+                if entry.get("qa_run_id"):
+                    queue["last_served_qa_run"] = entry["qa_run_id"]
+            elif not result.reason:
+                result.reason = why
+        elif ok:
+            # Someone else's entry that fits ahead of ours reserves its
+            # share.  One that doesn't fit doesn't block smaller entries
+            # behind it (E17).
+            inflight += projected
+    return result
+
+
+def _refresh_heartbeats(queue: dict, ids: set[str], now: float) -> None:
+    for e in queue["entries"]:
+        if e["id"] in ids and _is_mine(e):
+            e["heartbeat_at"] = now
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
+def _upsert_locked(queue: dict, container_type: str, qa_run_id: str | None,
+                   key: str | None, container_name: str | None,
+                   now: float) -> str:
+    """Add an entry, or adopt an existing entry with the same *key*.
+
+    Adoption keeps the entry's place in line (``enqueued_at``) so a QA run
+    resumed after a restart does not lose its fairness position.
+    """
+    if key:
+        for e in queue["entries"]:
+            if e.get("key") == key:
+                if e.get("status") == "acquired" and not _is_mine(e):
+                    # The previous owner's grant dies with it; re-queue.
+                    e["status"] = "waiting"
+                    e.pop("acquired_at", None)
+                e.update(_owner_fields())
+                e["heartbeat_at"] = now
+                e["container_type"] = container_type
+                e["qa_run_id"] = qa_run_id
+                e["container_name"] = container_name
+                return e["id"]
+    entry = {
+        "id": uuid.uuid4().hex[:12],
+        "container_type": container_type,
+        "key": key,
+        "container_name": container_name,
+        "qa_run_id": qa_run_id,
+        "enqueued_at": now,
+        "heartbeat_at": now,
+        "status": "waiting",
+        **_owner_fields(),
+    }
+    queue["entries"].append(entry)
+    return entry["id"]
+
+
 def enqueue(container_type: str, qa_run_id: str | None = None,
-            count: int = 1) -> list[str]:
+            count: int = 1, *, keys: list[str] | None = None,
+            container_names: list[str | None] | None = None) -> list[str]:
     """Add entries to the launch queue.  Returns entry IDs.
 
-    Must be called under ``governor_lock`` by the caller, or calls it
-    internally if not already locked.
-    """
-    entries = []
-    for _ in range(count):
-        entry_id = uuid.uuid4().hex[:8]
-        entries.append({
-            "id": entry_id,
-            "container_type": container_type,
-            "pid": os.getpid(),
-            "enqueued_at": time.time(),
-            "qa_run_id": qa_run_id,
-            "status": "waiting",
-        })
+    *keys* (one per entry) make enqueue idempotent: an existing entry with
+    the same key is adopted instead of duplicated.  *container_names* lets
+    admission stop reserving an entry's memory once its container runs.
 
+    Raises :class:`GovernorLockTimeout` if the lock is busy.
+    """
+    if keys is not None:
+        count = len(keys)
+    keys = keys or [None] * count
+    names = container_names or [None] * count
+    now = time.time()
     with governor_lock():
         queue = _load_queue()
-        queue["entries"].extend(entries)
+        # Adopt before cleaning: a resumed QA run takes over its previous
+        # owner's (possibly stale) entries and their place in line.
+        ids = [_upsert_locked(queue, container_type, qa_run_id, k, n, now)
+               for k, n in zip(keys, names)]
+        queue["entries"] = _clean_stale(queue["entries"], now)
         _save_queue(queue)
+    return ids
 
-    return [e["id"] for e in entries]
 
+def try_acquire_detailed(entry_ids: list[str],
+                         keepalive: list[str] | None = None) -> AcquireResult:
+    """Try to admit *entry_ids*; also refresh *keepalive* entries' heartbeat.
 
-def try_acquire(entry_ids: list[str]) -> list[str]:
-    """Try to acquire entries from the queue.
-
-    Under lock: clean stale entries, sort by policy, walk sorted order.
-    Grant entries from ``entry_ids`` that are next in line AND fit in
-    memory.  Returns list of granted entry IDs (may be empty).
-
-    Accounts for already-acquired entries' projected memory.
+    Under the lock: drop stale entries, then walk the queue in policy
+    order granting requested entries that fit the memory budget (after
+    the current measured usage, the remaining growth of running
+    containers, and in-flight reservations).  A lock timeout or a failed
+    measurement grants nothing and says why.
     """
-    from pm_core.memory_governor import (
-        get_memory_target, get_current_used_mb, project_memory,
-    )
-
-    target = get_memory_target()
-    if target is None:
-        # Governor inactive — grant everything
+    my_ids = set(entry_ids)
+    now = time.time()
+    try:
         with governor_lock():
             queue = _load_queue()
-            granted = []
-            for entry in queue["entries"]:
-                if entry["id"] in entry_ids and entry.get("status") == "waiting":
-                    entry["status"] = "acquired"
-                    granted.append(entry["id"])
+            queue["entries"] = _clean_stale(queue["entries"], now)
+            _refresh_heartbeats(queue, my_ids | set(keepalive or ()), now)
+            present = {e["id"] for e in queue["entries"]}
+            result = _admit_locked(queue, my_ids)
             _save_queue(queue)
-        return granted
+    except GovernorLockTimeout as e:
+        return AcquireResult(reason=str(e))
+    if not result.granted and not result.reason and not (my_ids & present):
+        result.reason = "launch queue entry no longer present"
+    if result.reason:
+        _log.info("Launch queue: not admitted (%s)", result.reason)
+    return result
 
-    my_ids = set(entry_ids)
 
-    with governor_lock():
-        queue = _load_queue()
-        queue["entries"] = _clean_stale(queue["entries"])
-
-        policy = get_queue_policy()
-        sorted_entries = _sort_queue(
-            [e for e in queue["entries"] if e.get("status") == "waiting"],
-            policy, queue.get("last_served_qa_run"),
-        )
-
-        # Current memory usage
-        current = get_current_used_mb()
-        if current is None:
-            # Can't measure — grant all requested
-            _log.warning("Cannot measure memory — granting all requested entries")
-            granted = []
-            for entry in queue["entries"]:
-                if entry["id"] in my_ids and entry.get("status") == "waiting":
-                    entry["status"] = "acquired"
-                    granted.append(entry["id"])
-            _save_queue(queue)
-            return granted
-
-        # Add projected memory for already-acquired entries
-        used = current
-        for entry in queue["entries"]:
-            if entry.get("status") == "acquired":
-                used += project_memory(entry.get("container_type", "qa_scenario"))
-
-        granted = []
-        # Walk sorted waiting entries
-        for entry in sorted_entries:
-            projected = project_memory(entry.get("container_type", "qa_scenario"))
-
-            if entry["id"] in my_ids:
-                if used + projected <= target:
-                    # Grant it
-                    used += projected
-                    granted.append(entry["id"])
-                    # Update in the actual queue
-                    for qe in queue["entries"]:
-                        if qe["id"] == entry["id"]:
-                            qe["status"] = "acquired"
-                            break
-                    # Track last served QA run for round-robin
-                    if entry.get("qa_run_id"):
-                        queue["last_served_qa_run"] = entry["qa_run_id"]
-                # If doesn't fit, skip but continue walking (E17)
-            else:
-                # Not ours — account for its projected memory only if it
-                # could actually fit (E17: entries that don't fit shouldn't
-                # block smaller entries behind them in the queue)
-                if used + projected <= target:
-                    used += projected
-
-        _save_queue(queue)
-
-    return granted
+def try_acquire(entry_ids: list[str],
+                keepalive: list[str] | None = None) -> list[str]:
+    """Like :func:`try_acquire_detailed` but return only the granted IDs."""
+    return try_acquire_detailed(entry_ids, keepalive=keepalive).granted
 
 
 def enqueue_and_try_acquire(container_type: str,
-                            qa_run_id: str | None = None,
-                            ) -> tuple[str, bool]:
-    """Atomic fast path for impl/review: enqueue 1 + immediate try.
+                            qa_run_id: str | None = None, *,
+                            key: str | None = None,
+                            container_name: str | None = None,
+                            ) -> tuple[str | None, bool, str]:
+    """Enqueue one entry and try to admit it, in one lock round-trip.
 
-    Returns ``(entry_id, acquired)``.  Single lock round-trip.
+    Used for impl/review/signoff launches, which refuse instead of waiting.
+    Returns ``(entry_id, acquired, reason)``; ``entry_id`` is None when the
+    lock could not be taken.
     """
-    from pm_core.memory_governor import (
-        get_memory_target, get_current_used_mb, project_memory,
-    )
-
-    entry_id = uuid.uuid4().hex[:8]
-    entry = {
-        "id": entry_id,
-        "container_type": container_type,
-        "pid": os.getpid(),
-        "enqueued_at": time.time(),
-        "qa_run_id": qa_run_id,
-        "status": "waiting",
-    }
-
-    target = get_memory_target()
-    if target is None:
-        # Governor inactive — enqueue as acquired
+    now = time.time()
+    try:
         with governor_lock():
             queue = _load_queue()
-            entry["status"] = "acquired"
-            queue["entries"].append(entry)
+            entry_id = _upsert_locked(queue, container_type, qa_run_id,
+                                      key, container_name, now)
+            queue["entries"] = _clean_stale(queue["entries"], now)
+            result = _admit_locked(queue, {entry_id})
             _save_queue(queue)
-        return entry_id, True
-
-    with governor_lock():
-        queue = _load_queue()
-        queue["entries"] = _clean_stale(queue["entries"])
-        queue["entries"].append(entry)
-
-        # Check if we can acquire immediately
-        current = get_current_used_mb()
-        if current is None:
-            # Can't measure — allow
-            entry["status"] = "acquired"
-            _save_queue(queue)
-            return entry_id, True
-
-        # Sum acquired entries' projected memory
-        used = current
-        for qe in queue["entries"]:
-            if qe.get("status") == "acquired":
-                used += project_memory(qe.get("container_type", "qa_scenario"))
-
-        projected = project_memory(container_type)
-
-        # In priority modes, check if any higher-priority entries are waiting
-        policy = get_queue_policy()
-        if policy != "fifo":
-            my_priority = _TYPE_PRIORITY.get(container_type, 2)
-            for qe in queue["entries"]:
-                if (qe["id"] != entry_id
-                        and qe.get("status") == "waiting"
-                        and _TYPE_PRIORITY.get(
-                            qe.get("container_type", ""), 2) < my_priority):
-                    # Higher priority entry waiting — don't jump queue
-                    _save_queue(queue)
-                    return entry_id, False
-
-        if used + projected <= target:
-            entry["status"] = "acquired"
-            _save_queue(queue)
-            return entry_id, True
-
-        _save_queue(queue)
-        return entry_id, False
+    except GovernorLockTimeout as e:
+        return None, False, str(e)
+    return entry_id, bool(result.granted), result.reason
 
 
-def dequeue(entry_ids: list[str] | str) -> None:
+def dequeue(entry_ids: list[str] | str) -> bool:
     """Remove entries from the queue (post-launch cleanup, cancellation).
 
-    Accepts a single ID or a list of IDs.
+    Accepts a single ID or a list of IDs.  Returns False if the lock was
+    busy; the entries then expire on their own (waiting entries stop being
+    kept alive, acquired ones stop reserving once their container runs).
     """
     if isinstance(entry_ids, str):
         entry_ids = [entry_ids]
-    ids_to_remove = set(entry_ids)
+    ids_to_remove = set(i for i in entry_ids if i)
+    if not ids_to_remove:
+        return True
+    try:
+        with governor_lock():
+            queue = _load_queue()
+            queue["entries"] = [
+                e for e in queue["entries"] if e["id"] not in ids_to_remove
+            ]
+            _save_queue(queue)
+    except GovernorLockTimeout as e:
+        _log.warning("Could not dequeue %s: %s", sorted(ids_to_remove), e)
+        return False
+    return True
 
-    with governor_lock():
-        queue = _load_queue()
-        queue["entries"] = [
-            e for e in queue["entries"] if e["id"] not in ids_to_remove
-        ]
-        _save_queue(queue)
+
+def dequeue_run(qa_run_id: str) -> bool:
+    """Remove every entry of QA run *qa_run_id* (loop exit, stop, crash)."""
+    try:
+        with governor_lock():
+            queue = _load_queue()
+            kept = [e for e in queue["entries"]
+                    if e.get("qa_run_id") != qa_run_id]
+            if len(kept) != len(queue["entries"]):
+                queue["entries"] = kept
+                _save_queue(queue)
+    except GovernorLockTimeout as e:
+        _log.warning("Could not release queue entries of %s: %s", qa_run_id, e)
+        return False
+    return True
+
+
+def keepalive(entry_ids: list[str]) -> bool:
+    """Renew *entry_ids* so they keep their place while their owner waits.
+
+    Returns False if the lock was busy (the next renewal will catch up).
+    """
+    ids = set(entry_ids)
+    if not ids:
+        return True
+    now = time.time()
+    try:
+        with governor_lock():
+            queue = _load_queue()
+            queue["entries"] = _clean_stale(queue["entries"], now)
+            _refresh_heartbeats(queue, ids, now)
+            _save_queue(queue)
+    except GovernorLockTimeout as e:
+        _log.debug("Launch queue keepalive skipped: %s", e)
+        return False
+    return True
 
 
 def get_queue_status() -> dict:
-    """Read-only snapshot of the queue for status display.
-
-    Returns the queue data without acquiring a lock (best-effort read).
-    """
+    """Read-only snapshot of the queue for status display (no lock)."""
     return _load_queue()

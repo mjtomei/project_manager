@@ -37,11 +37,10 @@ def container_status():
 
     # Memory governor settings
     from pm_core.paths import get_global_setting_value
-    from pm_core.memory_governor import (
-        get_memory_target, format_memory_status, get_stop_idle_policy,
-    )
+    from pm_core import memory_governor as mg
     target_raw = get_global_setting_value("container-system-memory-target", "")
     scope = get_global_setting_value("container-system-memory-scope", "pm")
+    reserve_raw = get_global_setting_value("container-system-memory-reserve", "")
     default_proj = get_global_setting_value(
         "container-system-memory-default-projection", "")
     history_size = get_global_setting_value(
@@ -51,12 +50,23 @@ def container_status():
     click.echo("Memory governor:")
     click.echo(f"  Target:        {target_raw or '(not set — governor inactive)'}")
     click.echo(f"  Scope:         {scope}")
+    click.echo(f"  Host reserve:  {reserve_raw or mg._DEFAULT_RESERVE + ' (default)'}")
     click.echo(f"  Default proj:  {default_proj or '(not set — uses memory-limit)'}")
     click.echo(f"  History size:  {history_size}")
 
-    mem_status = format_memory_status()
-    if mem_status:
-        click.echo(f"  Current:       {mem_status}")
+    snap = mg.take_snapshot()
+    if snap.error:
+        click.echo(f"  Current:       unmeasurable — launches are refused: {snap.error}")
+    elif snap.active:
+        click.echo(f"  Current:       {mg._fmt_mb(snap.measured_mb or 0)} used"
+                   f" + {mg._fmt_mb(snap.growth_mb)} expected growth"
+                   f" / {mg._fmt_mb(snap.target_mb)} target")
+        if snap.host is not None and snap.reserve_mb is not None:
+            click.echo(f"  Host free:     {mg._fmt_mb(snap.host.available_mb)}"
+                       f" of {mg._fmt_mb(snap.host.total_mb)}"
+                       f" (reserve {mg._fmt_mb(snap.reserve_mb)})")
+    for action, reason in mg.recent_blocked():
+        click.echo(f"  Blocked:       {action} — {reason}")
 
     # Queue policy
     from pm_core.launch_queue import get_queue_policy, get_queue_status
@@ -73,9 +83,9 @@ def container_status():
 
     click.echo("")
     click.echo("Stop-on-idle:")
-    click.echo(f"  impl:          {'on' if get_stop_idle_policy('impl') else 'off'}")
-    click.echo(f"  review:        {'on' if get_stop_idle_policy('review') else 'off'}")
-    click.echo(f"  qa:            {'on' if get_stop_idle_policy('qa_scenario') else 'off'}")
+    click.echo(f"  impl:          {'on' if mg.get_stop_idle_policy('impl') else 'off'}")
+    click.echo(f"  review:        {'on' if mg.get_stop_idle_policy('review') else 'off'}")
+    click.echo(f"  qa:            {'on' if mg.get_stop_idle_policy('qa_scenario') else 'off'}")
 
     if enabled and not runtime_ok:
         click.echo(
@@ -112,7 +122,7 @@ def container_disable():
 @container_group.command("set")
 @click.argument("key", type=click.Choice([
     "image", "memory-limit", "cpu-limit", "runtime",
-    "system-memory-target", "system-memory-scope",
+    "system-memory-target", "system-memory-scope", "system-memory-reserve",
     "system-memory-default-projection", "system-memory-history-size",
     "system-memory-queue-policy",
     "stop-idle-impl", "stop-idle-review", "stop-idle-qa",
@@ -122,7 +132,7 @@ def container_set(key: str, value: str):
     """Set a container configuration value.
 
     Keys: image, memory-limit, cpu-limit, runtime,
-          system-memory-target, system-memory-scope,
+          system-memory-target, system-memory-scope, system-memory-reserve,
           system-memory-default-projection, system-memory-history-size,
           system-memory-queue-policy,
           stop-idle-impl, stop-idle-review, stop-idle-qa
@@ -156,7 +166,17 @@ def container_set(key: str, value: str):
             click.echo("Error: system-memory-history-size must be a positive integer",
                         err=True)
             raise SystemExit(1)
-    if key in ("system-memory-target", "system-memory-default-projection"):
+    if key == "system-memory-reserve":
+        from pm_core.memory_governor import parse_reserve
+        try:
+            parse_reserve(value, 1024)
+        except ValueError:
+            click.echo(f"Error: system-memory-reserve must be a size (8g) or "
+                       f"a percentage (10%), got {value!r}", err=True)
+            raise SystemExit(1)
+    if key == "system-memory-target" and value.lower() in ("off", "none", "unset"):
+        value = ""  # governor inactive
+    elif key in ("system-memory-target", "system-memory-default-projection"):
         from pm_core.memory_governor import parse_memory
         try:
             parse_memory(value)
@@ -166,7 +186,7 @@ def container_set(key: str, value: str):
 
     setting_name = f"container-{key}"
     set_global_setting_value(setting_name, value)
-    click.echo(f"Set {key} = {value}")
+    click.echo(f"Set {key} = {value or '(unset)'}")
 
 
 @container_group.command("build-base")

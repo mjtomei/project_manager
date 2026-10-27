@@ -2,6 +2,127 @@
 
 PR: pr-eb2dbfc — "Container memory governor: dynamic memory limits with per-type stop policy and QA queuing"
 
+## 0. Revision 2026-10-27 — safety hardening after the OOM host restart
+
+The PR was refreshed onto origin/master@450a6362 and hardened per the
+2026-10-27 PR note.  These decisions supersede any conflicting text in
+the sections below (which are amended in place where they conflict).
+
+**Fail closed.**  Admission never treats "cannot measure" as "nothing in
+use".  A failed `<runtime> stats` call (runtime down, rootless Podman
+without a delegated memory cgroup, one cgroup-less container making
+`podman stats` fail for *every* container — seen live, rc=125), a pm
+container with no usage figure (`--`, `0B`), unreadable `/proc/meminfo`
+on Linux, an invalid target/scope/reserve setting, or a busy governor
+lock (`GovernorLockTimeout`, 30 s) all refuse the launch with the reason.
+impl/review/signoff/qa-debug get a `ContainerError` naming the blocked
+action; QA scenarios wait (`waiting_memory` + reason) and retry.  Unset
+the target (`pm container set system-memory-target off`) to bypass.
+
+**Runtime abstraction.**  All measurement goes through
+`container._get_runtime()` (docker or podman).  Docker prints binary
+units (`1.5GiB`), Podman decimal SI units (`1.06GB`); both parse to MiB
+(`parse_runtime_memory`).  Podman's `--format` tabwriter turns tabs into
+padding, so stats use `{{.Name}}|{{.MemUsage}}` (found by the live
+check).  Podman's StartedAt template output (`2026-10-27 14:11:38.69
++0000 UTC`) is parsed alongside RFC 3339.  Verified against real rootless
+Podman 3.4.4 — evidence in `/pm-captures/impl/live-podman/`.
+
+**Peaks, not snapshots.**  End-of-life capture reads the container's
+cgroup peak (`/sys/fs/cgroup/memory.peak`, v1 `memory.max_usage_in_bytes`)
+via `<runtime> exec`; samples record `kind: peak|snapshot`.  Snapshot
+samples (and legacy samples without `kind`) are inflated by
+`_SNAPSHOT_GROWTH_FACTOR` = 1.5.  Projection is the 90th percentile
+(nearest rank) of the adjusted samples, not the mean.
+
+**Committed usage.**  `take_snapshot()` measures, per scope:
+- pm: Σ current usage of running pm containers + the growth still ahead
+  of each (max(0, projection(type) − current)).
+- system: host used (MemTotal − MemAvailable) + the same growth; if
+  per-container stats fail but `ps` works, every running pm container is
+  assumed to have its full projection ahead of it.
+Admission (`admit`) requires committed + in-flight reservations +
+projection ≤ target **and** that host MemAvailable − growth − in-flight
+− projection ≥ the host reserve (`system-memory-reserve`, default 10 % of
+MemTotal; accepts `8g` or `10%`).
+
+**In-flight reservations.**  A granted queue entry reserves its
+projection until its container (`container_name` on the entry) shows up
+in runtime stats, or until it is dequeued; then the snapshot carries it
+(usage + growth), so there is no double counting (E16).  Acquired entries
+expire after 30 min as a backstop.
+
+**Shared admission and ownership across processes/restarts.**  Entries
+carry pid, pid start time and a per-exec instance nonce: entries of dead
+or recycled pids and of this process's pre-restart instance (pm restarts
+re-exec in place with the same PID) are stale.  Waiting entries expire
+unless their owner renews them (`keepalive`, ≤ every 15 s while waiting;
+TTL 300 s).  Entries have keys (container name; `<pr>-<loop_id>:s<N>`
+for QA) so retries don't pile up and a resumed QA run adopts its old
+entries and keeps its place in line.  impl/review/signoff/QA all walk the
+same queue under the same lock (`enqueue_and_try_acquire` uses the full
+policy walk).
+
+**Launch paths gated.**  Every path that *creates* a container: impl,
+review (incl. review-loop iterations), signoff (`wrap_claude_cmd` →
+`acquire_launch_admission`), QA scenarios (initial batch in
+`_admit_initial_batch`, queued in `_poll_tmux_verdicts`), and
+`pm qa debug` containers.  Reusing an already-running container needs no
+admission (its usage is already counted).  The QA planner, refiner
+(concretizer), verifier and finalizer create no containers on current
+master: the planner/verifier/finalizer run on the host and the refiner
+execs into the scenario container that was admitted.
+
+**QA admission.**  The initial batch is admitted in one walk (as many as
+fit launch; the rest wait at the head of the queue with a reason).  Only
+scenarios with a free concurrency slot get queue entries, so capped
+scenarios don't reserve memory other launches could use.  Queued
+admission attempts are rate-limited (`_MEMORY_RETRY_INTERVAL` = 15 s).
+The waiting reason names INPUT_REQUIRED containers still held (E11).
+Every entry is dequeued on loop exit (stop, completion, crash).
+
+**Stop-on-idle is removal, and never cuts off a person.**  As before,
+"stop" removes the container (`remove_container`, stats captured first;
+the bind-mounted workdir keeps all state).  It now runs on a daemon
+thread (never on the TUI thread or the QA poll loop), targets the exact
+container name of this session (no keyword search, so another pm
+session's container for the same PR is never touched), and keeps the
+container when:
+- the runtime reports exec sessions (`.ExecIDs`) beyond the exec clients
+  started from the session's own panes (someone attached a shell —
+  "retained human session"), or ownership cannot be determined;
+- the session transcript changed after the idle/verdict point (someone
+  resumed it);
+- the verdict is INPUT_REQUIRED or verification is in flight (unchanged).
+Standalone reviews stop only after a final review verdict (not
+INPUT_REQUIRED) is mirrored by master's hook-driven review pass.
+
+**UI.**  The status bar reads a cached memory string only; a 15 s TUI
+interval refreshes it off the UI thread (runtime stats take seconds).
+Text: `mem 34G/48G (pm)`, `mem ?/48G (pm) unmeasurable` on failure, and
+`blocked: impl pr-1 [+N]` for launches refused in the last 10 min
+(`~/.pm/governor-blocked.json`, cleared when the action launches).
+`pm container status` prints usage, growth, host free/reserve, the
+unmeasurable reason and blocked launches.  The QA status pane counts
+`waiting_memory` as not complete and shows "N waiting for memory".
+
+**Coordination with #241 (pr-1139060, unmerged).**  #241 rewrites
+container lifecycle with ownership labels, retain markers,
+`live_owner_panes`/`activity_owner`, `release_containers` and launch
+slots.  This PR keeps its container changes to narrow hooks so they
+compose: `acquire_launch_admission`/`release_launch_admission` around
+creation, `capture_and_record` before removal, and `stop_container` as
+the single stop-on-idle removal path.  When #241 lands, `stop_container`
+should defer to its retain markers / live-owner checks and release
+primitive instead of the local exec-session check.  (Cross-PR note left
+on pr-1139060.)
+
+**Known limit — nested rootless Podman.**  Inside a pm container whose
+cgroup isn't delegated (this dev environment), inner containers share
+the outer cgroup, so `podman stats` and `memory.peak` report the
+*enclosing* cgroup for each.  Sums then overcount (conservative); use
+`system-memory-scope system` there.
+
 ## 1. Requirements
 
 ### R1: Global memory target setting
@@ -250,8 +371,8 @@ def get_queue_status() -> dict
 
 ## 2. Implicit Requirements
 
-### IR1: Graceful degradation when Docker stats unavailable
-`docker stats` may fail (Docker not running, permissions). The governor must not block launches when stats are unavailable — fall back to allowing the launch and logging a warning.
+### IR1: Fail closed when memory cannot be measured
+`<runtime> stats` may fail (runtime not running, permissions, rootless Podman without memory cgroup delegation, a cgroup-less container). **Revised 2026-10-27:** the governor must not read a failed measurement as zero usage or allow the launch. When the target is set and usage cannot be measured, launches are refused (impl/review) or wait (QA) with the reason shown; the user can unset the target to bypass. (The original "allow and log a warning" let an unmeasurable host launch until it OOMed.)
 
 ### IR2: Thread and cross-process safety
 Memory governor state (stats file, current usage cache) is accessed from multiple threads within a process (QA scenario threads, TUI poll timer, review loop) and from multiple pm processes running concurrently. All shared state must be protected by the cross-process file lock (`governor_lock` from `launch_queue.py`), which also serializes within-process access. The threading locks (`_gate_lock`, `_stats_lock`) in `memory_governor.py` are replaced by this file lock.
@@ -272,7 +393,7 @@ When no target is configured, the governor must be inactive (all launches allowe
 QA scenarios in the verification phase (`verifying` set in `_poll_tmux_verdicts`) must not be stopped until verification completes. If verification fails and the scenario is sent back to `pending` (follow-up message sent, line 1670), the container must remain running. Scenarios with INPUT_REQUIRED verdict must never be stopped — the user needs the container alive to interact.
 
 ### IR8: Stats capture must not block container teardown
-The `docker stats` call before stop/removal should have a short timeout (5s). If it fails or times out, proceed with the stop/removal anyway — missing one sample is acceptable. Log a warning but don't prevent cleanup.
+The capture before stop/removal (cgroup peak via exec, falling back to a stats snapshot) uses short timeouts (5s each), and a busy governor lock skips the sample. If it fails or times out, proceed with the stop/removal anyway — missing one sample is acceptable. Log a warning but don't prevent cleanup.
 
 ## 3. Ambiguities
 
@@ -307,7 +428,7 @@ Setting stored in `~/.pm/settings/container-system-memory-scope`. The gate check
 ### A7: Projection fallback cascade
 **Ambiguity:** What does the governor project when historical data is incomplete or missing?
 **Resolution:** Cascade:
-1. If there are **any** samples for this container type (even 1), use their average. A partial window (e.g. 3 samples when `history-size` is 20) is still real data and better than any default. The average improves as more samples accumulate.
+1. If there are **any** samples for this container type (even 1), use them. **Revised 2026-10-27:** the projection is the 90th percentile (nearest rank) of the samples, with snapshot samples inflated ×1.5 (end-of-life usage is not the peak); peak samples are used as recorded. A partial window (e.g. 3 samples when `history-size` is 20) is still real data and better than any default.
 2. If there are **zero** samples and `container-system-memory-default-projection` is set, use that.
 3. If there are **zero** samples and no default projection configured, fall back to the per-container `memory-limit` from `ContainerConfig` (e.g. `8g`).
 
@@ -315,7 +436,7 @@ The key principle: any real observation beats a configured default, and a config
 
 ### A8: Stats capture timing
 **Ambiguity:** When exactly is memory captured?
-**Resolution:** At container end-of-life — immediately before `docker stop` or `docker rm -f`. A single `docker stats --no-stream` call for that specific container, with a 5s timeout. This replaces periodic background polling. For the gate check's "current used" value, a one-shot `docker stats` (all pm containers) or `/proc/meminfo` read is done synchronously at check time.
+**Resolution:** At container end-of-life — immediately before removal. **Revised 2026-10-27:** read the cgroup peak counter through `<runtime> exec` first; fall back to a single-container `<runtime> stats --no-stream` snapshot, with 5s timeouts. This replaces periodic background polling. For the gate check's "current used" value, a one-shot `docker stats` (all pm containers) or `/proc/meminfo` read is done synchronously at check time.
 
 ### A9: Queue policy vs QA sub-policy interaction
 **Ambiguity:** The original design had two independent settings: `system-memory-queue-policy fifo|priority` and `system-memory-qa-policy drain|round-robin`. With FIFO queue policy, the QA sub-policies conflict — FIFO means strict time ordering, but drain/round-robin reorder QA entries.
@@ -337,7 +458,7 @@ In `pm` scope, Docker reports memory for running containers only. If host memory
 If `container-memory-limit` is `16g` but `system-memory-target` is `12g`, a single container can't fit. The governor should detect this and report a clear error: "Container memory limit (16g) exceeds system memory target (12g)".
 
 ### E3: Race between stats sampling and container lifecycle
-A container may start or stop between the stats sample and the launch gate check. Accepted — the gate check uses the most recent sample plus projection, which is conservative. In the worst case a launch is unnecessarily blocked for one polling cycle.
+A container may start or stop between the stats sample and the launch gate check. Admission measures under the governor lock, and a granted entry keeps reserving its projection until its container is visible in stats, so a launch in flight is never missed. A container that just stopped may still be counted for one cycle — conservative.
 
 ### E4: Concurrent launch attempts
 Multiple containers may attempt to launch simultaneously (e.g. QA scenarios in parallel threads). The governor gate must be serialized (single lock) to prevent N containers all seeing "enough memory" and all launching.
@@ -345,8 +466,9 @@ Multiple containers may attempt to launch simultaneously (e.g. QA scenarios in p
 ### E5: `docker stop` of a container with active claude session
 `docker stop` sends SIGTERM then SIGKILL after grace period. The claude process inside will be terminated. This is acceptable for idle containers (session complete), but the governor must ensure the container is truly done before stopping. Per-type rules:
 - **QA:** Only stop after verdict accepted (and verified if PASS). Never stop INPUT_REQUIRED.
-- **Impl:** Only stop after `became_idle()` fires and interactive prompt check passes.
-- **Review:** Only stop after review loop completes.
+- **Impl:** Only stop after `became_idle()` fires (hook-driven idle on current master).
+- **Review:** Only stop after review loop completes, or a standalone review has a final verdict and is idle.
+- **All:** keep the container if another exec session is open in it, ownership is unknown, or the transcript changed since idle (revised 2026-10-27).
 
 ### E10: Verification failure after stop-on-idle
 If a QA scenario gets PASS, enters verification, and verification *fails* — the scenario goes back to `pending` and receives a follow-up message (line 1670). The container must still be running at this point. Since stop-on-idle only fires *after* verification passes, this is safe — the container hasn't been stopped yet. But if we change the trigger ordering this becomes a bug.
@@ -373,13 +495,13 @@ If the user changes the target while a QA run is active, the new value should ta
 If `container-stats.json` is corrupted (truncated write, manual edit), the governor should catch JSON parse errors, log a warning, and reset to empty stats (falling back to per-container limits for projection).
 
 ### E14: Stale queue entries from dead processes
-A pm process may crash or be killed with entries still in the launch queue. `try_acquire` cleans stale entries by checking PID liveness via `os.kill(pid, 0)`. This runs on every `try_acquire` call, so stale entries are cleared promptly.
+A pm process may crash or be killed with entries still in the launch queue. Every queue operation drops entries whose pid is dead or recycled (start time mismatch), entries of this process's previous instance (restart re-exec keeps the PID), waiting entries not renewed for 300s, and acquired entries older than 30 min.
 
 ### E15: Lock timeout on governor lock
-If `governor_lock()` times out (10s), the operation should fall back to allowing the launch and logging a warning — same graceful degradation as when Docker stats are unavailable (IR1). A stuck lock is better than a blocked launch.
+**Revised 2026-10-27:** if `governor_lock()` times out (30s — admission measures stats while holding it), it raises `GovernorLockTimeout` and the launch is refused / keeps waiting with the reason. Proceeding unlocked would let two processes admit into the same headroom. Teardown paths (stats sample, dequeue) skip instead of blocking.
 
 ### E16: Acquired-entry double counting
-Brief window where both `docker stats` reports a container's memory AND the queue still has its acquired entry (before `dequeue()`). This double-counts the memory, making the gate more conservative. Self-correcting on next poll cycle — conservative is acceptable.
+**Revised 2026-10-27:** acquired entries carry their container name; once that container appears in runtime stats its usage and remaining growth are counted from the snapshot and the entry stops reserving, so there is no double counting even when `dequeue()` happens late (QA dequeues after the refiner finishes).
 
 ### E17: Priority mode with entries that don't fit
 In priority-drain/priority-round-robin, an impl entry at the front of the queue may not fit in memory. The walk should continue past entries that don't fit to find smaller entries that do — an impl container needing 8GB shouldn't block a QA scenario that only needs 2GB when there's 3GB of headroom.

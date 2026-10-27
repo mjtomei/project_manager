@@ -318,3 +318,54 @@ class TestContainerSetValidation:
     def test_invalid_key_rejected_by_click(self):
         result = self._invoke("bad-key", "whatever")
         assert result.exit_code == 2
+
+
+class TestGovernorSettingsAndStatus:
+    def _invoke(self, *args):
+        return CliRunner().invoke(container_group, list(args))
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_reserve_size_and_percent(self, mock_set):
+        assert self._invoke("set", "system-memory-reserve", "8g").exit_code == 0
+        assert self._invoke("set", "system-memory-reserve", "10%").exit_code == 0
+        assert mock_set.call_args_list[-1][0] == (
+            "container-system-memory-reserve", "10%")
+
+    def test_reserve_invalid(self):
+        result = self._invoke("set", "system-memory-reserve", "lots")
+        assert result.exit_code == 1
+        assert "system-memory-reserve must be" in result.stderr
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_target_off_unsets(self, mock_set):
+        result = self._invoke("set", "system-memory-target", "off")
+        assert result.exit_code == 0
+        assert "(unset)" in result.output
+        mock_set.assert_called_once_with("container-system-memory-target", "")
+
+    def test_status_reports_unmeasurable_memory(self):
+        from pm_core import memory_governor as mg
+        snap = mg.MemorySnapshot(target_mb=48 * 1024,
+                                 error="container stats unavailable: rc=125")
+        with patch("pm_core.container.is_container_mode_enabled", return_value=True), \
+             patch("pm_core.container._runtime_available", return_value=True), \
+             patch("pm_core.memory_governor.take_snapshot", return_value=snap):
+            result = self._invoke("status")
+        assert result.exit_code == 0, result.output
+        assert "unmeasurable — launches are refused" in result.output
+        assert "rc=125" in result.output
+
+    def test_status_reports_usage_growth_and_host(self):
+        from pm_core import memory_governor as mg
+        snap = mg.MemorySnapshot(target_mb=48 * 1024, used_mb=34 * 1024,
+                                 measured_mb=30 * 1024, growth_mb=4 * 1024,
+                                 host=mg.HostMemory(64 * 1024, 20 * 1024),
+                                 reserve_mb=6 * 1024)
+        mg.record_blocked("impl pr-9", "30G used + 8G projected > 36G target")
+        with patch("pm_core.container.is_container_mode_enabled", return_value=False), \
+             patch("pm_core.container._runtime_available", return_value=True), \
+             patch("pm_core.memory_governor.take_snapshot", return_value=snap):
+            result = self._invoke("status")
+        assert "30G used + 4G expected growth / 48G target" in result.output
+        assert "20G of 64G (reserve 6G)" in result.output
+        assert "Blocked:       impl pr-9" in result.output

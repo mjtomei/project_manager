@@ -187,17 +187,22 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
         lines.append(f"  Overall: {color}{_BOLD}{overall}{_RESET}")
     else:
         done = sum(1 for s in scenarios
-                   if s.get("verdict") and s.get("verdict") not in ("interactive", "queued")
+                   if s.get("verdict")
+                   and s.get("verdict") not in ("interactive", "queued", "waiting_memory")
+                   and not s.get("verdict", "").startswith("verifying")
                    and "(retrying" not in s.get("verdict", "")
                    and "(verifying" not in s.get("verdict", ""))
         total = sum(1 for s in scenarios if s.get("verdict") != "interactive")
         queued = sum(1 for s in scenarios if s.get("verdict") == "queued")
-        verifying = sum(1 for s in scenarios if "(verifying" in s.get("verdict", ""))
+        mem_waiting = sum(1 for s in scenarios if s.get("verdict") == "waiting_memory")
+        verifying = sum(1 for s in scenarios if "verifying" in s.get("verdict", ""))
         progress = f"  {_DIM}Progress: {done}/{total} scenarios complete"
         if verifying:
             progress += f" ({verifying} verifying)"
         if queued:
             progress += f" ({queued} queued)"
+        if mem_waiting:
+            progress += f" ({mem_waiting} waiting for memory)"
         progress += f"{_RESET}"
         lines.append(progress)
 

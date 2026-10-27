@@ -25,32 +25,30 @@ from pm_core.review_loop import (
 _log = configure_logger("pm.tui.review_loop_ui")
 
 
-def _try_stop_idle_container(pr_id: str, container_type: str,
-                             pane_id: str | None = None) -> None:
-    """Stop a PR's container if stop-on-idle is enabled for the type.
+def _try_stop_idle_container(app, pr_id: str, container_type: str,
+                             key: str) -> None:
+    """Stop this session's *container_type* container for *pr_id* if idle.
 
-    Finds the container by looking up all running pm containers and
-    matching the PR ID in the container name.  If *pane_id* is given,
-    sets ``remain-on-exit`` on that pane so session text is preserved.
+    Policy-gated and non-blocking (see ``stop_idle_in_background``).  The
+    container is named exactly — this TUI session's tag — so another pm
+    session's container for the same PR is never touched.  *key* is the
+    idle-tracker key whose pane and transcript belong to the session.
     """
-    from pm_core.container import is_container_mode_enabled
-    if not is_container_mode_enabled():
+    session = app._session_name
+    if not session:
         return
-
-    from pm_core.memory_governor import get_stop_idle_policy
-    if not get_stop_idle_policy(container_type):
-        return
-
-    from pm_core.container import stop_container, find_containers_by_keywords
-    pane_ids = [pane_id] if pane_id else None
-    try:
-        for name in find_containers_by_keywords(pr_id, container_type):
-            _log.info("stop-on-idle: stopping %s container %s for %s",
-                      container_type, name, pr_id)
-            stop_container(name, pane_ids=pane_ids)
-    except Exception:
-        _log.debug("stop-on-idle: failed for %s/%s", container_type, pr_id,
-                    exc_info=True)
+    from pm_core.container import _make_container_name, stop_idle_in_background
+    tracker = app._pane_idle_tracker
+    pane_id = tracker.get_pane_id(key)
+    import time as _time
+    stop_idle_in_background(
+        _make_container_name(f"{container_type}-{pr_id}",
+                             session_tag=session.removeprefix("pm-")),
+        container_type,
+        pane_ids=[pane_id] if pane_id else None,
+        transcript_path=tracker.get_transcript_path(key),
+        idle_since=_time.time(),
+    )
 
 
 # Icons for review verdicts (used in log line)
@@ -1017,8 +1015,7 @@ def _poll_impl_idle(app) -> None:
                 tracker.mark_active(pr_id)
             else:
                 # Stop-on-idle: stop impl container if policy enabled
-                _try_stop_idle_container(pr_id, "impl",
-                                         pane_id=tracker.get_pane_id(pr_id))
+                _try_stop_idle_container(app, pr_id, "impl", pr_id)
                 newly_idle.append((pr_id, pr))
 
     # --- Second pass: post-publish repo-update (merge) windows ---
@@ -1166,8 +1163,7 @@ def _poll_impl_idle(app) -> None:
             # container for the user.
             if (verdict and verdict != "INPUT_REQUIRED"
                     and tracker.became_idle(review_key)):
-                _try_stop_idle_container(
-                    pr_id, "review", pane_id=tracker.get_pane_id(review_key))
+                _try_stop_idle_container(app, pr_id, "review", review_key)
 
     # Unregister stale merge keys and clean up verdict stability state
     for key in tracker.tracked_keys():

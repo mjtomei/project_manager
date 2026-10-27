@@ -546,14 +546,23 @@ End with a summary of which steps work and which don't, then one of:
         session_tag = session.removeprefix("pm-") if session else None
         cname = f"{container_mod.CONTAINER_PREFIX}qa-debug-{instruction_id}-{debug_id}"
 
-        container_mod.create_qa_container(
-            name=cname,
-            config=config,
-            workdir=clone_path,
-            scratch_path=scratch_path,
-            allowed_push_branch=base_branch,
-            session_tag=session_tag,
-        )
+        try:
+            admission = container_mod.acquire_launch_admission(
+                cname, action=f"qa-debug {instruction_id}")
+        except container_mod.ContainerError as e:
+            click.echo(str(e), err=True)
+            raise SystemExit(1)
+        try:
+            container_mod.create_qa_container(
+                name=cname,
+                config=config,
+                workdir=clone_path,
+                scratch_path=scratch_path,
+                allowed_push_branch=base_branch,
+                session_tag=session_tag,
+            )
+        finally:
+            container_mod.release_launch_admission(admission)
 
         claude_cmd = build_claude_shell_cmd(
             prompt=prompt,

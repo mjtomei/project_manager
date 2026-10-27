@@ -17,6 +17,12 @@ from pm_core.launch_queue import (
     get_queue_status,
     get_queue_policy,
     governor_lock,
+    keepalive,
+    try_acquire_detailed,
+    GovernorLockTimeout,
+    _INSTANCE,
+    _WAITING_TTL,
+    _ACQUIRED_TTL,
     _sort_queue,
     _sort_qa_drain,
     _sort_qa_round_robin,
@@ -43,14 +49,30 @@ def _patch_governor_inactive():
 
 @contextlib.contextmanager
 def _patch_governor_active(target_mb=48 * 1024, current_mb=30 * 1024,
-                           projection_mb=8 * 1024):
-    """Context manager patching an active governor."""
+                           projection_mb=8 * 1024, *, running=(),
+                           error=""):
+    """Context manager patching an active governor.
+
+    *current_mb* is the committed usage the snapshot reports, *running*
+    the names of running pm containers, *error* a measurement failure.
+    *projection_mb* is a number or a ``ctype -> MB`` callable.
+    """
+    from pm_core.memory_governor import MemorySnapshot
+
+    def _snap(stats=None):
+        return MemorySnapshot(target_mb=target_mb, scope="pm",
+                              used_mb=None if error else current_mb,
+                              measured_mb=None if error else current_mb,
+                              running_names=set(running), error=error)
+
+    def _proj(ctype, stats=None):
+        return projection_mb(ctype) if callable(projection_mb) else projection_mb
+
     with patch("pm_core.memory_governor.get_memory_target",
                return_value=target_mb), \
-         patch("pm_core.memory_governor.get_current_used_mb",
-               return_value=current_mb), \
-         patch("pm_core.memory_governor.project_memory",
-               return_value=projection_mb):
+         patch("pm_core.memory_governor.take_snapshot", side_effect=_snap), \
+         patch("pm_core.memory_governor.project_memory", side_effect=_proj), \
+         patch("pm_core.memory_governor.load_stats", return_value={}):
         yield
 
 
@@ -66,8 +88,8 @@ class TestGovernorLock:
                 # Lock file should exist
                 assert (tmp_path / "governor.lock").exists()
 
-    def test_lock_timeout_graceful(self, tmp_path):
-        """On timeout, governor_lock yields False but doesn't raise."""
+    def test_lock_timeout_raises(self, tmp_path):
+        """A busy lock raises instead of letting the caller proceed unlocked."""
         import fcntl
 
         with _patch_home(tmp_path):
@@ -77,8 +99,9 @@ class TestGovernorLock:
             blocker = open(lock_path, "w")
             fcntl.flock(blocker, fcntl.LOCK_EX | fcntl.LOCK_NB)
             try:
-                with governor_lock(timeout=0.1) as acquired:
-                    assert acquired is False
+                with pytest.raises(GovernorLockTimeout):
+                    with governor_lock(timeout=0.1):
+                        pytest.fail("entered the critical section unlocked")
             finally:
                 blocker.close()
 
@@ -295,30 +318,36 @@ class TestTryAcquire:
                    return_value="priority-drain"):
             # Enqueue qa first, then impl
             qa_ids = enqueue("qa_scenario", qa_run_id="run-1", count=1)
-            impl_ids = enqueue("impl", count=1)
+            enqueue("impl", count=1)
 
-            # Try acquiring qa — impl has higher priority and is waiting,
-            # but qa was enqueued first. In priority mode, qa still gets
-            # served because impl is a different entry in try_acquire's walk.
-            # The impl entry adds its projected memory to `used`.
+            # impl sorts first and reserves its 8G: 30 + 8 + 8 = 46 <= 48,
+            # so qa still fits behind it.
             qa_granted = try_acquire(qa_ids)
-            # 30G + 8G (impl projected) + 8G (qa) = 46G <= 48G — fits
             assert len(qa_granted) == 1
+
+    def test_priority_holds_back_when_only_one_fits(self, tmp_path):
+        """Room for one: the waiting impl is served before an earlier qa."""
+        with _patch_home(tmp_path), \
+             _patch_governor_active(48 * 1024, 36 * 1024, 8 * 1024), \
+             patch("pm_core.launch_queue.get_queue_policy",
+                   return_value="priority-drain"):
+            qa_ids = enqueue("qa_scenario", qa_run_id="run-1", count=1)
+            enqueue("impl", count=1)
+            result = try_acquire_detailed(qa_ids)
+            assert result.granted == []
+            assert "target" in result.reason
 
     def test_skip_entries_that_dont_fit(self, tmp_path):
         """E17: entries that don't fit should be skipped, not block the queue."""
         # impl needs 16G, qa needs 4G, target 48G, used 36G
         # headroom = 12G: impl doesn't fit but qa does
         with _patch_home(tmp_path), \
-             patch("pm_core.memory_governor.get_memory_target",
-                   return_value=48 * 1024), \
-             patch("pm_core.memory_governor.get_current_used_mb",
-                   return_value=36 * 1024), \
-             patch("pm_core.memory_governor.project_memory") as mock_proj, \
+             _patch_governor_active(
+                 48 * 1024, 36 * 1024,
+                 lambda t: 16 * 1024 if t == "impl" else 4 * 1024), \
              patch("pm_core.launch_queue.get_queue_policy",
                    return_value="fifo"):
-            mock_proj.side_effect = lambda t: 16 * 1024 if t == "impl" else 4 * 1024
-            impl_ids = enqueue("impl", count=1)
+            enqueue("impl", count=1)
             qa_ids = enqueue("qa_scenario", qa_run_id="run-1", count=1)
 
             qa_granted = try_acquire(qa_ids)
@@ -334,16 +363,16 @@ class TestTryAcquire:
 class TestEnqueueAndTryAcquire:
     def test_governor_inactive(self, tmp_path):
         with _patch_home(tmp_path), _patch_governor_inactive():
-            eid, acquired = enqueue_and_try_acquire("impl")
+            eid, acquired, reason = enqueue_and_try_acquire("impl")
             assert acquired is True
-            assert len(eid) == 8
+            assert eid and reason == ""
 
     def test_within_budget(self, tmp_path):
         with _patch_home(tmp_path), \
              _patch_governor_active(48 * 1024, 30 * 1024, 8 * 1024), \
              patch("pm_core.launch_queue.get_queue_policy",
                    return_value="fifo"):
-            eid, acquired = enqueue_and_try_acquire("impl")
+            eid, acquired, _ = enqueue_and_try_acquire("impl")
             assert acquired is True
 
     def test_over_budget(self, tmp_path):
@@ -351,8 +380,9 @@ class TestEnqueueAndTryAcquire:
              _patch_governor_active(48 * 1024, 44 * 1024, 8 * 1024), \
              patch("pm_core.launch_queue.get_queue_policy",
                    return_value="fifo"):
-            eid, acquired = enqueue_and_try_acquire("impl")
+            eid, acquired, reason = enqueue_and_try_acquire("impl")
             assert acquired is False
+            assert "projected" in reason and "target" in reason
             # Entry should be in queue as waiting
             q = _load_queue()
             assert any(e["id"] == eid and e["status"] == "waiting"
@@ -361,15 +391,31 @@ class TestEnqueueAndTryAcquire:
     def test_priority_respects_higher_waiting(self, tmp_path):
         """In priority mode, don't jump ahead of higher-priority entries."""
         with _patch_home(tmp_path), \
-             _patch_governor_active(48 * 1024, 30 * 1024, 8 * 1024), \
+             _patch_governor_active(48 * 1024, 36 * 1024, 8 * 1024), \
              patch("pm_core.launch_queue.get_queue_policy",
                    return_value="priority-drain"):
-            # Enqueue impl (higher priority) first
-            impl_ids = enqueue("impl", count=1)
-            # Now try enqueue_and_try_acquire for qa (lower priority)
-            qa_eid, acquired = enqueue_and_try_acquire("qa_scenario")
+            # Enqueue impl (higher priority) first; room for only one.
+            enqueue("impl", count=1)
+            qa_eid, acquired, _ = enqueue_and_try_acquire("qa_scenario")
             # impl is waiting with higher priority — qa should not jump
             assert acquired is False
+
+    def test_key_reuses_entry(self, tmp_path):
+        """Repeated attempts for one container don't pile up entries."""
+        with _patch_home(tmp_path), \
+             _patch_governor_active(48 * 1024, 44 * 1024, 8 * 1024):
+            a, ok_a, _ = enqueue_and_try_acquire("impl", key="pm-t-impl-pr-1")
+            b, ok_b, _ = enqueue_and_try_acquire("impl", key="pm-t-impl-pr-1")
+            assert a == b and not ok_a and not ok_b
+            assert len(_load_queue()["entries"]) == 1
+
+    def test_lock_busy_refuses(self, tmp_path):
+        with _patch_home(tmp_path), \
+             patch("pm_core.launch_queue.governor_lock",
+                   side_effect=GovernorLockTimeout("busy")):
+            eid, acquired, reason = enqueue_and_try_acquire("impl")
+        assert (eid, acquired) == (None, False)
+        assert "busy" in reason
 
 
 # ---------------------------------------------------------------------------
@@ -409,3 +455,129 @@ class TestQueuePolicy:
         with patch("pm_core.launch_queue.get_global_setting_value",
                    return_value="invalid"):
             assert get_queue_policy() == "fifo"
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed admission and reservation accounting
+# ---------------------------------------------------------------------------
+
+class TestFailClosed:
+    def test_measurement_failure_grants_nothing(self, tmp_path):
+        """Failed stats must not read as zero usage and admit the launch."""
+        with _patch_home(tmp_path), \
+             _patch_governor_active(error="podman stats failed (rc=125)"):
+            ids = enqueue("qa_scenario", qa_run_id="run-1", count=2)
+            result = try_acquire_detailed(ids)
+        assert result.granted == []
+        assert "memory measurement unavailable" in result.reason
+        assert "rc=125" in result.reason
+
+    def test_measurement_failure_refuses_fast_path(self, tmp_path):
+        with _patch_home(tmp_path), _patch_governor_active(error="stats down"):
+            _eid, acquired, reason = enqueue_and_try_acquire("impl")
+        assert acquired is False
+        assert "stats down" in reason
+
+    def test_lock_busy_grants_nothing(self, tmp_path):
+        with _patch_home(tmp_path), _patch_governor_inactive():
+            ids = enqueue("qa_scenario", count=1)
+        with _patch_home(tmp_path), \
+             patch("pm_core.launch_queue.governor_lock",
+                   side_effect=GovernorLockTimeout("lock busy")):
+            result = try_acquire_detailed(ids)
+        assert result.granted == []
+        assert "lock busy" in result.reason
+
+    def test_invalid_target_grants_nothing(self, tmp_path):
+        from pm_core.memory_governor import GovernorConfigError
+        with _patch_home(tmp_path), _patch_governor_inactive():
+            ids = enqueue("qa_scenario", count=1)
+        with _patch_home(tmp_path), \
+             patch("pm_core.memory_governor.get_memory_target",
+                   side_effect=GovernorConfigError("invalid target 'x'")):
+            result = try_acquire_detailed(ids)
+        assert result.granted == []
+        assert "invalid target" in result.reason
+
+
+class TestInflightReservations:
+    def test_acquired_entry_reserves_until_container_runs(self, tmp_path):
+        """A grant reserves its projection until its container is visible."""
+        with _patch_home(tmp_path), \
+             _patch_governor_active(48 * 1024, 32 * 1024, 8 * 1024):
+            first = enqueue("qa_scenario", qa_run_id="r", count=1,
+                            keys=["r:s1"], container_names=["pm-qa-r-s1"])
+            assert try_acquire(first) == first
+            # 32 + 8 (reserved for s1) + 8 = 48: s2 just fits.
+            second = enqueue("qa_scenario", qa_run_id="r", keys=["r:s2"],
+                             container_names=["pm-qa-r-s2"])
+            third = enqueue("qa_scenario", qa_run_id="r", keys=["r:s3"],
+                            container_names=["pm-qa-r-s3"])
+            assert try_acquire(second) == second
+            assert try_acquire(third) == []
+
+        # Once s1 and s2 run, the snapshot carries them (usage + growth),
+        # so their entries stop reserving on top.
+        with _patch_home(tmp_path), \
+             _patch_governor_active(48 * 1024, 32 * 1024, 8 * 1024,
+                                    running={"pm-qa-r-s1", "pm-qa-r-s2"}):
+            assert try_acquire(third) == third
+
+
+class TestOwnership:
+    def _entry(self, **kw):
+        base = {"id": "e1", "container_type": "qa_scenario",
+                "status": "waiting", "enqueued_at": time.time(),
+                "heartbeat_at": time.time()}
+        base.update(kw)
+        return base
+
+    def test_previous_instance_of_this_pid_is_stale(self):
+        """pm restarts re-exec in place: same PID, new instance."""
+        e = self._entry(pid=os.getpid(), instance="old-instance")
+        assert _clean_stale([e]) == []
+
+    def test_current_instance_kept(self):
+        e = self._entry(pid=os.getpid(), instance=_INSTANCE)
+        assert _clean_stale([e]) == [e]
+
+    def test_recycled_pid_is_stale(self):
+        e = self._entry(pid=os.getppid(), pid_start="1")
+        assert _clean_stale([e]) == []
+
+    def test_waiting_without_heartbeat_expires(self):
+        now = time.time()
+        e = self._entry(pid=os.getpid(), instance=_INSTANCE,
+                        heartbeat_at=now - _WAITING_TTL - 1)
+        assert _clean_stale([e], now) == []
+
+    def test_acquired_reservation_expires(self):
+        now = time.time()
+        e = self._entry(pid=os.getpid(), instance=_INSTANCE,
+                        status="acquired", acquired_at=now - _ACQUIRED_TTL - 1)
+        assert _clean_stale([e], now) == []
+
+    def test_keepalive_renews_waiting_entry(self, tmp_path):
+        with _patch_home(tmp_path):
+            [eid] = enqueue("qa_scenario", qa_run_id="r", count=1)
+            q = _load_queue()
+            q["entries"][0]["heartbeat_at"] = time.time() - _WAITING_TTL + 5
+            _save_queue(q)
+            assert keepalive([eid])
+            assert time.time() - _load_queue()["entries"][0]["heartbeat_at"] < 5
+
+    def test_resumed_run_adopts_its_place_in_line(self, tmp_path):
+        """After a restart (same PID, new instance) re-enqueueing under the
+        same key adopts the old entry and keeps its enqueued_at."""
+        with _patch_home(tmp_path):
+            [first] = enqueue("qa_scenario", qa_run_id="r", keys=["r:s1"])
+            q = _load_queue()
+            q["entries"][0]["instance"] = "pre-restart"
+            q["entries"][0]["enqueued_at"] = 1.0
+            _save_queue(q)
+            [again] = enqueue("qa_scenario", qa_run_id="r", keys=["r:s1"])
+            entries = _load_queue()["entries"]
+        assert again == first
+        assert len(entries) == 1
+        assert entries[0]["enqueued_at"] == 1.0
+        assert entries[0]["instance"] == _INSTANCE
