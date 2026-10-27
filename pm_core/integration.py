@@ -1601,8 +1601,13 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
             if diff_path:
                 # Keep the full record's delta in integration.json: the
                 # artifact is rewritten below, and the compact state only
-                # carries the pointer.
-                with contextlib.suppress(OSError):
+                # carries the pointer.  A string is not enough to make it
+                # readable: a null byte raises ``ValueError`` out of ``open``
+                # and a non-UTF-8 file raises ``UnicodeDecodeError``, neither
+                # of which is an ``OSError`` — both must read as "no delta"
+                # (the pointer is kept; the file may exist on the host that
+                # wrote it) rather than take every later check down.
+                with contextlib.suppress(OSError, ValueError):
                     carried["diff"] = Path(diff_path).read_text()
             else:
                 carried.pop("diff_path", None)

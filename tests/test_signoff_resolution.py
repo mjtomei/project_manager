@@ -1741,6 +1741,42 @@ def test_a_carried_resolution_with_a_malformed_delta_path_does_not_raise(w):
     assert "diff_path" not in kept["resolution"], kept
 
 
+def test_a_carried_resolution_with_an_unreadable_delta_path_does_not_raise(w):
+    """A *string* ``diff_path`` that cannot be read must not crash a check.
+
+    ``_carry_forward`` reads the recorded delta back through that pointer.  A
+    non-UTF-8 file raises ``UnicodeDecodeError`` and a null byte raises
+    ``ValueError`` out of ``open`` — neither is an ``OSError``, so the old
+    guard let both escape and took every later integration check down (the
+    sign-off launch reported "Integration check failed").  An unreadable
+    delta now reads as absent and the resolution's provenance is still
+    carried.
+    """
+    _metadata_conflict(w)
+    binary = w.croot / PR / "not-a-delta.bin"
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_bytes(b"\xff\xfe\x00 not utf-8")
+
+    def _point_at_binary(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["diff_path"] = str(
+            binary)
+    store.locked_update(w.pm_dir, _point_at_binary)
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    kept = pr_entry(w)["integration"]
+    assert kept["resolution"]["applied_merge_sha"], kept
+    assert kept["resolution"]["resolved_from"], kept
+
+    def _null_byte(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["diff_path"] = \
+            "bad\x00path"
+    store.locked_update(w.pm_dir, _null_byte)
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    kept = pr_entry(w)["integration"]
+    assert kept["resolution"]["applied_merge_sha"], kept
+
+
 def test_malformed_return_state_does_not_crash_the_prompts(w):
     """A hand-edited ``signoff_return`` must not crash a prompt or the driver.
 

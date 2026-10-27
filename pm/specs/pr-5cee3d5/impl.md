@@ -524,7 +524,11 @@ tests):
     must not make `_carry_forward` call `Path(...)` on it (that raised out of
     every later integration check and the sign-off launch reported only
     "Integration check failed"), so it is dropped and the rest of the
-    resolution's provenance is still carried. A carry-forward
+    resolution's provenance is still carried. A *string* pointer is not
+    enough to make the delta readable: a non-UTF-8 file raises
+    `UnicodeDecodeError` and a null byte raises `ValueError` out of `open`
+    (neither is an `OSError`), so reading the delta back tolerates both and
+    the resolution is carried without it. A carry-forward
     of an already-bounded list also keeps its recorded total
     (`overlap_total`, `base_behavior_count`), so the prompt does not
     under-report "… N more" after the re-check. The sign-off launch stamp is
