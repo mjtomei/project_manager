@@ -1600,6 +1600,64 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
       prompt again. A routed review return is launched by a tick and
       adopted by the TUI (2ad57eff). `pm container cleanup` under podman
       3. The full suite runs on HEAD with TMUX/PM_* unset.
+    Done: S80 (NEEDS_WORK, fix 63cabd07), S81 (NEEDS_WORK, fix
+    f83b3963, filed pr-7f74c77), S82 (NEEDS_WORK, fix 19c68f43).
+  - Thirty-second pass (S83+), delta-only, planner 2026-10-26. Product
+    changes since run b8a870d656209fa9 (review 4ffd i1 PASS, no change;
+    origin/master still 211a6128, merged) have each run live only in the
+    scenario that wrote them:
+    63cabd07 (a TUI `start_qa` that gives up on the lock keeps a pending
+    clear keyed by the return's `ts`, retried with NO_WAIT on each QA
+    poll tick; auto_start and `advance_all` confirm `awaiting: qa` on
+    disk), f83b3963 (the review loop's `pm pr review` subprocess timeout
+    is `_LAUNCH_TIMEOUT` + lock timeout + RETURN_CLEAR_WAIT_SECONDS, 302 s;
+    `advance_all` logs a StoreLockTimeout as one warning) and 19c68f43 (a
+    resumed review loop with no window waits while the iteration's
+    transcript symlink exists and its session has not written, up to
+    120 s, or 15 s when no symlink exists yet). Pre-fix controls:
+    5b78ba40 (before all three), or HEAD with only the commit under test
+    reverted.
+    - S83: the pending clear's lifetime. It lives only on the run's
+      in-memory QALoopState, which the poll tick drops once the run's
+      completion is processed. Open points from code reading (S83 decides
+      each one against the control): (a) a holder that outlasts the
+      re-run (fake scenarios finish in seconds, the holder runs 30–90 s).
+      The completion's own writes need the lock, so the run should stay
+      registered until the release, and the clear should take before the
+      completion on that tick. Expected: no second re-run after
+      INPUT_REQUIRED, and one hand-off after PASS. (b) The `ts` guard.
+      During the hold the user edits the return in `pm edit` (a new `ts`,
+      or `awaiting: review`). The retry must leave the new return alone.
+      (c) A TUI restart before the release. Review 4ffd bounds this at one
+      redundant re-run, whose start clears the return. Check that bound:
+      one extra run, then it holds. (d) `z t` / `zz t` over a re-run that
+      still has a pending clear. (e) Two PRs that each have a pending
+      clear, plus `pm pr auto-sequence` ticks during the window
+      (pr-bddda0f is an observation). Host, all fake-claude.
+    - S84: 19c68f43 in container mode, with real claude against the
+      router and main stubs. The S82 repro after the fix: a TUI restart
+      while a routed sign-off review return is still creating its
+      container. Variants: (a) an ordinary review-loop iteration rather
+      than a return; (b) the restart lands before the launch has written
+      its symlink, which takes the 15 s grace; (c) the pre-restart launch
+      failed, for example a broken provider, after or before it wrote the
+      symlink. The resumed loop must report the route error and relaunch
+      or stop within the stated bound, never hang without a message;
+      (d) the user closed the window before claude wrote anything;
+      (e) two PRs restored at once, one waiting while the other's loop
+      proceeds; (f) a tick launches a return for the same PR during the
+      wait. Expected: one review window and one routed session per
+      iteration, and the router sees only `work/` from routed roles.
+    - S85: f83b3963 bounds. A TUI review loop runs a sign-off review
+      return under holders of 150 s, 200 s (past the child's 182 s clear
+      wait, but under the 302 s timeout) and 320 s (past the timeout).
+      Within the bound: one window, `awaiting` cleared after the release,
+      no relaunch after the claim expires. Past either bound: whatever
+      the user sees is recorded as an observation. It must still never
+      open a second review over a live pane without a message. Also:
+      a sign-off verdict write that lands inside another process's hold
+      logs one `advance … deferred` warning with no traceback and is
+      retried. Host, fake-claude.
 
 ## 3. Edge cases
 
