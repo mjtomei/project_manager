@@ -1003,7 +1003,7 @@ class TestRemoveContainer:
                                                 _running):
         mock_docker.return_value = MagicMock(returncode=1)
         remove_container("pm-impl")
-        mock_capture.assert_called_once_with("pm-impl")
+        mock_capture.assert_called_once_with("pm-impl", None)
 
     @patch("pm_core.container.container_is_running", return_value=True)
     @patch("pm_core.container._run_runtime")
@@ -1020,7 +1020,7 @@ class TestRemoveContainer:
         remove_container("pm-impl")
         # Verify capture is called before docker rm -f
         calls = manager.mock_calls
-        capture_idx = next(i for i, c in enumerate(calls) if c == call.capture("pm-impl"))
+        capture_idx = next(i for i, c in enumerate(calls) if c == call.capture("pm-impl", None))
         rm_idx = next(i for i, c in enumerate(calls)
                       if c == call.docker("rm", "-f", "pm-impl", check=False, timeout=30))
         assert capture_idx < rm_idx
@@ -1051,13 +1051,42 @@ class TestRemoveContainer:
 
     @patch("pm_core.container._run_runtime")
     @patch("pm_core.push_proxy.stop_push_proxy")
-    def test_container_id_pins_removal(self, _proxy, mock_docker):
+    def test_container_id_pins_removal(self, proxy, mock_docker):
         """Removing by ID never touches a newer same-named container."""
         mock_docker.return_value = MagicMock(returncode=1)
         remove_container("pm-review", capture=False, container_id="cid1")
         mock_docker.assert_any_call("rm", "-f", "cid1", check=False, timeout=30)
         mock_docker.assert_any_call("inspect", "cid1", check=False, timeout=5)
-        assert all("pm-review" not in c.args for c in mock_docker.call_args_list)
+        assert not any(c.args[:2] == ("rm", "-f") and "pm-review" in c.args
+                       for c in mock_docker.call_args_list)
+        # The name is free again, so its push proxy goes too.
+        proxy.assert_called_once_with("pm-review")
+
+    @patch("pm_core.container._run_runtime")
+    @patch("pm_core.push_proxy.stop_push_proxy")
+    def test_container_id_keeps_proxy_of_recreated_container(self, proxy,
+                                                             mock_docker):
+        """The push proxy is keyed by name: a container recreated under
+        the name keeps it when the old one is removed by ID."""
+        def runtime(*args, **_kw):
+            if args == ("inspect", "-f", "{{.Id}}", "pm-review"):
+                return MagicMock(returncode=0, stdout="cid2\n")
+            return MagicMock(returncode=1, stdout="")
+        mock_docker.side_effect = runtime
+        remove_container("pm-review", capture=False, container_id="cid1")
+        proxy.assert_not_called()
+
+    @patch("pm_core.container._run_runtime")
+    @patch("pm_core.push_proxy.stop_push_proxy")
+    def test_container_id_stops_proxy_when_removal_lags(self, proxy,
+                                                        mock_docker):
+        """The name still resolving to the same (slow-to-go) container is
+        not a recreation."""
+        mock_docker.return_value = MagicMock(returncode=0, stdout="cid1\n")
+        with patch("time.sleep"), \
+             patch("time.monotonic", side_effect=[0.0, 0.0, 11.0]):
+            remove_container("pm-review", capture=False, container_id="cid1")
+        proxy.assert_called_once_with("pm-review")
 
     @patch("pm_core.container.container_is_running")
     @patch("pm_core.container._run_runtime")
@@ -1370,7 +1399,8 @@ class TestStopContainer:
         # Checked before and again after the (slow) stats capture.
         assert running.call_count == 2
         running.assert_called_with("pm-qa-s1", ["%10", "%11"])
-        self.capture.assert_called_once_with("pm-qa-s1")
+        # Sampled by ID: never a container recreated under the name.
+        self.capture.assert_called_once_with("pm-qa-s1", "cid1")
 
     @patch("pm_core.container.remove_container")
     @patch("pm_core.tmux.set_pane_option")
@@ -1417,7 +1447,7 @@ class TestStopContainer:
         answers = iter([False, True])
         assert stop_container("pm-qa-s1", ["%10"],
                               resumed=lambda: next(answers)) is False
-        self.capture.assert_called_once_with("pm-qa-s1")
+        self.capture.assert_called_once_with("pm-qa-s1", "cid1")
         mock_remove.assert_not_called()
 
         running.side_effect = [0, 1]

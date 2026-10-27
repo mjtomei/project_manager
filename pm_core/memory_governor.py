@@ -808,26 +808,30 @@ def check_single_container_fits(container_type: str) -> tuple[bool, str]:
 # Memory capture before stop/removal
 # ---------------------------------------------------------------------------
 
-def capture_and_record(name: str) -> None:
+def capture_and_record(name: str, ref: str | None = None) -> None:
     """Capture a container's peak (or current) memory and age as a sample.
 
-    Best-effort: failures are logged but don't block the caller.
+    The type comes from *name*; the runtime is asked about *ref* (a
+    container ID) when given, so a container recreated under the same
+    name meanwhile is not sampled in its place.  Best-effort: failures
+    are logged but don't block the caller.
     """
     ctype = infer_container_type(name)
     if ctype is None:
         _log.debug("Cannot infer type for container %s — skipping stats", name)
         return
 
+    target = ref or name
     kind = "peak"
-    memory_mb = capture_container_peak(name)
+    memory_mb = capture_container_peak(target)
     if memory_mb is None:
         kind = "snapshot"
-        memory_mb = capture_container_memory(name)
+        memory_mb = capture_container_memory(target)
     if memory_mb is None:
         _log.debug("Cannot capture memory for %s — skipping stats", name)
         return
 
-    age = get_container_age_minutes(name)
+    age = get_container_age_minutes(target)
     if age is None:
         age = 0.0
 

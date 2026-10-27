@@ -1054,7 +1054,8 @@ def remove_container(name: str, *, capture: bool = True,
     first, unless *capture* is False (the caller already captured them, or
     knows the container is not running).  With *container_id*, only that
     container is removed and waited on, never a newer one created under
-    the same name in the meantime.
+    the same name in the meantime — and that newer container keeps the
+    push proxy registered under the name.
     """
     import time
     from pm_core.push_proxy import stop_push_proxy
@@ -1065,7 +1066,8 @@ def remove_container(name: str, *, capture: bool = True,
     if capture and container_is_running(name):
         _capture_memory_sample(name)
 
-    stop_push_proxy(name)
+    if not container_id:
+        stop_push_proxy(name)
     target = container_id or name
     _run_runtime("rm", "-f", target, check=False, timeout=30)
     # Wait for the container to be fully gone.  When another rm is already in
@@ -1075,9 +1077,20 @@ def remove_container(name: str, *, capture: bool = True,
     while time.monotonic() < deadline:
         result = _run_runtime("inspect", target, check=False, timeout=5)
         if result.returncode != 0:
-            return  # container is gone
+            break  # container is gone
         time.sleep(0.1)
-    _log.warning("remove_container: %s still present after 10 s", name)
+    else:
+        _log.warning("remove_container: %s still present after 10 s", name)
+    if container_id:
+        # The proxy is keyed by name: leave it to a container that took
+        # the name since.
+        now = _run_runtime("inspect", "-f", "{{.Id}}", name, check=False,
+                           timeout=5)
+        if now.returncode == 0 and now.stdout.strip() != container_id:
+            _log.info("remove_container: %s was recreated — keeping its "
+                      "push proxy", name)
+        else:
+            stop_push_proxy(name)
 
 
 def _running_container_id(name: str) -> str | None:
@@ -1092,11 +1105,11 @@ def _running_container_id(name: str) -> str | None:
     return None
 
 
-def _capture_memory_sample(name: str) -> None:
+def _capture_memory_sample(name: str, container_id: str | None = None) -> None:
     """Record *name*'s memory for the governor (best-effort, never raises)."""
     try:
         from pm_core.memory_governor import capture_and_record
-        capture_and_record(name)
+        capture_and_record(name, container_id)
     except Exception:
         _log.debug("Failed to capture stats for %s before removal", name,
                    exc_info=True)
@@ -1241,7 +1254,7 @@ def stop_container(name: str, pane_ids: list[str] | None = None,
     if why:
         _log.info("Stop-on-idle: keeping %s — %s", name, why)
         return False
-    _capture_memory_sample(name)
+    _capture_memory_sample(name, container_id)
     why = _keep_reason()
     if why:
         _log.info("Stop-on-idle: keeping %s — %s", name, why)

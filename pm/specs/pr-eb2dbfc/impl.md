@@ -117,6 +117,8 @@ then recreates it, or reuses it if it is still running.  Either way the
 container belongs to the new review.  `stop_container` pins the container
 ID it first saw.  It keeps a container that was recreated under the same
 name since then, and it removes by ID (review 3f45 i1, after QA S39).
+The end-of-life sample is also taken by ID, and the name-keyed push proxy
+is left to a container that took the name meanwhile (review 3f45 i2).
 Window kill and fresh-review recreation are master lifecycle behaviour.
 They are not part of stop-on-idle, and #241's ownership work will
 revisit them.

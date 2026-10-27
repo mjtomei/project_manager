@@ -635,6 +635,22 @@ class TestCaptureAndRecord:
         snap.assert_not_called()
         mock_record.assert_called_once_with("impl", 6100, 45.0, kind="peak")
 
+    def test_ref_queries_runtime_by_id_type_by_name(self):
+        """stop_container samples the container ID it pinned, so one
+        recreated under the name is never recorded as the old one's peak."""
+        with patch("pm_core.memory_governor.capture_container_peak",
+                   return_value=None) as peak, \
+             patch("pm_core.memory_governor.capture_container_memory",
+                   return_value=4200) as snap, \
+             patch("pm_core.memory_governor.get_container_age_minutes",
+                   return_value=45.0) as age, \
+             patch("pm_core.memory_governor.record_sample") as mock_record:
+            capture_and_record("pm-tag-review-pr-1", "cid1")
+        for probe in (peak, snap, age):
+            probe.assert_called_once_with("cid1")
+        mock_record.assert_called_once_with("review", 4200, 45.0,
+                                            kind="snapshot")
+
     def test_falls_back_to_snapshot(self):
         with patch("pm_core.memory_governor.capture_container_peak",
                    return_value=None), \
