@@ -335,7 +335,7 @@ def ensure_in_container(cfg: ProviderConfig, name: str) -> tuple[bool, str]:
     return r.returncode == 0, (r.stderr or "").strip()
 
 
-def _main_account_remedy(session_type: str | None) -> str:
+def _off_route_remedy(session_type: str | None) -> str:
     """How to move the checked session off its route.
 
     *session_type* None means the gated QA refiner/worker launches.  Other
@@ -383,7 +383,7 @@ def check_route(resolution, *, container: bool = False,
             remedy=((f"fix {pm_home() / 'providers.yaml'} by hand"
                      if isinstance(exc, ProvidersFileUnreadableError) else
                      "configure the provider on this host")
-                    + f", or {_main_account_remedy(session_type)}"))
+                    + f", or {_off_route_remedy(session_type)}"))
     if cfg is None:
         return RouteStatus(True)
 

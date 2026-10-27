@@ -109,16 +109,26 @@ def subagent_pin_env(model: str | None,
     """Env that runs every subagent of a session on *model*.
 
     *model* is the session's effective ``--model`` value, kept verbatim
-    (any route prefix and context suffix such as ``[1m]`` included).  A router provider's explicit ``alias_models`` entry for
-    CLAUDE_CODE_SUBAGENT_MODEL takes its place.  Empty when pm selected no
-    model: the session then runs on the CLI default and pm has nothing to
-    enforce.
+    (any route prefix and context suffix such as ``[1m]`` included).  The
+    provider's own ``alias_models`` / ``env`` entries (``env`` wins, as in
+    ``env_vars``) override both variables: a value replaces pm's, a null
+    ``env`` value drops it (a null pin drops FORCE too).  Empty when pm
+    selected no model: the session then runs on the CLI default and pm has
+    nothing to enforce.
     """
     if not model:
         return {}
-    pinned = ((provider.alias_models.get(SUBAGENT_MODEL_ENV)
-               if provider is not None else None) or model)
-    return {SUBAGENT_MODEL_ENV: pinned, SUBAGENT_FORCE_ENV: "1"}
+    own: dict[str, str | None] = {}
+    if provider is not None:
+        own.update(provider.alias_models)
+        own.update(provider.env)
+    if SUBAGENT_MODEL_ENV in own and own[SUBAGENT_MODEL_ENV] is None:
+        return {}
+    pin = {SUBAGENT_MODEL_ENV: own.get(SUBAGENT_MODEL_ENV) or model}
+    force = own.get(SUBAGENT_FORCE_ENV, "1")
+    if force is not None:
+        pin[SUBAGENT_FORCE_ENV] = force
+    return pin
 
 
 # Set by a routed launch next to ANTHROPIC_BASE_URL, naming the URL pm put
@@ -305,7 +315,12 @@ class ProviderConfig:
                 env[SUBAGENT_FORCE_ENV] = "1"
             if self.classifier_model:
                 env[AUTO_MODE_MODEL_ENV] = self.classifier_model
-            return self._apply_env(env)
+            env = self._apply_env(env)
+            # A dropped pin leaves nothing to force (as subagent_pin_env).
+            if (SUBAGENT_MODEL_ENV not in env
+                    and SUBAGENT_FORCE_ENV not in self.env):
+                env.pop(SUBAGENT_FORCE_ENV, None)
+            return env
 
         if self.type in ("claude", "local"):
             env: dict[str, str] = {}
@@ -383,6 +398,8 @@ def retired_keys(entry) -> list[str]:
     if not isinstance(entry, dict):
         return []
     return [k for k in RETIRED_PROVIDER_KEYS if entry.get(k) is not None]
+
+
 _PROVIDER_LIST_FIELDS = ("capabilities", "unset_env", "probe_models")
 
 

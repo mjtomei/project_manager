@@ -104,14 +104,14 @@ class ModelSettingsScreen(ModalScreen):
         self._choice = 0
         self._status = ""
         self._data: dict = {}
-        # Provider lines (with a TCP check per router), built once per load
-        # rather than on every keypress.
+        # Provider lines (with a TCP check per router), built once per
+        # screen rather than on every keypress or save (saves change
+        # project.yaml, not providers.yaml).
         self._provider_cache: list[str] | None = None
 
     # -- data ---------------------------------------------------------
 
     def _load(self) -> None:
-        self._provider_cache = None
         try:
             self._data = store.load(self._root)
         except Exception as exc:  # unreadable project.yaml: say so
@@ -131,9 +131,12 @@ class ModelSettingsScreen(ModalScreen):
         return model_settings.role_rows(self._data, pr)
 
     def _targets(self) -> list[str | None]:
-        """Selectable rows: None = every role (PR view only)."""
-        roles = [r.role for r in self._rows()]
-        return roles if self._project_view else [None, *roles]
+        """Selectable rows: None = every role (PR view only).  The roles
+        _rows lists, without resolving them (called on every key)."""
+        from pm_core.model_config import PR_SESSION_TYPES, SESSION_TYPES
+        if self._project_view:
+            return list(SESSION_TYPES)
+        return [None, *(PR_SESSION_TYPES if self._pr() is not None else ())]
 
     # -- rendering ----------------------------------------------------
 

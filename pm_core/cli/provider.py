@@ -338,6 +338,12 @@ def _echo_provider(name: str, status: bool = False) -> None:
         click.echo(line)
 
 
+# Launch variables whose values ``pm provider show`` never prints (an
+# ``env`` entry may carry a key, e.g. ANTHROPIC_CUSTOM_HEADERS).
+_SECRET_VAR_PARTS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL",
+                     "AUTH", "HEADER")
+
+
 def provider_detail_lines(p, *, status: bool = False) -> list[str]:
     """Credential-free description of provider *p* (also used by the TUI)."""
     from pm_core.providers import BUILTIN_CLAUDE, get_default_provider, launch_env
@@ -360,7 +366,7 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
     if assign:
         lines.append("  launch env:")
         for var, value in assign.items():
-            secret = any(t in var for t in ("KEY", "TOKEN", "SECRET"))
+            secret = any(t in var for t in _SECRET_VAR_PARTS)
             lines.append(f"    {var}={'<redacted>' if secret and value else value}")
     if unset:
         lines.append(f"  launch unsets: {', '.join(unset)}")

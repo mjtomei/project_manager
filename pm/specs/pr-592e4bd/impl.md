@@ -38,9 +38,11 @@ R10. **Generic router provider.**
   - `alias_models` (the older name for `env`)
 - The auto-mode classifier model is the explicit `classifier_model`. It is
   no longer derived as `<prefix>/claude-sonnet-5`.
-- `pm provider test --live` judges the transcript's model only against
-  `model` plus an optional `probe_models` list. pm assumes no prefix
-  stripping.
+- `pm provider test --live` requires every model Claude requested to be
+  the route's `model`. The transcript's model (what the backend answered
+  with) is judged only when `probe_models` is set: it must then be `model`
+  (minus a `[...]` suffix) or one of `probe_models`; without it any
+  recorded model is accepted and shown. pm assumes no prefix stripping.
 - Remedies and help use neutral wording: "route '<name>'", "move it off this
   route", `pm pr model show`. A configured `remedy` also replaces the
   router-down hint.
@@ -204,7 +206,8 @@ R7. **Visibility.** Each refiner/worker launch logs
 `route=<name> model=<m> effort=<e> via=<host|launcher:…|container-bridge>`
 (`worker_route.describe`); Phase 2 `latest_output` names the refiner and
 worker routes; `pm model show` adds a Routes section; `pm provider list`
-prints URL, model, launcher, credentials *path* and expiry (never contents).
+prints URL, model, effort, launcher, remedy and classifier model (never a
+credential; since R11 no credentials path or expiry).
 `pm provider test <route> [--container] [--live]` runs the preflight; with
 `--container` in a throwaway container with the bridge mount; with `--live`
 a tools-disabled `claude -p` through the route, reporting requested models
@@ -226,8 +229,11 @@ and the built-in Explore/Plan agents all bypass it. On the router a bypassing
 child that asks for an unprefixed model (e.g. `fable` → `claude-fable-5-1`)
 runs on the caller's main account. FORCE (Claude Code ≥ 2.1.257; 2.1.310 is
 installed) makes the pin override all of them and removes `model` from the
-Agent tool. A router's explicit `alias_models` entry for
-`CLAUDE_CODE_SUBAGENT_MODEL` replaces the pinned value and is forced too.
+Agent tool. A provider's explicit `alias_models` or `env` entry for
+`CLAUDE_CODE_SUBAGENT_MODEL` replaces the pinned value and is forced too
+(`env` wins). Per R10 the pins are overridable defaults: a null `env` value
+for the pin drops it (and FORCE); one for FORCE drops only FORCE (review
+loop 6f0c i1: before this, `env` entries for either were overwritten).
 When pm selects no model (CLI default) it sets no pin and removes an
 inherited one (R9), so the children follow the CLI default rather than a
 caller's pin (QA S61, 3ee69236: pm run inside a routed session passed its

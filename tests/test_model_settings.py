@@ -142,6 +142,30 @@ class TestProviderEnv:
         assert ProviderConfig(name="r", type="router").unset_env_vars() == (
             "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 
+    @pytest.mark.parametrize("own, pin, force", [
+        ({}, "rt/big", "1"),
+        ({"alias_models": {"CLAUDE_CODE_SUBAGENT_MODEL": "rt/small"}},
+         "rt/small", "1"),
+        # env is the newer alias_models and wins over it
+        ({"alias_models": {"CLAUDE_CODE_SUBAGENT_MODEL": "rt/small"},
+          "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "rt/tiny"}}, "rt/tiny", "1"),
+        ({"env": {"CLAUDE_CODE_SUBAGENT_MODEL_FORCE": None}}, "rt/big", None),
+        ({"env": {"CLAUDE_CODE_SUBAGENT_MODEL": None}}, None, None),
+    ])
+    def test_env_overrides_the_subagent_pin(self, own, pin, force):
+        p = ProviderConfig(name=ROUTE, type="router", api_base="http://x:1",
+                           model="rt/big", **own)
+        assign, unset = launch_env(
+            p, p.env_vars(), "rt/big",
+            {"CLAUDE_CODE_SUBAGENT_MODEL": "inherited",
+             "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"})
+        assert assign.get("CLAUDE_CODE_SUBAGENT_MODEL") == pin
+        assert assign.get("CLAUDE_CODE_SUBAGENT_MODEL_FORCE") == force
+        # A dropped pin is removed, never inherited from the caller.
+        for var, value in (("CLAUDE_CODE_SUBAGENT_MODEL", pin),
+                           ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", force)):
+            assert (var in unset) == (value is None)
+
     def test_env_applies_to_other_types(self):
         p = ProviderConfig(name="o", type="local", api_base="http://x:1",
                            env={"FOO": "bar"})
@@ -313,6 +337,16 @@ class TestProviderEditShow:
         assert "SECRET" not in r.output
         assert "api_key: set" in r.output
         assert "ANTHROPIC_API_KEY=<redacted>" in r.output
+
+    def test_show_redacts_auth_bearing_env(self, pm_home_dir):
+        _providers(pm_home_dir, **{ROUTE: _router(env={
+            "ANTHROPIC_CUSTOM_HEADERS": "Authorization: Bearer HDRSECRET",
+            "MY_PASSWORD": "PWSECRET", "PLAIN": "shown"})})
+        r = _cli("provider", "show", ROUTE)
+        assert r.exit_code == 0, r.output
+        assert "SECRET" not in r.output
+        assert "ANTHROPIC_CUSTOM_HEADERS=<redacted>" in r.output
+        assert "PLAIN=shown" in r.output
 
     def test_show_router_status_and_env(self, pm_home_dir):
         _providers(pm_home_dir, **{ROUTE: _router(classifier_model="rt/s")})

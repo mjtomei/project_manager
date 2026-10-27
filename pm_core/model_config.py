@@ -409,9 +409,9 @@ def get_pr_model_override(pr_entry: dict,
                           session_type: str | None = None) -> str | None:
     """Select a PR's role override, falling back to its all-role model.
 
-    For example, ``model: provider:deepseek-flash`` with
-    ``session_models: {signoff: provider:claude-work}`` keeps the experimental
-    model for development while routing sign-off to Claude. Role inheritance
+    For example, ``model: provider:experimental`` with
+    ``session_models: {signoff: provider:my-router}`` keeps the experimental
+    model for development while routing sign-off elsewhere. Role inheritance
     matches project configuration (e.g. qa_scenario -> qa, signoff -> review).
     """
     return _pr_override(pr_entry, "session_models", "model", session_type)[0]
