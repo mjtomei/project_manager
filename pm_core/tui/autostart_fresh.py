@@ -29,6 +29,7 @@ removed.
 from __future__ import annotations
 
 import secrets
+import time
 from pathlib import Path
 
 from pm_core.paths import configure_logger
@@ -450,6 +451,38 @@ def handoff_ready(app, pr: dict, tracker) -> bool:
         if ts > since and event.get("event_type") in ("idle_prompt", "Stop"):
             return True
     return False
+
+
+# A handoff launch that does not move the PR out of ``in_progress`` (e.g.
+# ``pr review --no-window`` erroring on a locked/corrupt store) leaves the
+# transcript complete, so the 1 s poll would re-run it — a subprocess plus two
+# log lines every tick, forever.  Rate-limit the launch; a successful one
+# changes the status, which leaves the handoff path on its own.
+_HANDOFF_RETRY_SECONDS = 15.0
+
+
+def handoff_attempt_due(app, pr_id: str) -> bool:
+    """Whether the fresh handoff may (re)launch its review now.
+
+    Cheap enough to call every poll tick: the first call for a PR is always
+    due, later ones at most every ``_HANDOFF_RETRY_SECONDS``.  State lives on
+    the app (``_fresh_handoff_attempts``) because it is per-process, not per
+    attempt: a restarted TUI retries immediately, which is what we want.
+    """
+    attempts = getattr(app, "_fresh_handoff_attempts", None)
+    if not isinstance(attempts, dict):
+        attempts = {}
+        try:
+            app._fresh_handoff_attempts = attempts
+        except Exception:
+            # A duck-typed app that refuses attributes: never rate-limit.
+            return True
+    now = time.monotonic()
+    last = attempts.get(pr_id)
+    if last is not None and (now - last) < _HANDOFF_RETRY_SECONDS:
+        return False
+    attempts[pr_id] = now
+    return True
 
 
 def consume_handoff(app, pr_id: str) -> None:

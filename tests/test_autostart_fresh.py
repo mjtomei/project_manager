@@ -388,6 +388,33 @@ class TestPollRouting:
     def test_incomplete_handoff_waits(self, tmp_path):
         assert self._run(tmp_path, ready=False) == []
 
+    def test_failed_launch_is_rate_limited(self, tmp_path, monkeypatch):
+        # A launch that does not move the PR out of in_progress (e.g.
+        # ``pr review`` erroring) leaves the transcript complete, so without a
+        # backoff the 1 s poll would re-run it forever: a subprocess plus two
+        # log lines every tick.  The handoff check stays cheap; only the
+        # launch is throttled.
+        from pm_core.tui import review_loop_ui
+        pr = _pr(status="in_progress",
+                 **{FRESH_KEY: {"requested_at": st.now_iso(),
+                                "awaiting_handoff": True}})
+        app, tracker = _poll_app(tmp_path, pr)
+        calls = []
+        clock = [1000.0]
+        monkeypatch.setattr(autostart_fresh.time, "monotonic",
+                            lambda: clock[0])
+        with patch.object(tracker, "poll", return_value=False), \
+             patch("pm_core.tui.auto_start.is_enabled", return_value=True), \
+             patch.object(review_loop_ui, "_auto_review_idle_prs",
+                          side_effect=lambda _a, pairs: calls.append(pairs)), \
+             patch.object(autostart_fresh, "handoff_ready",
+                          return_value=True):
+            review_loop_ui._poll_impl_idle(app)
+            review_loop_ui._poll_impl_idle(app)  # inside the retry window
+            clock[0] += autostart_fresh._HANDOFF_RETRY_SECONDS + 1
+            review_loop_ui._poll_impl_idle(app)  # window elapsed → retry
+        assert len(calls) == 2
+
     def test_restart_recovers_the_native_transcript(self, tmp_path):
         # A restarted TUI has a new run dir, so ``impl-<pr>.jsonl`` is
         # missing and the symlink registration raises.  A fresh attempt must

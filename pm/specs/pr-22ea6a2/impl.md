@@ -539,3 +539,21 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   a false ``complete`` would start the review over in-flight work.  Two
   direct tests (summary after a completed turn → ``complete``; summary over
   an unanswered prompt → ``in_progress``).
+
+## Review-iteration notes (2aac i5)
+
+* **A failing handoff launch is no longer retried every poll tick** — R3's
+  handoff check is cheap and idempotent, so ``_poll_impl_idle`` runs it every
+  tick.  But the *launch* it triggers (``_auto_review_idle_prs`` →
+  ``pr review --no-window``) leaves the PR in ``in_progress`` when it fails
+  (store lock timeout, corrupt YAML, subprocess error), so the transcript
+  still reads ``complete`` and the next 1 s tick ran the whole thing again —
+  a subprocess plus two log lines every second, forever, on the TUI thread.
+  ``autostart_fresh.handoff_attempt_due()`` now rate-limits the launch to one
+  attempt per ``_HANDOFF_RETRY_SECONDS`` (15 s) per PR, recorded on the app
+  (``_fresh_handoff_attempts``, so a restarted TUI retries at once).  It is
+  evaluated *after* ``handoff_ready`` (short-circuit), so a waiting PR never
+  burns its window and the first launch after the turn completes is
+  immediate; ``fresh_start``'s explicit immediate handoff is unaffected.
+  Pinned by a poll-routing test (two ticks inside the window → one launch,
+  after the window → a second).

@@ -1006,7 +1006,11 @@ def _poll_impl_idle(app) -> None:
         # stale idle flag from the user's resumed turn (and must not be
         # advanced by an old hook event).
         if status == "in_progress" and fresh_awaiting(pr):
-            if autostart_fresh.handoff_ready(app, pr, tracker):
+            # The check itself runs every tick (it is cheap and idempotent),
+            # but a launch that fails to move the status must not be retried
+            # every second — see ``handoff_attempt_due``.
+            if (autostart_fresh.handoff_ready(app, pr, tracker)
+                    and autostart_fresh.handoff_attempt_due(app, pr_id)):
                 newly_idle.append((pr_id, pr))
             continue
 
