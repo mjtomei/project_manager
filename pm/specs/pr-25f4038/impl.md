@@ -152,6 +152,9 @@ the same migration helper (fail closed) rather than ignoring it.
   labels no longer say "stop".
 - README autostart section rewritten around one manual policy.
 - `pm/qa/regression/help-keybindings.md` updated.
+- `pm pr auto-sequence --help` no longer says "stopping before merge" (that
+  driver reports `ready_to_merge` and never merges); `qa_loop_ui` and the
+  sign-off hand-off tests describe O as waiting, not stopping.
 
 ### R7 — Preserve unrelated state
 
