@@ -815,6 +815,25 @@ def resolution_id_total(entry: dict, key: str) -> int:
     return n
 
 
+def _digest_payload(value):
+    """*value* with every mapping key rendered as a string, recursively.
+
+    ``_compact_resolution`` filters the top-level keys of ``records`` (a
+    YAML ``1:`` beside pm's string action paths), but a hand-edited member
+    *inside* the compact projection — ``resolved_from``, an ``unresolved``
+    entry, a ``records`` value — can carry one too.  ``json.dumps(...,
+    sort_keys=True)`` raises ``TypeError`` on a mapping that mixes key types,
+    and every integration check, the merge gate and ``compact`` compute this
+    digest: a malformed record must read as a stable hash, never crash the
+    command that touches it.
+    """
+    if isinstance(value, dict):
+        return {str(k): _digest_payload(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_digest_payload(v) for v in value]
+    return value
+
+
 def _resolution_digest(resolution: dict | None) -> str | None:
     """Canonical digest of a resolution's identity-bearing fields.
 
@@ -830,7 +849,8 @@ def _resolution_digest(resolution: dict | None) -> str | None:
     payload = _compact_resolution(resolution)
     payload.pop("diff_path", None)
     return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+        json.dumps(_digest_payload(payload), sort_keys=True,
+                   default=str).encode()).hexdigest()
 
 
 # --- base interaction summary ---------------------------------------------

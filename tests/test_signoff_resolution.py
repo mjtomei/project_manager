@@ -11,6 +11,7 @@ approved candidate.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import threading
@@ -1765,6 +1766,9 @@ def test_malformed_resolution_state_reads_as_absent(w):
         {"paths": "garbage", "unresolved": "garbage",
          "resolved_from": "garbage", "applied_merge_sha": 5},
         {"paths": ["garbage", 7], "unresolved": ["garbage", 7]},
+        # A YAML integer key beside pm's string keys, inside a *member* of
+        # the compact projection: the digest must still be computable.
+        {"resolved_from": {1: "x", "head": "a" * 40}},
     ]
     for bad in bad_values:
         rec = {"head": "a" * 40, "base_sha": "b" * 40, "status": "resolved",
@@ -1814,6 +1818,58 @@ def test_malformed_resolution_state_reads_as_absent(w):
     assert "Metadata conflict resolution" not in text
     signoff.format_signoff_return(pr)
     signoff.merge_gate_refusal(pr, rec["head"], "master")
+
+
+def test_a_mixed_key_resolution_member_still_hashes(w):
+    """A hand-edited nested mapping must not break the resolution digest.
+
+    ``compact`` filters non-string keys at the top of a ``records`` mapping,
+    but ``resolved_from``, an ``unresolved`` entry and a ``records`` *value*
+    are carried as they are.  A YAML integer key beside pm's string keys made
+    ``json.dumps(..., sort_keys=True)`` raise ``TypeError`` — out of
+    ``compact`` (every recorded check, the sign-off launch) and out of the
+    merge gate's digest comparison (``pm pr merge``).  The digest must be a
+    stable hash of whatever the record holds.
+    """
+    malformed = [
+        {"resolved_from": {1: "x", "head": "a" * 40}},
+        {"unresolved": [{"path": "p", 1: "x", "conflicts": ["c"]}]},
+        {"paths": [{"path": "p", "records": {"p": {1: "x", "added_ours": 2}}}]},
+    ]
+    for member in malformed:
+        res = dict(member)
+        digest = integration._resolution_digest(res)
+        assert isinstance(digest, str) and len(digest) == 64
+        # ``compact`` computes the same digest, so a recorded check and a
+        # gate re-computation agree (a malformed record is refused elsewhere,
+        # never made to look like a changed resolution).
+        rec = {"head": "a" * 40, "base_sha": "b" * 40, "status": "resolved",
+               "candidate_tree": "c" * 40, "merge_base": "b" * 40,
+               "resolution": res}
+        assert integration.compact(rec)["resolution_digest"] == digest
+
+    # A well-formed resolution keeps the exact digest the pre-fix formula
+    # produced (all keys are strings), so this hardening does not invalidate
+    # an approval already recorded against one.
+    res = {
+        "resolver": "project-yaml-records/v1", "base_tree": "a" * 40,
+        "head_tree": "b" * 40, "candidate_tree": "c" * 40,
+        "applied_merge_sha": "d" * 40,
+        "resolved_from": {"head": "e" * 40, "base_sha": "f" * 40,
+                          "merge_base": "0" * 40, "status": "resolved"},
+        "paths": [{"path": "pm/project.yaml", "resolver": "r",
+                   "blob": "1" * 40,
+                   "records": {"pm/project.yaml": {
+                       "added_ours": 1, "added_theirs": 2,
+                       "changed": 0, "removed": 0}},
+                   "added_ours": ["pr-1"], "added_theirs": ["pr-2"],
+                   "merged_fields": [], "removed": []}],
+        "unresolved": [],
+    }
+    expected = hashlib.sha256(json.dumps(
+        integration._compact_resolution(res), sort_keys=True,
+        default=str).encode()).hexdigest()
+    assert integration._resolution_digest(res) == expected
 
 
 def test_malformed_resolution_list_members_read_as_absent(w):
@@ -2391,6 +2447,33 @@ def test_signoff_prompt_counts_behavior_changes_stored_without_a_total(w):
     assert "… 5 more" in text
     assert "change 19" in text          # the last one rendered in full
     assert "change 20" not in text      # beyond the 20-line cap
+
+
+def test_signoff_prompt_never_hides_behaviour_changes_behind_a_small_total(w):
+    """A recorded total smaller than the stored list must not hide entries.
+
+    ``compact`` records the real length beside a bounded list, but
+    project.yaml is hand-editable: a count that is smaller than the list (or
+    a future compaction that keeps a count while shortening the list) must
+    not make the prompt's 20-line cap silently drop the rest.  The total is
+    the larger of the recorded count and the list — the same rule the return
+    text follows.
+    """
+    integration.check_integration(w.pm_dir, PR)
+    changes = [f"`pm/project.yaml`: change {i}" for i in range(25)]
+
+    def _store(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["base_behavior_changes"] = changes
+        integ["base_behavior_count"] = 5      # smaller than the list
+    store.locked_update(w.pm_dir, _store)
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "… 5 more" in text
+    assert "change 19" in text
+    assert "change 20" not in text
 
 
 def test_merge_gate_refuses_a_clean_approval_whose_recheck_lost_the_candidate(

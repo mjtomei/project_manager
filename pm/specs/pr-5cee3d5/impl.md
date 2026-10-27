@@ -340,7 +340,10 @@ qualification the CLI and the return text carry
 (`integration.carried_applied_resolution`). The behaviour-change list's total
 falls back to the stored list's length when `compact` kept 21-30 changes
 without a `base_behavior_count` (indexing the absent key would crash the
-prompt). The pre-existing base-interaction guidance stays in step 0
+prompt), and a recorded count *smaller* than the stored list (hand-edited, or
+a count kept while the list shortened) is not allowed to hide entries the
+20-line cap drops: the total is the larger of the count and the list, like the
+return text (`format_signoff_return`) already computes. The pre-existing base-interaction guidance stays in step 0
 (read the base diff, judge semantic overlap — the same behaviour/APIs/data/
 tests changed on both sides — line/file counts alone are not the rule), and
 the applied-resolution diff is described accurately: `git diff <old head>
@@ -631,7 +634,14 @@ tests):
     evidence requirement). A non-string key inside a resolution's `records`
     map is not an action path and is dropped from the compact record (a
     mapping mixing YAML's int keys with pm's string paths made
-    `_resolution_digest`'s `sort_keys` raise). The
+    `_resolution_digest`'s `sort_keys` raise), and the digest itself
+    normalises *every* mapping key to a string recursively, so the same mixed
+    key inside a member the compact record carries as it is — `resolved_from`,
+    an `unresolved` entry, a `records` value — is a stable hash instead of a
+    `TypeError` out of `compact` (every recorded check, the sign-off launch)
+    and out of the merge gate's digest comparison (`pm pr merge`). The
+    normalisation leaves a well-formed resolution's digest byte-identical, so
+    an approval already recorded against one stays valid. The
     delta pointer is one of those values: a non-string `resolution.diff_path`
     must not make `_carry_forward` call `Path(...)` on it (that raised out of
     every later integration check and the sign-off launch reported only

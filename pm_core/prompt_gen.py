@@ -967,12 +967,15 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         # the list (> _BEHAVIOR_LIMIT); 21-30 changes are stored in full with
         # no count, so the total must fall back to the stored list's length
         # (indexing the absent key would crash the prompt).  A hand-edited
-        # non-integer count is not a total either.
+        # non-integer count is not a total either, and a count *smaller* than
+        # the stored list must not hide entries this listing drops: take the
+        # larger of the two, like the return text (``format_signoff_return``)
+        # does — a trimmed enumeration names what it omitted.
         stored_total = rec.get("base_behavior_count")
-        behavior_total = (stored_total
-                          if isinstance(stored_total, int)
-                          and not isinstance(stored_total, bool)
-                          else len(behavior))
+        if isinstance(stored_total, int) and not isinstance(stored_total, bool):
+            behavior_total = max(stored_total, len(behavior))
+        else:
+            behavior_total = len(behavior)
         if behavior_total > 20:
             lines.append(f"- … {behavior_total - 20} more")
     elif rec.get("base_behavior_error"):
