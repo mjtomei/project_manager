@@ -796,7 +796,10 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
     resolution = integ.resolution_of(rec)
     lines = [
         f"- Target: `{rec.get('base_branch')}` of `{rec.get('target_repo')}`",
-        f"- Fetched base revision: `{base_sha or '?'}`",
+        # Neutral label: an ``error`` record may carry the base the last
+        # successful check assessed (``integration._carry_assessed_base``),
+        # so "fetched" would claim a fetch this check did not make.
+        f"- Base revision: `{base_sha or '?'}`",
         f"- PR HEAD checked: `{rec.get('head') or '?'}`",
         f"- Candidate tree: `{_short(rec.get('candidate_tree'))}`",
         f"- Result: **{rec.get('status')}** — {integ.summary(rec)}",

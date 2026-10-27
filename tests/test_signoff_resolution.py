@@ -2244,6 +2244,70 @@ def test_a_malformed_conflict_record_does_not_crash_the_router():
     assert "conflicts" in reason
 
 
+def test_a_malformed_signoff_record_does_not_crash_the_tui():
+    """The TUI readers of ``pr["signoff"]`` follow the same contract.
+
+    The tech-tree layout signature runs on every render and the auto-merge
+    path runs in the TUI loop: a non-mapping ``signoff`` value must read as
+    absent there too, not raise ``AttributeError`` out of the render/tick.
+    """
+    from pm_core.tui import auto_start, review_loop_ui
+    from pm_core.tui.tech_tree import TechTree
+
+    tree = TechTree(prs=[{"id": PR, "status": "sign_off", "signoff": 5,
+                          "depends_on": 5}])
+    assert tree._signature()  # no AttributeError
+
+    class _App:
+        def log_message(self, *args, **kwargs):
+            pass
+
+    with patch.object(auto_start, "is_enabled", lambda app: True), \
+         patch.object(auto_start, "in_scope", lambda app, pr_id: True), \
+         patch.object(review_loop_ui, "_signoff_gate",
+                      lambda app, pr_id: ("a" * 40, "refused",
+                                          {"id": pr_id, "status": "sign_off",
+                                           "signoff": 5})):
+        review_loop_ui._maybe_auto_merge(_App(), PR)  # no AttributeError
+
+
+def test_valid_for_reads_a_malformed_record_as_absent():
+    """The public helper follows the same contract as its callers."""
+    assert integration.valid_for(5, "a" * 40) is False
+    assert integration.valid_for(["not", "a", "mapping"], "a" * 40) is False
+    assert integration.valid_for(None, "a" * 40) is False
+
+
+def test_a_malformed_dependency_list_does_not_fail_the_behaviour_summary(
+        monkeypatch):
+    """A hand-edited ``depends_on``/``prs`` is not a summary failure.
+
+    ``base_behavior_changes`` is what makes the agent weigh the new base; a
+    scalar where a list belongs must read as absent (so the other changes are
+    still reported), not raise into ``base_behavior_error`` and lose them.
+    """
+    old = {"project": {"skip_qa": False},
+           "prs": [{"id": PR, "status": "pending"}]}
+    new = {"project": {"skip_qa": True},
+           "prs": [{"id": PR, "status": "merged"}]}
+    monkeypatch.setattr(
+        integration, "_show_yaml",
+        lambda workdir, rev, path: old if rev == "a" * 40 else new)
+    out = integration._project_yaml_behavior_changes(
+        "/tmp", "a" * 40, "b" * 40, "pm/project.yaml",
+        pr={"id": PR, "depends_on": 5, "plan": None})
+    assert any("skip_qa" in c for c in out), out
+    assert any(f"{PR}.status" in c for c in out), out
+
+    # A scalar ``prs`` on either side is no list of records either.
+    for side in (old, new):
+        side["prs"] = 5
+    out = integration._project_yaml_behavior_changes(
+        "/tmp", "a" * 40, "b" * 40, "pm/project.yaml",
+        pr={"id": PR, "depends_on": ["pr-1"], "plan": None})
+    assert any("skip_qa" in c for c in out), out
+
+
 def test_a_carried_record_keeps_the_bounded_totals():
     """A carried-forward bounded list must keep the real total.
 
@@ -2703,7 +2767,7 @@ def test_prompt_diff_refs_are_git_object_names_only(w):
         assert "git diff abc;" not in rendered
         assert "git merge abc;" not in rendered
     # The prompt names the fallbacks instead of the fragment.
-    assert "Fetched base revision: `?`" in text
+    assert "Base revision: `?`" in text
     assert "git diff <base>...HEAD" in text
     assert "<old head>" in text
 
@@ -4213,6 +4277,65 @@ def test_a_resolved_candidate_never_applied_keeps_the_base_summary(w):
         prompt = prompt_gen.generate_signoff_prompt(data, PR)
     assert "Files changed on both sides: `pm/project.yaml`" in prompt
     assert "(1 file(s))" in prompt
+
+
+def test_a_transient_error_between_the_assessment_and_a_hand_merge_keeps_it(w):
+    """A failed check must not break the base-interaction carry chain.
+
+    The failed metadata attempt (never applied) records the base interaction;
+    a transient check (the base fetch fails) then records ``error`` at the
+    same head; implementation reconciles the conflict by hand.  The next check
+    sees the base inside HEAD and carries the summary from the stored record —
+    which is the error one.  Without the assessed base on it, the files the
+    base changed and its behaviour-relevant changes vanish from the prompt and
+    the merge gate stops requiring the explicit evidence statement.
+    """
+    rec = _status_conflict(w)
+    assert rec["status"] == integration.CONFLICT
+    assert rec["base_files"] == ["pm/project.yaml"], rec
+    assert any("status" in c for c in rec["base_behavior_changes"]), rec
+
+    with patch("pm_core.integration.fetch_base",
+               lambda *a, **k: (None, "network down")):
+        err = integration.check_integration(w.pm_dir, PR)
+    assert err["status"] == integration.ERROR
+    assert err["head"] == rec["head"]
+    # The error record keeps the base the earlier check assessed (it is never
+    # mergeable, so nothing can bind to it) and its summary.
+    assert err["base_sha"] == rec["base_sha"], err
+    assert err["base_files_count"] == 1, err
+    assert any("status" in c for c in err["base_behavior_changes"]), err
+
+    # Implementation reconciles the conflict by hand, as the return text
+    # instructs ("git fetch the base and git merge ...").
+    git(w.wd, "fetch", "-q", "origin")
+    merged = subprocess.run(["/usr/bin/git", "merge", "--no-commit",
+                             "origin/master"], cwd=w.wd, capture_output=True,
+                            text=True)
+    assert merged.returncode != 0
+    ours = subprocess.run(["/usr/bin/git", "show", ":2:pm/project.yaml"],
+                          cwd=w.wd, capture_output=True, text=True, check=True)
+    (w.wd / "pm" / "project.yaml").write_text(ours.stdout)
+    data = store.load(w.wd / "pm")
+    store.get_pr(data, PR)["status"] = "in_review"
+    store.save(data, w.wd / "pm")
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "merge base, reconcile status")
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert again["base_files_count"] == 1, again
+    assert any("status" in c for c in again["base_behavior_changes"]), again
+    # The sign-off prompt still shows the base interaction and the merge gate
+    # still requires the explicit reuse/checks statement.
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        prompt = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "Files changed on both sides: `pm/project.yaml`" in prompt
+    assert "(1 file(s))" in prompt
+    stored = pr_entry(w)["integration"]
+    assert signoff.approval_justification_problem(PR, stored, again["head"])
 
 
 # --- the recovery path reads a hand-edited approval as absent --------------

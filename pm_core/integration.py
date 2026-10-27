@@ -972,7 +972,10 @@ def _project_yaml_behavior_changes(workdir: str, merge_base: str,
                     f"({_short(old_project.get(key))} -> "
                     f"{_short(new_project.get(key))})")
     focus = (pr or {}).get("id")
-    deps = {d for d in ((pr or {}).get("depends_on") or [])
+    # Hand-edited state: a non-list ``depends_on`` is not a set of ids
+    # (``for d in 5`` raises, and iterating a string yields characters), so it
+    # reads as absent instead of failing the whole behaviour summary.
+    deps = {d for d in _as_list((pr or {}).get("depends_on"))
             if isinstance(d, str)}
     focus_plan = (pr or {}).get("plan")
 
@@ -982,10 +985,11 @@ def _project_yaml_behavior_changes(workdir: str, merge_base: str,
         return focus is None or rec_id == focus or rec_id in deps
 
     # Ids are used as dict keys: skip a malformed entry (a non-string id)
-    # instead of raising on an unhashable one.
-    old_prs = {p["id"]: p for p in old.get("prs") or []
+    # instead of raising on an unhashable one.  ``_as_list`` likewise keeps a
+    # hand-edited scalar ``prs``/``plans`` from failing the summary.
+    old_prs = {p["id"]: p for p in _as_list(old.get("prs"))
                if isinstance(p, dict) and isinstance(p.get("id"), str)}
-    new_prs = {p["id"]: p for p in new.get("prs") or []
+    new_prs = {p["id"]: p for p in _as_list(new.get("prs"))
                if isinstance(p, dict) and isinstance(p.get("id"), str)}
     for pr_id, entry in new_prs.items():
         if not pr_id or not relevant(pr_id):
@@ -1003,9 +1007,9 @@ def _project_yaml_behavior_changes(workdir: str, merge_base: str,
     for pr_id in old_prs:
         if pr_id not in new_prs and relevant(pr_id):
             out.append(f"`{path}`: base removed PR {pr_id}")
-    old_plans = {p["id"]: p for p in old.get("plans") or []
+    old_plans = {p["id"]: p for p in _as_list(old.get("plans"))
                  if isinstance(p, dict) and isinstance(p.get("id"), str)}
-    new_plans = {p["id"]: p for p in new.get("plans") or []
+    new_plans = {p["id"]: p for p in _as_list(new.get("plans"))
                  if isinstance(p, dict) and isinstance(p.get("id"), str)}
     for plan_id, entry in new_plans.items():
         if focus is not None and plan_id != focus_plan:
@@ -1672,6 +1676,41 @@ def _carry_base_files(record: dict, old: dict) -> None:
             record["overlap_total"] = total
 
 
+def _copy_base_interaction(record: dict, old: dict, base: str) -> bool:
+    """Copy the base-interaction summary of *base* from *old* onto *record*.
+
+    Shared by :func:`_carry_base_interaction` (the branch now contains the
+    base) and :func:`_carry_assessed_base` (a failed check that could not
+    re-assess it).  The caller has established that *old*'s summary really
+    describes *base*; this only copies what is there and returns whether it
+    copied anything.
+    """
+    if not (old.get("base_files") or old.get("base_files_count")
+            or old.get("overlap") or old.get("base_behavior_changes")
+            or old.get("base_behavior_error")):
+        return False
+    _carry_base_files(record, old)
+    old_range = revision_of(old.get("base_range_from"))
+    if not old_range and revision_of(old.get("merge_base")) != base:
+        # The check that saw the base outside the branch recorded the real
+        # pre-merge merge base; a later re-check only carries it forward.
+        old_range = revision_of(old.get("merge_base"))
+    if old_range and old_range != base:
+        record["base_range_from"] = old_range
+    old_behavior = _as_list(old.get("base_behavior_changes"))
+    if old_behavior:
+        own_behavior = _as_list(record.get("base_behavior_changes"))
+        record["base_behavior_changes"] = _dedupe(
+            old_behavior + own_behavior)
+        if not own_behavior:
+            _carry_behavior_total(record, old, old_behavior)
+    if old.get("base_behavior_error") \
+            and not record.get("base_behavior_changes") \
+            and not record.get("base_behavior_error"):
+        record["base_behavior_error"] = old["base_behavior_error"]
+    return True
+
+
 def _carry_base_interaction(record: dict, old: dict) -> None:
     """Keep an earlier check's base-interaction summary on *record*.
 
@@ -1698,28 +1737,63 @@ def _carry_base_interaction(record: dict, old: dict) -> None:
     # its own, newer summary and must not inherit this one.
     if record.get("merge_base") != new_base or record.get("base_files"):
         return
-    if not (old.get("base_files") or old.get("base_files_count")
-            or old.get("overlap") or old.get("base_behavior_changes")
-            or old.get("base_behavior_error")):
+    _copy_base_interaction(record, old, new_base)
+
+
+def _carry_assessed_base(record: dict, old: dict) -> None:
+    """Keep the base an earlier check assessed on a *failed* check.
+
+    A transient failure (the base fetch, a broken workdir) records ``error``
+    without naming a base.  The branch has not moved, so the base the stored
+    record assessed is still the one the next successful check will see: the
+    record keeps that base (and its interaction) so the carry chain survives a
+    later hand merge — ``_carry_base_interaction`` needs the recorded base to
+    recognise that the branch now contains it.  Without it, a network hiccup
+    between "the base was assessed" and "implementation merged the base by
+    hand" silently drops the files/behaviour the base changed, and with them
+    the merge gate's evidence requirement.
+
+    The record keeps ``error`` (it is never mergeable, so nothing binds to
+    this carried base), and a later check re-verifies that the branch really
+    contains it before carrying anything forward.
+    """
+    if record.get("status") != ERROR:
         return
-    _carry_base_files(record, old)
-    old_range = revision_of(old.get("base_range_from"))
-    if not old_range and revision_of(old.get("merge_base")) != new_base:
-        # The check that saw the base outside the branch recorded the real
-        # pre-merge merge base; a later re-check only carries it forward.
-        old_range = revision_of(old.get("merge_base"))
-    if old_range and old_range != new_base:
-        record["base_range_from"] = old_range
-    old_behavior = _as_list(old.get("base_behavior_changes"))
-    if old_behavior:
-        own_behavior = _as_list(record.get("base_behavior_changes"))
-        record["base_behavior_changes"] = _dedupe(
-            old_behavior + own_behavior)
-        if not own_behavior:
-            _carry_behavior_total(record, old, old_behavior)
-    if old.get("base_behavior_error") \
-            and not record.get("base_behavior_changes") \
-            and not record.get("base_behavior_error"):
+    if record.get("base_sha"):
+        # This check resolved a base of its own (e.g. the candidate merge
+        # failed after a successful fetch): its own summary is the current one.
+        return
+    old_base = revision_of(old.get("base_sha"))
+    if not old_base:
+        return
+    if not record.get("head") or record.get("head") != old.get("head"):
+        # The branch moved: the stored assessment describes another revision.
+        return
+    if _copy_base_interaction(record, old, old_base):
+        record["base_sha"] = old_base
+
+
+def _carry_failed_check_behavior(record: dict, old: dict) -> None:
+    """Keep the behavioural summary a *failed* check could not re-assess.
+
+    A transient failure at the same head must not drop what the approval was
+    required to assess — the listed behavioural changes, or a summary pm could
+    not compute (which also requires the evidence statement): the merge gate
+    would then no longer ask for it.
+    """
+    if record.get("status") != ERROR:
+        return
+    if record.get("base_behavior_changes") or record.get("base_behavior_error"):
+        return
+    if not (old.get("base_behavior_changes") or old.get("base_behavior_error")):
+        return
+    if not record.get("head") or record.get("head") != old.get("head"):
+        return
+    carried_behavior = _as_list(old.get("base_behavior_changes"))
+    if carried_behavior:
+        record["base_behavior_changes"] = list(carried_behavior)
+        _carry_behavior_total(record, old, carried_behavior)
+    if old.get("base_behavior_error"):
         record["base_behavior_error"] = old["base_behavior_error"]
 
 
@@ -1819,23 +1893,17 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
             # base changed and the merge gate stops requiring the evidence
             # statement — the same hole the clean-bounce carry closes.
             _carry_base_interaction(record, old)
-    elif record.get("status") == ERROR \
-            and not record.get("base_behavior_changes") \
-            and not record.get("base_behavior_error") \
-            and (old.get("base_behavior_changes")
-                 or old.get("base_behavior_error")) \
-            and record.get("head") and record.get("head") == old.get("head"):
+            # A transient failure here must not break that chain either: the
+            # error record keeps the assessed base (and its summary) so the
+            # next check can still carry it after a hand merge.
+            _carry_failed_check_behavior(record, old)
+            _carry_assessed_base(record, old)
+    elif record.get("status") == ERROR:
         # A transient failure (e.g. the base fetch) must not drop what the
-        # approval was required to assess — the listed behavioural changes, or
-        # a summary pm could not compute (which also requires the evidence
-        # statement): the merge gate would then no longer ask for it.
-        if old.get("base_behavior_changes"):
-            carried_behavior = _as_list(old.get("base_behavior_changes"))
-            if carried_behavior:
-                record["base_behavior_changes"] = list(carried_behavior)
-                _carry_behavior_total(record, old, carried_behavior)
-        if old.get("base_behavior_error"):
-            record["base_behavior_error"] = old["base_behavior_error"]
+        # approval was required to assess, nor the base revision that makes
+        # the summary usable by a later check.
+        _carry_failed_check_behavior(record, old)
+        _carry_assessed_base(record, old)
     elif not record.get("resolution") and not old_resolution:
         # No resolution on either side: this is the clean-bounce path (or a
         # plain re-check).  The base-interaction summary must survive the
@@ -2054,6 +2122,7 @@ def binding(record: dict | None) -> dict | None:
 
 def valid_for(record: dict | None, head: str | None) -> bool:
     """Whether *record* is a mergeable integration check of *head*."""
+    record = _mapping(record)
     if not (record and head and record.get("head") == head
             and record.get("status") in MERGEABLE
             and record.get("base_sha") and record.get("candidate_tree")):

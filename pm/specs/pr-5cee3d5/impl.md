@@ -181,6 +181,17 @@ record still assessed it — `_carry_forward` falls back to
 `_carry_base_interaction` when it could not carry an applied resolution. A
 new attempt on the current check replaces it, as above.
 
+That carry chain must survive a **transient failure** in between: a check that
+could not resolve the base (a failed fetch) records `error` at the same head,
+and the record after it is what a later check carries from. Such an error
+record therefore keeps the base the earlier check assessed
+(`integration._carry_assessed_base` copies `base_sha`, the file count/overlap,
+`base_range_from` and the behaviour summary; the record keeps `error` and is
+never mergeable, and a later check re-verifies that the branch contains that
+base before carrying anything forward). Without it, a network hiccup between
+"the base was assessed" and "implementation merged the base by hand" silently
+drops the summary and the merge gate's evidence requirement.
+
 ### R4. Apply the resolved merge to the PR branch before sign-off runs
 For the GitHub backend `gh pr merge` cannot merge a conflicted branch, and
 sign-off's report/verdict must bind to a candidate that can actually be
@@ -624,7 +635,12 @@ tests):
     refusal into a clean, approvable resolution on the next routine re-check
     (and the digest, computed over the compact form, changes with it, so an
     approval bound to the clean form stops matching) — and
-    `return_awaiting`/`open_return` still answer. A
+    `return_awaiting`/`open_return` still answer. The TUI readers follow the
+    same contract: the tech-tree layout signature (run on every render) and
+    the auto-merge path read a non-mapping `signoff` as absent, and a
+    malformed `depends_on` (a scalar where a list belongs) is no list of ids
+    there or in the behaviour summary. `integration.valid_for` reads a
+    non-mapping record as absent too. A
     `resolution.paths`/`unresolved` value that is not a list (a hand-edited
     scalar) is no longer iterated at any reader (`resolution_entries`) — the
     prompt, the return text, the router, the merge gate, `summary`,

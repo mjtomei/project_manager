@@ -126,6 +126,18 @@ def _node_y(row: int) -> int:
     return row * (NODE_H + V_GAP) + 1
 
 
+def _signoff_verdict(pr: dict) -> str | None:
+    """The PR's recorded sign-off verdict, or ``None`` when malformed.
+
+    ``project.yaml`` is hand-editable state: a non-mapping ``signoff`` value
+    must read as absent instead of raising ``AttributeError`` out of the
+    layout signature, which runs on every render (the same contract
+    ``pm_core.signoff``'s readers follow).
+    """
+    record = pr.get("signoff")
+    return record.get("verdict") if isinstance(record, dict) else None
+
+
 def compute_neighbors(
     ordered_ids: list[str],
     node_positions: dict[str, tuple[int, int]],
@@ -898,8 +910,12 @@ class TechTree(Widget):
                 bool(pr.get("spec_pending")),
                 pr.get("agent_machine"),
                 bool(pr.get("workdir")),
-                (pr.get("signoff") or {}).get("verdict"),
-                tuple(pr.get("depends_on") or []),
+                _signoff_verdict(pr),
+                # Hand-edited state: ``tuple(5)`` raises, and iterating a
+                # string yields characters, so a malformed ``depends_on``
+                # reads as absent instead of crashing every render.
+                tuple(pr["depends_on"]) if isinstance(pr.get("depends_on"), list)
+                else (),
                 pr.get("updated_at"), pr.get("created_at"), pr.get("started_at"),
                 pr.get("reviewed_at"), pr.get("merged_at"),
             )
