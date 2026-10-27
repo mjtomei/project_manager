@@ -474,6 +474,17 @@ class TestReaperOwnership:
         assert not out.error
         assert (key in reaper.pending_failures()) is present
 
+    def test_proxy_failure_actionable_tracks_its_target(self, fake_env):
+        """An unshared release is retryable only while its record survives."""
+        releases = cm.container_state_dir() / "proxy-releases"
+        releases.mkdir(parents=True)
+        key = "push proxy unshared abc123"
+        assert reaper._proxy_failure_actionable(key) is False
+        (releases / "abc123.json").write_text("{}")
+        assert reaper._proxy_failure_actionable(key) is True
+        # Shapes the helper does not understand stay visible.
+        assert reaper._proxy_failure_actionable("push proxy sweep") is True
+
     def test_worker_exception_fails_only_that_container(self, fake_env, monkeypatch):
         """A crashed removal worker must not discard the pass's other results."""
         broken, other = "pm-repo-ab12-review-pr-aaaa", "pm-repo-ab12-impl-pr-bbbb"

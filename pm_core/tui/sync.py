@@ -47,9 +47,8 @@ def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
                                                   background_containers=True)
         for win_name in summary.get("windows", []):
             _log.info("Killed window '%s' for merged %s", win_name, pr_id)
-        if summary.get("containers"):
-            _log.info("Cleaned %d container(s) for merged %s",
-                      len(summary["containers"]), pr_id)
+        # Containers were handed to the background reaper above; its own log
+        # line reports what it removed.
 
 
 async def background_sync(app) -> None:

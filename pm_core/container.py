@@ -1126,11 +1126,18 @@ def create_container(
         from pm_core import container_reaper
         # Recovery may restart an unowned allocation and renew its generation;
         # that new lease belongs to this launch, not a concurrent attaching one.
-        was_attaching = recent_launch(name, container_reaper.LAUNCH_GRACE)
-        prior_id = current_container_id(name) if was_attaching or reuse_identity else None
-        same_owner = (bool(prior_id) and reuse_identity is not None
-                      and reuse_identity.get("id") == prior_id
-                      and reuse_identity.get("generation") == cleanup_generation(name))
+        # An unreadable lease/generation is unknown ownership, not absence: it
+        # must refuse this launch with a classified, retryable error rather than
+        # escape as a raw OSError the launchers only report as "is podman up?".
+        try:
+            was_attaching = recent_launch(name, container_reaper.LAUNCH_GRACE)
+            prior_id = current_container_id(name) if was_attaching or reuse_identity else None
+            same_owner = (bool(prior_id) and reuse_identity is not None
+                          and reuse_identity.get("id") == prior_id
+                          and reuse_identity.get("generation") == cleanup_generation(name))
+        except OSError as exc:
+            raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                               stage="check whether the container is still owned") from exc
         # Recovery can restart or remove an incomplete allocation. Protect the
         # create-to-pane gap before entering it, not just before renewing reuse.
         # Capture a QA handoff now: recovery itself may advance its generation.
@@ -1154,25 +1161,39 @@ def create_container(
             if allocation_identity is not None:
                 allocation_identity.update(id=reused, generation=cleanup_generation(name))
             return reused
-        with _create_slot():
-            container_id = _create_fresh(
-                name, config, workdir,
-                extra_ro_mounts=extra_ro_mounts,
-                extra_rw_mounts=extra_rw_mounts,
-                allowed_push_branch=allowed_push_branch,
-                session_tag=session_tag, pr_id=pr_id,
-                labels=ownership_labels(name, session_tag=session_tag,
-                                        pr_id=pr_id, kind=kind,
-                                        loop_id=loop_id, scenario=scenario),
-            )
-            try:
-                _renew_launch(name, container_id)
-                if allocation_identity is not None:
-                    allocation_identity.update(id=container_id, generation=cleanup_generation(name))
-            except BaseException:
-                discard_container(name, container_id=container_id)
-                raise
-            return container_id
+        try:
+            with _create_slot():
+                container_id = _create_fresh(
+                    name, config, workdir,
+                    extra_ro_mounts=extra_ro_mounts,
+                    extra_rw_mounts=extra_rw_mounts,
+                    allowed_push_branch=allowed_push_branch,
+                    session_tag=session_tag, pr_id=pr_id,
+                    labels=ownership_labels(name, session_tag=session_tag,
+                                            pr_id=pr_id, kind=kind,
+                                            loop_id=loop_id, scenario=scenario),
+                )
+                try:
+                    _renew_launch(name, container_id)
+                    if allocation_identity is not None:
+                        allocation_identity.update(id=container_id, generation=cleanup_generation(name))
+                except BaseException:
+                    discard_container(name, container_id=container_id)
+                    raise
+                return container_id
+        except ContainerError:
+            raise
+        except subprocess.TimeoutExpired as exc:
+            raise launch_error(
+                name, "timeout",
+                f"starting the container did not return within {exc.timeout}s",
+                stage="start") from exc
+        except (OSError, RuntimeError) as exc:
+            # Image auto-build, git config and runtime spawn failures that the
+            # helpers did not classify still name the container and keep the
+            # cause instead of surfacing as an unrelated launcher traceback.
+            raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                               stage="start") from exc
 
 
 # Container PID 1 after setup: wait forever, reaping adopted children; exit
@@ -2538,7 +2559,12 @@ def remove_container(name: str, *, container_id: str | None = None) -> bool:
     target = container_id or name
     proxy = capture_unshared_proxy(target)
     pending = defer_unshared_release(proxy, target) if proxy else None
-    removal = _run_runtime("rm", "-f", target, check=False, timeout=30)
+    try:
+        removal = _run_runtime("rm", "-f", target, check=False, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        # Callers expect ContainerError from a failed removal; a raw probe
+        # timeout would bypass their retry path and reach the launcher.
+        raise ContainerError(f"could not remove container {name}: {exc}") from exc
     removal_error = ""
     if removal.returncode != 0:
         diagnostic = (removal.stderr or "").strip() or "without an error diagnostic"

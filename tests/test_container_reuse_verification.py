@@ -124,6 +124,55 @@ def test_setup_probe_oserror_is_a_launch_error(monkeypatch):
     assert "podman" in str(error.value)
 
 
+def test_unreadable_attachment_lease_is_a_launch_error(monkeypatch, tmp_path):
+    """An unknown lease/generation is not absence; it must name the container."""
+    name = "pm-tag-impl-pr-aaaa"
+
+    def unreadable(*args, **kwargs):
+        raise OSError("Cannot determine allocation identity for attachment lease")
+
+    monkeypatch.setattr(cm, "recent_launch", unreadable)
+    monkeypatch.setattr(cm, "_ensure_reusable", Mock(side_effect=AssertionError("no reuse")))
+    monkeypatch.setattr(cm, "_create_fresh", Mock(side_effect=AssertionError("no create")))
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm.create_container(name, cm.ContainerConfig(), tmp_path)
+    assert error.value.kind == "runtime"
+    assert name in str(error.value)
+    assert "attachment lease" in str(error.value)
+
+
+def test_unclassified_fresh_create_failure_names_the_container(monkeypatch, tmp_path):
+    """An auto-build/git failure must not escape as an unrelated traceback."""
+    name = "pm-tag-impl-pr-aaaa"
+    monkeypatch.setattr(cm, "recent_launch", lambda *a: False)
+    monkeypatch.setattr(cm, "_ensure_reusable", lambda *a, **kw: None)
+    monkeypatch.setattr(cm, "_create_fresh",
+                        Mock(side_effect=RuntimeError("Image build failed: boom")))
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm.create_container(name, cm.ContainerConfig(), tmp_path)
+    assert error.value.kind == "runtime"
+    assert name in str(error.value)
+    assert "Image build failed" in str(error.value)
+
+
+def test_remove_container_rm_timeout_is_a_container_error(monkeypatch, tmp_path):
+    """A hung `rm` must not bypass the callers' ContainerError retry path."""
+    from pm_core import push_proxy
+
+    def runtime(*args, **kwargs):
+        if args[0] == "rm":
+            raise subprocess.TimeoutExpired(["podman", "rm"], 30)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    monkeypatch.setattr(push_proxy, "capture_unshared_proxy", lambda target: None)
+    monkeypatch.setattr(push_proxy, "stop_push_proxy", lambda name: None)
+    with pytest.raises(cm.ContainerError) as error:
+        cm.remove_container("pm-tag-impl-pr-aaaa")
+    assert "pm-tag-impl-pr-aaaa" in str(error.value)
+    assert "timed out" in str(error.value)
+
+
 @pytest.mark.parametrize("complete", [False, True])
 def test_completion_probe_without_runtime_error_remains_boolean(monkeypatch, complete):
     monkeypatch.setattr(cm, "_probe_setup", lambda target: (complete, "", ""))
