@@ -33,6 +33,16 @@ CLEAR = "(clear)"
 _EFFORT_CYCLE = (None, *EFFORT_LEVELS)
 
 
+def escape(text: str) -> str:
+    """Escape every ``[`` for Label markup.  rich's and textual's escape()
+    skip brackets that start uppercase, and textual reads ``[OK]`` or
+    ``[Done]`` as a tag and drops it.  Textual takes only the backslash
+    right before a ``[`` as an escape; a trailing one gets a space so it
+    cannot escape a closing tag that follows."""
+    text = text.replace("[", "\\[")
+    return text + " " if text.endswith("\\") else text
+
+
 def model_choices(data: dict) -> list[str]:
     """Values offered by the picker: clear, every configured provider, then
     the plain model names already used in this project."""
@@ -77,9 +87,11 @@ class ModelSettingsScreen(ModalScreen):
         align: center middle;
     }
     #model-container {
-        width: 96%;
-        max-width: 140;
+        width: auto;
+        min-width: 60;
+        max-width: 96%;
         height: auto;
+        overflow-x: auto;
         max-height: 90%;
         background: $surface;
         border: solid $primary;
@@ -151,7 +163,6 @@ class ModelSettingsScreen(ModalScreen):
         self._refresh()
 
     def _refresh(self) -> None:
-        from rich.markup import escape
         title = ("Project model settings" if self._project_view
                  else f"Model settings for {self._pr_id}")
         self.query_one("#model-title", Label).update(title)
@@ -177,7 +188,6 @@ class ModelSettingsScreen(ModalScreen):
         self.query_one("#model-status", Label).update(self._status)
 
     def _table_lines(self) -> list[str]:
-        from rich.markup import escape
         from pm_core import model_settings
         rows = self._rows()
         if not rows:
@@ -207,7 +217,6 @@ class ModelSettingsScreen(ModalScreen):
         return lines
 
     def _provider_lines(self) -> list[str]:
-        from rich.markup import escape
         from pm_core import worker_route
         from pm_core.model_config import ModelResolution
         from pm_core.providers import (
@@ -298,7 +307,6 @@ class ModelSettingsScreen(ModalScreen):
         return efforts.get(target) if isinstance(efforts, dict) else None
 
     def _apply(self, kind: str, value: str | None) -> None:
-        from rich.markup import escape
         from pm_core import model_settings
         target = self._targets()[self._selected]
         if kind == "model" and value is not None:

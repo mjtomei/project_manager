@@ -913,6 +913,7 @@ class TechTree(Widget):
         When unchanged across calls, ``_recompute`` skips the Sugiyama layout
         and the widget rebuild entirely.
         """
+        from pm_core.model_settings import has_pr_override
         pr_sig = tuple(
             (
                 pr.get("id"),
@@ -927,6 +928,7 @@ class TechTree(Widget):
                 tuple(pr.get("depends_on") or []),
                 pr.get("updated_at"), pr.get("created_at"), pr.get("started_at"),
                 pr.get("reviewed_at"), pr.get("merged_at"),
+                has_pr_override(pr),  # the ⇄ badge
             )
             for pr in self._prs
         )
