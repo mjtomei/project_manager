@@ -1509,6 +1509,49 @@ class TestVerifySingleScenario:
         assert passed is False
         assert "cwd" in reason.lower()
 
+    def test_reverification_baselines_before_prompting_the_verifier(
+            self, tmp_path):
+        """pr-8efa789: the re-verification prompts the verifier and only then
+        waits, so the baseline must be snapshotted *before* the prompt — the
+        answer can land during the send/settle window, and a waiter scanning
+        at call time would reject it and block for a second verdict."""
+        import json
+
+        transcript = tmp_path / "verify-s1.jsonl"
+        transcript.write_text("\n".join([
+            json.dumps({"type": "user", "message": {
+                "role": "user", "content": [
+                    {"type": "text", "text": "verify the scenario"}]}}),
+            json.dumps({"type": "assistant", "message": {
+                "role": "assistant", "content": [
+                    {"type": "text", "text": "Reason: first round\nVERIFIED"}]}}),
+        ]) + "\n")
+        scenario = QAScenario(
+            index=1, title="Test", focus="test", steps="steps",
+            window_name="qa-s1", pane_id="%1",
+            verifier_pane_id="%7", verifier_session_id="vsid",
+            verifier_transcript=str(transcript),
+            verifier_cwd=str(tmp_path),
+        )
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ..."), \
+             patch("pm_core.loop_shared.wait_for_follow_up_verdict",
+                   return_value="Reason: re-checked\nVERIFIED") as mock_wait, \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="VERIFIED"):
+            passed, reason, _ = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir=str(tmp_path),
+                pr_workdir="/tmp/prworkdir",
+            )
+        assert passed is True, reason
+        # The previous round's verdict sits on line 1; anything later is the
+        # answer to the prompt we just sent.
+        assert mock_wait.call_args.kwargs["baseline_line"] == 1
+
 
 class TestVerificationSetting:
     """Tests for _is_verification_enabled global setting."""

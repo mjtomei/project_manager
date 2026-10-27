@@ -252,3 +252,13 @@ These extend the requirements above; they are implemented and covered by tests.
   start and ignores hits at or before it; the transcript only grows, so a genuinely
   new verdict always sits later. `poll_for_verdict` keeps the unguarded scan because
   it must return a verdict emitted just before it is called.
+- **A caller that prompts the pane passes the baseline itself (review i4).** The
+  call-time snapshot is wrong for `qa_loop`'s re-verification: it sends the
+  follow-up prompt into the verifier pane and only then waits (~2 s of send/settle),
+  so a fast answer is already in the transcript when the waiter scans and the waiter
+  would reject it as "the verdict that prompted the call" and block for a second
+  verdict that never comes. `wait_for_follow_up_verdict` therefore takes an optional
+  `baseline_line`; `_verify_single_scenario` snapshots `find_verdict_turn(...)`'s
+  `line_index` *before* `send_keys` and passes it. Callers that wait on a human
+  answering a question the pane already asked (review/watcher) omit it and keep the
+  call-time snapshot.

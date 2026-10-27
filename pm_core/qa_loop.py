@@ -3557,6 +3557,13 @@ def _verify_single_scenario(
             f"VERIFIED on its own line, or wrap an explanation in "
             f"FLAGGED_START / FLAGGED_END markers."
         )
+        # Snapshot the last verdict *before* prompting: the verifier can
+        # answer during the send/settle below, and a waiter that scanned at
+        # call time would then mistake that answer for the verdict that
+        # prompted the wait and block for a second one (pr-8efa789).
+        _prior = find_verdict_turn(
+            scenario.verifier_transcript, _VERIFICATION_VERDICTS)
+        baseline_line = _prior.line_index if _prior else -1
         tmux_mod.send_keys(scenario.verifier_pane_id, msg)
         for _ in range(2):
             time.sleep(1)
@@ -3570,6 +3577,7 @@ def _verify_single_scenario(
                 verdicts=_VERIFICATION_VERDICTS,
                 stop_check=stop_check,
                 log_prefix=f"qa-verify-{scenario.index}",
+                baseline_line=baseline_line,
             )
         except Exception:
             _log.warning("Verification: follow-up polling failed for scenario %d",

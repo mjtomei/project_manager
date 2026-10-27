@@ -212,15 +212,25 @@ def wait_for_follow_up_verdict(
     wait_timeout: float = 15,
     stop_check: Callable[[], bool] | None = None,
     log_prefix: str = "loop_shared",
+    baseline_line: int | None = None,
 ) -> str | None:
     """Block for the next hook-driven idle on an existing pane and return
     the assistant text of the follow-up turn (or ``None``).
 
-    Only a verdict emitted *after* this call counts as the follow-up: the
-    task-scoped scan crosses non-task wakeups, so without that baseline a
-    ``/loop`` tick or Monitor postscript arriving while the caller waits for
-    a human answer would re-return the INPUT_REQUIRED / flagged verdict that
-    prompted the call (pr-8efa789).
+    Only a verdict emitted *after* the caller started waiting counts as the
+    follow-up: the task-scoped scan crosses non-task wakeups, so without that
+    baseline a ``/loop`` tick or Monitor postscript arriving while the caller
+    waits for a human answer would re-return the INPUT_REQUIRED / flagged
+    verdict that prompted the call (pr-8efa789).
+
+    *baseline_line* is the transcript line index of the last verdict emitted
+    before the caller started waiting (``-1`` when there was none).  Callers
+    that prompt the pane themselves must pass it, snapshotting it *before*
+    sending the prompt: the answer can land before this call is reached, and
+    scanning here would then treat it as the verdict that prompted the call
+    and wait forever for a second one.  When omitted, the scan happens now —
+    correct for callers that wait on a human answering a question the pane
+    has already asked.
 
     Hook-driven only — requires *transcript_path*.
     """
@@ -238,8 +248,9 @@ def wait_for_follow_up_verdict(
     # Snapshot the verdict that prompted the call (if any) so a wakeup
     # postscript cannot re-deliver it as the follow-up.  The transcript only
     # grows, so a genuinely new verdict sits at a later line.
-    baseline_hit = find_verdict_turn(transcript_path, verdicts)
-    baseline_line = baseline_hit.line_index if baseline_hit else -1
+    if baseline_line is None:
+        baseline_hit = find_verdict_turn(transcript_path, verdicts)
+        baseline_line = baseline_hit.line_index if baseline_hit else -1
 
     while not (stop_check and stop_check()):
         pane_id = find_claude_pane(session, window_name)

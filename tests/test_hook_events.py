@@ -500,6 +500,78 @@ def test_follow_up_verdict_ignores_the_verdict_that_prompted_it(
     assert "INPUT_REQUIRED" not in content
 
 
+def test_follow_up_verdict_honors_a_pre_prompt_baseline(
+        tmp_hooks_home, monkeypatch, tmp_path):
+    """pr-8efa789: a caller that prompts the pane itself snapshots the
+    baseline *before* sending, because the answer can land during the
+    send/settle window.
+
+    qa_loop's re-verification does exactly that: it sends the follow-up
+    prompt, settles the pane for ~2s, then waits.  A waiter that scanned the
+    transcript at call time would see the answer already there, treat it as
+    the verdict that prompted the wait, and block for a second verdict that
+    never comes.
+    """
+    import json as _json
+    hook_events = _reload_hook_events()
+    from pm_core.hook_install import ensure_hooks_installed
+    ensure_hooks_installed(tmp_hooks_home / ".claude" / "settings.json")
+    assert hook_events.hooks_available()
+
+    from pm_core import loop_shared
+
+    sid = "12345678-1234-1234-1234-123456789abc"
+    transcript_target = tmp_path / f"{sid}.jsonl"
+
+    def user(text):
+        return _json.dumps({"type": "user", "message": {
+            "role": "user", "content": [{"type": "text", "text": text}]}})
+
+    def assistant(text):
+        return _json.dumps({"type": "assistant", "message": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": text}]}})
+
+    # The verifier already answered the follow-up prompt before the waiter
+    # was reached.  The baseline was snapshotted before the prompt was sent,
+    # when the transcript still ended on the previous round's verdict (line
+    # 1); a call-time scan would find the *new* verdict at line 3 and reject
+    # it as the one that prompted the wait.
+    transcript_target.write_text("\n".join([
+        user("Verify the scenario against its transcript."),
+        assistant("Reason: first round\nVERIFIED"),
+        user("The scenario has been re-evaluated and produced a new verdict."),
+        assistant("Reason: re-checked\nVERIFIED"),
+    ]) + "\n")
+    transcript_link = tmp_path / "t.jsonl"
+    transcript_link.symlink_to(transcript_target)
+
+    monkeypatch.setattr(loop_shared, "find_claude_pane",
+                        lambda session, window: "%0")
+
+    def writer():
+        time.sleep(0.1)
+        _write_event(tmp_hooks_home, sid, "idle_prompt", ts=time.time() + 5)
+
+    t = threading.Thread(target=writer)
+    t.start()
+    deadline = time.monotonic() + 0.5
+    try:
+        content = loop_shared.wait_for_follow_up_verdict(
+            "pm-session", "verify-x", str(transcript_link),
+            verdicts=("VERIFIED", "FLAGGED_END"),
+            wait_timeout=0.2,
+            stop_check=lambda: time.monotonic() > deadline,
+            log_prefix="test",
+            baseline_line=1,
+        )
+    finally:
+        t.join()
+    assert content is not None
+    assert "VERIFIED" in content
+    assert "re-checked" in content
+
+
 def test_session_id_from_transcript(tmp_path):
     from pm_core.claude_launcher import session_id_from_transcript
 
