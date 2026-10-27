@@ -1281,6 +1281,23 @@ def own_run_started_since(pr_id: str, since: float) -> bool:
                for _wd, rec in _own_run_records(pr_id))
 
 
+def own_run_driven_since(pr_id: str, since: float | None = None) -> bool:
+    """True when a run of *pr_id* this pm session launched (at or after the
+    epoch time *since*, if given) still has a live driver: its resume
+    snapshot names another process that is still running.  The user can
+    close a run's main qa window while its driver goes on to a verdict
+    (S89), so a missing window does not mean nothing drives the run."""
+    for qa_wd, rec in _own_run_records(pr_id):
+        started = rec.get("started_at")
+        if since is not None and not (isinstance(started, (int, float))
+                                      and started >= since):
+            continue
+        data = _load_resume_file(qa_wd)
+        if isinstance(data, dict) and resume_owned_elsewhere(data):
+            return True
+    return False
+
+
 def _own_run_records(pr_id: str):
     """Yield (QA workdir, start record) for each run of *pr_id* this pm
     session launched."""

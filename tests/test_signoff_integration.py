@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
+import os
 import pytest
 from click.testing import CliRunner
 
@@ -500,6 +501,46 @@ def test_cli_qa_return_whose_rerun_is_still_starting_is_left_to_it(
         assert result.output.strip() == "running: qa"
         qa.assert_not_called()
         claim.assert_not_called()
+
+
+@pytest.mark.parametrize("awaiting", ["qa", None])
+@pytest.mark.parametrize("owner_alive, launched", [(True, False),
+                                                    (False, True)])
+def test_cli_qa_run_whose_window_was_closed_is_left_to_its_driver(
+        tmp_path, monkeypatch, awaiting, owner_alive, launched):
+    """S89: the user closed the re-run's qa window while its TUI driver was
+    still running.  A tick must not start a second driver while the run's
+    snapshot owner lives (awaiting still pending, or already cleared), and
+    still relaunches once that driver is gone."""
+    import json
+    from pm_core import qa_loop
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    # Older than a launch claim's expiry: only the live owner counts.
+    ret = time.time() - 600
+    ts = datetime.fromtimestamp(ret, timezone.utc).isoformat()
+    start = ret + 22
+    _qa_run_record(tmp_path / "home", start)
+    qa_wd = tmp_path / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-{int(start)}"
+    owner = os.getppid() if owner_alive else 2 ** 22 + 12345
+    (qa_wd / "qa_resume.json").write_text(json.dumps(
+        {"pr_id": PR, "loop_id": "x", "owner_pid": owner,
+         "owner_start": qa_loop._proc_start_time(owner)}))
+    result, _, _, qa = _seq(
+        tmp_path, _returned("qa", "qa", ts=ts, awaiting=awaiting),
+        **{"pm_core.cli.pr._qa_status_for": {"return_value": (None, None)},
+           "pm_core.cli.pr.tmux_mod.find_window_by_name":
+               {"return_value": None},
+           "pm_core.qa_loop.get_pm_session": {"return_value": "pm-test"},
+           "pm_core.cli.pr._check_qa_launch": {"return_value": None},
+           "pm_core.signoff.claim_return_launch":
+               {"new": MagicMock(return_value=True)}})
+    assert result.exit_code == 0, result.output
+    if launched:
+        assert result.output.strip() == "running: qa (launched)"
+        qa.assert_called_once()
+    else:
+        assert result.output.strip() == "running: qa"
+        qa.assert_not_called()
 
 
 def _review_transcripts(tmp_path, *iters):
