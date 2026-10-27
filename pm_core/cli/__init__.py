@@ -333,8 +333,9 @@ def set_cmd(setting, value):
 
       qa-verify-retries    Max verification retries before marking NEEDS_WORK (default 3)
 
-      qa-verdict-reminder-timeout  Seconds of pane silence before sending a verdict-format
-                                   reminder to a scenario agent (0 or unset = disabled)
+      qa-verdict-reminder-timeout  Retained for compatibility: overrides the settle interval
+                                   (seconds) between QA scenario-worker recovery nudges
+                                   (0 or unset = use verdict-recovery-settle-seconds)
 
       verdict-recovery-max-attempts  Recovery nudges a loop session gets when it idles
                                      without its expected verdict (default 3; 0 = off)

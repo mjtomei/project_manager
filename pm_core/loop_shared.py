@@ -60,6 +60,12 @@ VERDICT_NO_VERDICT = "NO_VERDICT"
 DEFAULT_MAX_MISSING = 3            # recovery nudges per session
 DEFAULT_SETTLE_SECONDS = 5.0       # wait for a newer idle before nudging
 DEFAULT_RESPONSE_TIMEOUT = 3600.0   # nudge -> next idle deadline (0 = off)
+# Consecutive "settle deferrals" tolerated before giving up.  A hook refresh
+# (a session that keeps re-emitting idle_prompt for the *same* turn — e.g. a
+# held-open FakeClaude) must not extend the settle window forever, or the
+# poller would never nudge and never exhaust: the very hang this module
+# exists to prevent.
+DEFAULT_MAX_DEFERRALS = 10
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +133,9 @@ class VerdictRecoveryExhausted(RuntimeError):
                  last_output: str = "", reason: str = "no_verdict",
                  session_id: str = "", pane_id: str = "",
                  verdicts: tuple[str, ...] = ()):
+        """*reason* is one of ``no_output``, ``no_verdict``,
+        ``no_progress`` (a session that kept re-announcing the same turn),
+        ``overall_timeout`` or ``no_response``."""
         super().__init__(message)
         self.attempts = attempts
         self.last_output = last_output
@@ -212,10 +221,31 @@ def build_block_outcome_request(
     )
 
 
+def build_block_resume_request(
+    blocks: tuple[tuple[str, str], ...],
+) -> str:
+    """Resume request for block-marker roles (planner, refiner).
+
+    Like :func:`build_resume_request`, but names the blocks the role must
+    emit when it finishes — a connection-loss resume for the planner or
+    refiner otherwise leaves the agent guessing what "your required
+    outcome" means.
+    """
+    rendered = " or ".join(f"{start} ... {end}" for start, end in blocks)
+    return (
+        "Your previous turn ended without any output (for example a "
+        "provider connection loss). Resume the same task in this session "
+        "from where you left off: keep partial edits, evidence and any "
+        "queued input, and do not restart completed work or repeat "
+        f"completed tests. When the task is complete, emit your own result "
+        f"wrapped in {rendered} (each marker alone on its own line)."
+    )
+
+
 @dataclass
 class RecoveryResult:
     """Outcome of one :meth:`MissingOutputRecovery.handle` call."""
-    status: str                     # "deferred" | "nudged"
+    status: str                     # "deferred" | "nudged" | "stopped"
     event: dict | None = None       # newer idle event when deferred
 
 
@@ -240,6 +270,7 @@ class MissingOutputRecovery:
         max_attempts: int = DEFAULT_MAX_MISSING,
         settle_seconds: float = DEFAULT_SETTLE_SECONDS,
         response_timeout: float | None = DEFAULT_RESPONSE_TIMEOUT,
+        max_deferrals: int | None = None,
         resume_request: str | Callable[[], str] | None = None,
         outcome_request: str | Callable[[], str] | None = None,
         log_prefix: str = "loop_shared",
@@ -251,13 +282,20 @@ class MissingOutputRecovery:
         self.max_attempts = max(0, int(max_attempts))
         self.settle_seconds = max(0.0, float(settle_seconds))
         self.response_timeout = response_timeout
+        self.max_deferrals = (DEFAULT_MAX_DEFERRALS if max_deferrals is None
+                              else max(0, int(max_deferrals)))
         self._resume_request = resume_request
         self._outcome_request = outcome_request
         self.log_prefix = log_prefix
         self.attempts = 0
+        self.deferrals = 0
         self.last_output = ""
         self.last_kind = ""
         self._last_nudge_ts: float | None = None
+        # Latest assistant text observed by this tracker.  A newer idle
+        # event whose turn text is unchanged is a hook *refresh*, not new
+        # activity — it must not reset the recovery budget.
+        self._seen_text: str | None = None
 
     @property
     def enabled(self) -> bool:
@@ -266,6 +304,7 @@ class MissingOutputRecovery:
     def reset(self) -> None:
         """Newer activity was seen — the session is making progress again."""
         self.attempts = 0
+        self.deferrals = 0
         self._last_nudge_ts = None
 
     # -- classification -----------------------------------------------------
@@ -304,20 +343,34 @@ class MissingOutputRecovery:
 
     def handle(self, transcript_path: str, ev_ts: float, *,
                wait_for_newer: Callable[[float, float], dict | None]
-               | None = None) -> RecoveryResult:
+               | None = None,
+               stop_check: Callable[[], bool] | None = None) -> RecoveryResult:
         """Handle one idle turn that produced no expected outcome.
 
         *wait_for_newer(timeout, newer_than)* may block up to the settle
         window looking for a newer idle event.  When omitted, a non-blocking
         hook read is used (for tick-based loops).
 
+        A newer event whose transcript text actually changed is a genuine
+        new turn (provider-native retry / queued input): it defers and
+        resets the budget.  A newer event that re-announces the *same* turn
+        (a hook refresh) is counted against *max_deferrals* instead, so a
+        session that keeps refreshing cannot defer forever.
+
         Returns ``RecoveryResult("deferred", event)`` when a newer event
-        landed (do not nudge; process that turn instead), or
+        landed (do not nudge; process that turn instead),
+        ``RecoveryResult("stopped")`` when *stop_check* fired during the
+        settle window (the caller should return its "stopped" result), or
         ``RecoveryResult("nudged")`` after sending a recovery request.
-        Raises :class:`VerdictRecoveryExhausted` once attempts run out.
+        Raises :class:`VerdictRecoveryExhausted` once the budget runs out.
         """
         kind = self.classify(transcript_path)
         self.last_kind = kind
+        text = self.last_output
+        # Did the transcript advance since the previous recovery decision?
+        # (The caller may have consumed a newer turn before calling us.)
+        advanced = self._seen_text is not None and text != self._seen_text
+        self._seen_text = text
 
         # Let a provider-native retry / queued input land before nudging.
         if self.settle_seconds > 0:
@@ -326,11 +379,36 @@ class MissingOutputRecovery:
             else:
                 newer = self._newer_event(ev_ts)
             if newer is not None:
-                self.reset()
-                _log.info("%s: newer idle event during settle — deferring "
-                          "recovery (session %s)", self.log_prefix,
-                          self.session_id)
+                if not advanced:
+                    # Re-read: the newer turn may have been written while we
+                    # waited (a genuine turn) or not (a hook refresh).
+                    from pm_core.verdict_transcript import (
+                        read_latest_assistant_text,
+                    )
+                    after = read_latest_assistant_text(transcript_path) or ""
+                    advanced = after != text
+                    if advanced:
+                        self._seen_text = after
+                if advanced:
+                    self.reset()
+                    _log.info("%s: newer turn during settle — deferring "
+                              "recovery (session %s)", self.log_prefix,
+                              self.session_id)
+                    return RecoveryResult("deferred", newer)
+                # Same turn re-announced (hook refresh): no new output to
+                # process, so this is a no-progress deferral.
+                self.deferrals += 1
+                if self.max_deferrals and self.deferrals > self.max_deferrals:
+                    raise self.exhausted("no_progress")
+                _log.debug("%s: idle hook refresh without new output "
+                           "(deferral %d/%d, session %s)", self.log_prefix,
+                           self.deferrals, self.max_deferrals,
+                           self.session_id)
                 return RecoveryResult("deferred", newer)
+            if stop_check is not None and stop_check():
+                # The caller asked us to stop while we waited for a newer
+                # turn — do not nudge a session that is being torn down.
+                return RecoveryResult("stopped")
 
         if self.attempts >= self.max_attempts:
             raise self.exhausted(kind)
@@ -375,6 +453,10 @@ class MissingOutputRecovery:
         elif reason == "no_output":
             detail = (f"the session idled {self.attempts} time(s) without any "
                       f"output; recovery attempts are exhausted")
+        elif reason == "no_progress":
+            detail = (f"the session re-announced its idle turn {self.deferrals} "
+                      f"time(s) without producing new output or a standalone "
+                      f"outcome; recovery made no progress")
         else:
             detail = (f"the session idled {self.attempts} time(s) without a "
                       f"standalone outcome; recovery attempts are exhausted")
@@ -644,7 +726,12 @@ def poll_for_verdict(
             transcript_path,
             float(ev.get("timestamp") or hook_baseline),
             wait_for_newer=_wait_newer,
+            stop_check=stop_check,
         )
+        if result.status == "stopped":
+            # stop_check fired while we waited out the settle window; do not
+            # nudge a session that is being torn down.
+            return None
         if result.status == "deferred" and result.event is not None:
             # Process the newer turn in this same iteration instead of
             # re-waiting for an event we already consumed.

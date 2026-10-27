@@ -39,6 +39,7 @@ from pm_core.loop_shared import (
     get_pm_session,
     poll_for_verdict,
     build_block_outcome_request,
+    build_block_resume_request,
     MissingOutputRecovery,
     VerdictRecoveryExhausted,
     recovery_max_attempts,
@@ -97,9 +98,9 @@ def _get_verification_max_retries() -> int:
 def _get_verdict_reminder_timeout() -> int | None:
     """Read qa-verdict-reminder-timeout from global settings.
 
-    Returns the number of seconds of pane-output silence after which a
-    reminder about verdict formatting is sent to the scenario agent.
-    Returns ``None`` if the setting is absent or zero (disabled).
+    Retained for compatibility: when set (> 0) it overrides the settle
+    interval between bounded missing-output recovery nudges for QA scenario
+    workers.  Returns ``None`` if the setting is absent or zero.
     """
     from pm_core.paths import get_global_setting_value
     val = get_global_setting_value("qa-verdict-reminder-timeout", "").strip()
@@ -1741,6 +1742,10 @@ def _concretize_scenario(
                 ("REFINED_STEPS_START", "REFINED_STEPS_END"),
                 ("REFINER_REJECT_START", "REFINER_REJECT_END"),
             )),
+            resume_request=build_block_resume_request((
+                ("REFINED_STEPS_START", "REFINED_STEPS_END"),
+                ("REFINER_REJECT_START", "REFINER_REJECT_END"),
+            )),
         )
     except WorkspaceTrustBlocked as e:
         return None, _TRUST_BLOCKED_PREFIX + str(e)
@@ -2678,6 +2683,12 @@ def _poll_tmux_verdicts(
     # after the configured attempts it is marked INPUT_REQUIRED with a
     # specific reason instead of hanging QA forever.
     _recoveries: dict[int, MissingOutputRecovery] = {}
+    # Wall-clock when each scenario's current "idle without a verdict"
+    # episode began.  The settle window is measured from here, not from the
+    # latest hook event: a session that keeps re-emitting idle_prompt (a
+    # held-open FakeClaude refreshes its hook every 2s) would otherwise keep
+    # pushing the window forward and QA would hang without ever nudging.
+    _no_verdict_since: dict[int, float] = {}
     # Hook-driven idle detection: gate verdict extraction on fresh
     # idle_prompt events for each scenario's Claude session.  Scenarios
     # without a session_id cannot be polled and are marked INPUT_REQUIRED.
@@ -2824,9 +2835,10 @@ def _poll_tmux_verdicts(
         _log.warning("Scenario %d: %s", scenario.index, exc)
         state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
         state.scenario_verdict_reasons[scenario.index] = (
-            f"worker produced no verdict after {_recovery_max} recovery "
-            f"attempt(s): {exc}")
+            f"worker produced no verdict ({exc.reason}) after "
+            f"{exc.attempts} recovery attempt(s): {exc}")
         _recoveries.pop(scenario.index, None)
+        _no_verdict_since.pop(scenario.index, None)
 
     while (pending or verifying or _launch_queue) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
@@ -2992,6 +3004,11 @@ def _poll_tmux_verdicts(
                         # Reset grace period for this retry
                         grace_start = time.monotonic()
                         _last_scenario_hook_ts.pop(scenario.index, None)
+                        # A relaunched worker is a new identity: drop the
+                        # old recovery tracker and its settle window so
+                        # attempt counts never leak across panes/sessions.
+                        _recoveries.pop(scenario.index, None)
+                        _no_verdict_since.pop(scenario.index, None)
                         continue
                     # Relaunch failed — will retry on next poll iteration
                     continue
@@ -3054,8 +3071,16 @@ def _poll_tmux_verdicts(
 
             # A recovery nudge with no following turn means the worker has
             # gone silent.  Check this before the fresh-event gate so it is
-            # caught even when no new idle_prompt ever arrives.
+            # caught even when no new idle_prompt ever arrives.  Drop the
+            # tracker if the pane/session changed underneath us: a stale
+            # nudge deadline must never retire a healthy relaunched worker.
             _rec = _recoveries.get(scenario.index)
+            if _rec is not None and (
+                    _rec.pane_id != pane_id
+                    or _rec.session_id != (scenario.session_id or "")):
+                _recoveries.pop(scenario.index, None)
+                _no_verdict_since.pop(scenario.index, None)
+                _rec = None
             if _rec is not None:
                 try:
                     _rec.check_response()
@@ -3093,12 +3118,16 @@ def _poll_tmux_verdicts(
             if verdict is None and pane_id:
                 rec = _recovery_for(scenario, pane_id)
                 if rec.enabled:
-                    # Non-blocking settle: leave the event unacknowledged
-                    # until the settle window elapses, so a newer turn
-                    # (native retry / queued input) supersedes it.
-                    if (time.time() - ev_ts) < _recovery_settle:
-                        continue
+                    # Non-blocking settle: acknowledge the event but wait
+                    # before nudging, so a newer turn (native retry / queued
+                    # input) supersedes it.  Measure the window from when
+                    # this episode began — not from the latest event — so a
+                    # hook refresh cannot push it forward forever.
+                    since = _no_verdict_since.setdefault(
+                        scenario.index, time.time())
                     _last_scenario_hook_ts[scenario.index] = ev_ts
+                    if (time.time() - since) < _recovery_settle:
+                        continue
                     try:
                         rec.handle(scenario.transcript_path, ev_ts)
                     except VerdictRecoveryExhausted as e:
@@ -3107,6 +3136,9 @@ def _poll_tmux_verdicts(
                         verdicts_changed = True
                         _launch_next_queued()
                         continue
+                    # A nudge was sent — the next no-verdict turn starts a
+                    # fresh settle window.
+                    _no_verdict_since.pop(scenario.index, None)
                 else:
                     _last_scenario_hook_ts[scenario.index] = ev_ts
             else:
@@ -3114,6 +3146,7 @@ def _poll_tmux_verdicts(
 
             if verdict:
                 _recoveries.pop(scenario.index, None)
+                _no_verdict_since.pop(scenario.index, None)
                 state.scenario_verdicts[scenario.index] = verdict
                 reason = extract_verdict_reason_from_transcript(
                     scenario.transcript_path,
@@ -3983,6 +4016,8 @@ def run_qa_sync(
             response_timeout=recovery_response_timeout(),
             outcome_request=build_block_outcome_request(
                 (("QA_PLAN_START", "QA_PLAN_END"),)),
+            resume_request=build_block_resume_request(
+                (("QA_PLAN_START", "QA_PLAN_END"),)),
             log_prefix="qa-planner",
         )
         planner_exhausted: VerdictRecoveryExhausted | None = None
@@ -4067,7 +4102,7 @@ def run_qa_sync(
             if not planner_recovery.enabled:
                 continue
             try:
-                planner_recovery.handle(
+                result = planner_recovery.handle(
                     planner_transcript,
                     float(ev.get("timestamp") or _hook_baseline),
                     wait_for_newer=lambda timeout, ts: _hook_events.wait_for_event(
@@ -4077,9 +4112,12 @@ def run_qa_sync(
                         newer_than=ts,
                         stop_check=lambda: state.stop_requested,
                     ),
+                    stop_check=lambda: state.stop_requested,
                 )
             except VerdictRecoveryExhausted as e:
                 planner_exhausted = e
+                break
+            if result.status == "stopped":
                 break
 
         if planner_exhausted:

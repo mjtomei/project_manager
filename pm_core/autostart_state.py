@@ -23,6 +23,8 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 
+from pm_core.loop_shared import VERDICT_NO_VERDICT
+
 SCHEMA = "pm.autostart.status/1"
 
 POLICY_STOP = "stop_before_merge"
@@ -357,7 +359,7 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                     return (phase, "waiting", _awaiting_signoff_reason(
                         pr_id, inp, holds, "review passed; QA skipped (skip_qa)"))
                 return phase, "waiting", "review passed; QA transition pending"
-            if last in ("KILLED", "ERROR"):
+            if last in ("KILLED", "ERROR", VERDICT_NO_VERDICT):
                 return phase, "failed", f"review loop ended {last}"
             if last:
                 return phase, "paused", f"review loop stopped (last {last})"

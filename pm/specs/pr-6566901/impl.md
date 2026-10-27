@@ -138,6 +138,16 @@ All four poller families use one shared helper so behaviour cannot drift.
   If one arrives, reset the attempt counter and process the new turn instead of
   nudging. In tick-based loops, re-read the hook event and defer if its
   timestamp advanced. This is the 242-S40 race (`02:54:31Z`) guard.
+  **Deferral must itself be bounded.** A newer `idle_prompt` only counts as
+  native recovery when the transcript's latest assistant text actually
+  changed; a *refresh* that re-announces the same turn (FakeClaude re-emits
+  `idle_prompt` every 2s while held open) is counted against
+  `max_deferrals` (default `10`, derived in `MissingOutputRecovery`) and then
+  raises `VerdictRecoveryExhausted(reason="no_progress")`. Without this the
+  settle window can be pushed forward forever and the poller hangs — the very
+  bug this PR fixes. In the QA tick loop the settle window is measured from
+  when the no-verdict episode began, not from the latest event timestamp, for
+  the same reason.
 * **Preserve attempt identity and partial work.** Recovery happens in the
   *same* pane/session; no relaunch, no transcript rewrite, no replayed tests.
 * **Not missing-output failures:** active tool/monitor progress (no
@@ -165,20 +175,25 @@ class VerdictRecoveryExhausted(RuntimeError): ...
 
 def build_outcome_request(verdicts, *, block: tuple[str,str] | None = None) -> str
 def build_resume_request() -> str
-def build_block_outcome_request(start: str, end: str, *, reject_end: str | None = None) -> str
+def build_block_outcome_request(blocks: tuple[tuple[str,str], ...]) -> str
+def build_block_resume_request(blocks: tuple[tuple[str,str], ...]) -> str
 
 class MissingOutputRecovery:
     """Per-session attempt bookkeeping + message delivery."""
     def __init__(self, *, session_id, pane_id, verdicts, send,
                  max_attempts, settle_seconds, response_timeout,
-                 resume_request=None, outcome_request=None, log_prefix=...)
+                 max_deferrals=None, resume_request=None,
+                 outcome_request=None, log_prefix=...)
     def reset(self) -> None                     # newer activity → attempts = 0
     def classify(self, transcript_path) -> str  # "no_output" | "no_verdict"
     def handle(self, transcript_path, ev_ts, *,
-               wait_for_newer=None) -> str
-        # "deferred"  — a newer event landed (native recovery); no nudge
+               wait_for_newer=None, stop_check=None) -> RecoveryResult
+        # "deferred"  — a newer *turn* landed (transcript changed); no nudge,
+        #               budget reset.  A refresh of the same turn counts a
+        #               deferral instead and exhausts with "no_progress".
         # "nudged"    — recovery message sent, attempt counted
-        # raises VerdictRecoveryExhausted when attempts exceed max
+        # "stopped"   — stop_check fired during settle; caller returns
+        # raises VerdictRecoveryExhausted when attempts/deferrals exceed max
     def check_response(self) -> None            # raises after response_timeout
 ```
 
@@ -187,8 +202,10 @@ class MissingOutputRecovery:
 1. if `recovery` is disabled → old behaviour (continue);
 2. `kind = recovery.classify(transcript)`;
 3. settle via `hook_events.wait_for_event(..., timeout=settle, newer_than=ev_ts)`
-   → if a new event: update `hook_baseline`, `recovery.reset()`, continue;
-4. `recovery.handle(...)` → "nudged", continue; exhaustion raises;
+   → if a new *turn* (transcript changed): update `hook_baseline`,
+   `recovery.reset()`, continue; if only a hook refresh: count a deferral;
+4. `recovery.handle(...)` → "nudged", continue; exhaustion raises; "stopped"
+   returns `None`;
 5. on `ev is None` (wait timeout) call `recovery.check_response()`.
 
 `wait_for_follow_up_verdict` is **not** changed (human wait; see Ambiguities).
@@ -271,7 +288,10 @@ class MissingOutputRecovery:
 * **Fake sessions** (`pm_core/fake_claude.py`) refresh `idle_prompt` while
   held open. They write their verdict transcript before the first event, so
   the first idle still matches. A deliberately verdictless fake now exhausts
-  after `max_attempts` (the intended fix) instead of hanging.
+  (bounded, instead of hanging) — implemented via the content-aware deferral
+  bound: a refresh that does not change the transcript counts against
+  `max_deferrals` and raises `no_progress`, so the fake is never nudged (a
+  nudge would close its stdin) and `NO_VERDICT` is surfaced.
 * **Grace periods** (`review 20s`, `QA 30s`) still gate verdict acceptance; a
   nudge sent before grace elapses is harmless (its turn produces a later
   event), but we only nudge on post-grace idles.
@@ -290,9 +310,12 @@ class MissingOutputRecovery:
 
 * `tests/test_loop_recovery.py` (new): shared recovery unit tests —
   no-verdict nudge then success; exhaustion after N; no-output → resume
-  message; output → outcome message that names no specific verdict; newer
-  event during settle defers and resets; overall timeout; response timeout;
-  recovery disabled keeps legacy behaviour; `stop_check` during settle.
+  message; output → outcome message that names no specific verdict; a
+  genuine newer turn during settle defers and resets; a hook refresh of the
+  same turn defers without resetting and exhausts with `no_progress`
+  (including the `poll_for_verdict` and QA-tick-loop integration cases);
+  overall timeout; response timeout; recovery disabled keeps legacy
+  behaviour; `stop_check` during settle does not nudge.
 * `tests/test_review_loop.py`: exhaustion → `NO_VERDICT`, history entry,
   callback fired.
 * `tests/test_watcher_loop.py`: exhaustion → `NO_VERDICT`, history entry.
@@ -301,4 +324,6 @@ class MissingOutputRecovery:
   frees the slot; refiner exhaustion label; verifier reason; finalize
   `NO_VERDICT`.
 * `tests/test_review_loop_terminal_state.py`: `NO_VERDICT` → `failed`.
+* `tests/test_autostart_multi_target.py`: `NO_VERDICT` review loop → phase
+  state `failed` in the status builder.
 * Existing suite (4100+ tests) must stay green.

@@ -20,6 +20,7 @@ from pm_core.loop_shared import (
     VerdictRecoveryExhausted,
     VERDICT_NO_VERDICT,
     build_block_outcome_request,
+    build_block_resume_request,
     build_outcome_request,
     build_resume_request,
 )
@@ -97,6 +98,12 @@ class TestRecoveryMessages:
         ))
         assert "REFINED_STEPS_START ... REFINED_STEPS_END" in msg
         assert "REFINER_REJECT_START ... REFINER_REJECT_END" in msg
+
+    def test_block_resume_request_names_blocks(self):
+        msg = build_block_resume_request((("QA_PLAN_START", "QA_PLAN_END"),))
+        assert "Resume the same task" in msg
+        assert "QA_PLAN_START ... QA_PLAN_END" in msg
+        assert "partial edits" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +190,41 @@ class TestMissingOutputRecovery:
         assert len(sent) == 2
         assert "produced no expected outcome" in str(exc.value)
 
-    def test_newer_event_defers_and_resets(self, tmp_path):
+    def test_newer_turn_defers_and_resets(self, tmp_path):
+        """A genuinely new turn during settle defers and resets the budget."""
+        rec, sent = _recovery(tmp_path, max_attempts=2, settle=5.0)
+        transcript = _transcript_with_assistant(tmp_path, "still thinking")
+        newer = {"event_type": "idle_prompt", "timestamp": 9.0}
+
+        def wait_and_advance(_timeout, _ts):
+            # The provider-native retry produced a new (still verdictless)
+            # turn while we waited.
+            _write_transcript(transcript, [("user", "review"),
+                                           ("assistant", "retried, no verdict")])
+            return newer
+
+        result = rec.handle(str(transcript), ev_ts=1.0,
+                            wait_for_newer=wait_and_advance)
+
+        assert result.status == "deferred"
+        assert result.event is newer
+        assert rec.attempts == 0
+        assert rec.deferrals == 0
+        assert sent == []
+
+        # A turn with no newer event afterwards is nudged normally.
+        result = rec.handle(str(transcript), ev_ts=9.0,
+                            wait_for_newer=lambda t, ts: None)
+        assert result.status == "nudged"
+        assert rec.attempts == 1
+
+    def test_hook_refresh_does_not_reset_the_budget(self, tmp_path):
+        """A re-announced idle event for the *same* turn is not new activity.
+
+        FakeClaude refreshes ``idle_prompt`` every couple of seconds while
+        held open.  Treating that as a native retry would defer forever and
+        reintroduce the hang this machinery exists to prevent.
+        """
         rec, sent = _recovery(tmp_path, max_attempts=2, settle=5.0)
         transcript = _transcript_with_assistant(tmp_path, "still thinking")
         newer = {"event_type": "idle_prompt", "timestamp": 9.0}
@@ -192,15 +233,42 @@ class TestMissingOutputRecovery:
                             wait_for_newer=lambda t, ts: newer)
 
         assert result.status == "deferred"
-        assert result.event is newer
-        assert rec.attempts == 0
+        assert rec.deferrals == 1
         assert sent == []
 
-        # A turn with no newer event afterwards is nudged normally.
-        result = rec.handle(str(transcript), ev_ts=9.0,
-                            wait_for_newer=lambda t, ts: None)
-        assert result.status == "nudged"
-        assert rec.attempts == 1
+    def test_repeated_hook_refresh_exhausts_without_nudging(self, tmp_path):
+        """An endlessly refreshing session is bounded, not hung."""
+        rec, sent = _recovery(tmp_path, max_attempts=3, settle=5.0,
+                              max_deferrals=2)
+        transcript = _transcript_with_assistant(tmp_path, "still thinking")
+
+        def always_newer(_timeout, ts):
+            return {"event_type": "idle_prompt", "timestamp": ts + 1}
+
+        assert rec.handle(str(transcript), ev_ts=1.0,
+                          wait_for_newer=always_newer).status == "deferred"
+        assert rec.handle(str(transcript), ev_ts=2.0,
+                          wait_for_newer=always_newer).status == "deferred"
+        with pytest.raises(VerdictRecoveryExhausted) as exc:
+            rec.handle(str(transcript), ev_ts=3.0,
+                       wait_for_newer=always_newer)
+
+        assert exc.value.reason == "no_progress"
+        # The session was never nudged — it is alive but not making progress.
+        assert sent == []
+
+    def test_stop_check_during_settle_does_not_nudge(self, tmp_path):
+        """A stop requested while waiting for a newer turn must not nudge."""
+        rec, sent = _recovery(tmp_path, max_attempts=3, settle=5.0)
+        transcript = _transcript_with_assistant(tmp_path, "still thinking")
+
+        result = rec.handle(str(transcript), ev_ts=1.0,
+                            wait_for_newer=lambda t, ts: None,
+                            stop_check=lambda: True)
+
+        assert result.status == "stopped"
+        assert sent == []
+        assert rec.attempts == 0
 
     def test_send_failure_is_logged_not_raised(self, tmp_path):
         def boom(_msg):
@@ -312,6 +380,45 @@ class TestPollForVerdictRecovery:
             )
         assert exc.value.attempts == 2
         assert len(sent) == 2
+
+    def test_repeated_idle_refresh_exhausts_instead_of_hanging(
+            self, tmp_path, monkeypatch):
+        """A session that keeps refreshing idle_prompt cannot defer forever.
+
+        This is the FakeClaude shape (hook re-emitted every couple of
+        seconds for the same turn): without a deferral bound the poller
+        would spin forever — the original bug.
+        """
+        link, target = _uuid_transcript(tmp_path)
+        _write_transcript(target, [("user", "review"),
+                                   ("assistant", "still reading")])
+        clock = {"ts": 1.0}
+        calls = {"n": 0}
+
+        def always_fresh(*_a, **_kw):
+            calls["n"] += 1
+            assert calls["n"] < 200, "poll deferred without bound"
+            clock["ts"] += 2.0
+            return _idle(clock["ts"])
+
+        from pm_core import hook_events, tmux
+        monkeypatch.setattr(hook_events, "wait_for_event", always_fresh)
+        monkeypatch.setattr(tmux, "pane_exists", lambda _p: True)
+        monkeypatch.setattr(loop_shared, "recovery_settle_seconds",
+                            lambda: 5.0)
+        monkeypatch.setattr(loop_shared, "recovery_max_attempts", lambda: 3)
+        monkeypatch.setattr(loop_shared, "recovery_response_timeout",
+                            lambda: 3600.0)
+        sent: list[str] = []
+
+        with pytest.raises(VerdictRecoveryExhausted) as exc:
+            loop_shared.poll_for_verdict(
+                "%1", str(link), ("PASS",),
+                grace_period=0, wait_timeout=0.01, send=sent.append,
+                log_prefix="test",
+            )
+        assert exc.value.reason == "no_progress"
+        assert sent == []
 
     def test_overall_timeout_raises(self, tmp_path, monkeypatch):
         link, target = _uuid_transcript(tmp_path)
@@ -476,6 +583,34 @@ class TestQARecoveryWiring:
 
         assert verdict == VERDICT_NO_VERDICT
 
+    def test_verifier_exhaustion_returns_failure_reason(self, tmp_path):
+        """A verifier that never emits VERIFIED/FLAGGED blocks finalize."""
+        from pm_core import qa_loop
+
+        scenario = qa_loop.QAScenario(index=1, title="S", focus="f",
+                                      window_name="qa-s1", pane_id="%1")
+        scenario.worktree_path = str(tmp_path)
+        scenario.transcript_path = None
+
+        with patch("pm_core.tmux.split_pane_at", return_value="%2"), \
+             patch("pm_core.tmux.pane_window_id", return_value="@1"), \
+             patch("pm_core.tmux.set_shared_window_size"), \
+             patch("pm_core.pane_layout.register_and_rebalance"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="cmd"), \
+             patch("pm_core.qa_loop.poll_for_verdict",
+                   side_effect=VerdictRecoveryExhausted(
+                       "no verifier verdict", attempts=3)):
+            passed, reason, pane = qa_loop._verify_single_scenario(
+                scenario, "PASS", "scenario output", {"id": "pr-1"},
+                session="sess", qa_workdir=str(tmp_path),
+                pr_workdir=str(tmp_path),
+            )
+
+        assert passed is False
+        assert reason.startswith("verifier produced no verdict:")
+        assert pane == "%2"
+
     def test_scenario_worker_exhaustion_marks_input_required(
             self, tmp_path, monkeypatch):
         """A worker that idles without a verdict is bounded, not hung."""
@@ -530,4 +665,65 @@ class TestQARecoveryWiring:
         assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
         reason = state.scenario_verdict_reasons[1]
         assert "no verdict" in reason and "recovery" in reason
-        assert len(sent) == 1  # one nudge, then exhaustion
+
+    def test_scenario_worker_hook_refresh_is_bounded(
+            self, tmp_path, monkeypatch):
+        """A worker whose idle_prompt keeps refreshing must not hang QA.
+
+        The settle window is measured from when the no-verdict episode
+        began, so a hook refresh cannot push it forward forever (the
+        FakeClaude shape that motivated pr-6566901).
+        """
+        from pm_core import qa_loop
+        from pm_core.qa_loop import QALoopState, QAScenario
+
+        scenario = QAScenario(index=1, title="S", focus="f")
+        scenario.window_name = "qa-s1"
+        scenario.session_id = "sid-s1"
+        scenario.pane_id = "%1"
+        transcript = _transcript_with_assistant(tmp_path, "still testing")
+        scenario.transcript_path = str(transcript)
+
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+        state.qa_workdir = None
+
+        clock = {"t": 1000.0}
+
+        def fake_time():
+            clock["t"] += 1.0
+            return clock["t"]
+
+        def fake_read_event(_sid):
+            clock["t"] += 1.0
+            return {"event_type": "idle_prompt",
+                    "timestamp": clock["t"],
+                    "session_id": "sid-s1"}
+
+        monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+        monkeypatch.setattr(qa_loop, "recovery_max_attempts", lambda: 2)
+        monkeypatch.setattr(qa_loop, "recovery_settle_seconds", lambda: 5.0)
+        monkeypatch.setattr(qa_loop, "recovery_response_timeout", lambda: 0.0)
+        monkeypatch.setattr(qa_loop, "_is_verification_enabled",
+                            lambda: False)
+        monkeypatch.setattr(qa_loop, "_get_verdict_reminder_timeout",
+                            lambda: None)
+
+        with patch("pm_core.hook_events.read_event", side_effect=fake_read_event), \
+             patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value=None), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.time", side_effect=fake_time), \
+             patch("pm_core.qa_loop.time.monotonic", return_value=1000.0), \
+             patch("pm_core.tmux.send_keys"), \
+             patch("pm_core.tmux.pane_exists", return_value=True):
+            qa_loop._poll_tmux_verdicts(
+                state, {}, {}, "sess", str(tmp_path),
+                tmp_path / "status.json", lambda *a: None,
+            )
+
+        assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
+        assert "no_progress" in state.scenario_verdict_reasons[1]

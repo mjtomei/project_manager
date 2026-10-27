@@ -48,6 +48,24 @@ def test_killed_verdict_writes_failed_state(tmp_path, monkeypatch):
     assert entry["verdict"] == "KILLED"
 
 
+def test_no_verdict_verdict_writes_failed_state(tmp_path, monkeypatch):
+    """pr-6566901: bounded recovery exhaustion is a failure, not a clean end."""
+    monkeypatch.setattr(runtime_state, "_runtime_dir", lambda: tmp_path)
+    _stub_active(monkeypatch)
+    state = _make_state("pr-nv1", "NO_VERDICT")
+    state.latest_output = (
+        "review_loop: session sid produced no expected outcome "
+        "(PASS / NEEDS_WORK / INPUT_REQUIRED): the session idled 3 time(s) "
+        "without a standalone outcome; recovery attempts are exhausted."
+    )
+
+    _on_complete_from_thread(MagicMock(), state)
+
+    entry = runtime_state.get_action_state("pr-nv1", "review-loop")
+    assert entry["state"] == "failed"
+    assert entry["verdict"] == "NO_VERDICT"
+
+
 def test_pass_verdict_writes_done_state(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_state, "_runtime_dir", lambda: tmp_path)
     _stub_active(monkeypatch)

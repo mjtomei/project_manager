@@ -720,6 +720,15 @@ class TestBuildStatus:
         r = _run(_status([_pr("a", status="in_review")], ["a"]), "a")
         assert r["state"] == "queued"
 
+    def test_review_no_verdict_marks_failed(self):
+        """pr-6566901: NO_VERDICT is a terminal failure like ERROR/KILLED."""
+        s = _status([_pr("a", status="in_review")], ["a"],
+                    review_loops={"a": {"running": False, "iteration": 1,
+                                        "verdict": "NO_VERDICT"}})
+        r = _run(s, "a")
+        assert (r["phase"], r["state"]) == ("review", "failed")
+        assert "NO_VERDICT" in r["reason"]
+
     def test_qa_scenario_progress(self):
         s = _status([_pr("a", status="qa")], ["a"],
                     qa_loops={"a": {"running": True, "planning": False,
