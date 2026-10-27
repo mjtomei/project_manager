@@ -950,6 +950,16 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
+            if existing and not fresh and tmux_mod.window_panes_dead(
+                    pm_session, existing["id"]):
+                # Its session ended (e.g. stop-on-idle removed the
+                # container and kept the dead pane readable): relaunch.
+                from pm_core import home_window
+                home_window.park_if_on(pm_session, existing["id"])
+                tmux_mod.kill_window(pm_session, existing["id"])
+                click.echo(f"Closed window '{window_name}' (its session "
+                           f"has ended); relaunching")
+                existing = None
             if existing:
                 if fresh:
                     from pm_core import home_window
@@ -1297,6 +1307,16 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     # just switch to it — skip expensive prompt generation and container setup.
     existing = tmux_mod.find_window_by_name(pm_session, window_name)
     sessions_on_review: list[str] = []
+    if existing and not fresh and tmux_mod.window_panes_dead(
+            pm_session, existing["id"]):
+        # The review session ended (e.g. stop-on-idle removed the
+        # container and kept the dead pane readable): relaunch.
+        from pm_core import home_window
+        home_window.park_if_on(pm_session, existing["id"])
+        tmux_mod.kill_window(pm_session, existing["id"])
+        click.echo(f"Closed review window '{window_name}' (its session "
+                   f"has ended); relaunching")
+        existing = None
     if existing:
         if fresh:
             if review_loop:

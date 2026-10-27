@@ -95,6 +95,7 @@ class TestPrStartCompanion:
         mock_tmux.in_tmux.return_value = True
         mock_tmux.session_exists.return_value = True
         mock_tmux.find_window_by_name.return_value = {"id": "@1", "index": "1", "name": "pr-001"}
+        mock_tmux.window_panes_dead.return_value = False
         mock_tmux.get_pane_indices.return_value = [("%1", 0)]  # single pane
         mock_tmux.split_pane_at.return_value = "%2"
         _reg.load_registry.return_value = {}
@@ -138,6 +139,7 @@ class TestPrStartCompanion:
         mock_tmux.in_tmux.return_value = True
         mock_tmux.session_exists.return_value = True
         mock_tmux.find_window_by_name.return_value = {"id": "@1", "index": "1", "name": "pr-001"}
+        mock_tmux.window_panes_dead.return_value = False
         mock_tmux.get_pane_indices.return_value = [("%1", 0)]
         mock_tmux.split_pane_at.return_value = "%2"
         _reg.load_registry.return_value = {}

@@ -353,6 +353,24 @@ def get_pane_indices(session: str, window: str = "0") -> list[tuple[str, int]]:
     return pairs
 
 
+def window_panes_dead(session: str, window: str) -> bool:
+    """True if *window* has panes and every one of them is dead.
+
+    Stop-on-idle keeps a finished session's panes (``remain-on-exit``) so
+    their text stays readable.  A window left with only dead panes has
+    no session to switch to; starting it again must relaunch.
+    """
+    result = _run(
+        _tmux_cmd("list-panes", "-t", f"{session}:{window}",
+                   "-F", "#{pane_dead}"),
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+    flags = result.stdout.split()
+    return bool(flags) and all(f == "1" for f in flags)
+
+
 def get_pane_geometries(session: str, window: str = "0") -> list[tuple[str, int, int, int, int]]:
     """Get pane geometries as list of (pane_id, x, y, width, height)."""
     result = _run(

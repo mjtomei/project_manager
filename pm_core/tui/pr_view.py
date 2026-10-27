@@ -119,7 +119,10 @@ def start_pr(app, companion: bool = False) -> None:
                     from pm_core.cli.pr import _pr_display_id
                     display_id = _pr_display_id(pr_entry)
                     existing = tmux_mod.find_window_by_name(session, display_id)
-                    if existing:
+                    # A window left with only dead panes (stop-on-idle
+                    # removed its container) is relaunched by pr start.
+                    if existing and not tmux_mod.window_panes_dead(
+                            session, existing["id"]):
                         tmux_mod.select_window(session, existing["id"])
                         app.log_message(f"Switched to window '{display_id}'")
                         return
@@ -187,7 +190,8 @@ def review_pr(app, fresh: bool = False) -> None:
                     display_id = _pr_display_id(pr_entry)
                     window_name = f"review-{display_id}"
                     existing = tmux_mod.find_window_by_name(session, window_name)
-                    if existing:
+                    if existing and not tmux_mod.window_panes_dead(
+                            session, existing["id"]):
                         tmux_mod.select_window(session, existing["id"])
                         app.log_message(f"Switched to review window '{window_name}'")
                         return

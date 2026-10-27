@@ -147,6 +147,15 @@ is left to a container that took the name meanwhile (review 3f45 i2).
 Window kill and fresh-review recreation are master lifecycle behaviour.
 They are not part of stop-on-idle, and #241's ownership work will
 revisit them.
+A stopped session's window stays behind with only dead panes (kept
+readable by `remain-on-exit`).  Plain `s` / `d` (and `pm pr start` /
+`pm pr review` without `--fresh`) treat such a window as gone: they close
+it and relaunch, recreating the container, instead of switching to the
+dead pane (QA S62: `s` on an in_review PR whose impl was stopped on idle).
+`zz d` goes through the TUI's in-flight PR action guard, so pressing it
+while `z d`'s fresh review is still launching is refused ("Busy") rather
+than starting a second `pr review --fresh` that shares the container and
+crosses panes with the first (QA S62).
 
 Two timing and sampling questions came up in QA S38 (review 3f45 i3).
 - **Which removals record a sample.**  Every removal of a *running* pm

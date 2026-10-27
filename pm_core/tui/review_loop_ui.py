@@ -154,6 +154,14 @@ def start_or_stop_loop(app) -> None:
         app.log_message("No PR selected")
         return
 
+    # A launch still in flight (e.g. ``z d``'s fresh review a second
+    # earlier) would race the loop's own ``pr review --fresh``: both
+    # reuse review-<pr>'s container and cross their panes into one
+    # window, leaving two reviews in it (QA S62).
+    from pm_core.tui import pr_view
+    if not pr_view.guard_pr_action(app, f"Review loop {pr_id}"):
+        return
+
     existing = app._review_loops.get(pr_id)
     superseded = bool(existing and existing.running)
     if superseded:

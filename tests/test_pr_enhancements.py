@@ -840,6 +840,7 @@ class TestPrStartFastPathSessionMessage:
             mock_tmux.session_exists.return_value = True
             mock_tmux.find_window_by_name.return_value = {
                 "id": "@1", "index": "1", "name": "pr-001"}
+            mock_tmux.window_panes_dead.return_value = False
             mock_tmux.current_or_base_session.return_value = grouped_session
             result = CliRunner().invoke(pr_mod.pr, ["start", "pr-001"])
         return result
