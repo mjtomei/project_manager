@@ -1385,7 +1385,12 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                     f"in {paths_text} — real field, deletion and ambiguity "
                     "conflicts are never auto-resolved:")
                 for entry in unresolved[:5]:
-                    lines.append(f"- `{entry.get('path')}`: "
+                    # Hand-edited state: a non-string path is not a path, so
+                    # name the file pm can only have attempted (the same
+                    # contract as the resolved-path list above) instead of
+                    # rendering the malformed value as one.
+                    upath = integration.resolution_entry_path(entry)
+                    lines.append(f"- `{upath}`: "
                                  f"{entry.get('conflicts')}")
             elif carried:
                 # The record carries a resolution an *earlier* merge applied

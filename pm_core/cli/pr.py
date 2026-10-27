@@ -731,7 +731,11 @@ def pr_show(pr_id: str):
                                + (f", … {more} more" if more else ""))
             for entry in integration.resolution_entries(resolution,
                                                         "unresolved"):
-                click.echo(f"Unresolved: {entry.get('path')}: "
+                # Hand-edited state: a non-string path is not a path, so name
+                # the file pm can only have attempted instead of printing the
+                # malformed value as one.
+                upath = integration.resolution_entry_path(entry)
+                click.echo(f"Unresolved: {upath}: "
                            f"{entry.get('conflicts')}")
             applied = integration.revision_of(
                 resolution.get("applied_merge_sha"))
@@ -1972,7 +1976,11 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
                 click.echo(f"    {label}: {', '.join(map(str, shown))}"
                            + (f", … {more} more" if more else ""))
     for entry in integration.resolution_entries(resolution, "unresolved"):
-        click.echo(f"  unresolved: {entry.get('path')}: "
+        # Hand-edited state: a non-string path is not a path, so name the file
+        # pm can only have attempted instead of printing the malformed value
+        # as one.
+        upath = integration.resolution_entry_path(entry)
+        click.echo(f"  unresolved: {upath}: "
                    f"{entry.get('conflicts')}", err=True)
     if applied_clean:
         # ``prepare`` can return the stored record when a concurrent apply won:

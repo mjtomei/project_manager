@@ -827,6 +827,20 @@ def resolution_id_total(entry: dict, key: str) -> int:
     return n
 
 
+def resolution_entry_path(entry) -> str:
+    """The file a resolution entry names, for a human-readable listing.
+
+    ``project.yaml`` is hand-editable state: a ``path`` that is not a
+    non-empty string is not a path, so every surface that renders an entry
+    names the file pm can only have attempted (``project.yaml``, the same
+    fallback :func:`summary` uses) instead of printing the malformed value as
+    one.  Shared by the sign-off prompt, the return text and the CLI so the
+    surfaces agree.
+    """
+    path = _mapping(entry).get("path")
+    return path if isinstance(path, str) and path else "project.yaml"
+
+
 def _digest_payload(value):
     """*value* with every mapping key rendered as a string, recursively.
 

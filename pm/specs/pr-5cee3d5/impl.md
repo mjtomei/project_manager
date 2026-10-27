@@ -637,7 +637,10 @@ tests):
     as a resolved path: `pm pr show`, `integrate` and the launch skip it, and
     the sign-off prompt and the return text fall back to the file pm can only
     have resolved (`project.yaml`, the same fallback `summary` uses) instead
-    of rendering the malformed value. An unhashable
+    of rendering the malformed value. The same rule holds for an `unresolved`
+    entry's `path`: the prompt, the return text, `pm pr show` and `integrate`
+    name `project.yaml` rather than print the hand-edited value as the file
+    pm attempted. An unhashable
     `base_behavior_changes` member is carried, not dropped: the carry-forward
     de-duplicates order-preservingly and skips only the de-duplication for a
     value `dict.fromkeys` would have raised on (which took every integration

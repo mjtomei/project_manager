@@ -1987,7 +1987,12 @@ def test_a_malformed_resolution_path_member_does_not_raise(w):
         pr, SIGNOFF_REVIEW, "review", reviewed_head=pr["integration"]["head"])
     text = signoff.format_signoff_return(pr)
     assert "pm could not resolve the metadata conflict" in text
-    assert "{'not': 'a path'}" in text   # the malformed entry still renders
+    # The malformed entry still renders (it is not dropped and nothing
+    # raises), but a non-string path is not a path: it names ``project.yaml``
+    # like every other surface rather than presenting the hand-edited value
+    # as the file pm attempted.
+    assert "`project.yaml`: ['c']" in text
+    assert "{'not': 'a path'}" not in text
     data = store.load(w.pm_dir)
     with patch("pm_core.prompt_gen.store.find_project_root",
                side_effect=FileNotFoundError):
@@ -4796,6 +4801,48 @@ def test_a_non_string_resolution_path_is_not_rendered_by_prompt_or_return(w):
     ret = signoff.format_signoff_return(pr)
     assert "['pm/project.yaml']" not in ret
     assert "`pm/project.yaml`" in ret
+
+
+def test_a_non_string_unresolved_path_is_not_rendered_as_a_path(w):
+    """An unresolved entry's path follows the same hand-edited-state contract.
+
+    An ``unresolved`` entry is labelled "attempted — NOT resolved", but its
+    ``path`` member is still a path: a non-string is not one.  The sign-off
+    prompt, the return text and ``pm pr show`` must name the file pm can only
+    have attempted (``project.yaml``) instead of printing the raw value as a
+    path, so a hand-edited record cannot make pm name a file it never touched.
+    """
+    _metadata_conflict(w)
+
+    def _set(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"])
+        resolution["unresolved"] = [{"path": ["pm/project.yaml"],
+                                     "conflicts": ["same field changed"]}]
+        integ["resolution"] = resolution
+    store.locked_update(w.pm_dir, _set)
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "['pm/project.yaml']" not in text
+    assert "**Unresolved** `project.yaml`" in text
+
+    pr = pr_entry(w)
+    pr = dict(pr, status="in_progress", signoff_return={
+        "verdict": SIGNOFF_REVIEW, "hop": "review", "reason": "x",
+        "reviewed_head": pr["integration"]["head"],
+        "integration": pr["integration"]})
+    ret = signoff.format_signoff_return(pr)
+    assert "['pm/project.yaml']" not in ret
+    assert "`project.yaml`: ['same field changed']" in ret
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "Unresolved: ['pm/project.yaml']" not in r.output
+    assert "Unresolved: project.yaml: ['same field changed']" in r.output
 
 
 def test_a_malformed_unresolved_value_is_never_labelled_resolved(w):

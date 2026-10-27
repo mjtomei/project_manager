@@ -960,7 +960,12 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
                          "applied to the branch (clean the workdir and re-run "
                          "sign-off, which applies it).")
         for entry in integ.resolution_entries(resolution, "unresolved"):
-            lines.append(f"- **Unresolved** `{entry.get('path')}`: "
+            # Hand-edited state: a non-string path is not a path, so name the
+            # file pm can only have attempted (the same contract as the
+            # resolved-path list above) instead of printing the malformed
+            # value as one.
+            path = integ.resolution_entry_path(entry)
+            lines.append(f"- **Unresolved** `{path}`: "
                          f"{entry.get('conflicts')}")
         diff_path = resolution.get("diff_path")
         if isinstance(diff_path, str) and diff_path:
