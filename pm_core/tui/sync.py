@@ -26,6 +26,15 @@ _log = configure_logger("pm.tui.sync")
 _INTEGRITY_HOLD_SECONDS = 6.0
 
 
+def _result_integrity(result) -> dict:
+    """The merge verifications on a sync result, keyed by PR id.
+
+    ``SyncResult`` always carries them; the default keeps a stubbed result
+    (a test double, a partial namespace) from breaking the tick.
+    """
+    return getattr(result, "merge_integrity", None) or {}
+
+
 def _log_merge_integrity(app, integrity: dict) -> None:
     """Surface a sync-detected merge-integrity problem on the log line.
 
@@ -158,7 +167,7 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
         # Reload from disk and apply sync results (merged PRs) atomically.
         if result.merged_prs:
             merged_set = set(result.merged_prs)
-            integrity = getattr(result, "merge_integrity", None) or {}
+            integrity = _result_integrity(result)
 
             def apply_merged(data):
                 for pr in usable_prs(data.get("prs")):
@@ -199,7 +208,7 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
         # A sync-detected merge that published something other than the
         # signed-off candidate is recorded on the PR (merge_integrity + note);
         # surface it on the log line too.
-        _log_merge_integrity(app, getattr(result, "merge_integrity", None))
+        _log_merge_integrity(app, _result_integrity(result))
 
         # Detect PRs that became merged — either via sync or via CLI
         # (e.g. `pm pr merge` for local/vanilla backends saves status
@@ -292,7 +301,7 @@ async def startup_github_sync(app) -> None:
         if result.synced and result.updated_count > 0:
             # Apply ALL status changes atomically under lock
             updates = result.status_updates
-            integrity = getattr(result, "merge_integrity", None) or {}
+            integrity = _result_integrity(result)
             newly_merged = set()
 
             def apply_github(data):

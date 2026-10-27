@@ -133,6 +133,7 @@ class _FakeApp:
         self._root = root
         self._data = store.load(root)
         self.messages = []
+        self.log_kwargs = []
         self.status_calls = []
 
     def _update_status_bar(self, sync_state="synced"):
@@ -143,10 +144,17 @@ class _FakeApp:
 
     def log_message(self, msg, **kw):
         self.messages.append(msg)
+        self.log_kwargs.append(kw)
         return len(self.messages)
 
     def clear_log_message_later(self, delay, seq=None):
         pass
+
+
+def integrity_log_lines(app) -> list[tuple[str, dict]]:
+    """The ``Merge integrity:`` lines the TUI logged, with their kwargs."""
+    return [(m, kw) for m, kw in zip(app.messages, app.log_kwargs)
+            if m.startswith("Merge integrity:")]
 
 
 # --- pr_sync.sync_prs (the TUI background path) ---------------------------
@@ -256,6 +264,29 @@ def test_sync_prs_legacy_unbound_approval_records_nothing(sync_github):
     assert "merge_integrity" not in pr_entry(sync_github)
 
 
+def test_sync_prs_workdir_gone_verifies_from_the_sync_workdir(sync_github):
+    """With the PR's workdir gone, the check runs in the workdir sync used.
+
+    `sync_prs` reads merge status from another PR's workdir when the PR's own
+    is gone; verification must use that same directory (and the project repo,
+    which has been pulled) instead of skipping the check.
+    """
+    merge_on_remote(sync_github, extra=True)
+    other = sync_github.tmp / "home" / ".pm" / "workdirs" / "proj" / "other"
+    git(sync_github.tmp, "clone", "-q", str(sync_github.remote), str(other))
+    # The project repo (the fallback fetch source) has since pulled the merge.
+    git(sync_github.main, "fetch", "-q", "origin")
+    git(sync_github.main, "merge", "-q", "--ff-only", "origin/master")
+    shutil.rmtree(sync_github.wd)
+
+    result = pr_sync.sync_prs(sync_github.pm_dir, force=True)
+
+    assert PR in result.merged_prs
+    v = result.merge_integrity.get(PR)
+    assert v is not None and "not the approved head" in v.problem
+    assert "merge_integrity" in pr_entry(sync_github)
+
+
 # --- pr_sync.sync_from_github (startup / pm pr sync-github) ----------------
 
 def test_sync_from_github_records_integrity_for_unapproved_merge(sync_github):
@@ -303,7 +334,11 @@ def test_tui_normal_sync_applies_integrity(sync_github):
     pr = store.get_pr(app._data, PR)
     assert pr["status"] == "merged"
     assert "not the approved head" in pr["merge_integrity"]["problem"]
-    assert any(m.startswith("Merge integrity:") for m in app.messages)
+    lines = integrity_log_lines(app)
+    assert len(lines) == 1 and "not the approved head" in lines[0][0]
+    # Held so the tick's "Synced: N PR(s) merged" line does not paint over it.
+    assert lines[0][1].get("force") is True
+    assert lines[0][1].get("hold") == tui_sync._INTEGRITY_HOLD_SECONDS
 
 
 def test_tui_startup_github_sync_applies_integrity(sync_github):
@@ -315,7 +350,10 @@ def test_tui_startup_github_sync_applies_integrity(sync_github):
     pr = store.get_pr(app._data, PR)
     assert pr["status"] == "merged"
     assert "not the approved head" in pr["merge_integrity"]["problem"]
-    assert any(m.startswith("Merge integrity:") for m in app.messages)
+    lines = integrity_log_lines(app)
+    assert len(lines) == 1 and "not the approved head" in lines[0][0]
+    assert lines[0][1].get("force") is True
+    assert lines[0][1].get("hold") == tui_sync._INTEGRITY_HOLD_SECONDS
 
 
 # --- CLI pm pr sync --------------------------------------------------------

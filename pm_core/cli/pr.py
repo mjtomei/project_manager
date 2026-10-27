@@ -2916,12 +2916,12 @@ def pr_sync_github():
     # A discovered merge that published something other than the signed-off
     # candidate is recorded on the PR (merge_integrity + note); say so here
     # too, like `pm pr sync` does, rather than only in the log file.
-    for verified in result.merge_integrity.values():
+    for pr_id, verified in result.merge_integrity.items():
         if verified.problem:
             click.echo(f"WARNING: {verified.problem}.", err=True)
         elif verified.error:
-            click.echo(f"WARNING: could not verify GitHub's merge: "
-                       f"{verified.error}.", err=True)
+            click.echo(f"WARNING: could not verify GitHub's merge of "
+                       f"{pr_id}: {verified.error}.", err=True)
 
     if result.updated_count > 0:
         click.echo(f"Updated {result.updated_count} PR(s).")

@@ -130,7 +130,7 @@ applies the merged status.
    line so the user sees it without opening the PR. "Could not verify" stays
    log-file-only to avoid noise on transient network failures.
 
-## 6. Review refinements (c703 i1/i2)
+## 6. Review refinements (c703 i1/i2/i3)
 
 These changed details of R2/R3 after the implementation landed; the
 requirements above still hold.
@@ -152,6 +152,18 @@ requirements above still hold.
   PRs without a bound approval never fetch. Left for QA to exercise: a merge
   detected while another integration check holds that lock delays the
   background sync (status bar stays "pulling"); it does not block the UI.
+- i3: the TUI's `getattr(result, "merge_integrity", ...)` default is kept (a
+  stubbed `SyncResult` in `tests/test_log_message_force.py` has no such
+  attribute) but moved behind one `_result_integrity` helper instead of three
+  inline copies; `pm pr sync-github`'s could-not-verify warning names the PR
+  like `pm pr sync` and the log line do; tests pin the held log line
+  (`force=True`, `hold=_INTEGRITY_HOLD_SECONDS`) and cover `sync_prs`'s
+  workdir-gone fallback (verification runs in the workdir the sync detected
+  from). The verifier itself is unchanged: a fetched base that does not show
+  the merge is still recorded as "did not publish the signed-off candidate"
+  (the deliberate pr-ac10f03 semantics —
+  `test_github_already_merged_elsewhere_is_still_verified`), so a stale local
+  project repo used as the fetch source can produce that general problem.
 
 No **[UNRESOLVED]** ambiguities.
 
