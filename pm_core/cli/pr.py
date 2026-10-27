@@ -17,7 +17,7 @@ from pathlib import Path
 import click
 import yaml
 
-from pm_core import store, graph, git_ops, prompt_gen
+from pm_core import store, graph, git_ops, prompt_gen, merge_integrity
 from pm_core.pr_utils import VALID_PR_STATES
 from pm_core.shell import shell_quote
 from pm_core import pr_sync as pr_sync_mod
@@ -2519,83 +2519,33 @@ def _publish_github(root: Path, pr_entry: dict, workdir: str,
 def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
                          target_repo: str, base_branch: str, base_sha: str,
                          head: str, bound: dict) -> None:
-    """Check GitHub's merge commit is the approved candidate; record if not."""
-    from pm_core import integration
+    """Check GitHub's merge commit is the approved candidate; record if not.
+
+    The check itself lives in :mod:`pm_core.merge_integrity` so the sync paths
+    (TUI background/startup, ``pm pr sync``) verify discovered merges exactly
+    as the publisher does.  Recording happens here, under the store lock.
+    """
     pr_id = pr_entry["id"]
-    tip, err = integration.fetch_base(workdir, target_repo, base_branch)
-    if err or not tip:
+    result = merge_integrity.verify_github_merge(
+        pr_id, workdir, target_repo, base_branch, base_sha, head, bound)
+    if result.error:
         click.echo(f"WARNING: could not verify GitHub's merge of {pr_id}: "
-                   f"{err or 'no base revision'}.", err=True)
+                   f"{result.error}.", err=True)
         return
-    log = git_ops.run_git("log", "--merges", "--format=%H %P %T",
-                          f"{base_sha}..{tip}", cwd=workdir, check=False)
-    if log.returncode != 0:
-        # The signed-off base is not readable here: unknown, not a mismatch.
-        click.echo(f"WARNING: could not verify GitHub's merge of {pr_id}: "
-                   f"{_git_detail(log)}.", err=True)
+    if result.problem is None:
         return
-    found = None
-    for line in (log.stdout or "").splitlines():
-        parts = line.split()
-        if len(parts) >= 4 and head in parts[1:-1]:
-            found = parts
-    merge_sha = None
-    if found is None:
-        # No merge commit of the approved head on the base: GitHub merged
-        # another head (or squashed/rebased) — not the approved candidate.
-        # Name the merge that published the branch when one contains it.
-        published = None
-        for line in (log.stdout or "").splitlines():
-            parts = line.split()
-            for parent in parts[2:-1]:
-                if integration.is_ancestor(workdir, head, parent):
-                    published = (parts[0], parent)
-        if published:
-            merge_sha = published[0]
-            problem = (f"GitHub merged {pr_id} at {published[1][:12]}, not "
-                       f"the approved head {head[:12]} (its branch had "
-                       f"commits that were not signed off); merge "
-                       f"{merge_sha[:12]} on {base_branch}")
-        else:
-            problem = (f"no merge commit of the approved head {head[:12]} on "
-                       f"{base_branch} {tip[:12]}; GitHub did not publish the "
-                       f"signed-off candidate")
-    else:
-        merge_sha, first_parent, tree = found[0], found[1], found[-1]
-        if first_parent == base_sha and tree == bound.get("candidate_tree"):
-            return
-        if first_parent != base_sha:
-            problem = (f"GitHub merged {pr_id} onto {first_parent[:12]}, not "
-                       f"the signed-off base {base_sha[:12]} (the base moved "
-                       f"during publication)")
-        else:
-            problem = (f"GitHub merged {pr_id} onto the signed-off base "
-                       f"{base_sha[:12]}, but its merge result differs from "
-                       f"the approved candidate")
-        problem += (f"; published tree {tree[:12]}, approved "
-                    f"{(bound.get('candidate_tree') or '?')[:12]}")
 
     # Recorded and noted on the PR (notes reach every later session and
     # `pm pr note list`), not only printed.  Verification re-runs on every
     # recovery (--propagation-only after a repo-update window, a repeated
     # --no-signoff-check): note a given problem once.
-    text = f"Merge integrity: {problem}."
-    created = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
     def _apply(d):
         p = store.get_pr(d, pr_id)
         if p is not None:
-            p["merge_integrity"] = {"problem": problem, "merge_sha": merge_sha}
-            notes = p.get("notes") or []
-            if not any(n.get("text") == text for n in notes):
-                note_id = store.generate_note_id(
-                    pr_id, text, {n.get("id") for n in notes})
-                p["notes"] = notes + [{
-                    "id": note_id, "text": text,
-                    "created_at": created, "last_edited": created}]
+            merge_integrity.apply_to_pr(p, result.problem, result.merge_sha)
 
     store.locked_update(root, _apply)
-    click.echo(f"WARNING: {problem}.", err=True)
+    click.echo(f"WARNING: {result.problem}.", err=True)
 
 
 def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
@@ -2892,6 +2842,7 @@ def pr_sync():
 
     # Check merge status outside the lock (network/git calls)
     merged_ids = set()
+    integrity_by_pr: dict[str, merge_integrity.MergeVerification] = {}
     for pr_entry in prs:
         if pr_entry.get("status") not in ("in_review", "in_progress", "qa", "sign_off"):
             continue
@@ -2904,6 +2855,24 @@ def pr_sync():
             merged_ids.add(pr_entry["id"])
             click.echo(f"  ✅ {_pr_display_id(pr_entry)}: merged")
             updated += 1
+            # A merge pm did not publish is verified against the signed-off
+            # candidate before it is finalized (pr-2e06289).  The TUI sync
+            # and `pm pr sync-github` do the same in pm_core.pr_sync.
+            try:
+                verified = merge_integrity.verify_detected_merge(
+                    root, data, pr_entry, str(check_dir), base_branch)
+            except Exception as e:
+                _log.warning("Merge integrity check failed for %s: %s",
+                             pr_entry["id"], e)
+                verified = merge_integrity.MergeVerification(error=str(e))
+            if verified is not None:
+                if verified.problem:
+                    integrity_by_pr[pr_entry["id"]] = verified
+                    click.echo(f"WARNING: {verified.problem}.", err=True)
+                elif verified.error:
+                    integrity_by_pr[pr_entry["id"]] = verified
+                    click.echo(f"WARNING: could not verify GitHub's merge of "
+                               f"{pr_entry['id']}: {verified.error}.", err=True)
 
     if updated:
         def apply(data):
@@ -2911,6 +2880,10 @@ def pr_sync():
                 if pr["id"] in merged_ids:
                     pr["status"] = "merged"
                     _record_status_timestamp(pr, "merged")
+                    verified = integrity_by_pr.get(pr["id"])
+                    if verified is not None and verified.problem:
+                        merge_integrity.apply_to_pr(
+                            pr, verified.problem, verified.merge_sha)
 
         data = store.locked_update(root, apply)
         trigger_tui_refresh()
