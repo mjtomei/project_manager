@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-001
+  active_pr: pr-e102089
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -30781,7 +30781,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-12T22:54:05.748558+00:00'
+  updated_at: '2026-10-27T01:11:58.082018+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30801,6 +30801,471 @@ prs:
       select_window should also cover this.'
     created_at: '2026-10-12T22:54:05Z'
     last_edited: '2026-10-12T22:54:05Z'
+  - id: note-571f279
+    text: 'QA S2 (2026-10-22) setup gaps: spec PATH omits ~/.local/bin so fake-claude
+      shim is missing (panes die rc=127) — append it after /usr/bin; fake planner
+      writes no qa.md so runs end INPUT_REQUIRED — seed pm/specs/<pr>/qa.md in each
+      PR workdir before needing a QA PASS.'
+    created_at: '2026-10-22T15:14:44Z'
+    last_edited: '2026-10-22T15:14:44Z'
+  - id: note-85ccf50
+    text: 'QA S1 incidental fix af42a1d9: launch_pane "Launched/Focused existing <role>
+      pane" now log_message(force=True). L pressed as auto-QA started landed in the
+      sticky "Review loop done ✓ PASS" window and the confirmation never painted (debug:
+      "(hidden by sticky message)"). Test: tests/test_log_message_force.py::test_launch_pane_confirmation_shown_while_sticky.'
+    created_at: '2026-10-22T15:20:09Z'
+    last_edited: '2026-10-22T15:20:09Z'
+  - id: note-50bda3a
+    text: 'S3 refine (zz t self-driving): PASS-short-of-count restarts always hit
+      the existing-window path (the main qa-<pr> window stays after a run), so they
+      never select, even on master. Only a run whose qa-<pr> window is gone before
+      the restart reaches the first-creation branch this PR gates. The refined S3
+      adds a review->QA bounce in which the user closes the qa-<pr>* windows during
+      the self-driving review. qa-pass-count is not a `pm set` setting ("Unknown setting"),
+      so write ~/.pm/settings/qa-pass-count directly. A fake planner cannot write
+      the QA spec: run `pm pr spec <pr> qa` first, or the run stops at INPUT_REQUIRED.'
+    created_at: '2026-10-22T15:07:56Z'
+    last_edited: '2026-10-22T15:07:56Z'
+  - id: note-1212844
+    text: 'QA S3 (2026-10-22) incidental fixes: (1) 8b793611 zz t / start_qa now arm
+      the shared 1 s poll timer — on a PR with no workdir at the last display refresh,
+      the run PASS was never processed (no self-driving restart) until a manual r;
+      (2) 59254fe1 "QA PASS (N/M consecutive) — restarting QA" now held 3 s (it was
+      overwritten in the same frame by "Starting QA", never painted). Focus Thens
+      of S3 all held post-fix.'
+    created_at: '2026-10-22T15:26:49Z'
+    last_edited: '2026-10-22T15:26:49Z'
+  - id: note-ff1551a
+    text: 'QA S7 (2026-10-22) incidental fixes: (1) cff91240 the first zz t on an
+      in_review PR now moves it to qa (start_or_stop_qa_loop skipped start_qa''s transition,
+      so the PR stayed in_review for the whole first run); (2) 976b6f6a plain-t NEEDS_WORK
+      with auto-start off now calls _update_display, so the tree shows in_review without
+      a refresh. Spec note: the interactive Scenario 0 pane consumes the first qa_scenario
+      scripted verdict, so a bounce needs ["NEEDS_WORK","NEEDS_WORK","PASS"]. send-keys
+      has no source client, so select_window targets whichever grouped session was
+      active last; drive keys through the rec client (tmux -L rec send-keys -t base).'
+    created_at: '2026-10-22T16:24:29Z'
+    last_edited: '2026-10-22T16:24:29Z'
+  - id: note-81874ed
+    text: 'S8 refine: two clients attached to the SAME tmux session share its current
+      window, so a user select_window on $S moves both; "only the user client moves"
+      needs one client per session ($S user client typed via tmux -L rec send-keys,
+      plus $S~1/$S~2 from a 2nd/3rd `pm session`). auto-sequence on a closed PR prints
+      "unknown status: closed" exit 2 (merged: "merged" exit 0); qa-run-bg logs "is
+      closed; skipping QA". S5 scripts in /pm-captures/scenarios/5/scripts are a working
+      base.'
+    created_at: '2026-10-22T15:51:07Z'
+    last_edited: '2026-10-22T15:51:07Z'
+  - id: note-d23d3d5
+    text: 'QA S12 (2026-10-22) PASS, no edits: 5 concurrent QA starts (autostart A/B/C
+      + CLI auto-sequence D + user t on E) → only select_window was $S:qa-E; closed/merged
+      auto-sequence + qa-run-bg skip cleanly. Story-3 background-first race: in the
+      no-fzf popup pre-type t, send only Enter the instant "Starting QA for <pr>"
+      hits the debug log, then q on "starting: qa" — otherwise qa-<pr>-s0 (spinner
+      prefix match) appears first and the popup closes on window_open. Scripts in
+      /pm-captures/scenarios/12/scripts.'
+    created_at: '2026-10-22T17:27:37Z'
+    last_edited: '2026-10-22T17:27:37Z'
+  - id: note-cb892a1
+    text: 'QA S9 (2026-10-22) PASS on 6e2d15ef: auto-start impl→review→QA→SIGNOFF_REQA→QA→SIGNOFF_MERGE
+      with $S + $S~1 clients, 556/556 samples on main, 0 select_window lines; L over
+      sticky shows Launched/Focused. Spec gotchas: L focuses the new log pane, so
+      a 2nd L needs C-b Left first (else it lands in tail -f); fake impl makes no
+      commits → 2nd sign-off MERGE coerced to BLOCKED, so commit a file in the PR
+      workdir during impl (/pm-captures/scenarios/9/scripts/impl_commit.sh).'
+    created_at: '2026-10-22T17:31:28Z'
+    last_edited: '2026-10-22T17:31:28Z'
+  - id: note-115e982
+    text: 'QA S11 (2026-10-22) incidental fix 456c0830: self-driving NEEDS_WORK bounce
+      line "QA NEEDS_WORK for <pr> — returning to review" is now held CONFIRM_HOLD_SECONDS
+      (it was replaced in the same frame by "Review loop started" and never painted).
+      Test: tests/test_qa_self_driving.py::TestNeedsWorkStrict::test_needs_work_starts_review_loop_directly.
+      All S11 focus Thens (R7/R12/E4) held pre- and post-fix; scripts in /pm-captures/scenarios/11/scripts
+      (drive.sh runs all triples unattended).'
+    created_at: '2026-10-22T18:41:25Z'
+    last_edited: '2026-10-22T18:41:25Z'
+  - id: note-astra-transfer-20261026
+    text: 'User-authorized transfer 2026-10-26: bring #242 and #243 from the main
+      session into pm-project_manager-5b29c418 and run with provider:chatgpt-astra
+      (chatgpt/gpt-6-astra-high) for ALL roles including helpers and sign-off. Preserve
+      existing branch/workdir/source/dirty files, drafts and QA evidence. Old main-session
+      autostart is off. Fresh Astra review is required at transfer, then native review/QA/sign-off
+      with wait_for_merge and spec review OFF. Existing QA findings remain required;
+      no invented verdicts or waived coverage. Existing main-session captures were
+      copied intact to this session before launch. No standalone follow-ups are authorized.'
+    created_at: '2026-10-26T13:21:44.912441+00:00'
+    last_edited: '2026-10-26T13:21:44.912441+00:00'
+  - id: note-7b1e0ce
+    text: 'Review 8e01 i1 on merged e05a50cf (master 211a6128): reproduced and fixed
+      two QA-round regressions: NEEDS_WORK repaint now flushes pending navigation
+      writes before reloading, and held PASS-count / NEEDS_WORK confirmations now
+      override existing sticky review lines. Three new behavioral cases failed before
+      the fixes; focused tests pass (92). Original focus regression also fails for
+      the right reason when only the old select condition is restored in memory. Impl/QA
+      specs synchronized. Evidence: /pm-captures/review-8e01-i1/. Historical captures
+      validate the original bug, not approval of the merged result; native QA remains
+      required. Preserved the transfer stash and all dirty Astra role settings; no
+      standalone follow-ups created.'
+    created_at: '2026-10-26T13:31:41Z'
+    last_edited: '2026-10-26T13:31:41Z'
+  - id: note-17ff378
+    text: 'Review 8e01 i2: fixed the remaining R12 startup race. start_qa_background
+      now marks the accepted run active before starting its worker (resetting on thread-start
+      failure), so slow initial model/state loading cannot make the shared poll timer
+      stop for a PR without a workdir. Deterministic gated-worker tests for both start_qa
+      and zz t failed before and pass after; focused tests 95 passed. Evidence: /pm-captures/review-8e01-i2/.
+      Original-condition mutation still fails on the unwanted select_window call.
+      Transfer settings/stash preserved; native QA still required; no standalone follow-ups.'
+    created_at: '2026-10-26T13:46:11Z'
+    last_edited: '2026-10-26T13:46:11Z'
+  - id: note-ab54963
+    text: 'S20 refinement: pm pr auto-sequence is one tick; prepare its review PASS
+      through its own review launch/transcript, not a TUI-only PASS. qa-run-bg terminal
+      guards log skipping QA (no dedicated stdout). Popup command surface prefix+M
+      -> pr qa ID works without fzf/open PR windows; fake planner delay occurs after
+      QA window creation and cannot guarantee pre-window suppression overlap. Capture
+      actual ordering, including scenario-0 windows; unit suppress-flag tests are
+      supplemental only. Removing explicit autostart targets before QA completion
+      preserves running workers and gives a pre-signoff boundary; stop-before-merge
+      alone does not stop signoff.'
+    created_at: '2026-10-26T14:17:13Z'
+    last_edited: '2026-10-26T14:17:13Z'
+  - id: note-86ff5e8
+    text: 'QA S20 (2026-10-26) runtime evidence: story1c five distinct runs A-E, only
+      user E selected both base clients; grouped clients stayed main, E finalized
+      ~31s before A-C. Story2 L visibly opened main log amid s0/main window creation,
+      registry roles retained. Story3 real prefix-M pr qa popup: background accepted,
+      user deduplicated, q before any qa-* window; one PASS run, no focus until separate
+      t. Stronger suppression ownership ordering not established; mocked tests 2 passed
+      supplemental only. Story4 closed/merged guards returned 2/0/0/0, no QA, unrelated
+      U finalized PASS. All finalizers explicitly FINALIZE_DONE and TUI processed
+      completion without refresh; stable continuation captured. Evidence /pm-captures/scenarios/20/{story1c,story2,story3,story4}/manifest.md.
+      Driver gotchas: pm session already creates ~1; keep CLI actor pane alive so
+      detached child does not inherit a dead TMUX_PANE. qa_status overall PASS precedes
+      finalization: wait for QA complete/finalize and TUI completion, not that file
+      alone.'
+    created_at: '2026-10-26T14:40:14Z'
+    last_edited: '2026-10-26T14:40:14Z'
+  - id: note-81b8a6a
+    text: 'S20 re-evaluation after verifier rejection: original PASS omitted required
+      replayable CLI captures (static logs were insufficient). Re-executed all four
+      stories in fresh recorded-story* fixtures; 35 detached CLI commands now have
+      live asciinema .cast + verified H.264/yuv420p .mp4 and per-command recipe manifests,
+      including D-review/D-next and all four CL/MG guards. Fresh five-run PASS/finalizers,
+      E 31s before A-C, only E focus; log pane confirmation/registry held; CL/MG exits
+      2/0/0/0 and U finalized. Popup recorded-story3 missed ordering (explicit not
+      reached); bounded retry recorded-story3b reached q before any qa window, background-first/user-dedup,
+      one finalized PASS, separate t after completion. Stronger private ownership
+      case not claimed. Uninterrupted rerun captures include FINALIZE_DONE and >15s
+      stability. Evidence /pm-captures/scenarios/20/manifest.md and recorded-story*/cli/*/manifest.md.
+      No code change.'
+    created_at: '2026-10-26T14:59:16Z'
+    last_edited: '2026-10-26T14:59:16Z'
+  - id: note-09e74e8
+    text: 'QA S16 re-evaluation: exact early-L rerun confirmed planner absent from
+      immediate pane registry while planning; prior PASS overclaimed this assertion
+      and late-stage repeat did not repair it. Fix registers qa-planner before polling
+      and avoids duplicate status-pane registration. Pre-fix runtime and two failing
+      regression tests preserved; post-fix exact early-L run and per-client transcripts
+      under /pm-captures/scenarios/16/{pre-fix,post-fix}. Original lifecycle/focus
+      evidence remains valid for 7ff754fd; no standalone follow-up created.'
+    created_at: '2026-10-26T15:03:50Z'
+    last_edited: '2026-10-26T15:03:50Z'
+  - id: note-d4b76f0
+    text: 'S16 re-evaluation runtime post-fix: exact L before any planned scenario
+      window now snapshots qa-planner %9 in QA @8 and log %10 in main @0; same planner
+      subsequently launched scenario 2; second L reused log, three clients stayed
+      on main, all three have pipe-pane transcripts + casts/videos. 89 focused tests
+      pass. Full suite: 43 failed/3475 passed/1 skipped/17 errors with shim-first
+      PATH; failing modules under real-Git-first PATH: 137 passed, one hook receiver
+      installer failure, also reproduced on untouched 7ff754fd baseline. No standalone
+      follow-up authorized; evidence /pm-captures/scenarios/16/{pre-fix,post-fix}.'
+    created_at: '2026-10-26T15:08:36Z'
+    last_edited: '2026-10-26T15:08:36Z'
+  - id: note-4f734a9
+    text: 'S19 verification correction: the original PASS incorrectly accepted 18.743/18.776-second
+      first restart confirmations as a minimum hold; the scenario requires approximately
+      3 seconds. Strict 2.7–3.5-second audits now fail the original recordings. Root
+      cause: forced held QA confirmation left the prior helper review sticky deadline
+      active, suppressing deferred progress at hold expiry. Fix clears obsolete sticky
+      protection only when a forced hold is actually displayed; regression tests now
+      exercise expiry (failed before, 76 focused tests pass after). Fresh complete
+      retained/cleanup replays are running; evidence cross-linked under /pm-captures/scenarios/19/pre-fix
+      and post-fix. No standalone follow-up created.'
+    created_at: '2026-10-26T15:00:14Z'
+    last_edited: '2026-10-26T15:00:14Z'
+  - id: note-6c5cd34
+    text: 'S19 timing-fix validation so far: first automatic PASS confirmation now
+      3.000/3.003 s in real three-client casts, versus 18.743/18.776 s pre-fix. Full
+      suite under inherited wrapper env: 3473 passed, 43 failed, 17 errors, 1 skipped;
+      all 60 failed/error cases pass with real Git PATH and PM_HOST_HOME unset. One
+      retained replay missed second helper overlap and is not counted for that precondition;
+      fresh retained retry has valid ~4 s overlaps. Cleanup replay reached 3/3 with
+      all intermediate holds ~3 s. Evidence and strict audits retained under post-fix;
+      final lifecycle observation still running.'
+    created_at: '2026-10-26T15:13:03Z'
+    last_edited: '2026-10-26T15:13:03Z'
+  - id: note-08d4898
+    text: 'S19 additional real-surface finding during fresh retained retry: issuing
+      zz t while setup Auto-start: already off held the log line hid the initial three-pass
+      requirement. Fixed the user-start QA-loop message with force=True while keeping
+      sticky=3; new behavioral regression failed before. Strict timing now passes;
+      cleanup replay passed all 22 checks with 65 s quiet, retained retry passed timing/overlap/focus
+      but exposed this startup failure. A final fresh retained replay and corrected-env
+      full suite are running. No coverage waived; all failed/intermediate evidence
+      retained.'
+    created_at: '2026-10-26T15:22:19Z'
+    last_edited: '2026-10-26T15:22:19Z'
+  - id: note-1c43a92
+    text: 'S19 re-evaluation complete: fixed stale sticky deadline surviving forced
+      hold, and initial zz t confirmation hidden by an active setup hold. Final retained
+      replay passed all 22 strict checks: first PASS 3.029 s, NEEDS_WORK 2.999 s,
+      post-bounce 1/3 2.999 s and 2/3 3.013 s; both helper overlaps valid. Independent
+      cleanup replay passed all 22 checks, first PASS 3.003 s, no QA windows for 117.19
+      s before fresh creation. Both reached 3/3 and remained quiet for 65 s with correct
+      focus. Corrected-env final full suite: 3534 passed, 1 skipped. Original PASS
+      withdrawn; outcome NEEDS_WORK because bugs were found and fixed. Pre/post recordings
+      and failed intermediate replays retained under /pm-captures/scenarios/19; no
+      standalone follow-up.'
+    created_at: '2026-10-26T15:37:29Z'
+    last_edited: '2026-10-26T15:37:29Z'
+  - id: note-51e1fa1
+    text: 'Review fef8 i1: reproduced and fixed two regressions from early planner
+      registration: registry/layout exceptions aborted healthy QA before polling,
+      and execution-only pm qa run/recreated windows lost main-pane registration.
+      Added a best-effort shared registration helper, invoked before planning and
+      status setup, without duplicate entries for already registered panes. Both regression
+      cases failed before the fix; added real-registry idempotence and new-plan-window
+      confirmation coverage. Impl spec includes S16/S19 fixes and shared-session focus;
+      QA R3 covers execution-only and transient failures. Focus-condition mutation
+      still fails on the unwanted select_window. Validation: 332 focused passed; final
+      full suite 3540 passed, 1 skipped, 4 AsyncMock warnings (real Git PATH, PM_HOST_HOME
+      unset, declared markdown dependency in scratchpad). Evidence /pm-captures/review-fef8-i1.
+      Original pre/post captures verified; native QA of these fixes remains required.
+      Preserved transfer settings, existing QA edits, drafts and stashes; no standalone
+      follow-up created.'
+    created_at: '2026-10-26T15:57:33Z'
+    last_edited: '2026-10-26T15:58:17Z'
+  - id: note-d9e8c44
+    text: 'Review fef8 i2: found and fixed explicit t losing its focus request when
+      a background QA run was already accepted but had not created its first window.
+      The running-state dedup guard now promotes focus_on_create for the user request
+      without launching another worker; popup suppression is still consumed at creation
+      and background dedup never clears user intent. Two parameterized regression
+      cases failed before; 97 focused tests pass after. Final full suite: 3543 passed,
+      1 skipped, 3 AsyncMock warnings, real Git PATH and PM_HOST_HOME unset with declared
+      markdown dependency in scratchpad. Impl R2 and QA R4 specify this ordering.
+      Original pre/post captures verified and old-condition mutation still fails on
+      unwanted select_window. Evidence: /pm-captures/review-fef8-i2. Native QA should
+      exercise the accepted-background/no-window user start with and without popup
+      dismissal. Existing QA edits, drafts and stashes preserved; no standalone follow-up
+      created.'
+    created_at: '2026-10-26T16:10:05Z'
+    last_edited: '2026-10-26T16:13:33Z'
+  - id: note-a9db055
+    text: 'QA S24 (2026-10-26) PASS, no code change, on 66325e40. Two fresh fixtures,
+      three recorded clients each (A user on $S, B watcher on ~1, C viewer on ~2),
+      real TUI keys through A only. Story 1 (5 runs, NEEDS_WORK bounce, user kills
+      completed qa-P windows during P''s 120 s review, C follows the run1->run2 replacement):
+      exactly one select_window total (the initial zz t), A and B pinned to main throughout,
+      C parked briefly on pm-home then settled on the new qa-P, fresh background qa-P
+      created 116 s later right after "Auto-QA: review passed", held confirmations
+      2.990/2.999/2.995/3.024 s with the helper sticky line active 5.06 s / 4.07 s
+      before the first PASS and NEEDS_WORK, counts 1->1->2->3, 65 s quiet with no
+      sixth run. Story 2 (2 passes, nobody watching): restart line 3.012 s, new window
+      ID, no client movement, no select_window and no switch_sessions_to_window line,
+      second PASS 2/2 then quiet. Harness: /pm-captures/scenarios/24/scripts (prepare.py/setup.sh/attach.sh/drive.py/sample.py/cast-check.py/audit.py/render.sh)
+      plus config-story1.json/config-story2.json; HELPER_DELAY=92 s into a 120 s finalizer
+      gives a ~4-5 s sticky overlap (the fake review itself takes ~23 s to report
+      PASS). agg for aarch64 is in the session scratchpad; /tmp/pm-venv needs `pip
+      install -e /workspace pyte` (and pytest for focused tests). Evidence: /pm-captures/scenarios/24/{manifest.md,story1,story2}.'
+    created_at: '2026-10-26T17:10:38Z'
+    last_edited: '2026-10-26T17:10:38Z'
+  - id: note-5b5c4e8
+    text: 'QA S26 (2026-10-26) NEEDS_WORK, fixed: the scenario''s "every PR has its
+      own ~/.pm/runtime/<id>.json" Then failed for the PR whose QA was launched by
+      the CLI driver — `pm pr qa-run-bg` ran `run_qa_sync` without mirroring anything
+      into runtime_state, so D had no runtime entry at all (pre-fix snapshots: null
+      in all 229 samples) while TUI-owned runs (A, B, C, E) did. Fix 9a46d187: the
+      driver now records qa running before the loop (keeping a pending suppress_switch
+      that belongs to a user start), done+verdict on completion, failed on exception;
+      the merged/closed guard still returns before any write. Tests tests/test_pr_auto_sequence.py::TestQaRunBgRuntimeState
+      (3, failed before) plus 283 focused tests pass. Re-ran the full five-PR story
+      on the fixed build: every PR has runtime/<id>.json (D qa done PASS), still exactly
+      one select_window (the user t on qa-E), grouped clients on main in all 772 samples,
+      21 s quiet with identical windows/clients. Focus behavior itself was clean pre-
+      and post-fix. Evidence: /pm-captures/scenarios/26/{manifest.md,story1,story2,post-fix}.
+      No standalone follow-up.'
+    created_at: '2026-10-26T17:38:23Z'
+    last_edited: '2026-10-26T17:38:23Z'
+  - id: note-eefa6cb
+    text: 'QA S22 (2026-10-26): incidental fix df89a6f0 — a user t landing in the
+      accepted-background/no-window gap logged "QA already running for <pr>" as (hidden
+      by sticky message) under auto-start''s "targets +=" hold, so the user saw nothing;
+      the dedup answer and the "QA window for <pr> ready (focus suppressed)" reply
+      now use force=True. Pre/post evidence: /pm-captures/scenarios/22/{pre-fix,post-fix}.
+      Also for future runs: the initial zz t start logs "QA loop started for <pr>
+      (N passes required) — z t to stop", not "Starting QA for <pr>" (that appears
+      only on the self-driving restart); the popup spinner also matches qa-<pr>-s0
+      as window_open, so a single q/Esc usually loses the ~100 ms dismissal gap —
+      send it repeatedly once the spinner frame paints.'
+    created_at: '2026-10-26T17:51:15Z'
+    last_edited: '2026-10-26T17:51:15Z'
+  - id: note-c139492
+    text: 'S25 refine (code read + tmux probe on 66325e40): a fresh `pm qa run <instr>
+      --pr P` with no qa-<P> window never gets a main pane. run_qa_sync creates it
+      with new_window_get_pane(..., "echo ''QA execution''"); that command exits at
+      once, there is no remain-on-exit, so the call returns None (reproduced on a
+      scratch tmux socket). _add_status_pane is then skipped: no qa-<P> window, no
+      status pane, no qa-planner registration. fef8 i1 _register_qa_planner only takes
+      effect when a qa-<P> window already exists (panes[0][0]). Likely predates this
+      PR; compare against /opt/pm-src before classifying.'
+    created_at: '2026-10-26T16:43:38Z'
+    last_edited: '2026-10-26T16:43:38Z'
+  - id: note-abdb79e
+    text: 'QA S25 (2026-10-26) NEEDS_WORK — found and fixed: execution-only `pm qa
+      run` (and any run restarted after its qa-<P> window was killed) created the
+      QA window with `echo ''QA execution''`, which exits at once (no remain-on-exit),
+      so new_window_get_pane returned None: no qa-status split, no qa-planner registration
+      (fef8 i1 helper never ran), window gone at the end, and the finalizer skipped
+      too (it returns None when the window is absent). Fix 87f40ccb: _QA_MAIN_PANE_CMD
+      (`echo ...; exec sleep infinity`) via new _ensure_qa_main_pane(), plus pane_registry.prune_dead_windows()
+      called from _register_qa_planner so panes of a killed window no longer linger
+      under the old @id. Runtime re-run of the same story: both runs leave qa-<P>
+      with qa-planner once + qa-status (+qa-finalize), stale @ids pruned, client on
+      main; read-only-registry story and the still-open-window re-run story held (no
+      duplicate qa-planner); plan-pane story held (Launched plan pane over the sticky
+      review line, then Focused existing plan pane, one plan pane). Full suite 3551
+      passed, 1 skipped. Master /opt/pm-src also never registers the qa main pane
+      (its finalizer opens a finalize-only window), so the registration gap predates
+      the PR; losing the window/finalize pane is branch-specific. Environment notes:
+      fake planner writes no QA spec (each project seeds pm/specs/<P>/qa.md); container
+      has no `less` (story 4 used a stand-in pager); a re-run with the window still
+      open adds a second qa-status pane/entry (recorded, not required). Evidence:
+      /pm-captures/scenarios/25/ (pre-fix vs post-fix cross-linked in story1 manifests).'
+    created_at: '2026-10-26T17:54:44Z'
+    last_edited: '2026-10-26T17:54:44Z'
+  - id: note-account-switch-20261026
+    text: Account transition / controller reload handoff 2026-10-26T16:24:40.272624+00:00.
+      User authorized October29 reset and bug PRs241/242/243 -> provider:claude-work/work
+      Opus/high ALL roles/helpers/signoff; do not restore historical Astra settings.
+      Work Opus (all roles). Previous reviewer completed/pushed f50d2bc8 and emitted
+      its own NEEDS_WORK; preserve its source fixes and current work-Opus overrides.
+      Controller restart recovered current QA snapshots but native autostart attempted
+      fresh review launches; those failed during container removal, so original review
+      windows are now gone. Original source/workdir/dirty files, stashes and mounted
+      captures/transcript remain. Read /pm-captures/account-transition-20261026/prior-review-a5906f49-88b0-451b-8476-0fb92d9ca85d.jsonl
+      in chunks for exact progress; do not invent completion or waive any pending
+      QA. Original ephemeral review-container processes cannot be assumed live after
+      native cleanup. Reproduce any missing unfinished tests honestly. The new review
+      is recovery of authorized existing work, not a new PR. Manual merge/spec-review-OFF
+      gates remain unchanged. No standalone followup/autostart or master merge is
+      newly authorized.
+    created_at: '2026-10-26T16:24:40.272624+00:00'
+    last_edited: '2026-10-26T16:24:40.272624+00:00'
+  - id: note-c5f4d6f
+    text: 'S22 refine: the "accepted but no window" gap is only the pre-window setup
+      in run_qa_sync (~<1 s from "log: Starting QA for X" to the qa-X-s0 then qa-X
+      new_window lines; S12 logs). A fake planner delay runs after window creation
+      and does not widen it. The select happens after a 2 s registration sleep, so
+      a t that lands after the window exists logs "Focused QA window" instead of "QA
+      already running"; that attempt counts as a miss, so retry with a fresh PR. The
+      popup spinner sets cbreak with TCSAFLUSH, so a q sent before "── starting: qa
+      for X ──" paints gets discarded. The spinner also closes on its own when qa-X-s0
+      appears (prefix match), and then no suppress flag is set. Auto-start QA needs
+      status qa + a workdir field (pm pr start, then pm pr edit --status qa) and fires
+      on the next sync pass. The prefix+P picker from main lists only PRs that have
+      open windows, so use prefix+M "pr qa <id>". Default qa-pass-count=1 prints no
+      "(N passes required)".'
+    created_at: '2026-10-26T16:45:17Z'
+    last_edited: '2026-10-26T16:45:17Z'
+  - id: note-862434c
+    text: 'QA S27 (2026-10-27) PASS on 787e87f0, no code change: autostart impl->review->QA
+      (885 samples, 0 off-main, no select_window), L during auto-QA opens the log
+      pane in main (@0, qa-planner stays in qa-<pr>), and the SIGNOFF_REQA bounce
+      makes a replacement qa window (@10 vs @6) with 1444 samples 0 off-main. Reproduction
+      tests 63 passed; old `elif not existing_win:` mutation fails exactly the two
+      background-start tests. Harness notes for next time: (1) qa-<pr>-s0 is created
+      at planning start, so "before any sN" means before s1; (2) qa-status registers
+      in the qa window ~3s after the QA window, not at L time; (3) the first recorded
+      `tmux attach` can die silently right after `pm session` — verify list-clients
+      per session and retry (scripts/s27.py attach_clients does this); (4) panes get
+      a sanitized PATH, so set BASH_ENV at session scope and type the PATH export
+      into interactive control panes. Evidence /pm-captures/scenarios/27/.'
+    created_at: '2026-10-27T00:21:46Z'
+    last_edited: '2026-10-27T00:21:46Z'
+  - id: note-ed148c7
+    text: 'QA S30 (2026-10-27) PASS on 787e87f0, no code change: all four triples
+      held (63/63 automated Then checks; evidence /pm-captures/scenarios/30/). Five
+      launches at once (autostart A/B/C from pending, CLI auto-sequence tick loop
+      D, user t on E): the only select_window in the debug delta is target=$S:qa-<E>;
+      grouped clients on main in all 2484 samples; A-E each QA PASS + FINALIZE_DONE
+      with runtime qa done/PASS; rows A/B/C/D sign_off, E qa, no manual r. CL/MG guards:
+      ''unknown status: closed'' on stderr/exit 2 (absent when stderr redirected),
+      ''merged''/exit 0, qa-run-bg closed exit 0 + skip line, no qa-CL/qa-MG window,
+      clients on main. H merged mid-run: ''QA aborted after window creation: <H> is
+      merged; tearing down qa window'', qa-H* gone, runtime H has no qa action, runs
+      popup shows no live run. autostart F racing the user''s t on G: only select_window
+      is target=$S:qa-G, 2.3 s after t; S~1 on main throughout; both runs done PASS.
+      Harness notes for future S30: pending auto-start targets do reach QA (impl idle
+      -> in_review -> review PASS -> qa); armed interactive actor panes never create
+      a done file (read the pane scrollback); TUI-owned runs mirror runtime ''running''
+      ~19 s after window creation while CLI qa-run-bg writes it immediately (pre-existing
+      on master).'
+    created_at: '2026-10-27T00:22:12Z'
+    last_edited: '2026-10-27T00:22:12Z'
+  - id: note-04c8a55
+    text: 'QA S29 (2026-10-27) PASS on 787e87f0, no code change. Story 1: execution-only
+      `pm qa run` (shell in a detached driver window) created qa-pr-95325c4 with the
+      branch main pane (`echo "QA execution"; exec sleep infinity`) + qa_status.py
+      split, qa-planner count 1 in flight, Result: PASS + FINALIZE_DONE, three panes
+      at the end (main/qa-status/qa-finalize, one of each role); the parked client
+      stayed on `main` in all 273 samples and L painted "Launched log pane" registering
+      log %11 under @0. Story 2: killed @5/@6, re-ran -> new @10 with main+status
+      and one qa-planner; registry prune removed @5/@6 but kept PR B @7/@8 with all
+      panes; client on main in all 378 samples. Story 3: over the sticky "Review loop
+      done ... ✓ PASS (1 iteration)", L -> "Focused existing log pane", first v ->
+      "Launched plan pane" (one plan role %28, one less process), second v -> "Focused
+      existing plan pane", plan count still 1. Story 4: tests/test_qa_execution_only_window.py
+      + tests/test_pane_registry.py = 51 passed (incl. both prune guard tests); supplemental
+      tests/test_qa_background_focus.py 19 passed. Harness gotchas: `pm qa run` from
+      a plain shell outside tmux finds no session, so drive it from a tmux pane; `tmux
+      pipe-pane -o` silently keeps an existing pipe, so the story-3 scrollback pipe
+      was not created (cast + pyte frames used instead). Incidental finding filed
+      as pr-e102089: `pm qa run` on a closed PR prints "Result: UNKNOWN" exit 0 and
+      outside a session prints a bare "Result: ERROR" — the skip reason is dropped.
+      Evidence: /pm-captures/scenarios/29/.'
+    created_at: '2026-10-27T00:34:34Z'
+    last_edited: '2026-10-27T00:34:34Z'
+  - id: note-502ac45
+    text: 'QA S31 (2026-10-27) PASS on 787e87f0, no code change. For future runs:
+      at the 3 s hold expiry the line shows the NEWEST deferred message. With the
+      fast fake planner, "Starting QA for <P>..." is almost always superseded by "QA
+      [P]: Plan: 1 scenario(s)" (both logged "(hidden by sticky message)") — that
+      is log_message documented newest-deferred-wins behaviour, not a missing follow-on.
+      The clean case is a NEEDS_WORK bounce, where "Review loop started for <P> loop=..."
+      is the newest deferred message and does paint at expiry. Harness notes: per-story
+      HOME/TMUX_TMPDIR under /scratch with one asciinema client; move the client back
+      to main only AFTER the user start focus select (~2 s after the key), else it
+      is pulled back to qa-<P>; story C needs qa_finalize delay ~70 s (a helper review
+      takes ~23 s here) so the verdict lands inside a helper review-done sticky; with
+      two PRs the tree sorts them side by side, so arrow to the other PR may be Left.
+      Captures: /pm-captures/scenarios/31/.'
+    created_at: '2026-10-27T01:11:58Z'
+    last_edited: '2026-10-27T01:11:58Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    signoff: provider:deepseek-flash
+    merge: provider:deepseek-flash
 - id: pr-7c32e44
   plan: bugs
   title: 'Bug: auto-start row says "merge attempt failed" for a dep whose auto-merge
@@ -31211,11 +31676,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T04:06:05.797085+00:00'
-  updated_at: '2026-10-13T04:06:05.797085+00:00'
+  updated_at: '2026-10-22T16:57:38.711537+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-959559f
+    text: 'Largely fixed by pr-f094946 af42a1d9: pane_ops.launch_pane "Launched/Focused
+      existing <role> pane" and _launch_in_plans_window "Launched <role> pane" now
+      log_message(force=True) (force bypasses sticky AND holds, the existing confirmation
+      convention, not the proposed user= flag). Test: tests/test_log_message_force.py::test_launch_pane_confirmation_shown_while_sticky.
+      Remaining unforced key reply of this class: qa_loop_ui.focus_or_start_qa "Focused
+      QA window for <pr>". Verify on master after pr-f094946 merges; close or narrow.'
+    created_at: '2026-10-22T16:57:38Z'
+    last_edited: '2026-10-22T16:57:38Z'
 - id: pr-adfdce3
   plan: bugs
   title: 'Bug: pm autostart CLI commands move focus from the plans/QA view to the
@@ -32631,11 +33105,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T14:01:30.872312+00:00'
-  updated_at: '2026-10-13T14:01:30.872312+00:00'
+  updated_at: '2026-10-22T17:04:03.852934+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-568d5cc
+    text: 'Likely fixed by pr-f094946 cff91240: start_or_stop_qa_loop now calls qa_loop_ui._enter_qa_status
+      (shared with start_qa), so the first zz t on an in_review PR moves it to qa
+      before the run starts; with the PR in qa, arming auto-start should no longer
+      launch a review loop for it. Test: tests/test_qa_self_driving.py::TestZZTStart::test_moves_in_review_pr_to_qa.
+      Verify the auto-start half on master after pr-f094946 merges; close or narrow.'
+    created_at: '2026-10-22T17:04:03Z'
+    last_edited: '2026-10-22T17:04:03Z'
 - id: pr-a9fa258
   plan: bugs
   title: 'Bug: sign-off driver relaunches a new router after every verdict while the
@@ -35477,6 +35959,90 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
   updated_at: '2026-10-25T21:27:23.093198+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-154595f
+  plan: bugs
+  title: QA scenario numbering leaks across projects that share a PR id
+  branch: pm/pr-154595f-qa-scenario-numbering-leaks-across-projects-that-s
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py _next_scenario_offset globs ~/.pm/workdirs/qa/{pr_id}-*/s-*
+    with no project scoping. PR ids are title-hash deterministic, so two projects
+    each with a PR titled "Add login feature" (pr-95325c4) share the namespace: the
+    second project''s first QA run logged "Renumbering 1 scenario(s) to start at 2
+    (planner used wrong numbering)" and created qa-<pr>-s2 instead of -s1. Repro:
+    two throwaway projects, same PR title, run QA in the first then the second. Seen
+    in pr-f094946 QA S1 (2026-10-22).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T15:20:10.391157+00:00'
+  updated_at: '2026-10-22T15:20:10.391157+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-064fe5b
+  plan: bugs
+  title: 'Bug: user zz t over a leftover qa-<pr> window replaces it without focusing
+    the new one'
+  branch: pm/pr-064fe5b-bug-user-zz-t-over-a-leftover-qa-pr-window-replace
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py window setup: when a previous run left qa-<pr>
+    windows, a user-initiated zz t (focus_on_create=True) kills and recreates them,
+    but only sessions already watching the old window follow (switch_sessions_to_window);
+    the pressing client stays on the TUI. The first-time-creation path (no window)
+    does select_window. Repro (pr-f094946 QA S7, 2026-10-22): zz t on a PR, let run
+    finish PASS 1/1, both clients on main, press zz t again -> no select_window/switch,
+    client stays on main. Same on master. Plain t on an existing window focuses it,
+    so zz t is the odd one out.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T16:24:28.617755+00:00'
+  updated_at: '2026-10-22T16:24:28.617755+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e102089
+  plan: bugs
+  title: 'Bug: pm qa run reports "Result: UNKNOWN"/"Result: ERROR" with no reason
+    when QA is skipped (closed/merged PR, or no pm session)'
+  branch: pm/pr-e102089-bug-pm-qa-run-reports-result-unknown-result-error-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py run_qa_sync early returns + pm_core/cli/qa.py
+    qa_run.
+
+
+    Repro A (closed PR): in a pm session, mark a PR closed (pm pr edit <pr> --status
+    closed) and run `pm qa run <instruction> --pr <pr>` from a shell inside the session.
+    run_qa_sync logs "QA aborted: <pr> is closed; not running QA against a merged/closed
+    PR" and returns without setting latest_verdict, so the CLI prints "Result: UNKNOWN"
+    and exits 0 — nothing tells the user QA was deliberately skipped, and an automation
+    driver sees success.
+
+
+    Repro B (no session): run `pm qa run <instruction> --pr <pr>` from a shell outside
+    tmux. run_qa_sync sets latest_output="No pm session found" and returns before
+    on_update is ever called, so the CLI prints only "Result: ERROR" with the reason
+    dropped.
+
+
+    Seen during QA scenario 29 on pr-f094946 (execution-only `pm qa run` ownership
+    checks); the scenario itself passed. Suggested fix: surface the early-return reason
+    (CLI echo and/or _notify before returning) and use a non-zero exit code for skipped
+    runs.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T00:34:05.592694+00:00'
+  updated_at: '2026-10-27T00:34:05.592694+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
