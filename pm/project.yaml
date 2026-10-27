@@ -34032,7 +34032,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T08:25:20.228153+00:00'
+  updated_at: '2026-10-27T08:55:47.708284+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35039,6 +35039,29 @@ prs:
       next scheduler pass". Captures: /pm-captures/scenarios/18/{story1-merge-refusal,story2-autostart-relaunch,story3-rerun-pointer,story4-suppression-after-work,story5-new-verdict,story6-return-suppression}.'
     created_at: '2026-10-27T08:25:20Z'
     last_edited: '2026-10-27T08:25:20Z'
+  - id: note-c6efb3d
+    text: 'signoff (claude-work) 2026-10-27 #2: SIGNOFF_IMPL — metadata-only merge,
+      NO code work. The recorded check vs master@450a6362 is `conflict` because the
+      running pm (/opt/pm-src 6406084d) predates this PR resolver; pm routes any conflict
+      to impl (bootstrap case). With this PR own code (PYTHONPATH=/workspace) the
+      conflict resolves: pm/project.yaml only, 1 record added from PR (pr-a49bb25)
+      + 7 from base, 499 records, none lost on either side (verified per-record vs
+      merge base 211a6128), active_pr takes the base value; candidate tree b0fa90b6ba3d.
+      Base semantic check: #242/#243 changed TUI picker/tmux/QA-loop UI + pr_utils.usable_prs;
+      overlap pm_core/cli/pr.py is disjoint (pr_start message, pr_qa_run_bg runtime
+      mirror) and merges cleanly; no base behaviour changes affect this PR. Full suite
+      on the candidate tree: 3972 passed, 1 skipped, 1 failed (test_dedup test_defaults_to_cwd
+      — only because the candidate was a git-archive extract with no .git) + the known
+      hook-installer deselect. IMPL TODO: from the workdir run `PATH=/usr/bin:$PATH
+      PYTHONPATH=/workspace python3 -m pm_core.wrapper pr signoff integrate pr-5cee3d5
+      --apply` (or git merge 450a6362 keeping all records) so HEAD^{tree} == b0fa90b6
+      (if master moved, re-run and confirm still metadata-only), push, note the merge
+      sha. Do NOT change code. EVIDENCE REUSE: review (c70c, code cdb01c19) and QA
+      18-23 PASS at 25fb1918 (code identical to HEAD) still cover the code after this
+      merge — no re-review/re-QA is warranted; the next sign-off only needs to refresh
+      and bind to the merged HEAD. Report: $CAP/report.html, evidence in $CAP/signoff-i2/.'
+    created_at: '2026-10-27T08:55:47Z'
+    last_edited: '2026-10-27T08:55:47Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
