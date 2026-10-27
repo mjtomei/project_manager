@@ -130,6 +130,11 @@ A5. *Freshness definition?* → A pre-existing artifact must be rewritten by the
 run (size+mtime signature changes); a newly created artifact must exist,
 non-empty, and have mtime ≥ run start. Same-second creation is accepted.
 
+A6. *Where do the `test_qa_loop.py` assertions live?* → In the new
+`tests/test_qa_artifact_wait_for_job.py` (classes `TestRecipes`,
+`TestVerifierFreshness`), so the whole feature's coverage is in one file. The
+verifier's FLAGGED rule is asserted there too, not only the prose paragraph.
+
 ## Edge cases
 
 - Job exits 0 but never touches a pre-existing artifact → stale → fail (R1/R2).
@@ -155,10 +160,9 @@ non-empty, and have mtime ≥ run start. Same-second creation is accepted.
 | `pm/qa/artifacts/tmux-screen-recording.md` | render via helper + completion rules |
 | `pm/qa/artifacts/cli-recording.md` | render via helper + completion rules |
 | `pm_core/prompt_gen.py` | `_background_jobs_block` + injection |
-| `pm_core/qa_loop.py` | copy `*.sh` helpers; freshness in verifier prompt |
+| `pm_core/qa_loop.py` | copy `*.sh` helpers; freshness in verifier prompt and the FLAGGED rule |
 | `pm_core/docs/qa_library.md` | document helper / background-job rule |
-| `tests/test_qa_artifact_wait_for_job.py` | **new** regression tests |
-| `tests/test_qa_loop.py` | helper-copy + verifier-freshness assertions |
+| `tests/test_qa_artifact_wait_for_job.py` | **new** regression tests (helper + recipe + verifier) |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 
 ## Verification plan

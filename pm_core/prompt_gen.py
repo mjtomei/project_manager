@@ -73,7 +73,9 @@ When a command outlives one shell step (a renderer, a test suite, a build):
   (`wait "$pid"`) — never bare `wait`, which blocks on every child including
   a deliberately persistent observer/reaper, and never `pgrep -f`/`pkill -f`
   on a process name, which also matches the waiting shell's own command line
-  so the wait never ends.
+  so the wait never ends. Do the start-and-wait in the *same* shell
+  invocation: a later shell cannot `wait` on a PID it did not start, so
+  finish the job in one step or drive it through the helper below.
 - Bound the wait (e.g. `timeout`) and treat expiry as failure. Reap the PID
   and use its exit status; a finished-but-unreaped (zombie) PID is not live
   work, and killing a wait is never a passing result.

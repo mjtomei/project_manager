@@ -3209,9 +3209,10 @@ the artifact with no explanation are **not** valid reasons.
 
 """
         artifact_judgment_bullet = (
-            "\n- If any required artifact (Step 3) is missing or downgraded to a "
-            "weaker substitute without a stated, valid reason in the transcript, "
-            "the verdict is **FLAGGED**.")
+            "\n- If any required artifact (Step 3) is missing, stale (a leftover "
+            "this run did not write), invalid where a validator exists, or "
+            "downgraded to a weaker substitute without a stated, valid reason in "
+            "the transcript, the verdict is **FLAGGED**.")
 
     # When an artifact-check step is present it takes the "Step 3" slot, so
     # the judgment step shifts to Step 4.

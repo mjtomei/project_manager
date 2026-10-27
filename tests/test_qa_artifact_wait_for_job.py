@@ -182,6 +182,31 @@ class TestWaitOutcomes:
             unrelated.terminate()
             unrelated.wait(timeout=5)
 
+    def test_timeout_kills_the_job_itself(self, tmp_path):
+        """The bound must actually end the job, not just stop waiting on it.
+
+        A helper that returned while the renderer kept running would leave
+        work behind and let a later run mistake the stale artifact for a
+        fresh one.
+        """
+        art = tmp_path / "recording.mp4"
+        pid_file = tmp_path / "job.pid"
+        r = run_helper([
+            "--timeout", "1", "--artifact", str(art),
+            "-c", f'echo $$ > {shlex.quote(str(pid_file))}; sleep 30',
+        ])
+        assert r.returncode == 3
+        job_pid = int(pid_file.read_text().strip())
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                os.kill(job_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError(f"timed-out job {job_pid} is still running")
+
     def test_persistent_observer_does_not_block_finite_job(self, tmp_path):
         """A deliberately persistent observer/reaper must not stall the wait.
 
@@ -253,6 +278,14 @@ class TestArtifactChecks:
         ])
         assert r.returncode == 4
         assert "empty" in r.stderr
+
+    def test_directory_artifact_is_failure(self, tmp_path):
+        art = tmp_path / "recording.mp4"
+        art.mkdir()
+        r = run_helper(["--timeout", "10", "--artifact", str(art),
+                        "-c", "true"])
+        assert r.returncode == 4
+        assert "not a regular file" in r.stderr
 
     def test_validate_failure(self, tmp_path):
         art = tmp_path / "recording.mp4"
@@ -374,3 +407,20 @@ class TestVerifierFreshness:
         assert "this run" in flat
         assert "freshly written" in flat
         assert "stale" in flat.lower()
+
+    def test_judgment_bullet_flags_stale_artifacts(self):
+        """A stale leftover must be FLAGGED, not just discouraged in prose."""
+        scenario = QAScenario(
+            index=1, title="T", focus="f", steps="s",
+            artifact_paths=["/scratch/qa-artifacts/tmux-screen-recording.md"],
+        )
+        prompt = _build_verification_prompt(
+            scenario, "PASS", pane_output="output",
+            captures_scenario_dir="/caps/pr-x/scenarios/1",
+        )
+        flat = " ".join(prompt.split())
+        assert "**FLAGGED**" in flat
+        bullet = flat.split("If any required artifact (Step 3)")[1]
+        bullet = bullet.split("**FLAGGED**")[0]
+        assert "stale" in bullet.lower(), bullet
+        assert "invalid" in bullet.lower(), bullet
