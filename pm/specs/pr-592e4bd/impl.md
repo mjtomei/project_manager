@@ -275,6 +275,22 @@ variables, so the suite gives the same result inside a routed session.
   control: a server-configured classifier model takes priority over the
   env var (none was configured for these accounts in S59 or the c189 live
   check).
+  *Requirement relaxed (user decision 2026-10-27, after QA S91 F1):* the
+  pin is best effort, not a guarantee that a routed session never touches
+  the main account. Claude Code 2.1.311 takes the classifier from the
+  account's server config (`tengu_auto_mode_config.modelByMainModel`,
+  looked up with the main model stripped of its route prefix) before
+  `CLAUDE_CODE_AUTO_MODE_MODEL`, so a routed session's classifier calls go
+  out as bare `claude-sonnet-5[1m]` and the router sends them to the main
+  account. The user accepted this: the work route exists so sessions keep
+  running when the main account's usage runs out, and avoiding the main
+  account entirely was wanted but is not required when Claude Code does
+  not allow it. pm keeps the pin (it still holds on 2.1.310 and whenever
+  no server classifier is configured) and does not change the permission
+  mode or the host router for this. Known consequence: with the main
+  account exhausted, auto-mode classification in a routed session fails
+  and Claude refuses the tool calls that need it (e.g. Agent).
+  pr-1071c5a needs no further work on this decision.
 - The router does not rewrite the response model, so transcripts record the
   physical name (`claude-opus-5-5`); requested-model checks use claude's
   `modelUsage` (`work/claude-opus-5-5`). A `[1m]` suffix on the route model

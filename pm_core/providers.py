@@ -85,7 +85,10 @@ SUBAGENT_FORCE_ENV = "CLAUDE_CODE_SUBAGENT_MODEL_FORCE"
 # Opus-class or Sonnet 5.5 ANTHROPIC_DEFAULT_SONNET_MODEL (and the same in
 # CLAUDE_CODE_AUTO_MODE_MODEL) and falls back to its Sonnet 5 default, sent
 # without a route prefix -- on the router, to the main account.  A router
-# session therefore sends that default through its route.
+# session therefore sends that default through its route.  Best effort
+# only: Claude Code >= 2.1.311 prefers an account's server-configured
+# classifier model over this variable, and those calls still reach the main
+# account (accepted by the user, 2026-10-27; see the pr-592e4bd impl spec).
 AUTO_MODE_MODEL_ENV = "CLAUDE_CODE_AUTO_MODE_MODEL"
 CLASSIFIER_DEFAULT_MODEL = "claude-sonnet-5"
 

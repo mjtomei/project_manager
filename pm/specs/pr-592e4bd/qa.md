@@ -797,6 +797,17 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
   review loop c189 i3 ran with `CLAUDE_CODE_AUTO_MODE_MODEL=work/claude-sonnet-5`
   (`/pm-captures/review-c189-i3/session-env-models.txt`, model names only);
   that is launch env, not classifier traffic.
+  *Relaxed (user decision 2026-10-27, after S91 F1; impl.md §2):* the
+  launch-env Thens above still hold, but classifier traffic on the
+  session's account is no longer required. Claude Code 2.1.311 prefers
+  the account's server-configured classifier (`modelByMainModel`) over
+  `CLAUDE_CODE_AUTO_MODE_MODEL`, so a routed session may request bare
+  `claude-sonnet-5[1m]`, which a real router sends to the main account.
+  That is accepted, not a failure: depending on the main account is
+  avoided where Claude Code allows it, not at any cost. Harness note: a
+  work/-only router stub or relay must answer (or forward to a main stub)
+  the unprefixed classifier request, or the routed session's Agent calls
+  are refused and the scenario fails for harness reasons.
 - **RQ44** (user decision 2026-10-26, review loop c189 i6; impl.md R9)
   Given a pm process (CLI or TUI) started inside a work-routed session,
   so its environment holds the route's `ANTHROPIC_DEFAULT_*_MODEL` and
