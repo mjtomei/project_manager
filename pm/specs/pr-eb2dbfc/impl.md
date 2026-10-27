@@ -123,6 +123,20 @@ Window kill and fresh-review recreation are master lifecycle behaviour.
 They are not part of stop-on-idle, and #241's ownership work will
 revisit them.
 
+Two timing and sampling questions came up in QA S38 (review 3f45 i3).
+- **Which removals record a sample.**  Every removal of a *running* pm
+  container records an end-of-life sample, and that includes the stale
+  cleanup at the start of a fresh QA run (`z t`).  Those leftovers ran
+  real scenarios, so their cgroup peaks are real observations.  The run
+  does not re-baseline after cleanup.  A scenario that counts samples
+  should expect one sample per running container that is removed.
+- **When a verdict happens.**  QA stop-on-idle runs after the loop
+  *records* the verdict, not when the pane prints it.  Master's poll
+  loop starts verdict polling only after every scenario has launched
+  and `_VERDICT_GRACE_PERIOD` (30 s) has passed.  It then needs two
+  stable polls.  So "removed within N s of the verdict" counts from the
+  verdict recorded in `qa_status.json`.
+
 Container types are read from the label at the *end* of the name
 (`…-impl-pr-x`, `…-qa-pr-x-<loop>-sN`): the session tag comes from the
 project name and may itself contain words like `impl` or `review`.
