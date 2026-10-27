@@ -3480,6 +3480,26 @@ IMPORTANT: Your response must end with either VERIFIED or the FLAGGED_START...FL
 
 _VERIFICATION_VERDICTS = ("VERIFIED", "FLAGGED_END")
 _VERIFICATION_KEYWORDS = ("VERIFIED", "FLAGGED_START", "FLAGGED_END")
+# Missing-output recovery messages for the verifier.  The shared
+# ``build_outcome_request`` would list "VERIFIED / FLAGGED_END", which does
+# not tell the agent how to emit a flag (the FLAGGED block), so the verifier
+# names its own two shapes.  Recovery never supplies or infers a verdict: it
+# asks only for the agent's own conclusion from work already done.
+_VERIFIER_OUTCOME_REQUEST = (
+    "Your last turn ended without a standalone outcome. Re-emit only your "
+    "own conclusion from the work already completed: either VERIFIED alone "
+    "on its own line, or the complete FLAGGED_START ... FLAGGED_END block. "
+    "Do not redo work, re-run tests, or restate evidence. If you have not "
+    "finished, continue the task instead."
+)
+_VERIFIER_RESUME_REQUEST = (
+    "Your previous turn ended without any output (for example a provider "
+    "connection loss). Resume the same verification in this session from "
+    "where you left off: keep partial evidence and any queued input, and do "
+    "not restart completed work or repeat completed tests. When the task is "
+    "complete, end with VERIFIED alone on its own line, or the complete "
+    "FLAGGED_START ... FLAGGED_END block."
+)
 
 
 def _extract_flagged_reason(content: str) -> str:
@@ -3522,7 +3542,6 @@ def _verify_single_scenario(
     from pm_core.claude_launcher import (
         build_claude_shell_cmd, transcript_path_for,
     )
-    from pm_core.loop_shared import wait_for_follow_up_verdict
 
     if not session:
         _log.warning("Verification: missing session for scenario %d, "
@@ -3648,14 +3667,8 @@ def _verify_single_scenario(
                 stop_check=stop_check,
                 log_prefix=f"qa-verify-{scenario.index}",
                 workdir=verify_cwd,
-                outcome_request=(
-                    "Your last turn ended without a standalone outcome. "
-                    "Re-emit only your own conclusion from the work already "
-                    "completed: either VERIFIED alone on its own line, or "
-                    "the complete FLAGGED_START ... FLAGGED_END block. Do "
-                    "not redo work, re-run tests, or restate evidence. If "
-                    "you have not finished, continue the task instead."
-                ),
+                outcome_request=_VERIFIER_OUTCOME_REQUEST,
+                resume_request=_VERIFIER_RESUME_REQUEST,
             )
         except WorkspaceTrustBlocked as e:
             return (False, _TRUST_BLOCKED_PREFIX + str(e),
@@ -3703,13 +3716,29 @@ def _verify_single_scenario(
         _log.info("Verification: sent follow-up to scenario %d verifier pane=%s",
                   scenario.index, scenario.verifier_pane_id)
         try:
-            content = wait_for_follow_up_verdict(
-                session, scenario.window_name or "",
-                scenario.verifier_transcript,
+            # Reuse the shared verdict poller (bounded missing-output
+            # recovery included): a verifier that idles without
+            # VERIFIED/FLAGGED after the follow-up must not hang QA forever.
+            # ``wait_for_follow_up_verdict`` is deliberately unbounded — it
+            # is the human INPUT_REQUIRED wait — so it must not be used for
+            # this machine-driven re-check.
+            content = poll_for_verdict(
+                scenario.verifier_pane_id, scenario.verifier_transcript,
                 verdicts=_VERIFICATION_VERDICTS,
                 stop_check=stop_check,
                 log_prefix=f"qa-verify-{scenario.index}",
+                workdir=scenario.verifier_cwd,
+                outcome_request=_VERIFIER_OUTCOME_REQUEST,
+                resume_request=_VERIFIER_RESUME_REQUEST,
             )
+        except VerdictRecoveryExhausted as e:
+            # Bounded recovery could not get VERIFIED / FLAGGED out of the
+            # verifier on the re-check either.  Block finalize with a
+            # specific reason instead of waiting forever.
+            _log.warning("Verification: no re-checked verdict for scenario "
+                         "%d: %s", scenario.index, e)
+            return (False, f"verifier produced no verdict: {e}",
+                    scenario.verifier_pane_id)
         except Exception:
             _log.warning("Verification: follow-up polling failed for scenario %d",
                          scenario.index, exc_info=True)

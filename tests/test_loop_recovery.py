@@ -824,6 +824,50 @@ class TestQARecoveryWiring:
         assert reason.startswith("verifier produced no verdict:")
         assert pane == "%2"
 
+    def test_verifier_recheck_exhaustion_blocks_finalize(self, tmp_path):
+        """The machine-driven re-check wait is bounded too.
+
+        The re-verification follow-up asks the *existing* verifier pane for a
+        new VERIFIED/FLAGGED outcome.  That wait used the unbounded
+        ``wait_for_follow_up_verdict`` (the human INPUT_REQUIRED wait), so a
+        verifier that idled without a verdict hung QA forever — the exact
+        shape bounded recovery exists to prevent.
+        """
+        from pm_core import qa_loop
+
+        scenario = qa_loop.QAScenario(index=1, title="S", focus="f",
+                                      window_name="qa-s1", pane_id="%1")
+        scenario.worktree_path = str(tmp_path)
+        scenario.transcript_path = None
+        # A live verifier pane from the first verification: the follow-up
+        # reuses it instead of splitting a new one.
+        scenario.verifier_pane_id = "%2"
+        scenario.verifier_session_id = str(uuid.uuid4())
+        scenario.verifier_cwd = str(tmp_path)
+        scenario.verifier_transcript = str(tmp_path / "verify.jsonl")
+
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.poll_for_verdict",
+                   side_effect=VerdictRecoveryExhausted(
+                       "no re-checked verdict", attempts=3)) as polled:
+            passed, reason, pane = qa_loop._verify_single_scenario(
+                scenario, "PASS", "scenario output", {"id": "pr-1"},
+                session="sess", qa_workdir=str(tmp_path),
+                pr_workdir=str(tmp_path),
+            )
+
+        assert passed is False
+        assert reason.startswith("verifier produced no verdict:")
+        assert pane == "%2"
+        # The shared poller (with recovery) was used, not the unbounded
+        # human follow-up wait.
+        assert polled.call_count == 1
+        assert polled.call_args.kwargs["verdicts"] == (
+            "VERIFIED", "FLAGGED_END")
+        assert "FLAGGED_START" in polled.call_args.kwargs["outcome_request"]
+
     def test_scenario_worker_exhaustion_marks_input_required(
             self, tmp_path, monkeypatch):
         """A worker that idles without a verdict is bounded, not hung."""

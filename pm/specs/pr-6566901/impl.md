@@ -248,6 +248,9 @@ safe when a caller knows hook refreshes terminate). `retry_prompt` /
 3. on `ev is None` (wait timeout) call `recovery.check_response()`.
 
 `wait_for_follow_up_verdict` is **not** changed (human wait; see Ambiguities).
+Its one machine-driven caller — the QA verifier's re-check follow-up — was
+switched to `poll_for_verdict` so that wait is bounded too (see the QA loop
+verifier bullet).
 
 For tick-based loops the tracker is handed the hook timestamp it has already
 accounted for (the episode's opening event, then the last deferred event),
@@ -280,8 +283,16 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
 * **refiner** (`_concretize_scenario`) — pass a block outcome request;
   catch → `(None, "no refiner outcome: …")`; teach
   `_concretize_failure_label` to pass that prefix through unchanged.
-* **verifier** (`_verify_single_scenario`) — pass recovery config; catch →
-  `(False, "verifier produced no verdict: …", pane)`.
+* **verifier** (`_verify_single_scenario`) — pass verifier-specific
+  outcome/resume requests (`VERIFIED` / the `FLAGGED_START…FLAGGED_END`
+  block, hoisted to module constants); catch →
+  `(False, "verifier produced no verdict: …", pane)`. The **re-verification
+  follow-up** (the same pane asked for a new outcome after the scenario was
+  re-evaluated) uses the shared `poll_for_verdict` for the same bounded
+  recovery, not `wait_for_follow_up_verdict`: that helper is the *human*
+  `INPUT_REQUIRED` wait and stays unbounded, but this follow-up is
+  machine-driven and a verifier that idled without `VERIFIED`/`FLAGGED`
+  there hung QA forever (the class this PR targets).
 * **scenario workers** (`_poll_tmux_verdicts`) — per-scenario
   `MissingOutputRecovery`; a fresh `idle_prompt` with no verdict opens a
   no-verdict episode whose settle window is measured from *episode start*
@@ -334,7 +345,11 @@ values (e.g. `0.5`) are accepted by `pm set`.
    verdict.
 3. **Should the `INPUT_REQUIRED` follow-up wait be bounded?** No. The audit
    lists genuine `INPUT_REQUIRED` as not a missing-output failure; that wait is
-   an intentional human interaction, not a hung expected verdict.
+   an intentional human interaction, not a hung expected verdict. The shared
+   `wait_for_follow_up_verdict` stays unbounded, but its *machine-driven* user
+   (the QA verifier's re-check follow-up, which asks the verifier for a new
+   `VERIFIED`/`FLAGGED` outcome) is a hung expected verdict and now goes
+   through `poll_for_verdict`'s bounded recovery instead.
 4. **New verdict string vs. reusing `ERROR`.** Resolved: add `NO_VERDICT`
    (distinct from launch/runtime `ERROR`) so the failure mode is visible in the
    TUI, picker and logs, and so QA can assert on it.
@@ -413,7 +428,9 @@ values (e.g. `0.5`) are accepted by `pm set`.
   QA-tick-loop cases). Also holds the loop wiring tests below.
 * `tests/test_loop_recovery.py` (review/watcher wiring): exhaustion →
   `NO_VERDICT`, history entry, callback fired; QA refiner label, verifier
-  reason, finalize `NO_VERDICT`, scenario-worker exhaustion
+  reason (initial poll and the machine-driven re-check follow-up, which must
+  call the shared poller rather than the unbounded human wait), finalize
+  `NO_VERDICT`, scenario-worker exhaustion
   (`INPUT_REQUIRED` + reason, slot freed).
 * `tests/test_qa_planner_handoff.py`: planner exhaustion surfaces
   `INPUT_REQUIRED` + error and stops planning; a plan written while recovery
