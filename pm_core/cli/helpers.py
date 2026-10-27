@@ -519,12 +519,13 @@ def _validate_tui_owner(
     """
     pidfile = _tui_pidfile_for_session(session)
     raw = tui_pidfile.read_pidfile_text(pidfile)
-    if raw is None:
+    if raw is None and not pidfile.exists():
         return pidfile, None, None, TuiIpcResult(
             False, "no_pidfile",
             f"No TUI is running for session {session}.")
     desc = tui_pidfile.parse_pidfile(raw)
     if desc is None:
+        # Present but empty/corrupt/undecodable: stale garbage.
         tui_pidfile.unlink_if_unchanged(pidfile, raw)
         return pidfile, raw, None, TuiIpcResult(
             False, "stale_pidfile",
@@ -557,7 +558,7 @@ def tui_owner_problem(session: str) -> str | None:
 
 def _missing_cap_result(session: str, desc, cap: str) -> TuiIpcResult:
     """Explain that the live TUI cannot handle *cap*."""
-    feature = ("command-queue" if cap == "sigusr2" else "reload")
+    feature = ("command-queue" if cap == tui_pidfile.CAP_COMMAND else "reload")
     if getattr(desc, "legacy", False):
         return TuiIpcResult(
             False, "missing_capability",
@@ -575,11 +576,24 @@ def _missing_cap_result(session: str, desc, cap: str) -> TuiIpcResult:
         f"{feature} capability; restart the TUI (Ctrl+R) to use it.")
 
 
-def _signal_tui(pid: int, sig: int) -> str | None:
+# ``_signal_tui`` reasons that mean the pidfile no longer names a live TUI,
+# so the file should be removed.
+_STALE_SIGNAL_REASONS = frozenset({
+    "process is not running",
+    "pid was reused by another process",
+})
+
+
+def _signal_tui(pid: int, sig: int, starttime: int | None = None) -> str | None:
     """Send *sig* to *pid*; return an error reason or ``None``.
 
-    Where available, a pidfd pins the process across the final checks so
-    the PID cannot be recycled between validation and ``os.kill``.
+    Where the kernel supports it, the signal goes out through a pidfd
+    (``pidfd_send_signal``) rather than ``os.kill``: a bare kill resolves
+    the PID *number* again, so a TUI that died between validation and the
+    signal could hand the signal to a recycled PID.  A pidfd names one
+    exact process, and sending to it fails with ``ESRCH`` once that
+    process is gone.  *starttime* is re-checked after the pidfd is opened
+    to close the same window on kernels without pidfd support.
     """
     pidfd = None
     try:
@@ -587,7 +601,15 @@ def _signal_tui(pid: int, sig: int) -> str | None:
             pidfd = tui_pidfile.open_pidfd(pid)
         except ProcessLookupError:
             return "process is not running"
-        os.kill(pid, sig)
+        if starttime is not None:
+            live_starttime = tui_pidfile.proc_starttime(pid)
+            if live_starttime is not None and live_starttime != starttime:
+                return "pid was reused by another process"
+        sender = getattr(signal, "pidfd_send_signal", None)
+        if pidfd is not None and sender is not None:
+            sender(pidfd, sig)
+        else:
+            os.kill(pid, sig)
         return None
     except ProcessLookupError:
         return "process is not running"
@@ -643,8 +665,8 @@ def trigger_tui_reload(session: str | None = None) -> bool:
                       "not signaling", desc.pid, session,
                       tui_pidfile.CAP_RELOAD)
             return False
-        problem = _signal_tui(desc.pid, signal.SIGUSR1)
-        if problem == "process is not running":
+        problem = _signal_tui(desc.pid, signal.SIGUSR1, desc.starttime)
+        if problem in _STALE_SIGNAL_REASONS:
             _log.debug("TUI pid %d gone, removing stale pidfile", desc.pid)
             tui_pidfile.unlink_if_unchanged(pidfile, raw)
             return False
@@ -693,8 +715,8 @@ def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
         return TuiIpcResult(
             False, "queue_error",
             f"Could not write to the TUI command queue: {e}")
-    problem = _signal_tui(desc.pid, signal.SIGUSR2)
-    if problem == "process is not running":
+    problem = _signal_tui(desc.pid, signal.SIGUSR2, desc.starttime)
+    if problem in _STALE_SIGNAL_REASONS:
         _log.debug("TUI pid %d gone, removing stale pidfile", desc.pid)
         tui_pidfile.unlink_if_unchanged(pidfile, raw)
         return TuiIpcResult(

@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-27T19:28:35.854880+00:00'
+  updated_at: '2026-10-27T20:02:45.788065+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14672,6 +14672,31 @@ prs:
       a throwaway project so the live controller pidfile/tmux state is untouched.'
     created_at: '2026-10-27T19:28:35Z'
     last_edited: '2026-10-27T19:28:35Z'
+  - id: note-2bddf2e
+    text: 'Review loop 3591 i1 (2026-10-27): found and fixed (a) _signal_tui opened
+      a pidfd but still called os.kill(pid), so the PID-reuse window the spec claimed
+      to close was wide open — it now delivers via signal.pidfd_send_signal(pidfd,
+      sig) and re-checks starttime after opening the fd, falling back to os.kill only
+      without pidfd support; (b) an undecodable (invalid-UTF-8) pidfile raised UnicodeDecodeError
+      out of read_pidfile_text, which crashed the pm _tui startup claim and the picker
+      — read_pidfile_text now treats it as unreadable, _validate_tui_owner reports
+      stale_pidfile and removes it, and claim_tui_pidfile takes over (unlink_if_unchanged
+      now re-checks: expected_text=None means "still unreadable", so it never deletes
+      a fresh descriptor or one caught empty mid-claim); (c) a post-pidfd starttime
+      mismatch now also removes the stale pidfile (shared _STALE_SIGNAL_REASONS);
+      (d) spinner abort message softened to "may not have been applied" (the command
+      can have been applied before the TUI died) and the duplicated termios-restore
+      block factored into _restore_termios. Spec impl.md updated: R5 pidfd delivery,
+      I4 (trigger_tui_reload now returns bool; callers ignore it), E3 undecodable
+      bytes, tests 8a/8b. 7 new tests (TestSignalDelivery x4, binary pidfile x3).
+      Full suite: 3853 passed, 1 skipped (pytest<9, PATH=/usr/bin:/bin; markdown installed
+      to scratch PYTHONPATH — without it 12 pre-existing test_markdown_render failures).
+      Note for QA: pm session respawn (_respawn_tui) splits a new TUI pane without
+      killing the old process, so a stale pane registry plus a live TUI now yields
+      a refused second TUI pane (message in that pane, exit 2) instead of two competing
+      TUIs.'
+    created_at: '2026-10-27T20:02:45Z'
+    last_edited: '2026-10-27T20:02:45Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

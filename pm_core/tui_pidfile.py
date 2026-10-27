@@ -126,10 +126,15 @@ def parse_pidfile(text: str | None) -> TuiPidfile | None:
 
 
 def read_pidfile_text(path: Path) -> str | None:
-    """Return the pidfile's raw text, or ``None`` if it can't be read."""
+    """Return the pidfile's raw text, or ``None`` if it can't be read.
+
+    ``UnicodeDecodeError`` counts as unreadable: a truncated or
+    half-written pidfile can hold arbitrary bytes, and that must never
+    escape as an exception into the TUI startup claim or the picker.
+    """
     try:
         return path.read_text()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
 
 
@@ -229,10 +234,13 @@ def identity_problem(desc: TuiPidfile) -> str | None:
 
 
 def open_pidfd(pid: int) -> int | None:
-    """Pin *pid* so it can't be recycled before we signal it.
+    """Open a pidfd naming *pid*'s current process.
 
-    Returns a pidfd, or ``None`` when the kernel/Python lacks pidfd
-    support.  Raises ``ProcessLookupError`` when the process is gone.
+    The fd refers to that one process for as long as it is held, so a
+    later ``signal.pidfd_send_signal`` cannot be delivered to an
+    unrelated process that recycled the PID.  Returns ``None`` when the
+    kernel/Python lacks pidfd support.  Raises ``ProcessLookupError``
+    when the process is gone.
     """
     opener = getattr(os, "pidfd_open", None)
     if opener is None:
@@ -278,11 +286,11 @@ def unlink_if_unchanged(path: Path, expected_text: str | None) -> bool:
 
     Callers validate a snapshot of the file and then remove it when it is
     stale; re-reading here avoids deleting a pidfile a new TUI wrote in
-    between.  When *expected_text* is ``None`` the caller never read the
-    file, so it is left alone.
+    between.  ``None`` means the caller's read found nothing usable
+    (missing, or undecodable bytes); the file is then removed only if it
+    is *still* unreadable, so a concurrent TUI's fresh descriptor — even
+    one caught empty mid-claim — is left alone.
     """
-    if expected_text is None:
-        return False
     if read_pidfile_text(path) != expected_text:
         return False
     try:

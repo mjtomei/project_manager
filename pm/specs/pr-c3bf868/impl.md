@@ -59,9 +59,14 @@ R5. **Caller-side identity validation.** Before signaling, validate:
     plus a pm entry-point element (`pm`, `pm_core`, `pm_core.cli`,
     `pm_core.wrapper`). Any failure → no signal, remove the stale pidfile
     (only if unchanged since read), return False with a reason.
-    Where `os.pidfd_open` exists (Linux 5.3+/py3.9+), open a pidfd before the
-    final check so the PID cannot be recycled between check and `os.kill`.
-    If procfs is unavailable, degrade to liveness only (documented).
+    Where `os.pidfd_open` and `signal.pidfd_send_signal` exist (Linux
+    5.3+/py3.9+), the signal is *delivered through the pidfd*, not
+    `os.kill(pid)`: a bare kill re-resolves the PID number and could hit a
+    recycled process, while a pidfd names one exact process and fails with
+    `ESRCH` once it is gone. The descriptor's `starttime` is re-checked
+    after the pidfd is opened (and the pidfd is closed afterwards). Without
+    pidfd support the code falls back to `os.kill`. If procfs is
+    unavailable, degrade to liveness only (documented).
 
 R6. **Picker aborts.** `_run_picker_command` uses a new
     `submit_tui_command()` returning a `TuiIpcResult(ok, reason, message)`
@@ -95,8 +100,11 @@ I3. The command queue file must exist before caps are published (a caller
     `_install_reload_signal`: claim → create queue → install handlers →
     publish caps.
 
-I4. `trigger_tui_reload` keeps its fire-and-forget `None` return and its
-    `refresh_home` side effect (existing tests assert the kick).
+I4. `trigger_tui_reload` keeps its fire-and-forget behavior and its
+    `refresh_home` side effect (existing tests assert the kick). It now
+    returns `True` only when SIGUSR1 was actually delivered and `False`
+    otherwise; every existing caller ignores the return value, so the
+    signature change is backwards compatible.
 
 I5. Backwards compatibility for an *older CLI* reading a JSON pidfile:
     `int()` fails → it logs and does nothing. Safe (no signal), acceptable.
@@ -156,6 +164,10 @@ E2. **Zombie pidfile owner.** `kill(pid,0)` succeeds for a zombie; treat as
     dead (existing `_is_zombie` logic moves into the shared module).
 E3. **Unreadable/empty pidfile.** Treated as "no TUI"; unlink only if the
     content is unchanged since the read (do not delete a just-created file).
+    Undecodable bytes (`UnicodeDecodeError`) count as unreadable rather
+    than propagating: a half-written pidfile must never crash the startup
+    claim or the picker. A file that is present but unreadable is reported
+    as `stale_pidfile` and removed; a missing one is `no_pidfile`.
 E4. **Permission denied** (`EPERM`) on signal → return False with a message;
     do **not** delete the pidfile (the process is alive, just not ours).
 E5. **Legacy live TUI + `trigger_tui_reload`** → signals SIGUSR1 (A1).
@@ -205,6 +217,12 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
    `sigusr1` → False, child survives; dead pid → False + cleanup.
 8. no-op guard: install guards, `os.kill(os.getpid(), SIGUSR2)`, still
    alive (handlers restored in `finally`).
+8a. pidfd delivery: `_signal_tui` uses `signal.pidfd_send_signal` (not
+    `os.kill`) when a pidfd is available; refuses when the starttime no
+    longer matches after the pidfd is opened; falls back to `os.kill`.
+8b. undecodable (invalid-UTF-8) pidfile: `read_pidfile_text` returns
+    `None` instead of raising; claim takes over and `submit_tui_command`
+    reports `stale_pidfile` and removes it.
 9. `_install_reload_signal` publishes both caps only after handlers are
    installed (tmp pidfile/queue paths).
 10. picker: `submit_tui_command` failure → message echoed, spinner not

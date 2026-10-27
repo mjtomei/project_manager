@@ -158,6 +158,13 @@ class TestParsePidfile:
     def test_missing_file_is_none(self, tmp_path):
         assert tpf.read_pidfile(tmp_path / "nope.pid") is None
 
+    def test_undecodable_bytes_are_none(self, tmp_path):
+        """A half-written/binary pidfile must not raise."""
+        path = tmp_path / "tui-pm-test.pid"
+        path.write_bytes(b"\xff\xfe\x00garbage")
+        assert tpf.read_pidfile_text(path) is None
+        assert tpf.read_pidfile(path) is None
+
 
 class TestCmdline:
     @pytest.mark.parametrize("argv", [
@@ -243,6 +250,16 @@ class TestClaim:
         finally:
             claim.release()
 
+    def test_takes_over_binary_file(self, tmp_path):
+        """Undecodable bytes must not crash the startup claim."""
+        path = tmp_path / "tui-pm-test.pid"
+        path.write_bytes(b"\xff\xfe\x00garbage")
+        claim = tpf.claim_tui_pidfile(path, SESSION)
+        try:
+            assert tpf.read_pidfile(path).pid == os.getpid()
+        finally:
+            claim.release()
+
     def test_publish_updates_caps(self, tmp_path):
         path = tmp_path / "tui-pm-test.pid"
         claim = tpf.claim_tui_pidfile(path, SESSION)
@@ -279,6 +296,15 @@ class TestSubmitCommand:
     def test_dead_pid_removes_pidfile(self, ipc_paths):
         pidfile, queue = ipc_paths
         _write_json(pidfile, DEAD_PID, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+        res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
+        assert res.ok is False
+        assert res.reason == "stale_pidfile"
+        assert not pidfile.exists()
+        assert not queue.exists()
+
+    def test_undecodable_pidfile_is_stale(self, ipc_paths):
+        pidfile, queue = ipc_paths
+        pidfile.write_bytes(b"\xff\xfe\x00garbage")
         res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
         assert res.ok is False
         assert res.reason == "stale_pidfile"
@@ -524,6 +550,54 @@ class TestSignalGuards:
         assert tpf.read_pidfile(pidfile).caps == {tpf.CAP_RELOAD}
 
 
+class TestSignalDelivery:
+    """``_signal_tui`` prefers a pidfd so a recycled PID can't be hit."""
+
+    def test_uses_pidfd_send_signal(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(tpf, "open_pidfd", lambda pid: 4242)
+        monkeypatch.setattr(tpf, "proc_starttime", lambda pid: 777)
+        monkeypatch.setattr(signal, "pidfd_send_signal",
+                            lambda fd, sig: calls.append((fd, sig)))
+        monkeypatch.setattr(os, "kill",
+                            lambda *a: pytest.fail("os.kill used"))
+
+        assert helpers._signal_tui(1234, signal.SIGUSR2, 777) is None
+        assert calls == [(4242, signal.SIGUSR2)]
+
+    def test_refuses_when_pid_recycled_after_pidfd_open(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(tpf, "open_pidfd", lambda pid: 4242)
+        monkeypatch.setattr(tpf, "proc_starttime", lambda pid: 999)
+        monkeypatch.setattr(signal, "pidfd_send_signal",
+                            lambda fd, sig: calls.append((fd, sig)))
+        monkeypatch.setattr(os, "kill",
+                            lambda *a: pytest.fail("os.kill used"))
+
+        assert helpers._signal_tui(1234, signal.SIGUSR2, 777) == (
+            "pid was reused by another process")
+        assert calls == []
+
+    def test_falls_back_to_kill_without_pidfd(self, monkeypatch):
+        killed = []
+        monkeypatch.setattr(tpf, "open_pidfd", lambda pid: None)
+        monkeypatch.setattr(os, "kill",
+                            lambda pid, sig: killed.append((pid, sig)))
+
+        assert helpers._signal_tui(1234, signal.SIGUSR1) is None
+        assert killed == [(1234, signal.SIGUSR1)]
+
+    def test_pidfd_send_signal_process_gone(self, monkeypatch):
+        def gone(fd, sig):
+            raise ProcessLookupError()
+
+        monkeypatch.setattr(tpf, "open_pidfd", lambda pid: 4242)
+        monkeypatch.setattr(signal, "pidfd_send_signal", gone)
+
+        assert helpers._signal_tui(1234, signal.SIGUSR1) == (
+            "process is not running")
+
+
 # ---------------------------------------------------------------------------
 # Picker / spinner
 
@@ -569,4 +643,4 @@ class TestPicker:
         assert elapsed < 2.0
         out = capsys.readouterr().out
         assert "no longer running" in out
-        assert "was not applied" in out
+        assert "may not have been applied" in out

@@ -1648,6 +1648,16 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     _log.debug("spinner stdin: cbreak=%s reason=%s",
                cbreak_ok, cbreak_reason or "ok")
 
+    def _restore_termios() -> None:
+        """Leave cbreak mode (idempotent; ``finally`` repeats it)."""
+        nonlocal old_attrs
+        if old_attrs is not None:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+            except termios.error:
+                pass
+            old_attrs = None
+
     # Transition tracking — log only when these flip, not every tick.
     prev_cur_state = None
     prev_window_open = None
@@ -1672,18 +1682,12 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                     elif now - owner_gone_since >= _TUI_GONE_GRACE_S:
                         _log.info("spinner exit: reason=tui_gone problem=%s",
                                   owner_problem)
-                        if old_attrs is not None:
-                            try:
-                                termios.tcsetattr(
-                                    fd, termios.TCSADRAIN, old_attrs)
-                            except termios.error:
-                                pass
-                            old_attrs = None
+                        _restore_termios()
                         click.echo(SHOW_CURSOR, nl=False)
                         click.echo(
                             f"\r✗ {action}: the TUI is no longer running "
-                            f"({owner_problem}); the command was not "
-                            f"applied{CLR_EOL}")
+                            f"({owner_problem}); the command may not have "
+                            f"been applied{CLR_EOL}")
                         _wait_dismiss()
                         return
                 else:
@@ -1762,12 +1766,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                           cur_state, verdict)
                 # Restore terminal *before* writing final lines / waiting
                 # for keypress so cbreak/cursor state doesn't leak.
-                if old_attrs is not None:
-                    try:
-                        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
-                    except termios.error:
-                        pass
-                    old_attrs = None
+                _restore_termios()
                 click.echo(SHOW_CURSOR, nl=False)
                 if failed:
                     suffix = f" ({verdict})" if verdict else ""
@@ -1837,11 +1836,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
                         _rs.request_suppress_switch(pr_id, action)
                     except Exception:
                         pass
-                    if old_attrs is not None:
-                        try:
-                            termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
-                        except termios.error:
-                            pass
+                    _restore_termios()
                     _log.info("spinner exit: reason=keypress")
                     raise SystemExit(0)
             i += 1
@@ -1849,11 +1844,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
         _log.info("spinner exit: reason=kbinterrupt")
         return
     finally:
-        if old_attrs is not None:
-            try:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
-            except termios.error:
-                pass
+        _restore_termios()
         click.echo(SHOW_CURSOR)
 
 
