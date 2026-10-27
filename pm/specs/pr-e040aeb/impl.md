@@ -684,3 +684,47 @@ verdict without requiring an idle hook event (rationale in iteration 9);
 `other_owner` stand-down surfaces as a non-retryable `LAUNCH_FAILED` after
 the bounded claim wait, so a second TUI driving the same PR reports
 "needs attention" for a review another loop is actually running.
+
+## Review iteration 3 (0688) — refinements
+
+Findings from the next review pass, applied on top of iteration 2 (0688):
+
+1. **A stopping loop cannot take (or re-take) the launch lease
+   (correctness fix — re-stranded target).** `zz d` / `z d` release the old
+   loop's lease and claim it for the replacement immediately, but the old
+   thread could re-claim it in the window between its loop-top
+   `stop_requested` check and the launch: `_claim_launch` did not look at
+   `stop_requested`.  The old loop would then launch a fresh review window
+   the user just asked to replace, while the new loop waited out its bounded
+   claim and expired into a *non-retryable* `LAUNCH_FAILED` ("owned by
+   another loop") — the stranded target this PR exists to prevent.
+   `_claim_launch` now returns False for a stopping loop (so
+   `_wait_for_claim` sees the cancellation and the caller raises
+   `PaneKilledError` → `KILLED`), and the retry checks `stop_requested`
+   once more right before launching (a stop can also land during the claim
+   or discovery).  Covered by
+   `test_stopping_loop_does_not_claim_the_launch_lease` and
+   `test_stop_between_claim_and_launch_does_not_launch` (both fail
+   pre-fix).
+2. **A HOLD does not carry the failed attempt's artifact in the live status
+   path.** Iterations 8/9 dropped the artifact from the runtime_state mirror
+   and preferred `latest_output` for the error, but
+   `autostart_state.review_progress_input` still reported
+   `last_launch_artifact`, so `pm autostart status --json` attached the
+   earlier attempt's evidence to a hold.  It now reports an empty artifact
+   for `HOLD`, matching the mirror.
+3. **Shared adopted-review polling.** The restart handoff
+   (`_adopt_in_flight_review`) and the retry's adopt branch duplicated the
+   same landed-verdict-then-poll logic (including the no-startup-grace and
+   trust-hold conversion).  Both now call `_poll_adopted_review(...)`; the
+   handoff additionally records the adopted transcript's session as
+   `last_session_id` even when the verdict had already landed, so the next
+   iteration replaces that still-live pane instead of re-adopting it.
+
+Not changed (documented residuals): `review_loop.py` is ~1500 lines; two
+lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
+`runtime_state.claim_action_lease`); discovery still adopts a transcript
+verdict without requiring an idle hook event (rationale in iteration 9);
+`other_owner` stand-down surfaces as a non-retryable `LAUNCH_FAILED` after
+the bounded claim wait, so a second TUI driving the same PR reports
+"needs attention" for a review another loop is actually running.

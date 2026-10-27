@@ -122,6 +122,39 @@ def test_non_retryable_failure_stops_after_one_attempt(tmp_path):
     assert result.launch_retryable is False
 
 
+def test_stopping_loop_does_not_claim_the_launch_lease(monkeypatch):
+    """A loop that has been stopped/superseded must not take (or re-take)
+    the launch lease: the superseding loop claims it right after setting
+    ``stop_requested``, and losing that race would make the new loop wait
+    out its bounded claim and then fail with a non-retryable
+    LAUNCH_FAILED — re-stranding the target."""
+    monkeypatch.setattr(review_loop, "_claim_launch", _ORIG_CLAIM)
+    state = ReviewLoopState(pr_id=PR)
+    state.stop_requested = True
+    claims = []
+    monkeypatch.setattr("pm_core.runtime_state.claim_action_lease",
+                        lambda *a, **k: claims.append(a) or True)
+    assert review_loop._claim_launch(state, 1, 1) is False
+    assert not claims, "a stopping loop must not write a lease"
+
+
+def test_stop_between_claim_and_launch_does_not_launch(tmp_path, monkeypatch):
+    """The stop can land after the loop-top check, while the claim or
+    discovery runs; the loop must not create a review window the user just
+    asked to replace."""
+    state = ReviewLoopState(pr_id=PR)
+
+    def discover_and_cancel(*_a, **_k):
+        state.stop_requested = True
+        return AttemptDiscovery("launch")
+
+    monkeypatch.setattr(review_loop, "_discover_iteration", discover_and_cancel)
+    with patch.object(review_loop, "_run_claude_review") as run:
+        result = _run(state, tmp_path)
+    run.assert_not_called()
+    assert result.latest_verdict == VERDICT_KILLED
+
+
 def test_cancellation_during_backoff_prevents_retry(tmp_path, monkeypatch):
     state = ReviewLoopState(pr_id=PR)
     err = ReviewLaunchError("boom", retryable=True)
@@ -1286,7 +1319,8 @@ def test_autostart_status_reports_the_hold_prompt_not_a_stale_launch_error():
         pr_id=PR, running=False, iteration=2,
         latest_verdict=VERDICT_HOLD,
         latest_output="workspace trust prompt in review pane",
-        last_launch_error="container setup failed")
+        last_launch_error="container setup failed",
+        last_launch_artifact="/tmp/stale-attempt.log")
     status = st.build_status({
         "prs": [{"id": PR, "title": "T", "status": "in_review",
                  "workdir": "/tmp/wd"}],
@@ -1298,6 +1332,9 @@ def test_autostart_status_reports_the_hold_prompt_not_a_stale_launch_error():
     assert run["state"] == "failed"
     assert "trust prompt" in run["reason"]
     assert "container setup failed" not in run["reason"]
+    # The artifact belongs to the failed attempt, not to the hold; the live
+    # status input must not attach it (matching the runtime_state mirror).
+    assert run["review"]["artifact"] == ""
 
 
 # ---------------------------------------------------------------------------

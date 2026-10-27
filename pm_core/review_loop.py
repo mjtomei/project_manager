@@ -900,6 +900,35 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     return content
 
 
+def _poll_adopted_review(state: ReviewLoopState, pane_id: str,
+                         transcript: str, pr_data: dict) -> str | None:
+    """Read a just-landed verdict or poll an adopted review pane.
+
+    Shared by the restart handoff (:func:`_adopt_in_flight_review`) and the
+    retry's adopt path.  The poller only wakes on idle events newer than its
+    own start, so a verdict that landed between discovery and this call is
+    read first instead of being waited on until the pane dies.  The poll has
+    no startup grace: the adopted session was launched *before* this call, so
+    the startup-false-positive window the grace protects against has already
+    passed (with a grace, an idle event inside it is discarded and the poll
+    waits for a second event an idle session never emits — the loop would
+    hang until the pane died).
+
+    Raises :class:`ReviewHoldError` for a workspace-trust/permission prompt.
+    Returns None when the pane disappears.
+    """
+    output = _landed_verdict(transcript)
+    if output:
+        return output
+    from pm_core.claude_launcher import WorkspaceTrustBlocked
+    try:
+        return _poll_for_verdict(
+            pane_id, transcript, workdir=pr_data.get("workdir"),
+            stop_check=_lease_keepalive(state))
+    except WorkspaceTrustBlocked as e:
+        raise ReviewHoldError(str(e)) from e
+
+
 def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
                             transcript_dir: str | None) -> str | None:
     """Collect the verdict of an iteration that was in flight at a TUI restart.
@@ -943,18 +972,9 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
         return None
     # The verdict may have landed between the breadcrumb write and now;
     # the poller only wakes on idle events newer than its start.
-    output = _landed_verdict(discovery.transcript)
-    if output:
-        return output
     state.last_session_id = session_id
-
-    from pm_core.claude_launcher import WorkspaceTrustBlocked
-    try:
-        content = _poll_for_verdict(discovery.pane_id, discovery.transcript,
-                                     workdir=pr_data.get("workdir"),
-                                     stop_check=_lease_keepalive(state))
-    except WorkspaceTrustBlocked as e:
-        raise ReviewHoldError(str(e)) from e
+    content = _poll_adopted_review(state, discovery.pane_id,
+                                   discovery.transcript, pr_data)
     if content is None:
         raise PaneKilledError(
             f"Review pane disappeared (window: "
@@ -993,6 +1013,14 @@ def _wait_for_claim(state: ReviewLoopState, pm_root: str | None,
 
 def _claim_launch(state: ReviewLoopState, iteration: int, attempt: int) -> bool:
     """Take the cross-driver launch lease for this attempt (one owner)."""
+    if state.stop_requested:
+        # A stopping loop must not take (or re-take) the lease.  A
+        # superseding loop releases the old lease and claims immediately
+        # after setting ``stop_requested``; if the old loop won that race it
+        # would launch a fresh review window the user just asked to replace,
+        # and the new loop's bounded claim wait would expire into a
+        # non-retryable LAUNCH_FAILED — re-stranding the target.
+        return False
     try:
         from pm_core import runtime_state as _rs
         if _rs.claim_action_lease(
@@ -1149,29 +1177,12 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
             _reset_launch_retry(state)
             return discovery.output
         if discovery.kind == "adopt":
-            from pm_core.claude_launcher import WorkspaceTrustBlocked
             # Discovery ran a moment ago; the adopted pane may have landed
-            # its verdict since.  The poller only wakes on idle events newer
-            # than its own start, so re-read it here rather than wait for an
-            # event that already fired.
-            output = _landed_verdict(discovery.transcript)
-            if output:
-                _reset_launch_retry(state)
-                return output
-            # No grace period: the adopted session was launched before this
-            # poll, so the startup-false-positive window the grace protects
-            # against has already passed (``_adopt_in_flight_review`` makes
-            # the same call).  With a grace, an idle event arriving inside
-            # it is discarded and the poll waits for a *second* event that
-            # an idle session never emits — the loop would hang until the
-            # pane died.
-            try:
-                content = _poll_for_verdict(
-                    discovery.pane_id, discovery.transcript,
-                    workdir=pr_data.get("workdir"),
-                    stop_check=_lease_keepalive(state))
-            except WorkspaceTrustBlocked as e:
-                raise ReviewHoldError(str(e)) from e
+            # its verdict since.  ``_poll_adopted_review`` reads that first,
+            # then polls without the startup grace (the adopted session was
+            # launched before this poll).
+            content = _poll_adopted_review(
+                state, discovery.pane_id, discovery.transcript, pr_data)
             if content is None:
                 raise PaneKilledError(
                     "Review pane disappeared during launch retry")
@@ -1201,6 +1212,11 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
                 continue
 
         # kind == "launch"
+        if state.stop_requested:
+            # The stop can land after the loop-top check, while the claim or
+            # discovery runs.  Never create a review window for a loop the
+            # user just stopped or superseded.
+            raise PaneKilledError("Review loop stopped during launch retry")
         if state.launch_attempts >= REVIEW_LAUNCH_MAX_ATTEMPTS:
             raise ReviewLaunchError(
                 state.last_launch_error or "Review launch failed",
