@@ -141,3 +141,11 @@ No **[UNRESOLVED]** items.
     the same repro post-fix, including the owning-PR positive control.
 - The repro binds a sandbox over `/pm-captures` inside `unshare -rm`, so the
   live evidence dir was never written by the nested project.
+
+## 7. Review-loop follow-up
+
+- Docstring truth (R5) was only partially done in 2739187c: the closing
+  sentence of `captures_dir` still said it returns `None` only when "no tag
+  can be derived AND the bind-mount isn't present". After the fail-closed
+  change it also returns `None` when the mount exists but is not owned by
+  *pr_id*. Reworded to state both conditions; no behaviour change.

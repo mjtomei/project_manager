@@ -114,8 +114,9 @@ def captures_dir(pr_id: str,
     in the canonical location; inside a container the host path
     doesn't exist and we fall through to the bind-mount.
 
-    Returns None when no tag can be derived AND the bind-mount isn't
-    present.
+    Returns None when no tag can be derived AND the bind-mount is absent
+    or not owned by *pr_id* (the fail-closed case: never the mount for a
+    PR it doesn't belong to).
     """
     if session_tag is None:
         session_tag = _resolve_session_tag(start_path)
