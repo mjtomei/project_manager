@@ -159,6 +159,21 @@ def test_trust_hold_stops_without_retry(tmp_path):
     assert "workspace trust" in result.latest_output
 
 
+def test_restart_handoff_converts_a_trust_hold_to_HOLD(tmp_path, monkeypatch):
+    """The handoff adopt path polls directly; a trust prompt there must be a
+    HOLD, not a terminal ERROR."""
+    from pm_core.claude_launcher import WorkspaceTrustBlocked
+    state = ReviewLoopState(pr_id=PR, iteration=1)
+    monkeypatch.setattr(review_loop, "_discover_iteration", lambda *a, **k:
+                        AttemptDiscovery("adopt", pane_id="%9",
+                                         transcript=str(tmp_path / "t.jsonl")))
+    monkeypatch.setattr(review_loop, "_poll_for_verdict",
+                        MagicMock(side_effect=WorkspaceTrustBlocked("trust")))
+    with pytest.raises(ReviewHoldError):
+        review_loop._adopt_in_flight_review(state, _pr(tmp_path),
+                                            str(tmp_path))
+
+
 def test_recovered_attempt_is_adopted_not_relaunched(tmp_path, monkeypatch):
     state = ReviewLoopState(pr_id=PR)
     err = ReviewLaunchError("boom", retryable=True)
@@ -377,7 +392,6 @@ def test_old_window_then_container_failure_retries_the_same_command(tmp_path,
     id, transcript) and collect its verdict.
     """
     state = ReviewLoopState(pr_id=PR, loop_id="ab12")
-    transcript = str(tmp_path / "review-pr-001-i1.jsonl")
     cmds = []
 
     def fake_run(cmd, **_kw):
@@ -434,7 +448,6 @@ def test_real_launch_recovery_collects_its_own_verdict(tmp_path, monkeypatch):
     state = ReviewLoopState(pr_id=PR)
     sid = str(uuid.uuid4())
     native = tmp_path / f"{sid}.jsonl"
-    transcript = tmp_path / "review-pr-001-i1.jsonl"
     attempts = []
 
     def fake_launch(pr_id, pm_root, *, iteration=0, loop_id="",
@@ -547,6 +560,38 @@ def test_discovery_replaces_the_historical_window(tmp_path, monkeypatch):
     disc = review_loop._discover_iteration(state, _pr(tmp_path),
                                            str(tmp_path), 2)
     assert disc.kind == "launch"
+
+
+def test_discovery_adopts_another_drivers_pane_after_our_attempt(tmp_path,
+                                                                monkeypatch):
+    """A route/native recovery racing a scheduled retry must be adopted, not
+    killed by a second ``--fresh`` launch."""
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    theirs = str(uuid.uuid4())
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: "%9")
+    monkeypatch.setattr(review_loop, "_other_loop_owner", lambda _s: "")
+    monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
+                        lambda *_a, **_k: tmp_path / f"{theirs}.jsonl")
+    pr = _pr(tmp_path)
+
+    # Before this loop has launched the iteration, a live pane is the
+    # historical window: a fresh launch replaces it.
+    state = ReviewLoopState(pr_id=PR, iteration=2)
+    disc = review_loop._discover_iteration(state, pr, str(tmp_path), 2,
+                                           allow_recovery=False)
+    assert disc.kind == "launch"
+
+    # After this loop's own attempt failed without a transcript, a live
+    # session is the recovery (or another driver's launch): adopt it.
+    state = ReviewLoopState(pr_id=PR, iteration=2,
+                            iteration_attempted=True, launch_attempts=1)
+    disc = review_loop._discover_iteration(state, pr, str(tmp_path), 2,
+                                           allow_recovery=True)
+    assert disc.kind == "adopt"
+    assert disc.pane_id == "%9"
+    assert disc.transcript == str(tmp_path / f"{theirs}.jsonl")
 
 
 def test_discovery_reports_a_landed_verdict(tmp_path, monkeypatch):
@@ -668,6 +713,52 @@ def test_claim_launch_fails_open_only_without_a_live_loop_owner(monkeypatch):
     with patch("pm_core.runtime_state.claim_action_lease",
                return_value=False):
         assert review_loop._claim_launch(state, 1, 1) is False
+
+
+def test_running_progress_only_names_a_retry_after_the_first_attempt():
+    """``launch_attempts`` is 1 for a normal first launch; the runs popup
+    must not label every running review a launch retry."""
+    from pm_core import autostart_state as st
+    first = ReviewLoopState(pr_id=PR, running=True, iteration=2,
+                            launch_attempts=1)
+    assert st._progress({"review": st.review_progress_input(first)}) == \
+        "review #2"
+    retry = ReviewLoopState(pr_id=PR, running=True, iteration=2,
+                            launch_attempts=2,
+                            last_launch_error="container setup failed")
+    assert st._progress({"review": st.review_progress_input(retry)}) == \
+        "review #2 (launch retry 2)"
+
+
+def test_follow_up_wait_refreshes_the_launch_lease(tmp_path, monkeypatch):
+    """An INPUT_REQUIRED wait can outlast the lease TTL; the loop must keep
+    ownership (and stop refreshing once it is stopping)."""
+    state = ReviewLoopState(pr_id=PR, iteration=1)
+    state._transcript_dir = str(tmp_path)
+    captured: dict = {}
+
+    def fake_wait(session, window, transcript, **kw):
+        captured["stop"] = kw["stop_check"]
+        return None
+
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(review_loop, "_wait_for_follow_up_shared", fake_wait)
+    monkeypatch.setattr(review_loop, "_LEASE_REFRESH_SECONDS", 0.0)
+    claims: list = []
+    monkeypatch.setattr("pm_core.runtime_state.claim_action_lease",
+                        lambda *a, **k: claims.append(a) or True)
+
+    assert review_loop._wait_for_follow_up_verdict(_pr(tmp_path),
+                                                   state) is None
+    stop = captured["stop"]
+    assert stop() is False
+    assert claims, "the follow-up wait must keep the launch lease alive"
+
+    state.stop_requested = True
+    assert stop() is True
+    n = len(claims)
+    stop()
+    assert len(claims) == n, "a stopping loop must not refresh the lease"
 
 
 def test_autostart_status_shows_the_retryable_launch_failure():

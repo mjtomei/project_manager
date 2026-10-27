@@ -35,7 +35,8 @@ fabricated agent verdict) when retries are exhausted.
    - Before *every* attempt (including the first after a failure) run
      `_discover_iteration(...)`.
    - Retry the *same* iteration number (`state.iteration` is not advanced again)
-     with exponential backoff `5 s, 20 s` (cap 60 s), up to
+     with exponential backoff `5 s` then `10 s` (`REVIEW_LAUNCH_BACKOFF_BASE`
+     doubled per attempt, capped at 60 s), up to
      `REVIEW_LAUNCH_MAX_ATTEMPTS = 3` attempts.  The sleep is chunked
      (≤0.25 s) and checks `state.stop_requested` and PR terminal status, so
      cancellation is prompt and the TUI event loop is never blocked (the retry
@@ -58,7 +59,6 @@ fabricated agent verdict) when retries are exhausted.
        launching a duplicate.
      - `other_owner` — another native loop (different `loop_id`) holds the
        launch lease: bow out rather than duplicate/supersede it.
-     - `hold` — the pane is at a permission/trust prompt: stop with `HOLD`.
      - `pending` — a pane exists but has not exposed its session yet: bounded
        grace, then re-discover.
      - `launch` — nothing live (or only the historical window): launch
@@ -66,6 +66,15 @@ fabricated agent verdict) when retries are exhausted.
    - A pane matching the *historical* iteration's session (`state.last_session_id`
      or a lower-numbered transcript) is not adopted; it is replaced by the fresh
      launch, preserving the existing semantics.
+   - Another driver's live session is adopted (and its landed verdict read)
+     only once *this* loop has launched the iteration (`allow_recovery`); on
+     the first attempt an unknown pane is the historical window and is
+     replaced.
+   - There is no `hold` discovery kind: a workspace-trust/permission prompt is
+     detected while polling (`WorkspacePromptWatch` → `WorkspaceTrustBlocked`)
+     and converted to `ReviewHoldError` → `HOLD` on both the launch and adopt
+     paths.  (Review 385e i2 removed the never-produced kind and its dead
+     handlers.)
 
 4. **Serialize retry ownership across drivers and restarts**
    (`pm_core/runtime_state.py`, `pm_core/cli/pr.py`).
@@ -230,3 +239,38 @@ Findings from the first review pass, applied on top of the implementation:
    not found", "no transcript session id") wrote `cmd: []`; they now record
    the launch command `_launch_review_window` returned, and `returncode: None`
    since no child exited non-zero.
+
+## Review iteration 2 (385e) — refinements
+
+Findings from the second review pass, applied on top of iteration 1:
+
+1. **Another driver's live review is adopted on a retry (correctness fix).**
+   Iteration 1's `allow_recovery` gate made the *first* attempt replace an
+   unknown pane (correct), but it also left the retry path replacing one:
+   after a launch failed *before* creating a transcript, `our_sid` is None and
+   `_discover_iteration` fell through to `launch` even though this loop had
+   launched the iteration — so a sign-off route (or another non-loop driver)
+   racing a scheduled retry had its live review killed by the retry's
+   `--fresh`.  When `allow_recovery` is true and a live pane's session is not
+   historical, discovery now reads its verdict or adopts it for polling
+   (regression "route/native recovery racing a scheduled retry").  The
+   historical-window check is now meaningful instead of both branches
+   returning `launch`.
+2. **No `hold` discovery kind.** `AttemptDiscovery("hold")` was never produced,
+   leaving three unreachable handlers.  Trust/permission holds are detected by
+   the poller (`WorkspacePromptWatch` → `ReviewHoldError`) on both the launch
+   and adopt paths; the dead kind and handlers were removed.
+3. **Progress label is not a retry on the first attempt (UI fix).**
+   `_progress` printed `review #N (launch retry 1)` for every running review
+   because `launch_attempts` is 1 after a normal launch.  It now requires
+   `attempts > 1`, matching the TUI notice's gate.
+4. **Lease kept alive through INPUT_REQUIRED.** The follow-up wait could
+   outlast the 180 s lease TTL, letting another driver treat the loop as dead.
+   `_wait_for_follow_up_verdict` now refreshes the lease too, and a stopping
+   loop (`stop_requested`) never refreshes it, so a superseding loop's claim
+   cannot be stolen back by the loop it replaced.
+5. **Trust hold on the restart handoff.** `_adopt_in_flight_review` (the
+   breadcrumb-resume handoff) polls the pane directly, so a
+   `WorkspaceTrustBlocked` there surfaced as a terminal `ERROR` (no re-arm).
+   It now converts to `ReviewHoldError` → `HOLD`, matching every other adopt
+   path.

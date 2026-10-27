@@ -593,7 +593,9 @@ def _progress(run: dict) -> str:
         return f"qa {qa['verdict']}"
     rv = run.get("review")
     if rv and rv.get("iteration"):
-        if rv.get("running") and rv.get("attempts"):
+        # ``attempts`` is 1 for a normal first launch; only a *retry* (a
+        # second or later attempt) is worth calling out.
+        if rv.get("running") and (rv.get("attempts") or 0) > 1:
             return f"review #{rv['iteration']} (launch retry {rv['attempts']})"
         return f"review #{rv['iteration']}"
     return ""
