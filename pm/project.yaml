@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T09:54:17.377390+00:00'
+  updated_at: '2026-10-27T16:34:17.529366+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36406,6 +36406,25 @@ prs:
       (2026-10-27)'
     created_at: '2026-10-27T09:54:17Z'
     last_edited: '2026-10-27T09:54:17Z'
+  - id: note-334479d
+    text: 'Review 0688 i1 (fixes applied): (1) a completed iteration left ReviewLoopState.iteration_attempted
+      True; run_review_loop_sync bumps state.iteration before _run_iteration_with_retry
+      re-snapshots the episode, so a merge restart in that window persisted True for
+      the NEXT iteration number and the restart handoff adopted an earlier run review-<pr>-i<N>.jsonl
+      verdict (e.g. PASS) for an iteration this loop never launched — the iteration-6
+      guard only covered a loops first iteration. _reset_launch_retry now clears the
+      flag on every completed iteration (a restart during an in-flight iteration still
+      adopts). Covered by test_restart_between_iterations_does_not_adopt_the_old_run
+      (fails pre-fix: persisted flag True for iteration 2). (2) a HOLD now drops the
+      failed attempts artifact/retry_ready_at from runtime_state (iteration 8 fixed
+      only the message), so pm autostart status cannot point at the wrong evidence.
+      Full suite 3875 passed, 1 skipped. Residual (non-blocking): review_loop.py ~1480
+      lines; two lease mechanisms coexist; discovery adopts a transcript verdict without
+      an idle hook event (documented); other_owner stand-down surfaces as a non-retryable
+      LAUNCH_FAILED after the bounded claim wait, so a second TUI on the same PR reports
+      needs attention for a review another loop is running.'
+    created_at: '2026-10-27T16:34:17Z'
+    last_edited: '2026-10-27T16:34:17Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
