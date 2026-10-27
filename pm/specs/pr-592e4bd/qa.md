@@ -1697,6 +1697,51 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
       clears `awaiting`. An ordinary review loop with the router down is
       ERROR and not relaunched. An unrouted PR keeps reaching main
       throughout. Ticks run concurrently.
+    Done (run cd2ea2bfffc11e5c): S86 (PASS), S87 (NEEDS_WORK, fix
+    a69b6945, filed pr-fc2e931), S88 (PASS).
+  - Thirty-fourth pass (S89+), delta-only, planner 2026-10-27. Product
+    changes since run cd2ea2bfffc11e5c: a69b6945 (S87: in the
+    `pm pr auto-sequence` awaiting-qa branch, a qa window plus a QA run
+    record started at or after the open return's `ts` counts as the
+    re-run's driver; the tick prints `running: qa` and launches nothing.
+    This covers the `zz t` loop start and the 63cabd07 REQA hop, where
+    the TUI's clear is pending under a busy project.yaml), review 84ea i1
+    4753b845 (test-only: a run record with no qa window still launches)
+    and i2 373fb92c (only this pm session's records count, via
+    `qa_loop._own_run_records`, which matches `pr_id` and filters
+    `launched_elsewhere`. `run_overlaps_own_run`, used by TUI restart
+    adoption, now shares that scan). a69b6945 has run live only in the
+    S87 post-fix rerun. 373fb92c has never run live. Controls: d93d39a9
+    (before both), a69b6945 (before 373fb92c).
+    - S89: the guard on its natural paths, host, fake-claude, HEAD vs
+      d93d39a9. (a) The S87 story 4 repro: `zz t` over a REQA re-run
+      inside a hold, with an auto-sequence ticker queued on the flock.
+      (b) The same race on the TUI's REQA hop (63cabd07 path). Expected
+      for both: the tick prints `running: qa`, no `qa-run-bg` runs, the
+      re-run's windows survive, and one clear lands after the release.
+      Cases that must still launch: (c) a return the TUI is not driving,
+      where the judged run's window is still open; (d) a `pm edit`
+      re-arm (new `ts`) after a re-run already started; (e) a re-run
+      whose qa window is gone while its clear is still pending. That
+      last case is an observation, bounded at one driver.
+    - S90: 373fb92c across two clones of one project, which share
+      `~/.pm/workdirs/qa`, host, fake-claude, HEAD vs a69b6945. Clone A
+      has a REQA return and its judged run's window still open. After
+      the return, clone B runs QA on the same PR, and a different PR in
+      clone A starts a run too. A's tick must launch A's re-run once, and
+      B's run must stay untouched; the a69b6945 control should stay at
+      `running: qa`. Regression for the refactor of
+      `run_overlaps_own_run`: restart each TUI while both clones QA the
+      PR. Each TUI resumes only its own run, never adopts the other's,
+      and records one QA note per run.
+    - S91: integration in container mode with real claude against the
+      router and main stubs. A routed PR's sign-off REQA return lands
+      while project.yaml is held, with the TUI and ticks running
+      concurrently. Expected: one re-run driver and one set of scenario
+      containers. Routed refiners and workers send only `work/` to the
+      router; s0, the planner and the verifier stay on main. The clear
+      lands after the release, and an unrouted PR keeps reaching main.
+      No containers leak.
 
 ## 3. Edge cases
 
