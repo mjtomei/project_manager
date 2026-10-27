@@ -317,7 +317,15 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   `check_response()` runs *after* the fresh-event/verdict scan and is
   skipped when a verdict was found: a verdict that lands on the very tick
   the response deadline expires must be recorded, not retired as
-  `no_response` (the "completed result treated as absent" failure).
+  `no_response` (the "completed result treated as absent" failure). Both
+  `check_response()` and the settle/nudge block are skipped while the run
+  is stopping (`state.stop_requested`): a stop is set from the TUI thread
+  and can land between two ticks, after the `while` condition was
+  evaluated, so without the guard a worker being torn down would be
+  retired as `no_response` (or `no_progress` — `handle`'s deferral bound
+  is checked before its own `stop_check`) with a reason that is persisted
+  into the resume snapshot. The planner honours `stop_requested` the same
+  way before its `check_response`.
 * **planner** — per-attempt `MissingOutputRecovery` with a `QA_PLAN_START/END`
   outcome request and a resume request; on exhaustion break out with
   `INPUT_REQUIRED` + `_error` (reusing the existing "plan incomplete" surface
@@ -444,7 +452,8 @@ unbounded.
   `NO_VERDICT`, scenario-worker exhaustion
   (`INPUT_REQUIRED` + reason, slot freed); a verdict landing on the tick the
   post-nudge response deadline expires is recorded, not retired as
-  `no_response`.
+  `no_response`; a stop that lands between ticks does not retire a worker as
+  `no_response` (no spurious exhaustion during teardown).
 * `tests/test_qa_planner_handoff.py`: planner exhaustion surfaces
   `INPUT_REQUIRED` + error and stops planning; a plan written while recovery
   settles (the idle-hook/transcript-write race) is accepted from the settle

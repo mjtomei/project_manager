@@ -3149,7 +3149,17 @@ def _poll_tmux_verdicts(
                     _no_verdict_since.setdefault(scenario.index, time.time())
                     _recovery_ev_ts.setdefault(scenario.index, ev_ts)
 
-            if _rec is not None and verdict is None:
+            # A stop ends the run cleanly: retiring a worker as
+            # INPUT_REQUIRED while the run is being torn down is noise, not
+            # a verdict (and its reason would be persisted into the resume
+            # snapshot).  The planner honours ``stop_requested`` the same
+            # way before its ``check_response``.  Both checks below are
+            # skipped on a stop — ``handle`` can otherwise raise
+            # ``no_progress`` from its settle branch *before* its own
+            # ``stop_check`` runs.
+            stopping = state.stop_requested
+
+            if _rec is not None and verdict is None and not stopping:
                 try:
                     _rec.check_response()
                 except VerdictRecoveryExhausted as e:
@@ -3172,7 +3182,8 @@ def _poll_tmux_verdicts(
             # idle and then goes silent (the common shape) would otherwise
             # never be nudged at all, because no further idle_prompt would
             # ever pass the fresh-event gate.
-            if verdict is None and scenario.index in _no_verdict_since:
+            if (verdict is None and not stopping
+                    and scenario.index in _no_verdict_since):
                 if not pane_id:
                     continue
                 rec = _recovery_for(scenario, pane_id)
