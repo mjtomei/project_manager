@@ -44,6 +44,7 @@ import shutil
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1041,25 +1042,21 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     return exec_part
 
 
-def remove_container(name: str) -> None:
+def remove_container(name: str, *, capture: bool = True) -> None:
     """Force-remove a container and its push proxy, then wait until it is gone.
 
     If another 'docker rm -f' is already in flight (e.g. the previous session's
     EXIT trap), this still blocks until the container has fully disappeared so
     that the caller can safely create a fresh container with the same name.
 
-    Captures memory stats before removal for the memory governor.
+    Captures memory stats before removal for the memory governor unless
+    *capture* is False (the caller already captured them).
     """
     import time
     from pm_core.push_proxy import stop_push_proxy
     _log.info("remove_container: name=%s", name)
-    # Capture memory stats before removing (best-effort)
-    try:
-        from pm_core.memory_governor import capture_and_record
-        capture_and_record(name)
-    except Exception:
-        _log.debug("Failed to capture stats for %s before removal", name,
-                    exc_info=True)
+    if capture:
+        _capture_memory_sample(name)
 
     stop_push_proxy(name)
     _run_runtime("rm", "-f", name, check=False, timeout=30)
@@ -1073,6 +1070,16 @@ def remove_container(name: str) -> None:
             return  # container is gone
         time.sleep(0.1)
     _log.warning("remove_container: %s still present after 10 s", name)
+
+
+def _capture_memory_sample(name: str) -> None:
+    """Record *name*'s memory for the governor (best-effort, never raises)."""
+    try:
+        from pm_core.memory_governor import capture_and_record
+        capture_and_record(name)
+    except Exception:
+        _log.debug("Failed to capture stats for %s before removal", name,
+                   exc_info=True)
 
 
 def _exec_session_count(name: str) -> int | None:
@@ -1170,7 +1177,8 @@ def foreign_exec_sessions(name: str, pane_ids: list[str]) -> int | None:
     return max(0, total - owned)
 
 
-def stop_container(name: str, pane_ids: list[str] | None = None) -> bool:
+def stop_container(name: str, pane_ids: list[str] | None = None,
+                   resumed: Callable[[], bool] | None = None) -> bool:
     """Remove a finished session's container to free memory (stop-on-idle).
 
     Captures memory stats before removal.  The workdir is bind-mounted
@@ -1180,20 +1188,35 @@ def stop_container(name: str, pane_ids: list[str] | None = None) -> bool:
     *pane_ids* are the panes that belong to the finished session: they
     get ``remain-on-exit on`` so their text stays readable, and exec
     sessions started from them are expected.  The container is kept when
-    any other exec session is open (someone is still using it) or when
-    that cannot be determined.  Returns True if the container was removed.
+    any other exec session is open (someone is still using it), when
+    that cannot be determined, or when *resumed* returns True (the
+    session was picked up again).  Ownership and *resumed* are checked
+    again after the stats capture — which takes seconds — immediately
+    before removal.  Returns True if the container was removed.
     """
     pane_ids = list(pane_ids or [])
+
+    def _keep_reason() -> str:
+        if resumed is not None and resumed():
+            return "session resumed since idle"
+        foreign = foreign_exec_sessions(name, pane_ids)
+        if foreign is None:
+            return "cannot tell who is using it"
+        if foreign:
+            return f"{foreign} other exec session(s) open"
+        return ""
+
     if not container_is_running(name):
         _log.info("Stop-on-idle: %s is not running — nothing to stop", name)
         return False
-    foreign = foreign_exec_sessions(name, pane_ids)
-    if foreign is None:
-        _log.info("Stop-on-idle: keeping %s — cannot tell who is using it", name)
+    why = _keep_reason()
+    if why:
+        _log.info("Stop-on-idle: keeping %s — %s", name, why)
         return False
-    if foreign:
-        _log.info("Stop-on-idle: keeping %s — %d other exec session(s) open",
-                  name, foreign)
+    _capture_memory_sample(name)
+    why = _keep_reason()
+    if why:
+        _log.info("Stop-on-idle: keeping %s — %s", name, why)
         return False
 
     # Preserve tmux panes before stopping (the exec processes die when the
@@ -1206,8 +1229,8 @@ def stop_container(name: str, pane_ids: list[str] | None = None) -> bool:
             except Exception:
                 _log.debug("Failed to set remain-on-exit for pane %s", pid)
 
-    # remove_container captures memory stats and removes the push proxy.
-    remove_container(name)
+    # Stats were captured above; this also removes the push proxy.
+    remove_container(name, capture=False)
     _log.info("Stop-on-idle: removed container %s", name)
     return True
 
@@ -1232,14 +1255,12 @@ def stop_idle_in_background(name: str, container_type: str,
     if not mg.get_stop_idle_policy(container_type):
         return None
 
+    resumed = (None if idle_since is None else
+               lambda: mg.transcript_touched_since(transcript_path, idle_since))
+
     def _run() -> None:
-        if (idle_since is not None
-                and mg.transcript_touched_since(transcript_path, idle_since)):
-            _log.info("Stop-on-idle: keeping %s — session resumed since idle",
-                      name)
-            return
         try:
-            stop_container(name, pane_ids=pane_ids)
+            stop_container(name, pane_ids=pane_ids, resumed=resumed)
         except Exception:
             _log.warning("Stop-on-idle failed for %s", name, exc_info=True)
 

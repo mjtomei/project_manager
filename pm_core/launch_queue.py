@@ -31,6 +31,7 @@ Safety rules:
 import fcntl
 import json
 import os
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -50,6 +51,8 @@ _DEFAULT_LOCK_TIMEOUT = 30.0
 _WAITING_TTL = 300.0
 # An acquired entry whose container never appeared is released after this.
 _ACQUIRED_TTL = 1800.0
+# How often keepalive_during renews entries (well under _WAITING_TTL).
+_KEEPALIVE_INTERVAL = 15.0
 
 # Identifies this process image.  ``pm`` restarts re-exec in place (same
 # PID), so the PID alone cannot tell a live owner from its previous self.
@@ -406,13 +409,15 @@ def _upsert_locked(queue: dict, container_type: str, qa_run_id: str | None,
     """Add an entry, or adopt an existing entry with the same *key*.
 
     Adoption keeps the entry's place in line (``enqueued_at``) so a QA run
-    resumed after a restart does not lose its fairness position.
+    resumed after a restart does not lose its fairness position.  An
+    adopted grant is returned to waiting: asking again means the earlier
+    launch is over (a dequeue that hit a busy lock) or its owner is gone,
+    and the caller must be admitted afresh rather than told "not granted".
     """
     if key:
         for e in queue["entries"]:
             if e.get("key") == key:
-                if e.get("status") == "acquired" and not _is_mine(e):
-                    # The previous owner's grant dies with it; re-queue.
+                if e.get("status") == "acquired":
                     e["status"] = "waiting"
                     e.pop("acquired_at", None)
                 e.update(_owner_fields())
@@ -583,6 +588,33 @@ def keepalive(entry_ids: list[str]) -> bool:
         _log.debug("Launch queue keepalive skipped: %s", e)
         return False
     return True
+
+
+@contextmanager
+def keepalive_during(entry_ids: set[str],
+                     interval: float = _KEEPALIVE_INTERVAL):
+    """Renew *entry_ids* from a daemon thread while the body runs.
+
+    For owners that block longer than ``_WAITING_TTL`` and so cannot
+    renew their waiting entries themselves — a QA launch waits for its
+    refiners, which can take minutes.  *entry_ids* is read on every
+    renewal, so the caller may keep it current.
+    """
+    if not entry_ids:
+        yield
+        return
+    stop = threading.Event()
+
+    def _beat() -> None:
+        while not stop.wait(interval):
+            keepalive(list(entry_ids))
+
+    t = threading.Thread(target=_beat, daemon=True, name="pm-queue-keepalive")
+    t.start()
+    try:
+        yield
+    finally:
+        stop.set()
 
 
 def get_queue_status() -> dict:

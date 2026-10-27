@@ -431,10 +431,12 @@ def run_review_loop_sync(
     finally:
         state.running = False
         # Stop-on-idle: remove this session's review container if the
-        # policy is on and the final verdict is not INPUT_REQUIRED (the
-        # user may still need it).
-        if (state.latest_verdict
-                and state.latest_verdict != VERDICT_INPUT_REQUIRED):
+        # policy is on and the session finished — a final verdict, or its
+        # pane is gone.  Not on INPUT_REQUIRED (the user may still need
+        # it) or ERROR (launch/poll failed; the reviewer may still be
+        # starting or running).
+        if state.latest_verdict in (VERDICT_PASS, VERDICT_NEEDS_WORK,
+                                    VERDICT_KILLED):
             try:
                 session = _get_pm_session()
                 if session:

@@ -1,11 +1,9 @@
 """Tests for pm_core.launch_queue."""
 
 import contextlib
-import json
 import os
 import time
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -18,14 +16,13 @@ from pm_core.launch_queue import (
     get_queue_policy,
     governor_lock,
     keepalive,
+    keepalive_during,
     try_acquire_detailed,
     GovernorLockTimeout,
     _INSTANCE,
     _WAITING_TTL,
     _ACQUIRED_TTL,
     _sort_queue,
-    _sort_qa_drain,
-    _sort_qa_round_robin,
     _clean_stale,
     _load_queue,
     _save_queue,
@@ -409,6 +406,22 @@ class TestEnqueueAndTryAcquire:
             assert a == b and not ok_a and not ok_b
             assert len(_load_queue()["entries"]) == 1
 
+    def test_leftover_own_grant_is_readmitted(self, tmp_path):
+        """Regression: a grant left behind by a dequeue that hit a busy
+        lock made the next launch of the same container refuse with an
+        empty reason (and dequeue the entry under it)."""
+        with _patch_home(tmp_path), \
+             _patch_governor_active(48 * 1024, 30 * 1024, 8 * 1024):
+            a, ok_a, _ = enqueue_and_try_acquire("impl", key="pm-t-impl-pr-1")
+            assert ok_a  # ...and the dequeue after launch never happened
+            b, ok_b, reason = enqueue_and_try_acquire("impl", key="pm-t-impl-pr-1")
+            assert (b, ok_b, reason) == (a, True, "")
+            assert len(_load_queue()["entries"]) == 1
+        with _patch_home(tmp_path), \
+             _patch_governor_active(48 * 1024, 44 * 1024, 8 * 1024):
+            _, ok_c, reason = enqueue_and_try_acquire("impl", key="pm-t-impl-pr-1")
+            assert not ok_c and "target" in reason
+
     def test_lock_busy_refuses(self, tmp_path):
         with _patch_home(tmp_path), \
              patch("pm_core.launch_queue.governor_lock",
@@ -581,3 +594,26 @@ class TestOwnership:
         assert len(entries) == 1
         assert entries[0]["enqueued_at"] == 1.0
         assert entries[0]["instance"] == _INSTANCE
+
+    def test_keepalive_during_renews_while_blocked(self, tmp_path):
+        """A QA launch blocks on its refiners for minutes; the scenarios
+        still waiting for memory must not expire meanwhile."""
+        with _patch_home(tmp_path):
+            [eid] = enqueue("qa_scenario", qa_run_id="r", count=1)
+            q = _load_queue()
+            q["entries"][0]["heartbeat_at"] = time.time() - _WAITING_TTL + 5
+            _save_queue(q)
+            with keepalive_during({eid}, interval=0.01):
+                deadline = time.time() + 5
+                while (time.time() - _load_queue()["entries"][0]["heartbeat_at"] > 5
+                       and time.time() < deadline):
+                    time.sleep(0.01)
+            assert time.time() - _load_queue()["entries"][0]["heartbeat_at"] < 5
+
+    def test_keepalive_during_nothing_to_renew(self):
+        with patch("pm_core.launch_queue.keepalive") as ka, \
+             patch("pm_core.launch_queue.threading.Thread") as thread:
+            with keepalive_during(set(), interval=0.01):
+                pass
+        thread.assert_not_called()
+        ka.assert_not_called()

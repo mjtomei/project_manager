@@ -316,6 +316,36 @@ class TestRunReviewLoopSync:
         mock_review.assert_called_once()
 
 
+class TestStopOnIdle:
+    """At loop exit the review container is removed (policy permitting)
+    only when the session finished — never after a launch/poll ERROR."""
+
+    def _run(self, review_effect):
+        state = ReviewLoopState(pr_id="pr-001")
+        with patch("pm_core.review_loop._run_claude_review",
+                   side_effect=review_effect), \
+             patch("pm_core.review_loop._get_pm_session",
+                   return_value="pm-repo-abc"), \
+             patch("pm_core.review_loop._find_claude_pane", return_value="%7"), \
+             patch("pm_core.container.stop_idle_in_background") as stop:
+            run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+        return stop
+
+    def test_pass_stops_exact_container(self):
+        stop = self._run(["All good.\n\n**PASS**"])
+        stop.assert_called_once_with("pm-repo-abc-review-pr-001", "review",
+                                     pane_ids=["%7"])
+
+    def test_pane_killed_stops(self):
+        stop = self._run(PaneKilledError("gone"))
+        stop.assert_called_once()
+
+    def test_error_keeps_container(self):
+        """A failed launch/poll may leave the reviewer starting or running."""
+        stop = self._run(RuntimeError("Review window not found after launch"))
+        stop.assert_not_called()
+
+
 class TestResumeInFlightIteration:
     """A breadcrumb-resumed loop adopts the iteration still running in its
     review window instead of relaunching (which killed the window)."""

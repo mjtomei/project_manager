@@ -2866,10 +2866,14 @@ def _poll_tmux_verdicts(
         state.scenarios = [scenario]
         try:
             if use_containers:
-                _launch_scenarios_in_containers(
-                    state, data, pr_data, session, repo_root, workdir_path,
-                    pm_root=pm_root, _status_scenarios=orig,
-                )
+                # The launch blocks on the refiner: keep the scenarios
+                # still waiting for memory in line meanwhile.
+                from pm_core.launch_queue import keepalive_during
+                with keepalive_during(_pending_entry_ids):
+                    _launch_scenarios_in_containers(
+                        state, data, pr_data, session, repo_root, workdir_path,
+                        pm_root=pm_root, _status_scenarios=orig,
+                    )
             else:
                 _launch_scenarios_in_tmux(
                     state, data, pr_data, session, repo_root, workdir_path,
@@ -4404,10 +4408,14 @@ def run_qa_sync(
     all_scenarios = state.scenarios
     state.scenarios = launch_scenarios
     if use_containers:
-        _launch_scenarios_in_containers(
-            state, data, pr_data, session, repo_root, workdir_path,
-            pm_root=pm_root,
-        )
+        # Refiners can run for minutes: keep the scenarios that are
+        # waiting for memory in line meanwhile.
+        from pm_core.launch_queue import keepalive_during
+        with keepalive_during(_pending_entry_ids):
+            _launch_scenarios_in_containers(
+                state, data, pr_data, session, repo_root, workdir_path,
+                pm_root=pm_root,
+            )
     else:
         _launch_scenarios_in_tmux(
             state, data, pr_data, session, repo_root, workdir_path,

@@ -164,7 +164,13 @@ def _fmt_mb(mb: int) -> str:
 #   pm-{tag}-signoff-{pr_id} or  pm-signoff-{pr_id}
 #   pm-{tag}-qa-{pr}-{loop}-s{N}  or  pm-qa-{pr}-{loop}-s{N}
 #   pm-qa-debug-{instruction}-{debug_id}
-# The tag is a session identifier that may contain hyphens.
+# The tag is a session identifier derived from the project name, so it
+# may contain hyphens and words like "impl" or "review": match the label
+# at the end of the name, never anywhere in it.
+_PR_ID = r"pr-[0-9a-z]+(?:-\d+)?"
+_SESSION_LABEL_RE = re.compile(rf"(?:^|-)(impl|review|signoff)-{_PR_ID}$")
+_QA_SCENARIO_RE = re.compile(rf"(?:^|-)qa-{_PR_ID}-[^-]+-s\d+$")
+
 
 def infer_container_type(name: str) -> str | None:
     """Infer container type from its name.
@@ -177,28 +183,17 @@ def infer_container_type(name: str) -> str | None:
 
     suffix = name[len(_CONTAINER_PREFIX):]
 
-    if "-qa-debug-" in suffix or suffix.startswith("qa-debug-"):
+    if suffix.startswith("qa-debug-"):
         return "qa_debug"
-
-    # QA scenario: contains "-qa-" or starts with "qa-", and ends with "-s{N}"
-    if ("-qa-" in suffix or suffix.startswith("qa-")) and re.search(r"-s\d+$", suffix):
+    m = _SESSION_LABEL_RE.search(suffix)
+    if m:
+        return m.group(1)
+    if _QA_SCENARIO_RE.search(suffix):
         return "qa_scenario"
-
-    # QA planner: contains "-qa-planner" or ends with "qa-planner"
-    if suffix.endswith("-qa-planner") or suffix == "qa-planner":
+    if suffix == "qa-planner" or suffix.endswith("-qa-planner"):
         return "qa_planner"
-
-    if "-signoff-" in suffix or suffix.startswith("signoff-"):
-        return "signoff"
-
-    # Impl: label is "impl-{pr_id}" so name contains "-impl-" or ends with "-impl"
-    if "-impl-" in suffix or suffix.endswith("-impl") or suffix == "impl" or suffix.startswith("impl-"):
+    if suffix == "impl" or suffix.endswith("-impl"):
         return "impl"
-
-    # Review: contains "-review-" or starts with "review-"
-    if "-review-" in suffix or suffix.startswith("review-"):
-        return "review"
-
     return None
 
 
@@ -406,12 +401,6 @@ def read_host_memory() -> HostMemory | None:
             return None
 
     return None
-
-
-def get_system_memory_used_mb() -> int | None:
-    """Total host memory in use (MiB), or None if unavailable."""
-    host = read_host_memory()
-    return host.used_mb if host else None
 
 
 # ---------------------------------------------------------------------------
@@ -771,39 +760,6 @@ def admit(snapshot: MemorySnapshot, projected_mb: int,
                 f"would leave {_fmt_mb(max(left, 0))} "
                 f"< {_fmt_mb(snapshot.reserve_mb)} reserve")
     return True, ""
-
-
-def check_launch(container_type: str,
-                 count: int = 1) -> tuple[bool, str]:
-    """Diagnostic gate check for ``count`` containers of a type.
-
-    Accounts for in-flight queue reservations.  Production launches go
-    through :mod:`pm_core.launch_queue` instead, which also orders
-    competing launches.  Returns ``(True, "")`` when the governor is
-    inactive and ``(False, reason)`` when it cannot measure.
-    """
-    from pm_core.launch_queue import (
-        governor_lock, GovernorLockTimeout, _load_queue,
-    )
-    try:
-        if get_memory_target() is None:
-            return True, ""
-    except GovernorConfigError as e:
-        return False, str(e)
-    try:
-        with governor_lock():
-            stats = load_stats()
-            snapshot = take_snapshot(stats=stats)
-            inflight = 0
-            for e in _load_queue()["entries"]:
-                if (e.get("status") == "acquired"
-                        and e.get("container_name") not in snapshot.running_names):
-                    inflight += project_memory(
-                        e.get("container_type") or "other", stats=stats)
-            projected = count * project_memory(container_type, stats=stats)
-            return admit(snapshot, projected, inflight)
-    except GovernorLockTimeout as e:
-        return False, str(e)
 
 
 def check_single_container_fits(container_type: str) -> tuple[bool, str]:

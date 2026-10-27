@@ -8,7 +8,7 @@ memory measurement is patched.
 
 import contextlib
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -350,6 +350,31 @@ class TestQueuedAdmission:
                    on_sleep=lambda n: ids_seen.extend(
                        (e["id"], e["enqueued_at"]) for e in _queue_entries()))
         assert (old, 1.0) in ids_seen
+
+
+class TestKeepaliveDuringLaunch:
+    def test_queued_launch_keeps_waiting_entries_alive(self, tmp_path):
+        """The launch blocks on the refiner for minutes; scenarios still
+        waiting for memory are renewed meanwhile instead of expiring."""
+        s2 = _scenario(2, launched=False)
+        s3 = _scenario(3, launched=False)
+        state = _state([s2, s3])
+        [e3] = lq.enqueue("qa_scenario", qa_run_id="pr-1-loop",
+                          keys=["pr-1-loop:s3"])
+        renewed = []
+
+        @contextlib.contextmanager
+        def recording(ids, interval=15.0):
+            renewed.append(set(ids))
+            yield
+
+        with _governor(used_g=30), \
+             patch("pm_core.launch_queue.keepalive_during", recording):
+            _, _, launched = _drive(tmp_path, state, queued=[s2, s3],
+                                    entry_id_map={3: e3},
+                                    pending_entry_ids={e3}, max_sleeps=2)
+        assert launched[:1] == [2]
+        assert e3 in renewed[0]
 
 
 class TestInitialBatch:

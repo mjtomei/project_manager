@@ -1,8 +1,5 @@
 """Tests for pm_core.memory_governor."""
 
-import json
-import textwrap
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -16,12 +13,10 @@ from pm_core.memory_governor import (
     save_stats,
     record_sample,
     project_memory,
-    check_launch,
     check_single_container_fits,
     get_stop_idle_policy,
     format_memory_status,
     capture_and_record,
-    get_history_size,
 )
 
 
@@ -91,9 +86,26 @@ class TestInferContainerType:
         assert infer_container_type("pm-repo-abc123-signoff-pr-abc") == "signoff"
         assert infer_container_type("pm-qa-debug-instr-1-dbg2") == "qa_debug"
 
+    def test_impl_with_pr_id(self):
+        assert infer_container_type("pm-impl-pr-001") == "impl"
+        assert infer_container_type("pm-repo-abc123-impl-pr-eb2dbfc") == "impl"
+        assert infer_container_type("pm-repo-abc123-impl-pr-eb2dbfc-2") == "impl"
+
+    def test_session_tag_words_do_not_decide_the_type(self):
+        """Regression: the session tag comes from the project name, so a
+        project called e.g. impl-tools or my-signoff-bot used to put every
+        container's samples under the wrong type."""
+        assert infer_container_type("pm-impl-tools-ab12-review-pr-1a2b") == "review"
+        assert infer_container_type("pm-my-signoff-bot-ab12-impl-pr-1a2b") == "impl"
+        assert infer_container_type("pm-review-ui-ab12-signoff-pr-1a2b") == "signoff"
+        assert infer_container_type(
+            "pm-impl-tools-ab12-qa-pr-1a2b-0123abcd-s2") == "qa_scenario"
+        assert infer_container_type("pm-qa-lab-ab12-impl-pr-1a2b") == "impl"
+
     def test_unknown(self):
         assert infer_container_type("pm-watcher") is None
         assert infer_container_type("not-a-pm-container") is None
+        assert infer_container_type("pm-review-ui-ab12-notes") is None
 
 
 # ---------------------------------------------------------------------------
@@ -394,53 +406,6 @@ class TestAdmit:
         assert mg.parse_reserve("8g", 65536) == 8192
         with pytest.raises(ValueError):
             mg.parse_reserve("150%", 1)
-
-
-class TestCheckLaunch:
-    def test_no_target_always_allows(self):
-        with patch("pm_core.memory_governor.get_memory_target", return_value=None):
-            allowed, reason = check_launch("impl")
-            assert allowed is True
-            assert reason == ""
-
-    def _check(self, used_g, count=1, error="", proj_g=8):
-        snap = mg.MemorySnapshot(target_mb=48 * 1024, used_mb=used_g * 1024,
-                                 measured_mb=used_g * 1024, error=error)
-        with patch("pm_core.memory_governor.get_memory_target",
-                   return_value=48 * 1024), \
-             patch("pm_core.memory_governor.take_snapshot", return_value=snap), \
-             patch("pm_core.memory_governor.project_memory",
-                   return_value=proj_g * 1024):
-            return check_launch("qa_scenario", count=count)
-
-    def test_within_budget(self):
-        assert self._check(30)[0] is True
-
-    def test_exceeds_budget(self):
-        allowed, reason = self._check(44)
-        assert allowed is False
-        assert "target" in reason
-
-    def test_multiple_count(self):
-        assert self._check(10, count=3, proj_g=5)[0] is True
-        assert self._check(10, count=10, proj_g=5)[0] is False
-
-    def test_measurement_failure_refuses(self):
-        """Regression: unmeasurable usage used to allow the launch."""
-        allowed, reason = self._check(0, error="podman stats failed")
-        assert allowed is False
-        assert "podman stats failed" in reason
-
-    def test_inflight_reservations_counted(self, _isolated_memory_governor):
-        from pm_core import launch_queue as lq
-        lq.enqueue("impl", keys=["pm-a"], container_names=["pm-a"])
-        q = lq._load_queue()
-        q["entries"][0]["status"] = "acquired"
-        q["entries"][0]["acquired_at"] = __import__("time").time()
-        lq._save_queue(q)
-        # 30 used + 8 reserved for pm-a + 8 = 46 fits; + another 8 doesn't
-        assert self._check(30)[0] is True
-        assert self._check(34)[0] is False
 
 
 class TestCheckSingleFits:

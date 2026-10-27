@@ -1300,6 +1300,12 @@ class TestStopContainer:
     """stop_container removes a finished session's container — unless
     something else (e.g. a person's shell) still has an exec session in it."""
 
+    @pytest.fixture(autouse=True)
+    def _no_capture(self):
+        with patch("pm_core.container._capture_memory_sample") as cap:
+            self.capture = cap
+            yield
+
     @pytest.fixture
     def running(self):
         with patch("pm_core.container.container_is_running", return_value=True), \
@@ -1316,16 +1322,19 @@ class TestStopContainer:
         assert manager.mock_calls == [
             call.set_pane("%10", "remain-on-exit", "on"),
             call.set_pane("%11", "remain-on-exit", "on"),
-            call.remove("pm-qa-s1"),
+            call.remove("pm-qa-s1", capture=False),
         ]
-        running.assert_called_once_with("pm-qa-s1", ["%10", "%11"])
+        # Checked before and again after the (slow) stats capture.
+        assert running.call_count == 2
+        running.assert_called_with("pm-qa-s1", ["%10", "%11"])
+        self.capture.assert_called_once_with("pm-qa-s1")
 
     @patch("pm_core.container.remove_container")
     @patch("pm_core.tmux.set_pane_option")
     def test_no_panes(self, mock_set_pane, mock_remove, running):
         assert stop_container("pm-qa-s1", pane_ids=None) is True
         mock_set_pane.assert_not_called()
-        mock_remove.assert_called_once_with("pm-qa-s1")
+        mock_remove.assert_called_once_with("pm-qa-s1", capture=False)
 
     @patch("pm_core.container.remove_container")
     @patch("pm_core.tmux.set_pane_option")
@@ -1333,7 +1342,7 @@ class TestStopContainer:
         mock_set_pane.side_effect = [None, RuntimeError("dead pane"), None]
         stop_container("pm-qa-s1", pane_ids=["%10", "%11", "%12"])
         assert mock_set_pane.call_count == 3
-        mock_remove.assert_called_once_with("pm-qa-s1")
+        mock_remove.assert_called_once_with("pm-qa-s1", capture=False)
 
     @patch("pm_core.container.remove_container")
     def test_keeps_container_with_foreign_exec_session(self, mock_remove):
@@ -1348,6 +1357,26 @@ class TestStopContainer:
         with patch("pm_core.container.container_is_running", return_value=True), \
              patch("pm_core.container.foreign_exec_sessions", return_value=None):
             assert stop_container("pm-qa-s1", pane_ids=["%10"]) is False
+        mock_remove.assert_not_called()
+
+    @patch("pm_core.container.remove_container")
+    def test_keeps_container_resumed_before_capture(self, mock_remove, running):
+        assert stop_container("pm-qa-s1", ["%10"], resumed=lambda: True) is False
+        mock_remove.assert_not_called()
+        self.capture.assert_not_called()
+
+    @patch("pm_core.container.remove_container")
+    def test_rechecks_after_capture(self, mock_remove, running):
+        """Someone resuming the session or attaching a shell while the
+        stats are captured (seconds) still keeps the container."""
+        answers = iter([False, True])
+        assert stop_container("pm-qa-s1", ["%10"],
+                              resumed=lambda: next(answers)) is False
+        self.capture.assert_called_once_with("pm-qa-s1")
+        mock_remove.assert_not_called()
+
+        running.side_effect = [0, 1]
+        assert stop_container("pm-qa-s1", ["%10"]) is False
         mock_remove.assert_not_called()
 
     @patch("pm_core.container.remove_container")
@@ -1403,12 +1432,10 @@ class TestForeignExecSessions:
 
 
 class TestStopIdleInBackground:
-    def _run(self, policy=True, touched=False, **kw):
+    def _run(self, policy=True, **kw):
         from pm_core import container as c
         with patch("pm_core.container.is_container_mode_enabled", return_value=True), \
              patch("pm_core.memory_governor.get_stop_idle_policy", return_value=policy), \
-             patch("pm_core.memory_governor.transcript_touched_since",
-                   return_value=touched), \
              patch("pm_core.container.stop_container") as stop:
             t = c.stop_idle_in_background("pm-qa-s1", "qa_scenario", ["%1"], **kw)
             if t:
@@ -1423,12 +1450,15 @@ class TestStopIdleInBackground:
     def test_stops_off_thread(self):
         t, stop = self._run()
         assert t is not None
-        stop.assert_called_once_with("pm-qa-s1", pane_ids=["%1"])
+        stop.assert_called_once_with("pm-qa-s1", pane_ids=["%1"], resumed=None)
 
-    def test_resumed_session_is_kept(self):
-        t, stop = self._run(touched=True, transcript_path="/t.jsonl",
-                            idle_since=100.0)
-        stop.assert_not_called()
+    def test_resumed_check_uses_transcript(self):
+        t, stop = self._run(transcript_path="/t.jsonl", idle_since=100.0)
+        resumed = stop.call_args.kwargs["resumed"]
+        with patch("pm_core.memory_governor.transcript_touched_since",
+                   return_value=True) as touched:
+            assert resumed() is True
+        touched.assert_called_once_with("/t.jsonl", 100.0)
 
 
 class TestLaunchAdmission:

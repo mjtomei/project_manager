@@ -94,8 +94,18 @@ container when:
 - the session transcript changed after the idle/verdict point (someone
   resumed it);
 - the verdict is INPUT_REQUIRED or verification is in flight (unchanged).
+The ownership and resumed checks run again right before removal, after
+the stats capture (which takes seconds), so a person who attaches or
+resumes during the capture keeps the container.
 Standalone reviews stop only after a final review verdict (not
-INPUT_REQUIRED) is mirrored by master's hook-driven review pass.
+INPUT_REQUIRED) is mirrored by master's hook-driven review pass.  A
+review loop stops its container only on PASS, NEEDS_WORK or KILLED —
+not INPUT_REQUIRED, and not ERROR (a failed launch or poll may leave the
+reviewer starting or running).
+
+Container types are read from the label at the *end* of the name
+(`…-impl-pr-x`, `…-qa-pr-x-<loop>-sN`): the session tag comes from the
+project name and may itself contain words like `impl` or `review`.
 
 **UI.**  The status bar reads a cached memory string only; a 15 s TUI
 interval refreshes it off the UI thread (runtime stats take seconds).
@@ -521,7 +531,7 @@ Stats are keyed by container type, but container names encode the type: `pm-{tag
 1. **`pm_core/memory_governor.py`** — Core governor logic:
    - `parse_memory(s: str) -> int` — parse "8g", "1.5GiB", "500MiB" to MB
    - `get_pm_container_memory() -> dict[str, int]` — one-shot `docker stats --no-stream` for all pm containers, returns name→MB
-   - `get_system_memory_used_mb() -> int` — read `/proc/meminfo` (MemTotal - MemAvailable), macOS fallback via `sysctl`/`vm_stat`
+   - `read_host_memory() -> HostMemory | None` — read `/proc/meminfo` (MemTotal, MemAvailable), macOS fallback via `sysctl`/`vm_stat`
    - `get_current_used_mb() -> int` — dispatch based on `system-memory-scope` setting
    - `capture_container_memory(name: str) -> int | None` — `docker stats --no-stream` for a single container, returns MB or None on failure. Called before stop/removal.
    - `get_container_age_minutes(name: str) -> float | None` — `docker inspect` StartedAt, returns age in minutes
@@ -529,7 +539,7 @@ Stats are keyed by container type, but container names encode the type: `pm-{tag
    - `record_sample(container_type: str, memory_mb: int, age_minutes: float)` — append sample to stats file under `governor_lock()`, drop oldest if over `system-memory-history-size`
    - `project_memory(container_type: str) -> int` — average of stored end-of-life samples (uses whatever samples exist, even if fewer than `history-size`); only falls back to `system-memory-default-projection` / `memory-limit` when zero samples
    - `get_history_size() -> int` — read `system-memory-history-size` setting, default 20
-   - `check_launch(container_type: str, count: int = 1) -> tuple[bool, str]` — gate check (current_used + count * projected <= target). Uses `governor_lock()`. Kept as convenience API for non-queued checks (status display, diagnostics).
+   - `take_snapshot()` / `admit(snapshot, projected, inflight)` — the gate math; production admission runs it inside the launch-queue walk (`launch_queue._admit_locked`). (The earlier standalone `check_launch()` was removed in review 2026-10-27: nothing used it and its in-flight accounting diverged from the queue walk.)
    - `get_memory_target() -> int | None` — read setting, None if unset (governor inactive)
    - `get_stop_idle_policy(container_type: str) -> bool` — check stop-on-idle setting
    - No threading locks (`_gate_lock`, `_stats_lock`) — cross-process file lock from `launch_queue.py` replaces them.
