@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e102089
+  active_pr: pr-16e45ba
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -36153,7 +36153,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/261
   gh_pr_number: 261
   created_at: '2026-10-27T04:42:06.128850+00:00'
-  updated_at: '2026-10-27T09:47:28.299378+00:00'
+  updated_at: '2026-10-27T09:54:14.993757+00:00'
   started_at: '2026-10-27T04:42:19.589247+00:00'
   reviewed_at: null
   merged_at: null
@@ -36281,6 +36281,52 @@ prs:
       Captures: /pm-captures/scenarios/6/{story1,story2,story3}.'
     created_at: '2026-10-27T09:47:28Z'
     last_edited: '2026-10-27T09:47:28Z'
+  - id: note-3ce3840
+    text: 'QA scenario 5 (shared prerequisites/diamonds/removal/dep edits) refinable
+      and verified end-to-end on a throwaway local-backend project. Harness traps:
+      (1) activate the venv FIRST, then export PATH=/tmp/pm-venv/bin:/usr/bin:/bin:$HOME/.local/bin
+      and start pm session with it — ~/.local/bin/git proxies fetch/push, so sign-off
+      integration fails ("<TEST_DIR> does not appear to be a git repository") and
+      every SIGNOFF_MERGE is coerced to BLOCKED; (2) pm pr start refuses until `pm
+      push` and the printed pm/sync-* branch are merged into master; (3) fake-claude
+      impl writes no commit, so seed a distinct commit in each workdir before sign-off
+      (else integration is in_base -> BLOCKED). Holds/removal/dep-edit assertions
+      are all visible in `pm autostart status`/`list`; count windows with `tmux list-windows
+      -t <session>`, not -a (grouped ~1 session double-counts).'
+    created_at: '2026-10-27T09:27:21Z'
+    last_edited: '2026-10-27T09:27:21Z'
+  - id: note-a0cc12e
+    text: 'QA scenario 5 (shared prerequisites/diamonds/removal/dep edits): PASS on
+      e31a9823, no code change. All five stories verified live on two throwaway local-backend
+      projects: A+B held at fresh sign-off under wait-for-merge target F; U never
+      scheduled (absent from status, pending in list, no window); merge A -> C starts
+      (1 window), D still blocked on B, U still absent; merge B -> D starts (1 window),
+      C still 1, no duplicates; A held by two targets shows "wait-for-merge <- F,
+      G" + "(held by F, G)"; `pm autostart remove F` printed exactly "released merge
+      hold: E, F" (A not listed) and A stayed held by G; removing A as a target printed
+      no released line and A kept its hold from F and G; dep edits moved B into/out
+      of F closure without killing its window. Captures: /pm-captures/scenarios/5/{story1-diamond-hold,story2-4-multitarget-removal-depedit}
+      (cast+mp4+manifest; the same-filename first attempt is archived under story1-fixture-flaw-same-file).
+
+
+      Harness traps for the next run: (1) seed A and B with DISTINCT FILENAMES (impl-<id>.txt),
+      not just distinct contents — the same path in both branches conflicts at the
+      second merge and coerces B to SIGNOFF_BLOCKED; (2) merging A moves master, so
+      the next held PR''s `pm pr merge` is refused once ("master moved since sign-off")
+      and the loop re-signs it automatically — the scenario''s "merge B" step needs
+      a short wait then a retry, not a code fix; (3) fake impl writes no commit, so
+      dependents C/D/E end "sign-off BLOCKED" (in_base) — they only need to START,
+      which they do; (4) resize the TUI window to 200x50 before `pm tui view`, else
+      the hold line clips at 80 cols; `pm tui view` shows the most recent event line,
+      not a chosen PR.
+
+
+      Incidental (pre-existing, out of this PR scope) bug filed as pr-16e45ba: a PR
+      flipped back to in_review after a completed review loop sticks at "awaiting
+      sign-off (hand-off on next scheduler pass)" — same skip-if-completed logic exists
+      on master.'
+    created_at: '2026-10-27T09:54:14Z'
+    last_edited: '2026-10-27T09:54:14Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -36295,3 +36341,53 @@ prs:
     merge: provider:deepseek-flash
     signoff: provider:claude-work
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-25f4038-use-wait-for-merge-as-the-only-manua-c6fab519
+- id: pr-16e45ba
+  plan: bugs
+  title: 'Bug: a PR flipped back to in_review after a completed review loop sticks
+    at ''awaiting sign-off (hand-off on next scheduler pass)'''
+  branch: pm/pr-16e45ba-bug-a-pr-flipped-back-to-in-review-after-a-complet
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/auto_start.py _auto_start_review_loops (skip
+    when app._review_loops already has a *completed* entry for the PR) + pm_core/tui/review_loop_ui.py
+    _poll_loop_state_inner (only hands review PASS to QA/sign-off for *newly done*
+    loops). autostart_state._awaiting_signoff_reason then reports "awaiting sign-off
+    (hand-off on next scheduler pass)" for a PR whose review-passed state is stale.
+
+
+    Repro (local backend, auto-start on with a wait-for-merge target whose closure
+    holds PR X):
+
+    1. X reaches sign_off and is held for manual merge (review loop completed, loop
+    entry cached in app._review_loops).
+
+    2. User runs `pm pr edit X --status in_review` (the documented "mark ready for
+    review without a throwaway window" path).
+
+    3. `pm autostart status` reports X as in_review / "review passed; QA skipped (skip_qa);
+    awaiting sign-off (hand-off on next scheduler pass)" forever. No new review loop
+    starts (skip-if-completed), and signoff_ui.advance_all only drives qa/sign_off
+    status PRs, so sign-off never runs.
+
+    4. Neither `pm autostart add <target>` (the documented nudge) nor cycling X through
+    in_progress -> in_review, nor killing the review window, recovers it; only a TUI
+    restart (or an explicit `d` review start) clears the cached loop entry.
+
+
+    Expected: either a re-review starts for an in_review PR with a stale completed
+    loop, or the status stops promising a hand-off that cannot happen. Observed: the
+    PR is stuck and never reaches a fresh sign-off.
+
+
+    Note: the skip-if-completed logic and the newly-done-only hand-off exist identically
+    on master (git show origin/master:pm_core/tui/auto_start.py line ~905), so this
+    predates the wait-for-merge PR; found incidentally during QA scenario 5.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T09:54:04.620652+00:00'
+  updated_at: '2026-10-27T09:54:04.620652+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
