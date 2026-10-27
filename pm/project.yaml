@@ -21429,7 +21429,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-13T14:15:50.184464+00:00'
-  updated_at: '2026-10-27T07:28:29.359181+00:00'
+  updated_at: '2026-10-27T07:55:46.551051+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -21539,6 +21539,28 @@ prs:
       missing markdown dep, 1 test_hook_events standalone receiver). Log: /pm-captures/review-8efa789-5e61-i2/full-suite-final.log'
     created_at: '2026-10-27T07:28:29Z'
     last_edited: '2026-10-27T07:28:29Z'
+  - id: note-d9b9477
+    text: 'Review i3 (5e61): (1) `[Request interrupted by user]` / `[Request interrupted
+      by user for tool use]` are now non-task records in `_NON_TASK_TEXT_PREFIXES`.
+      Claude Code writes them when the user hits Esc; treating them as a task boundary
+      made the task-scoped scan lose a verdict the pre-PR latest-turn scan still found.
+      Corpus sweep over ~33.5k local transcripts (old vs new extractor): 0 new false
+      positives, 5 genuine verdicts recovered across /loop + Monitor wakeups, and
+      the interruption variant was one of only two remaining old-vs-new drops. A follow-up
+      instruction typed after the interruption is a separate record and stays a barrier.
+      Tests: test_user_interruption_is_transparent (fails without the fix) and test_new_task_after_a_user_interruption_supersedes.
+      (2) Re-checked the `Stop hook feedback:` barrier and kept it — spec §6 now carries
+      the evidence: 193,105 of 193,107 occurrences in the corpus are hook_receiver.py
+      open failures, but the same receiver serves the idle_prompt hook, so when it
+      fails the QA loop gate never opens and nothing is polled; the barrier protects
+      the 1 genuine-instruction case. (3) Nits: dropped a dead `if hit is not None`
+      branch in _poll_tmux_verdicts, hoisted the lazy find_verdict_turn import in
+      _adopt_in_flight_review. Full suite 3711 passed, 1 skipped; 55 failed + 17 errors
+      identical to the master env baseline (signoff_integration/merge_publish/git_ops,
+      12 test_markdown_render missing markdown dep, 1 test_hook_events standalone
+      receiver). Log: /pm-captures/review-8efa789-5e61-i3-full-suite-final.log (2026-10-27T08:05:00Z)'
+    created_at: '2026-10-27T07:55:46Z'
+    last_edited: '2026-10-27T07:55:46Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
