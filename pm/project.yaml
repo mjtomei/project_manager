@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T19:12:55.379866+00:00'
+  updated_at: '2026-10-27T19:47:49.095256+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36515,6 +36515,33 @@ prs:
       s (~3% of a core during backoff). (2026-10-27)'
     created_at: '2026-10-27T19:12:55Z'
     last_edited: '2026-10-27T19:12:55Z'
+  - id: note-0983f7b
+    text: 'Review 0688 i6 (fixes applied): (1) the new auto-start re-arm path could
+      start a review loop while a sign-off REVIEW return still awaited its launch
+      — both launches are `--fresh` (each kills the window it finds), so the re-armed
+      loop and the return launcher (a `pm pr auto-sequence` tick or the TUI return
+      catch-up) could kill each other''s session. The fresh-loop path already took
+      the return''s launch claim first; the re-arm path now shares that guard via
+      `_yield_to_pending_review_return`. Losing the claim keeps the retryable failure
+      intact (episode count/budget untouched) and arms `_recheck_after_claim` so an
+      expired claim is taken over instead of stranding the target. Covered by test_auto_start_rearm_yields_to_a_pending_review_return
+      (fails pre-fix: the re-arm starts a loop and clears launch_retryable while another
+      driver owns the return launch). (2) `_live_review_pane_session` (the episode-start
+      stale-pane snapshot from 385e iteration 10) had no test; test_episode_start_snapshots_the_live_review_window
+      covers the resolved session and every total path. (3) `_auto_start_review_loops`
+      docstring now says it also re-arms a retryable failed launch. Full suite 3813
+      passed, 1 skipped; failures are the base tree''s pre-existing markdown-module/hook-installer/signoff/merge/git
+      env failures (test_git_ops::test_keeps_unpushed_merge verified failing identically
+      on an origin/master worktree). Still open (non-blocking, documented in the spec):
+      review_loop.py ~1530 lines; two lease mechanisms coexist; discovery adopts a
+      transcript verdict without an idle hook event; other_owner stand-down surfaces
+      as a non-retryable LAUNCH_FAILED (a proper SUPERSEDED outcome would touch the
+      verdict constants, tech-tree/popup rendering and auto-start''s re-arm gate);
+      the re-armed loop''s mirror/status keeps the previous episode''s verdict/attempts
+      until a new one lands; `_interruptible_sleep` re-reads the ~2 MB project.yaml
+      every 2 s during backoff.'
+    created_at: '2026-10-27T19:47:49Z'
+    last_edited: '2026-10-27T19:47:49Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
