@@ -34197,7 +34197,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T00:26:04.150027+00:00'
-  updated_at: '2026-10-27T20:04:42.444502+00:00'
+  updated_at: '2026-10-27T20:27:27.876230+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34226,6 +34226,21 @@ prs:
       so review was not launched here.'
     created_at: '2026-10-27T20:04:42Z'
     last_edited: '2026-10-27T20:04:42Z'
+  - id: note-e5a6965
+    text: 'Review loop c703 i1 (2026-10-27): reviewed addf8b40 — fix is correct and
+      complete for all three sync paths; pre/post captures under /pm-captures/impl
+      are convincing and the new tests fail on pre-fix code for the right reason.
+      Pushed c8171867 with review fixes: verify_detected_merge now never raises (single
+      guard; pr_sync + `pm pr sync` call sites simplified), _recover_completed_merge
+      reuses merge_integrity.approved_candidate, `pm pr sync-github` prints the same
+      WARNING as `pm pr sync`, git_detail/_log_merge_integrity dedupe, and 4 added
+      tests (no-approval, legacy unbound approval, verification crash still finalizes,
+      sync-github output). Full suite 3836 passed, 1 skipped (pytest 8.4.2) — log
+      at /pm-captures/review-c703-i1/full-suite.log. Not changed / for QA: the TUI
+      sync thread now runs integration.fetch_base (git fetch into a workdir, serialized
+      by integration.pm-integration.lock, up to 300 s wait) per detected merge.'
+    created_at: '2026-10-27T20:27:27Z'
+    last_edited: '2026-10-27T20:27:27Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
