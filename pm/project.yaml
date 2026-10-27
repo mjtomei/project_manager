@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T16:34:17.529366+00:00'
+  updated_at: '2026-10-27T16:58:34.573673+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36425,6 +36425,27 @@ prs:
       needs attention for a review another loop is running.'
     created_at: '2026-10-27T16:34:17Z'
     last_edited: '2026-10-27T16:34:17Z'
+  - id: note-c9047e2
+    text: 'Review 0688 i2 (fixes applied): (1) the restart handoff adopt path bypassed
+      _run_iteration_with_retry, so a resumed loop that adopted its in-flight iteration
+      left iteration_attempted=True; run_review_loop_sync bumps the counter and only
+      re-snapshots inside _run_iteration_with_retry, so a merge restart in that window
+      persisted True for the NEXT iteration number and the handoff adopted an earlier
+      run review-<pr>-i<N>.jsonl verdict (e.g. PASS) for an iteration this loop never
+      launched — the same fabrication iteration 1 (0688) closed for a normally finished
+      iteration. The adopt branch now calls _reset_launch_retry on a successful adoption
+      (nothing adopted still relaunches the same iteration with its episode intact).
+      Covered by test_restart_after_an_adopted_iteration_does_not_adopt_the_old_run
+      (fails pre-fix: flag True at the bump; the next iteration adopts the old PASS
+      with zero launches). (2) _concise_launch_detail chose the stream before stripping,
+      so whitespace-only stderr hid a real stdout error and the UI said "no output
+      from the launch command"; each stream is stripped before the fallback (test_whitespace_only_stderr_falls_back_to_stdout,
+      fails pre-fix). Full suite 3877 passed, 1 skipped. Residual (non-blocking):
+      review_loop.py ~1490 lines; two lease mechanisms coexist; discovery adopts a
+      transcript verdict without an idle hook event (documented); other_owner stand-down
+      surfaces as a non-retryable LAUNCH_FAILED.'
+    created_at: '2026-10-27T16:58:34Z'
+    last_edited: '2026-10-27T16:58:34Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
