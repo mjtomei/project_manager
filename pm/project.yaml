@@ -36629,3 +36629,31 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-648ebc9
+  plan: bugs
+  title: 'Bug: QA stop during PASS verification logs "verifier pane disappeared" while
+    the verifier pane is alive'
+  branch: pm/pr-648ebc9-bug-qa-stop-during-pass-verification-logs-verifier
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py verification (the else branch after poll_for_verdict,
+    "Verification: pane disappeared for scenario %d" / reason "verifier pane disappeared"):
+    when zz t stops the loop while a verifier is running, stop_check aborts the poll
+    and content is None, so the debug log says the pane disappeared and "Verification
+    FLAGGED scenario N, attempt 1: verifier pane disappeared" although the verifier
+    pane is still alive (pane_dead=0). The user-facing reason ("QA stopped during
+    PASS verification before a re-checked verdict could be recorded") is correct;
+    only the log/flag reason is misleading. Repro (QA S59 for pr-eb2dbfc, 2026-10-27
+    22:09:23): fake-claude qa_verification [{"verdict":"VERIFIED","delay":600}], scenario
+    PASS, press zz t while the row shows verifying; tmux list-panes shows the verifier
+    pane alive. Fix: when stop_check() is true, log/return "QA stopped before the
+    verifier returned a verdict". Pre-existing on master.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T22:10:32.796891+00:00'
+  updated_at: '2026-10-27T22:10:32.796891+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
