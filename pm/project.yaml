@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T18:40:19.004094+00:00'
+  updated_at: '2026-10-27T19:41:05.796722+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -10922,6 +10922,18 @@ prs:
       (pm pr signoff exits 0 on refusal). Captures /pm-captures/scenarios/47.'
     created_at: '2026-10-27T18:40:18Z'
     last_edited: '2026-10-27T18:40:18Z'
+  - id: note-24fd965
+    text: 'QA S49 (2026-10-27, e7ebba77, nested rootless podman 3.4.4): all 5 stories
+      PASS live, no code change. All set validations, default and second status lines,
+      pm scope (other-c excluded; outer cgroup was 1.739GB this run) vs system scope
+      (matches /proc/meminfo), fail-closed refusal + Blocked line + recovery, damaged
+      files (status rc=0, queue rewritten, blocked/stats md5 unchanged, 0 tracebacks),
+      crashed QA owner (no Queue depth, file untouched, no fake removal log, real
+      prune on pm pr start C). Harness: the first kill -9 of the TUI was fully reaped
+      by tmux (no zombie); a second round after pm session respawn gave Zs <defunct>;
+      both behaved the same. Captures /pm-captures/scenarios/49.'
+    created_at: '2026-10-27T19:41:05Z'
+    last_edited: '2026-10-27T19:41:05Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
