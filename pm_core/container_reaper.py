@@ -248,18 +248,25 @@ def retained_names() -> list[str]:
                    if isinstance(rec.get("name"), str) and rec["name"]})
 
 
-def local_retained_names() -> list[str]:
+def local_retained_names(inventory: "list[ContainerInfo] | None" = None) -> list[str]:
     """Retained names that belong to the current runtime, for display.
 
     Markers live in the shared state dir and record the runtime domain they
     were set in. Another store's marker names a container this runtime does
     not have, so ``pm container status`` must not list it as retained here;
     while the identity is unknown, domain-stamped markers are shown with the
-    saved diagnostics instead. Display only: cleanup still honours every
-    marker through :func:`is_retained`.
+    saved diagnostics instead. With a complete *inventory*, a marker whose
+    container is gone (pruned only by the next full pass) is not listed
+    either. Display only: cleanup still honours every marker through
+    :func:`is_retained`.
     """
     records = [rec for _, rec in _retention_records()
                if isinstance(rec.get("name"), str) and rec["name"]]
+    if inventory is not None:
+        ids = {info.id for info in inventory if info.id}
+        names = {info.name for info in inventory}
+        records = [rec for rec in records
+                   if (str(rec["id"]) in ids if rec.get("id") else rec["name"] in names)]
     domain = (_runtime_domain()
               if any(rec.get("runtime_domain") is not None for rec in records) else None)
     return sorted({rec["name"] for rec in records

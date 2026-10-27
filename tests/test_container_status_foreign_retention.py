@@ -51,3 +51,25 @@ def test_unknown_identity_shows_markers_only_as_diagnostics(monkeypatch):
     assert "pm-tag-review-pr-b: retained (kept out of cleanup)" in diag
     assert "pm-tag-impl-pr-a: retained (kept out of cleanup)" in diag
     assert reaper.is_retained("pm-tag-review-pr-b")
+
+
+def test_removed_retained_container_is_not_listed(monkeypatch):
+    """A marker outlives its container until the next full pass prunes it;
+    status, which already inventories, must not call the gone one retained."""
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: dict(A))
+    reaper.retain("pm-tag-impl-pr-a", container_id="id-a")
+    reaper.retain("pm-tag-review-pr-a", container_id="id-r")
+    live = [reaper.ContainerInfo(name="pm-tag-review-pr-a", id="id-r", running=True)]
+    assert reaper.local_retained_names(live) == ["pm-tag-review-pr-a"]
+    assert reaper.local_retained_names([]) == []
+    assert reaper.local_retained_names() == ["pm-tag-impl-pr-a", "pm-tag-review-pr-a"]
+    monkeypatch.setattr(container, "_runtime_available", lambda: True)
+    monkeypatch.setattr(reaper, "list_containers", lambda: live)
+    monkeypatch.setattr(container, "keyring_summary", lambda: "")
+    monkeypatch.setattr(container, "pids_pressure", lambda *a, **k: [])
+    out = CliRunner().invoke(cli, ["container", "status"]).output
+    retained = [line for line in out.splitlines() if line.startswith("Retained:")]
+    assert retained and "pm-tag-review-pr-a" in retained[0]
+    assert "pm-tag-impl-pr-a" not in retained[0]
+    # Display only: cleanup still honours the marker.
+    assert reaper.is_retained("pm-tag-impl-pr-a", "id-a")

@@ -13,7 +13,7 @@ FAILED = "pm-demo-impl-pr-bbbb"
 def _status(monkeypatch, retained_ids):
     monkeypatch.setattr(reaper, "last_state", lambda: {})
     monkeypatch.setattr(reaper, "unavailable_runtime_diagnostics", lambda: [])
-    monkeypatch.setattr(reaper, "local_retained_names", lambda: [RETAINED])
+    monkeypatch.setattr(reaper, "local_retained_names", lambda *_: [RETAINED])
     monkeypatch.setattr(reaper, "_runtime_domain", lambda: None)
     monkeypatch.setattr(reaper, "pending_failures", lambda: {
         RETAINED: {"id": "id-r", "owner_release": True,

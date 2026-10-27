@@ -54,7 +54,7 @@ def container_status():
                            f"'pm container restart {name}' clears it")
     # Persisted failures and pending releases remain useful even when the
     # runtime executable is unavailable. They must not disappear with metrics.
-    _echo_reaper_state(runtime_ok)
+    _echo_reaper_state(runtime_ok, inventory if runtime_ok else None)
 
     if enabled and not runtime_ok:
         click.echo(
@@ -63,7 +63,7 @@ def container_status():
         )
 
 
-def _echo_reaper_state(runtime_ok: bool = True) -> None:
+def _echo_reaper_state(runtime_ok: bool = True, inventory=None) -> None:
     from pm_core import container_reaper
     # Each helper below resolves the runtime identity with its own `info`
     # probe. One status invocation used to run that probe 4-5 times; reuse a
@@ -118,7 +118,7 @@ def _echo_reaper_state(runtime_ok: bool = True) -> None:
                        "then retry with 'pm container reap':")
             for source, name, error in diagnostics:
                 click.echo(f"  [{source}] {name}: {error}")
-        retained = container_reaper.local_retained_names()
+        retained = container_reaper.local_retained_names(inventory)
         if retained:
             click.echo(f"Retained:        {', '.join(retained)}")
 

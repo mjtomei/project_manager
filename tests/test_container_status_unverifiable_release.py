@@ -31,7 +31,7 @@ def test_pending_failures_marks_unknown_domain_release(monkeypatch):
 def _status(monkeypatch, failures):
     monkeypatch.setattr(reaper, "last_state", lambda: {})
     monkeypatch.setattr(reaper, "unavailable_runtime_diagnostics", lambda: [])
-    monkeypatch.setattr(reaper, "local_retained_names", lambda: [])
+    monkeypatch.setattr(reaper, "local_retained_names", lambda *_: [])
     monkeypatch.setattr(reaper, "_runtime_domain", lambda: None)
     monkeypatch.setattr(reaper, "is_retained", lambda name, cid="": False)
     monkeypatch.setattr(reaper, "pending_failures", lambda: dict(failures))

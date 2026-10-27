@@ -35,7 +35,7 @@ def test_status_keeps_scoped_failures_visible_during_runtime_outage(monkeypatch)
         container_reaper._record_release(name, daemon + "-id", "generation", "test")
     files = {path: path.read_bytes() for path in container.container_state_dir().rglob("*.json")}
     monkeypatch.setattr(container, "_runtime_available", lambda: False)
-    monkeypatch.setattr(container_reaper, "local_retained_names", lambda: [])
+    monkeypatch.setattr(container_reaper, "local_retained_names", lambda *_: [])
 
     # A known domain still displays only its own outcomes.
     result = CliRunner().invoke(cli, ["container", "status"])
@@ -157,7 +157,7 @@ def test_status_inventories_containers_once(monkeypatch):
     monkeypatch.setattr(container_reaper, "list_containers", _list)
     monkeypatch.setattr(container, "keyring_summary", lambda: "")
     monkeypatch.setattr(container, "pids_pressure", _pressure)
-    monkeypatch.setattr(container_reaper, "local_retained_names", lambda: [])
+    monkeypatch.setattr(container_reaper, "local_retained_names", lambda *_: [])
 
     result = CliRunner().invoke(cli, ["container", "status"])
     assert result.exit_code == 0, result.output
