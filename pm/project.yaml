@@ -31078,7 +31078,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-27T09:23:26.869157+00:00'
+  updated_at: '2026-10-27T19:39:35.518355+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31258,6 +31258,24 @@ prs:
       reproduced on origin/master@450a6362). (2026-10-27)'
     created_at: '2026-10-27T09:23:26Z'
     last_edited: '2026-10-27T09:23:26Z'
+  - id: note-bec6967
+    text: 'S19 refine (verified live on d805bd57): agg is NOT in this image even though
+      pm/specs/pr-b19db15/qa.md says pm-dev ships it — install before the render:
+      curl -fsSL https://github.com/asciinema/agg/releases/latest/download/agg-$(uname
+      -m)-unknown-linux-gnu -o ~/.local/bin/agg && chmod +x ~/.local/bin/agg. Mechanics
+      that worked: pm prompt <pr> with PYTHONPATH=/workspace; pm pr review <pr> from
+      a pane inside the pm session with a stub claude on PATH that records "$@" (fake-claude
+      never receives the prompt, so it cannot show it); QA run via TUI t with fake
+      config {qa_planning body containing ARTIFACT: cli-recording.md, qa_concretize
+      REFINED_STEPS, qa_scenario PASS, qa_verification VERIFIED, qa_finalize FINALIZE_DONE};
+      seed pm/specs/<pr>/qa.md in the PR workdir first or the spec gate aborts INPUT_REQUIRED
+      (do not use pm pr spec, which needs claude -p); scratch is ~/.pm/workdirs/qa/<pr>-<loop>/s-N/scratch
+      and prompt.md is $(pm qa captures-path <pr>)/scenarios/N/prompt.md; installed
+      helper render from the scratch dir with RECIPE_DIR=<scratch>/qa-artifacts exits
+      0 with the ok line and ffprobe reports h264. Tests: venv --system-site-packages
+      + pip "pytest<9"; -k VerifierFreshness -> 3 passed.'
+    created_at: '2026-10-27T19:39:35Z'
+    last_edited: '2026-10-27T19:39:35Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
