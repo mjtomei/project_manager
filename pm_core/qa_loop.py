@@ -2004,6 +2004,30 @@ def _manifest_scenarios(state: "QALoopState") -> list[dict]:
     ]
 
 
+def _captures_root_is_ours(base: Path, pr_id: str) -> bool:
+    """True when *base* is provably this PR's captures dir.
+
+    Inside a scenario container :func:`captures_dir` falls through to the
+    shared ``/pm-captures`` bind mount whenever the host path is absent.  The
+    mount belongs to the container's PR (``PM_CAPTURES_PR``, set at container
+    creation); when that marker is missing — a controller predating #264 — a
+    nested pm project (the fake-Claude QA fixture) resolves the *enclosing*
+    PR's mount.  Publishing a manifest there is recoverable (readers validate
+    ``pr_id`` and fall back to ``qa_runs/<run_id>.json``), but quarantining
+    is a **move**: the nested project would classify the enclosing PR's real
+    records as foreign and move them out of ``scenarios/``.  So quarantine
+    only a tree that is unambiguously ours; foreign records elsewhere are
+    still detected by :func:`captures.audit` and by the PR that owns them.
+    """
+    from pm_core.paths import CAPTURES_PR_ENV, CONTAINER_CAPTURES_MOUNT
+    try:
+        if Path(base) != Path(CONTAINER_CAPTURES_MOUNT):
+            return True
+    except (TypeError, ValueError):
+        return True
+    return os.environ.get(CAPTURES_PR_ENV) == pr_id
+
+
 def _sync_captures_evidence(state: "QALoopState", overall: str = "") -> None:
     """Quarantine foreign scenario records and refresh the run manifest.
 
@@ -2013,19 +2037,29 @@ def _sync_captures_evidence(state: "QALoopState", overall: str = "") -> None:
     incident).  Best effort: evidence bookkeeping must never abort a QA run.
     """
     from pm_core import captures
-    from pm_core.paths import captures_dir
+    from pm_core.paths import (
+        CAPTURES_PR_ENV, CONTAINER_CAPTURES_MOUNT, captures_dir,
+    )
     try:
         base = captures_dir(state.pr_id, session_tag=state.session_tag)
         if base is None:
             _log.warning("captures_dir unavailable for pr=%s — no evidence "
                          "manifest written", state.pr_id)
             return
-        moved = captures.quarantine_foreign(
-            base, pr_id=state.pr_id, run_id=state.loop_id)
-        if moved:
-            _log.warning("Quarantined %d foreign scenario dir(s) for %s: %s",
-                         len(moved), state.pr_id,
-                         ", ".join(str(p) for p in moved))
+        if _captures_root_is_ours(base, state.pr_id):
+            moved = captures.quarantine_foreign(
+                base, pr_id=state.pr_id, run_id=state.loop_id)
+            if moved:
+                _log.warning("Quarantined %d foreign scenario dir(s) for %s: "
+                             "%s", len(moved), state.pr_id,
+                             ", ".join(str(p) for p in moved))
+        else:
+            _log.warning(
+                "captures dir %s is the shared %s mount and is not marked as "
+                "%s's (%s unset or naming another PR) — not quarantining its "
+                "scenario directories, which may be the enclosing PR's real "
+                "evidence", base, CONTAINER_CAPTURES_MOUNT, state.pr_id,
+                CAPTURES_PR_ENV)
         captures.write_manifest(
             base, pr_id=state.pr_id, run_id=state.loop_id,
             scenarios=_manifest_scenarios(state), overall=overall,

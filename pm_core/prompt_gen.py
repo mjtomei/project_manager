@@ -694,8 +694,11 @@ def _qa_run_binding(pr_id: str, status: dict,
         f"`$CAP/scenarios/`.")
     manifest_idx = [m.get("index") for m in manifest.get("scenarios") or []
                     if isinstance(m, dict)]
+    # Scenario 0 is the interactive window: it stays in qa_status.json (the
+    # display contract) but is deliberately not a manifest member, so
+    # comparing the two listings verbatim would warn on every normal run.
     listed_idx = [s.get("index") for s in (status.get("scenarios") or [])
-                  if isinstance(s, dict)]
+                  if isinstance(s, dict) and s.get("index") != 0]
     if manifest_idx and listed_idx and set(manifest_idx) != set(listed_idx):
         lines.append(
             "**Warning:** `qa_manifest.json` lists scenarios "

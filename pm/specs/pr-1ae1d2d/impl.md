@@ -323,14 +323,28 @@ No **[UNRESOLVED]** items.
 - **Sign-off re-run against a new QA run**: the previous report still carries
   the old `pm-signoff-qa-run`; the dashboard flags it and the merge gate
   refuses until the report is regenerated for the new run.
+- **A nested project resolving the *enclosing* PR's mount** (a controller
+  predating #264 leaves `PM_CAPTURES_PR` unset, so a fixture's
+  `captures_dir` returns `/pm-captures`): the fixture must not *quarantine*.
+  Quarantine is a move, and from the fixture's point of view the enclosing
+  PR's real records name "another" `pr_id` — running it there would move the
+  enclosing PR's evidence out of `scenarios/`. `_sync_captures_evidence`
+  therefore quarantines only a captures root that is provably this PR's (not
+  the shared mount, or a mount marked with this PR's `PM_CAPTURES_PR`); the
+  manifest write still happens, because it is recoverable via `qa_runs/`.
+- **Scenario 0 in the manifest-vs-status membership check**: `qa_status.json`
+  lists the interactive scenario 0 (display contract, A5) but the manifest
+  never does, so the prompt's disagreement warning compares the listings
+  with index 0 excluded — otherwise it would fire on every normal run.
 
 ## 5. Implementation notes (files touched)
 
 - `pm_core/captures.py` — new module (R1, R5, R6).
 - `pm_core/qa_loop.py` — `_write_status_file` `run_id` (R4);
   `_persist_scenario_verdicts` stamping + manifest + completion quarantine
-  (R2, R3, R5); `_execute_and_finalize` start-of-run manifest + quarantine
-  (R3, R5); pass `run_id` at every `_write_status_file` call site.
+  (R2, R3, R5); `_sync_captures_evidence` start-of-run/completion sync (R3,
+  R5) with the shared-mount quarantine guard; `_execute_and_finalize`
+  completion sync; pass `run_id` at every `_write_status_file` call site.
 - `pm_core/prompt_gen.py` — QA head/listing run binding, evidence checklist,
   report meta contract (R7).
 - `pm_core/behavior_report.py` — dashboard stale-run marker (R8).

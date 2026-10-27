@@ -335,6 +335,63 @@ def test_status_file_omits_run_id_when_unknown(tmp_path):
     assert "run_id" not in json.loads(p.read_text())
 
 
+def _fixture_state(pr_id="pr-fixture", run_id="fixturerun"):
+    from pm_core import qa_loop
+    state = qa_loop.QALoopState(pr_id=pr_id)
+    state.loop_id = run_id
+    state.scenarios = [qa_loop.QAScenario(index=1, title="Smoke",
+                                          focus="f", steps="s")]
+    return state
+
+
+def test_sync_never_quarantines_through_a_shared_mount(tmp_path, monkeypatch):
+    """A nested pm project inside a scenario container resolves the enclosing
+    PR's ``/pm-captures`` mount when ``PM_CAPTURES_PR`` is absent (a
+    controller predating #264).  It must not move that PR's real evidence out
+    of ``scenarios/`` — quarantine is a move, so it only runs on a tree that
+    is provably ours."""
+    from pm_core import paths, qa_loop
+    mount = tmp_path / "pm-captures"
+    mount.mkdir()
+    captures.write_manifest(mount, pr_id="pr-outer", run_id="outerrun",
+                            scenarios=[{"index": 1, "title": "one"}])
+    _scenario_dir(mount, 1, {"index": 1, "pr_id": "pr-outer",
+                             "run_id": "outerrun"})
+    monkeypatch.setattr(paths, "CONTAINER_CAPTURES_MOUNT", str(mount))
+    monkeypatch.delenv(paths.CAPTURES_PR_ENV, raising=False)
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: mount)
+
+    qa_loop._sync_captures_evidence(_fixture_state())
+
+    assert (mount / "scenarios" / "1").is_dir()
+    assert not (mount / "scenarios" / captures.FOREIGN_DIR_NAME).exists()
+    # Publishing the fixture's manifest is recoverable: readers validate
+    # ``pr_id`` and fall back to the per-run copy, so the enclosing PR's
+    # membership is still bound to its own run.
+    assert captures.read_manifest(mount, pr_id="pr-fixture")["run_id"] == "fixturerun"
+    assert captures.read_manifest(mount, pr_id="pr-outer")["run_id"] == "outerrun"
+
+
+def test_sync_quarantines_when_the_mount_belongs_to_this_pr(tmp_path,
+                                                             monkeypatch):
+    """The guard does not disable legitimate quarantine: a mount marked as
+    ours is our captures tree, so foreign records there are moved."""
+    from pm_core import paths, qa_loop
+    mount = tmp_path / "pm-captures"
+    mount.mkdir()
+    _scenario_dir(mount, 3, {"index": 3, "pr_id": "pr-other",
+                             "run_id": "otherrun"})
+    monkeypatch.setattr(paths, "CONTAINER_CAPTURES_MOUNT", str(mount))
+    monkeypatch.setenv(paths.CAPTURES_PR_ENV, "pr-fixture")
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: mount)
+
+    qa_loop._sync_captures_evidence(_fixture_state())
+
+    assert not (mount / "scenarios" / "3").exists()
+    assert (mount / "scenarios" / captures.FOREIGN_DIR_NAME / "fixturerun-3").is_dir()
+    assert captures.read_manifest(mount, pr_id="pr-fixture")["run_id"] == "fixturerun"
+
+
 # ---------------------------------------------------------------------------
 # Sign-off prompt
 # ---------------------------------------------------------------------------
@@ -356,6 +413,29 @@ def test_signoff_qa_block_names_the_run_and_manifest(tmp_path, monkeypatch):
     head, _listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
     assert "QA run: `run1`" in head
     assert "qa_manifest.json" in head
+
+
+def test_signoff_qa_block_ignores_the_interactive_scenario(tmp_path,
+                                                           monkeypatch):
+    """Scenario 0 (the interactive window) stays in ``qa_status.json`` but is
+    deliberately not a manifest member — comparing the two listings verbatim
+    would warn about a membership disagreement on every normal run."""
+    from pm_core import paths, prompt_gen
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-x", run_id="run1",
+                            scenarios=[{"index": 1, "title": "one"}])
+    status = tmp_path / "qa_status.json"
+    status.write_text(json.dumps({
+        "pr_id": "pr-x", "run_id": "run1", "overall": "PASS",
+        "scenarios": [{"index": 0, "title": "Interactive",
+                       "verdict": "interactive"},
+                      {"index": 1, "title": "one", "verdict": "PASS"}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(paths, "latest_qa_status_path", lambda pr_id: status)
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: root)
+    head, _listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
+    assert "QA run: `run1`" in head
+    assert "disagree" not in head
 
 
 def test_signoff_qa_block_warns_when_status_run_differs(tmp_path, monkeypatch):
