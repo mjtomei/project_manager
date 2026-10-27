@@ -21434,6 +21434,19 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
 - id: pr-06a96fa
   plan: plan-regression
   title: QA scenarios reuse regression tests as their flow driver

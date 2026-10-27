@@ -43,6 +43,7 @@ from pm_core.loop_shared import (
 from pm_core.verdict_transcript import (
     extract_verdict_from_transcript,
     extract_verdict_reason_from_transcript,
+    find_verdict_turn,
     read_latest_assistant_text,
 )
 from pm_core.claude_launcher import WorkspaceTrustBlocked
@@ -197,6 +198,13 @@ class QALoopState:
     # colorizes correctly in the scenarios pane; the reason renders
     # alongside it when present.
     scenario_verdict_reasons: dict[int, str] = field(default_factory=dict)
+    # Identity of the transcript turn that produced each recorded verdict:
+    # {"pr_id", "loop_id", "scenario", "session_id", "turn_id",
+    # "timestamp"}.  Scoping to (PR, run, scenario, attempt/session) means a
+    # verdict restored from a resume snapshot is trusted only when it still
+    # belongs to the current attempt — a historical PASS is never
+    # resurrected and its verification is never inherited (pr-8efa789).
+    scenario_verdict_sources: dict[int, dict] = field(default_factory=dict)
     latest_verdict: str = ""
     latest_output: str = ""
     # Result of the post-QA finalize pane: "FINALIZE_DONE",
@@ -882,6 +890,9 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
         "scenario_verdict_reasons": {
             str(k): v for k, v in state.scenario_verdict_reasons.items()
         },
+        "scenario_verdict_sources": {
+            str(k): v for k, v in state.scenario_verdict_sources.items()
+        },
         "verified_scenarios": sorted(state.verified_scenarios),
         "planner_head": state.planner_head,
         "planner_code_changes": list(state.planner_code_changes),
@@ -968,6 +979,41 @@ def clear_resume_file(qa_workdir: str | Path) -> None:
                    exc_info=True)
 
 
+def _drop_foreign_verdicts(state: QALoopState) -> None:
+    """Drop restored verdicts whose recorded source is not this attempt.
+
+    A verdict is scoped to (pr_id, loop_id, scenario index, session_id).
+    When a resumed snapshot's session id no longer matches the scenario's
+    current session (e.g. the worker was relaunched), the verdict belongs
+    to a superseded attempt: discard it and its verification so the new
+    attempt is polled from scratch.  Snapshots written before sources
+    existed carry no source and are trusted unchanged.
+    """
+    if not state.scenario_verdict_sources:
+        return
+    by_index = {s.index: s for s in state.scenarios}
+    for idx in list(state.scenario_verdicts):
+        src = state.scenario_verdict_sources.get(idx)
+        if not src:
+            continue
+        scenario = by_index.get(idx)
+        if scenario is None:
+            continue
+        if (str(src.get("pr_id") or "") != state.pr_id
+                or str(src.get("loop_id") or "") != state.loop_id
+                or src.get("scenario") != idx
+                or str(src.get("session_id") or "")
+                != (scenario.session_id or "")):
+            _log.info(
+                "Resume: dropping stale %s verdict for scenario %d "
+                "(source identity changed)",
+                state.scenario_verdicts.get(idx), idx)
+            state.scenario_verdicts.pop(idx, None)
+            state.scenario_verdict_reasons.pop(idx, None)
+            state.scenario_verdict_sources.pop(idx, None)
+            state.verified_scenarios.discard(idx)
+
+
 def build_resume_state(resume_data: dict) -> QALoopState:
     """Reconstruct a QALoopState from a qa_resume.json snapshot.
 
@@ -991,7 +1037,13 @@ def build_resume_state(resume_data: dict) -> QALoopState:
         int(k): v
         for k, v in (resume_data.get("scenario_verdict_reasons") or {}).items()
     }
+    state.scenario_verdict_sources = {
+        int(k): v
+        for k, v in (resume_data.get("scenario_verdict_sources") or {}).items()
+        if isinstance(v, dict)
+    }
     state.verified_scenarios = set(resume_data.get("verified_scenarios") or [])
+    _drop_foreign_verdicts(state)
     state.finalize_verdict = resume_data.get("finalize_verdict")
     state.planner_head = resume_data.get("planner_head")
     state.planner_code_changes = list(
@@ -2848,6 +2900,10 @@ def _poll_tmux_verdicts(
                         # re-trigger verification on the same (still PASS)
                         # transcript turn.
                         state.scenario_verdicts.pop(scenario_idx, None)
+                        # The follow-up is a new attempt at this scenario's
+                        # verdict: forget the old turn identity so the
+                        # re-evaluation's verdict is recorded afresh.
+                        state.scenario_verdict_sources.pop(scenario_idx, None)
                         if scenario_idx in state.verified_scenarios:
                             _log.warning("Scenario %d was in verified_scenarios "
                                          "when flagged — clearing defensively",
@@ -2990,10 +3046,12 @@ def _poll_tmux_verdicts(
 
             # Read verdict straight from the JSONL transcript.  The hook
             # event is the turn-boundary gate; the transcript is the
-            # source of truth for what the agent actually said.
-            verdict = extract_verdict_from_transcript(
-                scenario.transcript_path, ALL_VERDICTS,
-            )
+            # source of truth for what the agent actually said.  A verdict
+            # emitted before a trailing /loop wakeup or Monitor postscript
+            # is still found (pr-8efa789); a genuine new task, retry or
+            # verifier follow-up remains a boundary and supersedes it.
+            hit = find_verdict_turn(scenario.transcript_path, ALL_VERDICTS)
+            verdict = hit.verdict if hit else None
 
             # Idle-reminder: when the agent emits idle_prompt without a
             # verdict, nudge once per _reminder_timeout window.
@@ -3017,8 +3075,20 @@ def _poll_tmux_verdicts(
 
             if verdict:
                 state.scenario_verdicts[scenario.index] = verdict
+                # Record which attempt/turn produced the verdict so a
+                # resumed run never trusts a verdict from a superseded
+                # attempt (see _drop_foreign_verdicts).
+                if hit is not None:
+                    state.scenario_verdict_sources[scenario.index] = {
+                        "pr_id": state.pr_id,
+                        "loop_id": state.loop_id,
+                        "scenario": scenario.index,
+                        "session_id": scenario.session_id or "",
+                        "turn_id": hit.turn_id,
+                        "timestamp": hit.timestamp,
+                    }
                 reason = extract_verdict_reason_from_transcript(
-                    scenario.transcript_path,
+                    scenario.transcript_path, ALL_VERDICTS,
                 )
                 if reason:
                     state.scenario_verdict_reasons[scenario.index] = reason

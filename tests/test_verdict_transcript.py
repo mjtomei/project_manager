@@ -16,23 +16,43 @@ from pm_core.verdict_transcript import (
 VERDICTS = ("INPUT_REQUIRED", "NEEDS_WORK", "PASS")
 
 
-def _assistant_line(text: str) -> str:
-    return json.dumps({
+def _assistant_line(text: str, *, uuid: str = "",
+                    timestamp: str = "") -> str:
+    rec = {
         "type": "assistant",
         "message": {
             "role": "assistant",
             "content": [{"type": "text", "text": text}],
         },
-    })
+    }
+    if uuid:
+        rec["uuid"] = uuid
+    if timestamp:
+        rec["timestamp"] = timestamp
+    return json.dumps(rec)
 
 
-def _user_line(text: str) -> str:
-    return json.dumps({
+def _user_line(text: str, *, is_meta: bool = False) -> str:
+    rec = {
         "type": "user",
         "message": {
             "role": "user",
             "content": [{"type": "text", "text": text}],
         },
+    }
+    if is_meta:
+        rec["isMeta"] = True
+    return json.dumps(rec)
+
+
+def _tool_result_line() -> str:
+    return json.dumps({
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{"type": "tool_result", "content": "ok"}],
+        },
+        "toolUseResult": {"stdout": "ok"},
     })
 
 
@@ -253,3 +273,190 @@ def test_reason_missing_returns_empty(tmp_path: Path) -> None:
 
 def test_reason_missing_file() -> None:
     assert extract_verdict_reason_from_transcript(None) == ""
+
+
+# ---------------------------------------------------------------------------
+# pr-8efa789 — verdicts survive non-task wakeup turns
+# ---------------------------------------------------------------------------
+
+# Real shapes from the confirmed reproductions.
+SCENARIO_44_VERDICT = (
+    "CP3a verified with real review-pane evidence. CP3b verified. CP4 and CP5 "
+    "were not exercisable in the available wall-time.\n"
+    "Reason: CP4/CP5 could not be exercised in the available wall-time\n"
+    "INPUT_REQUIRED"
+)
+SCENARIO_44_POSTSCRIPT = (
+    "Scenario 44 is complete; verdict already submitted as INPUT_REQUIRED "
+    "with captures pushed. No further work to do — ending the loop."
+)
+AUTONOMOUS_TICK = (
+    "# Autonomous loop tick (dynamic pacing)\n\n"
+    "Run the autonomous check using the loop instructions established "
+    "earlier in this conversation. If you cannot find them, treat this as a "
+    "no-op tick.\n\n"
+    "You scheduled this tick via the ScheduleWakeup tool (not a recurring "
+    "cron)."
+)
+MONITOR_EVENT = (
+    "<task-notification>\n"
+    "<task-id>bm7243e64</task-id>\n"
+    '<summary>Monitor event: "QA scenario 71 background check"</summary>\n'
+    "<event>captures pushed to the PR branch</event>\n"
+    "</task-notification>"
+)
+SCHEDULED_TASK_WAKEUP = (
+    "[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]\n"
+    "This turn was started automatically by a schedule, not typed live by "
+    "the user.\n\nYou are running QA scenario 44: drive the steps."
+)
+
+
+def test_verdict_survives_dynamic_loop_wakeup(tmp_path: Path) -> None:
+    """Real scenario-44 replay: verdict, dynamic /loop tick, postscript."""
+    p = _write(tmp_path, [
+        _user_line('You are running QA scenario 44: "INPUT_REQUIRED gate"'),
+        _assistant_line("Running the scenario steps..."),
+        _assistant_line(SCENARIO_44_VERDICT, uuid="turn-verdict-44"),
+        _user_line(AUTONOMOUS_TICK, is_meta=True),
+        _assistant_line(SCENARIO_44_POSTSCRIPT, uuid="turn-postscript-44"),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) == "INPUT_REQUIRED"
+
+
+def test_reason_comes_from_verdict_turn_not_postscript(tmp_path: Path) -> None:
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line(SCENARIO_44_VERDICT),
+        _user_line(AUTONOMOUS_TICK, is_meta=True),
+        _assistant_line(SCENARIO_44_POSTSCRIPT),
+    ])
+    assert extract_verdict_reason_from_transcript(p) == (
+        "CP4/CP5 could not be exercised in the available wall-time"
+    )
+
+
+def test_verdict_survives_monitor_task_notification(tmp_path: Path) -> None:
+    """#249 S71 replay: PASS, Monitor task-notification, postscript."""
+    p = _write(tmp_path, [
+        _user_line('You are running QA scenario 71: "Finalize close-out"'),
+        _assistant_line("Reason: finalize pane showed FINALIZE_DONE\nPASS",
+                        uuid="turn-verdict-71"),
+        _user_line(MONITOR_EVENT),
+        _assistant_line("Monitor reported the captures were pushed; nothing "
+                        "else to do.", uuid="turn-postscript-71"),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) == "PASS"
+
+
+def test_verdict_survives_fixed_interval_loop_delivery(tmp_path: Path) -> None:
+    """A scheduled-task /loop delivery re-sends the task prompt, but it is an
+    automated re-fire, not live user input — the verdict stays sticky."""
+    p = _write(tmp_path, [
+        _user_line("You are running QA scenario 44"),
+        _assistant_line("Reason: steps done\nINPUT_REQUIRED"),
+        _user_line(SCHEDULED_TASK_WAKEUP),
+        _assistant_line("Already submitted INPUT_REQUIRED; ending the loop."),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) == "INPUT_REQUIRED"
+
+
+def test_newest_verdict_after_wakeup_wins(tmp_path: Path) -> None:
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("old\nINPUT_REQUIRED"),
+        _user_line(AUTONOMOUS_TICK, is_meta=True),
+        _assistant_line("Actually re-ran the steps.\nReason: fixed\nPASS"),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) == "PASS"
+    assert extract_verdict_reason_from_transcript(p) == "fixed"
+
+
+def test_verifier_feedback_supersedes_prior_verdict(tmp_path: Path) -> None:
+    """The QA loop's verifier follow-up is a genuine re-evaluation request."""
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("Reason: all good\nPASS"),
+        _user_line("Your verdict was reviewed and flagged: no runtime "
+                   "evidence — Please re-evaluate this scenario."),
+        _assistant_line("Looking at it again; no verdict yet."),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) is None
+
+
+def test_genuine_new_task_supersedes_prior_verdict(tmp_path: Path) -> None:
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("Reason: all good\nPASS"),
+        _user_line("Now also check the finalize pane and report back."),
+        _assistant_line("Working on the finalize pane; no verdict yet."),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) is None
+
+
+def test_retry_prompt_supersedes_prior_verdict(tmp_path: Path) -> None:
+    """pr-6566901 re-sends the original prompt into the same session on a
+    retry; that must not resurrect the earlier verdict."""
+    p = _write(tmp_path, [
+        _user_line("You are running QA scenario 44"),
+        _assistant_line("Reason: partial\nNEEDS_WORK"),
+        _user_line("You are running QA scenario 44"),
+        _assistant_line("Re-running the steps; no verdict yet."),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) is None
+
+
+def test_stop_hook_feedback_is_a_barrier(tmp_path: Path) -> None:
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("Reason: done\nPASS"),
+        _user_line("Stop hook feedback: you have uncommitted changes — "
+                   "finish them before stopping.", is_meta=True),
+        _assistant_line("Committing the remaining changes."),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) is None
+
+
+def test_tool_result_records_are_not_turn_barriers(tmp_path: Path) -> None:
+    """A verdict in a non-final assistant text record of a tool-using turn is
+    still found when later tool results and text follow it."""
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("Reason: verified live\nPASS"),
+        _tool_result_line(),
+        _assistant_line("Saving the capture manifest."),
+        _tool_result_line(),
+        _assistant_line("Done; no further commentary."),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) == "PASS"
+
+
+def test_system_reminder_only_record_is_transparent(tmp_path: Path) -> None:
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("Reason: done\nPASS"),
+        _user_line("<system-reminder>\nAnother Claude session sent a "
+                   "message while you were working.\n</system-reminder>"),
+        _assistant_line("Acknowledged; nothing to add."),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) == "PASS"
+
+
+def test_find_verdict_turn_carries_identity(tmp_path: Path) -> None:
+    from pm_core.verdict_transcript import find_verdict_turn
+
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("Reason: verified\nPASS",
+                        uuid="turn-verdict-1",
+                        timestamp="2026-05-13T14:00:00.000Z"),
+        _user_line(AUTONOMOUS_TICK, is_meta=True),
+        _assistant_line(SCENARIO_44_POSTSCRIPT, uuid="turn-postscript-1"),
+    ])
+    hit = find_verdict_turn(p, VERDICTS)
+    assert hit is not None
+    assert hit.verdict == "PASS"
+    assert hit.turn_id == "turn-verdict-1"
+    assert hit.timestamp == "2026-05-13T14:00:00.000Z"
+    assert "Reason: verified" in hit.text
+    assert SCENARIO_44_POSTSCRIPT not in hit.text

@@ -227,10 +227,6 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
     import os
     from pm_core import hook_events
     from pm_core.claude_launcher import session_id_from_transcript
-    from pm_core.verdict_transcript import (
-        extract_verdict_from_transcript,
-        read_latest_assistant_text,
-    )
 
     session = _get_pm_session()
     if not session or not transcript_dir:
@@ -251,9 +247,12 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
     # the poller only wakes on idle events newer than its start.
     ev = hook_events.read_event(session_id)
     if ev and ev.get("event_type") == "idle_prompt":
-        verdict = extract_verdict_from_transcript(transcript, ALL_VERDICTS)
-        if verdict:
-            return read_latest_assistant_text(transcript) or verdict
+        from pm_core.verdict_transcript import find_verdict_turn
+        hit = find_verdict_turn(transcript, ALL_VERDICTS)
+        if hit:
+            # Return the verdict turn's text so a later /loop wakeup turn
+            # cannot hide the verdict from parse_review_verdict.
+            return hit.text or hit.verdict
 
     content = _poll_for_verdict(pane_id, transcript,
                                  workdir=pr_data.get("workdir"))

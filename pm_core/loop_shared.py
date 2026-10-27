@@ -119,12 +119,11 @@ def poll_for_verdict(
     """Block until Claude signals idle, then extract a verdict from the
     JSONL transcript.
 
-    Returns the assistant text from the latest turn when a verdict is
-    found, or ``None`` when the pane disappears / ``stop_check`` fires.
-    Callers can pass the returned string to downstream parsers (e.g.
-    :func:`extract_between_markers`) or to
-    :func:`pm_core.verdict_transcript.extract_verdict_from_transcript`
-    for pure verdict detection.
+    Returns the assistant text of the turn that carried the verdict, or
+    ``None`` when the pane disappears / ``stop_check`` fires.  The text
+    comes from the verdict turn rather than the transcript tail so a
+    ``/loop`` wakeup or Monitor postscript after the verdict cannot hide
+    markers from downstream parsers (e.g. :func:`extract_between_markers`).
 
     Hook-driven only — requires *transcript_path* so we can recover the
     Claude ``session_id`` via the symlink target and read the assistant
@@ -140,10 +139,7 @@ def poll_for_verdict(
     from pm_core.claude_launcher import (
         WorkspacePromptWatch, WorkspaceTrustBlocked, session_id_from_transcript,
     )
-    from pm_core.verdict_transcript import (
-        extract_verdict_from_transcript,
-        read_latest_assistant_text,
-    )
+    from pm_core.verdict_transcript import find_verdict_turn
 
     session_id = session_id_from_transcript(transcript_path)
     if not session_id:
@@ -197,11 +193,14 @@ def poll_for_verdict(
         if grace_period > 0 and (time.monotonic() - poll_start) < grace_period:
             continue
 
-        verdict = extract_verdict_from_transcript(transcript_path, verdicts)
-        if verdict:
+        hit = find_verdict_turn(transcript_path, verdicts)
+        if hit:
             _log.info("%s: hook-driven verdict %s (session_id=%s)",
-                      log_prefix, verdict, session_id)
-            return read_latest_assistant_text(transcript_path) or verdict
+                      log_prefix, hit.verdict, session_id)
+            # Return the verdict turn's text, not the tail: a /loop wakeup
+            # or Monitor postscript after the verdict must not hide the
+            # output downstream parsers (markers, reasons) need.
+            return hit.text or hit.verdict
 
 
 def wait_for_follow_up_verdict(
@@ -221,10 +220,7 @@ def wait_for_follow_up_verdict(
     """
     from pm_core import hook_events
     from pm_core.claude_launcher import session_id_from_transcript
-    from pm_core.verdict_transcript import (
-        extract_verdict_from_transcript,
-        read_latest_assistant_text,
-    )
+    from pm_core.verdict_transcript import find_verdict_turn
 
     session_id = session_id_from_transcript(transcript_path)
     if not session_id:
@@ -253,9 +249,10 @@ def wait_for_follow_up_verdict(
             continue
         hook_baseline = float(ev.get("timestamp") or hook_baseline)
 
-        verdict = extract_verdict_from_transcript(transcript_path, verdicts)
-        if verdict:
-            _log.info("%s: hook-driven follow-up verdict %s", log_prefix, verdict)
-            return read_latest_assistant_text(transcript_path) or verdict
+        hit = find_verdict_turn(transcript_path, verdicts)
+        if hit:
+            _log.info("%s: hook-driven follow-up verdict %s",
+                      log_prefix, hit.verdict)
+            return hit.text or hit.verdict
 
     return None
