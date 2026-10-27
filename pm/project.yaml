@@ -34197,7 +34197,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T00:26:04.150027+00:00'
-  updated_at: '2026-10-22T01:38:54.583871+00:00'
+  updated_at: '2026-10-27T20:04:42.444502+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34210,6 +34210,22 @@ prs:
       PR pr-bbac94b detected as merged"). Evidence /pm-captures/scenarios/13/when5-plain-merge-pr5/tui-sync-finalized-pr5.log.'
     created_at: '2026-10-22T01:38:54Z'
     last_edited: '2026-10-22T01:38:54Z'
+  - id: note-1c62905
+    text: 'Impl session (2026-10-27): fix implemented + pushed addf8b40. Sync-detected
+      GitHub merges (TUI background do_normal_sync -> pr_sync.sync_prs, TUI startup
+      -> sync_from_github, and CLI `pm pr sync`) now verify against the bound SIGNOFF_MERGE
+      via shared pm_core/merge_integrity.py (extracted from cli/pr.py::_verify_github_merge).
+      A mismatch records merge_integrity + one note (same text/shape as pm pr merge)
+      and shows a held TUI log line; an unverifiable merge is logged and finalized
+      unchanged. TUI worker thread still does reads only; evidence applied in the
+      main thread locked_update. Evidence: /pm-captures/impl/pre-fix (repro: merged,
+      no integrity/note), /pm-captures/impl/post-fix (integrity+note on both TUI paths;
+      approved-merge control clean), /pm-captures/impl/test-evidence/full-suite.log
+      (3832 passed, 1 skipped; pytest 8.4.2). New tests: tests/test_sync_merge_integrity.py
+      (9). Ready for review; the base pm TUI session is not reachable from this container,
+      so review was not launched here.'
+    created_at: '2026-10-27T20:04:42Z'
+    last_edited: '2026-10-27T20:04:42Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
