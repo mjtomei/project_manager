@@ -236,6 +236,21 @@ class TestWaitOutcomes:
         assert "125" in r.stderr
         assert "job itself returned 125" in r.stderr
 
+    def test_early_exit_124_is_a_job_failure_not_a_timeout(self, tmp_path):
+        """124/137 mean "timeout" only when the bound was actually reached.
+
+        A job can legitimately exit 124 on its own; blaming the bound would
+        send the worker after a timeout that never happened.
+        """
+        art = tmp_path / "out.txt"
+        r = run_helper([
+            "--timeout", "30", "--artifact", str(art),
+            "-c", f"printf v > {shlex.quote(str(art))}; exit 124",
+        ])
+        assert r.returncode == 1
+        assert "exit status 124" in r.stderr
+        assert "exceeded" not in r.stderr
+
     def test_interrupted_wait_kills_the_job(self, tmp_path):
         """A signalled helper stops the job and reports the interruption.
 
@@ -743,6 +758,86 @@ class TestRenderScript:
         assert r.returncode == 0, r.stderr
         assert "scale=trunc(iw/2)*2:trunc(ih/2)*2" in ffmpeg_args.read_text()
         assert mp4.exists()
+
+
+class TestRecipeInvocation:
+    """The fenced render block as a worker runs it, with stub renderers.
+
+    ``TestRenderScript`` drives only the helper's ``-c`` script.  A quoting
+    regression in the *invocation* itself — the exported ``$cast``/``$mp4``,
+    the ``--validate`` pipeline, ``$RECIPE_DIR`` — would slip past it, so
+    this runs the whole block the recipe tells a worker to paste.
+    """
+
+    def _run(self, name, tmp_path, *, agg_body=': > "$4"', codec="h264",
+             ffmpeg_body='for last; do :; done\nprintf video > "$last"',
+             pre_existing_mp4=False):
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+
+        def stub(prog, body):
+            p = bin_dir / prog
+            p.write_text("#!/bin/sh\n" + body + "\n")
+            p.chmod(0o755)
+
+        stub("agg", agg_body)
+        stub("ffprobe",
+             f'case "$*" in *codec_name*) echo {codec} ;; '
+             '*) echo "160,90" ;; esac')
+        stub("ffmpeg", ffmpeg_body)
+
+        # Both recipes spell the capture dir as a placeholder, and
+        # cli-recording adds a per-capture subdirectory; give them real paths
+        # so the block runs exactly as written.
+        raw = _render_block(_recipe_text(name))
+        cap_dir = tmp_path / "cap"
+        block = raw.replace("<capture-dir>", str(cap_dir)).replace(
+            "<short-name>", "run")
+        cast_dir = cap_dir / "run" if "<short-name>" in raw else cap_dir
+        cast_dir.mkdir(parents=True)
+        (cast_dir / "recording.cast").write_text("cast")
+        mp4 = cast_dir / "recording.mp4"
+        if pre_existing_mp4:
+            mp4.write_text("old render")
+            old = time.time() - 3600
+            os.utime(mp4, (old, old))
+        env = dict(
+            os.environ,
+            PATH=f"{bin_dir}:{os.environ.get('PATH', '')}",
+            RECIPE_DIR=str(ARTIFACTS),
+        )
+        r = subprocess.run(["bash", "-c", block], capture_output=True,
+                           text=True, env=env, timeout=120)
+        return r, mp4
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_render_block_produces_a_validated_artifact(self, name, tmp_path):
+        r, mp4 = self._run(name, tmp_path)
+        assert r.returncode == 0, r.stderr
+        assert "wait-for-job: ok" in r.stdout
+        assert mp4.is_file() and mp4.stat().st_size
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_render_failure_is_reported(self, name, tmp_path):
+        r, _ = self._run(name, tmp_path, agg_body="exit 1")
+        assert r.returncode == 1, r.stderr
+        assert "job failed with exit status 1" in r.stderr
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_wrong_codec_fails_validation(self, name, tmp_path):
+        r, _ = self._run(name, tmp_path, codec="vp9")
+        assert r.returncode == 4, r.stderr
+        assert "failed validation" in r.stderr
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_unrewritten_artifact_is_stale(self, name, tmp_path):
+        """A leftover mp4 the render never rewrote is not a completed render."""
+        r, _ = self._run(
+            name, tmp_path, pre_existing_mp4=True,
+            ffmpeg_body="exit 0",          # writes nothing
+        )
+        assert r.returncode == 4, r.stderr
+        assert "stale" in r.stderr or "not rewritten" in r.stderr
 
 
 # ---------------------------------------------------------------------------

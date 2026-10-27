@@ -72,13 +72,15 @@ capture, you do **not** need a `tmux attach` — the pane itself is
 where the CLI runs.
 
 ```
-# 1. Scaffold tmux on its own socket and open one pane.
+# 1. Scaffold tmux on its own socket and open one pane. The capture
+#    subdirectory has to exist before asciinema writes into it.
+mkdir -p <capture-dir>/<short-name>
 tmux -L scaffold new-session -d -s rec -x 100 -y 30
 
 # 2. Start asciinema in the pane, wrapping whichever command form
 #    fits from above (one command, bash + manual, or bash -c script).
 tmux -L scaffold send-keys -t rec:0.0 \
-    "asciinema rec --quiet --overwrite <capture-dir>/recording.cast \
+    "asciinema rec --quiet --overwrite <capture-dir>/<short-name>/recording.cast \
         -c '<command-to-record>'" Enter
 
 # 3. If you wrapped `bash`, drive it from outside via tmux send-keys

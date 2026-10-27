@@ -101,7 +101,12 @@ covering at minimum:
    - the shared background-job block reaches the impl, review (incl. review
      loop) and QA-child prompts, and the QA-child prompt explains `RECIPE_DIR`;
    - recipe/helper content assertions (helper referenced, `--timeout`,
-     `--artifact`, `pipefail`; helper copied by `_install_artifact_files`).
+     `--artifact`, `pipefail`; helper copied by `_install_artifact_files`);
+   - the recipe's fenced render block run end to end with stub renderers
+     (`TestRecipeInvocation`), so a quoting regression in the *invocation* —
+     exported `$cast`/`$mp4`, the `--validate` pipeline, `$RECIPE_DIR` —
+     fails a test, not only the inner `-c` script (`TestRenderScript`, review
+     loop i9).
 
 R7. **Evidence.** Exercise the prescribed workflow in a real render-like
 scenario and save pre-fix and post-fix captures under

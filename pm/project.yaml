@@ -31078,7 +31078,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-27T07:34:31.901654+00:00'
+  updated_at: '2026-10-27T08:07:06.024979+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31174,6 +31174,33 @@ prs:
       evidence still stands.'
     created_at: '2026-10-27T07:34:12Z'
     last_edited: '2026-10-27T07:34:31Z'
+  - id: note-6d4fbdf
+    text: 'Review loop i8: fixed the helper''s exit-125 diagnostic — `timeout` passes
+      a job''s own status 125 through (e.g. `docker run` on a daemon error), so "timeout
+      could not start the job" was a phantom problem; the message now names both possibilities,
+      with a regression test that fails against the old message. Spec edge cases updated.
+      No change to the wait/kill/freshness logic. New file: 57 pass; related suites
+      389 pass.'
+    created_at: '2026-10-27T07:54:03Z'
+    last_edited: '2026-10-27T07:54:03Z'
+  - id: note-b758861
+    text: 'Review loop i9: added TestRecipeInvocation — each recipe''s fenced render
+      block run end to end with stub agg/ffprobe/ffmpeg (success, renderer failure,
+      wrong codec, unrewritten leftover). TestRenderScript only drove the inner `-c`
+      script, so a quoting regression in the invocation itself (exported cast/mp4,
+      --validate pipeline, RECIPE_DIR) was untested; mutation-checked by dropping
+      `export cast mp4` — the block fails, so the new test catches it. Also fixed
+      cli-recording.md''s no-TTY scaffold: step 2 wrote the cast to <capture-dir>/recording.cast
+      while every other path (and the render block''s $cast) uses <capture-dir>/<short-name>/,
+      so a QA worker following the scaffold would have rendered nothing; added the
+      mkdir for that subdir. Added a regression test for a job''s own early exit 124
+      (job failure, not a timeout). No change to wait-for-job.sh. New file: 66 pass
+      (3 consecutive runs, no flakes). Full suite with the two env-blocked files excluded:
+      3710 passed, 14 failed — the 12 markdown tests pass with the markdown dep installed,
+      and test_git_ops::test_keeps_unpushed_merge + test_hook_events::test_installer_writes_standalone_receiver
+      reproduce on origin/master.'
+    created_at: '2026-10-27T08:07:05Z'
+    last_edited: '2026-10-27T08:07:05Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
