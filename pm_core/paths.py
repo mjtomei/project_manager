@@ -16,6 +16,8 @@ import logging
 import os
 import shlex
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 # Cache for session tags to avoid repeated subprocess calls
@@ -714,6 +716,55 @@ def log_shell_command(cmd: list[str] | str, prefix: str = "shell", returncode: i
             f.write(entry)
     except (OSError, IOError):
         pass  # Silently fail if we can't write to log
+
+
+# Provider env values must never appear in a command string that is logged,
+# kept as tmux's ``#{pane_start_command}`` or stored in the pane registry.
+# They are handed to the launched shell in a private file instead.
+_ENV_FILE_TTL = 24 * 60 * 60  # remove files from launches whose pane never ran
+
+
+def write_env_file(env: dict[str, str]) -> tuple[str, str]:
+    """Write *env* to a private shell file; return ``(source_prefix, path)``.
+
+    The prefix sources the file (``set -a`` exports each assignment), removes
+    it, and leaves the values in the shell's environment.  Only the file
+    *path* ever reaches a command string — never a value — so secrets stay out
+    of the command log, tmux's ``#{pane_start_command}`` and the pane registry.
+
+    Callers that fail before the command runs must unlink *path*.
+    """
+    d = pm_home() / "run"
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        os.chmod(d, 0o700)
+    except OSError:
+        pass  # not ours to tighten; the file itself is still 0600
+
+    # Best effort: a pane that is killed before running its command never
+    # removes its file, so sweep old leftovers on every write.
+    cutoff = time.time() - _ENV_FILE_TTL
+    for old in d.glob("env-*.sh"):
+        try:
+            if old.stat().st_mtime < cutoff:
+                old.unlink()
+        except OSError:
+            pass
+
+    fd, path = tempfile.mkstemp(prefix="env-", suffix=".sh", dir=d)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            for k, v in env.items():
+                fh.write(f"{k}={shlex.quote(v)}\n")
+        os.chmod(path, 0o600)
+    except OSError:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise
+    quoted = shlex.quote(path)
+    return f"set -a; . {quoted}; set +a; rm -f {quoted}; ", path
 
 
 def bench_cache_dir() -> Path:

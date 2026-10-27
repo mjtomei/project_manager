@@ -453,7 +453,7 @@ CANARY = "canary-84ebabf-do-not-use"
 
 
 class TestLaunchClaudeInTmuxProviderEnv:
-    @patch("pm_core.claude_launcher._write_env_file",
+    @patch("pm_core.claude_launcher.write_env_file",
            return_value=("set -a; . /tmp/canary.env; set +a; "
                          "rm -f /tmp/canary.env; ", "/tmp/canary.env"))
     @patch("pm_core.tmux.send_keys")
@@ -470,8 +470,10 @@ class TestLaunchClaudeInTmuxProviderEnv:
 
         sent = mock_sk.call_args[0][1]
         assert CANARY not in sent
-        assert sent.startswith("set -a; . /tmp/canary.env; set +a; ")
-        assert "claude 'hello'" in sent
+        # sh -c so the POSIX source prefix also works under fish.
+        assert sent.startswith("sh -c ")
+        assert "set -a; . /tmp/canary.env" in sent
+        assert "claude" in sent and "hello" in sent
 
     @patch("pm_core.tmux.send_keys")
     def test_no_provider_env_sends_command_unchanged(self, mock_sk):
@@ -491,8 +493,8 @@ class TestWriteEnvFile:
         import stat
 
         monkeypatch.setenv("HOME", str(tmp_path))
-        from pm_core.claude_launcher import _write_env_file
-        prefix, path = _write_env_file(
+        from pm_core.paths import write_env_file
+        prefix, path = write_env_file(
             {"ANTHROPIC_API_KEY": "value with spaces 'and quotes'"})
         try:
             assert stat.S_IMODE(os.stat(path).st_mode) == 0o600

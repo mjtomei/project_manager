@@ -36166,7 +36166,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/268
   gh_pr_number: 268
   created_at: '2026-10-26T05:09:15.878235+00:00'
-  updated_at: '2026-10-27T19:52:26.203402+00:00'
+  updated_at: '2026-10-27T20:30:01.899888+00:00'
   started_at: '2026-10-27T19:07:41.620041+00:00'
   reviewed_at: null
   merged_at: null
@@ -36195,6 +36195,24 @@ prs:
       TestBuildExecCmdProviderEnv, test_claude_launcher TestLaunchClaudeInTmuxProviderEnv/TestWriteEnvFile.'
     created_at: '2026-10-27T19:52:26Z'
     last_edited: '2026-10-27T19:52:26Z'
+  - id: note-7db09b8
+    text: 'review-loop b1c1 i1: blocking bug found and fixed. tmux 3.2a only resolves
+      `-e NAME` from the client environment for new-session; new-window uses the server
+      env and split-window the session env, so every provider-override impl/review/QA/signoff/TUI
+      pane would have silently lost the key — or picked up an unrelated value from
+      the server env (e.g. the user real ANTHROPIC_API_KEY sent to a third-party base
+      URL). The post-fix capture had only exercised create_session, the one path that
+      works. Replaced the transport with a 0600 env file under ~/.pm/run sourced by
+      the pane (`sh -c "set -a; . file; set +a; rm -f file; <cmd>"`); a leading `cd
+      ... && ` is kept outside the wrapper so pane_transcript_path still parses it,
+      and files from panes that never ran are swept after 24h. Container exec keeps
+      `-e NAME` (the pane now carries the value). Added real-tmux tests TestProviderEnvReachesRealPane
+      that read the value back out of new_window/split_pane panes and assert pane_start_command
+      is clean (the old transport fails them). Re-captured /pm-captures/impl/post-fix
+      with new_window+split_pane (synthetic canary only); spec R2/A1/A5 updated with
+      a §7 finding. Full suite: 3841 passed, 1 skipped (pytest 8.4.2) in /pm-captures/impl/post-fix/pytest-full-review1.log.'
+    created_at: '2026-10-27T20:30:01Z'
+    last_edited: '2026-10-27T20:30:01Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

@@ -1004,8 +1004,9 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     *env* names environment variables to add to the exec'd process.  Only
     the *name* goes on the runtime command line (``-e NAME``); the runtime
     reads the value from its own environment, which the tmux pane carries
-    (set with ``tmux -e NAME``).  Values must never be interpolated into
-    this string: it is logged and kept as ``#{pane_start_command}``.
+    (the pane command sources a private env file).  Values must never be
+    interpolated into this string: it is logged and kept as
+    ``#{pane_start_command}``.
     """
     runtime = _get_runtime()
     escaped = shlex.quote(shell_cmd)

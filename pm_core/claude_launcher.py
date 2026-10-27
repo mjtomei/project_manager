@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pm_core.paths import configure_logger, log_shell_command, pm_home
+from pm_core.paths import configure_logger, log_shell_command, write_env_file
 from pm_core.prompt_bounds import (
     PROMPT_ARG_LIMIT, PromptTooLargeError, prompt_bytes,
 )
@@ -921,8 +921,10 @@ def build_claude_shell_cmd(
             logged (``log_shell_command``), stored as the tmux
             ``#{pane_start_command}`` and kept in the pane registry.  Callers
             must transport the values through the launched process's
-            environment (``tmux -e NAME`` with the value in the client env,
-            ``os.execvpe(..., env=...)``, or a private env file).
+            environment: ``tmux`` pane helpers write a private env file the
+            pane sources (``env=`` argument), foreground launches use
+            ``os.execvpe(..., env=...)``, and ``send_keys`` sources the same
+            kind of file.
     """
     # When transcript is requested, generate a UUID and create a symlink
     if transcript and cwd:
@@ -1148,34 +1150,6 @@ def finalize_transcript(transcript_path: Path) -> None:
         _log.debug("transcript: target %s does not exist, skipping finalize", target)
 
 
-def _write_env_file(env: dict[str, str]) -> tuple[str, str]:
-    """Write *env* to a private file and return ``(shell_prefix, path)``.
-
-    ``send_keys`` types into an existing shell, which has no pane-env
-    channel (unlike ``tmux -e``), so the values are handed over in a
-    ``0600`` file that the command sources and removes before claude
-    starts.  The prefix leaves the values in the shell's environment
-    without ever placing them in the typed command, the command log, or
-    the pane history.
-    """
-    d = pm_home() / "run"
-    d.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd, path = tempfile.mkstemp(prefix="env-", suffix=".sh", dir=d)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            for k, v in env.items():
-                fh.write(f"{k}={shlex.quote(v)}\n")
-        os.chmod(path, 0o600)
-    except OSError:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
-        raise
-    quoted = shlex.quote(path)
-    return f"set -a; . {quoted}; set +a; rm -f {quoted}; ", path
-
-
 def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None,
                           session_type: str | None = None) -> None:
     """Send a claude command to a tmux pane.
@@ -1188,9 +1162,13 @@ def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None,
     cmd = build_claude_shell_cmd(prompt=prompt, cwd=cwd,
                                  session_type=session_type, env_out=env)
     if env:
-        prefix, path = _write_env_file(env)
+        # send_keys types into an existing shell, which has no pane-env
+        # channel, so the values are handed over in a 0600 file that the
+        # command sources and removes before claude starts.  sh -c so the
+        # POSIX prefix also works when the pane's shell is fish.
+        prefix, path = write_env_file(env)
         try:
-            send_keys(pane_target, prefix + cmd)
+            send_keys(pane_target, f"sh -c {shlex.quote(prefix + cmd)}")
         except Exception:
             try:
                 os.unlink(path)
