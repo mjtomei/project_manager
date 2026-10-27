@@ -14491,7 +14491,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T05:20:33.014824+00:00'
+  updated_at: '2026-10-27T05:42:38.472691+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14550,6 +14550,32 @@ prs:
       it targets no longer exists). (2026-10-27)'
     created_at: '2026-10-27T05:20:32Z'
     last_edited: '2026-10-27T05:20:32Z'
+  - id: note-6235bfb
+    text: 'Review-loop 7d11 i2 (2026-10-27): reviewed afeaa283. Fixes applied: (1)
+      the daemon *process* now exits when its socket path is rebound — the spec edge
+      case "daemon orphaned after its socket path is replaced → inode check makes
+      it exit" was only half-true: _serve_loop noticed the rebind but the __main__
+      wait loop still tested os.path.exists(_sock), so a daemon whose path was unlinked
+      and rebound inside one 2 s tick lived forever holding no socket. Reproduced
+      at afeaa283 (old daemon still alive 8 s after a new one rebound its path; note
+      os.kill(pid,0) reports a reaped child as alive — use Popen.poll) and verified
+      fixed; the wait loop is now _wait_for_socket_exit(), sharing PushProxy.socket_is_current()
+      with the serve loop. (2) socket_is_current() restores an existence check when
+      _sock_ino is None (stat failed at bind time) — the i1 inode refactor had dropped
+      the old os.path.exists check for that case, so such a daemon never exited on
+      socket removal. (3) _remove_proxy_dirs() also refuses to rmtree a directory
+      whose st_uid is not ours, completing i1 symlink-target guard (_is_proxy_dir)
+      for world-writable /tmp; a missing dir still gets its stale .lock cleared. Tests:
+      4 new (socket_is_current removal/rebind, no-inode fallback, _wait_for_socket_exit
+      exits, uid guard) — 70 push-proxy tests pass. Full suite (PATH=/usr/bin:/bin,
+      PYTHONPATH=/workspace): 3758 passed, 1 skipped, 13 failed — all environment:
+      12 test_markdown_render (no markdown module) + test_hook_events::test_installer_writes_standalone_receiver,
+      both pre-existing. Re-verified the bug-fix evidence: post-fix verify script
+      passes on HEAD, and test_impl_and_qa_get_distinct_proxies fails at 74462d76
+      with assert 1 == 3 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      Spec updated with a "Review iteration 2 refinements" section.'
+    created_at: '2026-10-27T05:42:38Z'
+    last_edited: '2026-10-27T05:42:38Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

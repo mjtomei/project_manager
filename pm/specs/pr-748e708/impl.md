@@ -239,3 +239,26 @@ Known, explicitly out of scope (unchanged by this PR): refcounts are
 in-process only, so a same-workdir container owned by another process can
 still have its proxy stopped when this process drops its last reference.
 Cross-process cleanup/restart stays with #241 / pr-ac12b47.
+
+## Review iteration 2 refinements
+
+Added during the second review pass (again consistent with R1–R9; no
+requirement changed):
+
+- **The daemon *process* now exits, not just its serve thread.** The
+  "Daemon orphaned after its socket path is replaced" edge case above was
+  only half-satisfied: `_serve_loop` noticed the rebind, but the
+  `__main__` wait loop still tested `os.path.exists(_sock)`, so a daemon
+  whose path was unlinked and rebound within one 2 s tick kept running
+  forever holding no socket. Reproduced at afeaa283 (old daemon alive
+  8 s after a new one rebound its path); the wait loop is now
+  `_wait_for_socket_exit()`, which uses the same
+  `PushProxy.socket_is_current()` check as the serve loop.
+- **Existence fallback restored.** `_serve_loop` skipped the socket check
+  entirely when `_sock_ino` was `None` (stat failed at bind time), so such
+  a daemon never noticed its socket being removed. `socket_is_current()`
+  falls back to `os.path.exists` in that case.
+- **Teardown cannot delete another user's directory.** `/tmp` is
+  world-writable, so `_remove_proxy_dirs` now also skips a real directory
+  whose `st_uid` is not ours, completing iteration 1's symlink-target
+  guard (`_is_proxy_dir`).

@@ -7,6 +7,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -401,6 +402,52 @@ class TestPushProxyLifecycle:
         Path(sock_path).write_text("replacement")
         proxy.stop()
         assert Path(sock_path).read_text() == "replacement"
+
+    def test_socket_is_current_tracks_removal_and_replacement(self, sock_path):
+        """Both the serve loop and the daemon wait loop use this check."""
+        proxy = PushProxy(sock_path, "/w", "branch")
+        proxy.start()
+        try:
+            assert proxy.socket_is_current()
+            os.unlink(sock_path)
+            assert not proxy.socket_is_current()  # removed -> exit
+            Path(sock_path).write_text("replacement")
+            assert not proxy.socket_is_current()  # rebound -> not ours
+        finally:
+            proxy.stop()
+
+    def test_socket_is_current_falls_back_to_existence_without_inode(
+            self, sock_path):
+        """Without a recorded inode the daemon still notices removal."""
+        proxy = PushProxy(sock_path, "/w", "branch")
+        proxy.start()
+        try:
+            proxy._sock_ino = None  # stat failed at bind time
+            assert proxy.socket_is_current()
+            os.unlink(sock_path)
+            assert not proxy.socket_is_current()
+        finally:
+            proxy.stop()
+
+    def test_daemon_wait_loop_exits_when_socket_is_replaced(self, sock_path):
+        """The daemon *process* must exit, not just its serve thread."""
+        proxy = PushProxy(sock_path, "/w", "branch")
+        proxy.start()
+        try:
+            os.unlink(sock_path)
+            Path(sock_path).write_text("replacement")
+            done = threading.Event()
+
+            def run() -> None:
+                push_proxy_mod._wait_for_socket_exit(
+                    proxy, threading.Event(), interval=0.01)
+                done.set()
+
+            threading.Thread(target=run, daemon=True).start()
+            assert done.wait(5.0), (
+                "daemon wait loop did not notice the replaced socket")
+        finally:
+            proxy.stop()
 
 
 class TestSharedProxy:
@@ -941,6 +988,21 @@ class TestWorkdirKeyedProxies:
         finally:
             if os.path.lexists(link):
                 os.unlink(link)
+
+    def test_sweep_refuses_a_dir_owned_by_another_user(self, tmp_path,
+                                                       monkeypatch):
+        """/tmp is world-writable; only our own proxy dirs may be deleted."""
+        other = "/tmp/pm-push-proxy-uidguard-evil"
+        os.makedirs(other, exist_ok=True)
+        Path(other, "keep.txt").write_text("keep\n")
+        real_uid = os.getuid()  # capture before patching the module's os
+        monkeypatch.setattr("pm_core.push_proxy.os.getuid",
+                            lambda: real_uid + 1)
+        try:
+            push_proxy_mod._remove_proxy_dirs("/tmp/pm-push-proxy-uidguard-*")
+            assert Path(other, "keep.txt").exists()
+        finally:
+            shutil.rmtree(other, ignore_errors=True)
 
     def test_start_raises_when_daemon_not_ready(self, tmp_path):
         from pm_core.push_proxy import PushProxyError

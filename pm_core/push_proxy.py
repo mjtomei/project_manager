@@ -251,6 +251,22 @@ class PushProxy:
         except OSError:
             return False
 
+    def socket_is_current(self) -> bool:
+        """True while the socket at our path is still the one we bound.
+
+        Unlike :meth:`_owns_socket_path` this treats a missing file as "not
+        current", which is what the serve and main loops need: both must
+        stop when the path is gone *or* has been rebound by another daemon.
+        """
+        if self._sock_ino is None:
+            # Could not stat our own socket at bind time — fall back to the
+            # plain existence check the daemon used before inode tracking.
+            return os.path.exists(self.socket_path)
+        try:
+            return os.stat(self.socket_path).st_ino == self._sock_ino
+        except OSError:
+            return False
+
     def stop(self) -> None:
         """Stop the proxy and clean up the socket."""
         if self._server_socket is None:
@@ -284,17 +300,9 @@ class PushProxy:
             # Exit if the socket was removed or replaced by another daemon
             # (different inode).  Checking existence alone would let an
             # orphaned daemon keep running after its path was rebound.
-            try:
-                if (self._sock_ino is not None
-                        and os.stat(self.socket_path).st_ino != self._sock_ino):
-                    _log.info("Push proxy socket replaced, exiting: %s",
-                              self.socket_path)
-                    break
-            except FileNotFoundError:
-                _log.info("Push proxy socket removed, exiting: %s",
+            if not self.socket_is_current():
+                _log.info("Push proxy socket removed or replaced, exiting: %s",
                           self.socket_path)
-                break
-            except OSError:
                 break
             try:
                 conn, _ = self._server_socket.accept()
@@ -1004,6 +1012,8 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
 
     Only paths that resolve to a proxy socket directory are removed; a
     symlink pointing anywhere else is unlinked but its target is left alone.
+    Directories owned by another user are left alone too — ``/tmp`` is
+    world-writable, so anyone can create a matching name there.
     """
     import glob as _glob
     import shutil
@@ -1020,6 +1030,15 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
         if not _is_proxy_dir(real, parent):
             _log.warning("Refusing to remove non-proxy directory %s -> %s",
                          path, real)
+            continue
+        try:
+            if os.stat(real).st_uid != os.getuid():
+                _log.warning("Refusing to remove proxy directory owned by "
+                             "another user: %s", real)
+                continue
+        except FileNotFoundError:
+            pass  # already gone — still clear a leftover lock below
+        except OSError:
             continue
         if os.path.isdir(real):
             shutil.rmtree(real, ignore_errors=True)
@@ -1163,6 +1182,20 @@ def container_socket_path() -> str:
     return _CONTAINER_SOCKET_PATH
 
 
+def _wait_for_socket_exit(proxy: PushProxy, stop_event: threading.Event,
+                          interval: float = 2.0) -> None:
+    """Block the daemon until its socket is removed/replaced or signalled.
+
+    The serve thread exits on its own when the path is unlinked or rebound,
+    but the process must exit too — otherwise a daemon whose socket another
+    daemon took over lingers forever holding no socket at all.
+    """
+    while not stop_event.is_set():
+        if not proxy.socket_is_current():
+            break
+        stop_event.wait(interval)
+
+
 # ---------------------------------------------------------------------------
 # Standalone entry point: python -m pm_core.push_proxy <sock> <workdir> <branch>
 # ---------------------------------------------------------------------------
@@ -1181,13 +1214,10 @@ if __name__ == "__main__":
         # Another daemon already serves this socket; do not steal it.
         _sys.exit(0)
 
-    # Block until the socket is removed or we get a signal
+    # Block until the socket is removed/replaced or we get a signal
     import signal as _signal
     _stop = threading.Event()
     _signal.signal(_signal.SIGTERM, lambda *_: _stop.set())
     _signal.signal(_signal.SIGINT, lambda *_: _stop.set())
-    while not _stop.is_set():
-        if not os.path.exists(_sock):
-            break
-        _stop.wait(2.0)
+    _wait_for_socket_exit(proxy, _stop)
     proxy.stop()
