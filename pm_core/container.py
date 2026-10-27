@@ -628,7 +628,7 @@ def create_container(
                 start_push_proxy, get_proxy_socket_path, proxy_is_alive,
             )
             sock = get_proxy_socket_path(name, session_tag=session_tag,
-                                         pr_id=pr_id)
+                                         pr_id=pr_id, workdir=str(workdir))
             if not sock or not proxy_is_alive(sock):
                 _log.warning("Push proxy dead/missing for container %s — "
                              "restarting proxy", name)
@@ -1136,7 +1136,8 @@ def wrap_claude_cmd(
         _log.debug("wrap_claude_cmd: rewrote prompt-file path to container path")
 
     from pm_core.push_proxy import get_proxy_socket_path
-    proxy_sock = get_proxy_socket_path(cname)
+    proxy_sock = get_proxy_socket_path(
+        cname, session_tag=session_tag, pr_id=pr_id, workdir=workdir)
     # For shared proxies (session_tag + pr_id), don't embed socket cleanup
     # in the exec command — the socket is shared across containers and its
     # lifetime is managed via reference counting in stop_push_proxy().

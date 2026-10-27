@@ -14463,11 +14463,43 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-05-04T11:58:45.935220+00:00'
+  updated_at: '2026-10-27T05:04:04.358926+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-6245c1d
+    text: 'Impl (2026-10-27): shared push proxies are now keyed by (session_tag, pr_id,
+      workdir_token); impl/review/sign-off on the PR workdir share one proxy, each
+      QA scenario clone gets its own. start_push_proxy refuses to replace a live proxy
+      serving a different workdir/branch (metadata sidecar), takes a per-dir flock
+      around check-and-spawn, and raises PushProxyError if the daemon is not connectable
+      within 5 s. Requests naming a foreign or missing workdir are rejected explicitly;
+      no silent cross-clone push. Shared stops keep the socket directory (a container
+      may still bind-mount it); stop_session_proxies/stop_all_proxies remove dirs
+      at teardown. get_proxy_socket_path takes workdir; container.py callers pass
+      it. Evidence: /pm-captures/impl/pre-fix/repro-proxy-key and /pm-captures/impl/post-fix/verify-proxy-key.
+      Tests: tests/test_push_proxy.py TestWorkdirKeyedProxies (11 new) and the full
+      suite (3763 passed, 1 skipped; run with PATH=/usr/bin so the container git wrapper
+      does not intercept test pushes). #249 socket disappearance: cause NOT established;
+      this change adds readiness/recovery and never deletes a shared socket dir, but
+      does not claim the workdir collision caused it. Container ownership/cleanup
+      stays with pr-1139060 (#241); no duplication here.'
+    created_at: '2026-10-27T04:54:58Z'
+    last_edited: '2026-10-27T05:04:04Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
 - id: pr-48cb564
   plan: improvements
   title: 'Picker popup: indicate per-session window-selected state with ● vs ○'

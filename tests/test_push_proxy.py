@@ -2,14 +2,17 @@
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 
+import pm_core.push_proxy as push_proxy_mod
 from pm_core.push_proxy import (
     PushProxy,
     start_push_proxy,
@@ -357,6 +360,7 @@ class TestSharedProxy:
         def fake_start(sock_path, workdir, branch):
             os.makedirs(os.path.dirname(sock_path), exist_ok=True)
             Path(sock_path).touch()
+            return True
         return patch("pm_core.push_proxy._start_proxy_subprocess",
                      side_effect=fake_start)
 
@@ -383,12 +387,19 @@ class TestSharedProxy:
             assert get_proxy_socket_path("c2") is None
 
     def test_shared_proxy_deterministic_path(self):
-        """Shared proxy socket is at a deterministic path."""
+        """Shared proxy socket path is deterministic per workdir."""
         with self._mock_start():
             sock = start_push_proxy("c1", "/w", "pm/pr-1",
                                     session_tag="repo-abc", pr_id="pr-1")
-            assert sock == "/tmp/pm-push-proxy-repo-abc-pr-1/push.sock"
+            token = push_proxy_mod._workdir_token("/w")
+            assert sock == (
+                f"/tmp/pm-push-proxy-repo-abc-pr-1-{token}/push.sock")
+            # A different workdir gets its own deterministic path.
+            sock2 = start_push_proxy("c2", "/w2", "pm/pr-1",
+                                     session_tag="repo-abc", pr_id="pr-1")
+            assert sock2 != sock
             stop_push_proxy("c1")
+            stop_push_proxy("c2")
 
     def test_stop_session_proxies(self):
         """stop_session_proxies cleans up all proxies for a session."""
@@ -418,11 +429,22 @@ class TestSharedProxy:
 
 
 class TestCallerWorkdir:
-    """The 'workdir' request field routes push/fetch/pull to the correct clone."""
+    """The 'workdir' request field must match the proxy's own workdir.
+
+    Each proxy is keyed by (session_tag, pr_id, workdir), so a request that
+    names a *different* workdir must be rejected rather than silently run
+    against another clone.
+    """
 
     @pytest.fixture
-    def proxy(self, sock_path):
-        p = PushProxy(sock_path, "/proxy-default-workdir", "pm/pr-123-feature")
+    def workdir(self, tmp_path):
+        d = tmp_path / "proxy-workdir"
+        d.mkdir()
+        return d
+
+    @pytest.fixture
+    def proxy(self, sock_path, workdir):
+        p = PushProxy(sock_path, str(workdir), "pm/pr-123-feature")
         p.start()
         yield p
         p.stop()
@@ -431,7 +453,7 @@ class TestCallerWorkdir:
     @patch("pm_core.push_proxy._resolve_local_remote_url",
            return_value="/some/pr-workdir")
     def test_rejects_local_path_origin(self, _mock_resolve, mock_run,
-                                       proxy, sock_path):
+                                       proxy, sock_path, workdir):
         """Local-path origins are rejected: the old fetch-into-target fallback
         silently desynced the target's worktree, so this is now fail-closed.
         Scenario clones must rewrite origin to the real upstream URL before
@@ -440,7 +462,7 @@ class TestCallerWorkdir:
         resp = _send_request(sock_path, {
             "cmd": "push",
             "args": ["origin", "pm/pr-123-feature"],
-            "workdir": "/caller-clone",
+            "workdir": str(workdir),
         })
         assert resp["exit_code"] == 1
         assert "local path" in resp["stderr"]
@@ -451,52 +473,52 @@ class TestCallerWorkdir:
 
     @patch("subprocess.run")
     @patch("pm_core.push_proxy._resolve_local_remote_url", return_value=None)
-    def test_push_runs_from_caller_workdir(self, _mock_resolve, mock_run,
-                                            proxy, sock_path):
-        """When origin is a real URL, push runs `git -C <caller>` so origin
-        resolution happens in the caller's clone, not the proxy default."""
+    def test_push_runs_from_proxy_workdir(self, _mock_resolve, mock_run,
+                                          proxy, sock_path, workdir):
+        """When origin is a real URL, push runs `git -C <proxy workdir>`."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         resp = _send_request(sock_path, {
             "cmd": "push",
             "args": ["origin", "pm/pr-123-feature"],
-            "workdir": "/caller-clone",
+            "workdir": str(workdir),
         })
         assert resp["exit_code"] == 0
         push_calls = [c for c in mock_run.call_args_list
                       if c[0][0][:2] == ["git", "-C"] and "push" in c[0][0]]
         assert len(push_calls) == 1
         push_cmd = push_calls[0][0][0]
-        assert push_cmd[2] == "/caller-clone"
+        assert push_cmd[2] == str(workdir)
         assert push_cmd[3:] == ["push", "origin", "pm/pr-123-feature"]
 
     @patch("subprocess.run")
-    def test_fetch_uses_caller_workdir(self, mock_run, proxy, sock_path):
-        """git fetch runs from the caller's workdir, not self.workdir."""
+    def test_fetch_uses_proxy_workdir(self, mock_run, proxy, sock_path,
+                                      workdir):
+        """git fetch runs from the proxy's own workdir."""
         mock_run.return_value = MagicMock(returncode=0, stdout="fetched\n", stderr="")
         resp = _send_request(sock_path, {
             "cmd": "fetch",
             "args": ["origin"],
-            "workdir": "/caller-clone",
+            "workdir": str(workdir),
         })
         assert resp["exit_code"] == 0
         fetch_call = mock_run.call_args
-        assert fetch_call[1]["cwd"] == "/caller-clone"
+        assert fetch_call[1]["cwd"] == str(workdir)
 
     @patch("subprocess.run")
-    def test_pull_uses_caller_workdir(self, mock_run, proxy, sock_path):
-        """git pull runs from the caller's workdir, not self.workdir."""
+    def test_pull_uses_proxy_workdir(self, mock_run, proxy, sock_path, workdir):
+        """git pull runs from the proxy's own workdir."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         resp = _send_request(sock_path, {
             "cmd": "pull",
             "args": ["origin"],
-            "workdir": "/caller-clone",
+            "workdir": str(workdir),
         })
         assert resp["exit_code"] == 0
-        assert mock_run.call_args[1]["cwd"] == "/caller-clone"
+        assert mock_run.call_args[1]["cwd"] == str(workdir)
 
     @patch("subprocess.run")
     def test_no_workdir_field_falls_back_to_self_workdir(self, mock_run, proxy,
-                                                          sock_path):
+                                                          sock_path, workdir):
         """Legacy requests without 'workdir' fall back to self.workdir."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         resp = _send_request(sock_path, {
@@ -505,11 +527,11 @@ class TestCallerWorkdir:
             # no "workdir" key
         })
         assert resp["exit_code"] == 0
-        assert mock_run.call_args[1]["cwd"] == "/proxy-default-workdir"
+        assert mock_run.call_args[1]["cwd"] == str(workdir)
 
     @patch("subprocess.run")
     def test_empty_workdir_field_falls_back_to_self_workdir(self, mock_run, proxy,
-                                                             sock_path):
+                                                             sock_path, workdir):
         """An empty-string 'workdir' is treated the same as absent."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         resp = _send_request(sock_path, {
@@ -518,12 +540,12 @@ class TestCallerWorkdir:
             "workdir": "",
         })
         assert resp["exit_code"] == 0
-        assert mock_run.call_args[1]["cwd"] == "/proxy-default-workdir"
+        assert mock_run.call_args[1]["cwd"] == str(workdir)
 
     @patch("subprocess.run")
     @patch("pm_core.push_proxy._resolve_local_remote_url", return_value=None)
     def test_no_workdir_push_falls_back_to_self_workdir(
-            self, _mock_resolve, mock_run, proxy, sock_path):
+            self, _mock_resolve, mock_run, proxy, sock_path, workdir):
         """Legacy push without 'workdir' falls back to self.workdir as source."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         resp = _send_request(sock_path, {
@@ -537,12 +559,12 @@ class TestCallerWorkdir:
         assert len(push_calls) == 1
         push_cmd = push_calls[0][0][0]
         # Source must be self.workdir, not some caller path
-        assert push_cmd[2] == "/proxy-default-workdir"
+        assert push_cmd[2] == str(workdir)
 
     @patch("subprocess.run")
     @patch("pm_core.push_proxy._resolve_local_remote_url", return_value=None)
     def test_empty_workdir_push_falls_back_to_self_workdir(
-            self, _mock_resolve, mock_run, proxy, sock_path):
+            self, _mock_resolve, mock_run, proxy, sock_path, workdir):
         """An empty-string 'workdir' in a push request falls back to self.workdir."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         resp = _send_request(sock_path, {
@@ -555,34 +577,67 @@ class TestCallerWorkdir:
                       if c[0][0][:2] == ["git", "-C"] and "push" in c[0][0]]
         assert len(push_calls) == 1
         push_cmd = push_calls[0][0][0]
-        assert push_cmd[2] == "/proxy-default-workdir"
+        assert push_cmd[2] == str(workdir)
 
     @patch("subprocess.run")
-    def test_ls_remote_ignores_workdir(self, mock_run, proxy, sock_path):
-        """ls-remote result is workdir-independent; caller workdir is accepted
-        without error (proxy just uses it as cwd, which is harmless)."""
+    def test_ls_remote_accepts_proxy_workdir(self, mock_run, proxy, sock_path,
+                                             workdir):
+        """ls-remote runs from the proxy's workdir."""
         mock_run.return_value = MagicMock(returncode=0, stdout="abc HEAD\n", stderr="")
         resp = _send_request(sock_path, {
             "cmd": "ls-remote",
             "args": ["origin"],
-            "workdir": "/caller-clone",
+            "workdir": str(workdir),
         })
         assert resp["exit_code"] == 0
         assert resp["stdout"] == "abc HEAD\n"
 
     @patch("subprocess.run")
-    def test_no_refspec_head_resolved_from_caller_workdir(self, mock_run, sock_path):
-        """_extract_target_branch uses caller_workdir for HEAD resolution,
-        not self.workdir, when no explicit refspec is given."""
-        p = PushProxy(sock_path, "/proxy-workdir-main", "feature/x")
+    def test_foreign_workdir_is_rejected(self, mock_run, proxy, sock_path,
+                                         tmp_path):
+        """A request naming another existing clone is rejected, not served."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        other = tmp_path / "other-clone"
+        other.mkdir()
+        resp = _send_request(sock_path, {
+            "cmd": "push",
+            "args": ["origin", "pm/pr-123-feature"],
+            "workdir": str(other),
+        })
+        assert resp["exit_code"] == 1
+        assert "does not match" in resp["stderr"]
+        assert not [c for c in mock_run.call_args_list
+                    if c[0][0][:2] == ["git", "-C"]]
+
+    @patch("subprocess.run")
+    def test_missing_workdir_is_rejected(self, mock_run, proxy, sock_path,
+                                         workdir):
+        """A request naming a workdir that no longer exists fails explicitly."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        # The request matches the proxy's own workdir, but the clone is gone.
+        workdir.rmdir()
+        resp = _send_request(sock_path, {
+            "cmd": "push",
+            "args": ["origin", "pm/pr-123-feature"],
+            "workdir": str(workdir),
+        })
+        assert resp["exit_code"] == 1
+        assert "does not exist" in resp["stderr"]
+        assert not [c for c in mock_run.call_args_list
+                    if c[0][0][:2] == ["git", "-C"]]
+
+    @patch("subprocess.run")
+    def test_no_refspec_head_resolved_from_proxy_workdir(self, mock_run,
+                                                         sock_path, workdir):
+        """_extract_target_branch resolves HEAD in the proxy's workdir."""
+        p = PushProxy(sock_path, str(workdir), "feature/x")
         p.start()
 
         def side_effect(cmd, **kwargs):
             cwd = kwargs.get("cwd", "")
             if "rev-parse" in cmd:
-                if cwd == "/caller-workdir-feature-x":
+                if cwd == str(workdir):
                     return MagicMock(returncode=0, stdout="feature/x\n", stderr="")
-                # self.workdir would resolve to "main"
                 return MagicMock(returncode=0, stdout="main\n", stderr="")
             if "remote" in cmd and "get-url" in cmd:
                 # Return non-zero so _resolve_local_remote_url returns None
@@ -596,7 +651,7 @@ class TestCallerWorkdir:
         resp = _send_request(sock_path, {
             "cmd": "push",
             "args": ["origin"],  # no refspec — HEAD must be resolved
-            "workdir": "/caller-workdir-feature-x",
+            "workdir": str(workdir),
         })
 
         assert resp["exit_code"] == 0, (
@@ -609,11 +664,226 @@ class TestCallerWorkdir:
         ]
         assert len(rev_parse_calls) >= 1
         assert all(
-            c[1].get("cwd") == "/caller-workdir-feature-x"
+            c[1].get("cwd") == str(workdir)
             for c in rev_parse_calls
-        ), "rev-parse must run in caller's workdir, not self.workdir"
+        ), "rev-parse must run in the proxy's workdir"
 
         p.stop()
+
+
+@pytest.fixture
+def live_proxies():
+    """Start real in-process PushProxy daemons instead of subprocesses.
+
+    Patches ``_start_proxy_subprocess`` so ``start_push_proxy`` drives a
+    real socket in this process.  Every daemon is stopped and its socket
+    directory removed at teardown.
+    """
+    started = []
+
+    def fake_start(sock_path, workdir, branch):
+        os.makedirs(os.path.dirname(sock_path), exist_ok=True)
+        p = PushProxy(sock_path, workdir, branch)
+        p.start()
+        started.append(p)
+        return True
+
+    with patch("pm_core.push_proxy._start_proxy_subprocess",
+               side_effect=fake_start):
+        yield started
+
+    for p in started:
+        p.stop()
+        d = os.path.dirname(p.socket_path)
+        real = os.path.realpath(d)
+        try:
+            os.unlink(real + ".lock")
+        except OSError:
+            pass
+        shutil.rmtree(real, ignore_errors=True)
+        if os.path.islink(d):
+            try:
+                os.unlink(d)
+            except OSError:
+                pass
+
+
+class TestWorkdirKeyedProxies:
+    """impl and QA containers on one PR must not share a proxy socket."""
+
+    TAG = "repo-wd"
+    PR = "pr-wd"
+    BRANCH = "pm/pr-wd"
+
+    def _workdir(self, tmp_path, name):
+        d = tmp_path / name
+        d.mkdir()
+        return d
+
+    def _start(self, container, workdir, tag=None, pr=None, branch=None):
+        return start_push_proxy(
+            container, str(workdir), branch or self.BRANCH,
+            session_tag=tag or self.TAG, pr_id=pr or self.PR,
+        )
+
+    def test_impl_and_qa_get_distinct_proxies(self, tmp_path, live_proxies):
+        impl = self._workdir(tmp_path, "impl")
+        qa1 = self._workdir(tmp_path, "s-1")
+        qa2 = self._workdir(tmp_path, "s-2")
+
+        s_impl = self._start("impl-wd", impl)
+        s_qa1 = self._start("qa-wd-1", qa1)
+        s_qa2 = self._start("qa-wd-2", qa2)
+
+        assert len({s_impl, s_qa1, s_qa2}) == 3
+        assert all(push_proxy_mod.proxy_is_alive(s)
+                   for s in (s_impl, s_qa1, s_qa2))
+
+        # Same workdir + same PR still reuses one proxy.
+        s_impl2 = self._start("impl-wd-2", impl)
+        assert s_impl2 == s_impl
+
+    @patch("pm_core.push_proxy._resolve_local_remote_url", return_value=None)
+    @patch("subprocess.run")
+    def test_each_proxy_serves_its_own_workdir(self, mock_run, _mock_resolve,
+                                               tmp_path, live_proxies):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        impl = self._workdir(tmp_path, "impl")
+        qa = self._workdir(tmp_path, "s-1")
+        s_impl = self._start("impl-wd", impl)
+        s_qa = self._start("qa-wd", qa)
+
+        for sock, wd in ((s_impl, impl), (s_qa, qa)):
+            resp = _send_request(sock, {
+                "cmd": "push",
+                "args": ["origin", self.BRANCH],
+                "workdir": str(wd),
+            })
+            assert resp["exit_code"] == 0, resp.get("stderr")
+
+        pushes = [c[0][0] for c in mock_run.call_args_list
+                  if c[0][0][:2] == ["git", "-C"] and "push" in c[0][0]]
+        assert [cmd[2] for cmd in pushes] == [str(impl), str(qa)]
+
+    def test_stopping_one_workdir_leaves_others_alive(self, tmp_path,
+                                                      live_proxies):
+        impl = self._workdir(tmp_path, "impl")
+        qa1 = self._workdir(tmp_path, "s-1")
+        qa2 = self._workdir(tmp_path, "s-2")
+        s_impl = self._start("impl-wd", impl)
+        s_qa1 = self._start("qa-wd-1", qa1)
+        s_qa2 = self._start("qa-wd-2", qa2)
+
+        stop_push_proxy("qa-wd-1")
+
+        assert not push_proxy_mod.proxy_is_alive(s_qa1)
+        assert push_proxy_mod.proxy_is_alive(s_impl)
+        assert push_proxy_mod.proxy_is_alive(s_qa2)
+
+    def test_restart_after_socket_death_does_not_disturb_other_workdir(
+            self, tmp_path, live_proxies):
+        impl = self._workdir(tmp_path, "impl")
+        qa = self._workdir(tmp_path, "s-1")
+        s_impl = self._start("impl-wd", impl)
+        s_qa = self._start("qa-wd", qa)
+        assert s_impl != s_qa
+
+        # Simulate the daemon dying between an impl restart and a QA launch.
+        os.unlink(s_impl)
+        time.sleep(0.1)
+
+        s_impl2 = self._start("impl-wd-restart", impl)
+        assert s_impl2 == s_impl
+        assert push_proxy_mod.proxy_is_alive(s_impl2)
+        assert push_proxy_mod.proxy_is_alive(s_qa)
+
+    def test_shared_stop_keeps_socket_dir(self, tmp_path, live_proxies):
+        impl = self._workdir(tmp_path, "impl")
+        sock = self._start("impl-wd", impl)
+        sock_dir = os.path.dirname(sock)
+
+        stop_push_proxy("impl-wd")
+
+        assert not os.path.exists(sock)
+        # The directory is kept so a container bind-mount stays valid.
+        assert os.path.isdir(sock_dir)
+
+    def test_refuses_live_proxy_with_different_workdir(
+            self, tmp_path, monkeypatch, live_proxies):
+        from pm_core.push_proxy import PushProxyConflict
+
+        impl = self._workdir(tmp_path, "impl")
+        other = self._workdir(tmp_path, "other")
+        # Force a key collision to exercise the metadata guard.
+        monkeypatch.setattr("pm_core.push_proxy._workdir_token",
+                            lambda w: "collision")
+
+        self._start("impl-wd", impl)
+        with pytest.raises(PushProxyConflict):
+            self._start("other-wd", other)
+
+    def test_refuses_live_proxy_with_different_branch(self, tmp_path,
+                                                      live_proxies):
+        from pm_core.push_proxy import PushProxyConflict
+
+        impl = self._workdir(tmp_path, "impl")
+        self._start("impl-wd", impl, branch="pm/pr-a")
+        with pytest.raises(PushProxyConflict):
+            self._start("impl-wd-2", impl, branch="pm/pr-b")
+
+    def test_get_proxy_socket_path_is_per_workdir(self, tmp_path,
+                                                  live_proxies):
+        impl = self._workdir(tmp_path, "impl")
+        qa = self._workdir(tmp_path, "s-1")
+        s_impl = self._start("impl-wd", impl)
+        s_qa = self._start("qa-wd", qa)
+
+        assert get_proxy_socket_path(
+            "impl-wd", session_tag=self.TAG, pr_id=self.PR,
+            workdir=str(impl)) == os.path.realpath(s_impl)
+        assert get_proxy_socket_path(
+            "qa-wd", session_tag=self.TAG, pr_id=self.PR,
+            workdir=str(qa)) == os.path.realpath(s_qa)
+
+        other = self._workdir(tmp_path, "other")
+        assert get_proxy_socket_path(
+            "other-wd", session_tag=self.TAG, pr_id=self.PR,
+            workdir=str(other)) is None
+
+    def test_stale_socket_file_is_replaced(self, tmp_path, live_proxies):
+        """A leftover non-listening socket file is replaced, not trusted."""
+        impl = self._workdir(tmp_path, "impl")
+        token = push_proxy_mod._workdir_token(str(impl))
+        sock_dir = push_proxy_mod._shared_sock_dir_path(
+            self.TAG, self.PR, token)
+        os.makedirs(sock_dir, exist_ok=True)
+        sock = os.path.join(sock_dir, "push.sock")
+        Path(sock).touch()  # stale regular file, not a listening socket
+
+        started = self._start("impl-wd", impl)
+        assert started == sock
+        assert push_proxy_mod.proxy_is_alive(started)
+
+    def test_stop_session_removes_kept_socket_dirs(self, tmp_path,
+                                                   live_proxies):
+        impl = self._workdir(tmp_path, "impl")
+        sock = self._start("impl-wd", impl)
+        sock_dir = os.path.dirname(sock)
+
+        stop_push_proxy("impl-wd")
+        assert os.path.isdir(sock_dir)  # kept for live container mounts
+
+        stop_session_proxies(self.TAG)
+        assert not os.path.exists(sock_dir)
+
+    def test_start_raises_when_daemon_not_ready(self, tmp_path):
+        from pm_core.push_proxy import PushProxyError
+
+        impl = self._workdir(tmp_path, "impl")
+        with patch("pm_core.push_proxy._start_proxy_subprocess",
+                   return_value=False):
+            with pytest.raises(PushProxyError):
+                self._start("not-ready", impl)
 
 
 class TestIntegrationFetchPull:
@@ -665,8 +935,9 @@ class TestIntegrationFetchPull:
                      cwd=str(repos["upstream"]))
         repos["git"]("push", "origin", "master", cwd=str(repos["upstream"]))
 
-        # Start the proxy with clone1 as the proxy's default workdir
-        proxy = PushProxy(sock_path, str(repos["clone1"]), "pm/pr-test")
+        # Start the proxy for clone2 — each workdir gets its own proxy, so
+        # the request's workdir must match the proxy's own workdir.
+        proxy = PushProxy(sock_path, str(repos["clone2"]), "pm/pr-test")
         proxy.start()
 
         try:

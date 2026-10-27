@@ -1,0 +1,213 @@
+# Implementation Spec: Workdir-keyed push proxies
+
+## Context and root cause (grounded in code)
+
+`pm_core/push_proxy.py:start_push_proxy()` keys live shared proxies by
+`(session_tag, pr_id)` only (`_shared_proxy_key`, `_shared_sock_dir_path`,
+`_shared_sock_dir`).  The socket lives at
+`/tmp/pm-push-proxy-{session_tag}-{pr_id}/push.sock`, and every container
+for that PR bind-mounts the same *directory* at `/run/pm-push-proxy`
+(`pm_core/container.py:817-818`).
+
+Containers on one PR have **different** host workdirs:
+
+- implementation / review / sign-off containers mount the PR workdir
+  (`pm_core/cli/pr.py:1179`, `:1372`, `pm_core/signoff.py:530`);
+- each QA scenario mounts its own clone
+  `…/qa/…/s-{N}/repo` (`pm_core/qa_loop.py:2250`, `:2295-2303`).
+
+The lifecycle assumes one proxy per key is enough:
+
+- If the socket is alive, `start_push_proxy` reuses it and ignores the
+  caller's `workdir` (`push_proxy.py:627-633`).
+- If the socket is missing or transiently dead, it `os.unlink`s whatever
+  is there and spawns a new daemon with the *new* caller's workdir
+  (`push_proxy.py:635-654`).
+
+So the second caller wins the proxy's default workdir.  The request
+protocol already carries `"workdir"` per request and the proxy routes
+push/fetch/pull to it (`push_proxy.py:230-246`, `:311`, `:339`, `:374`),
+which papers over the routing problem for callers that send it — but the
+lifecycle still lets one container replace/unlink another container's
+socket and socket directory.  The PR notes record two concrete failures:
+
+1. PR 2d0588a: a QA launch re-spawned the proxy with QA scenario
+   workdirs; the impl container's pushes then ran from a QA clone.
+2. S18 / pr-592e4bd: `z t` swept QA containers in the TUI process, the
+   process dropped its last refs, and the shared socket **directory** was
+   removed while the impl container still bind-mounted it.  Recreating the
+   daemon in a recreated directory did not heal the impl container's
+   mount (`git-proxy: cannot connect: [Errno 2]`).
+
+The #249 symptom (mounted `/run/pm-push-proxy` had no usable socket) is a
+different, not-established cause; this change must not claim it was the
+workdir collision.  It does, however, require the same lifecycle to
+include socket/mount/readiness checks and recovery.
+
+## Requirements
+
+### R1 — Include the workdir in the shared proxy key
+
+`_shared_proxy_key(session_tag, pr_id, workdir_token)` must return
+`"{session_tag}\0{pr_id}\0{workdir_token}"`, where `workdir_token` is a
+short hash of the **realpath** of the requested workdir.  Realpath makes
+symlinked/relative spellings of the same clone share one proxy; the hash
+keeps the socket path short and filesystem-safe.
+
+Consequence: impl/review/sign-off (same PR workdir) keep sharing one
+proxy; each QA scenario clone gets its own proxy.  The proxy's default
+workdir is therefore always correct for its own container.
+
+### R2 — Per-workdir socket directory
+
+`_shared_sock_dir_path(session_tag, pr_id, workdir_token)` and
+`_shared_sock_dir(...)` derive the readable directory name
+`{session_tag}-{pr_id}-{workdir_token}` and fall back to a hashed
+`/tmp/pm-push-proxy-<sha16>` when the readable path would exceed the
+107-byte Unix socket limit.  The long-name symlink continues to be
+created for discoverability/cleanup.  No filesystem side effects in the
+`_path` variant (existing contract).
+
+### R3 — Refuse to replace a live proxy serving a different workdir/branch
+
+Before spawning, `start_push_proxy` must check an existing live socket:
+
+- Read a small sidecar `<sock_dir>/proxy.json` written by the daemon
+  (`{"workdir": <realpath>, "allowed_branch": ..., "pid": ...}`).
+- If the recorded workdir (realpath) or allowed branch differs from the
+  request, raise a new `PushProxyConflict` error.  Do **not** unlink or
+  replace a live proxy.
+- If metadata is absent (older daemon), reuse the live proxy (backward
+  compatible); the workdir is already encoded in the key.
+
+The daemon itself must never steal a live socket: `PushProxy.start()`
+returns without binding if `proxy_is_alive(self.socket_path)` is true,
+and `PushProxy.stop()` must not unlink a socket it does not own.
+
+### R4 — Validate each request's workdir; never silently serve another clone
+
+In `PushProxy._handle_connection`:
+
+- `workdir` remains optional for legacy wrappers; when absent the proxy
+  uses `self.workdir` (now guaranteed to be that container's workdir).
+- When present, its realpath must equal the proxy's configured
+  `self.workdir` realpath, and the directory must exist.  Otherwise
+  return `exit_code=1` with an explicit `git-proxy: rejected — …`
+  message naming both paths.  Do not fall back to `self.workdir`.
+
+This also closes a hole where a container could name an arbitrary host
+path in the request and have the proxy run git there.
+
+### R5 — Readiness check and explicit startup failure
+
+`_start_proxy_subprocess` must report whether the socket became
+connectable within the wait window (extend to ~5 s).  On failure,
+`start_push_proxy` raises `PushProxyError` naming the socket and workdir
+instead of returning a path to a dead proxy.  Container creation then
+fails loudly rather than producing a container whose pushes silently
+fail.
+
+### R6 — Keep the socket directory across shared-proxy stop; clean at teardown
+
+`stop_push_proxy` for a **shared** proxy removes the socket and metadata
+but leaves the directory in place, so a container that still bind-mounts
+it is never left pointing at a deleted inode; a later start recreates the
+socket in the same directory and heals the mount.  Legacy per-container
+proxies keep the current remove-directory behaviour.
+
+`stop_session_proxies` and `stop_all_proxies` remove leftover directories
+(and long-name symlinks / lock files) once the session/process is gone.
+
+### R7 — Cross-process start lock
+
+Serialize check-and-spawn per socket directory with `fcntl.flock` on a
+lock file next to the directory (`<sock_dir>.lock`, outside the mount).
+This prevents two processes from racing unlink→bind and killing each
+other's live proxy.  The daemon records its socket inode and exits its
+serve loop when the path is replaced (different inode) or removed, so an
+orphaned daemon cannot linger.
+
+### R8 — Update path lookup and lifecycle bookkeeping for 3-part keys
+
+- `get_proxy_socket_path(container_name, session_tag=None, pr_id=None,
+  workdir=None)` computes the per-workdir path when all four are known,
+  then falls back to the in-memory registry (`_container_to_proxy_key`,
+  now storing 3-part keys), then the legacy per-container path.
+- `stop_push_proxy` parses 3-part keys.
+- `pm_core/container.py` callers pass `workdir` (and session/pr) so the
+  lookup is correct after a restart.
+- `_container_to_proxy_key` remains the in-process source of truth for
+  refcounting; cross-process cleanup stays the responsibility of
+  `stop_session_proxies`/`stop_all_proxies` and container ownership
+  (active #241), which this change does not duplicate.
+
+### R9 — Tests
+
+Add/update tests in `tests/test_push_proxy.py` (and `tests/test_container.py`
+where call signatures change) covering:
+
+1. impl workdir + two QA workdirs on the same `(session_tag, pr_id)` get
+   three distinct proxies; each push runs `git -C <its own workdir>`.
+2. Stopping one workdir's proxy leaves the others alive (socket still
+   connectable, same path).
+3. Reuse when alive; respawn when the socket is missing or stale; the
+   socket directory is preserved across a shared stop.
+4. A live proxy with a different workdir/branch is refused, not replaced.
+5. A request naming a different/nonexistent workdir is rejected with an
+   explicit message and never runs git in another clone.
+6. Readiness failure raises `PushProxyError`.
+
+## Implicit requirements
+
+- Container bind-mount stability: never delete a socket directory that a
+  live container may have mounted (R6).
+- Refcount semantics within a process unchanged: last `stop_push_proxy`
+  for a key stops the daemon; other refs keep it alive.
+- `stop_session_proxies(session_tag)` still finds every proxy for the
+  session (glob matches `{tag}-*`).
+- Allowed-branch enforcement and dangerous-flag rejection unchanged.
+- Legacy wrappers/requests without `workdir` keep working.
+- No host credentials enter the container: still only the socket dir is
+  mounted.
+- Do not reimplement container ownership/cleanup (#241).
+
+## Ambiguities and resolutions
+
+1. **Keep or reject a request whose `workdir` differs from the proxy's?**
+   Resolved: reject.  R1 guarantees each proxy owns exactly one workdir;
+   allowing a second would reintroduce the cross-clone push.  Existing
+   caller-workdir tests are rewritten to assert per-workdir proxies.
+2. **Include `allowed_branch` in the key?**  Resolved: no.  It is stable
+   per PR, and a metadata-based refusal (R3) covers a rare mismatch
+   without multiplying proxies.
+3. **Keep the socket dir on stop?**  Resolved: keep for shared proxies
+   (R6) — this is the explicit S18 requirement; remove at session
+   teardown.  Empty dirs in `/tmp` are tiny and bounded by session
+   lifetime.
+4. **Raise or warn when the daemon is not ready?**  Resolved: raise
+   `PushProxyError` (R5); silent success creates a broken container.
+5. **Backward compatibility with the old 2-part socket path?**  Resolved:
+   none.  The pm process and its containers are created together in a
+   session; an old container from a previous pm build is not expected to
+   survive an upgrade mid-session.
+
+## Edge cases
+
+- Two workdirs whose realpaths differ only by trailing slash / symlink →
+  same token, same proxy.
+- Hash collision → metadata check (R3) refuses the mismatch.
+- Socket file present but not a live socket (stale) → unlink and respawn
+  in the same directory.
+- Socket directory deleted externally → recreated at the same path; the
+  container's old mount cannot be healed from the host, so R6 prevents
+  this from happening in normal operation.  Readiness/`proxy_is_alive`
+  checks in `create_container`'s reuse path still restart a dead proxy.
+- Concurrent `start_push_proxy` for the same key from two processes →
+  serialized by R7; the loser reuses the winner's live socket.
+- QA loop workdirs deleted after a run → their proxies are stopped by
+  container cleanup; a stale directory is harmless and swept at session
+  end.
+- Request `workdir` is a file, not a directory, or missing → explicit
+  rejection (R4).
+- Daemon orphaned after its socket path is replaced → inode check makes
+  it exit.
