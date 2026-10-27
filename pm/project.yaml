@@ -36088,3 +36088,99 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-25f4038
+  plan: bugs
+  title: Use wait-for-merge as the only manual autostart merge policy
+  branch: pm/pr-25f4038-use-wait-for-merge-as-the-only-manual-autostart-me
+  status: in_progress
+  depends_on: []
+  description: 'The two manual-merge policies are unnecessarily confusing: stop_before_merge
+    holds only the selected target while prerequisites may auto-merge, whereas wait_for_merge
+    holds the target and all transitive prerequisites until the user merges them.
+    The user explicitly requested removing stop-before-merge and using wait-for-merge
+    instead, including the O key and all other bindings that currently select stop-before-merge.
+
+
+    Use wait_for_merge as the single manual-merge policy throughout the scheduler,
+    CLI, TUI command bar, O/auto-sequence and other affected bindings, runs popup,
+    help, watcher prompts, serialization and documentation. New CLI targets and O
+    must select wait_for_merge. A target and all of its unmerged transitive prerequisites
+    must run implementation -> review -> required QA -> fresh sign-off, then wait
+    for an explicit user merge; merging a prerequisite automatically starts newly
+    unblocked dependents. Do not change a merge hold into a pause before sign-off
+    or require re-arming after every manual merge.
+
+
+    Remove the distinct stop_before_merge state/semantics and user-visible stop-before-merge
+    choice. Migrate saved target policies, old per-PR stop marks and restart breadcrumbs
+    safely and idempotently to wait_for_merge semantics, including dependencies and
+    shared targets. Old stop-before-merge CLI/command-bar inputs may be accepted as
+    a deprecated compatibility alias to wait-for-merge if needed, but must not preserve
+    a separate target-only hold or silently drop the manual gate. Do not let an old-client
+    response, stale persisted field, removed target or mixed-version breadcrumb silently
+    permit a merge. Keep explicitly selected auto-merge as the separate opt-in automatic
+    policy; this request consolidates the two manual-merge options, rather than changing
+    explicit auto-merge authorization.
+
+
+    Preserve source, dirty workdirs, running agents, evidence, model assignments,
+    spec-review settings and unrelated targets. Migration must never merge a PR, resume
+    held/completed QA, launch a duplicate session, or consume stale sign-off. Shared
+    prerequisites remain held whenever any active wait-for-merge target needs them.
+    Removing or changing one target releases only the holds it owns; other manual
+    holds remain effective. Preserve standalone manual holds even when interpreting
+    legacy records.
+
+
+    Acceptance: cover O and all affected bindings, default CLI add, explicit wait-for-merge,
+    legacy stop-before-merge inputs/data, restart migration, repeated commands, multiple
+    targets with shared/diamond dependencies, dependency edits, removal and manual
+    merging through a chain. Verify fresh sign-off is still required, a prerequisite
+    never auto-merges under the manual policy, and its manual merge schedules the
+    next ready work exactly once. Exercise a live isolated TUI/CLI fixture in addition
+    to focused regressions. Update explanatory text and status output so one manual
+    policy is presented consistently.
+
+
+    Related concurrently running PR #260/pr-22ea6a2 adds the explicit z a fresh-autostart
+    implementation handoff. Preserve that feature''s live-session adoption, new-handoff
+    boundary and existing merge gate while updating any manual-policy choice it introduces.
+    Coordinate at integration/review rather than editing its workdir or depending
+    on unfinished code. Do not reset or operate on the user''s #253 as part of this
+    feature''s development. User authorized starting this PR with DeepSeek1017/high;
+    work Opus5.5/high sign-off and wait_for_merge are required for this PR itself.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/261
+  gh_pr_number: 261
+  created_at: '2026-10-27T04:42:06.128850+00:00'
+  updated_at: '2026-10-27T05:21:53.253880+00:00'
+  started_at: '2026-10-27T04:42:19.589247+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-41497eb
+    text: 'Impl: stop_before_merge removed; wait_for_merge is the only manual policy.
+      Default CLI/command-bar adds and O now select wait_for_merge; --stop-before-merge
+      is a deprecated alias (mapped to wait, never a target-only hold). Breadcrumb/legacy
+      record migration is fail-closed (standalone stop marks become wait targets;
+      legacy single target -> wait; malformed fields cannot enable all-mode). Related
+      PR #260 / pr-22ea6a2 adds the z a fresh-autostart handoff and may introduce
+      a manual-policy choice: at integration, map any stop-before-merge choice to
+      wait_for_merge and preserve its live-session adoption, new-handoff boundary
+      and merge gate. Do not edit that workdir.'
+    created_at: '2026-10-27T05:21:53Z'
+    last_edited: '2026-10-27T05:21:53Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-25f4038-use-wait-for-merge-as-the-only-manua-c6fab519

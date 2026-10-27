@@ -69,7 +69,7 @@ ctrl+b d to detach from the tmux session.
      * e / Enter - Edit selected PR
      * v - View plan file
      * M - Move to plan
-     * O - Auto-start target (stop before merge) — additive, re-press re-arms
+     * O - Auto-start target (wait for merge) — additive, re-press re-arms
      * A - Toggle auto-merge target (adds/removes only the selected PR)
      * a - Auto-start runs popup (Esc/q/a close; empty set says
        "No auto-start targets (auto-start off)")

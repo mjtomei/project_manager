@@ -24,7 +24,7 @@ import click
 
 from pm_core import store
 from pm_core.autostart_state import (
-    POLICY_AUTO, POLICY_FLAGS, POLICY_STOP, POLICY_WAIT, REPLY_DIR,
+    POLICY_AUTO, POLICY_FLAGS, POLICY_WAIT, REPLY_DIR,
     TERMINAL_STATUSES, format_text,
 )
 from pm_core.cli import cli
@@ -219,20 +219,20 @@ def autostart():
 
     \b
     Policies (per target, also set by the O / A keys):
-      stop-before-merge  (--stop-before-merge, the default for new CLI
-                         targets, and O) — stop the target when ready to
-                         merge; press g after sign-off
-      auto-merge         (--auto-merge, and A) — merge via `pm pr merge`,
-                         which still enforces the sign-off gate
-      wait-for-merge     (--wait-for-merge) — hold the target AND every
-                         transitive prerequisite for a manual merge; each
-                         PR runs impl → review → QA → sign-off, then waits
+      wait-for-merge     (--wait-for-merge, the default for new targets,
+                         and O) — hold the target AND every transitive
+                         prerequisite for a manual merge; each PR runs
+                         impl → review → QA → fresh sign-off, then waits
                          for g / `pm pr merge`; that merge starts the
                          newly unblocked dependents automatically
+      auto-merge         (--auto-merge, and A) — merge via `pm pr merge`,
+                         which still enforces the sign-off gate
 
-    A dependency shared by several targets is held if any active
-    wait-for-merge target needs it or it has its own stop mark; removing
-    the target (or changing its policy) releases only the holds it caused.
+    A dependency shared by several targets is held while any active
+    wait-for-merge target needs it; removing the target (or changing its
+    policy to auto-merge) releases only the holds it caused.
+    ``--stop-before-merge`` is accepted as a deprecated alias for
+    ``--wait-for-merge`` and never creates a separate target-only hold.
 
     \b
     Examples:
@@ -250,22 +250,25 @@ def autostart():
 
 @autostart.command("add")
 @click.argument("pr_ids", nargs=-1)
-@click.option("--stop-before-merge", "stop", is_flag=True,
-              help="Stop the target before merge (default for new targets)")
-@click.option("--auto-merge", "auto", is_flag=True,
-              help="Merge automatically when ready (sign-off gate still applies)")
 @click.option("--wait-for-merge", "wait", is_flag=True,
               help="Hold the target and all its transitive prerequisites "
                    "for a manual merge (g / pm pr merge); merging one "
-                   "starts its newly ready dependents")
+                   "starts its newly ready dependents. Default for new "
+                   "targets")
+@click.option("--auto-merge", "auto", is_flag=True,
+              help="Merge automatically when ready (sign-off gate still applies)")
+@click.option("--stop-before-merge", "stop", is_flag=True,
+              help="Deprecated alias for --wait-for-merge")
 @_session_opt
 @_timeout_opt
 @_json_opt
-def autostart_add(pr_ids, stop, auto, wait, session, timeout, as_json):
+def autostart_add(pr_ids, wait, auto, stop, session, timeout, as_json):
     """Add PR_IDS as auto-start targets (additive, idempotent).
 
     Re-adding a target without a policy flag keeps its current policy; a
-    flag replaces it.  At most one policy flag may be given.
+    flag replaces it.  New targets default to --wait-for-merge.  At most
+    one distinct policy flag may be given.  ``--stop-before-merge`` is a
+    deprecated alias for ``--wait-for-merge``.
 
     \b
     Run a whole dependency chain with manual merges:
@@ -277,8 +280,8 @@ def autostart_add(pr_ids, stop, auto, wait, session, timeout, as_json):
     unblocked — no further autostart command needed.
     """
     try:
-        chosen = [p for p, on in ((POLICY_STOP, stop), (POLICY_AUTO, auto),
-                                  (POLICY_WAIT, wait)) if on]
+        chosen = [p for p, on in ((POLICY_WAIT, wait or stop),
+                                  (POLICY_AUTO, auto)) if on]
         if len(chosen) > 1:
             flags = ", ".join(POLICY_FLAGS[p] for p in chosen)
             raise _Fail(EXIT_INVALID, "conflicting_flags",

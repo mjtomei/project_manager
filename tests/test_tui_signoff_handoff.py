@@ -30,7 +30,7 @@ PR = "pr-aaa1111"
 class App:
     """Plain stand-in for the TUI app (real attributes, real project.yaml)."""
 
-    def __init__(self, root: Path, *, stop: bool, skip_qa: bool = False,
+    def __init__(self, root: Path, *, wait: bool, skip_qa: bool = False,
                  status: str = "qa", targets=(PR,)):
         self._root = root
         data = {
@@ -53,7 +53,8 @@ class App:
         self._auto_start_all = False
         self._auto_start_run_id = "run"
         self._auto_start_launching = set()
-        self._stop_before_merge = {PR} if stop else set()
+        if wait:
+            self._auto_start_targets[PR][st.WAIT_KEY] = True
         self._review_loops = {}
         self._qa_loops = {}
         self._self_driving_qa = {}
@@ -203,9 +204,9 @@ def _poll(app, n=1):
         signoff_ui.advance_all(app)
 
 
-@pytest.mark.parametrize("stop", [True, False], ids=["O", "A"])
-def test_qa_pass_hands_off_to_signoff_not_merge(world_factory, stop):
-    app, w = world_factory(stop=stop)
+@pytest.mark.parametrize("wait", [True, False], ids=["O", "A"])
+def test_qa_pass_hands_off_to_signoff_not_merge(world_factory, wait):
+    app, w = world_factory(wait=wait)
     _qa_pass(app)
 
     pr = app.pr()
@@ -216,7 +217,7 @@ def test_qa_pass_hands_off_to_signoff_not_merge(world_factory, stop):
         f"pr signoff --background --transcript "
         f"{w.tdir / f'signoff-{PR}.jsonl'} {PR}"]
     assert w.merges() == []
-    assert not any("ready to merge" in m for m in app.logs)
+    assert not any("waiting for manual merge" in m for m in app.logs)
     assert any("handing off to sign-off" in m for m in app.logs)
     assert app._pending_merge_prs == set()
 
@@ -226,7 +227,7 @@ def test_qa_pass_hands_off_to_signoff_not_merge(world_factory, stop):
 
 
 def test_O_stops_only_after_fresh_signoff_merge(world_factory):
-    app, w = world_factory(stop=True)
+    app, w = world_factory(wait=True)
     _qa_pass(app)
     w.emit("SIGNOFF_MERGE")
     _poll(app)
@@ -237,9 +238,9 @@ def test_O_stops_only_after_fresh_signoff_merge(world_factory):
     assert rec["origin"] == "auto-sequence"
     assert app.pr()["status"] == "sign_off"
     assert w.merges() == []                # O never merges
-    ready = [m for m in app.logs if "ready to merge" in m]
+    ready = [m for m in app.logs if "waiting for manual merge" in m]
     assert len(ready) == 1 and "signed off" in ready[0]
-    # The stop line is the cue to press g: forced past a sticky message
+    # The wait line is the cue to press g: forced past a sticky message
     # (a fast sign-off right after "Review loop done") and held against
     # same-frame follow-ons, so it is actually painted.
     kw = app.log_kw[app.logs.index(ready[0])]
@@ -249,19 +250,19 @@ def test_O_stops_only_after_fresh_signoff_merge(world_factory):
     reloads = []
     app._load_state = lambda: reloads.append(1)
     _poll(app, 3)                          # no repeat of the ready line
-    assert len([m for m in app.logs if "ready to merge" in m]) == 1
+    assert len([m for m in app.logs if "waiting for manual merge" in m]) == 1
     assert reloads == []                   # ...and no per-tick TUI reload
     del app._load_state
 
     # Policy flip O -> A on the signed-off PR: now it merges.
-    app._stop_before_merge.clear()
+    app._auto_start_targets[PR].pop(st.WAIT_KEY, None)
     _poll(app)
     assert len(w.merges()) == 1
     assert app.pr()["status"] == "merged"
 
 
 def test_A_merges_only_after_recorded_current_head_approval(world_factory):
-    app, w = world_factory(stop=False)
+    app, w = world_factory(wait=False)
     _qa_pass(app)
     _poll(app, 2)
     assert w.merges() == []                # no approval yet -> no merge
@@ -274,7 +275,7 @@ def test_A_merges_only_after_recorded_current_head_approval(world_factory):
 
 
 def test_head_moved_after_approval_reruns_signoff(world_factory):
-    app, w = world_factory(stop=True)
+    app, w = world_factory(wait=True)
     _qa_pass(app)
     w.emit("SIGNOFF_MERGE")
     _poll(app)
@@ -288,12 +289,12 @@ def test_head_moved_after_approval_reruns_signoff(world_factory):
     assert w.merges() == []
 
 
-@pytest.mark.parametrize("stop", [True, False], ids=["O", "A"])
+@pytest.mark.parametrize("wait", [True, False], ids=["O", "A"])
 def test_verdict_from_run_launched_on_old_head_is_not_recorded(world_factory,
-                                                              stop):
+                                                              wait):
     """HEAD moves while the router still runs: its verdict reviewed the old
     HEAD and must never be recorded (or merged) against the new one."""
-    app, w = world_factory(stop=stop)
+    app, w = world_factory(wait=wait)
     _qa_pass(app)                          # router launched on HEAD A
     head_a = w.head
     w.head = "e" * 40                      # unreviewed commit B lands
@@ -302,7 +303,7 @@ def test_verdict_from_run_launched_on_old_head_is_not_recorded(world_factory,
 
     assert app.pr().get("signoff") is None  # nothing recorded against B
     assert w.merges() == []
-    assert not any("ready to merge" in m or "signed off" in m
+    assert not any("waiting for manual merge" in m or "signed off" in m
                    for m in app.logs)
     assert any("stale (HEAD moved)" in m for m in app.logs)
     assert not (w.tdir / f"signoff-{PR}.jsonl").exists()  # old run retired
@@ -315,8 +316,8 @@ def test_verdict_from_run_launched_on_old_head_is_not_recorded(world_factory,
     w.emit("SIGNOFF_MERGE")                 # the new run on B finishes
     _poll(app, 2)
     assert app.pr()["signoff"]["sha"] == w.head != head_a
-    if stop:
-        assert sum("ready to merge" in m for m in app.logs) == 1
+    if wait:
+        assert sum("waiting for manual merge" in m for m in app.logs) == 1
         assert w.merges() == []
     else:
         assert len(w.merges()) == 1
@@ -325,7 +326,7 @@ def test_verdict_from_run_launched_on_old_head_is_not_recorded(world_factory,
 
 def test_head_moved_before_verdict_retires_running_run(world_factory):
     """No need to wait out the old run: it is retired on the next pass."""
-    app, w = world_factory(stop=True)
+    app, w = world_factory(wait=True)
     _qa_pass(app)
     w.head = "e" * 40
     _poll(app)
@@ -340,7 +341,7 @@ def test_restart_does_not_adopt_run_of_another_head(world_factory, stamp):
     """A TUI restart reuses the running router window.  Its verdict counts
     only when the run's launch stamp equals the current HEAD; an unstamped
     run (launched by an older pm) reviewed an unknown revision."""
-    app, w = world_factory(stop=False)
+    app, w = world_factory(wait=False)
     _qa_pass(app)
     stamp_path = w.tdir / f"signoff-{PR}.head"
     if stamp:
@@ -386,13 +387,13 @@ def _write_verdict(target, verdict):
     target.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
 
 
-@pytest.mark.parametrize("stop", [True, False], ids=["O", "A"])
+@pytest.mark.parametrize("wait", [True, False], ids=["O", "A"])
 def test_restart_with_new_run_dir_adopts_running_router(world_factory,
-                                                        tmp_path, stop):
+                                                        tmp_path, wait):
     """pr-5410ae4 in the restart story: after Ctrl+R + re-arm the TUI reads a
     new run dir.  The still-running router (same window, HEAD unchanged) must
     be adopted and its verdict recorded once — not read as running forever."""
-    app, w = world_factory(stop=stop)
+    app, w = world_factory(wait=wait)
     _qa_pass(app)
     target = _router_symlink(w, tmp_path)
     new_tdir = _restart_into_new_run_dir(app)
@@ -410,8 +411,8 @@ def test_restart_with_new_run_dir_adopts_running_router(world_factory,
     assert (rec["verdict"], rec["sha"], rec["origin"]) == \
         ("SIGNOFF_MERGE", w.head, "auto-sequence")
     assert len(w.launches()) == 1
-    if stop:
-        assert sum("ready to merge" in m for m in app.logs) == 1
+    if wait:
+        assert sum("waiting for manual merge" in m for m in app.logs) == 1
         assert w.merges() == []
     else:
         assert len(w.merges()) == 1
@@ -422,7 +423,7 @@ def test_restart_with_new_run_dir_retires_run_of_another_head(world_factory,
                                                              tmp_path):
     """The adopted run is still bound to its launch HEAD (R9b): HEAD moved
     across the restart -> retired and relaunched, never recorded."""
-    app, w = world_factory(stop=False)
+    app, w = world_factory(wait=False)
     _qa_pass(app)
     target = _router_symlink(w, tmp_path)
     _write_verdict(target, "SIGNOFF_MERGE")
@@ -440,7 +441,7 @@ def test_run_from_earlier_signoff_episode_is_not_adopted(world_factory,
     """Only runs launched since the PR entered sign_off are adopted; an older
     leftover next to a live (e.g. manual ``i``) window is left alone."""
     import os
-    app, w = world_factory(stop=False)
+    app, w = world_factory(wait=False)
     _qa_pass(app)
     target = _router_symlink(w, tmp_path)
     _write_verdict(target, "SIGNOFF_MERGE")
@@ -458,7 +459,7 @@ def test_run_from_earlier_signoff_episode_is_not_adopted(world_factory,
 def test_gate_refusal_is_not_tracked_as_conflict(world_factory):
     """A merge refused by the sign-off gate must not land in
     _pending_merge_prs (it was the #226 misclassification)."""
-    app, w = world_factory(stop=False)
+    app, w = world_factory(wait=False)
     _qa_pass(app)
     w.emit("SIGNOFF_MERGE")
 
@@ -479,7 +480,7 @@ def test_gate_refusal_is_not_tracked_as_conflict(world_factory):
 
 
 def test_reqa_route_restarts_tui_qa(world_factory):
-    app, w = world_factory(stop=True)
+    app, w = world_factory(wait=True)
     _qa_pass(app)
     w.emit("SIGNOFF_REQA")
     with patch("pm_core.tui.qa_loop_ui.start_qa") as sq, \
@@ -494,7 +495,7 @@ def test_reqa_route_restarts_tui_qa(world_factory):
 
 
 def test_review_route_restarts_review_loop(world_factory):
-    app, w = world_factory(stop=True)
+    app, w = world_factory(wait=True)
     _qa_pass(app)
     app._review_loops[PR] = object()       # stale finished loop
     w.emit("SIGNOFF_REVIEW")
@@ -508,7 +509,7 @@ def test_review_route_restarts_review_loop(world_factory):
 
 
 def test_impl_route_relaunches_impl_fresh(world_factory):
-    app, w = world_factory(stop=True)
+    app, w = world_factory(wait=True)
     _qa_pass(app)
     w.emit("SIGNOFF_IMPL")
     calls = []
@@ -528,7 +529,7 @@ def test_impl_route_relaunches_impl_fresh(world_factory):
 
 
 def test_blocked_route_waits_for_human(world_factory):
-    app, w = world_factory(stop=False)
+    app, w = world_factory(wait=False)
     _qa_pass(app)
     w.emit("SIGNOFF_BLOCKED")
     _poll(app, 3)
@@ -539,14 +540,14 @@ def test_blocked_route_waits_for_human(world_factory):
 
 
 def test_out_of_scope_signoff_pr_untouched(world_factory):
-    app, w = world_factory(stop=False)
+    app, w = world_factory(wait=False)
     _poll(app, 2)   # pr-out is sign_off but not in any target closure
     assert app.pr("pr-out")["status"] == "sign_off"
     assert not any(PR not in c and "pr-out" in c for c in w.commands)
 
 
 def test_manual_qa_pass_without_autostart_no_handoff(world_factory):
-    app, w = world_factory(stop=True)
+    app, w = world_factory(wait=True)
     app._auto_start = False
     app._auto_start_targets = {}
     _qa_pass(app)
@@ -558,7 +559,7 @@ def test_manual_qa_pass_without_autostart_no_handoff(world_factory):
 def test_restart_catch_up_hands_off_recorded_pass(world_factory):
     """QA finished PASS before a restart: no _qa_loops entry, recorded PASS
     in runtime_state -> the scheduler pass hands it to sign-off."""
-    app, w = world_factory(stop=True)
+    app, w = world_factory(wait=True)
     with patch("pm_core.tui.auto_start.recorded_qa_verdict",
                lambda pr_id, pr=None: "PASS"), \
          patch.object(auto_start, "_start_pr_quiet"):
@@ -576,7 +577,7 @@ def test_restart_catch_up_ignores_qa_pass_from_before_the_return(
     """Restart mid-rework-QA (the new run has not recorded anything yet):
     the PASS of the run sign-off already judged must not hand the rework
     back to sign-off."""
-    app, w = world_factory(stop=True)
+    app, w = world_factory(wait=True)
 
     def ret(d):
         store.get_pr(d, PR)["signoff_return"] = {
@@ -597,32 +598,32 @@ def test_restart_catch_up_ignores_qa_pass_from_before_the_return(
 
 
 def test_skip_qa_review_pass_goes_to_signoff(world_factory):
-    app, w = world_factory(stop=True, skip_qa=True, status="in_review")
+    app, w = world_factory(wait=True, skip_qa=True, status="in_review")
     with patch("pm_core.tui.qa_loop_ui.start_qa") as sq:
         review_loop_ui._maybe_start_qa(app, PR)
     sq.assert_not_called()
     assert app.pr()["status"] == "sign_off"
     assert len(w.launches()) == 1
     assert w.merges() == []
-    assert not any("ready to merge" in m for m in app.logs)
+    assert not any("waiting for manual merge" in m for m in app.logs)
 
 
 def test_adopts_existing_fresh_manual_approval(world_factory):
     """A reviewer-recorded approval at current HEAD is adopted without
     launching another router."""
-    app, w = world_factory(stop=True)
+    app, w = world_factory(wait=True)
     from pm_core import signoff as so
     so.record_signoff_verdict(app._root, PR, "SIGNOFF_MERGE", w.head, "manual",
                               integration=_BOUND(w))
     _qa_pass(app)
     assert w.launches() == []
-    assert any("ready to merge" in m for m in app.logs)
+    assert any("waiting for manual merge" in m for m in app.logs)
     assert w.merges() == []
 
 
 def test_dead_window_relaunch_is_throttled(world_factory):
     """A launch that never produces a window is not retried every poll."""
-    app, w = world_factory(stop=True)
+    app, w = world_factory(wait=True)
 
     def no_window(a, cmd, *x, **kw):
         w.commands.append(cmd)     # launch "fails": window never appears
@@ -643,7 +644,7 @@ def test_throttled_polls_do_not_log_a_launch(world_factory, caplog, monkeypatch)
     """The L log names a launch only when one happens: a poll skipped by the
     relaunch backoff used to log "launching router" every 5 s (QA s5 B4/B6)."""
     import logging
-    app, w = world_factory(stop=True)
+    app, w = world_factory(wait=True)
 
     def no_window(a, cmd, *x, **kw):
         w.commands.append(cmd)
@@ -674,7 +675,7 @@ def test_manual_approval_with_changed_report_is_not_merged(world_factory,
     real gate refuses, so A must not call ``pm pr merge`` (which would be
     tracked as a conflict) and says why instead."""
     import hashlib
-    app, w = world_factory(stop=False)
+    app, w = world_factory(wait=False)
     croot = tmp_path / "captures"
     (croot / PR).mkdir(parents=True)
     report = croot / PR / "report.html"
@@ -698,7 +699,7 @@ def test_launch_quiet_runs_signoff_off_the_event_loop(tmp_path):
     """The real launcher: argv list (no shlex of the transcript path), async
     subprocess, failure surfaced in the log."""
     from pm_core.tui import signoff_ui
-    app = App(tmp_path, stop=True)
+    app = App(tmp_path, wait=True)
     seen = {}
 
     class Proc:
@@ -724,7 +725,7 @@ def test_hung_launch_is_killed_on_timeout(tmp_path):
     """A ``pm pr signoff`` that never exits holds the per-PR launch lock;
     the timeout must kill it rather than leave it blocking relaunches."""
     from pm_core.tui import signoff_ui
-    app = App(tmp_path, stop=True)
+    app = App(tmp_path, wait=True)
     killed = []
 
     class Proc:
@@ -756,7 +757,7 @@ def test_slow_launch_in_flight_is_not_duplicated(world_factory):
     """A launch still running past the relaunch backoff (container start)
     must not be stacked with a second ``pm pr signoff``."""
     from pm_core.tui import signoff_ui
-    app, w = world_factory(stop=True)
+    app, w = world_factory(wait=True)
     pending = []
     with patch("pm_core.tui.signoff_ui._launch_quiet",
                lambda a, pr_id, t: pending.append(pr_id)):
@@ -785,16 +786,16 @@ def _back_to_signoff(app):
 
 
 def test_manual_hold_survives_return_and_re_signoff(world_factory):
-    """O (stop-before-merge) holds the first approval, a REVIEW return and
+    """O (wait-for-merge) holds the first approval, a REVIEW return and
     the fresh approval after it: re-signing never releases the hold."""
-    app, w = world_factory(stop=True)
+    app, w = world_factory(wait=True)
     _qa_pass(app)
     w.emit("SIGNOFF_REVIEW")
     with patch("pm_core.tui.review_loop_ui._start_loop"):
         _poll(app)
     assert app.pr()["status"] == "in_review"
     assert app.pr()["signoff_return"]["verdict"] == "SIGNOFF_REVIEW"
-    assert PR in app._stop_before_merge
+    assert app._auto_start_targets[PR].get(st.WAIT_KEY) is True
 
     w.head = "d" * 40                       # review committed a fix
     _back_to_signoff(app)
@@ -802,7 +803,7 @@ def test_manual_hold_survives_return_and_re_signoff(world_factory):
     _poll(app)
     assert app.pr()["signoff"]["sha"] == w.head
     assert w.merges() == []
-    assert any("ready to merge" in m for m in app.logs)
+    assert any("waiting for manual merge" in m for m in app.logs)
     # The return episode closed with the new decision.
     assert app.pr()["signoff_return"].get("resolved_at")
 
@@ -811,7 +812,7 @@ def test_base_moved_merge_refusal_reruns_signoff(world_factory):
     """A (auto-merge): the merge finds the base moved, invalidates the
     approval and refuses; the driver re-runs sign-off by itself and the
     fresh approval merges."""
-    app, w = world_factory(stop=False)
+    app, w = world_factory(wait=False)
     _qa_pass(app)
     real_run = w.run_command
     moved = {"once": True}
@@ -845,7 +846,7 @@ def test_base_moved_merge_refusal_reruns_signoff(world_factory):
 
 
 def test_conflicted_integration_routes_to_impl_not_merge(world_factory):
-    app, w = world_factory(stop=False)
+    app, w = world_factory(wait=False)
     _qa_pass(app)
     w.record_integration(status="conflict")
     w.emit("SIGNOFF_MERGE")

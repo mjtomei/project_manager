@@ -258,7 +258,7 @@ Views:
   ?                Show help
 
 Auto-start (multiple targets; also `pm autostart --help`):
-  O                Add selected PR as target, stop before merge (repeat: re-arm)
+  O                Add selected PR as target, wait for merge (repeat: re-arm)
   A                Toggle selected PR as auto-merge target (no PR: all off)
   a                Runs popup: targets + running/queued deps (Enter/f focus,
                    r refresh, Esc/q/a close)

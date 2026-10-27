@@ -237,27 +237,28 @@ so you can continue working while reviews iterate.
 Auto-start drives an explicit set of target PRs through implementation →
 review → QA → sign-off inside the running TUI, starting each target's
 dependencies as they become ready (a dependency shared by several targets runs
-once). Targets are additive: pressing `O` (stop before merge) or `A`
-(auto-merge) on another PR adds it without dropping the others. An empty set
-means auto-start is off.
+once). Targets are additive: pressing `O` (wait for merge) or `A` (auto-merge)
+on another PR adds it without dropping the others. An empty set means
+auto-start is off.
 
 A QA PASS hands the PR to sign-off; the router's verdict is recorded against
 the branch HEAD and routed (re-QA, back to review, back to implementation, or
 blocked for a human). Only a fresh `SIGNOFF_MERGE` on the current HEAD
-finishes the sequence: `O` stops there ("ready to merge — press g"), `A`
-merges. With `skip_qa`, sign-off follows the review PASS.
+finishes the sequence. There is one manual policy, `wait-for-merge`: the
+target and every unmerged transitive prerequisite wait for you to merge them.
+`A` / `--auto-merge` is the separate opt-in that merges automatically once the
+sign-off gate passes. With `skip_qa`, sign-off follows the review PASS.
 
 ```bash
-pm autostart add pr-abc123 pr-def456   # add targets (default: stop before merge)
+pm autostart add pr-abc123 pr-def456   # add targets (default: wait for merge)
 pm autostart add 42 --auto-merge       # merge automatically (sign-off gate still applies)
-pm autostart add pr-final --wait-for-merge  # whole chain, every merge manual
+pm autostart add pr-final --wait-for-merge  # explicit; same as the default
 pm autostart remove pr-abc123          # stop scheduling it; running windows are kept
 pm autostart status --json             # what every target and dependency is doing
 ```
 
-`--stop-before-merge` holds only the named target, so its prerequisites still
-auto-merge. To walk an entire dependency chain with manual merges, add just the
-final PR with `--wait-for-merge`:
+Adding just the final PR of a chain with `--wait-for-merge` walks the whole
+chain with manual merges:
 
 1. The final PR stays the only target; every unmerged transitive prerequisite
    is held for a manual merge (as is the target itself). Holds are derived from
@@ -273,12 +274,13 @@ final PR with `--wait-for-merge`:
    target.
 
 A dependency shared by several targets is held while any active wait-for-merge
-target needs it or it carries its own stop mark; other targets keep their
-policy. Removing the wait target, or re-adding it with `--auto-merge` /
-`--stop-before-merge`, releases only the holds it caused (the command reports
-`released merge hold: …`). Re-adding without a flag keeps the policy; giving
-two policy flags is rejected without changing anything. The policy survives a
-merge-triggered TUI restart.
+target needs it; other targets keep their policy. Removing the wait target, or
+re-adding it with `--auto-merge`, releases only the holds it caused (the
+command reports `released merge hold: …`). Re-adding without a flag keeps the
+policy; giving two policy flags is rejected without changing anything. The
+policy survives a merge-triggered TUI restart. `--stop-before-merge` is
+accepted only as a deprecated alias for `--wait-for-merge`; it never creates a
+separate target-only hold.
 
 Press `a` in the TUI for a live runs popup (same data as `pm autostart status`):
 phase, running/waiting/paused/failed state with a reason, review iteration or QA

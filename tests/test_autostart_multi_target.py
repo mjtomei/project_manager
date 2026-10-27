@@ -17,7 +17,7 @@ from click.testing import CliRunner
 
 from pm_core import autostart_state as st
 from pm_core import store
-from pm_core.autostart_state import POLICY_AUTO, POLICY_STOP
+from pm_core.autostart_state import POLICY_AUTO, POLICY_WAIT
 from pm_core.qa_loop import QALoopState, QAScenario
 from pm_core.review_loop import ReviewLoopState
 from pm_core.tui import auto_start
@@ -43,7 +43,6 @@ class FakeApp:
         self._auto_start_all = False
         self._auto_start_run_id = None
         self._auto_start_launching = set()
-        self._stop_before_merge = set()
         self._review_loops = {}
         self._qa_loops = {}
         self._self_driving_qa = {}
@@ -143,10 +142,10 @@ class TestAddRemove:
         assert app._auto_start is True
         assert not auto_start.is_all_mode(app)
 
-    def test_default_policy_new_target_is_stop(self):
+    def test_default_policy_new_target_is_wait(self):
         app = FakeApp([_pr("a")])
         auto_start.add_targets(app, ["a"])
-        assert auto_start.policy_for(app, "a") == POLICY_STOP
+        assert auto_start.policy_for(app, "a") == POLICY_WAIT
 
     def test_readd_without_flag_keeps_policy(self):
         app = FakeApp([_pr("a")])
@@ -160,18 +159,18 @@ class TestAddRemove:
         r = auto_start.add_targets(app, ["a"], policy=POLICY_AUTO)
         assert r["changes"] == [{"pr_id": "a", "action": "policy_changed",
                                  "policy": POLICY_AUTO,
-                                 "previous_policy": POLICY_STOP}]
+                                 "previous_policy": POLICY_WAIT}]
         r = auto_start.add_targets(app, ["a"], policy=POLICY_AUTO)
         assert r["changes"][0]["action"] == "unchanged"
-        r = auto_start.add_targets(app, ["a"], policy=POLICY_STOP)
+        r = auto_start.add_targets(app, ["a"], policy=POLICY_WAIT)
         assert r["changes"][0]["action"] == "policy_changed"
         assert r["changes"][0]["previous_policy"] == POLICY_AUTO
 
-    def test_auto_merge_flag_clears_stop(self):
+    def test_auto_merge_flag_clears_wait(self):
         app = FakeApp([_pr("a")])
         auto_start.add_targets(app, ["a"])
         auto_start.add_targets(app, ["a"], policy=POLICY_AUTO)
-        assert "a" not in app._stop_before_merge
+        assert auto_start.target_policy(app, "a") == POLICY_AUTO
 
     def test_unknown_id_rejects_whole_command(self):
         app = FakeApp([_pr("a")])
@@ -216,11 +215,12 @@ class TestAddRemove:
         assert auto_start.managed_ids(app) == set()
         assert not auto_start.in_scope(app, "x")
 
-    def test_remove_keeps_stop_mark(self):
-        app = FakeApp([_pr("a")])
-        auto_start.add_targets(app, ["a"])
-        auto_start.remove_targets(app, ["a"])
-        assert "a" in app._stop_before_merge
+    def test_remove_releases_its_hold(self):
+        app = FakeApp([_pr("a"), _pr("f", deps=["a"])])
+        auto_start.add_targets(app, ["f"])
+        assert auto_start.merge_hold(app, "a") == {"targets": ["f"]}
+        auto_start.remove_targets(app, ["f"])
+        assert auto_start.merge_hold(app, "a") is None
 
     def test_remove_keeps_shared_dep_in_scope(self):
         app = FakeApp([_pr("d"), _pr("a", deps=["d"]), _pr("b", deps=["d"])])
@@ -246,7 +246,8 @@ class TestKeys:
         asyncio.run(auto_start.auto_sequence_for_pr(app, "b"))
         asyncio.run(auto_start.auto_sequence_for_pr(app, "a"))  # re-arm
         assert auto_start.get_targets(app) == ["a", "b"]
-        assert app._stop_before_merge == {"a", "b"}
+        assert all(auto_start.target_policy(app, t) == POLICY_WAIT
+                   for t in ("a", "b"))
 
     def test_A_adds_auto_merge_without_clearing_existing(self):
         app = FakeApp([_pr("a"), _pr("b")])
@@ -254,7 +255,7 @@ class TestKeys:
         asyncio.run(auto_start.toggle(app, "b"))
         assert auto_start.get_targets(app) == ["a", "b"]
         assert auto_start.policy_for(app, "b") == POLICY_AUTO
-        assert auto_start.policy_for(app, "a") == POLICY_STOP
+        assert auto_start.policy_for(app, "a") == POLICY_WAIT
 
     def test_A_on_target_removes_only_it(self):
         app = FakeApp([_pr("a"), _pr("b")])
@@ -309,12 +310,12 @@ class TestKeys:
 
         asyncio.run(auto_start.auto_sequence_for_pr(app, "a"))
         starting("a")
-        assert shown[-1] == " Auto-sequence armed for a (will stop before merge)"
+        assert shown[-1] == " Auto-sequence armed for a (will wait for merge)"
         asyncio.run(auto_start.auto_sequence_for_pr(app, "b"))  # inside A's hold
         starting("b")
-        assert shown[-1] == " Auto-sequence armed for a (will stop before merge)"
+        assert shown[-1] == " Auto-sequence armed for a (will wait for merge)"
         expire_hold()  # A's hold ends: B's armed line, with its own hold
-        assert shown[-1] == " Auto-sequence armed for b (will stop before merge)"
+        assert shown[-1] == " Auto-sequence armed for b (will wait for merge)"
         assert app._log_hold_until > time.monotonic()
         expire_hold()
         assert shown[-1] == " Auto-start: starting b"
@@ -329,7 +330,7 @@ class TestKeys:
         auto_start.add_targets(app, ["b"])
         assert "(already a target)" not in shown[-1]
         auto_start.add_targets(app, ["a", "b"])
-        assert "a (stop), b (stop) (already a target)" in shown[-1]
+        assert "a (wait-for-merge + deps), b (wait-for-merge + deps) (already a target)" in shown[-1]
 
     def test_A_without_selection_never_enables_backlog(self):
         app = FakeApp([_pr("a")])
@@ -342,12 +343,14 @@ class TestKeys:
 # Scheduler
 # ---------------------------------------------------------------------------
 
-def _enabled_app(prs, targets, tmp_path, stop=()):
+def _enabled_app(prs, targets, tmp_path, wait=()):
     app = FakeApp(prs, root=tmp_path)
     app._auto_start = True
     app._auto_start_targets = {t: st.make_target_record("test") for t in targets}
+    for t in wait:
+        app._auto_start_targets.setdefault(t, st.make_target_record("test"))
+        app._auto_start_targets[t][st.WAIT_KEY] = True
     app._auto_start_run_id = "run"
-    app._stop_before_merge = set(stop)
     return app
 
 
@@ -465,17 +468,17 @@ class TestMergePolicy:
         am.start_signoff = ss
         return am
 
-    def test_stop_target_not_merged_auto_target_merged(self, tmp_path):
+    def test_wait_target_not_merged_auto_target_merged(self, tmp_path):
         prs = [_signed("a"), _signed("b")]
-        app = _enabled_app(prs, ["a", "b"], tmp_path, stop={"a"})
+        app = _enabled_app(prs, ["a", "b"], tmp_path, wait={"a"})
         assert not self._run(app, "a").called
-        assert any("a signed off" in m and "ready to merge" in m
+        assert any("a signed off" in m and "waiting for manual merge" in m
                    for m in app.logs)
         assert self._run(app, "b").called
 
-    def test_stop_dep_wins_over_auto_target(self, tmp_path):
+    def test_wait_target_holds_its_prerequisite(self, tmp_path):
         prs = [_signed("d"), _pr("t", deps=["d"])]
-        app = _enabled_app(prs, ["t"], tmp_path, stop={"d"})
+        app = _enabled_app(prs, ["t"], tmp_path, wait={"t"})
         assert not self._run(app, "d").called
 
     def test_out_of_scope_never_merged(self, tmp_path):
@@ -487,7 +490,7 @@ class TestMergePolicy:
         """#226 gate: a QA-passed PR is routed to sign-off, never merged and
         never reported ready to merge (pr-488ac6d)."""
         prs = [_pr("a", status="qa"), _pr("b", status="qa")]
-        app = _enabled_app(prs, ["a", "b"], tmp_path, stop={"a"})
+        app = _enabled_app(prs, ["a", "b"], tmp_path, wait={"a"})
         for pid in ("a", "b"):
             am = self._run(app, pid)
             assert not am.called
@@ -511,7 +514,7 @@ class TestMergePolicy:
 class TestBreadcrumb:
     def test_save_and_consume_preserves_targets_and_policies(self, tmp_path):
         prs = [_pr("a"), _pr("b")]
-        app = _enabled_app(prs, ["a", "b"], tmp_path, stop={"a"})
+        app = _enabled_app(prs, ["a", "b"], tmp_path, wait={"a"})
         app._watcher_manager.is_any_running.return_value = False
         with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path):
             (tmp_path / "merge-restart").touch()
@@ -527,7 +530,8 @@ class TestBreadcrumb:
                               side_effect=lambda a: order.append("cas")):
                 asyncio.run(auto_start.consume_breadcrumb(fresh))
         assert auto_start.get_targets(fresh) == ["a", "b"]
-        assert fresh._stop_before_merge == {"a"}
+        assert fresh._auto_start_targets["a"][st.WAIT_KEY] is True
+        assert st.WAIT_KEY not in fresh._auto_start_targets["b"]
         assert fresh._auto_start is True and fresh._auto_start_run_id == "run"
         assert order == ["adopt", "cas"]  # adopt live QA before scheduling
 
@@ -541,6 +545,7 @@ class TestBreadcrumb:
              patch.object(auto_start, "check_and_start"):
             asyncio.run(auto_start.consume_breadcrumb(fresh))
         assert auto_start.get_targets(fresh) == ["a"]
+        assert fresh._auto_start_targets["a"][st.WAIT_KEY] is True
         assert not auto_start.is_all_mode(fresh)
         assert any("migrated legacy" in m for m in fresh.logs)
 
@@ -624,7 +629,7 @@ class TestHandleCommand:
         auto_start.handle_command(app, ["add", "a"])
         auto_start.handle_command(app, ["add", "b", "--auto-merge"])
         auto_start.handle_command(app, ["list"])
-        assert app.logs[-1] == "Auto-start targets: a (stop), b"
+        assert app.logs[-1] == "Auto-start targets: a (wait-for-merge), b"
 
     def test_unknown_id_reload_flushes_write_queue_first(self, tmp_path):
         app = FakeApp([_pr("a")], root=tmp_path)
@@ -646,9 +651,12 @@ class TestHandleCommand:
 # Status derivation (live evidence, not registry status alone)
 # ---------------------------------------------------------------------------
 
-def _status(prs, targets, **inp):
-    return st.build_status({"prs": prs, "targets": {t: {} for t in targets},
-                            "enabled": bool(targets), **inp})
+def _status(prs, targets, wait=(), **inp):
+    recs = {t: {} for t in targets}
+    for t in wait:
+        recs.setdefault(t, {})[st.WAIT_KEY] = True
+    return st.build_status({"prs": prs, "targets": recs,
+                            "enabled": bool(recs), **inp})
 
 
 def _run(status, pr_id):
@@ -687,13 +695,13 @@ class TestBuildStatus:
                     "input_required": False}}
         prs = [_pr("p", status="in_review")]
         s = _status(prs, ["p"], review_loops=rl, skip_qa=True,
-                    stop_before_merge={"p"})
+                    wait=("p",))
         reason = _run(s, "p")["reason"]
         assert "QA" not in reason.replace("QA skipped", "")
         assert "QA skipped" in reason and "awaiting sign-off" in reason
         s = _status(prs, ["p"], review_loops=rl, skip_qa=True,
                     signoff={"p": {"verdict": "SIGNOFF_MERGE", "fresh": True}},
-                    stop_before_merge={"p"})
+                    wait=("p",))
         assert "press g" in _run(s, "p")["reason"]
         s = _status(prs, ["p"], review_loops=rl)
         assert _run(s, "p")["reason"] == "review passed; QA transition pending"
@@ -754,13 +762,13 @@ class TestBuildStatus:
         assert r["state"] == "queued" and r["phase"] == "sign_off"
         assert "relaunches" in r["reason"] and "ready" not in r["reason"]
 
-    def test_signoff_fresh_merge_with_stop(self):
+    def test_signoff_fresh_merge_with_wait(self):
         r = _run(_status([_pr("a", status="sign_off")], ["a"],
-                         stop_before_merge={"a"},
+                         wait=("a",),
                          signoff={"a": {"verdict": "SIGNOFF_MERGE", "fresh": True}}),
                  "a")
-        assert "stop-before-merge — press g" in r["reason"] and "fresh" in r["reason"]
-        assert r["policy"] == POLICY_STOP
+        assert "waiting for manual merge" in r["reason"] and "fresh" in r["reason"]
+        assert r["policy"] == POLICY_WAIT
 
     def test_signoff_stale(self):
         r = _run(_status([_pr("a", status="sign_off")], ["a"],
@@ -768,10 +776,10 @@ class TestBuildStatus:
                  "a")
         assert "stale" in r["reason"]
 
-    def test_dep_blocked_by_stop_before_merge_noted(self):
+    def test_dep_blocked_by_wait_target_noted(self):
         prs = [_pr("d", status="sign_off"), _pr("t", deps=["d"])]
-        r = _run(_status(prs, ["t"], stop_before_merge={"d"}), "t")
-        assert "stop-before-merge" in r["reason"]
+        r = _run(_status(prs, ["t"], wait=("t",)), "t")
+        assert "wait-for-merge ← t" in r["reason"]
 
     def test_text_format_has_both_targets(self):
         prs = [_pr("a", status="in_progress"), _pr("b", status="in_review")]
@@ -808,7 +816,7 @@ class TestCLI:
         res = _cli(["--help"])
         assert res.exit_code == 0
         for word in ("add", "remove", "clear", "list", "status",
-                     "--stop-before-merge", "--auto-merge"):
+                     "--wait-for-merge", "--auto-merge"):
             assert word in res.output
 
     def test_unknown_id_rejected_before_sending(self, project):
@@ -951,7 +959,7 @@ class TestCLI:
         assert sent[1].startswith("autostart add pr-b --auto-merge --reply ")
         status = json.loads(r3.output)
         assert [(t["pr_id"], t["policy"]) for t in status["targets"]] == [
-            ("pr-a", POLICY_STOP), ("pr-b", POLICY_AUTO)]
+            ("pr-a", POLICY_WAIT), ("pr-b", POLICY_AUTO)]
         assert "removed: pr-a" in r4.output
         assert auto_start.get_targets(app) == ["pr-b"]
         assert not list((home / "autostart-replies").glob("*.json"))
@@ -972,7 +980,7 @@ def test_runs_popup_renders_targets_and_closes(tmp_path):
     class Host(App):
         def __init__(self):
             super().__init__()
-            fake = _enabled_app(prs, ["a", "b"], tmp_path, stop={"a"})
+            fake = _enabled_app(prs, ["a", "b"], tmp_path, wait={"a"})
             fake._qa_loops = {"b": QALoopState(pr_id="b", running=True,
                                                planning_phase=False,
                                                scenarios=[QAScenario(1, "s1", "", ""),
@@ -1001,10 +1009,10 @@ def test_runs_popup_renders_targets_and_closes(tmp_path):
             text = str(screen.query_one("#runs-body", Static).render())
             assert "◎ a" in text and "◎ b" in text
             assert "scenario 1/2 done" in text
-            assert "stop-before-merge" in text
+            assert "wait-for-merge" in text
             # Every target header names its policy, auto-merge included
-            # (QA s19: U showed no policy); deps carry only a stop mark.
-            assert "◎ a [stop-before-merge]" in text
+            # (QA s19: U showed no policy); deps carry only a hold label.
+            assert "◎ a [wait-for-merge]" in text
             assert "◎ b [auto-merge]" in text
             assert "d [auto-merge]" not in text
             # j moves selection; Enter on a run without window keeps popup open
@@ -1183,7 +1191,7 @@ def test_recorded_qa_verdict_used_when_loop_dropped(tmp_path):
 
 
 def test_qa_pass_with_fresh_signoff_reports_signed_off():
-    r = _run(_status([_pr("a", status="qa")], ["a"], stop_before_merge={"a"},
+    r = _run(_status([_pr("a", status="qa")], ["a"], wait=("a",),
                      qa_loops={"a": {"verdict": "PASS", "recorded": True}},
                      signoff={"a": {"verdict": "SIGNOFF_MERGE", "fresh": True}}),
              "a")

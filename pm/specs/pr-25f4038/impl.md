@@ -1,0 +1,223 @@
+# pr-25f4038 — wait_for_merge as the only manual autostart merge policy
+
+## Goal
+
+Delete the `stop_before_merge` policy (a target-only manual hold) and make
+`wait_for_merge` the single manual merge policy everywhere: scheduler, CLI,
+command bar, `O` key, runs popup, help, status, breadcrumb/restart migration
+and documentation. `auto_merge` remains the separate explicit opt-in.
+
+Under `wait_for_merge`, a target **and every unmerged transitive
+prerequisite** run implementation → review → required QA → fresh sign-off and
+then wait for an explicit user merge (`g` / `pm pr merge`). Merging a
+prerequisite starts newly unblocked dependents automatically, exactly once.
+No pause-before-sign-off and no re-arming after each manual merge.
+
+## Current code map (grounding)
+
+| Concern | Location |
+|---|---|
+| Policy constants, holds, target policy, breadcrumb parse, status builder, labels | `pm_core/autostart_state.py` |
+| Scheduler, target add/remove, `O`, breadcrumb save/consume, command handler | `pm_core/tui/auto_start.py` |
+| `_stop_before_merge` app state | `pm_core/tui/app.py:403-405` |
+| `O` binding | `pm_core/tui/app.py:184`, `action_auto_sequence_pr` at 1110 |
+| Merge decision + hold message | `pm_core/tui/review_loop_ui.py:588-670` |
+| Sign-off driver keys on effective policy | `pm_core/tui/signoff_ui.py:295` |
+| CLI group / `add` flags / docs | `pm_core/cli/autostart.py` |
+| `pm tui keys` help | `pm_core/cli/tui.py:230-270` |
+| Help screen + runs popup empty text/policy styles | `pm_core/tui/screens.py:252, 673, 774` |
+| README autostart section | `README.md:230-280` |
+| Regression help checklist | `pm/qa/regression/help-keybindings.md:72` |
+| Tests | `tests/test_autostart_merge_wait.py`, `test_autostart_multi_target.py`, `test_autostart_retarget_regression.py`, `test_log_message_force.py`, `test_tui_signoff_handoff.py` |
+
+Existing `wait_for_merge` machinery already provides the desired scheduler and
+hold semantics (`merge_holds` closure derivation, `_maybe_auto_merge` hold
+gate, status `held_by`). The change is to make it the *only* manual policy and
+remove the parallel explicit-mark path.
+
+## Requirements (grounded)
+
+### R1 — One manual policy in the data model
+
+- Remove `POLICY_STOP` and the `app._stop_before_merge` set.
+- `autostart_state.POLICIES = (POLICY_AUTO, POLICY_WAIT)`.
+- `POLICY_FLAGS = {POLICY_AUTO: "--auto-merge", POLICY_WAIT: "--wait-for-merge"}`.
+- A target record's policy is now solely `WAIT_KEY` presence:
+  `target_policy(pr_id, record)` → `POLICY_WAIT` iff `record[WAIT_KEY]` truthy,
+  else `POLICY_AUTO`.
+- `merge_holds(prs, targets)` → only wait targets hold their unmerged,
+  non-terminal closure. Remove the `stop` parameter and the
+  `"explicit"` hold member.
+- `effective_policy(pr_id, holds)` → `POLICY_WAIT` iff held, else `POLICY_AUTO`.
+- `held_by_text` only renders `wait-for-merge ← T1, T2`.
+- `build_status`/`collect_status_inputs` no longer emit `stop_before_merge`
+  or `explicit_hold`.
+- `_signed_off_reason`, `policy_labels`, `format_text` have no
+  stop-before-merge branch.
+
+### R2 — New selections are wait_for_merge
+
+- `add_targets` default for a **new** target becomes `POLICY_WAIT`
+  (`default_policy: str | None = POLICY_WAIT`). Re-adding an existing target
+  with `policy=None` still keeps its current policy.
+- `O` / `auto_sequence_for_pr` sets `policy=POLICY_WAIT` and logs
+  `Auto-sequence armed for <pr> (will wait for merge)`.
+- `A` / `toggle` still adds with `default_policy=None`, i.e. a new target is
+  `auto_merge`; removing an existing target is unchanged.
+- CLI `pm autostart add X` (no policy flag) results in `wait_for_merge`
+  because it relies on the owner's new-target default; the CLI must not send
+  an explicit flag on re-add (that would flip an existing auto-merge target).
+- Command-bar `autostart add X` likewise defaults to wait.
+
+### R3 — Legacy inputs are accepted as an alias, never a separate hold
+
+- CLI `--stop-before-merge` is kept as a deprecated alias for
+  `--wait-for-merge` (help text says so). It maps to `POLICY_WAIT` and the
+  CLI sends the canonical `--wait-for-merge` to the owner.
+- Command-bar `--stop-before-merge` maps to `POLICY_WAIT`.
+- Combining `--stop-before-merge` with `--wait-for-merge` is the same policy
+  (not a conflict); combining either with `--auto-merge` is rejected before
+  any change.
+- No code path may leave a target-only hold or drop the manual gate.
+
+### R4 — Safe, idempotent migration of saved state
+
+`autostart_state.targets_from_breadcrumb(data, prs=None)` normalises records
+and folds the legacy fields:
+
+- Legacy `stop_before_merge: [ids]`:
+  - id already a target → force `WAIT_KEY` on its record;
+  - id not a target → add it as a wait target (`source="legacy-stop"`),
+    preserving standalone manual holds (and now holding its closure too);
+  - terminal (`merged`/`closed`) ids are dropped (nothing left to merge);
+  - missing ids are kept (fail closed; the scheduler's normal
+    missing-target prune owns them later).
+- Legacy single-target breadcrumb (`target: X`, no stop list) cannot tell
+  `O` from `A`; fail closed and migrate it to a `wait_for_merge` target.
+- Legacy record fields are normalised:
+  - `wait_for_merge` truthy → `WAIT_KEY`; falsy → removed;
+  - `policy` / `merge_policy` == `stop_before_merge`/`wait_for_merge` →
+    `WAIT_KEY`; `auto_merge` → no flag; unknown → fail closed (`WAIT_KEY`);
+  - record-level `stop_before_merge` truthy → `WAIT_KEY`.
+- `migrated` is True whenever any legacy shape/field was interpreted.
+- Calling the parser twice on its own output is a no-op (idempotent).
+
+`save_breadcrumb` stops writing `stop_before_merge`; `consume_breadcrumb`
+stops restoring `_stop_before_merge` and uses the migrated target map.
+`build_status` defensively folds a stale `stop_before_merge` input through
+the same migration helper (fail closed) rather than ignoring it.
+
+### R5 — Scheduler/merge semantics unchanged for wait targets
+
+- Only `wait_for_merge` targets hold their closure; no other target or PR is
+  held unless it is in an active wait target's closure.
+- A shared prerequisite stays held while any active wait target needs it.
+- Removing/changing one target releases only the holds it owns.
+- Manual merge of a prerequisite still triggers `check_and_start`, starting
+  newly ready dependents once.
+- Fresh sign-off remains mandatory before any merge (existing gate).
+- A wait target's PR is never auto-merged; a prerequisite is never
+  auto-merged under the manual policy.
+- Explicit `auto_merge` targets continue to auto-merge through the sign-off
+  gate; a hold from a wait target still wins over an auto target.
+
+### R6 — Consistent user-facing presentation
+
+- `pm tui keys`: `O  Add selected PR as target, wait for merge (repeat: re-arm)`.
+- Help screen: `O  Auto-start target (wait for merge)`.
+- Runs popup empty state: `Add a target with O (wait for merge) or A on a PR, …`.
+- `pm autostart --help` documents two policies: `wait-for-merge` (default)
+  and `auto-merge`, with `--stop-before-merge` shown only as deprecated.
+- Command-bar `USAGE`, handler docstring, `_list_summary` and confirmation
+  labels no longer say "stop".
+- README autostart section rewritten around one manual policy.
+- `pm/qa/regression/help-keybindings.md` updated.
+
+### R7 — Preserve unrelated state
+
+Source, dirty workdirs, running agents/windows, QA/evidence, model
+assignments, spec-review settings and unrelated targets are untouched.
+Migration never merges, never resumes held/completed QA, never launches a
+duplicate session and never consumes a stale sign-off.
+
+## Implicit requirements
+
+- Every caller of the changed signatures must be updated:
+  `autostart_state.merge_holds`, `target_policy`, `effective_policy`,
+  `targets_from_breadcrumb`, `auto_start.merge_holds`/`target_policy`, and
+  all tests/fakes that set `_stop_before_merge`.
+- `app._stop_before_merge` must not be read via `getattr` anywhere; a stale
+  attribute on old fakes must be harmless but unused.
+- Status JSON `policy` values become only `wait_for_merge` / `auto_merge`;
+  the CLI list/status text and popup labels must agree.
+- The sign-off driver's once-per-`(verdict, sha, policy)` key still changes
+  when a policy flips (wait ↔ auto), so a released hold re-runs the merge
+  decision exactly once.
+- `check_and_start` no longer prunes merged ids from a stop set; wait holds
+  are already derived from the current graph/status.
+- Tests that assert the removed behaviour must be rewritten to assert the
+  new single-policy behaviour, not merely deleted, so regressions are
+  covered (default wait, O wait, legacy alias, breadcrumb migration,
+  shared/diamond holds, removal releases, fresh sign-off, one-shot start).
+
+## Ambiguities and resolutions
+
+1. **What happens to a legacy stop mark on a PR that is not a target?**
+   Resolved: migrate it to a `wait_for_merge` target. This preserves the
+   manual hold (fail closed) and satisfies "must not preserve a separate
+   target-only hold" / "including dependencies and shared targets".
+2. **Legacy single-target breadcrumb (`target: X`) — was it O or A?**
+   Resolved: cannot be distinguished; migrate to `wait_for_merge` so a
+   restart can never silently turn a manual gate into an auto-merge.
+3. **Should `--stop-before-merge` stay visible?**
+   Resolved: keep it as a documented deprecated alias; it maps to wait and
+   never creates a separate hold.
+4. **Should `build_status` keep accepting `stop_before_merge`?**
+   Resolved: yes, defensively, folding it through the migration helper so a
+   stale caller cannot silently permit a merge. It is not a distinct state.
+5. **What about legacy stop ids that are merged/closed?**
+   Resolved: drop them; there is nothing left to hold or merge. Missing ids
+   stay as targets (fail closed) and are pruned by the existing scheduler
+   rule when the PR is genuinely gone.
+
+No **[UNRESOLVED]** items.
+
+## Edge cases to cover
+
+- O on a target twice: idempotent, still wait, scheduler still nudged.
+- `pm autostart add X` default → wait; re-add without flag keeps an
+  auto-merge target auto.
+- `--stop-before-merge` alone → wait; with `--wait-for-merge` → wait;
+  with `--auto-merge` → rejected before any mutation.
+- Breadcrumb with `targets` + legacy `stop_before_merge`: stop ids already
+  in targets become wait; standalone ids become wait targets; terminal ids
+  dropped; parse is idempotent.
+- Legacy single-target breadcrumb → wait target, `migrated` log.
+- Mixed record `{"policy": "stop_before_merge"}` / `{"wait_for_merge":
+  false}` normalisation.
+- Shared prerequisite held by two wait targets; removing one keeps the hold
+  and reports only the released subset.
+- Diamond (`f ← c,d; c ← a; d ← a,b`): each PR signs off and waits; manual
+  merges start each next stage exactly once; unrelated PR never scheduled.
+- Policy change wait → auto releases the closure holds and lets the
+  sign-off driver merge once; auto → wait re-holds.
+- Stale sign-off never reported as ready/waiting for manual merge.
+- Graph edit adds a new prerequisite to a wait target: it becomes held;
+  removing the edge releases it.
+- Dependency that is itself a target: removing it while another wait target
+  needs it keeps it in scope/held.
+
+## Verification plan
+
+1. Pre-fix manual repro (captures): isolated fixture showing `pm autostart
+   add` / O selecting `stop_before_merge` and a stop mark holding only the
+   target (prerequisite auto-merges).
+2. Failing regressions: new/updated tests asserting default wait, O wait,
+   alias mapping, breadcrumb migration and shared/diamond semantics.
+3. Fix the code paths above.
+4. Focused suites: `tests/test_autostart_merge_wait.py`,
+   `tests/test_autostart_multi_target.py`,
+   `tests/test_autostart_retarget_regression.py`,
+   `tests/test_log_message_force.py`, `tests/test_tui_signoff_handoff.py`;
+   then the full suite once after final edits.
+5. Post-fix manual capture of the same fixture showing one manual policy.

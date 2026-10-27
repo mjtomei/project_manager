@@ -22,7 +22,7 @@ from click.testing import CliRunner
 
 from pm_core import autostart_state as st
 from pm_core import store
-from pm_core.autostart_state import POLICY_AUTO, POLICY_STOP, POLICY_WAIT
+from pm_core.autostart_state import POLICY_AUTO, POLICY_WAIT
 from pm_core.tui import auto_start, signoff_ui
 from pm_core.tui import review_loop_ui
 
@@ -47,8 +47,8 @@ def _signed(pid, **kw):
                signoff=dict(_SIGNED), **kw)
 
 
-def _app(prs, tmp_path, targets=(), wait=(), stop=()):
-    """Enabled app; *targets* plain, *wait* wait-for-merge targets."""
+def _app(prs, tmp_path, targets=(), wait=()):
+    """Enabled app; *targets* plain auto-merge, *wait* wait-for-merge."""
     app = FakeApp(prs, root=tmp_path)
     recs = {t: st.make_target_record("test") for t in targets}
     for t in wait:
@@ -56,7 +56,6 @@ def _app(prs, tmp_path, targets=(), wait=(), stop=()):
     app._auto_start_targets = recs
     app._auto_start = bool(recs)
     app._auto_start_run_id = "run"
-    app._stop_before_merge = set(stop)
     return app
 
 
@@ -87,39 +86,37 @@ def _diamond(**status):
 class TestMergeHolds:
     def test_wait_target_holds_whole_closure_only(self):
         prs = _diamond()
-        holds = st.merge_holds(prs, {"f": {st.WAIT_KEY: True}}, set())
+        holds = st.merge_holds(prs, {"f": {st.WAIT_KEY: True}})
         assert set(holds) == {"a", "b", "c", "d", "f"}
-        assert holds["a"] == {"explicit": False, "targets": ["f"]}
+        assert holds["a"] == {"targets": ["f"]}
         assert st.effective_policy("a", holds) == POLICY_WAIT
         assert st.effective_policy("x", holds) == POLICY_AUTO
 
-    def test_plain_targets_hold_nothing_extra(self):
-        holds = st.merge_holds(_diamond(), {"f": {}}, {"f"})
-        assert set(holds) == {"f"}
-        assert st.effective_policy("f", holds) == POLICY_STOP
+    def test_plain_auto_target_holds_nothing(self):
+        holds = st.merge_holds(_diamond(), {"f": {}})
+        assert holds == {}
+        assert st.effective_policy("f", holds) == POLICY_AUTO
 
-    def test_explicit_and_wait_both_reported(self):
-        holds = st.merge_holds(_diamond(), {"f": {st.WAIT_KEY: True}}, {"a"})
-        assert holds["a"] == {"explicit": True, "targets": ["f"]}
-        assert st.effective_policy("a", holds) == POLICY_STOP
-        assert st.held_by_text(holds["a"]) == \
-            "stop-before-merge; wait-for-merge ← f"
+    def test_wait_hold_text_names_the_target(self):
+        holds = st.merge_holds(_diamond(), {"f": {st.WAIT_KEY: True}})
+        assert st.held_by_text(holds["a"]) == "wait-for-merge ← f"
+        assert st.held_by_text(None) == ""
 
     def test_shared_dep_lists_every_wait_target(self):
         prs = _diamond() + [_pr("g", deps=["a"])]
         holds = st.merge_holds(prs, {"f": {st.WAIT_KEY: True},
-                                     "g": {st.WAIT_KEY: True}}, set())
+                                     "g": {st.WAIT_KEY: True}})
         assert holds["a"]["targets"] == ["f", "g"]
 
     def test_merged_closure_members_not_held(self):
         holds = st.merge_holds(_diamond(a="merged", b="closed"),
-                               {"f": {st.WAIT_KEY: True}}, set())
+                               {"f": {st.WAIT_KEY: True}})
         assert set(holds) == {"c", "d", "f"}
 
     def test_target_policy(self):
-        assert st.target_policy("f", {st.WAIT_KEY: True}, {"f"}) == POLICY_WAIT
-        assert st.target_policy("f", {}, {"f"}) == POLICY_STOP
-        assert st.target_policy("f", None, set()) == POLICY_AUTO
+        assert st.target_policy({st.WAIT_KEY: True}) == POLICY_WAIT
+        assert st.target_policy({}) == POLICY_AUTO
+        assert st.target_policy(None) == POLICY_AUTO
 
 
 # ---------------------------------------------------------------------------
@@ -127,14 +124,13 @@ class TestMergeHolds:
 # ---------------------------------------------------------------------------
 
 class TestLifecycle:
-    def test_add_wait_sets_record_not_stop_set(self, tmp_path):
+    def test_add_wait_sets_record_flag(self, tmp_path):
         app = _app(_diamond(), tmp_path)
         res = auto_start.add_targets(app, ["f"], policy=POLICY_WAIT)
         assert res["changes"] == [{"pr_id": "f", "action": "added",
                                    "policy": POLICY_WAIT}]
         assert auto_start.get_targets(app) == ["f"]  # deps not targets
         assert app._auto_start_targets["f"][st.WAIT_KEY] is True
-        assert app._stop_before_merge == set()
         for pid in "abcdf":
             assert auto_start.policy_for(app, pid) == POLICY_WAIT
         assert auto_start.policy_for(app, "x") == POLICY_AUTO
@@ -150,7 +146,7 @@ class TestLifecycle:
             coro.close()
         app.run_worker = capture
         auto_start.add_targets(app, ["f"], policy=POLICY_WAIT)
-        assert seen["hold"] == {"explicit": False, "targets": ["f"]}
+        assert seen["hold"] == {"targets": ["f"]}
 
     def test_readd_without_flag_preserves_wait(self, tmp_path):
         app = _app(_diamond(), tmp_path, wait=["f"])
@@ -159,38 +155,47 @@ class TestLifecycle:
         assert res["changes"][0]["policy"] == POLICY_WAIT
         assert auto_start.target_policy(app, "f") == POLICY_WAIT
 
-    def test_policy_change_releases_only_inherited(self, tmp_path):
-        app = _app(_diamond(), tmp_path, wait=["f"], stop={"b"})
+    def test_policy_change_releases_its_holds(self, tmp_path):
+        app = _app(_diamond(), tmp_path, wait=["f"])
         res = auto_start.add_targets(app, ["f"], policy=POLICY_AUTO)
         assert res["changes"][0] == {"pr_id": "f", "action": "policy_changed",
                                      "policy": POLICY_AUTO,
                                      "previous_policy": POLICY_WAIT}
-        assert res["released"] == ["a", "c", "d", "f"]
-        assert set(auto_start.merge_holds(app)) == {"b"}  # explicit kept
-        assert any("released merge hold on a, c, d, f" in m for m in app.logs)
+        assert res["released"] == ["a", "b", "c", "d", "f"]
+        assert auto_start.merge_holds(app) == {}
+        assert any("released merge hold on a, b, c, d, f" in m for m in app.logs)
 
-    def test_wait_to_stop_keeps_only_target_hold(self, tmp_path):
+    def test_wait_to_auto_releases_whole_closure(self, tmp_path):
         app = _app(_diamond(), tmp_path, wait=["f"])
-        res = auto_start.add_targets(app, ["f"], policy=POLICY_STOP)
-        assert res["released"] == ["a", "b", "c", "d"]
-        assert set(auto_start.merge_holds(app)) == {"f"}
+        res = auto_start.add_targets(app, ["f"], policy=POLICY_AUTO)
+        assert res["released"] == ["a", "b", "c", "d", "f"]
+        assert auto_start.merge_holds(app) == {}
         assert st.WAIT_KEY not in app._auto_start_targets["f"]
 
-    def test_stop_to_wait_replaces_own_mark(self, tmp_path):
-        app = _app(_diamond(), tmp_path, targets=["f"], stop={"f", "x"})
+    def test_auto_to_wait_sets_flag(self, tmp_path):
+        app = _app(_diamond(), tmp_path, targets=["f"])
         auto_start.add_targets(app, ["f"], policy=POLICY_WAIT)
-        assert app._stop_before_merge == {"x"}  # other marks untouched
         assert auto_start.target_policy(app, "f") == POLICY_WAIT
+        assert app._auto_start_targets["f"][st.WAIT_KEY] is True
+
+    def test_policy_change_keeps_other_target_holds(self, tmp_path):
+        prs = _diamond() + [_pr("g", deps=["a"])]
+        app = _app(prs, tmp_path, wait=["f", "g"])
+        res = auto_start.add_targets(app, ["f"], policy=POLICY_AUTO)
+        assert res["released"] == ["b", "c", "d", "f"]
+        holds = auto_start.merge_holds(app)
+        assert holds["a"] == {"targets": ["g"]}   # shared dep still held
+        assert "b" not in holds and "c" not in holds and "d" not in holds
 
     def test_remove_releases_only_its_holds(self, tmp_path):
         prs = _diamond() + [_pr("g", deps=["a"])]
-        app = _app(prs, tmp_path, wait=["f", "g"], stop={"d"})
+        app = _app(prs, tmp_path, wait=["f", "g"])
         res = auto_start.remove_targets(app, ["f"])
-        # a stays held by g; d keeps its explicit mark.
-        assert res["released"] == ["b", "c", "f"]
+        # a stays held by g.
+        assert res["released"] == ["b", "c", "d", "f"]
         holds = auto_start.merge_holds(app)
-        assert holds["a"] == {"explicit": False, "targets": ["g"]}
-        assert holds["d"] == {"explicit": True, "targets": []}
+        assert holds["a"] == {"targets": ["g"]}
+        assert "d" not in holds
 
     def test_remove_does_not_report_merged_deps_released(self, tmp_path):
         app = _app(_diamond(a="merged", b="merged"), tmp_path, wait=["f"])
@@ -224,7 +229,7 @@ class TestLifecycle:
         assert auto_start.merge_hold(app, "a")["targets"] == ["f"]
 
     def test_breadcrumb_round_trip_keeps_wait(self, tmp_path):
-        app = _app(_diamond(), tmp_path, wait=["f"], stop={"x"})
+        app = _app(_diamond(), tmp_path, wait=["f"])
         app._watcher_manager.is_any_running.return_value = False
         with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path):
             (tmp_path / "merge-restart").touch()
@@ -234,9 +239,8 @@ class TestLifecycle:
                  patch.object(auto_start, "check_and_start"):
                 asyncio.run(auto_start.consume_breadcrumb(fresh))
         assert auto_start.target_policy(fresh, "f") == POLICY_WAIT
-        assert auto_start.merge_hold(fresh, "b") == \
-            {"explicit": False, "targets": ["f"]}
-        assert fresh._stop_before_merge == {"x"}
+        assert auto_start.merge_hold(fresh, "b") == {"targets": ["f"]}
+        assert fresh._auto_start_targets["f"][st.WAIT_KEY] is True
 
 
 # ---------------------------------------------------------------------------
@@ -246,12 +250,11 @@ class TestLifecycle:
 class TestFlags:
     def test_handler_rejects_conflicting_policies(self, tmp_path):
         app = _app(_diamond(), tmp_path, targets=["x"])
-        before = (dict(app._auto_start_targets), set(app._stop_before_merge))
+        before = dict(app._auto_start_targets)
         res = auto_start.handle_command(
             app, ["add", "f", "--wait-for-merge", "--auto-merge"])
         assert res["ok"] is False and res["error"] == "conflicting_flags"
-        assert (dict(app._auto_start_targets),
-                set(app._stop_before_merge)) == before
+        assert dict(app._auto_start_targets) == before
         assert not app.workers
 
     def test_repeated_same_flag_is_fine(self, tmp_path):
@@ -285,12 +288,13 @@ class TestFlags:
         from pm_core.cli import cli
         with patch("pm_core.cli.autostart.trigger_tui_command") as trig:
             res = CliRunner().invoke(cli, [
-                "autostart", "add", "f", "--wait-for-merge",
-                "--stop-before-merge", "--json", "-s", "pm-x"])
+                "autostart", "add", "f", "--stop-before-merge",
+                "--auto-merge", "--json", "-s", "pm-x"])
         assert res.exit_code == 1
         out = json.loads(res.output)
         assert out["error"] == "conflicting_flags"
-        assert "--stop-before-merge" in out["message"]
+        assert "--wait-for-merge" in out["message"]
+        assert "--auto-merge" in out["message"]
         trig.assert_not_called()
 
     def test_cli_list_names_only_other_holding_targets(self):

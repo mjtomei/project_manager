@@ -22,7 +22,6 @@ class _App:
         self._auto_start_targets = {}
         self._auto_start_all = False
         self._auto_start_run_id = None
-        self._stop_before_merge = set()
         self._review_loops = {}
         self._qa_loops = {}
         self._watcher_manager = MagicMock()
@@ -76,4 +75,5 @@ def test_second_O_keeps_first_pr_advancing(tmp_path):
     # iteration 1's window itself, so a windowed `pr review` here would be
     # a throwaway Claude session.
     assert all("--no-window" in c for c in cmds)
-    assert app._stop_before_merge == {"pr-a", "pr-b"}
+    assert all(app._auto_start_targets[t].get("wait_for_merge")
+               for t in ("pr-a", "pr-b"))

@@ -11,14 +11,13 @@ Adding a target is additive and idempotent; an empty collection means
 auto-start is OFF (never "all pending PRs").  The whole-backlog mode is a
 separate explicit switch (``autostart all``, ``app._auto_start_all``).
 
-Merge holds: ``app._stop_before_merge`` holds explicit per-PR stop marks;
-a ``wait_for_merge`` target (record flag) additionally holds itself and its
-whole dependency closure for a manual merge.  Every merge decision and the
-status resolve the effective hold through :func:`merge_hold` /
-:func:`policy_for` (``autostart_state.merge_holds``) — absent means
-auto-merge.
+Merge holds: there is one manual policy.  A ``wait_for_merge`` target
+(record flag) holds itself and its whole unmerged dependency closure for an
+explicit user merge.  Every merge decision and the status resolve the
+effective hold through :func:`merge_hold` / :func:`policy_for`
+(``autostart_state.merge_holds``) — absent means auto-merge.
 
-Controls: ``O`` (add selected, stop-before-merge), ``A`` (toggle selected as
+Controls: ``O`` (add selected, wait-for-merge), ``A`` (toggle selected as
 an auto-merge target), the command bar ``autostart …`` verbs, and the CLI
 ``pm autostart add/remove/clear/list/status`` which reaches this module via
 the session command queue (``--reply`` writes a JSON reply file).  State is
@@ -37,7 +36,7 @@ from pm_core.paths import configure_logger, pm_home
 from pm_core import store, graph
 from pm_core import autostart_state
 from pm_core.autostart_state import (
-    POLICY_AUTO, POLICY_STOP, POLICY_WAIT, REPLY_DIR, WAIT_KEY,
+    POLICY_AUTO, POLICY_WAIT, REPLY_DIR, WAIT_KEY,
 )
 from pm_core.tui._shell import _run_shell_async
 
@@ -93,21 +92,16 @@ def in_scope(app, pr_id: str, prs: list[dict] | None = None) -> bool:
     return m is None or pr_id in m
 
 
-def _stop_set(app) -> set:
-    sbm = getattr(app, "_stop_before_merge", None)
-    return sbm if isinstance(sbm, set) else set()
-
-
 def merge_holds(app, prs: list[dict] | None = None) -> dict[str, dict]:
-    """``{pr_id: {explicit, targets}}`` for every PR held for a manual merge.
+    """``{pr_id: {targets}}`` for every PR held for a manual merge.
 
-    Explicit per-PR marks always count; ``wait_for_merge`` targets hold
-    their closures only while auto-start is enabled (they are active).
+    Only active ``wait_for_merge`` targets hold their closures; auto-merge
+    targets never do.
     """
     if prs is None:
         prs = (app._data or {}).get("prs") or []
     targets = _targets(app) if is_enabled(app) else {}
-    return autostart_state.merge_holds(prs, targets, _stop_set(app))
+    return autostart_state.merge_holds(prs, targets)
 
 
 def merge_hold(app, pr_id: str, prs: list[dict] | None = None) -> dict | None:
@@ -122,10 +116,8 @@ def policy_for(app, pr_id: str, prs: list[dict] | None = None) -> str:
 
 
 def target_policy(app, pr_id: str) -> str:
-    """A target's own configured policy (``wait_for_merge`` /
-    ``stop_before_merge`` / ``auto_merge``)."""
-    return autostart_state.target_policy(
-        pr_id, _targets(app).get(pr_id), _stop_set(app))
+    """A target's own configured policy (``wait_for_merge`` / ``auto_merge``)."""
+    return autostart_state.target_policy(_targets(app).get(pr_id))
 
 
 def _launching(app) -> set:
@@ -182,20 +174,12 @@ def save_breadcrumb(app) -> None:
 
     # Persist auto-start state if active: the full target collection
     # (records, in order), explicit all-mode, and the shared run id.
-    # A target's wait-for-merge flag rides on its record; explicit stop
-    # marks ride on ``stop_before_merge`` below.
+    # A target's wait-for-merge flag rides on its record.
     if is_enabled(app):
         data["auto_start"] = True
         data["targets"] = autostart_state.targets_to_breadcrumb(_targets(app))
         data["all_mode"] = is_all_mode(app)
         data["run_id"] = app._auto_start_run_id
-
-    # Persist auto-sequence stop-before-merge set even when auto-start is
-    # off — a TUI restart between QA finish and merge shouldn't re-arm
-    # auto-merge for an auto-sequence PR.
-    stop_before_merge = getattr(app, "_stop_before_merge", None)
-    if isinstance(stop_before_merge, set) and stop_before_merge:
-        data["stop_before_merge"] = sorted(stop_before_merge)
 
     # Persist review loop state for running loops
     review_loops = {}
@@ -267,9 +251,12 @@ async def consume_breadcrumb(app) -> None:
 
     # Restore auto-start state only if it was active before the restart.
     # Current breadcrumbs carry ``targets`` + ``all_mode``; a legacy
-    # single-target breadcrumb (``target: X``) migrates to ``[X]`` and a
-    # legacy targetless one to the explicit all-mode it represented.
-    targets, all_mode, migrated = autostart_state.targets_from_breadcrumb(data)
+    # single-target breadcrumb (``target: X``) migrates to a wait target and
+    # a legacy targetless one to the explicit all-mode it represented.
+    # Removed ``stop_before_merge`` marks migrate to wait targets (fail
+    # closed) so a restart can never silently permit a merge.
+    targets, all_mode, migrated = autostart_state.targets_from_breadcrumb(
+        data, (app._data or {}).get("prs") or [])
     had_auto_start = bool(targets) or all_mode
     run_id = data.get("run_id")
     _log.info("consume_breadcrumb: restoring targets=%s all_mode=%s run_id=%s "
@@ -287,12 +274,6 @@ async def consume_breadcrumb(app) -> None:
             tdir.mkdir(parents=True, exist_ok=True)
         elif not run_id:
             _ensure_run(app)
-
-    # Restore auto-sequence stop-before-merge set
-    sbm = data.get("stop_before_merge")
-    if sbm:
-        app._stop_before_merge.update(sbm)
-        _log.info("consume_breadcrumb: restored stop_before_merge=%s", sbm)
 
     # Restore review loop state before check_and_start so it sees existing loops
     review_loops_data = data.get("review_loops", {})
@@ -482,18 +463,18 @@ def _resolve_ids(app, ids: list[str]) -> tuple[list[dict], list[str]]:
 
 
 def add_targets(app, ids: list[str], policy: str | None = None,
-                default_policy: str | None = POLICY_STOP,
+                default_policy: str | None = POLICY_WAIT,
                 source: str = "command", confirm: str | None = None) -> dict:
     """Add targets (additive, idempotent, all-or-nothing validation).
 
-    *policy*: ``stop_before_merge`` / ``auto_merge`` / ``wait_for_merge``
-    to set explicitly, or None to keep an existing target's policy; a *new*
-    target then gets *default_policy* (None = leave the stop set untouched,
-    i.e. the ``A``-key semantics).  Setting a policy replaces that target's
-    own previous one (its stop mark / wait flag); marks on other PRs are
-    never touched.  The policy is in place before the scheduler pass this
-    queues, so a wait target's dependencies are held before any starts.
-    Never touches other targets and never enables all-mode.
+    *policy*: ``auto_merge`` / ``wait_for_merge`` to set explicitly, or None
+    to keep an existing target's policy; a *new* target then gets
+    *default_policy* (None = plain auto-merge record, i.e. the ``A``-key
+    semantics).  Setting a policy replaces that target's own previous one
+    (its wait flag); other targets are never touched.  The policy is in
+    place before the scheduler pass this queues, so a wait target's
+    dependencies are held before any starts.  Never touches other targets
+    and never enables all-mode.
 
     *confirm* replaces the "targets +=" log-line confirmation (e.g. the
     ``O`` key's "Auto-sequence armed …"); it gets the same hold.
@@ -513,6 +494,8 @@ def add_targets(app, ids: list[str], policy: str | None = None,
                 "message": f"already merged/closed: {', '.join(closed)}",
                 "invalid": closed, "changes": []}
 
+    if policy is not None:
+        policy = autostart_state.LEGACY_POLICIES.get(policy, policy)
     if policy is not None and policy not in autostart_state.POLICIES:
         return {"ok": False, "error": "usage",
                 "message": f"unknown merge policy {policy!r}", "changes": []}
@@ -520,7 +503,6 @@ def add_targets(app, ids: list[str], policy: str | None = None,
     targets = _targets(app)
     if not isinstance(getattr(app, "_auto_start_targets", None), dict):
         app._auto_start_targets = targets
-    sbm = app._stop_before_merge
     held_before = set(merge_holds(app))
     changes = []
     for pr in found:
@@ -533,13 +515,8 @@ def add_targets(app, ids: list[str], policy: str | None = None,
         rec = targets[pr_id]
         if effective == POLICY_WAIT:
             rec[WAIT_KEY] = True
-            sbm.discard(pr_id)
-        elif effective == POLICY_STOP:
-            rec.pop(WAIT_KEY, None)
-            sbm.add(pr_id)
         elif effective == POLICY_AUTO:
             rec.pop(WAIT_KEY, None)
-            sbm.discard(pr_id)
         current = target_policy(app, pr_id)
         if is_new:
             action = "added"
@@ -563,8 +540,7 @@ def add_targets(app, ids: list[str], policy: str | None = None,
     def _label(c: dict) -> str:
         if c["action"] == "policy_changed":
             return f"{c['pr_id']} (now {c['policy'].replace('_', '-')})"
-        pol = {POLICY_STOP: " (stop)",
-               POLICY_WAIT: " (wait-for-merge + deps)"}.get(c["policy"], "")
+        pol = {POLICY_WAIT: " (wait-for-merge + deps)"}.get(c["policy"], "")
         already = " (already a target)" if c["action"] == "unchanged" else ""
         return f"{c['pr_id']}{pol}{already}"
     summary = ", ".join(_label(c) for c in changes)
@@ -583,14 +559,14 @@ def add_targets(app, ids: list[str], policy: str | None = None,
 
 
 def remove_targets(app, ids: list[str]) -> dict:
-    """Remove targets.  Never kills windows/loops; keeps stop marks.
+    """Remove targets.  Never kills windows/loops.
 
     Unknown ids reject the whole command; a valid PR that isn't a target
     is reported as ``not_target``.  PRs still needed by another target
     stay in scope (scope is the union of the remaining closures).  A
     removed ``wait_for_merge`` target releases only the holds it caused:
-    explicit marks and holds from other wait targets remain (``released``
-    in the result lists PRs no longer held).
+    holds from other wait targets remain (``released`` in the result lists
+    PRs no longer held).
     """
     if not ids:
         return {"ok": False, "error": "usage", "message": "no PR ids given",
@@ -664,8 +640,7 @@ async def toggle(app, selected_pr_id: str | None = None) -> None:
     """``A`` key: toggle the selected PR as an auto-merge target.
 
     - Selected PR not a target → add it (additive; other targets kept).
-      New targets get no stop-before-merge mark (explicit ``A`` keeps the
-      existing auto-merge semantics); an existing stop mark is kept.
+      New targets get the plain auto-merge policy (explicit ``A``).
     - Selected PR already a target → remove it (others keep running).
     - No PR selected → turn auto-start off if on, else "No PR selected"
       (no implicit whole-backlog mode — use ``autostart all``).
@@ -687,18 +662,20 @@ async def toggle(app, selected_pr_id: str | None = None) -> None:
 
 
 async def auto_sequence_for_pr(app, pr_id: str) -> None:
-    """``O`` key: add *pr_id* as a stop-before-merge target and nudge.
+    """``O`` key: add *pr_id* as a wait-for-merge target and nudge.
 
     Additive: other targets (and their policies) are untouched.  Repeating
-    ``O`` on the same PR re-arms the stop mark and re-runs the scheduler.
+    ``O`` on the same PR re-arms the wait policy and re-runs the scheduler.
+    The target and every unmerged transitive prerequisite run through to a
+    fresh sign-off, then wait for an explicit merge.
     """
     # The armed line is the held confirmation itself: logged separately
     # after "targets +=" (forced, unheld) it only lasted as long as some
     # earlier hold, so a second O inside the first O's hold had it
     # replaced by its own deferred "starting <pr>" ~0.1s later.
     result = add_targets(
-        app, [pr_id], policy=POLICY_STOP, source="key:O",
-        confirm=f"Auto-sequence armed for {pr_id} (will stop before merge)")
+        app, [pr_id], policy=POLICY_WAIT, source="key:O",
+        confirm=f"Auto-sequence armed for {pr_id} (will wait for merge)")
     if not result["ok"]:
         app.log_message(f"Auto-sequence: {result['message']}")
 
@@ -794,16 +771,6 @@ async def check_and_start(app) -> None:
     _prune_completed_targets(app, prs)
     if not is_enabled(app):
         return
-
-    # Drop merged PRs from stop_before_merge — once merged, the entry
-    # has done its job and shouldn't linger across future auto-start runs.
-    sbm = getattr(app, "_stop_before_merge", set())
-    if sbm:
-        merged = {pr["id"] for pr in (app._data.get("prs") or [])
-                  if pr.get("status") == "merged"}
-        sbm.intersection_update(
-            {pr["id"] for pr in (app._data.get("prs") or [])} - merged
-        )
 
     # Collect PRs that should be started: pending with all deps merged,
     # plus in_progress PRs (whose window may have been killed).
@@ -1169,7 +1136,6 @@ def collect_status_inputs(app) -> dict:
         "enabled": enabled,
         "run_id": app._auto_start_run_id,
         "owner": {"session": session, "pid": os.getpid()},
-        "stop_before_merge": set(getattr(app, "_stop_before_merge", set()) or ()),
         "review_loops": review_loops,
         "qa_loops": qa_loops,
         "pending_merge": pending_merge,
@@ -1191,11 +1157,13 @@ def build_status(app) -> dict:
 # Command handling (command bar + ``pm autostart`` CLI via the cmd queue)
 # ---------------------------------------------------------------------------
 
-USAGE = ("autostart add PR_ID... [--stop-before-merge|--auto-merge|"
-         "--wait-for-merge] | remove PR_ID... | list | status | clear | all")
+USAGE = ("autostart add PR_ID... [--wait-for-merge|--auto-merge] | "
+         "remove PR_ID... | list | status | clear | all")
 
-# Flag → policy (the inverse of ``autostart_state.POLICY_FLAGS``).
+# Flag → policy (the inverse of ``autostart_state.POLICY_FLAGS`` plus the
+# deprecated ``--stop-before-merge`` alias, which maps to wait-for-merge).
 _FLAG_POLICIES = {flag: p for p, flag in autostart_state.POLICY_FLAGS.items()}
+_FLAG_POLICIES.update(autostart_state.LEGACY_POLICY_FLAGS)
 
 
 def reply_dir() -> Path:
@@ -1229,10 +1197,11 @@ def handle_command(app, args: list[str]) -> dict:
     Verbs: ``add``/``target`` IDS, ``remove``/``rm`` IDS, ``clear``/``off``,
     ``all``, ``list``, ``status``; bare ``autostart`` turns auto-start off
     when on and prints usage when off (it no longer enables the whole
-    backlog).  Flags: ``--stop-before-merge`` / ``--auto-merge`` /
-    ``--wait-for-merge`` (``add`` only; at most one distinct policy — a
-    contradiction rejects the whole command before any change),
-    ``--reply ID`` (CLI: write the JSON reply file).  Returns the result.
+    backlog).  Flags: ``--wait-for-merge`` / ``--auto-merge`` (``add`` only;
+    at most one distinct policy — a contradiction rejects the whole command
+    before any change).  The removed ``--stop-before-merge`` is accepted as
+    a deprecated alias for ``--wait-for-merge``.  ``--reply ID`` (CLI: write
+    the JSON reply file).  Returns the result.
     """
     reply_id = None
     policies: list[str] = []
@@ -1336,7 +1305,7 @@ def _list_summary(app) -> str:
         return "Auto-start: off (no targets)"
     if is_all_mode(app):
         return "Auto-start: all ready PRs (backlog mode)"
-    marks = {POLICY_STOP: " (stop)", POLICY_WAIT: " (wait-for-merge)"}
+    marks = {POLICY_WAIT: " (wait-for-merge)"}
     parts = [f"{t}{marks.get(target_policy(app, t), '')}"
              for t in get_targets(app)]
     return f"Auto-start targets: {', '.join(parts)}"

@@ -7,10 +7,17 @@ This module holds the pure pieces that the scheduler, the CLI
 - dependency closures over an explicit *collection* of targets
   (:func:`closure`, :func:`managed_ids`, :func:`needed_by`);
 - target records and breadcrumb (de)serialisation, including migration of
-  the legacy single-``target`` breadcrumb (:func:`targets_from_breadcrumb`);
+  the legacy single-``target`` breadcrumb and the removed per-PR
+  ``stop_before_merge`` marks (:func:`targets_from_breadcrumb`);
 - the single structured status builder (:func:`build_status`, schema
   ``pm.autostart.status/1``) and a row flattener (:func:`status_rows`) used by
   both the CLI text output and the TUI popup.
+
+There is one manual merge policy: ``wait_for_merge``.  A target carrying
+``WAIT_KEY`` holds itself and its whole unmerged dependency closure for an
+explicit user merge.  ``auto_merge`` remains the separate opt-in automatic
+policy.  The old target-only ``stop_before_merge`` policy was removed; legacy
+inputs are interpreted as ``wait_for_merge`` (fail closed).
 
 ``build_status`` is a pure function of an *inputs* dict gathered by the TUI
 (``auto_start.collect_status_inputs``) from live scheduler, worker, tmux and
@@ -25,19 +32,23 @@ from datetime import datetime, timezone
 
 SCHEMA = "pm.autostart.status/1"
 
-POLICY_STOP = "stop_before_merge"
 POLICY_AUTO = "auto_merge"
-# Target-level: hold the target *and its whole dependency closure* for a
-# manual merge.  Stored on the target record (``WAIT_KEY``), never copied
-# into the explicit per-PR stop set, so removing the target or changing its
-# policy releases exactly the holds it caused.
+# The single manual policy: hold the target *and its whole dependency
+# closure* for an explicit user merge.  Stored on the target record
+# (``WAIT_KEY``); a target without the flag auto-merges.
 POLICY_WAIT = "wait_for_merge"
 WAIT_KEY = "wait_for_merge"
-POLICIES = (POLICY_STOP, POLICY_AUTO, POLICY_WAIT)
+POLICIES = (POLICY_AUTO, POLICY_WAIT)
 # The command-line flag selecting each policy (CLI + command bar).
-POLICY_FLAGS = {POLICY_STOP: "--stop-before-merge",
-                POLICY_AUTO: "--auto-merge",
+POLICY_FLAGS = {POLICY_AUTO: "--auto-merge",
                 POLICY_WAIT: "--wait-for-merge"}
+# Removed policy accepted only as a deprecated input alias.  It maps to the
+# single manual policy and never creates a separate target-only hold.
+LEGACY_POLICY_FLAGS = {"--stop-before-merge": POLICY_WAIT}
+LEGACY_POLICIES = {"stop_before_merge": POLICY_WAIT}
+# Legacy record values naming the automatic policy; anything else fails
+# closed to the single manual policy.
+_LEGACY_AUTO_VALUES = {"auto_merge", "auto-merge"}
 
 PHASES = ("pending", "implementation", "review", "qa", "sign_off", "merge", "done")
 STATES = ("queued", "running", "waiting", "paused", "failed", "completed")
@@ -110,66 +121,52 @@ def needed_by(prs: list[dict], targets) -> dict[str, list[str]]:
 
 
 # ---------------------------------------------------------------------------
-# Merge holds (the single policy path)
+# Merge holds (the single manual policy)
 # ---------------------------------------------------------------------------
 
 def is_wait_target(record) -> bool:
     return isinstance(record, dict) and bool(record.get(WAIT_KEY))
 
 
-def target_policy(pr_id: str, record, stop) -> str:
+def target_policy(record) -> str:
     """A target's own configured policy (not what holds it)."""
-    if is_wait_target(record):
-        return POLICY_WAIT
-    return POLICY_STOP if pr_id in (stop or ()) else POLICY_AUTO
+    return POLICY_WAIT if is_wait_target(record) else POLICY_AUTO
 
 
-def merge_holds(prs: list[dict], targets: dict, stop) -> dict[str, dict]:
-    """Every held PR → ``{"explicit": bool, "targets": [wait target ids]}``.
+def merge_holds(prs: list[dict], targets: dict) -> dict[str, dict]:
+    """Every held PR → ``{"targets": [wait target ids]}``.
 
-    A PR is held for a manual merge when it carries an explicit per-PR mark
-    (*stop*, the ``_stop_before_merge`` set) or lies in the dependency
-    closure (target included) of an active ``wait_for_merge`` target.
-    Derived on every call from the current graph, so newly added
-    dependencies are held and removed targets/edges release theirs.
-    Merged/closed closure members are not held (nothing left to merge, and
-    they would otherwise show up as "released" when the target goes).
+    A PR is held for a manual merge when it lies in the dependency closure
+    (target included) of an active ``wait_for_merge`` target.  Derived on
+    every call from the current graph, so newly added dependencies are held
+    and removed targets/edges release theirs.  Merged/closed closure members
+    are not held (nothing left to merge, and they would otherwise show up as
+    "released" when the target goes).
     """
     status = {pr["id"]: pr.get("status") for pr in prs}
     holds: dict[str, dict] = {}
-    for pr_id in stop or ():
-        holds[pr_id] = {"explicit": True, "targets": []}
     for t, rec in (targets or {}).items():
         if not is_wait_target(rec):
             continue
         for pr_id in sorted(closure(prs, t)):
             if status.get(pr_id) in TERMINAL_STATUSES:
                 continue
-            h = holds.setdefault(pr_id, {"explicit": False, "targets": []})
+            h = holds.setdefault(pr_id, {"targets": []})
             h["targets"].append(t)
     return holds
 
 
 def effective_policy(pr_id: str, holds: dict) -> str:
-    """Merge policy actually applied to *pr_id* (an explicit stop names it
-    first; a wait-target hold next; otherwise auto-merge)."""
-    h = holds.get(pr_id)
-    if not h:
-        return POLICY_AUTO
-    return POLICY_STOP if h.get("explicit") else POLICY_WAIT
+    """Merge policy actually applied to *pr_id*: wait-for-merge when a
+    wait target holds it, otherwise auto-merge."""
+    return POLICY_WAIT if pr_id in holds else POLICY_AUTO
 
 
 def held_by_text(h: dict | None) -> str:
-    """Short cause of a hold, e.g. ``"stop-before-merge"`` or
-    ``"wait-for-merge ← pr-final"``."""
-    if not h:
+    """Short cause of a hold, e.g. ``"wait-for-merge ← pr-final"``."""
+    if not h or not h.get("targets"):
         return ""
-    parts = []
-    if h.get("explicit"):
-        parts.append("stop-before-merge")
-    if h.get("targets"):
-        parts.append("wait-for-merge ← " + ", ".join(h["targets"]))
-    return "; ".join(parts)
+    return "wait-for-merge ← " + ", ".join(h["targets"])
 
 
 # ---------------------------------------------------------------------------
@@ -185,37 +182,144 @@ def targets_to_breadcrumb(targets: dict[str, dict]) -> list[dict]:
     return [{"pr_id": pr_id, **(rec or {})} for pr_id, rec in targets.items()]
 
 
-def targets_from_breadcrumb(data: dict) -> tuple[dict[str, dict], bool, bool]:
+def _legacy_ids(value) -> list[str]:
+    """String ids from a legacy field, defensively typed.
+
+    A wrong-typed field still names at least one id when it is a non-empty
+    string or a mapping's keys; anything else contributes nothing.  Keeping
+    a plausible id preserves a manual gate instead of dropping it.
+    """
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, dict):
+        return [k for k in value if isinstance(k, str) and k]
+    if isinstance(value, (list, tuple, set)):
+        return [v for v in value if isinstance(v, str) and v]
+    return []
+
+
+def _normalize_record(entry: dict) -> dict:
+    """Normalise one breadcrumb target record to the current schema.
+
+    The only policy state is ``WAIT_KEY``.  Legacy record fields are folded
+    in and any ambiguity fails closed to the manual policy so a stale record
+    can never silently permit a merge:
+
+    - ``wait_for_merge`` truthy → wait; explicitly falsy → auto;
+    - ``policy`` / ``merge_policy`` == auto → auto, anything else
+      (wait, stop, unknown) → wait;
+    - record-level ``stop_before_merge`` truthy → wait.
+    """
+    rec = {k: v for k, v in entry.items() if k != "pr_id"}
+    manual = False
+    auto = False
+    for key in ("policy", "merge_policy"):
+        if key in rec:
+            val = rec.pop(key)
+            if isinstance(val, str) and val.strip().lower() in _LEGACY_AUTO_VALUES:
+                auto = True
+            elif val:
+                manual = True          # wait / stop / unknown → fail closed
+    if rec.pop("stop_before_merge", False):
+        manual = True
+    if WAIT_KEY in rec:
+        if rec.pop(WAIT_KEY):
+            manual = True
+        else:
+            auto = True
+    if manual:
+        rec[WAIT_KEY] = True
+    else:
+        # Plain records are current-format auto-merge targets (the ``A``
+        # key's semantics); an explicit auto field also lands here.
+        rec.pop(WAIT_KEY, None)
+    return rec
+
+
+def migrate_legacy_stop(prs: list[dict], targets: dict,
+                        stop_ids) -> dict[str, dict]:
+    """Fold removed per-PR ``stop_before_merge`` marks into wait targets.
+
+    A legacy mark on an existing target forces its ``WAIT_KEY``; a mark on
+    a non-target becomes a standalone ``wait_for_merge`` target, preserving
+    the manual hold (and holding its closure, per the single policy).  Used
+    by both the breadcrumb reader and :func:`build_status` for stale inputs.
+    Terminal PRs are dropped (nothing left to merge); unknown ids are kept
+    and the scheduler's normal missing-target prune owns them later.
+    """
+    out = {k: (dict(v) if isinstance(v, dict) else v)
+           for k, v in (targets or {}).items()}
+    status = {p["id"]: p.get("status") for p in (prs or []) if p.get("id")}
+    for pr_id in _legacy_ids(stop_ids):
+        if status.get(pr_id) in TERMINAL_STATUSES:
+            continue
+        rec = out.get(pr_id)
+        if not isinstance(rec, dict):
+            rec = make_target_record("legacy-stop")
+            out[pr_id] = rec
+        rec[WAIT_KEY] = True
+    return out
+
+
+def targets_from_breadcrumb(data: dict, prs: list[dict] | None = None
+                            ) -> tuple[dict[str, dict], bool, bool]:
     """Read ``(targets, all_mode, migrated)`` from a breadcrumb dict.
 
     Current format: ``targets`` (list of records) + ``all_mode``.
     Legacy format (single-target TUI): ``target: X`` → ``[X]``; legacy
     ``auto_start`` with no target was the explicit "all ready PRs" mode and
-    maps to ``all_mode``.  *migrated* is True when the legacy shape was read.
+    maps to ``all_mode``.
+
+    The removed ``stop_before_merge`` list is migrated to
+    ``wait_for_merge`` targets (see :func:`migrate_legacy_stop`), and a
+    legacy single target (which cannot be distinguished from an ``A``
+    target) also fails closed to ``wait_for_merge``.  *migrated* is True
+    when any legacy shape/field was interpreted.
     """
     targets: dict[str, dict] = {}
+    all_mode = False
+    migrated = False
     raw = data.get("targets")
     if isinstance(raw, list):
         for entry in raw:
             if isinstance(entry, str):
                 targets.setdefault(entry, make_target_record("breadcrumb"))
             elif isinstance(entry, dict) and entry.get("pr_id"):
-                rec = {k: v for k, v in entry.items() if k != "pr_id"}
+                rec = _normalize_record(entry)
                 rec.setdefault("added_at", now_iso())
                 rec.setdefault("source", "breadcrumb")
                 targets.setdefault(entry["pr_id"], rec)
-        return targets, bool(data.get("all_mode")), False
+        all_mode = data.get("all_mode") is True
+    elif raw is None:
+        # Legacy single-target breadcrumb.  Older breadcrumbs always implied
+        # auto-start; treat presence of target/run_id as enabled.
+        had_auto = data.get("auto_start",
+                            bool(data.get("target") or data.get("run_id")))
+        if had_auto:
+            migrated = True
+            legacy = data.get("target")
+            if legacy:
+                rec = make_target_record("legacy-breadcrumb")
+                # Cannot tell O from A here: hold for a manual merge.
+                rec[WAIT_KEY] = True
+                targets[legacy] = rec
+            else:
+                all_mode = True
+    else:
+        # Malformed ``targets`` (not a list): fail closed — no targets and
+        # no all-mode, so a corrupt breadcrumb can never auto-merge the
+        # whole backlog.
+        migrated = True
 
-    # Legacy single-target breadcrumb.  Older breadcrumbs always implied
-    # auto-start; treat presence of target/run_id as enabled.
-    had_auto = data.get("auto_start", bool(data.get("target") or data.get("run_id")))
-    if not had_auto:
-        return {}, False, False
-    legacy = data.get("target")
-    if legacy:
-        targets[legacy] = make_target_record("legacy-breadcrumb")
-        return targets, False, True
-    return {}, True, True
+    # Removed per-PR stop marks.  Only meaningful when auto-start was active:
+    # with it off there is no scheduler/merge path, and turning these into
+    # targets would enable one (and could launch work).
+    stop = data.get("stop_before_merge")
+    if _legacy_ids(stop):
+        migrated = True
+        if targets or all_mode:
+            targets = migrate_legacy_stop(prs, targets, stop)
+    return targets, all_mode, migrated
 
 
 # ---------------------------------------------------------------------------
@@ -258,9 +362,7 @@ def _find_window(windows: dict[str, str], pr: dict, phase: str) -> dict | None:
 
 def _signed_off_reason(pr_id: str, holds: dict) -> str:
     h = holds.get(pr_id)
-    if h and h.get("explicit"):
-        return "signed off (fresh SIGNOFF_MERGE); stop-before-merge — press g"
-    if h:
+    if h and h.get("targets"):
         return ("signed off (fresh SIGNOFF_MERGE); waiting for manual merge "
                 f"(held by {', '.join(h['targets'])}) — press g")
     return "signed off (fresh SIGNOFF_MERGE); auto-merge pending"
@@ -423,20 +525,25 @@ def build_status(inp: dict) -> dict:
 
     *inp* keys (all optional except ``prs``): ``prs``, ``targets`` (ordered
     ``{pr_id: record}``), ``all_mode``, ``enabled``, ``run_id``, ``owner``,
-    ``stop_before_merge``, ``review_loops``, ``qa_loops``, ``pending_merge``,
+    ``review_loops``, ``qa_loops``, ``pending_merge``,
     ``merge_input_required``, ``launching``,
     ``impl_idle``, ``windows`` (``{name: id}``), ``signoff``
     (``{pr_id: {verdict, fresh, stale_reason?}}``), ``skip_qa``, ``generated_at``.
+
+    A stale ``stop_before_merge`` input (the removed policy) is folded into
+    ``wait_for_merge`` targets rather than ignored, so an old caller cannot
+    silently permit a merge.
     """
     prs = inp.get("prs") or []
     pr_map = {p["id"]: p for p in prs if p.get("id")}
     targets: dict[str, dict] = inp.get("targets") or {}
+    if _legacy_ids(inp.get("stop_before_merge")):
+        targets = migrate_legacy_stop(prs, targets, inp["stop_before_merge"])
     all_mode = bool(inp.get("all_mode"))
     enabled = bool(inp.get("enabled", bool(targets) or all_mode))
-    stop = set(inp.get("stop_before_merge") or ())
     windows = inp.get("windows") or {}
-    # Only active targets hold their closures (off → explicit marks only).
-    holds = merge_holds(prs, targets if enabled else {}, stop)
+    # Only active wait targets hold their closures.
+    holds = merge_holds(prs, targets if enabled else {})
 
     if not enabled:
         mode = "off"
@@ -468,7 +575,6 @@ def build_status(inp: dict) -> dict:
             "depends_on": list(pr.get("depends_on") or []),
             "policy": effective_policy(pr_id, holds),
             "held_by": list((holds.get(pr_id) or {}).get("targets") or []),
-            "explicit_hold": bool((holds.get(pr_id) or {}).get("explicit")),
             "window": ({"name": win["name"], "id": win["id"]} if win else None),
             "review": ({
                 "iteration": review.get("iteration") or 0,
@@ -533,7 +639,7 @@ def build_status(inp: dict) -> dict:
         targets_out.append({
             "pr_id": t,
             "title": (pr or {}).get("title", ""),
-            "policy": target_policy(t, rec, stop),
+            "policy": target_policy(rec),
             "effective_policy": effective_policy(t, holds),
             "held_by": list((holds.get(t) or {}).get("targets") or []),
             "added_at": rec.get("added_at"),
@@ -622,8 +728,8 @@ def policy_labels(row: dict) -> list[tuple[str, str]]:
     """``[(label, kind)]`` naming a status row's effective merge policy and
     what causes a hold — shared by ``format_text`` and the runs popup.
 
-    *kind* is ``stop`` / ``wait`` / ``auto``.  A wait target names its own
-    policy (``wait-for-merge``); a PR held by other wait targets names them
+    *kind* is ``wait`` / ``auto``.  A wait target names its own policy
+    (``wait-for-merge``); a PR held by other wait targets names them
     (``wait-for-merge ← T``).  Target rows always name a policy; an
     auto-merge target that a hold overrides says so.
     """
@@ -631,8 +737,6 @@ def policy_labels(row: dict) -> list[tuple[str, str]]:
     pr_id = run.get("pr_id") or row.get("pr_id")
     held_by = list(run.get("held_by") or [])
     out: list[tuple[str, str]] = []
-    if run.get("explicit_hold") or run.get("policy") == POLICY_STOP:
-        out.append(("stop-before-merge", "stop"))
     # A target's own wait policy, even once nothing is left to hold (a
     # completed target's closure is merged, so it is in no ``held_by``).
     if pr_id in held_by or (row.get("kind") == "target"

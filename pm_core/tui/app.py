@@ -397,11 +397,6 @@ class ProjectManagerApp(App):
         # ``pr start`` activation must not move the user's cursor.
         self._followed_active_pr: str | None = None
         self._quiet_activations: dict[str, float] = {}
-        # Explicit per-PR opt-out of auto-merge (O key / CLI default).
-        # When a PR is in this set, _maybe_auto_merge stops at "ready to
-        # merge" instead of launching the merge window.  Wait-for-merge
-        # holds are derived separately (auto_start.merge_holds).
-        self._stop_before_merge: set[str] = set()
         # Watcher framework manager (purely in-memory, lost on TUI restart)
         from pm_core.watcher_manager import WatcherManager
         self._watcher_manager = WatcherManager()

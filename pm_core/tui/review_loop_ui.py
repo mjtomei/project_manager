@@ -591,9 +591,8 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     skip_qa ``in_review``) PR is handed to the sign-off step instead, and a
     ``sign_off`` PR is left to the sign-off driver (``signoff_ui``).
 
-    Then the effective merge hold (``auto_start.merge_hold``: an explicit
-    stop-before-merge mark from O / the CLI, or a ``wait_for_merge`` target
-    whose closure contains the PR) stops with the "ready to merge" /
+    Then the effective merge hold (``auto_start.merge_hold``: a
+    ``wait_for_merge`` target whose closure contains the PR) stops with the
     "waiting for manual merge" line; otherwise runs
     ``pm pr merge --resolve-window --background <pr_id>`` synchronously,
     then triggers ``auto_start.check_and_start()`` to kick off newly-ready
@@ -634,22 +633,18 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
                       "— not merging", pr_id, status)
         return
 
-    # Effective merge hold: an explicit per-PR stop (O / CLI default) or a
-    # wait-for-merge target needing this PR.  Either wins even when an
-    # auto-merge target depends on this PR.
+    # Effective merge hold: a wait-for-merge target needing this PR.  It
+    # wins even when an auto-merge target depends on this PR.
     hold = _auto_start.merge_hold(app, pr_id)
     if hold:
         _log.info("auto_merge: %s held (%s) — skipping merge", pr_id,
                   held_by_text(hold))
-        # The stop line is printed once per (verdict, sha, policy) and is
+        # The wait line is printed once per (verdict, sha, policy) and is
         # the user's cue to press g, so force it past a sticky message (e.g.
         # "Review loop done" right before a fast skip_qa sign-off) and hold
         # it against same-frame follow-ons (another target's merge lines).
-        if hold.get("explicit"):
-            tail = "ready to merge (auto-sequence armed — press 'g' to merge)"
-        else:
-            tail = ("waiting for manual merge (wait-for-merge: "
-                    f"{', '.join(hold['targets'])}) — press 'g' to merge")
+        tail = ("waiting for manual merge (wait-for-merge: "
+                f"{', '.join(hold['targets'])}) — press 'g' to merge")
         app.log_message(
             f"[green bold]✓ {pr_id} signed off[/] (SIGNOFF_MERGE @ {sha[:8]}) "
             f"— {tail}",
