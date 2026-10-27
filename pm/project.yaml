@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T15:26:04.694009+00:00'
+  updated_at: '2026-10-27T15:42:10.064334+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37017,6 +37017,30 @@ prs:
       aarch64 asset is agg-aarch64-unknown-linux-gnu (v1.9.0, no version in the name).'
     created_at: '2026-10-27T15:26:04Z'
     last_edited: '2026-10-27T15:26:04Z'
+  - id: note-529193f
+    text: 'QA scenario 28 (merged base behaviours + sign-off flow): found and fixed
+      one base gap, qa commit 9f930e5f. (1) `tmux_mod.kill_window` now prunes the
+      pane registry after the kill — tmux never fires `after-kill-pane` for `kill-window`,
+      so a bounced-out `signoff-<A>` window (and the `review-<A>` window a re-launch
+      replaced) kept its panes in `~/.pm/pane-registry/<base>.json` under the old
+      `@id` until some unrelated pane kill reconciled the whole registry; `prune_dead_windows`
+      also no longer creates a registry/lock file for a session pm never registered
+      panes for. Tests: 524 focused passed (test_tmux, test_pane_registry, test_pane_layout,
+      test_pane_idle, test_signoff*, test_tui_signoff_handoff). Captures: /pm-captures/scenarios/28/
+      (story1, story2, story3, pre-fix/story4, post-fix/story4). Harness facts for
+      the next run: (a) the picker qa row shows `[open] [idle]`, not `[working]` —
+      fake-claude always writes an `idle_prompt` hook and `derive_action_status` aggregates
+      it to idle; the runtime mirror still says running and the TUI row shows ● qa,
+      so the scenario text should ask for "a live badge"; (b) to exercise the spinner
+      suppress-switch path send `t` then `q` ~50 ms apart in the picker pane — the
+      qa window appears within ~0.2 s, so a 0.25 s gap is too late and the client
+      is switched; (c) `pm pr auto-sequence` needs `$TMUX` (run it from a pane of
+      the session) and the bounce iteration counter is cumulative per PR (a second
+      bounce prints `iteration 2`); (d) the story-3 fixture reproduces the `project.active_pr`
+      conflict rather than a record-append conflict — the appended records auto-merge,
+      so resolving the single active_pr hunk (base value wins) is enough.'
+    created_at: '2026-10-27T15:42:09Z'
+    last_edited: '2026-10-27T15:42:09Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
