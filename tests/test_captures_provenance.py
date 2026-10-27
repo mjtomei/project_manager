@@ -148,6 +148,16 @@ def test_manifest_survives_unreadable_file(tmp_path):
     assert captures.read_manifest(root, pr_id="pr-x") is None
 
 
+def test_write_manifest_ignores_non_mapping_members(tmp_path):
+    """``write_manifest`` is documented as never raising; a malformed member
+    must be dropped, not turn a QA run's evidence sync into a TypeError."""
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-x", run_id="run1",
+                            scenarios=[{"index": 1}, "junk", None, 7])
+    m = captures.read_manifest(root, pr_id="pr-x")
+    assert [s["index"] for s in m["scenarios"]] == [1]
+
+
 # ---------------------------------------------------------------------------
 # Per-scenario record
 # ---------------------------------------------------------------------------
@@ -318,6 +328,24 @@ def test_quarantine_is_a_noop_without_foreign_records(tmp_path):
     assert captures.quarantine_foreign(root, pr_id="pr-x", run_id="run1") == []
 
 
+def test_non_canonical_dir_names_are_never_mapped_to_an_index(tmp_path):
+    """``scenarios/03`` must not be treated as index 3: every helper turns an
+    index back into a path, so classifying ``03`` as 3 would make quarantine
+    move ``scenarios/3`` — a different directory — on ``03``'s record."""
+    root = _root(tmp_path)
+    odd = root / "scenarios" / "03"
+    odd.mkdir(parents=True)
+    (odd / "scenario.json").write_text(
+        json.dumps({"index": 3, "pr_id": "pr-other"}), encoding="utf-8")
+    real = _scenario_dir(root, 3, {"index": 3, "pr_id": "pr-x",
+                                   "run_id": "run1"})
+
+    assert captures.scenario_indices(root) == [3]
+    assert captures.quarantine_foreign(root, pr_id="pr-x", run_id="run1") == []
+    assert real.is_dir()
+    assert odd.is_dir()
+
+
 # ---------------------------------------------------------------------------
 # QA loop writers
 # ---------------------------------------------------------------------------
@@ -417,6 +445,25 @@ def test_sync_never_quarantines_through_a_shared_mount(tmp_path, monkeypatch):
     # membership is still bound to its own run.
     assert captures.read_manifest(mount, pr_id="pr-fixture")["run_id"] == "fixturerun"
     assert captures.read_manifest(mount, pr_id="pr-outer")["run_id"] == "outerrun"
+
+
+def test_sync_writes_an_empty_membership_manifest(tmp_path, monkeypatch):
+    """A run that owns no scenarios (planner trust-blocked, QA spec missing)
+    still binds itself to the PR: the empty manifest is what stops an older
+    run's directories passing as this run's coverage."""
+    from pm_core import paths, qa_loop
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-fixture", run_id="oldrun",
+                            scenarios=[{"index": 1, "title": "old"}])
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: root)
+    state = _fixture_state()
+    state.scenarios = []
+
+    qa_loop._sync_captures_evidence(state)
+
+    m = captures.read_manifest(root, pr_id="pr-fixture")
+    assert m["run_id"] == "fixturerun"
+    assert m["scenarios"] == []
 
 
 def test_sync_quarantines_when_the_mount_belongs_to_this_pr(tmp_path,
@@ -671,3 +718,20 @@ def test_cli_qa_evidence_lists_members_and_anomalies(tmp_path, monkeypatch):
     assert "run1" in res.output
     assert "Scenario 1" in res.output
     assert "foreign" in res.output
+
+
+def test_cli_qa_evidence_reports_absent_captures_dir(tmp_path, monkeypatch):
+    """The reader must not fail a sign-off session just because nothing was
+    captured: "no captures dir" is an audit anomaly, and the command exits 0."""
+    from click.testing import CliRunner
+    from pm_core.cli.qa import qa_evidence
+    data = {"prs": [{"id": "pr-x", "title": "T", "status": "sign_off"}]}
+    monkeypatch.setattr("pm_core.paths.captures_dir", lambda *a, **k: None)
+    monkeypatch.setattr("pm_core.paths.latest_qa_status_path",
+                        lambda pr_id: None)
+    monkeypatch.setattr("pm_core.cli.helpers.state_root", lambda: tmp_path)
+    monkeypatch.setattr("pm_core.store.load", lambda root: data)
+    res = CliRunner().invoke(qa_evidence, ["pr-x"])
+    assert res.exit_code == 0, res.output
+    assert "Captures: (none)" in res.output
+    assert "no captures dir" in res.output

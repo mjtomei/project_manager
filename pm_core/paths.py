@@ -141,7 +141,8 @@ def captures_dir(pr_id: str,
 
 
 def captures_root(session_tag: str | None = None,
-                  start_path: Path | None = None) -> Path | None:
+                  start_path: Path | None = None,
+                  create: bool = True) -> Path | None:
     """Return the host captures *root* (``~/.pm/sessions/<tag>/captures/``).
 
     This is the directory that holds every per-PR captures dir; it is also
@@ -151,12 +152,18 @@ def captures_root(session_tag: str | None = None,
     tag, else the cwd/tmux-derived tag. Returns ``None`` when no tag can
     be derived (e.g. not inside a git repo). The directory is created if
     it doesn't exist when a tag is available.
+
+    *create* may be ``False`` for a **reader** (the merge gate, evidence
+    lookups): the root is then returned only when it already exists, so
+    checking a gate never conjures a captures tree as a side effect.
     """
     if session_tag is None:
         session_tag = _resolve_session_tag(start_path)
     if not session_tag:
         return None
     root = sessions_dir() / session_tag / "captures"
+    if not create:
+        return root if root.is_dir() else None
     root.mkdir(parents=True, exist_ok=True)
     return root
 

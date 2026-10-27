@@ -385,7 +385,8 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
     recorded_hash = (pr.get("signoff") or {}).get("report_hash")
     from pm_core import captures as captures_mod
     from pm_core.paths import captures_root
-    croot = captures_root()
+    # Reader only: a gate check must not create a captures tree.
+    croot = captures_root(create=False)
     report = croot / pr_id / "report.html" if croot else None
     if recorded_hash:
         import hashlib

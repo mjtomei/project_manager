@@ -116,6 +116,11 @@ manifest still resolves).
   `_write_status_file` and before the first scenario prompt is written) —
   so `prompt.md` directories are covered even if the run dies before any
   verdict is persisted. Scenario 0 (interactive) is **not** a member.
+  `resume_qa_sync` runs the same sync before re-entering the poll phase: a
+  TUI restart must not skip the start-of-run quarantine, because queued
+  scenarios launch from there and their `prompt.md` must not land on another
+  project's record. `loop_id` survives the restart, so a resume re-asserts
+  the same run.
 - **Completion**, in `_execute_and_finalize`, after
   `_persist_scenario_verdicts` (which also publishes the final membership),
   with final verdicts and `overall` (`state.latest_verdict`).
@@ -171,9 +176,12 @@ a nested fixture's record is provably not this PR's evidence.
 New CLI command `pm qa evidence <pr_id>` (`pm_core/cli/qa.py`, beside
 `captures-path`) prints the audit: PR, run id, manifest scenario list, and
 each anomaly. It resolves the captures dir through `paths.captures_dir` (so it
-works on the host and inside a container) and exits 0; it is a *reader*, it
-never writes. This is the surface a sign-off session (or a QA scenario) uses
-instead of listing arbitrary directories.
+works on the host and inside a container) and exits 0 for any existing PR —
+including when no captures dir exists, which is reported as the audit's "no
+captures dir" anomaly rather than a command failure, so a sign-off session
+does not abort on "nothing captured yet". It is a *reader*, it never writes.
+This is the surface a sign-off session (or a QA scenario) uses instead of
+listing arbitrary directories.
 
 ### R7 — Sign-off prompt binds to the run
 `pm_core/prompt_gen.py`:
@@ -263,7 +271,9 @@ is introduced for pre-existing reports.
 - **Prompt budget.** All prompt additions are static text or one inlined line;
   they stay well inside `PROMPT_ARG_LIMIT` (120 KB) and the QA listing handed
   to `fit_prompt` is unchanged in shape.
-- **No duplication of #264.** `pm_core/paths.py` routing is not modified.
+- **No duplication of #264.** `pm_core/paths.py`'s *routing* rule (which PR
+  owns the mount) is not modified — only the additive `create=False` reader
+  mode on `captures_dir`/`captures_root`.
   `tests/test_captures_dir_mount.py` is not modified.
 - **Preserve existing captures.** Nothing is deleted; quarantine is a move,
   and only for provably-foreign records.
@@ -342,6 +352,20 @@ No **[UNRESOLVED]** items.
   lists the interactive scenario 0 (display contract, A5) but the manifest
   never does, so the prompt's disagreement warning compares the listings
   with index 0 excluded — otherwise it would fire on every normal run.
+- **Two runs publishing the manifest concurrently** (a stale controller and a
+  fresh one): each writer uses its own temp file (`<name>.<pid>.<rand>.tmp`)
+  before `os.replace`, so the intended last-write-wins cannot become a
+  half-written file, and readers still fall back to `qa_runs/<run_id>.json`
+  if a pointer is unreadable.
+- **Non-canonical numeric directory names** (`scenarios/03`): indices are
+  only accepted when `str(int(name)) == name`. Every helper turns an index
+  back into a path, so treating `03` as index 3 would make
+  `quarantine_foreign` move `scenarios/3` — a different directory — on
+  `03`'s record. pm only ever writes `str(index)`, so such a directory is
+  left alone (and is not classified).
+- **A manifest member whose only record is from a prior run**: reported as
+  "manifest member whose record is from prior QA run X — this run's evidence
+  for it is missing", not merely as history.
 
 ## 5. Implementation notes (files touched)
 
@@ -350,7 +374,11 @@ No **[UNRESOLVED]** items.
   `_persist_scenario_verdicts` stamping + manifest + completion quarantine
   (R2, R3, R5); `_sync_captures_evidence` start-of-run/completion sync (R3,
   R5) with the shared-mount quarantine guard; `_execute_and_finalize`
-  completion sync; pass `run_id` at every `_write_status_file` call site.
+  completion sync; `resume_qa_sync` start sync; pass `run_id` at every
+  `_write_status_file` call site.
+- `pm_core/paths.py` — `captures_dir(create=False)` and
+  `captures_root(create=False)` so readers (prompt builders, `pm qa
+  evidence`, the merge gate) never create a captures dir as a side effect.
 - `pm_core/prompt_gen.py` — QA head/listing run binding, evidence checklist,
   report meta contract (R7).
 - `pm_core/behavior_report.py` — dashboard stale-run marker (R8).

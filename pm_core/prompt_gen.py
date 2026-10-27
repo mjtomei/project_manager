@@ -676,7 +676,7 @@ def _qa_run_binding(pr_id: str, status: dict,
             "Scenario membership is **not run-bound**: no "
             "`$CAP/qa_manifest.json` for this PR. Treat every "
             "`$CAP/scenarios/<n>/` directory as unverified provenance and "
-            "cite only the scenarios listed above.")
+            "cite only the scenarios listed below.")
         return lines
     if status_run and status_run != manifest_run:
         lines.append(

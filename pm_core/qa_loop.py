@@ -4475,6 +4475,12 @@ def resume_qa_sync(
     state.latest_output = "Resuming QA after restart..."
     _notify()
 
+    # Same start-of-run evidence sync as the fresh launch path (pr-1ae1d2d):
+    # queued scenarios launch from the poll phase below, and their prompt.md
+    # must not land on top of another project's record.  ``loop_id`` survives
+    # the restart, so this re-asserts the *same* run's membership.
+    _sync_captures_evidence(state)
+
     return _execute_and_finalize(
         state, pm_root, pr_data, data, session, window_name,
         workdir_path, status_path, repo_root,

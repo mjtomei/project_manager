@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -92,19 +93,28 @@ def _now() -> str:
 
 
 def _atomic_write_json(path: Path, data: dict) -> bool:
-    """Write *data* as JSON via ``tmp`` + ``rename``; False on any OSError."""
+    """Write *data* as JSON via ``tmp`` + ``rename``; False on any OSError.
+
+    The temp name is unique per writer: two QA runs for the same PR can
+    publish the manifest concurrently (a stale controller and a fresh one),
+    and a shared ``<name>.tmp`` would let them truncate/rename each other's
+    half-written file instead of the intended last-write-wins.
+    """
+    tmp: Path | None = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".tmp")
+        tmp = path.with_name(
+            f".{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         os.replace(tmp, path)
         return True
     except (OSError, TypeError, ValueError):
         _log.warning("Failed to write %s", path, exc_info=True)
-        try:
-            path.with_name(path.name + ".tmp").unlink()
-        except OSError:
-            pass
+        if tmp is not None:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
         return False
 
 
@@ -143,7 +153,10 @@ def write_manifest(captures_root: Path | str | None, *,
         "started_at": started_at or _now(),
         "updated_at": _now(),
         "overall": overall or "",
-        "scenarios": [dict(s) for s in (scenarios or [])],
+        # Only mappings are members; a caller that hands over something else
+        # must not turn "never raises" into a TypeError mid-QA-run.
+        "scenarios": [dict(s) for s in (scenarios or [])
+                      if isinstance(s, dict)],
     }
     # Per-run copy first: the root pointer below is what a nested fixture can
     # overwrite, and the copy is what makes this run's membership recoverable
@@ -206,16 +219,24 @@ def read_manifest(captures_root: Path | str | None,
             return manifest
     runs = root / RUNS_DIR_NAME
     try:
-        candidates = sorted(
-            (p for p in runs.glob("*.json") if p.is_file()),
-            key=lambda p: p.stat().st_mtime, reverse=True)
+        files = [p for p in runs.glob("*.json") if p.is_file()]
     except OSError:
         return None
+    # A per-run copy can vanish between the glob and the stat (a concurrent
+    # prune); sort it to the back rather than discarding every candidate.
+    candidates = sorted(files, key=_mtime_or_zero, reverse=True)
     for path in candidates:
         manifest = _valid_manifest(_read_json(path), pr_id)
         if manifest is not None:
             return manifest
     return None
+
+
+def _mtime_or_zero(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +312,15 @@ class EvidenceAudit:
 
 
 def scenario_indices(captures_root: Path | str | None) -> list[int]:
-    """Indices of the numeric directories under ``scenarios/`` (sorted)."""
+    """Indices of the numeric directories under ``scenarios/`` (sorted).
+
+    Only *canonical* names count (``3``, not ``03``).  The index is what
+    every other helper turns back into a path (``scenario_dir(root, 3)``),
+    so accepting ``03`` as index 3 would make :func:`quarantine_foreign`
+    move ``scenarios/3`` — a different directory — based on ``03``'s record.
+    pm only ever writes ``str(index)``, so a non-canonical name is not ours
+    to classify (or move).
+    """
     if captures_root is None:
         return []
     root = scenarios_dir(captures_root)
@@ -301,8 +330,12 @@ def scenario_indices(captures_root: Path | str | None) -> list[int]:
         return []
     out: list[int] = []
     for entry in entries:
-        if entry.is_dir() and _NUMERIC_DIR_RE.match(entry.name):
-            out.append(int(entry.name))
+        if not entry.is_dir() or not _NUMERIC_DIR_RE.match(entry.name):
+            continue
+        index = int(entry.name)
+        if str(index) != entry.name:
+            continue
+        out.append(index)
     return sorted(out)
 
 
@@ -390,8 +423,17 @@ def audit(captures_root: Path | str | None, *,
                     f"scenarios/{i}: unowned record (no PR/run identity) — "
                     "not bound to a QA run")
         elif ev.state == PRIOR_RUN:
-            anomalies.append(
-                f"scenarios/{i}: prior QA run {ev.owner_run}")
+            if i in member_indices:
+                # The manifest says this run owns the scenario, but the only
+                # record on disk was written by an earlier run — this run's
+                # evidence for it is missing, not merely old.
+                anomalies.append(
+                    f"scenarios/{i}: manifest member whose record is from "
+                    f"prior QA run {ev.owner_run} — this run's evidence for "
+                    "it is missing")
+            else:
+                anomalies.append(
+                    f"scenarios/{i}: prior QA run {ev.owner_run}")
     for i in orphans:
         if dirs[i].state == CURRENT:
             anomalies.append(

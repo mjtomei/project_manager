@@ -230,7 +230,9 @@ def qa_evidence(pr_id: str):
 
     Scenario membership is the manifest's, never "the directory exists" —
     this is the reader a sign-off session uses instead of walking the
-    captures tree by hand. Read-only: it never writes or quarantines.
+    captures tree by hand. Read-only: it never writes or quarantines, and it
+    exits 0 for any existing PR — "no captures dir" is reported as an
+    anomaly, not as a command failure.
     """
     import json
 
@@ -262,13 +264,13 @@ def qa_evidence(pr_id: str):
         root = captures_dir(canonical, create=False)
     except Exception:
         root = None
-    if root is None:
-        click.echo(f"PR {canonical}: no captures dir found.", err=True)
-        raise click.exceptions.Exit(1)
 
+    # "No captures dir" is a valid audit result, not a command failure: this
+    # is the reader a sign-off session runs, and it must report the absence
+    # (``audit`` turns it into an anomaly) instead of failing the session.
     audit = captures.audit(root, pr_id=canonical, run_id=status_run)
     click.echo(f"PR: {canonical}")
-    click.echo(f"Captures: {root}")
+    click.echo(f"Captures: {root if root is not None else '(none)'}")
     if audit.manifest is None:
         click.echo("QA run: (no qa_manifest.json — membership not run-bound)")
     else:
