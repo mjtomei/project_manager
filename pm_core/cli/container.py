@@ -535,7 +535,9 @@ def container_restart(name: str, force: bool):
             owners = ([] if force
                       else container_reaper.live_owner_panes(name, target_id))
             if not force and container_mod.recent_launch(
-                    name, container_reaper.LAUNCH_GRACE, target_id):
+                    name, container_reaper.LAUNCH_GRACE, target_id) and not (
+                    container_mod.restart_lease_only(
+                        name, container_reaper.LAUNCH_GRACE, target_id)):
                 click.echo(f"{name} is awaiting attachment; retry after its launch lease "
                            "expires, or use --force only when it is safe to end the session.", err=True)
                 raise SystemExit(1)

@@ -1159,13 +1159,17 @@ def create_container(
             same_owner = (bool(prior_id) and reuse_identity is not None
                           and reuse_identity.get("id") == prior_id
                           and reuse_identity.get("generation") == cleanup_generation(name))
+            # A restart's lease keeps cleanup away until the next launch, but
+            # it is not an attaching launch: that next launch may adopt it.
+            restarted = (bool(prior_id) and was_attaching and not same_owner
+                         and restart_lease_only(name, container_reaper.LAUNCH_GRACE, prior_id))
         except OSError as exc:
             raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
                                stage="check whether the container is still owned") from exc
         # Recovery can restart or remove an incomplete allocation. Protect the
         # create-to-pane gap before entering it, not just before renewing reuse.
         # Capture a QA handoff now: recovery itself may advance its generation.
-        if was_attaching and prior_id != "" and not same_owner:
+        if was_attaching and prior_id != "" and not same_owner and not restarted:
             raise launch_error(
                 name, "runtime", "container is still owned by an attaching launch; "
                 "use that session or wait for it to finish", stage="be reused")
@@ -1191,7 +1195,7 @@ def create_container(
             same_owner = same_owner and prior_id == reused
             if not same_owner:
                 owners = container_reaper.live_owner_panes(name, reused)
-                if owners or was_attaching:
+                if owners or was_attaching and not (restarted and reused == prior_id):
                     raise launch_error(
                         name, "runtime",
                         "container is still owned by a live session or an attaching launch; "
@@ -1427,6 +1431,29 @@ def recent_launch(name: str, grace: float, container_id: str | None = None) -> b
     return False
 
 
+# A restart renews the attachment lease so cleanup cannot reap the restarted
+# allocation before the user relaunches it, but no launch is attaching to it.
+# Its generation carries this prefix so the next launch may adopt it.
+RESTART_GENERATION_PREFIX = "restart-"
+
+
+def restart_lease_only(name: str, grace: float, container_id: str) -> bool:
+    """True when every live lease on *name*/*container_id* came from a restart.
+
+    Callers hold the name's launch lock, as do restart and every launch that
+    renews a lease, so the markers cannot change between stat and read.
+    """
+    now = time.time()
+    fresh = []
+    for marker in (_restart_generation_path(name), _identity_generation_path(container_id)):
+        try:
+            if now - marker.stat().st_mtime < grace:
+                fresh.append(marker.read_text().strip())
+        except FileNotFoundError:
+            continue
+    return bool(fresh) and all(g.startswith(RESTART_GENERATION_PREFIX) for g in fresh)
+
+
 @_runtime_domain_operation
 def restart_container(name: str, *, container_id: str | None = None) -> None:
     """Restart *name* in place: ends every process inside (clearing PID or
@@ -1446,7 +1473,7 @@ def restart_container(name: str, *, container_id: str | None = None) -> None:
         container_id = current
         marker = _restart_generation_path(name, for_write=True)
         marker.parent.mkdir(parents=True, exist_ok=True)
-        generation = uuid.uuid4().hex
+        generation = RESTART_GENERATION_PREFIX + uuid.uuid4().hex
         marker.write_text(generation)
         _write_identity_generation(container_id, generation)
     except OSError as exc:
