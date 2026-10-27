@@ -1,5 +1,6 @@
 """Tests for pm_core.review_loop and pm_core.prompt_gen review loop prompt."""
 
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -314,6 +315,59 @@ class TestRunReviewLoopSync:
         assert result.running is False
         assert result.iteration == 1
         mock_review.assert_called_once()
+
+
+# --- pr-e040aeb: a failed next-iteration launch is retried -----------------
+
+def test_failed_launch_is_retried_not_terminal(tmp_path, monkeypatch):
+    """The next iteration's ``pm pr review`` child fails (the historical
+    window is closed, container setup then fails).  Pre-fix this ended the
+    loop with ERROR on the first attempt; the fix retries the same
+    iteration and collects its own verdict."""
+    import uuid
+
+    from pm_core import review_loop as rl
+    from pm_core import tmux
+
+    monkeypatch.setattr(rl, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(tmux, "session_exists", lambda _s: True)
+    monkeypatch.setattr(rl, "_find_claude_pane", lambda *a, **k: "%9")
+    monkeypatch.setattr(rl, "_find_review_claude_pane", lambda *a, **k: "%9",
+                        raising=False)
+    monkeypatch.setattr(rl, "_poll_for_verdict", lambda *a, **k: "**PASS**")
+    # Post-fix seams: discovery says nothing is live; retries are instant.
+    if hasattr(rl, "_discover_iteration"):
+        monkeypatch.setattr(
+            rl, "_discover_iteration",
+            lambda *a, **k: rl.AttemptDiscovery("launch"))
+        monkeypatch.setattr(rl, "REVIEW_LAUNCH_BACKOFF_BASE", 0.0)
+        monkeypatch.setattr(rl, "REVIEW_LAUNCH_BACKOFF_MAX", 0.0)
+        monkeypatch.setattr(rl, "_WINDOW_WAIT", 0.0)
+        monkeypatch.setattr(rl, "_pr_is_terminal", lambda *a, **k: False)
+        monkeypatch.setattr(rl, "_claim_launch", lambda *a, **k: True)
+
+    calls = []
+
+    def fake_run(cmd, **_kw):
+        calls.append(cmd)
+        if len(calls) == 1:
+            return MagicMock(returncode=1, stdout="",
+                             stderr="Failed to create container")
+        # The child created the iteration transcript before running Claude.
+        t = cmd[cmd.index("--transcript") + 1]
+        link = Path(t)
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(link.parent / f"{uuid.uuid4()}.jsonl")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(rl.subprocess, "run", fake_run)
+
+    state = ReviewLoopState(pr_id="pr-001")
+    run_review_loop_sync(state, str(tmp_path), _PR_DATA,
+                         transcript_dir=str(tmp_path))
+    assert len(calls) == 2, "the failed launch must be retried, not terminal"
+    assert state.iteration == 1
+    assert state.latest_verdict == VERDICT_PASS
 
 
 class TestResumeInFlightIteration:

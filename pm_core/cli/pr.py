@@ -3664,6 +3664,14 @@ def pr_auto_sequence(pr_id: str):
         if not pm_session:
             click.echo("paused: no pm tmux session")
             return
+        # A native review loop (including its bounded failed-launch retries)
+        # owns this PR's review launch; a second --fresh launch here would
+        # kill its window and duplicate the work.  Wait for the loop.
+        from pm_core.review_loop import review_loop_owns_launch
+        _loop_owner = review_loop_owns_launch(pr_id)
+        if _loop_owner:
+            click.echo(f"running: review (owned by {_loop_owner})")
+            return
         verdict, latest_iter = _check_review_verdict(tdir, pr_id)
         if verdict and _older_than(
                 tdir / f"review-{pr_id}-i{latest_iter}.jsonl",

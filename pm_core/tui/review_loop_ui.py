@@ -11,6 +11,8 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
              If a loop is already running, make this iteration the last one.
 """
 
+import time
+
 from pm_core.paths import configure_logger
 from pm_core import store
 from pm_core.autostart_state import held_by_text
@@ -20,6 +22,9 @@ from pm_core.review_loop import (
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
+    VERDICT_LAUNCH_FAILED,
+    VERDICT_HOLD,
+    VERDICT_CLOSED,
 )
 
 _log = configure_logger("pm.tui.review_loop_ui")
@@ -32,6 +37,9 @@ VERDICT_ICONS = {
     "KILLED": "[red bold]☠ KILLED[/]",
     "TIMEOUT": "[red bold]⏱ TIMEOUT[/]",
     "ERROR": "[red bold]! ERROR[/]",
+    VERDICT_LAUNCH_FAILED: "[red bold]↻ LAUNCH_FAILED[/]",
+    VERDICT_HOLD: "[yellow bold]⏸ HOLD[/]",
+    VERDICT_CLOSED: "[dim]· CLOSED[/]",
     "": "[dim]—[/]",
 }
 
@@ -70,6 +78,16 @@ def stop_loop_or_fresh_review(app) -> None:
     loop = app._review_loops.get(pr_id)
     if loop and loop.running:
         loop.stop_requested = True
+        # Hand the cross-driver launch lease to the fresh loop now; waiting
+        # for the old thread to exit would make the new loop's first claim
+        # fail against a still-live lease.
+        try:
+            from pm_core import runtime_state as _rs
+            _rs.release_action_lease(pr_id, "review-loop",
+                                     f"loop:{loop.loop_id}")
+        except Exception:
+            _log.debug("review_loop_ui: supersede lease release failed",
+                       exc_info=True)
         # Kill the review window so the running iteration's
         # _poll_for_verdict (which doesn't check stop_requested)
         # detects pane-gone, raises PaneKilledError, and the loop
@@ -128,6 +146,15 @@ def start_or_stop_loop(app) -> None:
     superseded = bool(existing and existing.running)
     if superseded:
         existing.stop_requested = True
+        # Release the old loop's launch lease immediately so the new loop's
+        # first claim does not lose to a loop that is already stopping.
+        try:
+            from pm_core import runtime_state as _rs
+            _rs.release_action_lease(pr_id, "review-loop",
+                                     f"loop:{existing.loop_id}")
+        except Exception:
+            _log.debug("review_loop_ui: supersede lease release failed",
+                       exc_info=True)
         # Force the running iteration to terminate now: the
         # _run_claude_review path blocks in _poll_for_verdict (which
         # doesn't check stop_requested) until the pane is gone.
@@ -217,6 +244,7 @@ def _start_loop(app, pr_id: str, pr: dict | None,
         state.stop_requested = False
         state._ui_notified_done = False
         state._ui_notified_input = False
+        state._ui_notified_retry = 0
         app._review_loops[pr_id] = state
         mode_label = f"resumed at iteration {state.iteration}"
         _log.info("review_loop_ui: resuming loop for %s at iteration %d", pr_id, state.iteration)
@@ -314,6 +342,13 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
                     finalize_transcript(p)
 
     from pm_core import runtime_state as _rs
+    # Release this loop's cross-driver launch lease (only if we still hold
+    # it; a superseding loop owns its own).
+    try:
+        _rs.release_action_lease(state.pr_id, "review-loop",
+                                 f"loop:{state.loop_id}")
+    except Exception:
+        _log.debug("review_loop_ui: lease release failed", exc_info=True)
     if not _is_active_loop(state):
         # We were superseded by a fresh loop; don't overwrite its
         # 'running' entry with our terminal (often KILLED) verdict.
@@ -321,16 +356,34 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
                    "superseded loop_id=%s verdict=%s",
                    state.loop_id, state.latest_verdict)
         return
-    # ERROR/KILLED are runtime failures, not clean completions; record
-    # them as state="failed" so the popup spinner can distinguish a
-    # successful loop end from a failure and surface the verdict to the
-    # user instead of silently dismissing.
+    # ERROR/KILLED/LAUNCH_FAILED/HOLD are runtime failures, not clean
+    # completions; record them as state="failed" so the popup spinner can
+    # distinguish a successful loop end from a failure and surface the
+    # verdict to the user instead of silently dismissing.
     final_state = ("failed"
-                   if state.latest_verdict in ("ERROR", "KILLED")
+                   if state.latest_verdict in (
+                       "ERROR", "KILLED", VERDICT_LAUNCH_FAILED,
+                       VERDICT_HOLD)
                    else "done")
-    _rs.set_action_state(state.pr_id, "review-loop", final_state,
-                         iteration=state.iteration,
-                         verdict=state.latest_verdict)
+    extras = {
+        "iteration": state.iteration,
+        "verdict": state.latest_verdict,
+    }
+    if state.latest_verdict == VERDICT_LAUNCH_FAILED:
+        extras.update(
+            retryable=bool(getattr(state, "launch_retryable", False)),
+            attempts=int(getattr(state, "launch_attempts", 0) or 0),
+            error=getattr(state, "last_launch_error", "") or "",
+            artifact=getattr(state, "last_launch_artifact", None),
+            retry_ready_at=getattr(state, "retry_ready_at", 0.0) or 0.0,
+        )
+    elif state.latest_verdict == VERDICT_HOLD:
+        extras.update(
+            retryable=False,
+            error=getattr(state, "last_launch_error", "") or
+                  state.latest_output,
+        )
+    _rs.set_action_state(state.pr_id, "review-loop", final_state, **extras)
 
 
 def _is_active_loop(state: ReviewLoopState) -> bool:
@@ -409,6 +462,22 @@ def _poll_loop_state_inner(app) -> None:
                     f"interact with Claude in the review pane",
                     sticky=30,
                 )
+            # A failed launch that is being retried: surface each new
+            # attempt (bounded, so this cannot spam forever).
+            attempts = int(getattr(state, "launch_attempts", 0) or 0)
+            if attempts and attempts != state._ui_notified_retry \
+                    and state.latest_verdict != VERDICT_PASS:
+                state._ui_notified_retry = attempts
+                err = (getattr(state, "last_launch_error", "")
+                       or state.latest_output or "").strip()
+                msg = (f"[yellow]Review launch retry[/] for {state.pr_id} "
+                       f"(attempt {attempts})")
+                if err:
+                    msg += f": {err[:200]}"
+                artifact = getattr(state, "last_launch_artifact", None)
+                if artifact:
+                    msg += f"\n  Artifact: {artifact}"
+                app.log_message(msg, sticky=15)
         elif not state._ui_notified_done:
             state._ui_notified_done = True
             newly_done.append(state)
@@ -439,13 +508,30 @@ def _poll_loop_state_inner(app) -> None:
             f"Review loop done for {state.pr_id}: {verdict_icon} "
             f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})"
         )
-        if state.latest_verdict == "ERROR" and state.latest_output:
+        if state.latest_verdict in ("ERROR", VERDICT_LAUNCH_FAILED,
+                                    VERDICT_HOLD) and state.latest_output:
             # Truncate for display but show enough to be useful
             err_text = state.latest_output[:300]
             msg += f"\n  Error: {err_text}"
+            artifact = getattr(state, "last_launch_artifact", None)
+            if artifact:
+                msg += f"\n  Artifact: {artifact}"
             from pm_core.paths import command_log_file
             msg += f"\n  See log: {command_log_file()}"
+            if state.latest_verdict == VERDICT_LAUNCH_FAILED:
+                if getattr(state, "launch_retryable", False):
+                    msg += ("\n  Will retry automatically; a manual "
+                            "'review-loop start' also retries.")
+                else:
+                    msg += "\n  Needs attention before it can be retried."
         app.log_message(msg, sticky=10)
+
+        # A retryable launch failure must not strand an auto-start target:
+        # schedule one scheduler pass after the cooldown.  Cancellation,
+        # holds and non-retryable failures never re-arm.
+        if state.latest_verdict == VERDICT_LAUNCH_FAILED \
+                and getattr(state, "launch_retryable", False):
+            _schedule_retry_rearm(app, state)
 
         # Auto-start next step: review pass → QA (then QA pass → merge)
         if state.latest_verdict == VERDICT_PASS:
@@ -463,6 +549,37 @@ def _poll_loop_state_inner(app) -> None:
         if app._review_loop_timer:
             app._review_loop_timer.stop()
             app._review_loop_timer = None
+
+
+def _schedule_retry_rearm(app, state: ReviewLoopState) -> None:
+    """Run one auto-start pass when a retryable launch failure may re-arm.
+
+    The TUI has no periodic auto-start pass; without this a target whose
+    review launch exhausted its bounded retries would sit until an
+    unrelated event (the original bug).  Only auto-start targets re-arm;
+    manual loops keep the explicit failure for the user.
+    """
+    from pm_core.tui import auto_start as _auto_start
+    try:
+        if not _auto_start.is_enabled(app) \
+                or not _auto_start.in_scope(app, state.pr_id):
+            return
+    except Exception:
+        return
+    set_timer = getattr(app, "set_timer", None)
+    if set_timer is None or getattr(app, "_review_retry_timer", None) is not None:
+        return
+    delay = max(1.0, (getattr(state, "retry_ready_at", 0.0) or 0.0)
+                - time.time())
+
+    def _fire():
+        app._review_retry_timer = None
+        try:
+            app.run_worker(_auto_start.check_and_start(app))
+        except Exception:
+            _log.exception("review_loop_ui: retry re-arm pass failed")
+
+    app._review_retry_timer = set_timer(delay, _fire)
 
 
 def _refresh_tech_tree(app) -> None:

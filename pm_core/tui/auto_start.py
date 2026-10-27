@@ -208,6 +208,18 @@ def save_breadcrumb(app) -> None:
             "loop_id": rstate.loop_id,
             "input_required": rstate.input_required,
             "_transcript_dir": rstate._transcript_dir,
+            # Failed-launch retry episode: a restart mid-backoff must
+            # continue the same bounded budget and deadline.
+            "retry_iteration": rstate.retry_iteration,
+            "launch_attempts": rstate.launch_attempts,
+            "next_retry_at": rstate.next_retry_at,
+            "last_launch_error": rstate.last_launch_error,
+            "last_launch_artifact": rstate.last_launch_artifact,
+            "launch_retryable": rstate.launch_retryable,
+            "retry_episodes": rstate.retry_episodes,
+            "retry_ready_at": rstate.retry_ready_at,
+            "last_pane_id": rstate.last_pane_id,
+            "last_session_id": rstate.last_session_id,
             "history": [
                 {
                     "iteration": h.iteration,
@@ -306,6 +318,16 @@ async def consume_breadcrumb(app) -> None:
                 loop_id=loop_data.get("loop_id", secrets.token_hex(2)),
                 input_required=loop_data.get("input_required", False),
                 _transcript_dir=loop_data.get("_transcript_dir"),
+                retry_iteration=loop_data.get("retry_iteration", 0) or 0,
+                launch_attempts=loop_data.get("launch_attempts", 0) or 0,
+                next_retry_at=loop_data.get("next_retry_at", 0.0) or 0.0,
+                last_launch_error=loop_data.get("last_launch_error", "") or "",
+                last_launch_artifact=loop_data.get("last_launch_artifact"),
+                launch_retryable=bool(loop_data.get("launch_retryable", False)),
+                retry_episodes=loop_data.get("retry_episodes", 0) or 0,
+                retry_ready_at=loop_data.get("retry_ready_at", 0.0) or 0.0,
+                last_pane_id=loop_data.get("last_pane_id", "") or "",
+                last_session_id=loop_data.get("last_session_id", "") or "",
             )
             for h in loop_data.get("history", []):
                 rstate.history.append(ReviewIteration(
@@ -888,6 +910,34 @@ async def check_and_start(app) -> None:
     signoff_ui.advance_all(app, prs)
 
 
+# Bounded auto-start recovery after a retryable review-launch failure: the
+# in-loop retry budget has already been spent, so each scheduler re-arm is a
+# fresh bounded episode.  After this many, the explicit failure stays for a
+# human (the artifact and error name it) instead of hammering the host.
+MAX_REVIEW_LAUNCH_RETRY_EPISODES = 5
+
+
+def _retryable_launch_failure(loop) -> bool:
+    """Whether *loop* ended in a retryable failed review launch."""
+    from pm_core.review_loop import VERDICT_LAUNCH_FAILED
+    return (getattr(loop, "latest_verdict", "") == VERDICT_LAUNCH_FAILED
+            and bool(getattr(loop, "launch_retryable", False)))
+
+
+def _retry_rearm_blocked(app, loop) -> bool:
+    """Whether a retryable failure must wait (cooldown) or stop (cap)."""
+    episodes = int(getattr(loop, "retry_episodes", 0) or 0)
+    if episodes >= MAX_REVIEW_LAUNCH_RETRY_EPISODES:
+        _log.info("auto_start: %s review launch retries exhausted "
+                  "(%d episodes); manual retry required",
+                  getattr(loop, "pr_id", "?"), episodes)
+        return True
+    ready_at = float(getattr(loop, "retry_ready_at", 0.0) or 0.0)
+    if ready_at and time.time() < ready_at:
+        return True
+    return False
+
+
 def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
     """Start review loops for in-scope in_review PRs without one."""
     if not is_enabled(app):
@@ -902,9 +952,37 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
         pr_id = pr["id"]
         if not in_scope(app, pr_id, prs):
             continue
-        # Skip if a review loop is already running or completed for this PR
+        # Skip if a review loop is already running or completed for this PR —
+        # except a retryable launch failure: that is exactly the stranded
+        # target this fix must recover, so re-arm it (resuming history and
+        # the un-completed iteration) once the backoff cooldown has passed.
         loop = app._review_loops.get(pr_id)
         if loop:
+            if loop.running:
+                continue
+            if not _retryable_launch_failure(loop):
+                continue
+            # _start_loop would bail on these; clearing the failure flags
+            # first would then strand the target, so check them up front.
+            if not pr.get("workdir"):
+                continue
+            from pm_core import tmux as _tmux
+            if not _tmux.in_tmux():
+                continue
+            if _retry_rearm_blocked(app, loop):
+                continue
+            _log.info("auto_start: re-arming retryable review launch for %s "
+                      "(episode %d)", pr_id, getattr(loop, "retry_episodes", 0) + 1)
+            app.log_message(f"Auto-start: retrying review launch for {pr_id}")
+            loop.retry_episodes = getattr(loop, "retry_episodes", 0) + 1
+            loop.launch_attempts = 0
+            loop.next_retry_at = 0.0
+            loop.launch_retryable = False
+            loop.retry_ready_at = 0.0
+            tdir = loop._transcript_dir or str(get_transcript_dir(app))
+            from pm_core.tui.review_loop_ui import _start_loop
+            _start_loop(app, pr_id, pr, transcript_dir=str(tdir),
+                        resume_state=loop)
             continue
         # Skip if no workdir (shouldn't happen for in_review, but guard)
         if not pr.get("workdir"):

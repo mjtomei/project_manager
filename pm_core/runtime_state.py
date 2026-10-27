@@ -215,6 +215,122 @@ def set_action_state(pr_id: str, action: str, state: str | None,
                        exc_info=True)
 
 
+def _locked_action_mutate(pr_id: str, action: str, mutate):
+    """Run *mutate(action_dict)* under the per-PR file lock.
+
+    Returns whatever *mutate* returns, or ``None`` when the file cannot be
+    read/written.  Used by the launch-lease helpers below, which need a
+    compare-and-set the plain :func:`set_action_state` merge cannot express.
+    The action entry is written back with a fresh ``updated_at`` even when
+    the mutator only refreshes a lease.
+    """
+    path = runtime_path(pr_id)
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError as e:
+        _log.debug("runtime_state: open %s failed: %s", path, e)
+        return None
+    try:
+        with os.fdopen(fd, "r+") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                f.seek(0)
+                raw = f.read()
+                try:
+                    data = json.loads(raw) if raw else {}
+                except json.JSONDecodeError:
+                    data = {}
+                if not isinstance(data, dict):
+                    data = {}
+                data["pr_id"] = pr_id
+                actions = data.setdefault("actions", {})
+                if not isinstance(actions, dict):
+                    actions = {}
+                    data["actions"] = actions
+                cur = actions.get(action) or {}
+                if not isinstance(cur, dict):
+                    cur = {}
+                result = mutate(cur)
+                cur["updated_at"] = _now_iso()
+                actions[action] = cur
+                f.seek(0)
+                f.truncate()
+                json.dump(data, f, indent=2, sort_keys=True)
+                f.flush()
+                return result
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except OSError as e:
+        _log.debug("runtime_state: write %s failed: %s", path, e)
+        return None
+
+
+def _lease_age(lease: dict) -> float | None:
+    """Age in seconds of a lease's ``at`` timestamp, or None if unreadable."""
+    try:
+        at = datetime.fromisoformat(str(lease.get("at")))
+    except (TypeError, ValueError):
+        return None
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - at).total_seconds()
+
+
+def claim_action_lease(pr_id: str, action: str, owner: str,
+                       ttl_seconds: float, **fields: Any) -> bool:
+    """Take (or refresh) a launch lease for *action*; one owner at a time.
+
+    Several drivers can try to launch the same action (a native review loop,
+    its retries, ``pm pr auto-sequence``, a TUI restart).  The first owner
+    records a lease; a different owner sees it and leaves the launch alone.
+    A lease whose owner died expires after *ttl_seconds* so recovery is
+    bounded.  *fields* are merged into the action entry when the claim wins
+    (pass ``None`` to drop a field).  Returns True when this caller owns the
+    lease.
+    """
+    now = datetime.now(timezone.utc)
+
+    def _mutate(cur: dict) -> bool:
+        lease = cur.get("lease") or {}
+        if not isinstance(lease, dict):
+            lease = {}
+        age = _lease_age(lease)
+        if (lease.get("owner") and lease["owner"] != owner
+                and age is not None and 0 <= age < ttl_seconds):
+            return False
+        cur["lease"] = {"owner": owner, "at": now.isoformat()}
+        for k, v in fields.items():
+            if v is None:
+                cur.pop(k, None)
+            else:
+                cur[k] = v
+        return True
+
+    return bool(_locked_action_mutate(pr_id, action, _mutate))
+
+
+def release_action_lease(pr_id: str, action: str, owner: str) -> None:
+    """Drop *action*'s launch lease when *owner* still holds it."""
+    def _mutate(cur: dict) -> None:
+        lease = cur.get("lease") or {}
+        if isinstance(lease, dict) and lease.get("owner") == owner:
+            cur.pop("lease", None)
+
+    _locked_action_mutate(pr_id, action, _mutate)
+
+
+def get_action_lease(pr_id: str, action: str,
+                     ttl_seconds: float) -> dict | None:
+    """The action's live lease (``{owner, at}``), or None if absent/expired."""
+    lease = (get_action_state(pr_id, action) or {}).get("lease")
+    if not isinstance(lease, dict) or not lease.get("owner"):
+        return None
+    age = _lease_age(lease)
+    if age is None or not (0 <= age < ttl_seconds):
+        return None
+    return lease
+
+
 def clear_action(pr_id: str, action: str) -> None:
     set_action_state(pr_id, action, None)
 

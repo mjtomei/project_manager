@@ -357,6 +357,21 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                     return (phase, "waiting", _awaiting_signoff_reason(
                         pr_id, inp, holds, "review passed; QA skipped (skip_qa)"))
                 return phase, "waiting", "review passed; QA transition pending"
+            if last == "LAUNCH_FAILED":
+                tag = "retryable" if review.get("retryable") else "needs attention"
+                reason = f"review launch failed ({tag})"
+                err = (review.get("error") or "").strip()
+                if err:
+                    reason += f": {err}"
+                artifact = review.get("artifact") or ""
+                if artifact:
+                    reason += f" [artifact: {artifact}]"
+                return phase, "failed", reason
+            if last == "HOLD":
+                err = (review.get("error") or "").strip()
+                return (phase, "failed",
+                        "review launch held" + (f": {err}" if err else
+                                                " — needs human input"))
             if last in ("KILLED", "ERROR"):
                 return phase, "failed", f"review loop ended {last}"
             if last:
@@ -475,6 +490,10 @@ def build_status(inp: dict) -> dict:
                 "verdict": review.get("verdict") or "",
                 "running": bool(review.get("running")),
                 "input_required": bool(review.get("input_required")),
+                "retryable": bool(review.get("retryable")),
+                "attempts": review.get("attempts") or 0,
+                "error": review.get("error") or "",
+                "artifact": review.get("artifact") or "",
             } if review else None),
             "qa": ({
                 "planning": bool(qa.get("planning")),
@@ -574,6 +593,8 @@ def _progress(run: dict) -> str:
         return f"qa {qa['verdict']}"
     rv = run.get("review")
     if rv and rv.get("iteration"):
+        if rv.get("running") and rv.get("attempts"):
+            return f"review #{rv['iteration']} (launch retry {rv['attempts']})"
         return f"review #{rv['iteration']}"
     return ""
 
@@ -704,4 +725,9 @@ def review_progress_input(state) -> dict:
         "iteration": getattr(state, "iteration", 0) or 0,
         "verdict": getattr(state, "latest_verdict", "") or "",
         "input_required": bool(getattr(state, "input_required", False)),
+        # Failed-launch retry evidence (LAUNCH_FAILED / HOLD outcomes).
+        "retryable": bool(getattr(state, "launch_retryable", False)),
+        "attempts": int(getattr(state, "launch_attempts", 0) or 0),
+        "error": getattr(state, "last_launch_error", "") or "",
+        "artifact": getattr(state, "last_launch_artifact", "") or "",
     }
