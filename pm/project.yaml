@@ -32491,7 +32491,29 @@ prs:
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-0af873b
+    text: 'Launch handoff from user-approved critical-bug review, 2026-10-27: current
+      captures_dir still accepts any PR when PM_CAPTURES_PR is absent. Keep this fix
+      narrowly on fail-closed capture routing for absent/empty/mismatched owner markers
+      while preserving matching-owner and legitimate host fallback behavior. Exercise
+      nested throwaway fixtures with separate captures and preserve existing real
+      evidence. Broader PR/run evidence ownership remains tracked separately in pr-1ae1d2d.'
+    created_at: '2026-10-27T18:43:33Z'
+    last_edited: '2026-10-27T18:43:33Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    signoff: provider:claude-work
+    merge: provider:deepseek-flash
 - id: pr-dc4dd45
   plan: bugs
   title: 'Bug: trust-blocked message for an approved pm workdir tells the user to
