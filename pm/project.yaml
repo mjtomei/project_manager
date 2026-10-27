@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-26T23:31:46.048105+00:00'
+  updated_at: '2026-10-27T00:34:29.078871+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16843,6 +16843,37 @@ prs:
       both unreadable-window-name cases) plus C1/R13/E10, then fresh sign-off.'
     created_at: '2026-10-26T23:31:45Z'
     last_edited: '2026-10-26T23:31:45Z'
+  - id: note-00be83a
+    text: 'QA S36 (2026-10-27, HEAD a0fc12c3) PASS on all four no-fzf stories, no
+      code change. (1) merged home pr-aa05a22: tip + "PR Actions — pr-aa05a22" + "  No
+      actions — PR is merged." + "Press q/Esc/Enter to close...", no numbered rows/Shortcuts/Select
+      prompt, alive after 3s and after x, q/Esc/Enter each close. (2) live pr-cd3fc0f
+      from review-pr-cd3fc0f: menu showed "  pr-cd3fc0f  (in_progress)  Live A", 1)
+      start [open] .. 5) merge, Shortcuts line, "Select [1-5] or shortcut key:"; 1+Enter
+      closed at once and dispatched pr start pr-cd3fc0f route=direct, client moved
+      review-pr-cd3fc0f -> pr-cd3fc0f, no new window. (3) stale menu, four runs with
+      an actor editing status while "Select [1-5] or shortcut key:" waited: runs 1
+      (merged, 1+Enter) and 3 (merged, s+Enter) printed "  No actions — PR is merged.",
+      run 2 (closed, 1+Enter) printed "  No actions — PR is closed.", each followed
+      by "Press q/Esc/Enter to close...", x a no-op, q closed, no dispatch, client
+      stayed on review-pr-cd3fc0f; run 4 control (B merged, A live, 1+Enter) dispatched
+      normally with no notice. (4) unparsable project.yaml while the menu waited:
+      "  Could not refresh PR actions; no action was run." + "  Repair project.yaml
+      and reopen the picker." + the close line, log warning "refresh failed, keeping
+      state: project.yaml is not valid YAML", no traceback, no dispatch; after repair
+      the normal menu returned and 1+Enter dispatched pr start pr-cd3fc0f. Harness
+      notes for the next run: (a) start the tmux server with LANG=LC_ALL=C.UTF-8 —
+      under the default POSIX locale tmux renders ACS and both the em dash and the
+      "●" in "2) ● review" collapse to "_", making the header/menu unreadable; (b)
+      the container has NO fzf (nothing to move aside) and no agg — download agg 1.4.3
+      aarch64 from the GitHub release to render casts; (c) capture-pane on a pane
+      no client displays returns blank on tmux 3.2a, so the actor window cannot be
+      read while the recorder client is on another window — synchronize on project.yaml/pm
+      pr show and capture the actor scrollback after the popup closes; (d) end a cast
+      with "tmux detach-client -s =<session>" rather than C-b d, which the popup would
+      swallow. Captures /pm-captures/scenarios/36 (README + story1..story4, each recording.cast/mp4/manifest).'
+    created_at: '2026-10-27T00:34:29Z'
+    last_edited: '2026-10-27T00:34:29Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
