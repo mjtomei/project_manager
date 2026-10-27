@@ -33257,7 +33257,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T04:32:05.160526+00:00'
+  updated_at: '2026-10-27T04:36:39.706908+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36312,6 +36312,35 @@ prs:
       crashes with a StoreLockTimeout traceback).'
     created_at: '2026-10-27T04:32:05Z'
     last_edited: '2026-10-27T04:32:05Z'
+  - id: note-1176258
+    text: 'S86 refine: dropped the two-clone story (each clone has its own pm/project.yaml;
+      nothing carries clone B sign-off return into clone A, so it is not drivable).
+      The TUI has no periodic auto-start pass, so passes are driven with `pm autostart
+      add <pr>` (re-arm = one scheduler pass). On d6e599bf the x1 gap shows only when
+      a pass straddles the hold release: its claim_return_launch blocks on the lock
+      and wins at release, before the pending hand-off tick. Tick losers print `running:
+      review`; only the TUI logs `review return launch already claimed`. `awaiting`/`launch_claim`
+      are not in `pm pr show`, so read them with a read-only project.yaml poll.'
+    created_at: '2026-10-27T03:37:34Z'
+    last_edited: '2026-10-27T03:37:34Z'
+  - id: note-7a9ff09
+    text: 'QA S86 (2026-10-27, host, all fake-claude, HEAD d93d39a9 vs controls d6e599bf/0eeb8719
+      side by side; captures /pm-captures/scenarios/86, REPORT.md): PASS, no code
+      change. 7bd12f64 + d6e599bf held live. E (pm-edit REVIEW return behind a finished
+      announced loop): HEAD one Auto-start review loop, one new review-E window, awaiting+claim
+      cleared 0.2 s after it, no relaunch through pass at launch+205 s; 0eeb8719 never
+      launched (awaiting: review 50 min later). G (S85 x1, 250 s hold, PASS at window+205
+      s): HEAD passes +190/+210/+230/+249 log nothing for G, one auto_qa transition
+      at release+0.8 s; d6e599bf pass +249 started a 2nd review (%20->%23) as the
+      hand-off moved G to qa, the 2nd launch put G back to in_review and its PASS
+      handed off again (2 transitions). H: running loop %52 never replaced, zero fresh
+      reviews, hand-off same tick. K: 50-iteration NEEDS_WORK loop untouched by 4
+      passes. L: TUI won both races (chained autostart ~0.14 s after save), ticks
+      only running: review; TUI-lost branch not exercised. Observation (open x1, inert
+      in sign_off): on HEAD G keeps awaiting: review + expired claim through QA into
+      sign_off; H keeps awaiting: review.'
+    created_at: '2026-10-27T04:36:39Z'
+    last_edited: '2026-10-27T04:36:39Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
