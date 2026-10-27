@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-27T01:02:56.572216+00:00'
+  updated_at: '2026-10-27T01:04:56.246495+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -17031,6 +17031,44 @@ prs:
       failed (exit 1)." and needs one more key — two dismissals, expected.'
     created_at: '2026-10-27T00:35:38Z'
     last_edited: '2026-10-27T00:35:38Z'
+  - id: note-5dfe517
+    text: 'QA S32 (2026-10-27, HEAD cd70f850, workdir /workspace) PASS on both stories,
+      no code change. Story 1 (id-less entries: one merged, one pending depending
+      on Alpha; last_pr_sync backdated to 2020; real workdir from pm pr start --background):
+      TUI stayed up, tree drew only Alpha/Beta, and neither the manual r nor the 300
+      s background tick logged Sync error / KeyError: id / Traceback (tui-stderr.log
+      0 bytes). The background tick was proved with a fresh pipe-pane started at 00:53:46
+      with no user input afterwards: its first pulling... -> synced pair landed at
+      00:57:07, exactly 300 s after the previous tick (pane polling cannot catch it
+      — Textual paints pulling and synced in the same flush). Real prefix+P then showed
+      the 80-col popup "Could not load PR actions: Picker PR entry requires a non-empty,
+      command-safe string id: entry #3 (status=''merged'')" + "Press q/Esc/Enter to
+      close...", then "pm popup failed (exit 1)." + "Press any key to close..." after
+      the first dismissal; two dismissals total; log line was the expected popup-picker
+      warning naming entry #3. Story 2 (same entries repaired to pr-ghost1 merged
+      / pr-ghost2 pending, windows named for them, r): tree showed all four PRs (Ghost
+      merged ✓ merged, Ghost blocked pending); picker from pr-ghost2 showed "PR Actions
+      — pr-ghost2" + "  pr-ghost2  (pending)  Ghost blocked" + start/review/qa/signoff/merge;
+      picker from pr-ghost1 showed "PR Actions — pr-ghost1" + "  No actions — PR is
+      merged."; no errors in the log or tui-stderr. Harness notes for the next run:
+      (a) this container has NO fzf (picker numbered fallback, needs q+Enter to dismiss
+      — plain q does nothing because the fallback uses input()) and NO agg — downloaded
+      agg 1.4.3 aarch64 to /scratch/tools/agg; (b) start the tmux server AND the recorder
+      client with LANG=LC_ALL=C.UTF-8, otherwise tmux renders ACS and the TUI shows
+      lqqq box art; (c) capture-pane on a pane no client displays returns blank on
+      tmux 3.2a, so keep the recorder client (env -u TMUX tmux attach) on the window
+      you want to read; (d) the popup belongs to the invoking client, so prefix+P
+      must be sent into the recorder pane pty (tmux -L rec send-keys -t rec C-b P),
+      not via pm tui send; (e) end a cast with "tmux detach-client -s =<session>",
+      and note the trimmed casts cut from a mid-session point replay with a partially
+      drawn screen — record a fresh short cast instead. One observation, no change
+      made: the status bar counts every file entry, so it reads "4 PRs" while the
+      tree draws 2 boxes during the id-less window (pr_count=len(prs) in _update_status_bar);
+      the scenario only constrains the tree, so it is cosmetic, and master would crash
+      the sync on the same file. Captures /pm-captures/scenarios/32 (REPORT.md + story1/story2
+      manifests, recordings, pane captures, tick-transcript.log, pm-debug-evidence.txt).'
+    created_at: '2026-10-27T01:04:56Z'
+    last_edited: '2026-10-27T01:04:56Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
