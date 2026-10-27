@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T16:17:33.057614+00:00'
+  updated_at: '2026-10-27T16:47:52.132015+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37074,6 +37074,21 @@ prs:
       Full suite: 3979 passed, 1 skipped.'
     created_at: '2026-10-27T16:17:32Z'
     last_edited: '2026-10-27T16:17:32Z'
+  - id: note-a538cbf
+    text: 'review-loop 640d i2: closed one residual labelling gap with a test that
+      fails on the pre-fix code. A malformed (truthy, non-list) resolution.unresolved
+      value is a refusal everywhere (valid_for, the merge gate, the router, and the
+      prompt says "NOT resolved"), but two labelling surfaces disagreed: (1) unresolved_paths
+      could not enumerate it, so it returned an empty set and pm pr show / pm pr signoff
+      integrate / the sign-off launch printed "resolved: <path>" while the prompt
+      printed "attempted — NOT resolved" — a value that cannot be enumerated now makes
+      every recorded path an attempt (the gate conservative reading); (2) summary
+      claimed "resolved by record" for the same record — it now says the metadata
+      resolution was attempted but unresolved conflicts remain, so the summary, the
+      unresolved line and the per-path lines agree (spec R8). Spec updated (R9 item
+      14). Full suite: 3980 passed, 1 skipped.'
+    created_at: '2026-10-27T16:47:52Z'
+    last_edited: '2026-10-27T16:47:52Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
