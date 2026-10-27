@@ -169,5 +169,8 @@ not re-route or duplicate it. No auto-merge is performed.
   `_focus_review_window()`, and the new branch in `pr_review()`; guard
   `closed`.
 - `tests/test_pr.py` — new regression suite.
+- `tests/test_popup_picker.py` — pin that a successful direct dispatch
+  re-emits the command's stdout (the picker `d` route surfaces the
+  inspection notice this way).
 - (No change) `pm_core/cli/session.py`, `pm_core/tui/pr_view.py`,
   `pm_core/signoff.py`, `pm_core/tui/qa_loop_ui.py`, `pm_core/tui/signoff_ui.py`.

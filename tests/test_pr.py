@@ -148,6 +148,27 @@ def test_review_inspection_preserves_signoff_and_return_records(tmp_path):
 
 
 @pytest.mark.parametrize("status", ["qa", "sign_off"])
+def test_inspection_does_not_trigger_tui_refresh(tmp_path, status):
+    """Nothing on disk changed, so no reload signal may be sent.
+
+    A spurious refresh makes the TUI reload project.yaml and can race a
+    concurrent QA-loop / sign-off write — the exact state churn this fix
+    exists to avoid.
+    """
+    root, _ = _make_project(tmp_path, status=status)
+    runner = CliRunner()
+
+    with _review_window(), \
+         mock.patch.object(pr_mod, "state_root", return_value=root), \
+         mock.patch.object(pr_mod, "_launch_review_window"), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh") as refresh:
+        result = runner.invoke(pr_mod.pr, ["review", PR])
+
+    assert result.exit_code == 0, result.output
+    refresh.assert_not_called()
+
+
+@pytest.mark.parametrize("status", ["qa", "sign_off"])
 def test_review_without_review_window_starts_nothing(tmp_path, status):
     root, _ = _make_project(tmp_path, status=status)
 
