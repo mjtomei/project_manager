@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T18:16:00.772477+00:00'
+  updated_at: '2026-10-27T18:21:45.563149+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38298,6 +38298,43 @@ prs:
       the prior terminal entry started_at while running; the older pm does the same.'
     created_at: '2026-10-27T18:16:00Z'
     last_edited: '2026-10-27T18:16:00Z'
+  - id: note-bf137f7
+    text: 'S96 refine (2026-10-27): a qa_scenario/qa_concretize provider that is not
+      configured never stops the run. Those roles are route-gated and wait (S94 2a;
+      pr-97fe1e3 says pm model set never releases the wait). To get the 8416c20f stopped-run
+      path, break an ungated role mid-run (qa_planning/qa_verification/qa_finalize/qa_interactive),
+      for example `pm model set qa_finalize provider:fin-main --project` before the
+      launch tick, then `pm provider remove fin-main` while the worker is held, and
+      fix it with `pm provider add fin-main`. The tick pre-check (_check_qa_launch)
+      refuses a break that lands before launch. For a tick to launch QA again after
+      a PASS run, the PR must go back through in_review (`pm pr edit --status in_review`
+      plus ticks until `advanced: qa`). An older-pm (2a424a0d) seed is lost if any
+      HEAD pm session/TUI/picker in that clone creates ~/.pm/runtime/pm-<tag>/ before
+      the old records exist.'
+    created_at: '2026-10-27T17:43:47Z'
+    last_edited: '2026-10-27T17:43:47Z'
+  - id: note-84b55db
+    text: 'QA S96 (2026-10-27, container mode podman 3, real claude 2.1.311 vs work/
+      router + main stubs, upgrade from older pm 2a424a0d to HEAD cb4ec5e0; captures
+      /pm-captures/scenarios/96, REPORT.md): PASS, no code change. 86c0da90 seed held
+      live: first HEAD session start created ~/.pm/runtime/pm-<tag>/ with only R done/INPUT_REQUIRED
+      and U done/NEEDS_WORK; auto-start held R (status "last QA run ended INPUT_REQUIRED
+      ... press t / z t") while U ran review->QA->sign-off. Picker plain qa on R:
+      spinner "qa: queued…", q read, client stayed on main (207545e6). 8416c20f in
+      container mode: fin-main removed mid-run -> one "QA stopped for R" warning,
+      picker [failed], no adoption; 4 ticks rc 1 with the one Error line, no driver/containers/stub
+      traffic; after re-add "running: qa (relaunched)" once, stopped run containers/windows
+      gone, route bridge counts unchanged. kill -9 of the relaunched qa-run-bg: running
+      TUI adopted it once (~2.5 s), pm tui restart adopted R and U once each, no duplicates,
+      one note per run; both clients pickers agreed. Router saw only work/ (old-pm
+      host refiner sent 3 unprefixed classifier calls). Harness notes: picker nav
+      lists only PRs with open windows, so R needed an impl window (fake impl) after
+      the upgrade; claude 2.1.311 asks to approve an exported ANTHROPIC_API_KEY on
+      host (pre-approve customApiKeyResponses) and its billing notice no longer contains
+      the link text. Observation: a stopped run leaves runtime state failed with the
+      previous verdict PASS kept.'
+    created_at: '2026-10-27T18:21:45Z'
+    last_edited: '2026-10-27T18:21:45Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
