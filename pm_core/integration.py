@@ -264,6 +264,23 @@ _BOOKKEEPING_TS = frozenset({
 })
 
 
+# UI state pm rewrites on its own, without any user intent about the PR's
+# content.  ``project.active_pr`` is the TUI's selected PR: ``pm_core.tui``
+# persists it through the coalescing write queue on *every cursor move*
+# (``store.WriteQueue`` documents "the per-keypress ``active_pr`` persist"),
+# so any branch where someone used pm has a different value from the base —
+# it is the same class as the bookkeeping timestamps above, not a real field
+# conflict.  Without this, the real #250-shaped conflict (independent record
+# appends) is refused by the resolver for every branch pm was used on, and
+# sign-off can only route implementation.
+#
+# Both sides changed it independently: take the new base's value (the shared
+# state; the branch's cursor belongs to its author and pm rewrites it on the
+# next keystroke), deterministically, and do not count the branch's value as a
+# lost change.  A *deletion* vs edit stays a conflict, like the timestamps.
+_UI_STATE_PATHS = frozenset({"project.active_pr"})
+
+
 def _bookkeeping_ts(path: str) -> bool:
     return path.rsplit(".", 1)[-1] in _BOOKKEEPING_TS
 
@@ -432,6 +449,10 @@ def _merge_value(base, ours, theirs, path: str, actions: dict):
         value = _merge_bookkeeping_ts(ours, theirs)
         if value is not _MISSING:
             return value, []
+    if path in _UI_STATE_PATHS:
+        # Both sides moved pm's own UI cursor (see ``_UI_STATE_PATHS``): the
+        # new base's value is the shared state.
+        return theirs, []
     return None, [f"{path or '<root>'}: changed differently on both sides"]
 
 
@@ -599,6 +620,11 @@ def _preservation_problems(base, side, merged, label: str) -> list[str]:
             # A bookkeeping timestamp both sides bumped is merged as the
             # later value, so the earlier one is intentionally not carried.
             if _bookkeeping_ts(path) and _merge_bookkeeping_ts(s, m) == m:
+                return
+            # pm's own UI cursor is not content (see ``_UI_STATE_PATHS``): one
+            # of the two selections is kept, and the other is not a lost
+            # change.
+            if path in _UI_STATE_PATHS:
                 return
             problems.append(
                 f"{label} change not preserved at {path or '<root>'}")

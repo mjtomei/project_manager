@@ -3094,6 +3094,86 @@ def test_bookkeeping_timestamps_both_bumped_do_not_block_the_merge():
     assert [n["id"] for n in rec["notes"]] == ["note-1", "note-2"]
 
 
+def test_the_pm_ui_cursor_is_bookkeeping_but_project_fields_are_not():
+    """``project.active_pr`` is pm's own state, not a field conflict.
+
+    ``pm_core.tui`` persists the TUI's selected PR through the coalescing
+    write queue on every cursor move, so every branch pm was used on carries
+    a different value from the base.  Treating it as a real field conflict
+    refused the resolution for exactly the conflicts this feature exists for
+    (checked against this repository's own merge with master, where it was
+    the *only* non-record conflict).  It merges to the new base's value,
+    deterministically, and is not counted as a lost change — while a real
+    ``project`` field stays a conflict.
+    """
+    base = ("project:\n  name: p\n  active_pr: pr-1\n  skip_qa: false\n"
+            "prs:\n- id: pr-1\n  status: pending\n")
+    ours = ("project:\n  name: p\n  active_pr: pr-9\n  skip_qa: false\n"
+            "prs:\n- id: pr-1\n  status: pending\n"
+            "- id: pr-9\n  status: pending\n")
+    theirs = ("project:\n  name: p\n  active_pr: pr-8\n  skip_qa: false\n"
+              "prs:\n- id: pr-1\n  status: pending\n"
+              "- id: pr-8\n  status: pending\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is not None, details
+    doc = yaml.safe_load(merged)
+    # The new base's cursor is the shared state; both records survive.
+    assert doc["project"]["active_pr"] == "pr-8"
+    assert [p["id"] for p in doc["prs"]] == ["pr-1", "pr-9", "pr-8"]
+
+    # A real project field both sides changed differently is still a
+    # conflict: the exemption covers the cursor only.
+    conflict_ours = ours.replace("name: p", "name: from-branch")
+    conflict_theirs = theirs.replace("name: p", "name: from-base")
+    merged, details = integration.resolve_project_yaml(
+        base, conflict_ours, conflict_theirs)
+    assert merged is None
+    assert any("name" in c and "changed differently" in c
+               for c in details["conflicts"]), details
+
+    # A deletion vs edit is not silently resolved either (the same rule the
+    # bookkeeping timestamps follow).
+    deleted = ours.replace("  active_pr: pr-9\n", "")
+    assert "active_pr" not in deleted
+    merged, details = integration.resolve_project_yaml(base, deleted, theirs)
+    assert merged is None
+    assert any("active_pr" in c for c in details["conflicts"]), details
+
+
+def test_the_ui_cursor_does_not_block_the_real_metadata_resolution(w):
+    """The real #250 trigger carries pm's cursor on both sides.
+
+    A branch and the base each append their own PR records *and* each carries
+    the TUI cursor pm rewrote while it was used.  The integration must still
+    resolve, apply, and keep every record — otherwise every real integration
+    routes implementation for a UI pointer.
+    """
+    def _branch(d):
+        d["project"]["active_pr"] = PR
+        d["prs"].append({"id": "pr-300", "title": "Record pr-300",
+                         "branch": "pm/pr-300", "status": "pending"})
+    store.locked_update(w.wd / "pm", _branch)
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records + cursor")
+
+    def _base(d):
+        d["project"]["active_pr"] = "pr-100"
+        d["prs"].append({"id": "pr-250", "title": "Record pr-250",
+                         "branch": "pm/pr-250", "status": "merged"})
+    store.locked_update(w.base_pm, _base)
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records + cursor")
+
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.UP_TO_DATE, rec
+    assert rec["resolution"]["applied_merge_sha"]
+    doc = yaml.safe_load((w.wd / "pm" / "project.yaml").read_text())
+    ids = [p["id"] for p in doc["prs"]]
+    assert "pr-300" in ids and "pr-250" in ids and PR in ids
+    # The base's cursor is the shared state; the branch's is not content.
+    assert doc["project"]["active_pr"] == "pr-100"
+
+
 def test_bookkeeping_timestamp_merge_does_not_mask_a_real_conflict():
     """A field both sides changed differently is still a conflict."""
     base = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"

@@ -58,6 +58,19 @@ theirs_text)`:
   (non-string values keep the normal conflict rule) and the preservation
   check does not count the earlier timestamp as a lost change. Every other
   field still conflicts when both sides changed it differently.
+- **pm's own UI cursor is not a field conflict either.**
+  `project.active_pr` is the TUI's selected PR: `pm_core.tui` persists it
+  through the coalescing write queue on *every cursor move*, so any branch pm
+  was used on carries a different value from the base. Verified against this
+  repository's own merge with master, it was the **only** non-record conflict
+  — refusing it defeated the whole point of the feature (independent record
+  appends could never resolve on a branch anyone used pm on). Both sides
+  changing it merges to the new base's value (the shared state; the branch's
+  cursor belongs to its author and pm rewrites it on the next keystroke),
+  deterministically, and the branch's value is not counted as a lost change.
+  The exemption is that one path: every real `project` field (and a
+  deletion-vs-edit of the cursor) still conflicts. UI *preferences* a person
+  set deliberately (`project.hide_merged`) are not exempt.
 - After merging, validate that **neither side lost a change**: for every leaf
   or id-entry where each side differs from base, the merged result must carry
   that side's value (or the same value both sides chose). Any violation fails
@@ -515,7 +528,12 @@ tests):
     the summary/prompt; the same id with different content is still ambiguous.
     Cover the *real* command path too: `_record_status_timestamp` bumps
     `updated_at` on both sides, which must not block the merge, while a real
-    field conflict (e.g. both change `status` differently) still does.
+    field conflict (e.g. both change `status` differently) still does. The
+    same holds for the TUI's cursor: `project.active_pr` differs on every
+    branch pm was used on, so a branch + base that each append records *and*
+    each carry their own cursor still resolves and applies (the base's cursor
+    wins, every record survives) — while a real `project` field changed
+    differently on both sides, and a deleted-vs-edited cursor, are conflicts.
 11. Approval guards: a too-short or wrong `pm-signoff-candidate` is not
     accepted, an unapplied resolution cannot be justified, an approval bound
     to an unapplied or unresolved resolution is refused by the merge gate
