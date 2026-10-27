@@ -245,6 +245,22 @@ def test_audit_without_manifest_flags_run_stamped_records(tmp_path):
     assert any("run9" in x for x in a.anomalies)
 
 
+def test_audit_names_a_member_without_a_record_as_a_member(tmp_path):
+    """A launched scenario that never produced a verdict writes only
+    ``prompt.md``, so its directory has no identity — but the manifest says
+    this run owns it.  Calling it "not bound to a QA run" would contradict
+    the membership printed beside it."""
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-x", run_id="run1",
+                            scenarios=[{"index": 1, "title": "one"}])
+    _scenario_dir(root, 1)  # prompt.md only: launched, no verdict
+    a = captures.audit(root, pr_id="pr-x", run_id="run1")
+    assert a.dirs[1].state == "unowned"
+    assert any("manifest member" in x and "no verdict captured" in x
+               for x in a.anomalies)
+    assert not any("not bound to a QA run" in x for x in a.anomalies)
+
+
 def test_audit_ignores_non_numeric_dirs(tmp_path):
     root = _root(tmp_path)
     (root / "scenarios" / captures.FOREIGN_DIR_NAME).mkdir(parents=True)
@@ -553,6 +569,17 @@ def test_dashboard_legacy_report_without_qa_run_is_not_flagged(tmp_path):
     rows = br.gather_dashboard_rows(_dash_data(), tmp_path)
     row = next(r for r in rows if r.pr_id == "pr-aaa")
     assert row.qa_run == ""
+    assert row.qa_run_stale is False
+
+
+def test_dashboard_report_without_a_manifest_is_not_flagged(tmp_path):
+    """A report can outlive its manifest (captures reaped).  With no current
+    run to compare against, the report is not called stale."""
+    _report(tmp_path, "pr-aaa", signoff.SIGNOFF_MERGE, qa_run="run1")
+    rows = br.gather_dashboard_rows(_dash_data(), tmp_path)
+    row = next(r for r in rows if r.pr_id == "pr-aaa")
+    assert row.qa_run == "run1"
+    assert row.qa_current_run == ""
     assert row.qa_run_stale is False
 
 

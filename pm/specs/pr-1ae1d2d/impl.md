@@ -111,11 +111,13 @@ per-run copy is what makes the PR's own membership recoverable afterwards
 (observed in the repro: the fixture clobbers the pointer and the outer run's
 manifest still resolves).
 
-- **Execution start**, in `_execute_and_finalize` (`pm_core/qa_loop.py:4180`),
-  right after the initial `_write_status_file` and before scenarios launch —
+- **Execution start**, in `run_qa_sync`'s launch path
+  (`_sync_captures_evidence(state)` just after the initial
+  `_write_status_file` and before the first scenario prompt is written) —
   so `prompt.md` directories are covered even if the run dies before any
   verdict is persisted. Scenario 0 (interactive) is **not** a member.
-- **Completion**, after `_persist_scenario_verdicts` (`pm_core/qa_loop.py:4236`),
+- **Completion**, in `_execute_and_finalize`, after
+  `_persist_scenario_verdicts` (which also publishes the final membership),
   with final verdicts and `overall` (`state.latest_verdict`).
 - **Early exits that produce no scenarios** (planner trust-blocked, QA spec
   missing): an empty-membership manifest still records that this run owns
@@ -160,7 +162,11 @@ a nested fixture's record is provably not this PR's evidence.
 - `anomalies`: human-readable one-liners for foreign/unowned/orphan dirs, a
   manifest/`qa_status.json` run-id disagreement, and a **manifest member with
   no evidence directory** (its evidence was destroyed or never captured —
-  sign-off must see missing evidence, not a synthetic record).
+  sign-off must see missing evidence, not a synthetic record). A member whose
+  directory exists but holds no provenance record (a launched scenario that
+  never produced a verdict writes only `prompt.md`) is reported as a member
+  without a record, not as "not bound to a QA run" — the audit must not
+  contradict the membership it just printed.
 
 New CLI command `pm qa evidence <pr_id>` (`pm_core/cli/qa.py`, beside
 `captures-path`) prints the audit: PR, run id, manifest scenario list, and

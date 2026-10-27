@@ -370,7 +370,18 @@ def audit(captures_root: Path | str | None, *,
                 f"scenarios/{i}: foreign record (pr_id={ev.owner_pr}) — "
                 "not this PR's evidence")
         elif ev.state == UNOWNED:
-            if ev.owner_run:
+            if i in member_indices:
+                # The manifest says this run owns the scenario, but nothing
+                # on disk carries provenance: a launched scenario that never
+                # produced a verdict writes only ``prompt.md`` (and any
+                # pre-fix record at that index has no identity).  Reporting
+                # that as "not bound to a QA run" would contradict the
+                # membership the same audit just printed.
+                anomalies.append(
+                    f"scenarios/{i}: manifest member with no provenance "
+                    "record (no verdict captured) — its files cannot be "
+                    "verified as this run's evidence")
+            elif ev.owner_run:
                 anomalies.append(
                     f"scenarios/{i}: record names QA run {ev.owner_run}, but "
                     "no current-run manifest binds it to this run")
