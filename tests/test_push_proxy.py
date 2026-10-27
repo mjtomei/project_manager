@@ -1532,6 +1532,87 @@ class TestWorkdirKeyedProxies:
             stop_push_proxy("our-c")
             stop_push_proxy("other-session-c")
 
+    def test_start_replaces_a_squatted_discovery_file(self, tmp_path,
+                                                     live_proxies):
+        """A regular file on the long name must not block the discovery link.
+
+        ``/tmp`` is world-writable, so a file (planted, or left by a crashed
+        run) can squat the long name.  Without the link a *later* process —
+        one with an empty registry — cannot find the hashed directory, so
+        session teardown stops nothing and the proxy plus its socket
+        directory leak.
+        """
+        tag = "t" * 80
+        ours = self._workdir(tmp_path, "ours")
+        long_dir = self._long_link(tag, ours)
+        Path(long_dir).write_text("planted\n")
+
+        sock = self._start("our-c", ours, tag=tag)
+        try:
+            assert os.path.islink(long_dir)
+            assert (os.path.realpath(long_dir)
+                    == os.path.realpath(os.path.dirname(sock)))
+
+            # Emulate a later process: the registry is empty, so the glob
+            # over the long name is the only way to find the hashed dir.
+            with push_proxy_mod._proxy_lock:
+                push_proxy_mod._active_proxies.clear()
+                push_proxy_mod._proxy_refs.clear()
+                push_proxy_mod._container_to_proxy_key.clear()
+
+            assert stop_session_proxies(tag) == 1
+            assert not push_proxy_mod.proxy_is_alive(sock)
+            assert not os.path.exists(os.path.dirname(sock))
+            assert not os.path.lexists(long_dir)
+        finally:
+            stop_push_proxy("our-c")
+
+    def test_shared_sock_dir_keeps_a_foreign_squatted_file(self, tmp_path,
+                                                           monkeypatch):
+        """Another user's entry on the long name is not ours to remove."""
+        tag = "t" * 80
+        ours = self._workdir(tmp_path, "ours")
+        long_dir = self._long_link(tag, ours)
+        Path(long_dir).write_text("theirs\n")
+        token = push_proxy_mod._workdir_token(str(ours))
+        real_uid = os.getuid()
+        monkeypatch.setattr("pm_core.push_proxy.os.getuid",
+                            lambda: real_uid + 1)
+        try:
+            short = push_proxy_mod._shared_sock_dir(tag, self.PR, token)
+            assert short == push_proxy_mod._shared_sock_dir_path(
+                tag, self.PR, token)
+            # Not followed, not replaced, and the start is not failed.
+            assert Path(long_dir).read_text() == "theirs\n"
+            assert not os.path.islink(long_dir)
+        finally:
+            monkeypatch.undo()
+            os.unlink(long_dir)
+            shutil.rmtree(push_proxy_mod._shared_sock_dir_path(
+                tag, self.PR, token), ignore_errors=True)
+
+    def test_sweep_removes_a_regular_file_squatting_a_proxy_name(self):
+        """A stale regular file matching the glob is swept.
+
+        Only entries that are ours: ``/tmp`` is world-writable, so the
+        ownership check is exercised through the monkeypatched uid.
+        """
+        mine = "/tmp/pm-push-proxy-sweepfile-mine"
+        Path(mine).write_text("stale\n")
+        real_uid = os.getuid()
+        try:
+            with patch("pm_core.push_proxy.os.getuid",
+                       return_value=real_uid + 1):
+                push_proxy_mod._remove_proxy_dirs(
+                    "/tmp/pm-push-proxy-sweepfile-*")
+            assert os.path.exists(mine), "a foreign entry must be left alone"
+
+            push_proxy_mod._remove_proxy_dirs("/tmp/pm-push-proxy-sweepfile-*")
+            assert not os.path.exists(mine)
+        finally:
+            if os.path.exists(mine):
+                os.unlink(mine)
+
     def test_teardown_follows_its_own_discovery_link(self, tmp_path,
                                                      live_proxies):
         """The identity check must not stop a legitimate link being swept."""

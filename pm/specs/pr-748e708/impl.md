@@ -733,3 +733,47 @@ other session's socket), and `test_discovery_target_matches_the_hashed_dir`
 pins the hash relation.
 `test_teardown_follows_its_own_discovery_link` pins that a legitimate link
 is still swept (it passes at b0e0550e too).
+
+## Review iteration 14 refinements
+
+Fourteenth review pass (consistent with R6/R7; no requirement changed).  The
+discovery name and the start-lock name both live in world-writable `/tmp`,
+and the sweep/EXIT-trap cleanup is the only thing that reclaims them:
+
+- **A regular file squatting the long discovery name no longer leaks the
+  proxy past teardown.**  `_shared_sock_dir` handled a *directory* and a
+  *foreign symlink* at the long name, but a regular file (planted by
+  another user, or left by a crashed run) made `os.symlink` fail with
+  nothing done — silently, with no link.  Without that link a later process
+  (empty in-process registry, after a TUI restart) cannot find the hashed
+  directory, so `stop_session_proxies` stopped nothing and the proxy and
+  its socket directory survived the session.  Reproduced at d872d080:
+  `discovery link created: False`, `stop_session_proxies` returned 0 and
+  the hashed directory stayed.  A non-directory, non-symlink entry is now
+  replaced when it is ours (`os.lstat().st_uid`), matching the ownership
+  rule the other `/tmp` guards use; a foreign one is left alone and the
+  start still succeeds (the link is optional).
+- **The sweep removes a stale regular file matching the glob.**  The
+  `not os.path.isdir(real)` branch only unlinked *symlinks*, so a regular
+  file left on a proxy-shaped name was never reclaimed by
+  `_remove_proxy_dirs` and kept the discovery name unusable forever.  It
+  now goes through `_unlink_stale_entry()`, which unlinks a symlink (never
+  its target, as before) or a regular file that is ours.
+- **The pane EXIT trap removes the start lock.**  R7 put the start lock
+  *next to* the socket directory so it never blocks the bind-mounted
+  `rmdir`, but `build_exec_cmd`'s cleanup only removed `push.sock` and
+  `proxy.json`: every per-container proxy torn down by a killed pane left
+  a `/tmp/pm-push-proxy-<container>.lock` behind (the later
+  `stop_push_proxy` cannot clear it either — it returns early once the
+  directory is gone).  The trap now removes `<realpath(sock_dir)>.lock`
+  too, mirroring the `proxy.json` fix from iteration 7.
+
+Tests: `test_start_replaces_a_squatted_discovery_file` (link created, and a
+registry-less `stop_session_proxies` then stops the proxy and removes the
+directory) and `test_sweep_removes_a_regular_file_squatting_a_proxy_name`
+both fail at d872d080 for the right reason (`assert os.path.islink(long_dir)`
+is False; the file survives the sweep), and
+`test_cleanup_removes_proxy_socket` fails there too (`/tmp/pm-push-proxy-x.lock`
+missing from the trap).  `test_shared_sock_dir_keeps_a_foreign_squatted_file`
+pins the ownership half.  `tests/test_push_proxy.py` +
+`tests/test_container.py`: 224 passed.  Full suite: 3825 passed, 1 skipped.

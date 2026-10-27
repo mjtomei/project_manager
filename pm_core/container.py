@@ -1026,6 +1026,11 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
             cleanup_parts.append(
                 f"rm -f {shlex.quote(str(Path(sock_dir) / _METADATA_NAME))}")
             cleanup_parts.append(f"rmdir {shlex.quote(sock_dir)} 2>/dev/null")
+            # The start lock lives *next to* the directory (outside the
+            # mount), so rmdir does not take it: without this the lock file
+            # leaks in /tmp for every per-container proxy a pane tears down.
+            cleanup_parts.append(
+                f"rm -f {shlex.quote(os.path.realpath(sock_dir) + '.lock')}")
         # Wrap in a bash trap so cleanup runs even when the pane is killed
         # via tmux kill-pane/kill-window (SIGHUP to the outer shell causes
         # ';'-chained commands to be skipped, but EXIT traps always fire).

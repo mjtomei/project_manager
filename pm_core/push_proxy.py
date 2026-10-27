@@ -829,7 +829,9 @@ def _shared_sock_dir(session_tag: str, pr_id: str,
     when starting a proxy; use ``_shared_sock_dir_path`` for read-only
     lookups.  A link found at the long name that does not resolve to this
     name's hashed directory is replaced (the link only, never its target),
-    so a later registry-less teardown can still find the directory.
+    so a later registry-less teardown can still find the directory.  A
+    non-directory entry squatting that name is removed when it is ours, for
+    the same reason.
 
     Directory creation is best-effort here: ``_start_lock`` creates it
     for real (and reports an unusable name as a ``PushProxyError``), and
@@ -893,6 +895,28 @@ def _shared_sock_dir(session_tag: str, pr_id: str,
                 _log.warning("Push proxy: could not replace a discovery "
                              "link that points elsewhere: %s", long_dir,
                              exc_info=True)
+        elif not os.path.islink(long_dir):
+            # A regular file (or other non-directory entry) squatting the
+            # long name.  Without the link, a *later* process — one with an
+            # empty registry — cannot find the hashed directory to sweep, so
+            # the proxy and its directory would leak past session teardown.
+            # /tmp is world-writable, so only remove an entry that is ours;
+            # a foreign one is left in place (the link is optional).
+            try:
+                ours = os.lstat(long_dir).st_uid == os.getuid()
+            except OSError:
+                ours = False
+            if not ours:
+                _log.warning("Push proxy: refusing to replace an entry owned "
+                             "by another user: %s", long_dir)
+                return short_dir
+            try:
+                os.unlink(long_dir)
+                os.symlink(short_dir, long_dir)
+            except OSError:
+                _log.warning("Push proxy: could not replace a squatted "
+                             "discovery name %s", long_dir, exc_info=True)
+        # else: our own legitimate discovery link — nothing to do.
     except OSError:
         _log.warning("Push proxy: could not create discovery symlink %s",
                      long_dir, exc_info=True)
@@ -1534,6 +1558,29 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
         except OSError:
             pass
 
+    def _unlink_stale_entry(entry: str) -> None:
+        """Remove a non-directory entry squatting a proxy-shaped name.
+
+        A symlink is removed (never its target, as above); a regular file is
+        removed only when it is ours — ``/tmp`` is world-writable.  Leaving
+        such a file behind keeps the long discovery name unusable forever,
+        so a later registry-less sweep could not find the hashed directory
+        (the leak this sweep exists to prevent).
+        """
+        if os.path.islink(entry):
+            _unlink_link(entry)
+            return
+        try:
+            st = os.lstat(entry)
+        except OSError:
+            return
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+            return
+        try:
+            os.unlink(entry)
+        except OSError:
+            pass
+
     for path in _glob.glob(glob_pattern):
         if path.endswith(".lock"):
             continue
@@ -1558,7 +1605,7 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
         except OSError:
             continue
         if not os.path.isdir(real):
-            _unlink_link(path)
+            _unlink_stale_entry(path)
             _clear_lock_file(real + ".lock")
             continue
         with _start_lock(real, blocking=False) as locked:

@@ -924,6 +924,9 @@ class TestBuildExecCmd:
         # The proxy's metadata sidecar must go too, or rmdir fails and the
         # directory leaks in /tmp.
         assert "/tmp/pm-push-proxy-x/proxy.json" in cmd
+        # ...and the start lock, which lives *next to* the directory so
+        # rmdir never takes it.
+        assert "/tmp/pm-push-proxy-x.lock" in cmd
         assert "rmdir" in cmd
         assert "/tmp/pm-push-proxy-x" in cmd
         # Socket removal should come before container rm
