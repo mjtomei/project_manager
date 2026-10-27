@@ -36419,3 +36419,27 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-ee7bd75
+  plan: bugs
+  title: 'Bug: pm pr signoff exits 0 when the memory governor (or any ContainerError)
+    refuses the launch'
+  branch: pm/pr-ee7bd75-bug-pm-pr-signoff-exits-0-when-the-memory-governor
+  status: pending
+  depends_on: []
+  description: 'pm_core/signoff.py launch_signoff_window catches ContainerError from
+    wrap_claude_cmd, prints it and returns, so `pm pr signoff <id>; echo $?` prints
+    "Memory governor blocked signoff <id>: ... > <T> target" then exit=0; the PR was
+    already moved qa -> sign_off before the refusal. Repro (QA S47 pr-eb2dbfc): governor
+    target with room for one 8G container, start a review first, then `pm pr signoff
+    <qa PR>` -> refusal text, exit 0, no window. Same on master. Expected: CLI exits
+    1 (and ideally does not leave the PR in sign_off with no window). pm pr start
+    already exits 1 on the same refusal.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T18:34:51.008193+00:00'
+  updated_at: '2026-10-27T18:34:51.008193+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

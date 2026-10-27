@@ -2985,6 +2985,10 @@ def _poll_tmux_verdicts(
                         pane_id = None
                     if pane_id is None:
                         pane_id = _get_scenario_pane(session, scenario.window_name)
+                    if state.stop_requested:
+                        # Stopping tears the scenario windows down; a
+                        # re-evaluation request could not be answered.
+                        pane_id = None
                     if pane_id:
                         followup_msg = (
                             f"Your verdict was reviewed and flagged: {reason} — "
@@ -2997,12 +3001,18 @@ def _poll_tmux_verdicts(
                             f"(PASS / NEEDS_WORK / INPUT_REQUIRED) alone "
                             f"on the last line."
                         )
-                        tmux_mod.send_keys(pane_id, followup_msg)
-                        # Send extra Enters to ensure the message is
-                        # submitted — sometimes newlines don't trigger.
-                        for _ in range(2):
-                            time.sleep(1)
-                            tmux_mod.send_keys(pane_id, "")
+                        try:
+                            tmux_mod.send_keys(pane_id, followup_msg)
+                            # Send extra Enters to ensure the message is
+                            # submitted — sometimes newlines don't trigger.
+                            for _ in range(2):
+                                time.sleep(1)
+                                tmux_mod.send_keys(pane_id, "")
+                        except subprocess.CalledProcessError:
+                            # The pane died between the existence check
+                            # and the send (e.g. a stop killed it).
+                            pane_id = None
+                    if pane_id:
                         _log.info("Sent follow-up message to scenario %d pane",
                                   scenario_idx)
                         # Clear verdict and put back in pending.  Stamp the
