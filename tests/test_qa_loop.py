@@ -468,6 +468,22 @@ class TestQAWorkdirs:
         assert scratch.name == "scratch"
         assert scratch.parent.name == "s-1"
 
+    def test_create_scenario_workdir_clone_works_across_filesystems(self, tmp_path):
+        """No explicit --local: git then copies objects when hardlinking
+        fails (repo and ~/.pm on different filesystems)."""
+        qa_workdir = tmp_path / "qa"
+        qa_workdir.mkdir()
+        calls = []
+        with patch("pm_core.git_ops.run_git",
+                   side_effect=lambda *a, **k: calls.append(a) or MagicMock(returncode=0)), \
+             patch("pm_core.push_proxy.resolve_real_origin", return_value=None):
+            create_scenario_workdir(qa_workdir, 1, repo_root=tmp_path / "repo",
+                                    branch="master")
+        clone = calls[0]
+        assert clone[0] == "clone"
+        assert "--local" not in clone
+        assert clone[-2:] == ("--branch", "master")
+
 
 class TestQALoopState:
     def test_defaults(self):

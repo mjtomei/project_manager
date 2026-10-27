@@ -319,8 +319,11 @@ def create_scenario_workdir(qa_workdir: Path, scenario_index: int,
         shutil.rmtree(clone_path, ignore_errors=True)
 
     # Create a local clone — fast (hardlinks objects) and standalone
-    # (proper .git directory, no worktree pointer issues).
-    clone_args = ["clone", "--local", str(repo_root), str(clone_path)]
+    # (proper .git directory, no worktree pointer issues).  A plain path
+    # clone hardlinks when it can and copies when the repo sits on another
+    # filesystem; an explicit --local dies there ("Invalid cross-device
+    # link") instead of falling back.
+    clone_args = ["clone", str(repo_root), str(clone_path)]
     if branch:
         clone_args.extend(["--branch", branch])
     git_ops.run_git(*clone_args)
