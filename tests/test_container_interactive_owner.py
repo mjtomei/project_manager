@@ -111,7 +111,45 @@ def test_unknown_viewed_window_preserves_qa_allocation(monkeypatch, viewed, pane
                        container_name="pm-t-qa-pr-1234-L-s1", container_id="cid", pane_id="%1")]
     monkeypatch.setattr(qa_loop, "_viewed_window_ids", lambda _: viewed)
     monkeypatch.setattr(tmux, "pane_window_id", lambda _: pane_window)
+    monkeypatch.setattr(tmux, "pane_gone", lambda _: False)
     release = Mock()
     monkeypatch.setattr(reaper, "release_containers", release)
     qa_loop._release_scenario_containers(state, "pm-t")
     release.assert_not_called()
+
+
+def test_gone_worker_pane_is_released_while_another_window_is_viewed(monkeypatch):
+    # A superseding run (fresh QA start) kills this run's windows before the
+    # run stops; a pane the server positively no longer lists is not viewed.
+    state = qa_loop.QALoopState(pr_id="pr-1234")
+    state.scenarios = [qa_loop.QAScenario(index=1, title="one", focus="",
+                       container_name="pm-t-qa-pr-1234-L-s1", container_id="cid", pane_id="%1")]
+    monkeypatch.setattr(qa_loop, "_viewed_window_ids", lambda _: {"@9"})
+    monkeypatch.setattr(tmux, "pane_window_id", lambda _: None)
+    monkeypatch.setattr(tmux, "pane_gone", lambda pane: pane == "%1", raising=False)
+    release = Mock(return_value=reaper.Outcome(removed=["pm-t-qa-pr-1234-L-s1"]))
+    monkeypatch.setattr(reaper, "release_containers", release)
+    assert qa_loop._release_scenario_containers(state, "pm-t") is False
+    release.assert_called_once()
+    assert release.call_args.args[0] == ["pm-t-qa-pr-1234-L-s1"]
+    assert release.call_args.kwargs["owner_release"] is True
+
+
+@pytest.mark.parametrize("returncode,stdout,expected", [
+    (0, "%0\n%5\n", True),      # server answered; %1 not listed
+    (0, "%0\n%1\n", False),     # still present
+    (1, "", False),               # no server / query failed
+    (0, "", False),               # empty answer is not proof
+    (0, "%0\ngarbage\n", False),  # malformed output
+])
+def test_pane_gone_needs_a_positive_answer(monkeypatch, returncode, stdout, expected):
+    monkeypatch.setattr(tmux.subprocess, "run", lambda *a, **k:
+                        subprocess.CompletedProcess(a, returncode, stdout, ""))
+    assert tmux.pane_gone("%1") is expected
+
+
+def test_pane_gone_on_timeout_is_not_gone(monkeypatch):
+    def boom(*a, **k):
+        raise subprocess.TimeoutExpired(a, 10)
+    monkeypatch.setattr(tmux.subprocess, "run", boom)
+    assert tmux.pane_gone("%1") is False

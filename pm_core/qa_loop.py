@@ -4724,12 +4724,15 @@ def _release_scenario_containers(state: QALoopState, session: str, *,
         if viewed and sc.pane_id:
             try:
                 window_id = tmux_mod.pane_window_id(sc.pane_id)
-                # ``None`` is "no window id" — either the pane is gone or the
-                # lookup failed, and the two are indistinguishable here. Keep
-                # the allocation: a failed inspection must never be read as
-                # "nobody is watching" (R3). An unowned container left this
-                # way is removed by the reconciler on its next pass.
-                if not window_id or window_id in viewed:
+                if window_id in viewed:
+                    continue
+                # ``None`` is "no window id" — the pane is gone or the lookup
+                # failed. Only a pane the server positively no longer lists is
+                # unviewed (a superseding run kills this run's windows before
+                # it stops); on a failed inspection keep the allocation, which
+                # must never be read as "nobody is watching" (R3) — the
+                # reconciler removes it on a later pass.
+                if not window_id and not tmux_mod.pane_gone(sc.pane_id):
                     continue
             except Exception:
                 continue

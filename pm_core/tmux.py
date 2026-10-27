@@ -652,6 +652,26 @@ def pane_exists(pane_id: str) -> bool:
     return result.returncode == 0
 
 
+def pane_gone(pane_id: str) -> bool:
+    """True only when the server answered and *pane_id* is not among its panes.
+
+    ``pane_exists`` and ``pane_window_id`` cannot tell a removed pane from a
+    failed query (unreachable server, timeout, malformed output); callers that
+    must keep a resource on any doubt need this positive "gone" answer.
+    """
+    try:
+        result = _run(_tmux_cmd("list-panes", "-a", "-F", "#{pane_id}"),
+                      text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode != 0:
+        return False
+    ids = result.stdout.split()
+    if not ids or not all(p.startswith("%") for p in ids):
+        return False
+    return pane_id not in ids
+
+
 def pane_window_id(pane_id: str) -> str | None:
     """Return the window ID (e.g. ``@1``) that contains *pane_id*, or ``None``."""
     result = _run(
