@@ -34032,7 +34032,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T08:12:57.028383+00:00'
+  updated_at: '2026-10-27T08:13:43.052863+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34947,6 +34947,41 @@ prs:
       from the concurrent merge. Captures: /pm-captures/scenarios/22/{story1-apply-race,story2-apply-vs-record-and-notes,story3-merge-vs-recheck,story4-merge-race}.'
     created_at: '2026-10-27T08:12:56Z'
     last_edited: '2026-10-27T08:12:56Z'
+  - id: note-4c37c3b
+    text: 'QA scenario 20 (real #250 shape, pm on both sides) PASS at 25fb1918 — no
+      code change. All four stories held live on two throwaway projects: (1) read-only
+      `pm pr signoff integrate` resolved the metadata-only conflict (2 added from
+      PR, 2 from base), printed the candidate tree + base behaviour, and its `integration-resolution.diff`
+      shows `-  active_pr: <BRANCH_REC>` / `+  active_pr: <FEATURE>` with no lost-change
+      line, PR workdir untouched; (2) all three must-refuse fixtures held with the
+      exact unresolved fields — `prs[FEATURE].status: changed differently on both
+      sides`, `project.hide_merged: changed differently on both sides`, `project.active_pr:
+      deleted on the PR branch, changed on the new base` — each exit 1, nothing applied,
+      `Status: conflict`; a hand-written SIGNOFF_MERGE report over the case-A conflict
+      was refused by the record gate; (3) tick1 opened the sign-off window, the fake
+      printed SIGNOFF_MERGE, tick2 printed the coercion note on stderr and `sign_off:
+      returning to impl`, and `pm pr show` shows Verdict SIGNOFF_IMPL / Hop impl /
+      Original verdict SIGNOFF_MERGE / Coerced reason + Integration conflict, PR back
+      to in_progress; (4) apply -> 15afc362 (tree == recorded candidate, active_pr
+      FEATURE) -> record with candidate + reused evidence -> merge published 0ce4efb
+      whose tree == the candidate, parents base+approved head, every record and note
+      exactly once, `active_pr: pr-28dc43e`, PR listed merged, workdir still at the
+      merge sha. Captures: /pm-captures/scenarios/20/ (8 dirs, cast+mp4+manifest).
+      Harness facts for the next run: (a) the scenario prose "Master gains exactly
+      one new commit" is imprecise — after a resolution apply the merge second parent
+      is the apply merge, so `git rev-list --count <base>..master` is 3; assert `--count
+      --first-parent` == 1 instead (same class as the scenario 9/13 precision notes);
+      (b) the shared tmux server carried a foreign HOME — `tmux set-environment -t
+      <session> HOME /home/pm` fixes it session-scoped without disturbing other scenarios
+      panes; (c) this build writes no `<state-root>/transcripts/auto-sequence/.../*.jsonl`,
+      so read the verdict from the `signoff-<id>` pane instead; (d) `pm pr show |
+      head -1` is the PR status line — the Integration section has its own `Status:`;
+      (e) recording at the 80x24 drive pane wraps long lines; `asciinema --cols 120
+      --rows 40` reads better; (f) the workdir branch is not in the project clone,
+      so a merge-base computed from the project dir is wrong — use the workdir or
+      reason from history.'
+    created_at: '2026-10-27T08:13:42Z'
+    last_edited: '2026-10-27T08:13:42Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
