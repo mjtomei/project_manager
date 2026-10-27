@@ -948,8 +948,36 @@ def _retry_rearm_blocked(loop) -> bool:
     return False
 
 
+def _yield_to_pending_review_return(app, pr_id: str) -> bool:
+    """Whether a pending sign-off REVIEW return owns the next review launch.
+
+    A sign-off REVIEW return's relaunch is ``--fresh`` (it kills the review
+    window it finds), and so is a review loop's own launch, so two
+    concurrent launchers kill each other's session.  The first driver takes
+    the return's launch claim (as the impl catch-up does) and performs the
+    launch; later drivers leave it alone.  Returns True when another driver
+    already owns that launch — this pass must then neither start nor re-arm
+    a loop.  A claim whose launcher died expires, and
+    :func:`_recheck_after_claim` runs one more pass for it.
+    """
+    if not _awaiting_on_disk(app, pr_id, "review"):
+        return False
+    from pm_core.signoff import claim_return_launch
+    if claim_return_launch(app._root, pr_id, "review"):
+        return False
+    _log.info("auto_start: %s review return launch already claimed, "
+              "skipping", pr_id)
+    _recheck_after_claim(app)
+    return True
+
+
 def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
-    """Start review loops for in-scope in_review PRs without one."""
+    """Start review loops for in-scope in_review PRs without one.
+
+    Also re-arms a loop whose last outcome was a *retryable* failed launch
+    (the stranded target this recovery exists for), resuming its history and
+    un-completed iteration once the cooldown has passed.
+    """
     if not is_enabled(app):
         return
 
@@ -987,6 +1015,12 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
                 ready_at = float(getattr(loop, "retry_ready_at", 0.0) or 0.0)
                 if ready_at > time.time():
                     _schedule_retry_rearm(app, loop)
+                continue
+            # A sign-off REVIEW return still waiting for its launch is a
+            # second ``--fresh`` launcher for the same window; take its
+            # claim first (exactly like the fresh-loop path below) so the
+            # re-armed loop and the return cannot kill each other's session.
+            if _yield_to_pending_review_return(app, pr_id):
                 continue
             _log.info("auto_start: re-arming retryable review launch for %s "
                       "(episode %d)", pr_id, getattr(loop, "retry_episodes", 0) + 1)
@@ -1026,13 +1060,8 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
         # restart after the hop): the loop's --fresh launch would kill one
         # a concurrent `pm pr auto-sequence` tick is starting, so take the
         # return's launch claim first (as the impl catch-up does).
-        if _awaiting_on_disk(app, pr_id, "review"):
-            from pm_core.signoff import claim_return_launch
-            if not claim_return_launch(app._root, pr_id, "review"):
-                _log.info("auto_start: %s review return launch already "
-                          "claimed, skipping", pr_id)
-                _recheck_after_claim(app)
-                continue
+        if _yield_to_pending_review_return(app, pr_id):
+            continue
         _log.info("auto_start: starting review loop for %s", pr_id)
         app.log_message(f"Auto-start: review loop for {pr_id}")
         tdir = get_transcript_dir(app)

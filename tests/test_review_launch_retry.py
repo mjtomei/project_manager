@@ -1083,6 +1083,32 @@ def test_discovery_still_adopts_a_session_started_after_the_stale_one(
     assert disc.session_id == fresh
 
 
+def test_episode_start_snapshots_the_live_review_window(tmp_path, monkeypatch):
+    """The stale-pane guard's snapshot: the session running in the review
+    window when the episode starts is what rediscovery must treat as the
+    historical window.  A missing window/session is "nothing to exclude"."""
+    sid = str(uuid.uuid4())
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: "%9")
+    monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
+                        lambda *_a, **_k: tmp_path / f"{sid}.jsonl")
+    assert review_loop._live_review_pane_session(_pr(tmp_path)) == sid
+
+    # No pm session / no review window / an unresolvable pane: total, "".
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
+    assert review_loop._live_review_pane_session(_pr(tmp_path)) == ""
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: None)
+    assert review_loop._live_review_pane_session(_pr(tmp_path)) == ""
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: "%9")
+    monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
+                        lambda *_a, **_k: None)
+    assert review_loop._live_review_pane_session(_pr(tmp_path)) == ""
+
+
 def test_discovery_reports_a_landed_verdict(tmp_path, monkeypatch):
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
     sid = str(uuid.uuid4())
@@ -1529,6 +1555,53 @@ def test_auto_start_keeps_the_failure_retryable_when_rearm_cannot_start(
         auto_start._auto_start_review_loops(app, app._data["prs"])
     assert state.retry_episodes == 2
     assert state.launch_retryable is True
+
+
+def test_auto_start_rearm_yields_to_a_pending_review_return(tmp_path):
+    """A sign-off REVIEW return waiting for its launch is a second
+    ``--fresh`` launcher for the same window, so the re-arm takes the
+    return's launch claim (one launcher) instead of racing it."""
+    from pm_core.tui import auto_start
+
+    def _state():
+        return ReviewLoopState(pr_id=PR, running=False,
+                               latest_verdict=VERDICT_LAUNCH_FAILED,
+                               launch_retryable=True, retry_ready_at=0,
+                               retry_episodes=0, iteration=1,
+                               _transcript_dir=str(tmp_path))
+
+    # Another driver already owns the return's launch: do not re-arm, keep
+    # the retryable failure, and re-check once the claim can expire.
+    state = _state()
+    app = _auto_app(tmp_path, state)
+    app._return_claim_recheck = False
+    with patch.object(auto_start, "_awaiting_on_disk", return_value=True), \
+            patch("pm_core.signoff.claim_return_launch",
+                  return_value=False) as claim, \
+            patch("pm_core.tui.review_loop_ui._start_loop") as start, \
+            patch("pm_core.tmux.in_tmux", return_value=True):
+        auto_start._auto_start_review_loops(app, app._data["prs"])
+    claim.assert_called_once_with(tmp_path, PR, "review")
+    start.assert_not_called()
+    assert state.launch_retryable is True
+    assert state.retry_episodes == 0
+    assert state.launch_attempts == 0
+    app.set_timer.assert_called_once()
+
+    # Nobody owns it: this pass takes the claim and re-arms the loop, which
+    # performs the return's launch itself.
+    state = _state()
+    app = _auto_app(tmp_path, state)
+    app._return_claim_recheck = False
+    with patch.object(auto_start, "_awaiting_on_disk", return_value=True), \
+            patch("pm_core.signoff.claim_return_launch",
+                  return_value=True), \
+            patch("pm_core.tui.review_loop_ui._start_loop",
+                  return_value=True) as start, \
+            patch("pm_core.tmux.in_tmux", return_value=True):
+        auto_start._auto_start_review_loops(app, app._data["prs"])
+    start.assert_called_once()
+    assert state.retry_episodes == 1
 
 
 # ---------------------------------------------------------------------------

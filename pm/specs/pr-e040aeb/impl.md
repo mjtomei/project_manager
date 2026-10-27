@@ -812,3 +812,49 @@ runtime_state mirror of a *re-armed* loop keeps the previous episode's
 while the retry runs; `_interruptible_sleep` re-reads and re-validates the
 ~2 MB `project.yaml` every 2 s to notice a merge/close (≈3 % of a core
 during a backoff, on the loop thread).
+
+## Review iteration 6 (0688) — refinements
+
+Findings from the next review pass, applied on top of iteration 5 (0688):
+
+1. **The auto-start re-arm yields to a pending sign-off REVIEW return
+   (correctness fix — duplicate `--fresh` launchers).** Requirement 4
+   ("serialize retry ownership across drivers") was only half applied: the
+   *fresh-loop* path in `_auto_start_review_loops` takes the sign-off
+   return's launch claim (`signoff.claim_return_launch`) before starting a
+   loop, but the new *re-arm* branch did not.  A PR whose review loop
+   exhausted its retries while a sign-off REVIEW return still awaited its
+   launch could therefore get two `--fresh` launches at once — the re-armed
+   loop's and the return's (from `pm pr auto-sequence` or the TUI return
+   catch-up) — and each kills the window it finds, so they could kill each
+   other's session.  Both paths now share
+   `_yield_to_pending_review_return(app, pr_id)`: the first driver takes the
+   claim and performs the launch (the re-armed loop's own launch satisfies
+   the return, as the fresh path already relied on); a later driver leaves
+   the launch alone, keeps the retryable failure intact (episode count and
+   budget untouched) and arms `_recheck_after_claim` so an expired claim is
+   taken over instead of stranding the target.  Covered by
+   `test_auto_start_rearm_yields_to_a_pending_review_return` (fails pre-fix:
+   the re-arm starts a loop and clears `launch_retryable` while another
+   driver owns the return's launch).
+2. **The episode-start pane snapshot has a test.**
+   `_live_review_pane_session` (the iteration-10 guard's snapshot) was
+   untested; `test_episode_start_snapshots_the_live_review_window` covers
+   the resolved session and every total path (no pm session, no window, an
+   unresolvable pane).
+
+Not changed (documented residuals): `review_loop.py` is ~1530 lines; two
+lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
+`runtime_state.claim_action_lease`); discovery still adopts a transcript
+verdict without requiring an idle hook event (rationale in iteration 9);
+`other_owner` stand-down surfaces as a non-retryable `LAUNCH_FAILED` after
+the bounded claim wait, so a second TUI driving the same PR reports
+"needs attention" for a review another loop is actually running (a proper
+`SUPERSEDED` outcome would touch the verdict constants, the tech-tree/popup
+rendering and auto-start's re-arm gate, so it stays a follow-up); the
+runtime_state mirror of a *re-armed* loop keeps the previous episode's
+`verdict`/`attempts` until the next iteration mirrors a new verdict, so
+`pm autostart status` reports `review iteration N (last LAUNCH_FAILED)`
+while the retry runs; `_interruptible_sleep` re-reads and re-validates the
+~2 MB `project.yaml` every 2 s to notice a merge/close (≈3 % of a core
+during a backoff, on the loop thread).
