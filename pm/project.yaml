@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T17:21:52.927201+00:00'
+  updated_at: '2026-10-27T19:32:22.472885+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14101,6 +14101,20 @@ prs:
       on ssh pushes, remote.*.uploadpack). Full suite 4213 passed, 2 skipped.'
     created_at: '2026-10-27T17:21:52Z'
     last_edited: '2026-10-27T17:21:52Z'
+  - id: note-1fea227
+    text: 'QA S36 (a44a70dc, real rootless Podman + tmux, fake workers): PASS, all
+      Thens held. Story1 normal/abrupt ends released impl/review/signoff/debug in
+      1.1-2.1 s with A proxy kept until last worker; --fresh review/signoff inside
+      grace replaced cleanly (60+ s observed); v1/v2 tmux-delegator faults disposed
+      or kept exactly one worker with the expected messages; plain-terminal pm pr
+      cleanup --resources removed exactly A test-tag + untagged + other-tag retained
+      decoys. Observation (cosmetic, not fixed): after cleanup removes a retained
+      container, pm container status still prints "Retained: <name>" because it lists
+      marker names without checking presence; markers are ID-bound and pruned only
+      on the next full pass. Fixture gotcha: host fallback needs /workspace/bin (fake-claude)
+      on PATH. Evidence /pm-captures/scenarios/36/manifest.md'
+    created_at: '2026-10-27T19:32:22Z'
+    last_edited: '2026-10-27T19:32:22Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
