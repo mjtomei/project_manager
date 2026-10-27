@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-27T00:46:01.761122+00:00'
+  updated_at: '2026-10-27T00:50:23.180756+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16950,6 +16950,28 @@ prs:
       (REPORT.md + 5 story dirs, each recording.cast/recording.mp4/pane captures/manifest.md).'
     created_at: '2026-10-27T00:46:01Z'
     last_edited: '2026-10-27T00:46:01Z'
+  - id: note-b3311c3
+    text: 'QA S35 PASS (2026-10-27, HEAD a0fc12c3, no code change): two clients in
+      grouped sessions with a third writer — all four stories held live on a fresh
+      LC_ALL=C tmux server with tmux -u clients (fzf 0.56.3). Harness notes for the
+      next run: (1) a recorder pane (asciinema wrapping `tmux attach`) captures blank
+      on tmux 3.2a until something forces a full redraw — run `tmux -S $PM_TMUX_SOCKET
+      refresh-client -S` right after attaching, then capture-pane on the recorder
+      shows the client and its popup; (2) `C-b` sent to a client whose popup has focus
+      is swallowed by fzf and does NOT bump client_activity — to make a client "most
+      recently active" send C-b while its popup is closed, then confirm with an untargeted
+      `display-message -p "#{session_name}"` (that is also the exact regression oracle
+      for the dispatch-session check); (3) do not build the fixture windows with `sleep
+      600` — they expire mid-run and tmux closes them, which moves the client to the
+      main window and empties the picker list; use a much longer sleep; (4) the full
+      suite here is 3739 passed / 1 failed / 1 skipped, and the only failure is tests/test_hook_events.py::test_installer_writes_standalone_receiver,
+      caused by this container setting PM_HOST_HOME=/home/matt (the installer deliberately
+      skips when PM_HOST_HOME != $HOME); it passes with PM_HOST_HOME cleared, so the
+      tree is 3740 passed / 1 skipped. Captures: /pm-captures/scenarios/35 (REPORT.md
+      + story1/story1-oneentry/story2/story3/story4 with casts, mp4s, popup captures
+      and dispatch streams).'
+    created_at: '2026-10-27T00:50:23Z'
+    last_edited: '2026-10-27T00:50:23Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
