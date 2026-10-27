@@ -36153,7 +36153,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/261
   gh_pr_number: 261
   created_at: '2026-10-27T04:42:06.128850+00:00'
-  updated_at: '2026-10-27T07:50:29.914321+00:00'
+  updated_at: '2026-10-27T08:02:46.194842+00:00'
   started_at: '2026-10-27T04:42:19.589247+00:00'
   reviewed_at: null
   merged_at: null
@@ -36248,6 +36248,18 @@ prs:
       no TUI session) — launch review from the host.'
     created_at: '2026-10-27T07:50:29Z'
     last_edited: '2026-10-27T07:50:29Z'
+  - id: note-a85ee22
+    text: 'Integration note for #260/pr-22ea6a2 (the `z a` fresh-autostart handoff):
+      its `reset_pr` persists `pr[FRESH_KEY]["policy"] = policy or POLICY_STOP` in
+      project.yaml, and `resume_fresh` reads it back (`policy = fresh_marker(pr).get("policy")
+      or POLICY_STOP`, then `if policy not in POLICIES: policy = POLICY_STOP`). After
+      this PR there is no POLICY_STOP: at integration map any persisted/marker `stop_before_merge`
+      value (and `z O` / `--stop-before-merge`) to POLICY_WAIT, make fresh_start default_policy
+      POLICY_WAIT, and fail closed on an unknown marker policy instead of defaulting
+      to the removed constant. Preserve that PR''s live-session adoption, new-handoff
+      boundary and merge gate; do not edit its workdir.'
+    created_at: '2026-10-27T08:02:46Z'
+    last_edited: '2026-10-27T08:02:46Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
