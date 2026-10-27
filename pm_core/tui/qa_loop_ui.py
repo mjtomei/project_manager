@@ -97,12 +97,13 @@ def focus_or_start_qa(app, pr_id: str) -> None:
                 app.log_message(f"Focused QA window for {pr_id}")
             else:
                 app.log_message(
-                    f"QA window for {pr_id} ready (focus suppressed)")
+                    f"QA window for {pr_id} ready (focus suppressed)",
+                    force=True)
             return
 
     # No existing window — start a new QA session.  qa_loop will
     # consume any suppress_switch flag at its window-creation step.
-    start_qa(app, pr_id)
+    start_qa(app, pr_id, focus=True)
 
 
 def _ensure_qa_poll_timer(app) -> None:
@@ -154,11 +155,16 @@ def _enter_qa_status(app, pr_id: str, pr: dict, caller: str,
 
 
 def start_qa(app, pr_id: str,
-             lock_timeout: float = store.LOCK_TIMEOUT_SECONDS) -> bool | None:
+             lock_timeout: float = store.LOCK_TIMEOUT_SECONDS, *,
+             focus: bool = False) -> bool | None:
     """Start a QA session for a PR.
 
     Creates QALoopState, starts background QA thread.
-    Called by auto-start and internal callers (fresh_start, loop start).
+    Called by the user starts ``t`` / ``z t`` (with *focus*) and by
+    scheduler-driven callers: auto-start, review PASS → QA, sign-off REQA
+    and self-driving restarts.  *focus* selects the new QA window; only
+    user-initiated starts pass it, so scheduler-driven starts don't pull
+    attached clients off the TUI.
     Returns False when project.yaml could not be loaded or locked.  A
     caller retrying on the poll timer passes ``lock_timeout=store.NO_WAIT``
     and reports the wait itself (no "Error:" line per retry, RQ38).
@@ -181,7 +187,16 @@ def start_qa(app, pr_id: str,
     if pr_id in app._qa_loops:
         existing = app._qa_loops[pr_id]
         if existing.running:
-            app.log_message(f"QA already running for {pr_id}")
+            # A user can ask to view a background run before its first window
+            # exists. Reuse that worker, but retain the explicit focus request;
+            # popup suppression is still consumed at window creation.
+            if focus:
+                existing.focus_on_create = True
+            # A direct answer to the user's start must be visible even when
+            # an auto-start/setup confirmation is holding the log line —
+            # this lands in the gap where the scheduler's "targets +="
+            # confirmation is still sticky (QA s22).
+            app.log_message(f"QA already running for {pr_id}", force=True)
             return
 
     # A sign-off REQA return is now being re-verified.
@@ -195,7 +210,7 @@ def start_qa(app, pr_id: str,
                             lock_timeout=lock_timeout):
         return False
 
-    state = QALoopState(pr_id=pr_id)
+    state = QALoopState(pr_id=pr_id, focus_on_create=focus)
     if cleared is None:
         # project.yaml stayed busy past the lock timeout: the run starts
         # anyway (the main thread must not wait), and the poll tick clears
@@ -263,7 +278,7 @@ def fresh_start_qa(app, pr_id: str) -> None:
     # Start fresh — run_qa_sync will clean up old windows after capturing
     # which sessions were watching them (for proper session switching).
     app.log_message(f"Fresh QA start for {pr_id}...")
-    start_qa(app, pr_id)
+    start_qa(app, pr_id, focus=True)
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +330,7 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     }
 
     # Start a new QA loop
-    state = QALoopState(pr_id=pr_id)
+    state = QALoopState(pr_id=pr_id, focus_on_create=True)
     # Like start_qa, this run re-verifies a sign-off REQA return.  A run it
     # replaces takes its pending clear along (S83: after a zz t over a run
     # started inside a busy project.yaml, ``awaiting: qa`` outlived the
@@ -336,7 +351,7 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     passes_label = f" ({required} pass{'es' if required > 1 else ''} required)" if required > 1 else ""
     app.log_message(
         f"[bold]QA loop started[/] for {pr_id}{passes_label} — z t to stop",
-        sticky=3,
+        sticky=3, force=True,
     )
     _log.info("qa_loop_ui: starting QA loop for %s (passes=%d)", pr_id, required)
 
@@ -608,9 +623,16 @@ def _record_completion(app, state: QALoopState) -> bool:
 
 def _reload_tree(app) -> bool:
     """Reload and repaint, so the tree shows a status change now rather
-    than at the next 300 s background sync.  False on an unloadable file."""
+    than at the next 300 s background sync.  False on an unloadable file.
+
+    Not _load_state(): its scheduler hook would duplicate the completion's
+    own check_and_start.  Keep its flush-before-reload invariant so a
+    debouncing navigation write isn't replaced by stale disk state."""
     if not app._root:
         return True
+    wq = getattr(app, "_write_queue", None)
+    if wq is not None:
+        wq.flush_sync()
     try:
         app._data = store.load(app._root)
     except store.ProjectYamlParseError:

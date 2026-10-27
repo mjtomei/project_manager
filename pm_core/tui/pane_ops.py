@@ -169,7 +169,7 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False,
         else:
             _log.info("pane with role=%s already exists: %s, focusing", role, existing_pane)
             tmux_mod.select_pane_smart(existing_pane, session, window)
-            app.log_message(f"Focused existing {role} pane")
+            app.log_message(f"Focused existing {role} pane", force=True)
             return
 
     data = pane_registry.load_registry(session)
@@ -181,7 +181,9 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False,
         pane_id = tmux_mod.split_pane(session, direction, wrap, window=window)
         pane_layout.register_and_rebalance(session, window, [(pane_id, role, cmd)])
         tmux_mod.select_pane_smart(pane_id, session, window)
-        app.log_message(f"Launched {role} pane")
+        # Forced: this answers the user's key, which may land while a
+        # sticky message (e.g. "Review loop done") holds the line.
+        app.log_message(f"Launched {role} pane", force=True)
         _log.info("launched pane: role=%s id=%s", role, pane_id)
     except Exception as e:
         _log.exception("failed to launch %s pane", role)
@@ -638,7 +640,7 @@ def _launch_in_plans_window(app, plan_id: str | None, cmd: str, role: str,
         if pane_id and win:
             pane_layout.register_and_rebalance(
                 session, win["id"], [(pane_id, role, cmd)])
-            app.log_message(f"Launched {role} pane")
+            app.log_message(f"Launched {role} pane", force=True)
             _log.info("launched pane in new window: role=%s id=%s window=%s",
                       role, pane_id, name)
         _focus_plans_window(app, plan_id)

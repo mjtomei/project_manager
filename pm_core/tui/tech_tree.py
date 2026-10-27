@@ -20,6 +20,7 @@ from rich.text import Text
 from rich.cells import cell_len
 from rich.console import RenderableType
 
+from pm_core.pr_utils import usable_prs
 from pm_core.tui import item_message, perf
 from pm_core.tui.tree_layout import compute_tree_layout, SORT_FIELDS, SORT_FIELD_KEYS
 
@@ -565,6 +566,14 @@ class PRNode(Widget):
         id_line = f"{side} {id_content:<{max_id_len}} {side}"
 
         title = pr.get("title", "???")
+        # A null or non-string title (e.g. a YAML integer) must not crash the
+        # node: cell_len() raises on None/int.  Normalise the same way the
+        # popup picker does — None renders blank, other scalars stringify —
+        # and replace non-printables (newline/tab/NUL/ESC) so the 5-line box
+        # never gains a row or emits an escape sequence.
+        if not isinstance(title, str):
+            title = "" if title is None else str(title)
+        title = "".join(ch if ch.isprintable() else " " for ch in title)
         max_title_len = NODE_W - 4
         # Pad/truncate by display cell width (not char count) so double-width
         # cells (e.g. emoji) don't push the right border off the box.
@@ -747,7 +756,7 @@ class TechTree(Widget):
 
     def __init__(self, prs: list[dict] | None = None, **kwargs):
         super().__init__(**kwargs)
-        self._prs = prs or []
+        self._prs = usable_prs(prs)
         self._ordered_ids: list[str] = []
         self._node_positions: dict[str, tuple[int, int]] = {}  # pr_id -> (x_char, row)
         self._hidden_plans: set[str] = set()       # plan IDs to hide ("_standalone" for null-plan PRs)
@@ -807,7 +816,7 @@ class TechTree(Widget):
         """*unavailable*: why there is nothing to show (project.yaml cannot
         be loaded and there is no earlier state); drawn instead of the
         "No PRs defined" hint."""
-        self._prs = prs
+        self._prs = usable_prs(prs)
         self._unavailable = unavailable
         self._recompute()
 

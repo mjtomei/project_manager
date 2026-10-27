@@ -962,7 +962,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     if impl_workdir:
                         _add_companion_pane(pm_session, existing, impl_workdir, "impl")
                     tmux_mod.select_window(pm_session, existing["id"])
-                    click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                    click.echo(f"Switched to existing window '{window_name}' "
+                               f"(session: {tmux_mod.current_or_base_session(pm_session)})")
                     return
                 elif background:
                     # Window already exists, nothing to do in background mode
@@ -970,7 +971,8 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     return
                 else:
                     tmux_mod.select_window(pm_session, existing["id"])
-                    click.echo(f"Switched to existing window '{window_name}' (session: {pm_session})")
+                    click.echo(f"Switched to existing window '{window_name}' "
+                               f"(session: {tmux_mod.current_or_base_session(pm_session)})")
                     return
 
     repo_url = data["project"]["repo"]
@@ -4073,12 +4075,37 @@ def pr_qa_run_bg(pr_id: str):
 
     from pm_core.signoff import clear_return_awaiting
     clear_return_awaiting(root, pr_id, "qa", session_opened=True)
+    # Mirror this CLI-driven run into the shared per-PR runtime state.  Only
+    # TUI-owned loops mirror themselves, so without this a run launched by
+    # auto-sequence has no ~/.pm/runtime/<id>.json at all: the popup picker
+    # cannot show its progress and auto-start's recorded_qa_verdict cannot
+    # see its verdict (it would relaunch QA for a PR this driver already
+    # took to PASS).  Keep any pending suppress_switch: it belongs to a user
+    # start for this PR, not to this driver's own launch.
+    from pm_core import runtime_state as _rs
+    _suppress = (_rs.get_action_state(pr_id, "qa") or {}).get("suppress_switch")
+    _rs.set_action_state(pr_id, "qa", "running", suppress_switch=_suppress)
     state = QALoopState(pr_id=pr_id)
     try:
         run_qa_sync(state, root, pr_entry, on_update=None, max_scenarios=None)
     except Exception as e:
+        _rs.set_action_state(pr_id, "qa", "failed")
         _log_thread_end(e, "pr_qa_run_bg: QA", pr_id)
         raise SystemExit(1)
+    if state.latest_verdict:
+        _rs.set_action_state(pr_id, "qa", "done", verdict=state.latest_verdict)
+    else:
+        # The run ended without a verdict — the PR merged/closed while it
+        # ran, so run_qa_sync returned early.  Drop the [working] entry
+        # rather than leaving a QA run the picker and home window show as
+        # still live; keep a suppress flag that is *still* pending (a
+        # concurrent user start may have consumed it during the run), since
+        # it belongs to that start rather than this driver's launch.
+        still_pending = (_rs.get_action_state(pr_id, "qa")
+                         or {}).get("suppress_switch")
+        _rs.clear_action(pr_id, "qa")
+        if still_pending:
+            _rs.request_suppress_switch(pr_id, "qa")
 
     # This process finished the run and auto-sequence reads qa_status.json
     # itself, so drop the resume snapshot before exiting.  It exists only so

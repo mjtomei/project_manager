@@ -1683,3 +1683,19 @@ mutations caught (`/pm-captures/review-a5a3-i1/mutation-checks.log`).
 Latest full suite: 3853 passed, rc 0 (env -u PM_HOST_HOME, /usr/bin first,
 PYTHONPATH=/workspace, markdown installed to a --target dir first;
 `/pm-captures/review-a5a3-i1/full-suite.log`).
+
+Master integration 2026-10-27 (origin/master 450a6362, #243 background QA
+focus fix, plus #242 popup-picker fixes): conflicts reconciled by keeping
+both sides. `QALoopState` keeps `scenario_start` and gains
+`focus_on_create`. `start_qa` keeps its `lock_timeout` and returns
+False/True, and takes keyword-only `focus` (only `t` / `z t` / `zz t` pass
+it). The four-argument `_enter_qa_status` and `_ensure_qa_poll_timer` are
+the only helpers, and master's duplicate `zz t` status transition was
+dropped. `_reload_tree` gains master's write-queue flush before reload.
+`pr qa-run-bg` keeps `session_opened=True` and `_log_thread_end` and gains
+master's runtime-state mirror. `TechTree.update_prs` keeps `unavailable`
+and filters through `usable_prs`. project.yaml was merged by id
+(`/pm-captures/integration-249-master-450a6362/merge3.py`). Full suite on
+the merge tree: 4353 passed, 1 skipped; the 12 failures were all
+test_markdown_render (env-only missing `markdown`; 13 passed with it on a
+--target path). Logs: `/pm-captures/integration-249-master-450a6362/`.
