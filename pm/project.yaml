@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-27T22:39:46.500861+00:00'
+  updated_at: '2026-10-27T22:56:47.465961+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14795,6 +14795,24 @@ prs:
       message changes, so the QA expectations from i3 still hold.'
     created_at: '2026-10-27T22:39:46Z'
     last_edited: '2026-10-27T22:39:46Z'
+  - id: note-3942677
+    text: 'Review loop 1e74 i5 (2026-10-27): no production-code defects found this
+      pass — re-verified the i1–i4 fixes (pidfd delivery, empty/binary pidfile races,
+      unqueue-on-signal-failure, zombie re-check) and the exec-restart path (SIG_IGN
+      across exec + same-PID claim short-circuit keeps `tui_owner_problem` None throughout,
+      so the picker spinner cannot false-abort on Ctrl+R). One test gap fixed: test_caps_published_only_after_handlers
+      asserted the queue existed only *after* _install_reload_signal returned, so
+      it would still pass if queue creation were moved after claim.publish() — the
+      exact I3 race. It now captures queue.exists() inside the fake loop at handler-registration
+      time and asserts it alongside the caps-empty check; verified the assertion fails
+      when the queue creation is reordered after publish. Spec test 9 updated. Non-blocking
+      observation (left as-is): helpers.trigger_tui_command is now production-dead
+      — autostart and the picker both use submit_tui_command, so only the compat wrapper
+      + its one test reference it; kept deliberately as the documented bool API. Full
+      suite: 3878 passed, 1 skipped (pytest 8.4.2, PATH=/usr/bin:/bin, markdown on
+      PYTHONPATH).'
+    created_at: '2026-10-27T22:56:47Z'
+    last_edited: '2026-10-27T22:56:47Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
