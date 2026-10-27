@@ -14432,6 +14432,35 @@ prs:
       Evidence /pm-captures/scenarios/38/README.md'
     created_at: '2026-10-27T19:52:20Z'
     last_edited: '2026-10-27T19:52:20Z'
+  - id: note-07e6c87
+    text: 'QA S34 (2026-10-27): NEEDS_WORK; three fixes pushed: 895b5b69, b913a424
+      and 065aba13. Evidence: /pm-captures/scenarios/34/manifest.md.
+
+      T1 held, with one fixture deviation: A finished 8 PASS + 2 NEEDS_WORK because
+      the fake cursor clamps at its last entry (an 11th qa_scenario consumer). A released
+      immediately, B s1/s10 kept their IDs and could still push, and the evidence
+      hashes matched.
+
+      T2 pre-fix bug: after fresh-over-fresh, 9 of 10 superseded workers were removed
+      only by the periodic pass (4 min). Fix 895b5b69 (tmux.pane_gone). Post-fix all
+      were gone in 9.3 s and the next attempt started without waiting.
+
+      T2 second bug: the restart resume recovered the stale superseded snapshot. Fix
+      b913a424.
+
+      T3 blocked by the environment: the TUI crashed on fork EAGAIN in _poll_loop_state
+      2 s after the /pr qa loop stop, so 8 C containers leaked. Fix 065aba13: the
+      poll tick is skipped on EAGAIN/ENOMEM. Live prlimit repro: pre-fix the TUI died,
+      post-fix it survived. Full suite 4246 passed.
+
+      T3 still needs a rerun on a host whose PID 1 reaps zombies. Here PID 1 is sleep
+      infinity and the cgroup cap is 2048; ~590 zombies plus two podman exec clients
+      per worker (~22 threads each) cannot fit 30 workers.
+
+      Scenario numbers renumber across attempts, so successive A attempts never share
+      window names.'
+    created_at: '2026-10-27T20:18:03Z'
+    last_edited: '2026-10-27T20:18:03Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
