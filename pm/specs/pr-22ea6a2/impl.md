@@ -82,7 +82,13 @@ Fresh autostart must **never** launch or kill the implementation session:
 * Do not call `pr start` with `--fresh`; do not send keys to the pane.
 * Register/adopt the live implementation pane in `PaneIdleTracker` using the
   pane's own transcript (`pane_transcript_path`, falling back to the run-dir
-  `impl-<pr>.jsonl` symlink) so it is trackable after a TUI restart.
+  `impl-<pr>.jsonl` symlink) so it is trackable after a TUI restart.  The
+  registration happens in `review_loop_ui._poll_impl_idle`'s existing lazy
+  path: when the run-dir symlink is unavailable (a restarted TUI's run dir is
+  new) a fresh-marked PR recovers the pane's native transcript from its start
+  command instead of only trust-watching it.  The handoff check itself always
+  prefers the pane's native transcript (`autostart_fresh._impl_transcript`),
+  so the tracker registration only feeds hook/idle state.
 * The scheduler pass that follows only runs `pr start --background`, whose
   existing-window fast path is a no-op (`pm_core/cli/pr.py:955-965`).  If the
   window genuinely does not exist, that is the existing in-progress relaunch
@@ -368,3 +374,26 @@ schema, so it could still hold the new QA.  The TUI-driven flow (the one this
 feature targets) is fenced by popping `app._qa_loops` and by
 `_resume_incomplete_qa` refusing to resume a PR that is no longer in `qa`
 status.  A fully robust fence needs a per-run id in the QA runtime record.
+
+## Review-iteration notes (i4)
+
+* **Coverage for the two fences that had none** — the sign-off timestamp
+  guard (`fresh_recorded_verdict` ignores a pre-`requested_at` record even
+  when a racing write never set `invalidated`) and the review-loop
+  `SUPERSEDED` sentinel's fresh `loop_id` (the value `_is_active_loop`
+  compares, so a late callback from the old thread bows out) are now tested
+  directly.
+* **Partial reset failures are pinned by a test** — validation reads the
+  TUI's in-memory rows while `reset_pr` re-reads disk under the lock, so a
+  PR that changed underneath fails its own reset; the test asserts the
+  others are still reset and the failure is reported in `failed` for the
+  CLI's `failed:` lines.
+* **`resume_pending` policy fallback is tested** — an unknown/hand-edited
+  marker policy re-arms the target as `stop_before_merge` (manual merge)
+  rather than an unrecognised policy.
+* **No duplicated resume log line** — `resume_pending` already logs each
+  resumed PR through `add_targets`'s confirmation, so `_deferred_startup`
+  no longer logs a second, near-identical aggregate line.
+* **R2 clarified** — the pane adoption is the existing lazy registration in
+  `_poll_impl_idle` (with a fresh-attempt native-transcript recovery), not a
+  separate step in `fresh_start`.

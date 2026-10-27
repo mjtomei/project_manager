@@ -467,6 +467,33 @@ class TestFreshStart:
         assert store.get_pr(store.load(project), "pr-a")["status"] == "in_review"
         assert not auto_start.get_targets(app)
 
+    def test_partial_reset_failure_is_reported(self, project):
+        # Validation reads the TUI's in-memory rows; the reset re-reads disk
+        # under the lock.  A PR that changed underneath (merged meanwhile)
+        # fails its reset — the others must still be reset and the failure
+        # must be reported so the CLI can print it.
+        data = store.load(project)
+        data["prs"].append(_pr("pr-b", workdir=str(project.parent / "wd-b")))
+        store.save(data, project)
+        app = FakeApp(store.load(project)["prs"], project)
+        app._pane_idle_tracker = MagicMock()
+        app._pane_idle_tracker.is_tracked.return_value = False
+        # On disk pr-b has already merged; app._data still says in_review.
+        on_disk = store.load(project)
+        store.get_pr(on_disk, "pr-b")["status"] = "merged"
+        store.save(on_disk, project)
+
+        with patch.object(autostart_fresh, "handoff_ready",
+                          return_value=False), \
+             patch("pm_core.tui.review_loop_ui._auto_review_idle_prs"):
+            out = autostart_fresh.fresh_start(app, ["pr-a", "pr-b"])
+        assert out["ok"]
+        assert [c["pr_id"] for c in out["changes"]] == ["pr-a"]
+        assert out["failed"][0]["pr_id"] == "pr-b"
+        assert out["failed"][0]["error"] == "terminal_pr"
+        assert store.get_pr(store.load(project), "pr-a")["status"] == "in_progress"
+        assert auto_start.get_targets(app) == ["pr-a"]
+
     def test_new_target_policies_match_the_z_keys(self, project):
         app = self._app(project)
         with patch.object(autostart_fresh, "handoff_ready",
@@ -739,6 +766,19 @@ class TestResume:
         restarted = FakeApp(store.load(project)["prs"], project)
         assert autostart_fresh.resume_pending(restarted) == []
 
+    def test_resume_falls_back_to_stop_for_an_unknown_marker_policy(
+            self, project):
+        # A hand-edited / future marker value must not arm a target with an
+        # unknown policy; the resume uses the manual-merge default.
+        autostart_fresh.reset_pr(project, "pr-a", "test",
+                                 policy=st.POLICY_AUTO)
+        data = store.load(project)
+        store.get_pr(data, "pr-a")[FRESH_KEY]["policy"] = "bogus"
+        store.save(data, project)
+        restarted = FakeApp(store.load(project)["prs"], project)
+        assert autostart_fresh.resume_pending(restarted) == ["pr-a"]
+        assert auto_start.target_policy(restarted, "pr-a") == st.POLICY_STOP
+
 
 # ---------------------------------------------------------------------------
 # Retiring old in-memory state
@@ -781,6 +821,23 @@ class TestRetirement:
              patch("pm_core.runtime_state.set_action_state"):
             autostart_fresh.retire_in_memory(app, _pr())
         assert loop.stop_requested
+
+    def test_review_loop_sentinel_fences_late_callbacks(self):
+        # ``_is_active_loop`` compares the recorded loop_id: the retirement
+        # must write a *different* one so a late callback from the old
+        # thread cannot record its verdict into the new attempt.
+        app = FakeApp([_pr()])
+        loop = ReviewLoopState(pr_id="pr-a", running=True)
+        app._review_loops["pr-a"] = loop
+        written = {}
+        with patch("pm_core.runtime_state.get_action_state",
+                   return_value={}), \
+             patch("pm_core.runtime_state.set_action_state",
+                   side_effect=lambda pid, action, state, **kw:
+                   written.__setitem__(action, (state, kw))):
+            autostart_fresh.retire_in_memory(app, _pr())
+        new_id = written["review-loop"][1]["loop_id"]
+        assert new_id and new_id != loop.loop_id
 
     def test_retirement_clears_the_previous_turns_idle_flag(self):
         # A resumed turn fires no hook at its start, so the tracker keeps
@@ -861,6 +918,31 @@ class TestStaleQa:
                                  "previous_verdict": "PASS",
                                  "updated_at": st.now_iso()}):
             assert auto_start.recorded_qa_verdict("pr-a", pr) is None
+
+
+# ---------------------------------------------------------------------------
+# Stale sign-off evidence
+# ---------------------------------------------------------------------------
+
+class TestStaleSignoff:
+    def test_pre_fresh_verdict_is_ignored_even_when_not_invalidated(self):
+        # The reset invalidates the current record; this timestamp fence also
+        # covers a racing/legacy write that never got the invalidated flag.
+        from pm_core.signoff import fresh_recorded_verdict
+        pr = {"id": "pr-a",
+              "signoff": {"verdict": "SIGNOFF_REQA", "sha": "abc",
+                          "ts": OLD},
+              FRESH_KEY: {"requested_at": st.now_iso(),
+                          "awaiting_handoff": True}}
+        assert fresh_recorded_verdict(pr, "abc") is None
+
+    def test_post_fresh_verdict_is_kept(self):
+        from pm_core.signoff import fresh_recorded_verdict
+        pr = {"id": "pr-a",
+              "signoff": {"verdict": "SIGNOFF_REQA", "sha": "abc",
+                          "ts": st.now_iso()},
+              FRESH_KEY: {"requested_at": OLD, "awaiting_handoff": False}}
+        assert fresh_recorded_verdict(pr, "abc") == "SIGNOFF_REQA"
 
 
 # ---------------------------------------------------------------------------

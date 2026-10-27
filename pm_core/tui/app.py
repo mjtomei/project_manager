@@ -618,13 +618,11 @@ class ProjectManagerApp(App):
         await auto_start.consume_breadcrumb(self)
         # An explicit fresh autostart (z O / z A) is a user request that must
         # survive a plain TUI restart: re-add its target from the PR marker.
+        # ``resume_pending`` logs each resumed PR itself (through
+        # ``add_targets``'s confirmation); an extra aggregate line here would
+        # only duplicate it.
         from pm_core.tui import autostart_fresh
-        resumed = autostart_fresh.resume_pending(self)
-        if resumed:
-            self.log_message(
-                "Auto-start: resumed fresh attempt for "
-                + ", ".join(resumed)
-                + " (waiting for implementation handoff)", sticky=5)
+        autostart_fresh.resume_pending(self)
         # Now dispatch external commands, including any that arrived while
         # the previous process was exec'ing (signal lost) or before the
         # breadcrumb restore above (which would have overwritten them).
