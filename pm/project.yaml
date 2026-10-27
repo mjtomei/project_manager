@@ -31078,7 +31078,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-12T23:09:15.916240+00:00'
+  updated_at: '2026-10-27T04:46:01.837004+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31097,6 +31097,30 @@ prs:
       are improvised worker commands, not a checked-in PM polling loop.'
     created_at: '2026-10-12T23:09:15Z'
     last_edited: '2026-10-12T23:09:15Z'
+  - id: note-900f1b9
+    text: 'Implemented: shared pm/qa/artifacts/wait-for-job.sh (captured-PID wait,
+      bounded timeout, pipefail for -c, real exit status, fresh+validated artifact;
+      no pgrep/bare wait). Recording recipes use it; impl/review/QA-child prompts
+      get shared background-job guidance; QA verifier rejects stale/killed-wait artifacts;
+      _install_artifact_files copies *.sh helpers. Tests: tests/test_qa_artifact_wait_for_job.py
+      (34 pass). Captures: $CAP/impl/pre-fix/repro-selfmatch and $CAP/impl/post-fix/render-wait
+      (transcript+mp4+manifest). Full suite 3772 passed; only known base hook-installer
+      failure and 12 markdown tests needing the missing markdown dep (pass with it).'
+    created_at: '2026-10-27T04:46:01Z'
+    last_edited: '2026-10-27T04:46:01Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
 - id: pr-edc256b
   plan: bugs
   title: 'Bug: TUI status bar omits WCH after starting a watcher (w s) until the next
