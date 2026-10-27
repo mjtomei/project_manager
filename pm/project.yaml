@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T20:09:09.181957+00:00'
+  updated_at: '2026-10-27T20:19:15.401294+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -10994,6 +10994,23 @@ prs:
       /pm-captures/scenarios/55.'
     created_at: '2026-10-27T20:09:09Z'
     last_edited: '2026-10-27T20:09:09Z'
+  - id: note-22a650e
+    text: 'QA S51 (2026-10-27, nested rootless podman, fake-claude): fixed a094ece6.
+      (1) The launch-time qa_status.json write dropped queued/waiting info. With the
+      governor off, the cap-held "queued (1 queued)" row vanished from batch launch
+      until the first verdict, and during each queued launch the waiting_memory rows
+      read "pending" for about 17 s. (2) An initial batch the governor refused was
+      retried at once on the first poll (two not-admitted lines 0-1 s apart). Now
+      it waits the 15 s interval. Live on the post-fix tree: queued row held throughout,
+      dim queued (4 queued) during launches, gaps 15/15/16 s. All other Thens held:
+      fit-2 run A (Queue depth 2, s3/s4 keys only, IR suffix, +16g raise launched
+      s3 in 13 s in the same loop, PASS->VERIFIED->removed->next in 4 s, Overall NEEDS_WORK,
+      clean queue), E1/E2 reasons and raise, zz t during verification (QA stopped
+      reason, INPUT_REQUIRED, no crash, queue clean). For a human: zz t is the graceful
+      stop and keeps the scenario windows and the IR-held container, while the scenario
+      expected them torn down (only z t kills windows). Captures /pm-captures/scenarios/51.'
+    created_at: '2026-10-27T20:19:15Z'
+    last_edited: '2026-10-27T20:19:15Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
