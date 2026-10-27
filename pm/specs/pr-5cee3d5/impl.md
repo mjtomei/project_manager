@@ -602,3 +602,42 @@ tests):
 - **"Behavioral configuration" set.** Chosen: the explicit `project.yaml`
   keys/paths in R3; anything else is covered by the generic overlap listing
   and the agent's judgment.
+
+## Integration with master: prompt bounding (pr-ace66e5, merged as #250)
+
+The base this PR integrates contains pr-ace66e5, which bounds accumulating
+prompt lists. Both behaviours are kept; neither side's intent is dropped.
+
+- `pm_core/integration.py` gains master's `omitted_path_count` and
+  `integration_pointer` alongside this PR's `resolution_diff_path`. The pointer
+  is a *runtime-resolved* reference (`$(pm qa captures-path <pr>)/integration.json`
+  or `pm pr show <pr>`), never a host path, so it survives the container
+  boundary.
+- The sign-off integration block (`prompt_gen._signoff_integration_block`) and
+  the sign-off return (`signoff.format_signoff_return`) render the
+  overlap/conflict path lists through `bounded_join` with
+  `INTEGRATION_MAX_PATHS` / `INTEGRATION_LIST_BUDGET` and an omission marker
+  that reports the *record's* remainder (`omitted_path_count` over
+  `overlap_total` / `conflicts_total`). The `isinstance` list guards from R9
+  are kept in front of every listing: a hand-edited non-list value is not
+  evidence of a clean record and must not be iterated as characters.
+- `signoff.build_return_record` carries `conflicts_total` / `overlap_total`
+  into the return's `integration` block, together with this PR's `resolution`
+  and `base_behavior_changes`.
+- The base-range line in the sign-off block keeps this PR's
+  `base_range_from` / contained-base logic (the range starts at the applied
+  base once the base is inside HEAD); master's simpler `merge_base` line is
+  not used.
+- `prompt_gen._signoff_qa_scenarios_parts` returns a `(head, listing)` tuple on
+  master; this PR's non-dict `qa_status.json` guard is re-applied in tuple
+  form (`("…malformed…", "")`) so malformed evidence is reported instead of
+  raising `AttributeError`.
+- The sign-off prompt still goes through `_assemble` / `fit_prompt`, and only
+  enumerations are abbreviated (never instructions). This PR's new prompt
+  content is accumulation and stays bounded: the resolution `paths` list has
+  one entry per auto-resolved *file* (in practice a single
+  `pm/project.yaml`) with each id list capped at 10 in the prompt, the
+  behaviour list is capped at 20 with an `… N more` line, and the evidence
+  block is a fixed few lines. Worst-case size therefore stays well inside
+  `PROMPT_ARG_LIMIT`; if a large PR pushes the whole prompt over anyway, the
+  launcher's file-backed delivery still carries every instruction intact.
