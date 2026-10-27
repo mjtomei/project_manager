@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T15:13:32.733509+00:00'
+  updated_at: '2026-10-27T15:15:05.985726+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36906,6 +36906,27 @@ prs:
       when an attempt was recorded — a bare --no-resolve leaves no attempt.'
     created_at: '2026-10-27T15:13:32Z'
     last_edited: '2026-10-27T15:13:32Z'
+  - id: note-5a94c0e
+    text: 'QA scenario 29 (concurrent operators, branch already contains the base)
+      PASS at 91011ee4 — no code change; all four triples held live. Harness facts
+      for the next run: (1) `source /tmp/pm-venv/bin/activate` resets PATH, so export
+      PATH=/usr/bin:/usr/local/bin:/bin:/usr/sbin:/sbin AFTER activating — otherwise
+      the integration fetch hits the ~/.local/bin git proxy and records status error/base_sha
+      null. (2) asciinema 2.1.0 rejects --cols/--rows; run `tmux resize-window -t
+      <sess>:qa -x 140 -y 45` before recording. (3) The story-2 launch prints `Sign-off
+      window: failed to create tmux window ''signoff-<pr>''` because fake-claude ({"_all":
+      {}} -> --verdict SIGNOFF_MERGE) exits instantly and the window is gone before
+      find_window_by_name; the launch-time integration record is still written — harness
+      artifact, not a bug. (4) The scenario-22 fixture reproduced the record conflict
+      exactly: --record -> `conflicts with master@<base> resolved by record (pm/project.yaml;
+      1 added from PR, 1 from base)`, then --apply -> `up to date ... applied to the
+      PR branch as <merge>`. (5) Story 3 race reliably refused the merge (base-move
+      landed before the merge re-fetch): `merge refused — master moved since sign-off
+      (<old> -> <new>)`, 0 merges/1 first-parent OLD..master, signoff_invalidated
+      kept, concurrent --record recorded the re-check against the new base without
+      clearing it. Captures: /pm-captures/scenarios/29/{story1-concurrent-apply,story2-apply-vs-record,story3-merge-vs-recheck,story4-four-way}.'
+    created_at: '2026-10-27T15:15:05Z'
+    last_edited: '2026-10-27T15:15:05Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
