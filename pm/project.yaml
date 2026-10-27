@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T21:51:03.727579+00:00'
+  updated_at: '2026-10-27T21:56:33.988124+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11055,6 +11055,19 @@ prs:
       /pm-captures/scenarios/61.'
     created_at: '2026-10-27T21:51:03Z'
     last_edited: '2026-10-27T21:51:03Z'
+  - id: note-22e8e8d
+    text: 'QA S58 incidental fix 2e829ae9 (pre-existing on master): create_scenario_workdir
+      ran `git clone --local`; an explicit --local dies with "Invalid cross-device
+      link" when the repo and ~/.pm are on different filesystems (e.g. /scratch vs
+      /home), so `pm qa debug` and every QA scenario clone crashed with a CalledProcessError
+      traceback. Now a plain path clone (hardlinks when possible, else copies); regression
+      test mutation-checked; full suite 4084 passed. S58 all 5 stories held live otherwise.
+      Per-PR `skip_qa: true` in project.yaml is not read by pm pr signoff, which needs
+      project-level `pm project set skip-qa on` to accept in_review. The TUI log line
+      is clipped at pane width, so the refusal hint after "or" is only readable in
+      the L command-log pane.'
+    created_at: '2026-10-27T21:56:33Z'
+    last_edited: '2026-10-27T21:56:33Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
