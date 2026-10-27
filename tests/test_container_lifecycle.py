@@ -904,6 +904,41 @@ class TestCreateFailureCleanup:
         assert removed[-1] == "pm-t-impl-pr-1"
         assert "pm session cleanup" not in str(ei.value)
 
+    def test_fresh_pids_failure_does_not_name_the_removed_container(self, monkeypatch,
+                                                                    no_claude_json):
+        # QA S43: the advice 'pm container restart NAME' failed with "No container
+        # named NAME to restart" because PM had just removed that fresh allocation.
+        rt = _Runtime(exec=lambda *a: _cp(126, err="exec: cannot fork: resource "
+                                                   "temporarily unavailable"))
+        removed = self._patch(monkeypatch, rt)
+        with pytest.raises(cm.ContainerLaunchError) as ei:
+            cm.create_container("pm-t-impl-pr-1", cm.ContainerConfig(), Path("/w"))
+        msg = str(ei.value)
+        assert ei.value.kind == "pids"
+        assert removed[-1] == "pm-t-impl-pr-1"
+        assert "pm container restart" not in msg
+        assert "PM removed this partial container" in msg and "retry the launch" in msg
+        assert "could not finish setup" in msg and "cannot fork" in msg
+
+    def test_fresh_pids_failure_keeps_restart_advice_if_removal_fails(self, monkeypatch,
+                                                                      no_claude_json):
+        rt = _Runtime(exec=lambda *a: _cp(126, err="exec: cannot fork: resource "
+                                                   "temporarily unavailable"))
+        self._patch(monkeypatch, rt)
+
+        calls = []
+
+        def rm_fails(name, **kw):
+            # The first removal is the fixture's stopped prior allocation.
+            calls.append(name)
+            if len(calls) > 1:
+                raise cm.ContainerError(f"container {name} still present after 10 s")
+
+        monkeypatch.setattr(cm, "remove_container", rm_fails)
+        with pytest.raises(cm.ContainerLaunchError) as ei:
+            cm.create_container("pm-t-impl-pr-1", cm.ContainerConfig(), Path("/w"))
+        assert "pm container restart pm-t-impl-pr-1" in str(ei.value)
+
     def test_claude_json_copy_failure_is_launch_failure(self, monkeypatch, tmp_path):
         host = tmp_path / ".claude.json"
         host.write_text("{}")

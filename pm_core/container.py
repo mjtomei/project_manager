@@ -77,11 +77,12 @@ class ContainerLaunchError(ContainerError):
     """
 
     def __init__(self, message: str, *, kind: str = "runtime",
-                 stderr: str = "", name: str = "") -> None:
+                 stderr: str = "", name: str = "", stage: str = "") -> None:
         super().__init__(message)
         self.kind = kind
         self.stderr = stderr
         self.name = name
+        self.stage = stage
 
 # Default settings
 DEFAULT_IMAGE = "pm-dev:latest"
@@ -827,8 +828,12 @@ _REMEDY_REAP = ("Preview leftover containers with 'pm container reap --dry-run' 
 
 
 def launch_error(name: str, kind: str, stderr: str = "", *,
-                 stage: str = "create") -> ContainerLaunchError:
-    """Build a launch error that keeps the runtime's real message and a fix."""
+                 stage: str = "create", removed: bool = False) -> ContainerLaunchError:
+    """Build a launch error that keeps the runtime's real message and a fix.
+
+    *removed*: PM already removed this failed fresh allocation, so advice
+    must not name the container as something the user can still act on.
+    """
     tail = (stderr or "").strip()
     if len(tail) > 600:
         tail = "…" + tail[-600:]
@@ -851,6 +856,10 @@ def launch_error(name: str, kind: str, stderr: str = "", *,
         msg = (f"Container '{name}' could not {stage}: the host is out of memory. "
                f"{_REMEDY_REAP} You can also lower 'pm container set memory-limit' "
                f"or 'pm set container-launch-concurrency'.{cause}")
+    elif kind == "pids" and removed:
+        msg = (f"Container '{name}' could not {stage}: its process/PID limit is "
+               f"exhausted (runaway or zombie processes). PM removed this partial "
+               f"container, which frees its processes; retry the launch.{cause}")
     elif kind == "pids":
         msg = (f"Container '{name}' could not {stage}: its process/PID limit is "
                f"exhausted (runaway or zombie processes). Once no session needs "
@@ -864,7 +873,8 @@ def launch_error(name: str, kind: str, stderr: str = "", *,
                f"{_REMEDY_REAP}{cause}")
     else:
         msg = f"Container '{name}' could not {stage}.{cause}"
-    return ContainerLaunchError(msg, kind=kind, stderr=stderr or "", name=name)
+    return ContainerLaunchError(msg, kind=kind, stderr=stderr or "", name=name,
+                                stage=stage)
 
 
 # ---------------------------------------------------------------------------
@@ -2139,10 +2149,14 @@ def _create_fresh(
                 raise launch_error(name, "proxy",
                                    f"push proxy at {sock_path} is not accepting connections",
                                    stage="finish setup")
-    except BaseException:
+    except BaseException as exc:
         _log.error("Container %s setup failed — removing the partial container",
                    name, exc_info=True)
-        discard_container(name, container_id=container_id)
+        removed = discard_container(name, container_id=container_id)
+        if removed and isinstance(exc, ContainerLaunchError) and exc.kind == "pids":
+            # Its restart advice would name a container that no longer exists.
+            raise launch_error(name, "pids", exc.stderr, stage=exc.stage,
+                               removed=True) from exc
         raise
 
     _log.info("Created container %s (id=%s)", name, container_id[:12])
@@ -2387,15 +2401,17 @@ def _discard_on_failure(name: str, attempt: str):
         raise
 
 
-def discard_container(name: str, *, container_id: str | None = None) -> None:
+def discard_container(name: str, *, container_id: str | None = None) -> bool:
     """Best-effort removal of a container whose launch failed or was abandoned
-    before a pane attached to it (never raises)."""
+    before a pane attached to it (never raises).  True once removal is confirmed."""
     if not name:
-        return
+        return False
     try:
         remove_container(name, container_id=container_id)
     except Exception:
         _log.warning("Could not remove container %s", name, exc_info=True)
+        return False
+    return True
 
 
 @_runtime_domain_operation
