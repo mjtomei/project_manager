@@ -36141,3 +36141,56 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-84ebabf
+  plan: bugs
+  title: 'Bug: a claude-type provider api_key (even a ${VAR} reference) is written
+    as ANTHROPIC_API_KEY=<value> into the logged launch command and the tmux pane
+    command'
+  branch: pm/pr-84ebabf-bug-a-claude-type-provider-api-key-even-a-var-refe
+  status: pending
+  depends_on: []
+  description: 'pm_core/providers.py ProviderConfig.env_vars resolves api_key (_resolve_env_ref)
+    and pm_core/claude_launcher.py build_claude_shell_cmd inlines every provider env
+    value as NAME=<value> in the shell command (pre-existing on master: claude_launcher.py:937,
+    providers.py:75). log_shell_command then writes it at INFO to ~/.pm/debug/<tag>.log,
+    and tmux keeps it as the pane_start_command (tmux list-panes -F "#{pane_start_command}").
+    Live (QA S67 story 3, /pm-captures/scenarios/67/story3/secret-in-launch-cmd.txt):
+    provider mainstub (type claude, api_key ${ANTHROPIC_API_KEY}) as a PR qa_finalize
+    override; the three finalizer launches logged ANTHROPIC_API_KEY=<the dummy value>
+    and their panes carried it; ps after exec did not. Same class as the container
+    -e NAME=value leak this PR fixed (env values via the process env, not argv). Decide
+    how host panes get secret provider env (process env of the tmux client, a shell
+    reference for ${VAR} keys when the pane inherits the var, or redaction at least
+    in the log) and keep openai OPENAI_API_KEY the same.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-26T05:09:15.878235+00:00'
+  updated_at: '2026-10-27T18:43:31.767149+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-1a74701
+    text: 'Launch handoff from user-approved critical-bug review, 2026-10-27: host
+      build_claude_shell_cmd still places resolved provider secrets in logged strings
+      and tmux pane_start_command. Prevent the secret transport/metadata exposure
+      as well as logging it; redaction alone does not fix the tmux copy. Use synthetic
+      canary credentials for tests and never reproduce by printing real credentials.
+      #249 already covers the separate container -e NAME=value issue (75f0dde6), so
+      avoid duplicating that work.'
+    created_at: '2026-10-27T18:43:31Z'
+    last_edited: '2026-10-27T18:43:31Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    signoff: provider:claude-work
+    merge: provider:deepseek-flash
