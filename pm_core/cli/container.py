@@ -62,54 +62,61 @@ def container_status():
 
 def _echo_reaper_state() -> None:
     from pm_core import container_reaper
-    state = container_reaper.last_state()
-    if state.get("last_run"):
-        import time as _time
-        when = _time.strftime("%Y-%m-%d %H:%M:%S",
-                              _time.localtime(state["last_run"]))
-        click.echo(f"Last cleanup:    {when} ({state.get('last_reason', '')}): "
-                   f"{state.get('last_summary', '')}")
-    failures = container_reaper.pending_failures()
-    # An owner release of a still-retained allocation is deferred, not failed:
-    # reap keeps it until the retention is released, so retrying cannot help.
+    # Each helper below resolves the runtime identity with its own `info`
+    # probe. One status invocation used to run that probe 4-5 times; reuse a
+    # single successful answer for the whole report. An unknown identity is
+    # not cached (``runtime_domain_scope`` only keeps successful probes), so a
+    # transient outage is still retried rather than reported as final.
     with container_reaper.runtime_domain_scope():
+        state = container_reaper.last_state()
+        if state.get("last_run"):
+            import time as _time
+            when = _time.strftime("%Y-%m-%d %H:%M:%S",
+                                  _time.localtime(state["last_run"]))
+            click.echo(f"Last cleanup:    {when} ({state.get('last_reason', '')}): "
+                       f"{state.get('last_summary', '')}")
+        failures = container_reaper.pending_failures()
+        # An owner release of a still-retained allocation is deferred, not
+        # failed: reap keeps it until the retention is released, so retrying
+        # cannot help.
         deferred = sorted(
             name for name, info in failures.items()
             if info.get("owner_release")
             and container_reaper.is_retained(name, str(info.get("id") or "")))
-    for name in deferred:
-        failures.pop(name)
-    if deferred:
-        click.echo("Released while retained (removed once "
-                   "'pm container retain --release' drops the retention):")
         for name in deferred:
-            click.echo(f"  {name}")
-    # A release recorded while the runtime identity was unavailable can never
-    # authorize cleanup (and full passes deliberately preserve it), so a reap
-    # retry cannot clear it either. Show it as what it is — a diagnostic.
-    unverifiable = {name: info for name, info in failures.items()
-                    if info.get("unverifiable_release")}
-    for name in unverifiable:
-        failures.pop(name)
-    if unverifiable:
-        click.echo("Unverifiable release records (recorded without a runtime "
-                   "identity; diagnostic only, not retried by 'pm container reap'):")
-        for name, info in sorted(unverifiable.items()):
-            click.echo(f"  {name}: allocation {info.get('id') or 'unknown'}")
-    if failures:
-        click.echo(f"Cleanup failures ({len(failures)}) — retry with 'pm container reap':")
-        for name, info in sorted(failures.items()):
-            click.echo(f"  {name}: {info.get('error', '')}")
-    diagnostics = container_reaper.unavailable_runtime_diagnostics()
-    if diagnostics:
-        click.echo("Saved cleanup diagnostics (runtime identity unavailable; "
-                   "records may belong to other runtimes). Restore the runtime, "
-                   "then retry with 'pm container reap':")
-        for source, name, error in diagnostics:
-            click.echo(f"  [{source}] {name}: {error}")
-    retained = container_reaper.retained_names()
-    if retained:
-        click.echo(f"Retained:        {', '.join(retained)}")
+            failures.pop(name)
+        if deferred:
+            click.echo("Released while retained (removed once "
+                       "'pm container retain --release' drops the retention):")
+            for name in deferred:
+                click.echo(f"  {name}")
+        # A release recorded while the runtime identity was unavailable can
+        # never authorize cleanup (and full passes deliberately preserve it),
+        # so a reap retry cannot clear it either. Show it as what it is — a
+        # diagnostic.
+        unverifiable = {name: info for name, info in failures.items()
+                        if info.get("unverifiable_release")}
+        for name in unverifiable:
+            failures.pop(name)
+        if unverifiable:
+            click.echo("Unverifiable release records (recorded without a runtime "
+                       "identity; diagnostic only, not retried by 'pm container reap'):")
+            for name, info in sorted(unverifiable.items()):
+                click.echo(f"  {name}: allocation {info.get('id') or 'unknown'}")
+        if failures:
+            click.echo(f"Cleanup failures ({len(failures)}) — retry with 'pm container reap':")
+            for name, info in sorted(failures.items()):
+                click.echo(f"  {name}: {info.get('error', '')}")
+        diagnostics = container_reaper.unavailable_runtime_diagnostics()
+        if diagnostics:
+            click.echo("Saved cleanup diagnostics (runtime identity unavailable; "
+                       "records may belong to other runtimes). Restore the runtime, "
+                       "then retry with 'pm container reap':")
+            for source, name, error in diagnostics:
+                click.echo(f"  [{source}] {name}: {error}")
+        retained = container_reaper.retained_names()
+        if retained:
+            click.echo(f"Retained:        {', '.join(retained)}")
 
 
 @container_group.command("enable")

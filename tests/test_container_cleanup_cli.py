@@ -93,3 +93,47 @@ def test_empty_reap_still_reports_recovery_counts():
     assert "removed 0, kept 0, failed 0" in result.output
     assert "running 0 → 0" in result.output
     assert "keyring 10/200 → 10/200" in result.output
+
+
+# conftest stubs the runtime-domain resolver to isolate ordinary lifecycle
+# tests; capture the real caching one for the probe-count test below.
+_real_domain = container_reaper._runtime_domain
+
+
+def test_status_resolves_the_runtime_identity_once(monkeypatch):
+    """One status report resolves the runtime identity once, not per helper.
+
+    ``pm container status`` asks several reaper-state helpers for the runtime
+    domain; each one used to run its own ``runtime info`` probe (4-5 per
+    invocation). The report must scope them so a single successful probe
+    serves the whole command.
+    """
+    from pm_core import push_proxy
+    monkeypatch.setattr(container_reaper, "_runtime_domain", _real_domain)
+    monkeypatch.setattr(container, "_get_runtime", lambda: "podman")
+    calls = []
+
+    def probe():
+        calls.append(1)
+        return {"runtime": "podman", "id": "status"}
+
+    monkeypatch.setattr(push_proxy, "runtime_domain", probe)
+    # Seed a persisted failure and a pending owner release so every helper
+    # that needs the identity actually runs.
+    container_reaper._record(
+        container_reaper.Outcome(failures={"pm-tag-review-pr-001": "boom"}),
+        container_reaper.Scope(), "test")
+    container_reaper._record_release(
+        "pm-tag-review-pr-001", "cid-1", "gen-1", "test")
+    monkeypatch.setattr(container, "_runtime_available", lambda: True)
+    monkeypatch.setattr(container, "running_container_count", lambda: 0)
+    monkeypatch.setattr(container, "keyring_summary", lambda: "")
+    monkeypatch.setattr(container, "pids_pressure", lambda *a, **k: [])
+    calls.clear()
+
+    result = CliRunner().invoke(cli, ["container", "status"])
+    assert result.exit_code == 0, result.output
+    assert "boom" in result.output, "the seeded failure must be reported"
+    assert calls, "status must resolve the runtime identity"
+    assert len(calls) == 1, (
+        f"status probed the runtime identity {len(calls)} times")
