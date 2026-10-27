@@ -212,6 +212,13 @@ published. So the sign-off launch
    locked read-modify-write, to write a check computed before HEAD moved when
    the stored record already describes the branch's current revision
    (`_check_is_stale`) — the loser's record is then dropped, not written.
+   The apply itself runs under the repository lock (`_repo_lock`), like the
+   check's fetches and candidate worktrees: otherwise two applies (the
+   sign-off launch, a `--apply`, a bounce) can both pass the HEAD check and
+   enter `git merge` in the same workdir, where the loser's `merge --abort`
+   discards the winner's in-progress merge and both report a confusing "merge
+   failed". Serialized, the loser sees the winner's commit and returns
+   `HEAD_MOVED`, which `prepare` re-checks and records.
 Dirty workdirs are never touched: apply refuses and the record keeps
 `RESOLVED` with `apply_error`; a MERGE on it is blocked (R6).
 
@@ -393,6 +400,9 @@ invalidates and returns to sign-off.
 - `--apply` applies a `CLEAN` or `RESOLVED` candidate (the existing clean
   behavior is preserved), including a `RESOLVED` check whose re-check in
   `prepare` comes back `CLEAN` because the base moved between the two checks.
+  With resolution enabled it delegates to `prepare` directly (check -> apply ->
+  re-check, recorded as one record) instead of running a separate check first,
+  which fetched the base and merged the candidate a third time.
 `--record` still records the check the verdict binds to.
 
 ### R9. Regression coverage

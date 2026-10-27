@@ -1685,13 +1685,17 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
     pr_id = pr_entry["id"]
     applied_clean = None
     if apply_:
-        rec = integration.check_integration(root, pr_id, data=data,
-                                            resolve=resolve)
-        if rec.get("status") == integration.RESOLVED:
+        if resolve:
+            # ``prepare`` is check -> apply a resolved candidate -> re-check,
+            # recorded as one coherent record; calling the check again first
+            # would fetch and merge the candidate a third time.
             rec = integration.prepare(root, pr_id, data=data)
+        else:
+            rec = integration.check_integration(root, pr_id, data=data,
+                                                resolve=False)
         if rec.get("status") == integration.CLEAN:
-            # Also covers a resolved check whose base moved to a clean merge
-            # between the two checks: `--apply` must still apply the merge.
+            # A clean candidate (including a resolved check whose base moved to
+            # a clean merge): `--apply` must still apply the merge.
             applied_clean, err = integration.apply_integration(root, pr_id, rec)
             if err:
                 click.echo(f"Not applied: {err}", err=True)

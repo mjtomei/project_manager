@@ -2052,6 +2052,14 @@ def apply_integration(root: Path, pr_id: str, record: dict | None = None,
     ``(None, reason)``; a failed merge is aborted so no half-merge is left.
     Never touches the base branch and never pushes (the merge step pushes the
     approved PR head where needed).
+
+    Runs under the repository lock (:func:`_repo_lock`), like the check's
+    candidate worktrees and fetches: two applies (the sign-off launch, a
+    ``--apply``, a bounce) can otherwise both pass the HEAD check and enter
+    ``git merge`` in the same workdir, where the loser's ``merge --abort``
+    would discard the winner's in-progress merge and both would report a
+    confusing "merge failed".  Serialized, the loser sees the winner's commit
+    and returns :data:`HEAD_MOVED`, which ``prepare`` re-checks and records.
     """
     if data is None:
         data = store.load(root)
@@ -2064,6 +2072,13 @@ def apply_integration(root: Path, pr_id: str, record: dict | None = None,
     workdir = pr.get("workdir")
     if not isinstance(workdir, str) or not Path(workdir).is_dir():
         return None, "no PR workdir"
+    with _repo_lock(workdir):
+        return _apply_locked(pr, record, workdir)
+
+
+def _apply_locked(pr: dict, record: dict, workdir: str):
+    """The merge itself; the caller holds :func:`_repo_lock`."""
+    status = record.get("status")
     head = _out(_git("rev-parse", "HEAD", cwd=workdir))
     if head != record.get("head"):
         return None, HEAD_MOVED

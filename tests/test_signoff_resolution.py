@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -3683,3 +3684,75 @@ def test_recovery_skips_verification_for_a_malformed_approval(w, monkeypatch):
         resolve_window=False, background=False, transcript=None,
         companion=False)
     assert calls == []
+
+
+def test_concurrent_applies_serialize_on_the_repository_lock(w):
+    """Two applies at once: one merges, the other sees HEAD moved.
+
+    Without the repository lock both can pass the HEAD check and enter
+    ``git merge`` in the same workdir; the loser's ``merge --abort`` then
+    discards the winner's in-progress merge and both report "merge failed".
+    Serialized, the loser returns ``HEAD_MOVED`` (which ``prepare`` re-checks
+    and records) and the branch gets exactly one merge commit.
+    """
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN, rec
+    head = rec["head"]
+    results: list[tuple[str | None, str | None]] = []
+    barrier = threading.Barrier(2)
+
+    def apply():
+        barrier.wait(timeout=30)
+        results.append(integration.apply_integration(w.pm_dir, PR, rec))
+
+    threads = [threading.Thread(target=apply) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    assert len(results) == 2, results
+
+    merged = [sha for sha, err in results if sha and not err]
+    errors = [err for sha, err in results if not sha]
+    assert len(merged) == 1, results
+    assert errors == [integration.HEAD_MOVED], results
+    assert git(w.wd, "rev-parse", "HEAD") == merged[0]
+    assert git(w.wd, "rev-parse", "HEAD^{tree}") == rec["candidate_tree"]
+    assert git(w.wd, "status", "--porcelain") == ""
+    # Exactly one merge commit on top of the reviewed head.
+    assert git(w.wd, "rev-list", "--count", "--merges",
+               f"{head}..HEAD") == "1"
+
+
+def test_integrate_cli_apply_checks_the_base_once_before_applying(w, monkeypatch):
+    """`--apply` delegates to ``prepare`` instead of checking the base twice.
+
+    ``prepare`` is check -> apply -> re-check; a separate check first would
+    fetch the base and merge the candidate a third time for the same result.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    calls = []
+    real_run_check = integration.run_check
+
+    def counting_run_check(*args, **kwargs):
+        calls.append(1)
+        return real_run_check(*args, **kwargs)
+
+    monkeypatch.setattr(integration, "run_check", counting_run_check)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(
+            pr_mod.pr, ["signoff", "integrate", PR, "--apply"])
+    assert r.exit_code == 0, r.output
+    # prepare's check + the post-apply re-check.
+    assert len(calls) == 2, calls
+    rec = pr_entry(w)["integration"]
+    assert rec["resolution"]["applied_merge_sha"]
+    assert git(w.wd, "rev-parse", "HEAD") == rec["resolution"]["applied_merge_sha"]
