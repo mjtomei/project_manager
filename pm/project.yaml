@@ -33244,7 +33244,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-26T18:26:35.849299+00:00'
+  updated_at: '2026-10-27T00:22:11.846191+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36092,6 +36092,32 @@ prs:
       on parent aaefb0e7).'
     created_at: '2026-10-26T18:26:35Z'
     last_edited: '2026-10-26T18:26:35Z'
+  - id: note-cb11d33
+    text: 'QA S82 (2026-10-27, container mode podman 3, HEAD 5b78ba40 = 62ba5b0f +
+      0f4ecbf2, real claude vs work/ router + main stubs; captures /pm-captures/scenarios/82/REPORT.md):
+      CODE CHANGE 19c68f43 needs normal re-review. FOUND: when the TUI itself launches
+      a sign-off REVIEW return (its review loop runs pm pr review --fresh) and `pm
+      tui restart --breadcrumb` lands while that launch is still creating its container
+      (12 s), the restored loop found no review window, relaunched iteration 1, and
+      two review-<pr> windows + two routed review sessions ran for one return (pre-fix/story2).
+      Fix: review_loop._wait_for_launching_window waits (<= _LAUNCH_TIMEOUT 120 s)
+      while the iteration symlink exists and its session has not started (15 s grace
+      if the symlink is not written yet); post-fix the same race adopted the late
+      window after 1.0 s, one window. 5 tests (4 fail without it); full suite 4042
+      passed + same 6 test_worker_route env failures. Held live: file-backed bootstrap
+      on all 69 planner/s0/refiner/worker/verifier/review sessions, Reads whole; router
+      only work/ from A refiners/workers/review (bridge prefix), main all else; cleanup
+      --pr A under a held s1 worker -> retry 1/10, recreated container (new id, route
+      mount), same bridge inode/pid, B containers + proxy untouched, A PASS 4.5 min
+      after; tick-launched return (2ad57eff) adopted at the 185 s re-check in container
+      mode; return block 20 paths + (+40 more); concurrent unfiltered cleanups rc
+      0, 0 left, third "No pm containers found."; 0 leaks, 0 Tracebacks. Observations:
+      the retry line shows in the TUI log line, not in the qa_status pane; three ticks
+      5 s apart each spawned qa-run-bg after review PASS (container qa window appears
+      13 s after launch; pre-existing, noted on pr-7a83b6d); TUI auto-QA + tick duplicate
+      QA (pr-bddda0f).'
+    created_at: '2026-10-27T00:22:11Z'
+    last_edited: '2026-10-27T00:22:11Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -36898,7 +36924,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-26T04:56:16.944073+00:00'
-  updated_at: '2026-10-26T07:50:16.077054+00:00'
+  updated_at: '2026-10-27T00:22:12.914328+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36910,6 +36936,18 @@ prs:
       qa-tick race (no sign-off return, no claim) is unchanged.'
     created_at: '2026-10-26T07:50:16Z'
     last_edited: '2026-10-26T07:50:16Z'
+  - id: note-90ee5f0
+    text: 'Container-mode variant from QA S82 of pr-592e4bd (2026-10-27, /pm-captures/scenarios/82/story2b/ticker.log):
+      ticks are not concurrent here, they are 5 s apart. After review PASS the tick
+      printed advanced: qa (driver 1, 00:12:38), the next two ticks printed running:
+      qa (launched) (00:12:43, 00:12:48) -> three qa-run-bg drivers, three QA planning
+      phases sharing planner pane %73, three QA complete PASS. Cause: the earlier
+      run qa_status.json is masked as predating the sign-off return, and in container
+      mode the new driver qa-<pr> window only appears ~13 s after launch (orphan container
+      cleanup + clone), so the window guard misses it. A launch claim (claim_return_launch-style)
+      on both launch sites would cover this too.'
+    created_at: '2026-10-27T00:22:12Z'
+    last_edited: '2026-10-27T00:22:12Z'
 - id: pr-f1d825b
   plan: bugs
   title: 'Bug: pm pr auto-sequence advances a QA PASS to sign_off while the QA finalizer
