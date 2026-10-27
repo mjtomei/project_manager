@@ -412,7 +412,7 @@ def echo_reap_outcome(outcome) -> None:
     for name, error in outcome.failures.items():
         if name not in listed:
             click.echo(f"  FAILED   {name}: {error}")
-    for proxy in outcome.proxies_released:
+    for proxy in [*outcome.proxies_stopped, *outcome.proxies_released]:
         click.echo(f"  stopped  push proxy {proxy}")
     for name, pids, limit, why in outcome.pid_pressure:
         click.echo(f"  WARNING  {name} at {pids}/{limit} PIDs ({why}) — run "

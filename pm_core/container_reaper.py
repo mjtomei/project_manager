@@ -969,6 +969,8 @@ class Decision:
     released: bool = False
     release_generation: str | None = None
     release_name: str = ""  # original name for pre-ID generation compatibility
+    # Push-proxy sockets stopped together with this container's removal.
+    proxies_stopped: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -981,6 +983,8 @@ class Outcome:
     # Failed removals of containers their run released (retried as released).
     released_failures: set[str] = field(default_factory=set)
     proxies_released: list[str] = field(default_factory=list)
+    # Per-container push proxies stopped with the containers removed above.
+    proxies_stopped: list[str] = field(default_factory=list)
     # Proxies this pass reached a definitive answer for (released, or proven
     # still in use). A failure recorded for one of them earlier is resolved.
     proxies_checked: list[str] = field(default_factory=list)
@@ -1015,8 +1019,9 @@ class Outcome:
         else:
             head = (f"removed {len(self.removed)}, kept {kept}, "
                     f"failed {len(self.failures)}")
-        if self.proxies_released:
-            head += f", stopped {len(self.proxies_released)} unused proxy(ies)"
+        stopped = len(self.proxies_released) + len(self.proxies_stopped)
+        if stopped:
+            head += f", stopped {stopped} unused proxy(ies)"
         counts = []
         if self.running_before is not None:
             after = ("" if self.running_after is None or self.dry_run
@@ -1144,7 +1149,12 @@ def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
         try:
             if not info.id:
                 return False, "error: missing captured container id"
-            container_mod.remove_container(info.name, container_id=info.id)
+            from pm_core import push_proxy
+            token = push_proxy.stopped_proxy_sink.set(d.proxies_stopped)
+            try:
+                container_mod.remove_container(info.name, container_id=info.id)
+            finally:
+                push_proxy.stopped_proxy_sink.reset(token)
         except Exception as e:
             return False, f"error: {e}"
     return True, ""
@@ -1343,6 +1353,7 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
                                      exc_info=True)
                         results.append((d, (False, f"error: {exc}")))
             for d, (ok, msg) in results:
+                out.proxies_stopped.extend(d.proxies_stopped)
                 if ok:
                     out.removed.append(d.info.name)
                 elif msg.startswith("error:"):

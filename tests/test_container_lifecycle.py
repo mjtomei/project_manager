@@ -1703,3 +1703,51 @@ def test_file_lock_reopen_failure_fails_closed(monkeypatch, tmp_path):
     monkeypatch.setattr(cm.os, "open", open_patch)
     with cm._file_lock("reopen-race") as acquired:
         assert acquired is False
+
+
+class TestOwnershipLabelProjectRoot:
+    """pm.project_root names the project the command acts on, not the cwd clone.
+
+    QA S45: prefix+M ``pr start`` runs in the viewed PR window's cwd (a PR
+    workdir clone with its own stale pm/project.yaml) with PM_PROJECT pinned
+    to the session's project.  The label must name the session's project, or
+    the reaper reads PR status from the clone's snapshot.
+    """
+
+    @staticmethod
+    def _projects(tmp_path):
+        session = tmp_path / "proj" / "pm"
+        clone = tmp_path / "workdir" / "pr-clone"
+        for d in (session, clone / "pm"):
+            d.mkdir(parents=True)
+            (d / "project.yaml").write_text("project: {nested_podman: false}\nprs: []\n")
+        (session / "project.yaml").write_text("project: {nested_podman: true}\nprs: []\n")
+        return session, clone
+
+    def test_cli_project_override_beats_cwd(self, tmp_path, monkeypatch):
+        from pm_core.cli import helpers
+        session, clone = self._projects(tmp_path)
+        monkeypatch.chdir(clone)
+        monkeypatch.delenv("PM_PROJECT", raising=False)
+        monkeypatch.setattr(helpers, "_project_override", session)
+        labels = cm.ownership_labels("pm-t-impl-pr-1", session_tag="t",
+                                     pr_id="pr-1", kind="impl")
+        assert labels[cm.LABEL_PROJECT] == str(session)
+        assert cm._nested_podman_enabled() is True
+
+    def test_pm_project_env_beats_cwd(self, tmp_path, monkeypatch):
+        from pm_core.cli import helpers
+        session, clone = self._projects(tmp_path)
+        monkeypatch.chdir(clone)
+        monkeypatch.setattr(helpers, "_project_override", None)
+        monkeypatch.setenv("PM_PROJECT", str(session))
+        assert cm._current_project_root() == str(session)
+
+    def test_cwd_walk_without_override(self, tmp_path, monkeypatch):
+        from pm_core.cli import helpers
+        _session, clone = self._projects(tmp_path)
+        monkeypatch.chdir(clone)
+        monkeypatch.setattr(helpers, "_project_override", None)
+        monkeypatch.delenv("PM_PROJECT", raising=False)
+        assert cm._current_project_root() == str(clone / "pm")
+        assert cm._nested_podman_enabled() is False

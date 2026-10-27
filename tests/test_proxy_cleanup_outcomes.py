@@ -128,3 +128,57 @@ def test_undetermined_proxy_keeps_an_earlier_failure(monkeypatch, tmp_path):
     result = CliRunner().invoke(cli, ["container", "reap"])
     assert result.exit_code == 0, result.output
     assert reaper.pending_failures(), "a busy lock must not clear the failure"
+
+
+
+def _collect_stopped(fn):
+    sink: list[str] = []
+    token = push_proxy.stopped_proxy_sink.set(sink)
+    try:
+        fn()
+    finally:
+        push_proxy.stopped_proxy_sink.reset(token)
+    return sink
+
+
+def test_stopping_a_proxy_reports_it_to_the_sink(tmp_path):
+    """QA S45: a reap that stops a removed container's proxy can say so."""
+    directory = tmp_path / "pm-push-proxy-tag-pr-aaaa"
+    directory.mkdir()
+    (directory / "push.sock").touch()
+    stopped = _collect_stopped(lambda: push_proxy._kill_proxy_socket(str(directory / "push.sock")))
+    assert stopped == [str(directory)]
+    assert not directory.exists()
+
+
+def test_a_kept_proxy_generation_is_not_reported(tmp_path):
+    sock = tmp_path / "proxy" / "push.sock"
+    sock.parent.mkdir()
+    sock.touch()
+    stopped = _collect_stopped(lambda: push_proxy._kill_proxy_socket(
+        str(sock), expected_identity=(0, 0, 0)))
+    assert stopped == [] and sock.exists()
+
+
+def test_shared_proxy_release_with_its_container_is_reported(monkeypatch, tmp_path):
+    directory = tmp_path / "proxy"
+    directory.mkdir()
+    (directory / "owner.json").write_text(json.dumps({"runtime_domain": reaper._runtime_domain()}))
+    (directory / "push.sock").touch()
+    monkeypatch.setattr(push_proxy, "_shared_sock_dir_path", lambda *a: str(directory))
+    monkeypatch.setattr(cm, "containers_for_pr", lambda *a: set())
+    stopped = _collect_stopped(lambda: push_proxy.release_proxy_if_unused("tag", "pr-aaaa"))
+    assert stopped == [str(directory)]
+
+
+def test_reap_output_lists_proxies_stopped_with_containers(capsys):
+    from pm_core.cli.container import echo_reap_outcome
+    info = reaper.ContainerInfo(name="pm-tag-impl-pr-aaaa", id="c" * 64, running=True)
+    out = reaper.Outcome(scope="session tag", removed=["pm-tag-impl-pr-aaaa"],
+                         proxies_stopped=["/tmp/pm-push-proxy-tag-pr-aaaa"])
+    out.decisions.append(reaper.Decision(info, "remove", "no owning pane (attempt ended)"))
+    echo_reap_outcome(out)
+    text = capsys.readouterr().out
+    assert "removed  pm-tag-impl-pr-aaaa" in text
+    assert "stopped  push proxy /tmp/pm-push-proxy-tag-pr-aaaa" in text
+    assert "removed 1, kept 0, failed 0, stopped 1 unused proxy(ies)" in text

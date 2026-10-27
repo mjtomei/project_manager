@@ -14228,6 +14228,27 @@ prs:
       <id> git push` in fixtures. Proxy daemons exit as Z under PID 1 (pr-2111fa0).'
     created_at: '2026-10-27T20:03:12Z'
     last_edited: '2026-10-27T20:03:12Z'
+  - id: note-9264e05
+    text: 'S45 refinement (2026-10-27, HEAD a44a70dc): fake-claude bounded "hold"
+      ignores stdin EOF when a session_id is set (_hold_open sleeps), so EOF-ended
+      workers need NO hold key; tell A/B configs apart by preamble/body_lines (A preamble
+      1 shows only "I''ll review the changes carefully."; B preamble 6 + body_lines
+      3 shows "Reviewing the interface contracts…" and "Examining the test harness
+      configuration…"). pr start/meta call find_claude() first, so put a non-provider
+      stub named claude first on PATH (never /home/pm/.local/bin). Session code: A
+      via pm_root (project root must contain pm_core/cli, i.e. commit a same-revision
+      copy into the project, which also makes every PR workdir a cwd_walk decoy);
+      B via override from a real `pm meta` with a pre-seeded clean master clone at
+      ~/.pm/workdirs/meta-<Btag> (no GitHub clone). Meta EOF runs rm -rf ~/.pm/sessions/<Btag>,
+      so end it last. The impl pane start command pins the launcher checkout in its
+      release_on_exit sys.path, which shows which code launched it. Successful prefix+M
+      commands close at once: read the output from the cast. TUI startup and the 600
+      s periodic reconcile are unscoped, so create aged (>120 s) orphans after both
+      TUIs mount and finish the overlap before mount+600 s. Gate B at the `podman
+      run --name <exact>` return (60 s timeout) and log A''s inventory by PM_POPUP_SESSION
+      in the shim env. fzf is not installed.'
+    created_at: '2026-10-27T19:14:20Z'
+    last_edited: '2026-10-27T19:14:20Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -34242,6 +34263,28 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T19:51:10.564754+00:00'
   updated_at: '2026-10-27T19:51:10.564754+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-20684e6
+  plan: bugs
+  title: 'Bug: Esc at the prefix+M "pm>" prompt types ^[ instead of dismissing the
+    popup'
+  branch: pm/pr-20684e6-bug-esc-at-the-prefix-m-pm-prompt-types-instead-of
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/session.py popup_cmd_cmd reads the command with input("pm>
+    "), so Esc is echoed as ^[ and the popup stays open (only Ctrl-C/empty Enter dismiss);
+    _run_with_abort_keys handles Esc only while a command runs, and the picker advertises
+    q/Esc. Repro (QA pr-1139060 S45, real tmux client): prefix+M, press Esc -> prompt
+    shows "pm> ^[" and stays open; Enter then runs pm with a garbage arg and waits
+    for a keypress. Expected: Esc at the prompt closes the popup like Ctrl-C.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T20:03:01.265742+00:00'
+  updated_at: '2026-10-27T20:03:01.265742+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

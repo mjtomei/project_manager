@@ -28,6 +28,7 @@ Legacy requests without ``cmd`` are treated as push (backward compat).
 """
 
 import contextlib
+import contextvars
 import errno
 import hashlib
 import json
@@ -827,6 +828,13 @@ def start_push_proxy(container_name: str, workdir: str,
     return sock_path
 
 
+# While set, every proxy _kill_proxy_socket() stops is appended (by socket
+# directory), so a caller removing containers can report the proxies that
+# went with them (their release paths differ: unshared, shared, legacy).
+stopped_proxy_sink: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "stopped_proxy_sink", default=None)
+
+
 def _kill_proxy_socket(sock_path: str, expected_identity: tuple[int, int, int] | None = None) -> None:
     """Stop a subprocess proxy, optionally only the captured socket generation."""
     with _socket_lifecycle_lock(sock_path):
@@ -870,6 +878,9 @@ def _kill_proxy_socket(sock_path: str, expected_identity: tuple[int, int, int] |
             os.rmdir(real_dir)
         except OSError:
             pass
+    sink = stopped_proxy_sink.get()
+    if sink is not None:
+        sink.append(sock_dir)
 
 
 _OWNER_FILE = "owner.json"

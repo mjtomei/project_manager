@@ -155,8 +155,8 @@ def _nested_podman_enabled() -> bool:
     /proc masks) and should only apply to projects that genuinely need it.
     """
     try:
-        from pm_core.store import find_project_root, load
-        data = load(find_project_root(), validate=False)
+        from pm_core.store import load
+        data = load(_active_project_root(), validate=False)
         return bool(data.get("project", {}).get("nested_podman", False))
     except Exception:
         return False
@@ -616,10 +616,31 @@ def _current_tmux_socket() -> str:
     return tmux_env.split(",", 1)[0] if tmux_env else ""
 
 
+def _active_project_root() -> Path:
+    """The project dir this pm invocation acts on.
+
+    Honours ``-C`` / ``PM_PROJECT`` (the CLI's project override) before the
+    cwd walk.  A prefix+M popup runs in the viewed pane's cwd -- often a PR
+    workdir clone whose ``pm/project.yaml`` is a stale snapshot -- with
+    PM_PROJECT pinned to the session's project, so the cwd walk alone would
+    name the wrong project.
+    """
+    try:
+        from pm_core.cli import helpers
+        override = helpers._project_override
+    except Exception:
+        override = None
+    if override is None and os.environ.get("PM_PROJECT"):
+        override = Path(os.environ["PM_PROJECT"]).resolve()
+    if override is not None:
+        return Path(override)
+    from pm_core.store import find_project_root
+    return find_project_root()
+
+
 def _current_project_root() -> str:
     try:
-        from pm_core.store import find_project_root
-        return str(find_project_root())
+        return str(_active_project_root())
     except Exception:
         return ""
 
