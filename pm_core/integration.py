@@ -1479,13 +1479,24 @@ def _compact_resolution(resolution: dict) -> dict:
             item["records_total"] = records_total
         paths.append(item)
     out["paths"] = paths[:_YAML_LIST_LIMIT]
+    raw_unresolved = resolution.get("unresolved")
     unresolved = resolution_entries(resolution, "unresolved")
     unresolved_total = resolution.get("unresolved_total")
     if unresolved_total is None and len(unresolved) > _YAML_LIST_LIMIT:
         unresolved_total = len(unresolved)
-    out["unresolved"] = unresolved[:_YAML_LIST_LIMIT]
-    if unresolved_total is not None:
-        out["unresolved_total"] = unresolved_total
+    if isinstance(raw_unresolved, list) or not raw_unresolved:
+        out["unresolved"] = unresolved[:_YAML_LIST_LIMIT]
+        if unresolved_total is not None:
+            out["unresolved_total"] = unresolved_total
+    else:
+        # Hand-edited state: a truthy non-list value is a *refusal* everywhere
+        # (``valid_for``, the merge gate, the router, the prompt) because it
+        # cannot name what pm failed to reconcile.  Dropping it here would
+        # launder that refusal into a clean resolution on the next record
+        # write — every check compacts the record — so it is kept verbatim:
+        # the record keeps refusing, and the digest changes with it, so an
+        # approval bound to the clean form stops matching.
+        out["unresolved"] = raw_unresolved
     return out
 
 

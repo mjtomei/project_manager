@@ -526,7 +526,13 @@ tests):
    lines and the return text's `git diff <rev> HEAD` / `git merge <rev>` /
    `git log <rev>..HEAD` hints (the last is built from the return record's
    hand-editable `reviewed_head`) fall back (`<base>`, `<old head>`, the base
-   branch) instead of interpolating a hand-edited fragment.
+   branch) instead of interpolating a hand-edited fragment. The same rule
+   covers the revisions either surface *displays* as a revision:
+   `resolution.resolved_from`'s `head`/`base_sha`/`merge_base` are rendered
+   only when they are object names (the prompt omits the "Resolved from PR
+   HEAD …" line for a head pm cannot confirm, and the return text — which
+   feeds the impl/review/QA prompts — matches it instead of showing a sliced
+   fragment).
 10. Notes appended to the same PR record on both sides (the merge base has no
     `notes` key) resolve, both notes survive, and the nested ids are named in
     the summary/prompt; the same id with different content is still ambiguous.
@@ -612,7 +618,13 @@ tests):
     record and a binding whose `base_sha`/`candidate_tree` is not a string are
     refusals, not `TypeError`s, and the router/driver reads the same
     mapping), `compact`/`_compact_resolution` drop non-mapping and non-string
-    members, and `return_awaiting`/`open_return` still answer. A
+    members — except a truthy non-list `unresolved`, which is the record's
+    refusal marker and is kept verbatim: every integration check rewrites the
+    record through `compact`, so dropping it would launder a hand-edited
+    refusal into a clean, approvable resolution on the next routine re-check
+    (and the digest, computed over the compact form, changes with it, so an
+    approval bound to the clean form stops matching) — and
+    `return_awaiting`/`open_return` still answer. A
     `resolution.paths`/`unresolved` value that is not a list (a hand-edited
     scalar) is no longer iterated at any reader (`resolution_entries`) — the
     prompt, the return text, the router, the merge gate, `summary`,

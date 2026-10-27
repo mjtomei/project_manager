@@ -1419,16 +1419,16 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                     "auto-resolved).")
             resolved_from = resolution.get("resolved_from")
             resolved_from = _mapping(resolved_from)
-            pre_head = resolved_from.get("head")
-            pre_head = pre_head if isinstance(pre_head, str) and pre_head \
-                else None
+            # Object names only: these are revisions rendered as revisions
+            # (project.yaml is hand-editable state), and the sign-off prompt
+            # omits the line for a head pm cannot confirm — the two surfaces
+            # must not disagree about what the resolution combined.
+            pre_head = integration._sha_like(resolved_from.get("head"))
             if pre_head:
-                base_rev = resolved_from.get("base_sha")
-                base_rev = (base_rev[:12]
-                            if isinstance(base_rev, str) and base_rev else "?")
+                base_rev = integration._sha_like(resolved_from.get("base_sha"))
                 lines.append(
-                    f"Resolved from PR HEAD `{pre_head[:12]}` "
-                    f"against base `{base_rev}`.")
+                    f"Resolved from PR HEAD `{pre_head[:12]}` against base "
+                    f"`{base_rev[:12] if base_rev else '?'}`.")
             applied_sha = resolution.get("applied_merge_sha")
             if isinstance(applied_sha, str) and applied_sha:
                 # Object name only: the record is hand-editable state, and

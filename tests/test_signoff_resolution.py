@@ -1800,12 +1800,20 @@ def test_malformed_resolution_state_reads_as_absent(w):
         assert integration.unresolved_paths(rec) == set()
         assert integration.carried_applied_resolution(rec) is False
         assert isinstance(integration.summary(rec), str)
-        # The compact state never carries a malformed member through: a
-        # non-mapping resolution is dropped, a malformed member sanitized.
+        # The compact state never carries a malformed *member* through: a
+        # non-mapping resolution is dropped and a malformed list member
+        # sanitized.  A truthy non-list ``unresolved`` is the exception — it
+        # is the record's refusal marker, so it survives the rewrite (see
+        # test_a_benign_recheck_does_not_launder_a_malformed_unresolved).
         compacted = integration.compact(rec)
         if isinstance(bad, dict):
             assert compacted["resolution"]["paths"] == []
-            assert compacted["resolution"]["unresolved"] == []
+            if isinstance(bad.get("unresolved"), list) \
+                    or not bad.get("unresolved"):
+                assert compacted["resolution"]["unresolved"] == []
+            else:
+                assert compacted["resolution"]["unresolved"] \
+                    == bad["unresolved"]
             assert "applied_merge_sha" not in compacted["resolution"]
         else:
             assert "resolution" not in compacted
@@ -1911,7 +1919,10 @@ def test_malformed_resolution_list_members_read_as_absent(w):
         assert integration.unresolved_paths(rec) == set()
         compacted = integration.compact(rec)
         assert compacted["resolution"]["paths"] == []
-        assert compacted["resolution"]["unresolved"] == []
+        # A truthy non-list ``unresolved`` is the refusal marker, not a member
+        # to sanitize: dropping it would let the next record write turn the
+        # refusal into a clean resolution.
+        assert compacted["resolution"]["unresolved"] == bad
         signoff.effective_verdict(SIGNOFF_REVIEW, rec, "a" * 40)
         signoff.merge_gate_refusal(
             {"id": PR, "integration": rec,
@@ -4714,8 +4725,8 @@ def test_a_hand_edited_applied_merge_is_not_rendered_as_a_revision(w):
     that render it sit beside commands the agent is told to run, so a shell
     fragment must fall back rather than be interpolated.
     """
-    rec = _metadata_conflict(w)
     fragment = "abc; touch /tmp/pwned"
+    _metadata_conflict(w)
 
     def _set(d):
         integ = store.get_pr(d, PR)["integration"]
@@ -4920,3 +4931,100 @@ def test_a_malformed_unresolved_value_is_never_labelled_resolved(w):
     # The Result line renders the (honest) one-line summary.
     assert "metadata resolution attempted but unresolved conflicts remain" \
         in text
+
+
+def test_a_benign_recheck_does_not_launder_a_malformed_unresolved(w):
+    """A hand-edited ``unresolved`` refusal survives the compact rewrite.
+
+    A truthy non-list ``unresolved`` is a refusal everywhere (``valid_for``,
+    the merge gate, the router, the prompt): the value cannot name what pm
+    failed to reconcile, so the record must never read as a clean resolution.
+    Every integration check rewrites the record through ``compact``, so a
+    compaction that dropped the malformed value would turn the refusal into an
+    approvable record on the next routine re-check — the person's edit erased
+    rather than surfaced.  The recorded value is kept verbatim (and with it in
+    the digest, so an approval bound to the clean form stops matching).
+    """
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+    clean_digest = pr_entry(w)["integration"]["resolution_digest"]
+
+    def _tamper(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["unresolved"] = \
+            "garbage"
+    store.locked_update(w.pm_dir, _tamper)
+    # The edit is refused (its digest no longer describes the record), and it
+    # stays refused after the rewrite below.
+    refusal = signoff.merge_gate_refusal(pr_entry(w), rec["head"], "master")
+    assert refusal, "a hand-edited unresolved value must never be approved"
+
+    # A routine re-check carries the resolution forward and rewrites the
+    # record: the malformed value must still be there, still refusing.
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    stored = pr_entry(w)["integration"]
+    assert stored["resolution"].get("unresolved") == "garbage"
+    refusal = signoff.merge_gate_refusal(pr_entry(w), again["head"], "master")
+    assert refusal, "the re-check must not launder the refusal into a merge"
+
+    # Removing the edit and re-checking recomputes the clean digest, so the
+    # approval bound to it holds again: the edit was refused, not absorbed.
+    def _restore(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["unresolved"] = []
+    store.locked_update(w.pm_dir, _restore)
+    restored = integration.check_integration(w.pm_dir, PR)
+    assert restored["resolution_digest"] == clean_digest
+    assert signoff.merge_gate_refusal(
+        pr_entry(w), restored["head"], "master") is None
+
+
+def test_a_hand_edited_resolved_from_is_not_rendered_as_a_revision(w):
+    """The prompt and the return text agree on what a revision is.
+
+    ``resolution.resolved_from`` is hand-editable project.yaml state.  The
+    sign-off prompt already omits its "Resolved from PR HEAD ..." line when
+    the head is not a git object name; the return text (which feeds the
+    impl/review/QA prompts) rendered the same fields raw, so a shell fragment
+    read as a revision pm had confirmed.
+    """
+    _metadata_conflict(w)
+    fragment = "$(touch /tmp/pwned)"
+
+    def _set(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"])
+        resolved_from = dict(resolution.get("resolved_from") or {})
+        resolved_from.update(head=fragment, base_sha=fragment)
+        resolution["resolved_from"] = resolved_from
+        integ["resolution"] = resolution
+    store.locked_update(w.pm_dir, _set)
+
+    pr = pr_entry(w)
+    pr["signoff_return"] = signoff.build_return_record(
+        pr, SIGNOFF_REVIEW, "review",
+        reviewed_head=pr["integration"]["head"])
+    text = signoff.format_signoff_return(pr)
+    assert "$(touch" not in text
+    assert "Resolved from PR HEAD" not in text
+
+    prompt = _signoff_prompt(w)
+    assert "$(touch" not in prompt
+    assert "Resolved from PR HEAD" not in prompt
+
+    # A real revision is still named on both surfaces.
+    head = pr["integration"]["resolution"]["applied_merge_sha"]
+
+    def _restore(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"])
+        resolution["resolved_from"] = {"head": head, "base_sha": head,
+                                       "merge_base": head}
+        integ["resolution"] = resolution
+    store.locked_update(w.pm_dir, _restore)
+    pr = pr_entry(w)
+    pr["signoff_return"] = signoff.build_return_record(
+        pr, SIGNOFF_REVIEW, "review",
+        reviewed_head=pr["integration"]["head"])
+    assert f"Resolved from PR HEAD `{head[:12]}`" in \
+        signoff.format_signoff_return(pr)
+    assert f"Resolved from PR HEAD `{head[:12]}`" in _signoff_prompt(w)

@@ -918,14 +918,15 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         resolved_from = resolution.get("resolved_from")
         resolved_from = resolved_from if isinstance(resolved_from, dict) else {}
         # Object name only: this revision becomes a `git diff <rev> HEAD`
-        # command below.
+        # command below, and the return text names the same revisions.
         pre_head = _short(integ._sha_like(resolved_from.get("head")), None)
         if pre_head:
             lines.append(
                 f"- Resolved from PR HEAD `{pre_head}` "
                 f"against base "
-                f"`{_short(resolved_from.get('base_sha'))}` (merge-base "
-                f"`{_short(resolved_from.get('merge_base'))}`).")
+                f"`{_short(integ._sha_like(resolved_from.get('base_sha')))}` "
+                f"(merge-base "
+                f"`{_short(integ._sha_like(resolved_from.get('merge_base')))}`).")
         applied_sha = resolution.get("applied_merge_sha")
         if isinstance(applied_sha, str) and applied_sha:
             # The branch may also contain a *newer* base merged by a bounce
