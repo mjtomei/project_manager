@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T15:15:05.985726+00:00'
+  updated_at: '2026-10-27T15:16:02.010734+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36927,6 +36927,36 @@ prs:
       clearing it. Captures: /pm-captures/scenarios/29/{story1-concurrent-apply,story2-apply-vs-record,story3-merge-vs-recheck,story4-four-way}.'
     created_at: '2026-10-27T15:15:05Z'
     last_edited: '2026-10-27T15:15:05Z'
+  - id: note-8f147b9
+    text: 'QA scenario 27 (hand-reconciled integration state) PASS at 91011ee4 — all
+      six stories held live on a throwaway project; no code change. (1) After a hand
+      merge of the base (no --apply, so no applied-resolution record), `pm pr signoff
+      integrate --record` reports `up to date with master@B` with no conflict/resolution
+      line yet still carries `changed on both sides: pm/project.yaml` and both `base
+      behaviour:` lines; integration.json has status up_to_date, head=merge, merge_base=B,
+      base_range_from=M0, overlap, non-empty base_behavior_changes, resolution null;
+      workdir untouched. (2) The read-only preview prints only the bare result and
+      leaves integration.json + the compact record byte-identical. (3) `pm pr review
+      --fresh` diffs against the contained base: change summary/full diff show only
+      feature.txt + the branch record; pyproject.toml and the base record never appear
+      as changes. (4) A MERGE report without evidence/checks tags is refused (exit
+      1, exact message); (5) with reuse+reason it is accepted (sha/review_head=merge,
+      integration.base_sha/report_base=B, candidate tree, evidence.reused review@/qa@H_BRANCH),
+      and a later --record re-check still carries base_range_from + base_behavior_changes
+      so removing the tags is refused again; accepted report restored (sha256 == report_hash).
+      (6) `pm pr merge` publishes with no resolution lines: master^{tree} == approved
+      candidate tree, every record/note exactly once, status merged, untracked file/captures/workdir
+      preserved. DEVIATION FROM THE SCENARIO TEXT (not a code defect): story 1 THEN
+      expects integration.json `base_files` LIST; the up-to-date carry keeps only
+      `base_files_count: 2` (spec R7 requires the count, and the scenario own fifth
+      THEN allows the count) — align the scenario text. HARNESS: asciinema 2.1.0 has
+      no --cols/--rows (resize the tmux window or attach a 200x50 recorder client);
+      the review window puts the fake agent in pane 0 and the DIFF in pane 1 (prose
+      says pane 0); agg is not installed (download aarch64 v1.9.0 from the asciinema
+      GitHub releases); the hand-merge resolve script must keep both records/notes
+      AND take the base project.active_pr. Captures: /pm-captures/scenarios/27/{story1..story6}.'
+    created_at: '2026-10-27T15:16:01Z'
+    last_edited: '2026-10-27T15:16:01Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
