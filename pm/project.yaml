@@ -34197,7 +34197,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T00:26:04.150027+00:00'
-  updated_at: '2026-10-27T20:53:45.295071+00:00'
+  updated_at: '2026-10-27T21:18:11.361529+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34265,6 +34265,33 @@ prs:
       bound approval never fetch.'
     created_at: '2026-10-27T20:53:45Z'
     last_edited: '2026-10-27T20:53:45Z'
+  - id: note-ac730c2
+    text: 'Review loop c703 i3 (2026-10-27): reviewed f0891fe5 and pushed 7c761cf8.
+      The i2 fix holds: all three sync paths verify sync-detected merges against the
+      bound SIGNOFF_MERGE, record merge_integrity + one note, and a failed check never
+      stops merge detection; the pre/post captures under /pm-captures/impl remain
+      convincing. i3 changes (no verifier behavior change): (1) the three inline `getattr(result,
+      "merge_integrity", None) or {}` copies in pm_core/tui/sync.py became one `_result_integrity`
+      helper — the default is required because tests/test_log_message_force.py stubs
+      the sync result with a SimpleNamespace that lacks the attribute (dropping the
+      getattr broke 2 tests; full suite caught it); (2) `pm pr sync-github`''s could-not-verify
+      warning now names the PR like `pm pr sync` and the log line; (3) the TUI tests
+      now assert the warning is logged force=True with hold=_INTEGRITY_HOLD_SECONDS
+      (spec R3''s held line was previously untested); (4) new test for sync_prs''s
+      workdir-gone fallback (verification runs in the workdir sync detected from,
+      with the project repo pulled so a real mismatch is named). Full suite 3839 passed,
+      1 skipped (pytest 8.4.2) — /pm-captures/review-c703-i3/full-suite.log. Still
+      for QA (unchanged): the TUI sync worker thread runs integration.fetch_base once
+      per detected merge of a bound-approved PR, serialized by <git-common-dir>/pm-integration.lock
+      with a 300 s bound, so a merge detected while another integration check holds
+      that lock delays the background sync (status bar stays "pulling"); PRs without
+      a bound approval never fetch. Known limitation (inherited from pr-ac10f03, deliberate):
+      when the PR workdir is gone and the fallback fetch source (a local project repo)
+      is stale and does not show the merge, the verifier records the general "did
+      not publish the signed-off candidate" problem rather than "could not verify"
+      — correct for a GitHub-URL repo, possible noise for a local mirror. (2026-10-27T21:20:00Z)'
+    created_at: '2026-10-27T21:18:11Z'
+    last_edited: '2026-10-27T21:18:11Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
