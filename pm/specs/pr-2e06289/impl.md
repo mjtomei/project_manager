@@ -130,7 +130,7 @@ applies the merged status.
    line so the user sees it without opening the PR. "Could not verify" stays
    log-file-only to avoid noise on transient network failures.
 
-## 6. Review refinements (c703 i1/i2/i3)
+## 6. Review refinements (c703 i1/i2/i3, d49c i1)
 
 These changed details of R2/R3 after the implementation landed; the
 requirements above still hold.
@@ -164,6 +164,15 @@ requirements above still hold.
   (the deliberate pr-ac10f03 semantics —
   `test_github_already_merged_elsewhere_is_still_verified`), so a stale local
   project repo used as the fetch source can produce that general problem.
+- d49c i1: R3's `apply_github` / `sync_from_github` callbacks apply the
+  verification whenever the sync's `new_status` is `merged`, not only when
+  the fresh state still shows a different status. The sync verifies from its
+  own (possibly stale) copy of the PR, so another writer can have finalized
+  the status first; the record is evidence about the merge, not a side effect
+  of the transition (otherwise a startup/`sync-github` race would show the
+  log line but drop the persistent record). Added the matching
+  failing-then-passing tests for both callbacks, plus a `pm pr sync` control
+  test (approved merge: no record, no note, no `WARNING:`).
 
 No **[UNRESOLVED]** ambiguities.
 

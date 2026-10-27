@@ -323,6 +323,29 @@ def test_sync_from_github_workdir_gone_falls_back_to_project_repo(sync_github):
     assert "merge_integrity" in pr_entry(sync_github)
 
 
+def test_sync_from_github_records_integrity_when_status_already_merged(sync_github):
+    """The evidence lands even if another writer finalized the status first.
+
+    The sync verifies from its own (stale) copy of the PR, so the merge can
+    be new to it while the fresh state already says ``merged``.  The record
+    is evidence about the merge, not a side effect of the transition.
+    """
+    merge_on_remote(sync_github, extra=True)
+    stale = store.load(sync_github.pm_dir)  # still sign_off
+    assert store.get_pr(stale, PR)["status"] == "sign_off"
+
+    def _mark_merged(d):
+        store.get_pr(d, PR)["status"] = "merged"
+    store.locked_update(sync_github.pm_dir, _mark_merged)
+
+    result = pr_sync.sync_from_github(sync_github.pm_dir, data=stale)
+
+    assert PR in result.merged_prs
+    assert "not the approved head" in pr_entry(sync_github)[
+        "merge_integrity"]["problem"]
+    assert len(integrity_notes(sync_github)) == 1
+
+
 # --- TUI sync entry points -------------------------------------------------
 
 def test_tui_normal_sync_applies_integrity(sync_github):
@@ -356,6 +379,24 @@ def test_tui_startup_github_sync_applies_integrity(sync_github):
     assert lines[0][1].get("hold") == tui_sync._INTEGRITY_HOLD_SECONDS
 
 
+def test_tui_startup_github_sync_records_integrity_when_status_already_merged(
+        sync_github):
+    """Startup sync's evidence also lands if the status was finalized first."""
+    merge_on_remote(sync_github, extra=True)
+    app = _FakeApp(sync_github.pm_dir)  # stale copy: still sign_off
+
+    def _mark_merged(d):
+        store.get_pr(d, PR)["status"] = "merged"
+    store.locked_update(sync_github.pm_dir, _mark_merged)
+
+    asyncio.run(tui_sync.startup_github_sync(app))
+
+    pr = pr_entry(sync_github)
+    assert pr["status"] == "merged"
+    assert "not the approved head" in pr["merge_integrity"]["problem"]
+    assert len(integrity_notes(sync_github)) == 1
+
+
 # --- CLI pm pr sync --------------------------------------------------------
 
 def test_cli_pr_sync_records_integrity(sync_github):
@@ -373,6 +414,22 @@ def test_cli_pr_sync_records_integrity(sync_github):
     assert len(integrity_notes(sync_github)) == 1
     assert "WARNING:" in result.output
     assert "not the approved head" in result.output
+
+
+def test_cli_pr_sync_approved_merge_records_nothing(sync_github):
+    """`pm pr sync` stays silent for a merge of the signed-off candidate."""
+    merge_on_remote(sync_github, extra=False)
+
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=sync_github.pm_dir), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        result = CliRunner().invoke(pr_mod.pr, ["sync"])
+
+    assert result.exit_code == 0, result.output
+    assert pr_entry(sync_github)["status"] == "merged"
+    assert "merge_integrity" not in pr_entry(sync_github)
+    assert integrity_notes(sync_github) == []
+    assert "WARNING:" not in result.output
 
 
 def test_cli_pr_sync_unverifiable_merge_warns_and_records_nothing(sync_github):

@@ -307,12 +307,19 @@ async def startup_github_sync(app) -> None:
             def apply_github(data):
                 for pr in usable_prs(data.get("prs")):
                     new_status = updates.get(pr["id"])
-                    if new_status and pr.get("status") != new_status:
+                    if not new_status:
+                        continue
+                    if pr.get("status") != new_status:
                         if new_status == "merged":
                             newly_merged.add(pr["id"])
                         pr["status"] = new_status
                         _record_status_timestamp(pr, new_status)
-                        merge_integrity.apply_to_pr(pr, integrity.get(pr["id"]))
+                    if new_status == "merged":
+                        # Applied even when another writer already set the
+                        # status: the verification is evidence about this
+                        # merge, not a side effect of the transition.
+                        merge_integrity.apply_to_pr(
+                            pr, integrity.get(pr["id"]))
 
             try:
                 app._data = store.locked_update(app._root, apply_github)

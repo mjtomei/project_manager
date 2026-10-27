@@ -406,9 +406,15 @@ def sync_from_github(
         def apply(fresh_data):
             for pr in usable_prs(fresh_data.get("prs")):
                 new_status = status_updates.get(pr["id"])
-                if new_status and pr.get("status") != new_status:
+                if not new_status:
+                    continue
+                if pr.get("status") != new_status:
                     pr["status"] = new_status
                     _record_status_timestamp(pr, new_status)
+                if new_status == "merged":
+                    # Applied even when another writer already set the status:
+                    # the verification is evidence about this merge, not a
+                    # side effect of the transition (pr-2e06289).
                     merge_integrity.apply_to_pr(
                         pr, integrity_by_pr.get(pr["id"]))
             set_last_sync_timestamp(fresh_data, datetime.now(timezone.utc))
