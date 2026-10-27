@@ -594,6 +594,74 @@ def test_discovery_adopts_another_drivers_pane_after_our_attempt(tmp_path,
     assert disc.transcript == str(tmp_path / f"{theirs}.jsonl")
 
 
+def test_discovery_never_adopts_a_historical_pane_after_a_failed_attempt(
+        tmp_path, monkeypatch):
+    """A failed launch can write this iteration's symlink and still leave the
+    previous iteration's window live (its removal failed).  That window runs
+    an *earlier* iteration's session, so its verdict is not this iteration's:
+    replace the window instead of recording a verdict for a review that never
+    ran."""
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    old = str(uuid.uuid4())    # iteration 1's live session (the stale window)
+    ours = str(uuid.uuid4())   # iteration 2's symlink, written by the failure
+    _make_symlink(tmp_path, "review-pr-001-i2.jsonl", ours)
+    (tmp_path / f"{old}.jsonl").write_text(json.dumps({
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "old\n\n**PASS**"}]},
+    }) + "\n")
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: "%9")
+    monkeypatch.setattr(review_loop, "_other_loop_owner", lambda _s: "")
+    monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
+                        lambda *_a, **_k: tmp_path / f"{old}.jsonl")
+    state = ReviewLoopState(pr_id=PR, iteration=2, iteration_attempted=True,
+                            launch_attempts=1, last_session_id=old)
+    disc = review_loop._discover_iteration(state, _pr(tmp_path),
+                                           str(tmp_path), 2,
+                                           allow_recovery=True)
+    assert disc.kind == "launch"
+
+
+def test_retry_never_adopts_a_historical_panes_verdict(tmp_path, monkeypatch):
+    """End-to-end form of the same hole: the retry must run its own review
+    for the iteration, not inherit the stale window's verdict."""
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: "%9")
+    monkeypatch.setattr(review_loop, "_other_loop_owner", lambda _s: "")
+    old = str(uuid.uuid4())
+    (tmp_path / f"{old}.jsonl").write_text(json.dumps({
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "old\n\n**PASS**"}]},
+    }) + "\n")
+    monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
+                        lambda *_a, **_k: tmp_path / f"{old}.jsonl")
+
+    state = ReviewLoopState(pr_id=PR, iteration=1, last_session_id=old)
+    state.history.append(ReviewIteration(iteration=1, verdict="NEEDS_WORK",
+                                         output="iteration 1"))
+    err = ReviewLaunchError("container setup failed", retryable=True)
+
+    def fake_review(*_a, **kw):
+        # The child wrote the iteration-2 symlink before the parent-side
+        # launch failed, leaving the historical window live.
+        link = tmp_path / "review-pr-001-i2.jsonl"
+        if not link.is_symlink():
+            _make_symlink(tmp_path, "review-pr-001-i2.jsonl",
+                          str(uuid.uuid4()))
+        raise err
+
+    with patch.object(review_loop, "_run_claude_review",
+                      side_effect=fake_review) as run:
+        result = _run(state, tmp_path)
+    assert run.call_count == 3, "the stale window's verdict must not be adopted"
+    assert [(h.iteration, h.verdict) for h in result.history] == [
+        (1, "NEEDS_WORK")]
+    assert result.latest_verdict == VERDICT_LAUNCH_FAILED
+
+
 def test_discovery_reports_a_landed_verdict(tmp_path, monkeypatch):
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
     sid = str(uuid.uuid4())
@@ -1059,6 +1127,21 @@ def test_container_permission_error_is_retryable_not_auth(tmp_path):
                 transcript=str(tmp_path / "t.jsonl"))
     assert ei.value.retryable is True
     assert ei.value.reason == "launch"
+
+
+def test_bare_http_code_lookalikes_stay_retryable(tmp_path):
+    """A 3-digit token in arbitrary child stderr (a pid, an id, a port) is
+    not an HTTP 401/403.  Misclassifying it as auth stops the retry after one
+    attempt and strands the target again."""
+    assert not review_loop._looks_like_auth_failure(
+        "error: process 403 exited while removing container")
+    assert not review_loop._looks_like_auth_failure(
+        "container pm-review-401 not found")
+    assert not review_loop._looks_like_auth_failure("mount failed: 401")
+    # Real auth symptoms still classify.
+    assert review_loop._looks_like_auth_failure("HTTP 403 Forbidden")
+    assert review_loop._looks_like_auth_failure("401 unauthorized")
+    assert review_loop._looks_like_auth_failure("status code 403")
 
 
 def test_discovery_waits_for_a_starting_pane_after_our_attempt(tmp_path,

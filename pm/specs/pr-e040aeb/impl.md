@@ -346,3 +346,39 @@ Findings from the fourth review pass, applied on top of iteration 3:
    root) escaped with the retry episode already cleared, silently disarming
    the failure.  `_auto_start_review_loops` now treats a raise like a False
    return and restores the saved episode fields.
+
+## Review iteration 5 (385e) — refinements
+
+Findings from the fifth review pass, applied on top of iteration 4:
+
+1. **A failed launch must not adopt the *historical pane's* verdict
+   (correctness fix).** Iterations 1 and 3 stopped rediscovery from adopting
+   a stale transcript *symlink*, but the same fabrication was still reachable
+   through the live pane.  `build_claude_shell_cmd` writes the iteration's
+   transcript symlink *before* the child removes the historical window and
+   creates the new one, so a launch that fails after the symlink is written
+   but before the window is replaced leaves a live pane running the
+   *previous* iteration's session.  In the `our_sid` branch (our symlink is
+   new, so `our_sid != stale_session_id`) `_discover_iteration` treated any
+   other live session as "another driver's review" and returned its verdict —
+   i.e. iteration N's `NEEDS_WORK`/`PASS` was recorded for iteration N+1,
+   which never ran.  It now consults `_is_historical_session` there too and
+   returns `launch`, replacing the stale window exactly as the no-`our_sid`
+   branch already did.  Covered by
+   `test_discovery_never_adopts_a_historical_pane_after_a_failed_attempt`
+   and `test_retry_never_adopts_a_historical_panes_verdict` (both fail
+   pre-fix).
+2. **The `pending` grace is observable.** `AttemptDiscovery.reason` was set
+   but never read; the retry's pending branch now logs it (and the
+   "pane never exposed a session" replacement) instead of sleeping silently.
+3. **A bare `401`/`403` token is not an auth failure.** `_AUTH_FAILURE_RE`
+   still matched the HTTP codes anywhere in the child's stderr, so a 3-digit
+   pid, id or port in a container teardown error (e.g. `process 403 exited`,
+   `container pm-review-401 not found`) classified a transient failure as a
+   non-retryable auth hold — the same re-stranding failure mode iteration 4
+   fixed for `permission denied`.  The codes now only count with auth/HTTP
+   context (`http`/`api`/`auth`/`status`/`response` within 20 chars, or
+   `401 unauthorized` / `403 forbidden`); `forbidden` is matched directly.
+   `test_bare_http_code_lookalikes_stay_retryable` covers both directions.
+4. **Dead local removed.** `_start_loop`'s unused `mode_label` (pre-existing)
+   is gone.

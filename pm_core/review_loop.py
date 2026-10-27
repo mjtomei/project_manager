@@ -356,10 +356,17 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
 # filesystem/socket errors like "permission denied": a container teardown or
 # mount that fails that way is exactly the transient launch failure this
 # retry exists to recover, and treating it as an auth hold would strand the
-# target again.
+# target again.  A bare "401"/"403" is likewise not enough: any 3-digit token
+# in arbitrary child stderr (a pid, a port, an id) would match, and a
+# misclassified transient failure is a stranded target.  The HTTP codes only
+# count with auth/HTTP context around them.
 _AUTH_FAILURE_RE = re.compile(
     r"unauthori[sz]ed|not logged in|authentication failed|invalid api key|"
-    r"\b401\b|\b403\b|workspace trust|trust prompt",
+    r"\bforbidden\b|"
+    r"\b(?:http(?:/\d(?:\.\d)?)?|api|auth|authentication|status(?:\s+code)?|"
+    r"response)[^\n]{0,20}?\b(?:401|403)\b|"
+    r"\b(?:401|403)\b\s*(?:unauthorized|forbidden)\b|"
+    r"workspace trust|trust prompt",
     re.IGNORECASE)
 
 
@@ -605,6 +612,14 @@ def _discover_iteration(state: ReviewLoopState, pr_data: dict,
                 return AttemptDiscovery("other_owner", owner=other,
                                         pane_id=pane_id,
                                         transcript=pane_transcript)
+            if _is_historical_session(state, transcript_dir, iteration,
+                                      pane_sid):
+                # A failed launch can leave the *previous* iteration's window
+                # live (e.g. its removal failed) after the child already wrote
+                # this iteration's transcript symlink.  That window's verdict
+                # belongs to an earlier iteration: replace it with the fresh
+                # launch, never adopt it as this iteration's.
+                return AttemptDiscovery("launch")
             output = _verdict_output_if_present(pane_transcript)
             if output:
                 return AttemptDiscovery("verdict", output=output)
@@ -1026,8 +1041,14 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
             if pending_checks > 3:
                 # A pane that never exposes a Claude session is half-created
                 # debris: replace it with a fresh launch.
+                _log.info("review_loop: %s iteration %d pane never exposed a "
+                          "session; replacing it", pr_id, iteration)
                 discovery = AttemptDiscovery("launch")
             else:
+                _log.debug("review_loop: %s iteration %d %s; waiting %.0fs",
+                           pr_id, iteration,
+                           discovery.reason or "pane not ready yet",
+                           _DISCOVERY_GRACE)
                 _interruptible_sleep(_DISCOVERY_GRACE, state, pm_root)
                 continue
 

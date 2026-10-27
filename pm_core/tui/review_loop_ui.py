@@ -250,7 +250,6 @@ def _start_loop(app, pr_id: str, pr: dict | None,
         state._ui_notified_input = False
         state._ui_notified_retry = 0
         app._review_loops[pr_id] = state
-        mode_label = f"resumed at iteration {state.iteration}"
         _log.info("review_loop_ui: resuming loop for %s at iteration %d", pr_id, state.iteration)
     else:
         state = ReviewLoopState(pr_id=pr_id)
