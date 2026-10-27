@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-27T00:34:29.078871+00:00'
+  updated_at: '2026-10-27T00:36:33.303113+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16874,6 +16874,32 @@ prs:
       swallow. Captures /pm-captures/scenarios/36 (README + story1..story4, each recording.cast/mp4/manifest).'
     created_at: '2026-10-27T00:34:29Z'
     last_edited: '2026-10-27T00:34:29Z'
+  - id: note-dbebdbc
+    text: 'QA S34 (2026-10-27, HEAD a0fc12c3) PASS on all four window-name-drift stories,
+      no code change. (1) Window named for the PR old local id (pr-2395e39) while
+      the PR now has gh #12: header "PR Actions — #12 (2/2)", row "#12 (in_review)
+      Drifted PR" + start/review/qa/signoff/merge, no load notice; l->pr-1e70e4d (1/2),
+      l->#12 (2/2), q closes. (2) Window "#12" with no PR resolving to it: header
+      "PR Actions — #12 (1/2)" + single row "Could not load actions for #12.", no
+      merged/closed text, log line popup-picker: no actions for "#12" (window="#12",
+      root=<TEST_DIR>/pm, found=False, status=None, prs_loaded=2, known_ids pairs,
+      ids_omitted=0) emitted before any key; l->pr-1e70e4d (2/2), popup stays open,
+      q closes. (3) Bare legacy-numeric local id "12": opens anchored on 12 (2/2)
+      not pr-1e70e4d (1/2); h->pr-1e70e4d (1/2), 0->12 (2/2), s dispatches pr start
+      12 route=direct, popup closes on the existing 12 window. (4) Ids pr-a / pr-a-s1
+      (second looks like a -s1 scenario suffix): opens on pr-a-s1 (2/2), not anchored
+      to pr-a; h->pr-a (1/2), 0->pr-a-s1 (2/2), s dispatches pr start pr-a-s1 route=direct
+      (never pr start pr-a), popup closes on the existing pr-a-s1 window. Harness
+      for the next run: container has fzf 0.29 at /usr/bin/fzf (fine) and tmux 3.2a,
+      but NO agg — downloaded agg-aarch64-unknown-linux-gnu v1.9.0 to /scratch/tools/agg-bin
+      for the mp4 render; the recorder client must be the client that presses prefix+P
+      (a display-popup belongs to its invoking client), so wrap the attach itself
+      in asciinema rec -c "env -u TMUX tmux attach -t ${S}~1"; pm sizes the popup
+      to -w 80 above the mobile threshold; pm pr list order != project.yaml order
+      (the (n/N) counter follows project.yaml). Captures /pm-captures/scenarios/34
+      (REPORT.md + story1-4 with cast/mp4/txt/frames/manifests + pm-debug-evidence.txt).'
+    created_at: '2026-10-27T00:36:33Z'
+    last_edited: '2026-10-27T00:36:33Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
