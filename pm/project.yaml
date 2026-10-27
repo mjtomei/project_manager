@@ -14508,7 +14508,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T18:32:02.838374+00:00'
+  updated_at: '2026-10-27T19:33:01.242389+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15042,6 +15042,45 @@ prs:
       stop still leaves its .lock beside the kept directory until session teardown.'
     created_at: '2026-10-27T18:32:02Z'
     last_edited: '2026-10-27T18:32:02Z'
+  - id: note-9c3105e
+    text: 'Review-loop 6280 i6 (2026-10-27): reviewed c5bd5ca9. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at 74462d76 for the right reason
+      (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock, assert
+      1 == 3), verified this pass in a base-commit worktree. Two fixes applied, each
+      with a test: (1) stop_session_proxies interpolated the session tag raw into
+      its teardown globs. The tag comes from a directory name, so a repo directory
+      "repo[1]" yields the tag "repo[1]-abcd1234", whose "[1]" is a glob character
+      class: after a restart (empty in-process registry, where the glob is the only
+      way to find a proxy) the pattern matched nothing of its own — the proxy and
+      its socket directory survived the session — and it matched a sibling "pm-push-proxy-repo1-abcd1234-..."
+      directory, which the sweep deleted (a cross-session kill of the kind iteration
+      13 guards against). The tag now goes through glob.escape; test_stop_session_escapes_glob_metacharacters_in_the_tag
+      fails with glob.escape neutralised for exactly those reasons (count 0, proxy
+      alive, dir left behind, sibling deleted). (2) Test hygiene: test_stop_all_proxies_skips_a_busy_directory
+      called the real stop_all_proxies(), which sweeps every /tmp/pm-push-proxy-*
+      entry — run on a machine with a live session, the suite would stop that session''s
+      proxies and delete the socket directories its containers bind-mount (S18, the
+      failure this lifecycle prevents). The test now patches _SOCKET_DIR_PREFIX to
+      a test-only value and pins that a stand-in live directory survives. Also re-ran
+      the full lifecycle probe (hashed-dir shared stop keeps the dir and a restart
+      heals in place; SIGKILL leaves a stale socket and the restart respawns it; deleting
+      the socket under a live daemon is detected within one tick; foreign-workdir
+      request rejected) — all correct at HEAD. Tests: tests/test_push_proxy.py + tests/test_container.py
+      231 passed; full suite (env -u PM_HOST_HOME, PATH=/usr/bin:/bin, PYTHONPATH=/workspace
+      plus markdown on the path) 3831 passed, 1 skipped, 0 failed. Spec updated with
+      Review iteration 17 refinements. Residual, unchanged and out of scope: in-process
+      refcounts only (cross-process cleanup stays with #241/pr-ac12b47); one daemon
+      per workdir (option (3), workdir-per-request, remains the cleaner long-term
+      design); proxy_is_alive cannot distinguish a busy daemon from a dead one beyond
+      the backlog of 16; the daemon serves one request at a time; a shared stop still
+      leaves its .lock beside the kept directory until session teardown; a running
+      container whose socket directory was deleted and recreated keeps a stale bind
+      mount (the spec records that the host cannot heal it — R6 is what prevents it
+      in normal operation).'
+    created_at: '2026-10-27T19:33:01Z'
+    last_edited: '2026-10-27T19:33:01Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
