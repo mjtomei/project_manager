@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T05:59:23.169308+00:00'
+  updated_at: '2026-10-27T06:22:17.036547+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36243,6 +36243,23 @@ prs:
       claim_action_lease in runtime_state).'
     created_at: '2026-10-27T05:59:23Z'
     last_edited: '2026-10-27T05:59:23Z'
+  - id: note-5087a44
+    text: 'Review 385e i2 (10f5e0c5): retry discovery now adopts a live pane whose
+      session is not historical once this loop has launched the iteration (allow_recovery),
+      so a sign-off route racing a scheduled retry is polled instead of killed by
+      --fresh; removed the never-produced AttemptDiscovery("hold") kind and its dead
+      handlers; the restart-handoff adopt path converts WorkspaceTrustBlocked to HOLD
+      (was ERROR); autostart_state._progress no longer says "launch retry 1" for every
+      running review (needs attempts > 1); the launch lease is refreshed through an
+      INPUT_REQUIRED wait and never refreshed after stop_requested. Spec updated:
+      backoff is 5 s then 10 s (the old "5 s, 20 s" text was wrong) and the iteration-2
+      refinements are recorded. Full suite 3782 passed; the 43 failed + 17 errors
+      are the base tree''s pre-existing git/signoff/merge env failures (identical
+      on origin/master). Residual (non-blocking): review_loop.py is ~1250 lines and
+      two lease mechanisms coexist (signoff launch_claim vs claim_action_lease); _progress
+      keeps a dead local (mode_label, pre-existing). (2026-10-27)'
+    created_at: '2026-10-27T06:22:16Z'
+    last_edited: '2026-10-27T06:22:16Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
