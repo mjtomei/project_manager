@@ -316,7 +316,10 @@ def _parse_started_at(s: str) -> datetime:
     """
     s = s.strip().strip('"')
     s = re.sub(r"\s+[A-Z]{2,5}$", "", s)          # trailing zone name
-    s = re.sub(r"(\.\d{6})\d*", r"\1", s)          # ns -> us
+    # Go trims trailing zeros (".69"); Python 3.10's fromisoformat takes
+    # only 3 or 6 fraction digits, so normalise to exactly 6.
+    s = re.sub(r"\.(\d+)", lambda m: "." + m.group(1)[:6].ljust(6, "0"), s,
+               count=1)
     s = s.replace("Z", "+00:00")
     s = re.sub(r"\s([+-]\d{2})(\d{2})$", r"\1:\2", s)  # " +0000" -> "+00:00"
     return datetime.fromisoformat(s.replace(" ", "T", 1))

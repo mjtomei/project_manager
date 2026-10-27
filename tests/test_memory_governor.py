@@ -287,6 +287,19 @@ class TestRuntimeStats:
         assert docker == podman
         assert docker.tzinfo is not None
 
+    @pytest.mark.parametrize("raw", [
+        "2026-10-27 14:11:38.69 +0000 UTC",      # podman, zeros trimmed
+        "2026-10-27T14:11:38.69Z",               # docker RFC3339Nano
+        "2026-10-27T14:11:38.6900Z",
+        "2026-10-27 14:11:38 +0000 UTC",         # whole second
+    ])
+    def test_started_at_trimmed_fractions(self, raw):
+        # Go trims trailing zeros; Python 3.10 only parses 3 or 6 digits.
+        parsed = mg._parse_started_at(raw)
+        assert parsed.tzinfo is not None
+        assert parsed.second == 38
+        assert parsed.microsecond in (690000, 0)
+
     def test_peak_read_from_cgroup(self):
         with patch("pm_core.container._get_runtime", return_value="podman"), \
              self._run(_completed("1275113472\n")) as run:
