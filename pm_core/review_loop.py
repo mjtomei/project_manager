@@ -1324,7 +1324,13 @@ def run_review_loop_sync(
     # Stash transcript_dir on state so _on_complete_from_thread can finalize
     state._transcript_dir = transcript_dir
     state.running = True
-    state.stop_requested = False
+    # ``stop_requested`` is owned by the caller, not reset here: ``_start_loop``
+    # marks the loop running *before* it creates this thread (so a second
+    # starter cannot launch a duplicate), and a stop that lands in the window
+    # between those two would be swallowed — the user would be told the loop is
+    # stopping while it launched a review window anyway.  ``_start_loop``
+    # clears the flag for a resumed loop; a fresh state already defaults to
+    # False.
 
     last_done = state.history[-1].iteration if state.history else 0
     adopt = state.iteration > last_done

@@ -728,3 +728,38 @@ verdict without requiring an idle hook event (rationale in iteration 9);
 `other_owner` stand-down surfaces as a non-retryable `LAUNCH_FAILED` after
 the bounded claim wait, so a second TUI driving the same PR reports
 "needs attention" for a review another loop is actually running.
+
+## Review iteration 4 (0688) — refinements
+
+Findings from the next review pass, applied on top of iteration 3 (0688):
+
+1. **A stop that lands before the loop thread's first line is no longer
+   discarded (correctness fix — cancellation).** Iteration 4 (385e) made
+   `_start_loop` mark the loop running *synchronously* before
+   `start_review_loop_background` (so a second starter cannot observe a
+   non-running loop and launch a duplicate), which means `_stop_loop` /
+   `z d` / `zz d` now accept a stop for the whole window between
+   `thread.start()` and the thread body.  `run_review_loop_sync` then reset
+   `state.stop_requested = False` unconditionally, so such a stop was
+   swallowed: the TUI told the user "Review loop stopping", and the loop
+   went on to create a review window (and its container) anyway.  The flag
+   is owned by the caller now — `_start_loop` clears it for a resumed loop
+   and a fresh state defaults to `False` — so `run_review_loop_sync` no
+   longer resets it.  Covered by
+   `test_stop_landing_before_the_thread_body_prevents_the_launch` (fails
+   pre-fix: the launch runs to `max_iterations`).
+
+Not changed (documented residuals): `review_loop.py` is ~1500 lines; two
+lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
+`runtime_state.claim_action_lease`); discovery still adopts a transcript
+verdict without requiring an idle hook event (rationale in iteration 9);
+`other_owner` stand-down surfaces as a non-retryable `LAUNCH_FAILED` after
+the bounded claim wait, so a second TUI driving the same PR reports
+"needs attention" for a review another loop is actually running; the
+runtime_state mirror of a *re-armed* loop keeps the previous episode's
+`verdict`/`attempts` until the next iteration mirrors a new verdict, so
+`pm autostart status` reports `review iteration N (last LAUNCH_FAILED)`
+while the retry runs; `_interruptible_sleep` re-reads and re-validates the
+~2 MB `project.yaml` every 2 s to notice a merge/close (≈3 % of a core
+during a backoff, on the loop thread); `session._format_action_status`'s
+new `[failed; retryable]` badge has no test (the function has none).

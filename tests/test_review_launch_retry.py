@@ -155,6 +155,21 @@ def test_stop_between_claim_and_launch_does_not_launch(tmp_path, monkeypatch):
     assert result.latest_verdict == VERDICT_KILLED
 
 
+def test_stop_landing_before_the_thread_body_prevents_the_launch(
+        tmp_path, monkeypatch):
+    """A stop issued between ``_start_loop`` (which marks the loop running
+    before the thread exists) and this thread's first line must not be
+    discarded: the user is told the loop is stopping, so it must not create
+    a review window (and a container) anyway."""
+    state = ReviewLoopState(pr_id=PR)
+    state.stop_requested = True
+    with patch.object(review_loop, "_run_claude_review") as run:
+        result = _run(state, tmp_path)
+    run.assert_not_called()
+    assert result.running is False
+    assert result.latest_verdict != VERDICT_PASS
+
+
 def test_cancellation_during_backoff_prevents_retry(tmp_path, monkeypatch):
     state = ReviewLoopState(pr_id=PR)
     err = ReviewLaunchError("boom", retryable=True)
