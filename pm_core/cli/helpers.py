@@ -514,16 +514,24 @@ def _read_tui_owner(
 
     Returns ``(pidfile, raw_text, descriptor, problem)``.  ``problem`` is
     ``None`` when the file names a live TUI; otherwise it is a short
-    human-readable reason (``"no pidfile"``, ``"unreadable pidfile"``, or
-    an identity problem from :func:`tui_pidfile.identity_problem`).
-    Nothing is modified here, so the result is safe to poll; callers that
-    want the stale file removed go through :func:`_validate_tui_owner`.
+    human-readable reason (``"no pidfile"``, ``"unreadable pidfile"``,
+    ``"empty pidfile"``, or an identity problem from
+    :func:`tui_pidfile.identity_problem`).  Nothing is modified here, so
+    the result is safe to poll; callers that want the stale file removed
+    go through :func:`_validate_tui_owner`.
     """
     path = _tui_pidfile_for_session(session)
     raw = tui_pidfile.read_pidfile_text(path)
     if raw is None:
         return path, None, None, (
             "unreadable pidfile" if path.exists() else "no pidfile")
+    if not raw.strip():
+        # A TUI creates the file with O_EXCL and writes its descriptor a
+        # moment later (``claim_tui_pidfile`` waits out that window on
+        # the writing side).  An empty file is therefore ambiguous, not
+        # stale: callers must not delete it, or a second TUI could claim
+        # the session while the first is still starting.
+        return path, raw, None, "empty pidfile"
     desc = tui_pidfile.parse_pidfile(raw)
     if desc is None:
         return path, raw, None, "unreadable pidfile"
@@ -538,13 +546,21 @@ def _validate_tui_owner(
     Returns ``(pidfile, raw_text, descriptor, error)``.  On success
     ``error`` is ``None`` and the other three describe a live TUI.  On
     failure ``error`` carries the result to hand back to the caller and
-    any stale pidfile has already been removed.
+    any stale pidfile has already been removed — except for an empty file
+    (``"starting"``), which is left for the TUI that is mid-claim.
     """
     pidfile, raw, desc, problem = _read_tui_owner(session)
     if problem == "no pidfile":
         return pidfile, None, None, TuiIpcResult(
             False, "no_pidfile",
             f"No TUI is running for session {session}.")
+    if problem == "empty pidfile":
+        # A TUI is mid-claim (see ``_read_tui_owner``).  Leave the file
+        # alone so the starting TUI keeps its claim.
+        return pidfile, raw, None, TuiIpcResult(
+            False, "starting",
+            f"The TUI for session {session} has not finished starting up; "
+            f"try again in a moment.")
     if problem is not None:
         # Unreadable, dead, recycled, or not a TUI: stale.
         tui_pidfile.unlink_if_unchanged(pidfile, raw)
@@ -702,6 +718,34 @@ def trigger_tui_reload(session: str | None = None) -> bool:
 trigger_tui_refresh = trigger_tui_reload
 
 
+def _unqueue_line(queue: Path, line: str) -> None:
+    """Best-effort removal of a line this process just appended.
+
+    Used when the signal after the append fails: the caller is told the
+    command was *not* applied, so it must not sit in the queue waiting
+    for some later drain to execute it.  Safe against concurrent
+    appenders — under the same ``flock`` the appender uses, we only
+    truncate when the file still ends with our exact line, so a line
+    another caller appended after ours is never the one removed.
+    """
+    import fcntl
+
+    payload = line.encode()
+    try:
+        with open(queue, "r+b") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                content = f.read()
+                if not content.endswith(payload):
+                    return
+                f.seek(0)
+                f.truncate(len(content) - len(payload))
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except OSError as e:
+        _log.debug("Could not unqueue TUI command %r: %s", line, e)
+
+
 def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
     """Queue *cmd* for the TUI and signal it, with a reason on failure.
 
@@ -733,14 +777,17 @@ def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
             False, "queue_error",
             f"Could not write to the TUI command queue: {e}")
     problem = _signal_tui(desc.pid, signal.SIGUSR2, desc.starttime)
-    if problem in _STALE_SIGNAL_REASONS:
-        _log.debug("TUI pid %d gone, removing stale pidfile", desc.pid)
-        tui_pidfile.unlink_if_unchanged(pidfile, raw)
-        return TuiIpcResult(
-            False, "stale_pidfile",
-            f"The TUI for session {session} is not running "
-            f"(process disappeared); restart the TUI.")
     if problem is not None:
+        # The command is already queued but nothing will drain it now (or
+        # not soon); take it back so the failure we report is the truth.
+        _unqueue_line(queue, line)
+        if problem in _STALE_SIGNAL_REASONS:
+            _log.debug("TUI pid %d gone, removing stale pidfile", desc.pid)
+            tui_pidfile.unlink_if_unchanged(pidfile, raw)
+            return TuiIpcResult(
+                False, "stale_pidfile",
+                f"The TUI for session {session} is not running "
+                f"(process disappeared); restart the TUI.")
         _log.debug("Cannot signal TUI pid %d: %s", desc.pid, problem)
         return TuiIpcResult(
             False, "signal_error",

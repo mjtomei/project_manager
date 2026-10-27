@@ -56,8 +56,8 @@ R4. **TUI-side takeover.** Before installing handlers the TUI claims the
 R5. **Caller-side identity validation.** Before signaling, validate:
     liveness (`kill(pid,0)`), not a zombie, `starttime` matches the
     descriptor, and `/proc/<pid>/cmdline` has an exact `_tui` argv element
-    plus a pm entry-point element (`pm`, `pm_core`, `pm_core.cli`,
-    `pm_core.wrapper`). Any failure → no signal, remove the stale pidfile
+    plus a pm entry-point element (an argv element whose basename is `pm`,
+    or any `pm_core` / `pm_core.*` module — see E15). Any failure → no signal, remove the stale pidfile
     (only if unchanged since read), return False with a reason.
     Where `os.pidfd_open` and `signal.pidfd_send_signal` exist (Linux
     5.3+/py3.9+), the signal is *delivered through the pidfd*, not
@@ -105,7 +105,11 @@ I2. `on_unmount` must not delete a successor's pidfile: unlink only when
 I3. The command queue file must exist before caps are published (a caller
     that sees `sigusr2` must not race a missing queue). Order in
     `_install_reload_signal`: claim → create queue → install handlers →
-    publish caps.
+    publish caps. On the caller side the order is the mirror image: the
+    line is appended *before* the signal (signaling first could drain an
+    empty queue), and `_unqueue_line` removes it again under the same
+    `flock` when the signal fails, so a failure the user is told about is
+    not applied by some later drain.
 
 I4. `trigger_tui_reload` keeps its fire-and-forget behavior and its
     `refresh_home` side effect (existing tests assert the kick). It now
@@ -184,7 +188,11 @@ E3. **Unreadable/empty pidfile.** Treated as "no TUI"; unlink only if the
     claim or the picker. A file that is present but unreadable is reported
     as `stale_pidfile` and removed; a missing one is `no_pidfile`. In the
     startup claim an *empty* file is retried briefly first (a peer may be
-    mid-claim) and only then treated as stale (A2).
+    mid-claim) and only then treated as stale (A2). The *caller* side
+    applies the same reasoning: an empty file is reported as `starting`
+    and is **never** unlinked, because deleting a peer's just-created
+    file would let a second TUI claim the session while the first is
+    still starting — the exact race A2 closes from the writing side.
 E4. **Permission denied** (`EPERM`) on signal → return False with a message;
     do **not** delete the pidfile (the process is alive, just not ours).
 E5. **Legacy live TUI + `trigger_tui_reload`** → signals SIGUSR1 (A1).
@@ -274,6 +282,11 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
 18. `pm autostart` surfaces `submit_tui_command`'s message verbatim (the
     `owner_unavailable` failure carries "restart the TUI (Ctrl+R)", not a
     generic "could not signal the TUI").
+19. empty pidfile on the caller side → reason `starting`, file kept,
+    `tui_owner_problem` reports `empty pidfile` (mirrors A2/E3).
+20. a failed signal after the queue append takes the line back
+    (`_unqueue_line`), so a reported failure is not applied by a later
+    drain; a line another caller appended after ours is never truncated.
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;

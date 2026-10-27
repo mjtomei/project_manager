@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -457,6 +458,64 @@ class TestSubmitCommand:
         assert pidfile.exists()
         assert tui.poll() is None
 
+    def test_failed_signal_takes_the_command_back(self, ipc_paths,
+                                                  start_fake_tui,
+                                                  monkeypatch):
+        """A reported failure must not linger in the queue for a later drain.
+
+        Otherwise the picker says "could not signal" and some later SIGUSR2
+        (or the next startup within the staleness window) runs the command
+        anyway.
+        """
+        pidfile, queue = ipc_paths
+        tui = start_fake_tui()
+        _write_json(pidfile, tui.pid, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+        queue.write_text("earlier command\n")
+        monkeypatch.setattr(helpers, "_signal_tui",
+                            lambda *a, **k: "permission denied")
+
+        res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
+
+        assert res.ok is False
+        assert queue.read_text() == "earlier command\n"
+
+    def test_empty_pidfile_is_starting_not_stale(self, ipc_paths):
+        """A peer mid-claim must keep its file: deleting it reopens the race.
+
+        The claim side waits out an empty file before treating it as stale
+        (A2); the caller side must not delete it out from under that peer.
+        """
+        pidfile, queue = ipc_paths
+        pidfile.write_text("")
+        res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
+        assert res.ok is False
+        assert res.reason == "starting"
+        assert "starting up" in res.message
+        assert pidfile.exists()
+        assert pidfile.read_text() == ""
+        assert not queue.exists()
+        assert helpers.tui_owner_problem(SESSION) == "empty pidfile"
+
+
+class TestUnqueue:
+    """Rolling back a queued line after the signal fails."""
+
+    def test_removes_only_our_trailing_line(self, tmp_path):
+        queue = tmp_path / "q"
+        queue.write_text("earlier\nours\n")
+        helpers._unqueue_line(queue, "ours\n")
+        assert queue.read_text() == "earlier\n"
+
+    def test_leaves_a_later_appended_line_alone(self, tmp_path):
+        """Another caller's line landed after ours: never truncate it."""
+        queue = tmp_path / "q"
+        queue.write_text("ours\ntheirs\n")
+        helpers._unqueue_line(queue, "ours\n")
+        assert queue.read_text() == "ours\ntheirs\n"
+
+    def test_missing_queue_is_swallowed(self, tmp_path):
+        helpers._unqueue_line(tmp_path / "nope", "ours\n")  # no exception
+
 
 # ---------------------------------------------------------------------------
 # Caller side: reload
@@ -544,16 +603,31 @@ class TestIdentity:
 
 class TestSignalGuards:
     def test_noop_guards_survive_sigusr2(self):
-        prev = {s: signal.getsignal(s)
-                for s in (signal.SIGUSR1, signal.SIGUSR2)}
-        try:
-            tpf.install_signal_guards()
-            os.kill(os.getpid(), signal.SIGUSR2)
-            os.kill(os.getpid(), signal.SIGUSR1)
-            time.sleep(0.1)
-        finally:
-            for sig, handler in prev.items():
-                signal.signal(sig, handler)
+        """Both signals must be survivable before the real handlers exist.
+
+        Runs in a child process: if the guard regresses, the default
+        terminate action kills *that* process and the test fails cleanly,
+        instead of taking the whole pytest run down with it.
+        """
+        code = (
+            "import os, signal, time\n"
+            "from pm_core.tui_pidfile import install_signal_guards\n"
+            "install_signal_guards()\n"
+            "os.kill(os.getpid(), signal.SIGUSR1)\n"
+            "os.kill(os.getpid(), signal.SIGUSR2)\n"
+            "time.sleep(0.1)\n"
+            "print('alive')\n"
+        )
+        # Make pm_core importable in the child regardless of pytest's cwd.
+        root = str(Path(tpf.__file__).resolve().parent.parent)
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(
+            filter(None, [root, env.get("PYTHONPATH")]))
+        res = subprocess.run([sys.executable, "-c", code],
+                             capture_output=True, text=True, timeout=30,
+                             env=env)
+        assert res.returncode == 0, res.stderr
+        assert "alive" in res.stdout
 
     def test_caps_published_only_after_handlers(self, tmp_path, monkeypatch):
         pidfile = tmp_path / "tui-pm-test.pid"
