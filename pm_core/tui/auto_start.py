@@ -36,6 +36,7 @@ from pathlib import Path
 from pm_core.paths import configure_logger, pm_home
 from pm_core import store, graph
 from pm_core import autostart_state
+from pm_core.pr_utils import usable_prs
 from pm_core.autostart_state import (
     POLICY_AUTO, POLICY_STOP, POLICY_WAIT, REPLY_DIR, WAIT_KEY,
 )
@@ -83,7 +84,7 @@ def managed_ids(app, prs: list[dict] | None = None) -> set[str] | None:
     if is_all_mode(app):
         return None
     if prs is None:
-        prs = (app._data or {}).get("prs") or []
+        prs = usable_prs((app._data or {}).get("prs"))
     return autostart_state.managed_ids(prs, get_targets(app))
 
 
@@ -105,7 +106,7 @@ def merge_holds(app, prs: list[dict] | None = None) -> dict[str, dict]:
     their closures only while auto-start is enabled (they are active).
     """
     if prs is None:
-        prs = (app._data or {}).get("prs") or []
+        prs = usable_prs((app._data or {}).get("prs"))
     targets = _targets(app) if is_enabled(app) else {}
     return autostart_state.merge_holds(prs, targets, _stop_set(app))
 
@@ -775,7 +776,7 @@ def on_state_loaded(app, old_statuses: dict,
     """
     if not old_statuses or not is_enabled(app):
         return
-    prs = (app._data or {}).get("prs") or []
+    prs = usable_prs((app._data or {}).get("prs"))
     terminal = autostart_state.TERMINAL_STATUSES
     newly = [p["id"] for p in prs
              if p.get("id") in old_statuses
@@ -847,7 +848,7 @@ async def check_and_start(app) -> None:
     if not app._root:
         return
 
-    prs = app._data.get("prs") or []
+    prs = usable_prs(app._data.get("prs"))
 
     _prune_completed_targets(app, prs)
     if not is_enabled(app):
@@ -857,11 +858,8 @@ async def check_and_start(app) -> None:
     # has done its job and shouldn't linger across future auto-start runs.
     sbm = getattr(app, "_stop_before_merge", set())
     if sbm:
-        merged = {pr["id"] for pr in (app._data.get("prs") or [])
-                  if pr.get("status") == "merged"}
-        sbm.intersection_update(
-            {pr["id"] for pr in (app._data.get("prs") or [])} - merged
-        )
+        merged = {pr["id"] for pr in prs if pr.get("status") == "merged"}
+        sbm.intersection_update({pr["id"] for pr in prs} - merged)
 
     # Collect PRs that should be started: pending with all deps merged,
     # plus in_progress PRs (whose window may have been killed).
@@ -939,7 +937,7 @@ async def check_and_start(app) -> None:
     if started:
         # Reload state after starting PRs
         app._load_state()
-        prs = app._data.get("prs") or []
+        prs = usable_prs(app._data.get("prs"))
 
     if not is_enabled(app):
         return
@@ -960,7 +958,7 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
         return
 
     if prs is None:
-        prs = app._data.get("prs") or []
+        prs = usable_prs(app._data.get("prs"))
 
     for pr in prs:
         if pr.get("status") != "in_review":
@@ -1054,7 +1052,7 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         return
 
     if prs is None:
-        prs = app._data.get("prs") or []
+        prs = usable_prs(app._data.get("prs"))
 
     for pr in prs:
         if pr.get("status") != "qa":
@@ -1269,7 +1267,7 @@ def collect_status_inputs(app) -> dict:
     """
     from pm_core import tmux as tmux_mod
 
-    prs = (app._data or {}).get("prs") or []
+    prs = usable_prs((app._data or {}).get("prs"))
     enabled = is_enabled(app)
     managed = managed_ids(app, prs)
 

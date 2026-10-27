@@ -640,17 +640,21 @@ def generate_note_id(pr_id: str, text: str, existing_ids: set[str] | None = None
 
 
 def get_pr(data: dict, pr_id: str) -> Optional[dict]:
-    """Get a PR entry by id."""
+    """Get a PR entry by id.
+
+    Entries without an id (a hand-edited or partially written project.yaml)
+    are skipped, not raised on: a QA completion recording its note looks its
+    PR up here, and a KeyError killed the TUI (S94)."""
     for pr in data.get("prs") or []:
-        if pr["id"] == pr_id:
+        if isinstance(pr, dict) and pr.get("id") == pr_id:
             return pr
     return None
 
 
 def get_plan(data: dict, plan_id: str) -> Optional[dict]:
-    """Get a plan entry by id."""
+    """Get a plan entry by id (entries without an id are skipped)."""
     for plan in data.get("plans") or []:
-        if plan["id"] == plan_id:
+        if isinstance(plan, dict) and plan.get("id") == plan_id:
             return plan
     return None
 

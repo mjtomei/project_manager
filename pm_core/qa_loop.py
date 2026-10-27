@@ -1936,12 +1936,14 @@ def _await_route(state: QALoopState, check, what: str) -> bool:
             if shown:
                 state.latest_output = (f"{what}: work route '{st.route}' "
                                        "available — launching")
-                _log.info("%s", state.latest_output)
+                # The pm log is shared by every PR's runs: name the PR.
+                _log.info("QA run for %s: %s", state.pr_id,
+                          state.latest_output)
                 _notify_state(state)
             return True
         msg = f"{what} waiting — {st.message()}"
         if msg != shown:
-            _log.warning("%s", msg)
+            _log.warning("QA run for %s: %s", state.pr_id, msg)
             state.latest_output = msg
             _notify_state(state)
             shown = msg
@@ -1988,8 +1990,8 @@ def _route_gate(state: QALoopState, pr_data: dict, data: dict,
     st = check()
     if st.ok:
         return True
-    _log.warning("Scenario %d %s launch deferred: %s",
-                 scenario.index, role, st.message())
+    _log.warning("QA run for %s: scenario %d %s launch deferred: %s",
+                 state.pr_id, scenario.index, role, st.message())
     deferred[scenario.index] = st
     return False
 
@@ -5485,6 +5487,38 @@ def check_ungated_qa_providers(pr_data: dict, project_data: dict) -> None:
         get_provider(res.provider, strict=bool(res.provider))
 
 
+def record_setup_stop(state: QALoopState, exc: Exception) -> None:
+    """Mark a run that a provider setup error ended (``QA stopped: …``).
+
+    Its ``qa_status.json`` gets ``stopped`` (``overall`` stays empty: there
+    is no verdict) and its resume snapshot is dropped: resuming would hit
+    the same error, and nothing else would ever finish the run.  An
+    auto-sequence tick reads the mark to relaunch QA once the setting is
+    fixed; without it the tick printed ``running: qa`` for good over the
+    stopped run's window (S94).  A run stopped before its first status
+    write gets one, so a tick does not act on an earlier run's verdict.
+    """
+    if not state.qa_workdir:
+        return
+    wd = Path(state.qa_workdir)
+    status_path = wd / "qa_status.json"
+    try:
+        data = json.loads(status_path.read_text())
+        if not isinstance(data, dict):
+            raise ValueError("not a mapping")
+    except (OSError, ValueError):
+        data = {"pr_id": state.pr_id, "scenarios": [], "overall": "",
+                "error": ""}
+    data["stopped"] = str(exc)
+    try:
+        tmp_path = status_path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(data, indent=2))
+        tmp_path.rename(status_path)
+    except OSError:
+        _log.debug("could not mark stopped QA run in %s", wd, exc_info=True)
+    clear_resume_file(wd)
+
+
 def _log_thread_end(exc: Exception, what: str, pr_id: str) -> None:
     """Log why a QA thread ended.
 
@@ -5511,6 +5545,8 @@ def start_qa_background(
             run_qa_sync(state, pm_root, pr_data, on_update, max_scenarios)
         except Exception as exc:
             _log_thread_end(exc, "QA background thread", state.pr_id)
+            if _is_setup_error(exc):
+                record_setup_stop(state, exc)
             state.running = False
             state.latest_verdict = "ERROR"
             state.latest_output = _crash_output(exc, "QA thread crashed")
@@ -5543,6 +5579,8 @@ def resume_qa_background(
             resume_qa_sync(state, pm_root, pr_data, on_update)
         except Exception as exc:
             _log_thread_end(exc, "QA resume thread", state.pr_id)
+            if _is_setup_error(exc):
+                record_setup_stop(state, exc)
             state.running = False
             state.latest_verdict = "ERROR"
             state.latest_output = _crash_output(exc, "QA resume thread crashed")

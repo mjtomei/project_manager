@@ -282,6 +282,59 @@ class TestQA:
         mock_qa.assert_not_called()
 
 
+    def _stopped_run(self, tmp_path):
+        """A qa_status.json that record_setup_stop marked (S94)."""
+        import json
+        status = tmp_path / "pr-001-x" / "qa_status.json"
+        status.parent.mkdir()
+        status.write_text(json.dumps({"pr_id": "pr-001", "scenarios": [],
+                                      "overall": "", "stopped": "boom"}))
+        return status
+
+    def test_stopped_run_with_window_relaunches(self, runner, tmp_path):
+        """S94: a run a provider setup error ended keeps its qa window but
+        has no driver: the tick relaunches it instead of `running: qa`."""
+        pr = _pr("qa")
+        status = self._stopped_run(tmp_path)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=(None, status)), \
+             patch("pm_core.cli.pr.tmux_mod.find_window_by_name",
+                   return_value={"id": "@7", "index": "3"}), \
+             patch("pm_core.qa_loop.own_run_started_since",
+                   return_value=False), \
+             patch("pm_core.cli.pr._qa_run_driven_since", return_value=False), \
+             patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == "running: qa (relaunched)"
+        mock_qa.assert_called_once()
+
+    @pytest.mark.parametrize("newer,driven", [(True, False), (False, True)])
+    def test_stopped_run_replaced_or_driven_is_left_alone(
+            self, runner, tmp_path, newer, driven):
+        """A run started after the stop (a TUI t), or a live driver, owns
+        the PR's QA: no second driver."""
+        pr = _pr("qa")
+        status = self._stopped_run(tmp_path)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=(None, status)), \
+             patch("pm_core.cli.pr.tmux_mod.find_window_by_name",
+                   return_value={"id": "@7", "index": "3"}), \
+             patch("pm_core.qa_loop.own_run_started_since",
+                   return_value=newer), \
+             patch("pm_core.cli.pr._qa_run_driven_since", return_value=driven), \
+             patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.output.strip() == "running: qa"
+        mock_qa.assert_not_called()
+
+
 class TestSignOff:
     def test_no_verdict_window_present_running(self, runner, tmp_path):
         pr = _pr("sign_off")
@@ -731,3 +784,33 @@ class TestQaRunBgRuntimeState:
             assert result.exit_code == 1
             rec = runtime_state.get_action_state("pr-001", "qa")
             assert rec.get("state") == "failed"
+
+    def test_setup_error_marks_run_stopped(self, runner, tmp_path):
+        """S94: a provider setup error marks the run's status file stopped
+        and drops its snapshot, so a later tick relaunches QA."""
+        import json
+        from pm_core.providers import ProviderNotFoundError
+        pr = _pr("qa")
+        data = _data_with(pr)
+        rt = tmp_path / "runtime"
+        rt.mkdir()
+        wd = tmp_path / "qa-wd"
+        wd.mkdir()
+        (wd / "qa_resume.json").write_text("{}")
+
+        def _run(state, *a, **kw):
+            state.qa_workdir = str(wd)
+            raise ProviderNotFoundError("provider 'x' is not configured")
+        with patch("pm_core.runtime_state._runtime_dir", return_value=rt), \
+             patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.signoff.clear_return_awaiting"), \
+             patch("pm_core.qa_loop.run_qa_sync", side_effect=_run):
+            result = runner.invoke(pr_qa_run_bg, ["pr-001"])
+        assert result.exit_code == 1
+        status = json.loads((wd / "qa_status.json").read_text())
+        assert status["overall"] == ""
+        assert "not configured" in status["stopped"]
+        assert not (wd / "qa_resume.json").exists()

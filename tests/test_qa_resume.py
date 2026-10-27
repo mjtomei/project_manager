@@ -601,7 +601,8 @@ def test_resume_skips_already_tracked(tmp_path):
 def test_resume_skips_already_recovered(tmp_path):
     app = _make_app(tmp_path)
     app._resumed_qa_pr_ids.add("pr-001")
-    _seed_run(tmp_path, overall="")
+    qa_dir = _seed_run(tmp_path, overall="")
+    app._resumed_qa_workdirs = {str(qa_dir)}
 
     with patch("pathlib.Path.home", return_value=tmp_path), \
          patch.object(qa_loop, "resume_qa_background") as resume_bg, \
@@ -610,6 +611,22 @@ def test_resume_skips_already_recovered(tmp_path):
 
     resume_bg.assert_not_called()
     on_complete.assert_not_called()
+
+
+def test_resume_adopts_later_run_of_a_pr_resumed_before(tmp_path):
+    """S94: this TUI adopted one run of the PR earlier; a later run whose
+    `pm pr auto-sequence` driver died is a new orphan and is adopted."""
+    app = _make_app(tmp_path)
+    app._resumed_qa_pr_ids.add("pr-001")
+    app._resumed_qa_workdirs = {str(tmp_path / "older-run")}
+    _seed_run(tmp_path, overall="")
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete"):
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
 
 
 def test_resume_noop_when_no_qa_root(tmp_path):
