@@ -486,13 +486,11 @@ def _canonical_session(session: str) -> str:
 
 def _tui_pidfile_for_session(session: str) -> Path:
     """Path to the pidfile a TUI in ``session`` writes at startup."""
-    from pm_core import tui_pidfile
     return tui_pidfile.pidfile_path(_canonical_session(session))
 
 
 def _tui_command_queue_for_session(session: str) -> Path:
     """Path to the per-session TUI command queue file."""
-    from pm_core import tui_pidfile
     return tui_pidfile.command_queue_path(_canonical_session(session))
 
 
@@ -519,8 +517,6 @@ def _validate_tui_owner(
     failure ``error`` carries the result to hand back to the caller and
     any stale pidfile has already been removed.
     """
-    from pm_core import tui_pidfile
-
     pidfile = _tui_pidfile_for_session(session)
     raw = tui_pidfile.read_pidfile_text(pidfile)
     if raw is None:
@@ -550,8 +546,6 @@ def tui_owner_problem(session: str) -> str | None:
     Identity-only: capabilities are deliberately not checked, so this is
     safe to poll while a TUI is starting up or restarting.
     """
-    from pm_core import tui_pidfile
-
     raw = tui_pidfile.read_pidfile_text(_tui_pidfile_for_session(session))
     if raw is None:
         return "no pidfile"
@@ -587,8 +581,6 @@ def _signal_tui(pid: int, sig: int) -> str | None:
     Where available, a pidfd pins the process across the final checks so
     the PID cannot be recycled between validation and ``os.kill``.
     """
-    from pm_core import tui_pidfile
-
     pidfd = None
     try:
         try:
@@ -627,7 +619,6 @@ def trigger_tui_reload(session: str | None = None) -> bool:
     non-TUI process, or a TUI that does not advertise ``sigusr1`` means
     no signal is sent.  Returns True only when SIGUSR1 was delivered.
     """
-    from pm_core import tui_pidfile
     try:
         if session is None:
             _, session = _find_tui_pane()
@@ -682,7 +673,6 @@ def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
     pidfile is removed so the next caller starts clean.
     """
     import fcntl
-    from pm_core import tui_pidfile
 
     pidfile, raw, desc, error = _validate_tui_owner(session)
     if error is not None:
