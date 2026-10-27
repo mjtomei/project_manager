@@ -52,6 +52,14 @@ ALL_VERDICTS = (VERDICT_PASS, VERDICT_NEEDS_WORK, VERDICT_INPUT_REQUIRED)
 # almost certainly false positives from prompt text shown in the pane.
 _VERDICT_GRACE_PERIOD = 20
 
+# Upper bound on one ``pm pr review`` window launch (the relauncher's
+# subprocess timeout).  A container-mode launch spends most of it creating
+# the container before the window exists.
+_LAUNCH_TIMEOUT = 120
+# How long a resumed loop waits for a launch that has not written its
+# iteration transcript symlink yet (pm start-up before the launcher runs).
+_IN_FLIGHT_SYMLINK_GRACE = 15
+
 
 @dataclass
 class ReviewIteration:
@@ -129,7 +137,8 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
     _log.info("relauncher: pr=%s iteration=%s loop_id=%s cmd=%s",
               pr_id, iteration, loop_id, cmd)
     t0 = time.monotonic()
-    result = subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=120)
+    result = subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True,
+                            timeout=_LAUNCH_TIMEOUT)
     elapsed = time.monotonic() - t0
     if result.returncode != 0:
         stderr = result.stderr.strip() if result.stderr else ""
@@ -213,6 +222,42 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
     return content
 
 
+def _wait_for_launching_window(session: str, window_name: str,
+                               transcript: str) -> str | None:
+    """Wait for the window of an iteration launch still in flight.
+
+    A TUI restart can land while the pre-restart loop's ``pm pr review``
+    is still running: its transcript symlink is written but its session
+    has not started, and in container mode the window only opens once the
+    container exists.  Relaunching then would open a second review window
+    for the same iteration, so wait for this launch's window (bounded by
+    the launch timeout).  A symlink whose session already wrote its
+    transcript means that session ran and its window is gone: nothing to
+    wait for.  Returns the window's pane, or ``None``.
+    """
+    import os
+    t0 = time.monotonic()
+    waited = False
+    while True:
+        pane_id = _find_claude_pane(session, window_name)
+        if pane_id:
+            if waited:
+                _log.info("review_loop: in-flight launch opened %s after %.1fs",
+                          window_name, time.monotonic() - t0)
+            return pane_id
+        elapsed = time.monotonic() - t0
+        if os.path.lexists(transcript):
+            if os.path.exists(transcript) or elapsed >= _LAUNCH_TIMEOUT:
+                return None
+        elif elapsed >= _IN_FLIGHT_SYMLINK_GRACE:
+            return None
+        if not waited:
+            _log.info("review_loop: no %s window yet; waiting for the "
+                      "in-flight launch (transcript=%s)", window_name, transcript)
+            waited = True
+        time.sleep(1)
+
+
 def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
                             transcript_dir: str | None) -> str | None:
     """Collect the verdict of an iteration that was in flight at a TUI restart.
@@ -236,8 +281,10 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
     if not session or not transcript_dir:
         return None
     window_name = _compute_review_window_name(pr_data)
-    pane_id = _find_claude_pane(session, window_name)
     transcript = f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+    pane_id = _find_claude_pane(session, window_name)
+    if not pane_id:
+        pane_id = _wait_for_launching_window(session, window_name, transcript)
     if not pane_id or not os.path.lexists(transcript):
         return None
     session_id = session_id_from_transcript(transcript)
