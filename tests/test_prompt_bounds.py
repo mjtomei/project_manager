@@ -1998,6 +1998,25 @@ class TestPlanPromptBounding:
         assert result.exit_code == 0, result.output
         assert prompt_bytes(result.output) <= PROMPT_ARG_LIMIT + 300
 
+    def test_plan_deps_tolerates_malformed_pr_fields(self, tmp_path):
+        """A hand-edited ``description``/``depends_on`` is not prompt material.
+
+        ``project.yaml`` is hand-editable state: ``" ".join(5.split())`` and
+        ``", ".join(5)`` raised ``AttributeError``/``TypeError`` out of the
+        plan prompt builders.
+        """
+        root = _make_plan_state(tmp_path, plan_prs=3, other_prs=0)
+        data = store.load(root)
+        for pr in data["prs"]:
+            pr["description"] = 5
+            pr["depends_on"] = 7
+        store.save(data, root)
+        for argv in (["plan", "deps"], ["plan", "breakdown", "pl-001"],
+                     ["plan", "review", "pl-001"]):
+            with patch("pm_core.cli.plan.find_claude", return_value=None):
+                result = CliRunner().invoke(cli, ["-C", str(root)] + argv)
+            assert result.exit_code == 0, (argv, result.output)
+
     def test_plan_lists_bound_long_titles_too(self, tmp_path):
         """The plan *listings* are count-capped, but their lines carry
         user-authored titles — a byte budget has to bound the product.

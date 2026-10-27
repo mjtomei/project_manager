@@ -755,7 +755,8 @@ tests):
     prompt builder, `graph.deps_of` is the one reader of `depends_on` (a
     scalar is absent, a non-string member ignored) for the graph, the TUI
     layout/render and scheduler, the plan and PR prompts and `pm pr edit`'s
-    reconciliation, and the note commands (`pm pr note add` / `edit` /
+    reconciliation (a scalar `description` there has no whitespace to
+    collapse), and the note commands (`pm pr note add` / `edit` /
     `delete` — the canonical handoff channel) plus `_apply_pr_edit` treat a
     malformed member as "not a note" instead of raising `TypeError` /
     `KeyError` and losing the write: they preserve the malformed member rather

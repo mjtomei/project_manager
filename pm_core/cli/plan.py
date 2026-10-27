@@ -508,7 +508,10 @@ def plan_deps():
     def _dep_pr_line(p: dict) -> str:
         deps = graph.deps_of(p)
         dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-        desc = " ".join((p.get("description") or "").split())
+        # Hand-edited state: only text has whitespace to collapse (a scalar
+        # ``description`` raised ``AttributeError`` out of the plan prompt).
+        raw_desc = p.get("description")
+        desc = " ".join(raw_desc.split()) if isinstance(raw_desc, str) else ""
         display_id = _pr_display_id(p)
         if len(desc) > _PLAN_DESC_CHARS:
             desc = desc[:_PLAN_DESC_CHARS].rstrip() + "…"
