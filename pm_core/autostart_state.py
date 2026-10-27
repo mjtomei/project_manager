@@ -348,7 +348,12 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                 return phase, "waiting", f"review INPUT_REQUIRED (iteration {it})"
             if review.get("running"):
                 reason = f"review iteration {it}"
-                if last:
+                # A re-armed retry keeps the previous episode's
+                # ``LAUNCH_FAILED`` verdict until the new iteration lands;
+                # "(last LAUNCH_FAILED)" would read as though the retry now
+                # running had already failed.  Any other verdict is the
+                # previous iteration's real outcome and stays useful.
+                if last and last != "LAUNCH_FAILED":
                     reason += f" (last {last})"
                 return phase, "running", reason
             if last in _REVIEW_PASS:

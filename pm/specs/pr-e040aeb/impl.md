@@ -917,3 +917,52 @@ a new verdict, so `pm autostart status` reports
 `_interruptible_sleep` re-reads and re-validates the ~2 MB `project.yaml`
 every 2 s to notice a merge/close (≈3 % of a core during a backoff, on the
 loop thread).
+
+## Review iteration 8 (0688) — refinements
+
+Findings from the next review pass, applied on top of iteration 7 (0688) and
+the QA refinement above:
+
+1. **A HOLD's completion notice no longer prints a failed attempt's
+   artifact.** Iterations 8/9 (385e) and 1/3 (0688) stopped attaching the
+   earlier failed attempt's `artifact`/`retry_ready_at` to a hold in the
+   `runtime_state` mirror and in `autostart_state.review_progress_input`, but
+   the TUI's "Review loop done" notice still appended
+   `Artifact: <attempt-N artifact>` under a hold's trust/permission prompt
+   (QA scenario 6 observed it).  The artifact line is now shown only for
+   `LAUNCH_FAILED`, the outcome the artifact belongs to.  Covered by
+   `test_hold_completion_notice_does_not_print_the_failed_attempts_artifact`
+   (fails pre-fix) and `test_launch_failed_completion_notice_still_prints_its_artifact`.
+2. **A running re-armed retry is not described by the previous episode's
+   failure (closes a documented residual).** A re-armed loop keeps
+   `latest_verdict == LAUNCH_FAILED` until the new iteration lands, so
+   `_derive` reported `review iteration N (last LAUNCH_FAILED)` while the
+   retry was running — QA observed the row in `pm autostart status`.  The
+   running branch now suppresses the `(last …)` suffix for `LAUNCH_FAILED`
+   only; a real previous verdict (`NEEDS_WORK`) still shows as useful
+   context.  Covered by
+   `test_running_rearmed_retry_does_not_report_the_old_failure_verdict`
+   (fails pre-fix) and `test_running_review_still_reports_the_previous_iterations_verdict`.
+3. **A retried launch failure logs a warning, not an error.** QA noted the
+   per-attempt `launch failed (rc=…)` line at ERROR level for a failure the
+   loop immediately retries.  `_launch_review_window` now logs at WARNING for
+   a retryable (transient) failure and keeps ERROR for a non-retryable auth
+   failure; the loop still logs ERROR when it gives up (`LAUNCH_FAILED`).
+   Covered by `test_transient_launch_failure_logs_a_warning` and
+   `test_auth_launch_failure_logs_an_error` (both fail pre-fix).
+
+Not changed (documented residuals): `review_loop.py` is ~1540 lines (the
+retry/discovery state machine would be worth its own module, but splitting it
+mid-review is a large, risky refactor); two lease mechanisms coexist
+(`signoff.claim_return_launch` in project.yaml vs
+`runtime_state.claim_action_lease`); discovery still adopts a transcript
+verdict without requiring an idle hook event (rationale in iteration 9 of
+385e); `other_owner` stand-down surfaces as a non-retryable `LAUNCH_FAILED`
+after the bounded claim wait, so a second TUI driving the same PR reports
+"needs attention" for a review another loop is running; the `runtime_state`
+mirror of a re-armed loop keeps the previous episode's `verdict`/`attempts`
+until the next iteration mirrors a new verdict (the live `pm autostart status`
+path no longer shows it — see refinement 2 — and the runs popup reads
+`runtime_state`); `_interruptible_sleep` re-reads and re-validates the ~2 MB
+`project.yaml` every 2 s to notice a merge/close (≈3 % of a core during a
+backoff, on the loop thread).

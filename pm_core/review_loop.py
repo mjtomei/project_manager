@@ -354,8 +354,16 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
     if result.returncode != 0:
         stderr = _as_text(result.stderr).strip()
         stdout = _as_text(result.stdout).strip()
-        _log.error("review_loop: launch failed (rc=%d) stderr=%s stdout=%s",
-                   result.returncode, stderr[:1000], stdout[:500])
+        # Consider both streams: a child can report the real error on
+        # stdout while stderr carries only warnings.
+        reason = ("auth" if _looks_like_auth_failure(f"{stderr}\n{stdout}")
+                  else "launch")
+        # A transient failure is retried by the caller, so this attempt is a
+        # warning; only a non-retryable (auth) failure is an error at this
+        # level.  The loop logs ERROR when it gives up for good.
+        log_fn = _log.error if reason == "auth" else _log.warning
+        log_fn("review_loop: launch failed (rc=%d) stderr=%s stdout=%s",
+               result.returncode, stderr[:1000], stdout[:500])
         artifact = _write_launch_artifact(
             transcript=transcript, pr_id=pr_id, iteration=iteration,
             loop_id=loop_id, attempt=attempt, cmd=cmd,
@@ -365,10 +373,6 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
         msg = f"Review window launch failed (rc={result.returncode}): {detail}"
         if artifact:
             msg += f" (artifact: {artifact})"
-        # Consider both streams: a child can report the real error on
-        # stdout while stderr carries only warnings.
-        reason = ("auth" if _looks_like_auth_failure(f"{stderr}\n{stdout}")
-                  else "launch")
         raise ReviewLaunchError(
             msg, returncode=result.returncode, stderr=stderr, stdout=stdout,
             artifact=artifact, retryable=(reason != "auth"), reason=reason)

@@ -2161,3 +2161,158 @@ def test_auto_start_keeps_the_failure_retryable_when_rearm_raises(tmp_path):
         auto_start._auto_start_review_loops(app, app._data["prs"])
     assert state.retry_episodes == 2
     assert state.launch_retryable is True
+
+
+# ---------------------------------------------------------------------------
+# A hold's evidence is the prompt it sits at, not an earlier attempt's artifact
+# ---------------------------------------------------------------------------
+
+def test_hold_completion_notice_does_not_print_the_failed_attempts_artifact(
+        tmp_path):
+    """A HOLD that follows a retried attempt must not attach the earlier
+    failed attempt's artifact to the trust/permission prompt: the
+    runtime_state mirror and `pm autostart status` drop it, and the TUI
+    notice must not point a human at the wrong evidence either."""
+    from pm_core.tui import review_loop_ui
+    app = MagicMock()
+    app._auto_start = False
+    app._auto_start_targets = {}
+    app._auto_start_all = False
+    state = ReviewLoopState(
+        pr_id=PR, running=False, iteration=2, latest_verdict=VERDICT_HOLD,
+        latest_output="workspace trust prompt in review pane",
+        last_launch_error="container setup failed",
+        last_launch_artifact=str(tmp_path / "stale-attempt.log"))
+    app._review_loops = {PR: state}
+    app._impl_poll_counter = 0
+    app._qa_loops = {}
+    app._data = {"prs": [{"id": PR, "status": "in_review",
+                          "workdir": str(tmp_path)}]}
+    app._watcher_manager.is_any_running.return_value = False
+    app._review_loop_timer = None
+    with patch.object(review_loop_ui, "_refresh_tech_tree"), \
+            patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
+            patch("pm_core.tui.qa_loop_ui.poll_qa_state"):
+        review_loop_ui._poll_loop_state_inner(app)
+    msg = app.log_message.call_args[0][0]
+    assert "trust prompt" in msg
+    assert "stale-attempt.log" not in msg
+
+
+def test_launch_failed_completion_notice_still_prints_its_artifact(tmp_path):
+    """The artifact line is kept for the failure it belongs to."""
+    from pm_core.tui import review_loop_ui
+    app = MagicMock()
+    app._auto_start = False
+    app._auto_start_targets = {}
+    app._auto_start_all = False
+    state = ReviewLoopState(
+        pr_id=PR, running=False, iteration=2,
+        latest_verdict=VERDICT_LAUNCH_FAILED, launch_retryable=False,
+        launch_attempts=3,
+        latest_output="Review window launch failed (rc=1): boom",
+        last_launch_artifact=str(tmp_path / "attempt3.log"))
+    app._review_loops = {PR: state}
+    app._impl_poll_counter = 0
+    app._qa_loops = {}
+    app._data = {"prs": [{"id": PR, "status": "in_review",
+                          "workdir": str(tmp_path)}]}
+    app._watcher_manager.is_any_running.return_value = False
+    app._review_loop_timer = None
+    with patch.object(review_loop_ui, "_refresh_tech_tree"), \
+            patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
+            patch("pm_core.tui.qa_loop_ui.poll_qa_state"):
+        review_loop_ui._poll_loop_state_inner(app)
+    msg = app.log_message.call_args[0][0]
+    assert str(tmp_path / "attempt3.log") in msg
+
+
+# ---------------------------------------------------------------------------
+# A re-armed retry is not described by the previous episode's failure
+# ---------------------------------------------------------------------------
+
+def _running_status(state):
+    from pm_core import autostart_state as st
+    status = st.build_status({
+        "prs": [{"id": PR, "title": "T", "status": "in_review",
+                 "workdir": "/tmp/wd"}],
+        "targets": {PR: {}},
+        "enabled": True,
+        "review_loops": {PR: st.review_progress_input(state)},
+    })
+    return next(r for r in status["runs"] if r["pr_id"] == PR)
+
+
+def test_running_rearmed_retry_does_not_report_the_old_failure_verdict():
+    """A re-armed loop keeps ``latest_verdict == LAUNCH_FAILED`` while its
+    retry runs; `pm autostart status` must not say
+    "review iteration 2 (last LAUNCH_FAILED)", which reads as though the
+    retry had already failed."""
+    state = ReviewLoopState(
+        pr_id=PR, running=True, iteration=2,
+        latest_verdict=VERDICT_LAUNCH_FAILED, launch_retryable=False,
+        launch_attempts=1, last_launch_error="container setup failed",
+        last_launch_artifact="/tmp/a.log")
+    run = _running_status(state)
+    assert run["state"] == "running"
+    assert run["reason"] == "review iteration 2"
+
+
+def test_running_review_still_reports_the_previous_iterations_verdict():
+    """Suppressing the suffix is specific to a stale launch failure: a real
+    previous verdict stays useful context."""
+    state = ReviewLoopState(pr_id=PR, running=True, iteration=3,
+                            latest_verdict=VERDICT_NEEDS_WORK)
+    run = _running_status(state)
+    assert run["reason"] == "review iteration 3 (last NEEDS_WORK)"
+
+
+# ---------------------------------------------------------------------------
+# A retried launch failure is a warning until the loop gives up
+# ---------------------------------------------------------------------------
+
+def _run_launch_with_stderr(monkeypatch, stderr):
+    from pm_core import review_loop as rl
+    monkeypatch.setattr(
+        rl.subprocess, "run",
+        lambda *a, **k: MagicMock(returncode=1, stdout="", stderr=stderr))
+    with pytest.raises(rl.ReviewLaunchError) as exc:
+        rl._launch_review_window(PR, "/tmp", iteration=1)
+    return exc.value
+
+
+def test_transient_launch_failure_logs_a_warning(monkeypatch, caplog):
+    """The loop retries a transient failure, so this attempt is not an
+    error-level event; the loop logs ERROR only when it gives up."""
+    import logging
+    from pm_core import review_loop as rl
+
+    caplog.set_level(logging.INFO, logger="pm.review_loop")
+    logger = logging.getLogger("pm.review_loop")
+    monkeypatch.setattr(logger, "handlers", [caplog.handler])
+    monkeypatch.setattr(logger, "propagate", False)
+
+    err = _run_launch_with_stderr(
+        monkeypatch, "Failed to create container pm-review-1")
+    assert err.retryable is True
+    levels = [r.levelno for r in caplog.records
+              if "launch failed" in r.getMessage()]
+    assert levels == [logging.WARNING]
+
+
+def test_auth_launch_failure_logs_an_error(monkeypatch, caplog):
+    """A non-retryable auth failure is the loop's terminal outcome for this
+    launch, so it stays an error-level log."""
+    import logging
+    from pm_core import review_loop as rl
+
+    caplog.set_level(logging.INFO, logger="pm.review_loop")
+    logger = logging.getLogger("pm.review_loop")
+    monkeypatch.setattr(logger, "handlers", [caplog.handler])
+    monkeypatch.setattr(logger, "propagate", False)
+
+    err = _run_launch_with_stderr(monkeypatch, "401 unauthorized: bad api key")
+    assert err.retryable is False
+    levels = [r.levelno for r in caplog.records
+              if "launch failed" in r.getMessage()]
+    assert levels == [logging.ERROR]

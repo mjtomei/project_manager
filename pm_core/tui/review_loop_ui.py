@@ -549,9 +549,15 @@ def _poll_loop_state_inner(app) -> None:
             # Truncate for display but show enough to be useful
             err_text = state.latest_output[:300]
             msg += f"\n  Error: {err_text}"
-            artifact = getattr(state, "last_launch_artifact", None)
-            if artifact:
-                msg += f"\n  Artifact: {artifact}"
+            # The artifact belongs to a *failed launch attempt*.  A HOLD is
+            # the trust/permission prompt the pane sits at (latest_output);
+            # attaching an earlier attempt's artifact would point a human at
+            # the wrong evidence — the runtime_state mirror and
+            # `pm autostart status` already drop it for a hold.
+            if state.latest_verdict == VERDICT_LAUNCH_FAILED:
+                artifact = getattr(state, "last_launch_artifact", None)
+                if artifact:
+                    msg += f"\n  Artifact: {artifact}"
             from pm_core.paths import command_log_file
             msg += f"\n  See log: {command_log_file()}"
             if state.latest_verdict == VERDICT_LAUNCH_FAILED:
