@@ -1034,14 +1034,18 @@ def test_tui_review_catch_up_takes_the_return_launch_claim(tmp_path, claimed):
         assert rec["launch_claim"]["hop"] == "review"
 
 
-@pytest.mark.parametrize("running", [True, False])
+@pytest.mark.parametrize("case", ["finished", "running", "unannounced",
+                                  "handoff_pending"])
 def test_tui_review_return_written_behind_a_finished_loop_starts_it(
-        tmp_path, running):
+        tmp_path, case):
     """S83 story 3 E: the PR's review loop had finished (PASS) before QA and
     sign-off; `pm edit` then made the return a REVIEW one (in_review,
     ``awaiting: review``).  Every auto-start pass skipped the PR on its
     finished loop, so the return waited for good.  A finished loop gives
-    way to a waiting return; a running one is never replaced."""
+    way to a waiting return; a running one is never replaced, nor one whose
+    PASS the poll tick has not yet announced and handed to QA (a pending
+    hand-off would move the PR to qa under the new review)."""
+    from pm_core.tui import review_loop_ui
     from pm_core import autostart_state as st
     from pm_core.review_loop import ReviewLoopState
     from pm_core.tui import auto_start
@@ -1054,15 +1058,20 @@ def test_tui_review_return_written_behind_a_finished_loop_starts_it(
     app._auto_start_targets = {PR: st.make_target_record("t")}
     app._auto_start_run_id = "run"
     old = ReviewLoopState(pr_id=PR)
-    old.running = running
-    old.latest_verdict = "" if running else "PASS"
+    old.running = case == "running"
+    old.latest_verdict = "" if old.running else "PASS"
+    old._ui_notified_done = case in ("finished", "handoff_pending")
+    if case == "handoff_pending":
+        review_loop_ui._pending_auto_qa(app)[PR] = (
+            "transition", store.LOCK_BUSY_REASON)
     app._review_loops[PR] = old
     store.save(app._data, tmp_path)
     with patch("pm_core.tui.review_loop_ui._start_loop") as start, \
          patch.object(auto_start, "get_transcript_dir", return_value=tmp_path):
         auto_start._auto_start_review_loops(app, [p])
-    assert start.called is not running
-    assert (app._review_loops.get(PR) is old) is running
+    replaced = case == "finished"
+    assert start.called is replaced
+    assert (app._review_loops.get(PR) is old) is not replaced
 
 
 def test_worktree_candidate_ignores_rerere_resolutions(w):
