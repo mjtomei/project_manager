@@ -33257,7 +33257,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T04:13:10.520262+00:00'
+  updated_at: '2026-10-27T04:32:05.160526+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36289,6 +36289,29 @@ prs:
       and the iteration number keeps counting.'
     created_at: '2026-10-27T04:13:10Z'
     last_edited: '2026-10-27T04:13:10Z'
+  - id: note-e4fc657
+    text: 'QA S87 (2026-10-27, host, all fake-claude, HEAD d93d39a9 vs control 0eeb8719
+      side by side; captures /pm-captures/scenarios/87, REPORT.md): CODE CHANGE a69b6945
+      needs normal re-review. d6e599bf held live. Story 1: zz t stop + zz t start
+      inside the hold, no later give-up, no freeze; exactly one "cleared the sign-off
+      return ... once project.yaml was free" +0.16 s after the release, ts unchanged;
+      one INPUT_REQUIRED note; 3 passes already ended. Control: no clear, and pass
+      1 ran an extra run. Story 2 (pm edit re-arm, no holder): awaiting null +0.12
+      s after zz t, no lock lines; control kept awaiting and ran a second run. Story
+      3 ts guard: editor won the lock +44 ms after release; one cleared line, edited
+      return kept; pass 1 ran exactly one run (2 notes). Story 5 restart: case (a),
+      the startup run cleared once +0.9 s after release. Story 4 FAILED pre-fix: a
+      pm pr auto-sequence tick queued on the flock got it at the release before the
+      TUI 1 s NO_WAIT retry, read the pending awaiting: qa as no driver, claimed and
+      launched qa-run-bg ("running: qa (launched)") over the zz t loop run, giving
+      2 QA drivers for C. The same race exists on the 63cabd07 hop path. Fix a69b6945:
+      the auto-sequence awaiting-qa branch treats a qa window plus a qa_run.json started
+      at or after the return ts as the re-run driver and prints "running: qa"; test
+      added. Post-fix rerun: 0 launched, no qa-run-bg, one clear per PR. Incidental
+      pre-existing bug filed: pr-fc2e931 (QA on a never-started PR under a held lock
+      crashes with a StoreLockTimeout traceback).'
+    created_at: '2026-10-27T04:32:05Z'
+    last_edited: '2026-10-27T04:32:05Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -38598,6 +38621,36 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T02:28:17.100013+00:00'
   updated_at: '2026-10-27T02:28:17.100013+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-fc2e931
+  plan: bugs
+  title: 'Bug: QA started on a never-started PR while project.yaml is locked crashes
+    the QA thread with a StoreLockTimeout traceback'
+  branch: pm/pr-fc2e931-bug-qa-started-on-a-never-started-pr-while-project
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py run_qa_sync -> pm_core/cli/helpers.py
+    _ensure_workdir/_clone_workdir, which persists pr.workdir via store.locked_update(root,
+    apply) at the default 2 s lock timeout; start_qa_background._run then logs "QA
+    background thread crashed" with a full traceback (_is_setup_error only covers
+    ProviderNotFoundError) and the run ends ERROR. The clone it made is left on disk
+    but not recorded. Repro (QA S87, pr-592e4bd, host, fake-claude): PR never started
+    (status pending, no workdir); hold project.yaml.lock with flock for >2 s; press
+    z z t (or z t) on that PR in the TUI. The pm log shows "ERROR [qa_loop] QA background
+    thread crashed for <pr>" + "pm_core.store.StoreLockTimeout: Could not acquire
+    lock ... within 2.0s", the TUI shows "QA thread crashed", and after the release
+    "QA complete ... verdict=ERROR". Captures: /pm-captures/scenarios/87/story4-invalid-probe-keys-moved-highlight/
+    (pr-36925c6, pr-bf2f2f7). Same code on master 120cbb32. Expected: wait for the
+    lock with the long timeout, or report a busy project.yaml as one warning and retry,
+    with no traceback.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T04:31:41.412066+00:00'
+  updated_at: '2026-10-27T04:31:41.412066+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
