@@ -252,6 +252,19 @@ def test_audit_ignores_non_numeric_dirs(tmp_path):
     assert a.dirs == {}
 
 
+def test_audit_without_a_captures_dir_never_walks_the_cwd(tmp_path,
+                                                          monkeypatch):
+    """``captures_dir`` may return None; auditing that must report the absence
+    instead of scanning the process's current directory."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "scenarios" / "9").mkdir(parents=True)
+    a = captures.audit(None, pr_id="pr-x", run_id="run1")
+    assert a.captures_root is None
+    assert a.dirs == {}
+    assert a.members == []
+    assert any("no captures dir" in x for x in a.anomalies)
+
+
 # ---------------------------------------------------------------------------
 # Quarantine
 # ---------------------------------------------------------------------------
@@ -333,6 +346,24 @@ def test_status_file_omits_run_id_when_unknown(tmp_path):
     p = tmp_path / "qa_status.json"
     qa_loop._write_status_file(p, "pr-x", [], {})
     assert "run_id" not in json.loads(p.read_text())
+
+
+def test_status_run_id_reads_the_field(tmp_path):
+    p = tmp_path / "qa_status.json"
+    assert captures.status_run_id({"run_id": "run1"}, p, "pr-x") == "run1"
+
+
+def test_status_run_id_falls_back_to_the_workdir_suffix(tmp_path):
+    """A pre-fix status file names its run only in the workdir path."""
+    p = tmp_path / "pr-x-run7" / "qa_status.json"
+    assert captures.status_run_id({}, p, "pr-x") == "run7"
+    # A directory that is not "<pr>-<run>" yields nothing rather than a lie.
+    other = tmp_path / "elsewhere" / "qa_status.json"
+    assert captures.status_run_id(None, other, "pr-x") == ""
+
+
+def test_status_run_id_without_status_or_path():
+    assert captures.status_run_id(None, None, "pr-x") == ""
 
 
 def _fixture_state(pr_id="pr-fixture", run_id="fixturerun"):
@@ -456,6 +487,23 @@ def test_signoff_qa_block_says_membership_unbound_without_manifest(
     assert "not run-bound" in head
 
 
+def test_signoff_qa_block_binds_the_run_without_a_status_file(tmp_path,
+                                                              monkeypatch):
+    """The live status file can be gone (its QA workdir was reaped) while the
+    captures evidence survives — the head must still name the run that owns
+    it, or membership silently reverts to "whatever directories exist"."""
+    from pm_core import paths, prompt_gen
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-x", run_id="run1",
+                            scenarios=[{"index": 1, "title": "one"}])
+    monkeypatch.setattr(paths, "latest_qa_status_path", lambda pr_id: None)
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: root)
+    head, _listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
+    assert "No qa_status.json found" in head
+    assert "QA run: `run1`" in head
+    assert "qa_manifest.json" in head
+
+
 def test_signoff_prompt_requires_report_bound_to_the_qa_run(tmp_path,
                                                             monkeypatch):
     from pm_core import paths, prompt_gen
@@ -480,8 +528,13 @@ def test_dashboard_flags_report_bound_to_another_run(tmp_path):
     rows = br.gather_dashboard_rows(_dash_data(), tmp_path)
     row = next(r for r in rows if r.pr_id == "pr-aaa")
     assert row.qa_run == "run1"
+    assert row.qa_current_run == "run2"
     assert row.qa_run_stale is True
-    assert "QA run changed" in br.render_dashboard_html(rows)
+    page = br.render_dashboard_html(rows)
+    assert "QA run changed" in page
+    # The marker names both runs, so the reader can tell which way it moved.
+    assert "report reviewed QA run run1" in page
+    assert "current QA run is run2" in page
 
 
 def test_dashboard_row_not_stale_when_run_matches(tmp_path):

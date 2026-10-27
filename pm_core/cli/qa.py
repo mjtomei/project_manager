@@ -232,6 +232,8 @@ def qa_evidence(pr_id: str):
     this is the reader a sign-off session uses instead of walking the
     captures tree by hand. Read-only: it never writes or quarantines.
     """
+    import json
+
     from pm_core import captures, store
     from pm_core.cli.helpers import _resolve_pr_id, state_root
     from pm_core.paths import captures_dir, latest_qa_status_path
@@ -243,19 +245,18 @@ def qa_evidence(pr_id: str):
         raise click.exceptions.Exit(1)
     canonical = pr_entry["id"]
 
-    status_run = ""
     latest = latest_qa_status_path(canonical)
+    status: dict = {}
     if latest is not None:
-        import json
         try:
-            status_run = (json.loads(latest.read_text()).get("run_id") or "")
+            loaded = json.loads(latest.read_text())
         except (OSError, ValueError):
-            status_run = ""
-        if not status_run:
-            # Legacy status file: the run id is the workdir suffix.
-            status_run = latest.parent.name.removeprefix(f"{canonical}-")
-            if status_run == latest.parent.name:
-                status_run = ""
+            loaded = None
+        if isinstance(loaded, dict):
+            status = loaded
+    # The run the live status file names (or its legacy workdir suffix) —
+    # shared with the sign-off prompt so the two never disagree.
+    status_run = captures.status_run_id(status, latest, canonical)
 
     try:
         root = captures_dir(canonical, create=False)

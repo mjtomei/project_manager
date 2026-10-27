@@ -121,7 +121,8 @@ def write_manifest(captures_root: Path | str | None, *,
 
     Overwrites the previous run's manifest — "the current run" is exactly
     what readers need, and a report bound to a superseded run is then
-    detectable by the mismatch (see :func:`report_qa_run`).  *started_at* is
+    detectable by the mismatch (the report's ``pm-signoff-qa-run`` tag
+    against this manifest; see ``signoff.merge_gate_refusal``).  *started_at* is
     carried over when the manifest already describes the same run, so the
     manifest does not claim the run restarted on every update.
 
@@ -278,7 +279,7 @@ class ScenarioDirEvidence:
 @dataclass
 class EvidenceAudit:
     """Authoritative membership of a QA run, plus what else is on disk."""
-    captures_root: Path
+    captures_root: Path | None
     pr_id: str
     run_id: str
     manifest: dict | None
@@ -337,7 +338,14 @@ def audit(captures_root: Path | str | None, *,
     can tell this run's evidence from an earlier run's, a foreign project's,
     or a legacy record with no identity at all.
     """
-    root = Path(captures_root) if captures_root is not None else Path("")
+    if captures_root is None:
+        # No captures dir at all: nothing is bound to a run, and saying so is
+        # the honest answer — never audit the process's current directory.
+        return EvidenceAudit(
+            captures_root=None, pr_id=pr_id, run_id=run_id, manifest=None,
+            manifest_run="",
+            anomalies=["no captures dir — no QA evidence to audit"])
+    root = Path(captures_root)
     manifest = read_manifest(captures_root, pr_id=pr_id, run_id=run_id or None)
     manifest_run = (manifest or {}).get("run_id", "")
     effective_run = run_id or manifest_run
@@ -447,17 +455,26 @@ def quarantine_foreign(captures_root: Path | str | None, *,
 
 
 # ---------------------------------------------------------------------------
-# Report binding
+# QA status binding
 # ---------------------------------------------------------------------------
 
-def report_qa_run(report_path: Path | str | None) -> str:
-    """The QA run a ``report.html`` says it reviewed (``""`` when unbound).
+def status_run_id(status: dict | None, status_path: Path | str | None,
+                  pr_id: str = "") -> str:
+    """The QA run a ``qa_status.json`` belongs to (``""`` when unknown).
 
-    Read from the report's ``<head>`` meta tag
-    ``<meta name="pm-signoff-qa-run" content="<run id>">``; legacy reports
-    carry no such tag.
+    The status file names its run (``run_id``, written by
+    ``qa_loop._write_status_file``).  A legacy file written before that field
+    existed still names it in its workdir path —
+    ``~/.pm/workdirs/qa/<pr_id>-<run_id>/qa_status.json`` — so *pr_id* is
+    needed to strip the prefix.  One implementation for every reader (the
+    sign-off prompt, ``pm qa evidence``) so they cannot drift.
     """
-    if report_path is None:
+    if isinstance(status, dict):
+        run = status.get("run_id")
+        if isinstance(run, str) and run:
+            return run
+    if status_path is None or not pr_id:
         return ""
-    from pm_core.behavior_report import extract_signoff_meta
-    return extract_signoff_meta(Path(report_path)).get("qa-run", "")
+    name = Path(status_path).parent.name
+    run = name.removeprefix(f"{pr_id}-")
+    return "" if run == name else run

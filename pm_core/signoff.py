@@ -401,7 +401,9 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
     # the approval certifies superseded coverage — refuse it, exactly like an
     # edited report.  A report without the tag is legacy and passes: this
     # adds no new requirement to reports written before the binding existed.
-    report_run = captures_mod.report_qa_run(report)
+    from pm_core.behavior_report import extract_signoff_meta
+    report_run = (extract_signoff_meta(report).get("qa-run", "")
+                  if report is not None else "")
     if report_run:
         manifest = captures_mod.read_manifest(
             croot / pr_id if croot else None, pr_id=pr_id)

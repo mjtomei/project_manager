@@ -655,13 +655,10 @@ def _qa_run_binding(pr_id: str, status: dict,
     from pm_core.paths import captures_dir
 
     lines: list[str] = []
-    status_run = status.get("run_id") if isinstance(status.get("run_id"), str) else ""
-    if not status_run and status_path is not None:
-        # Legacy status file: the run id is the workdir suffix
-        # (~/.pm/workdirs/qa/<pr>-<run_id>/qa_status.json).
-        status_run = status_path.parent.name.removeprefix(f"{pr_id}-")
-        if status_run == status_path.parent.name:
-            status_run = ""
+    # The status file's own run id, falling back to the legacy workdir suffix
+    # (~/.pm/workdirs/qa/<pr>-<run_id>/qa_status.json) — one implementation,
+    # shared with `pm qa evidence`.
+    status_run = captures.status_run_id(status, status_path, pr_id)
     try:
         root = captures_dir(pr_id, create=False)
     except Exception:
@@ -697,7 +694,10 @@ def _qa_run_binding(pr_id: str, status: dict,
     # Scenario 0 is the interactive window: it stays in qa_status.json (the
     # display contract) but is deliberately not a manifest member, so
     # comparing the two listings verbatim would warn on every normal run.
-    listed_idx = [s.get("index") for s in (status.get("scenarios") or [])
+    listed = status.get("scenarios") or []
+    if isinstance(listed, dict):
+        listed = list(listed.values())
+    listed_idx = [s.get("index") for s in listed
                   if isinstance(s, dict) and s.get("index") != 0]
     if manifest_idx and listed_idx and set(manifest_idx) != set(listed_idx):
         lines.append(
@@ -714,6 +714,18 @@ def _idx_list(indices: list, limit: int = 20) -> str:
     rest = len(indices) - len(vals)
     out = ", ".join(vals)
     return out + (f" (+{rest} more)" if rest > 0 else "")
+
+
+def _qa_head_without_status(note: str, pr_id: str,
+                            status_path) -> tuple[str, str]:
+    """QA block head when there is no readable ``qa_status.json``.
+
+    The live status file is the *listing*; the run binding comes from the
+    captures manifest, which outlives the QA workdir, so name it anyway.
+    """
+    lines = [note]
+    lines.extend(_qa_run_binding(pr_id, {}, status_path))
+    return ("\n" + "\n".join(lines) + "\n", "")
 
 
 def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
@@ -737,13 +749,18 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
     from pm_core.paths import latest_qa_status_path
     latest = latest_qa_status_path(pr_id)
     if latest is None:
-        return ("\n_No qa_status.json found — read the captures dir directly._\n",
-                "")
+        # No live status file (the QA workdir may have been reaped) — but the
+        # captures evidence may still exist, so still bind the report to the
+        # run that owns it instead of leaving membership implicit.
+        return _qa_head_without_status(
+            "_No qa_status.json found — read the captures dir directly._",
+            pr_id, None)
     try:
         data = json.loads(latest.read_text())
     except (OSError, ValueError):
-        return ("\n_qa_status.json unreadable — read the captures dir directly._\n",
-                "")
+        return _qa_head_without_status(
+            "_qa_status.json unreadable — read the captures dir directly._",
+            pr_id, latest)
     head_lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
     if data.get("error"):
         # Normalise whitespace but keep every character.  The error is

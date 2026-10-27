@@ -50,6 +50,9 @@ class _DashRow:
     # QA run the report says it reviewed (``pm-signoff-qa-run``); "" for a
     # legacy report written before the binding existed.
     qa_run: str = ""
+    # The PR's current QA run (``qa_manifest.json``); "" when it has no
+    # manifest (legacy), in which case the report can never be stale.
+    qa_current_run: str = ""
     # True when the report is bound to a different run than the PR's current
     # ``qa_manifest.json`` — the report's scenario evidence is superseded.
     qa_run_stale: bool = False
@@ -129,23 +132,24 @@ def extract_signoff_meta(report_path: Path) -> dict[str, str]:
 
 
 def _qa_run_binding(pr_id: str, report_path: Path,
-                    captures_root_dir: Path) -> tuple[str, bool]:
-    """The QA run a report claims to have reviewed, and whether it is stale.
+                    captures_root_dir: Path) -> tuple[str, str, bool]:
+    """``(run the report reviewed, the PR's current run, stale?)``.
 
     A report is *stale* when it names a run other than the PR's current
     ``qa_manifest.json`` run: its scenario membership and verdicts describe
     evidence a later QA run replaced (pr-1ae1d2d).  Legacy reports carry no
     ``pm-signoff-qa-run`` tag and no manifest — neither side exists, so they
-    are never flagged.
+    are never flagged.  Both run ids come back so the marker can name what
+    changed instead of only saying "different".
     """
     from pm_core import captures
 
-    run = captures.report_qa_run(report_path)
+    run = extract_signoff_meta(report_path).get("qa-run", "")
     if not run:
-        return "", False
+        return "", "", False
     manifest = captures.read_manifest(captures_root_dir / pr_id, pr_id=pr_id)
     current = (manifest or {}).get("run_id", "")
-    return run, bool(current and current != run)
+    return run, current, bool(current and current != run)
 
 
 def gather_dashboard_rows(data: dict,
@@ -161,8 +165,8 @@ def gather_dashboard_rows(data: dict,
         report_path = captures_root_dir / pr_id / "report.html"
         if report_path.is_file():
             verdict = _extract_verdict(report_path)
-            qa_run, qa_run_stale = _qa_run_binding(pr_id, report_path,
-                                                   captures_root_dir)
+            qa_run, qa_current_run, qa_run_stale = _qa_run_binding(
+                pr_id, report_path, captures_root_dir)
             try:
                 mtime = report_path.stat().st_mtime
             except OSError:
@@ -171,7 +175,8 @@ def gather_dashboard_rows(data: dict,
                 pr_id=pr_id, gh_label=gh_label, title=title, status=status,
                 has_report=True, report_html_rel=f"{pr_id}/report.html",
                 verdict=verdict, mtime=mtime,
-                qa_run=qa_run, qa_run_stale=qa_run_stale,
+                qa_run=qa_run, qa_current_run=qa_current_run,
+                qa_run_stale=qa_run_stale,
             ))
         else:
             rows.append(_DashRow(
@@ -425,7 +430,8 @@ def render_dashboard_html(rows: list[_DashRow]) -> str:
                 # verdict read as current coverage.
                 verdict_cell += (
                     ' <span class="stale-run" title="report reviewed QA run '
-                    f'{_e(r.qa_run)}; the current QA run is different">'
+                    f"{_e(r.qa_run)}; the PR's current QA run is "
+                    f'{_e(r.qa_current_run)}">'
                     '⚠ QA run changed</span>')
         else:
             report_cell = _no_report_cell()
