@@ -518,6 +518,9 @@ def test_adopted_review_polls_with_pr_workdir(tmp_path):
     (transcript_dir / "review-pr-x-i2.jsonl").symlink_to(tmp_path / f"{sid}.jsonl")
     state = review_loop.ReviewLoopState(pr_id="pr-x")
     state.iteration = 2
+    # A resumed loop only adopts an iteration it actually launched; the
+    # breadcrumb records that (pr-e040aeb's fabrication guard).
+    state.iteration_attempted = True
     pr_data = {"id": "pr-x", "workdir": "/wd/pr-x"}
     with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
          patch("pm_core.review_loop._find_claude_pane", return_value="%5"), \

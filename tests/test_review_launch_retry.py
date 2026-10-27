@@ -164,14 +164,58 @@ def test_restart_handoff_converts_a_trust_hold_to_HOLD(tmp_path, monkeypatch):
     HOLD, not a terminal ERROR."""
     from pm_core.claude_launcher import WorkspaceTrustBlocked
     state = ReviewLoopState(pr_id=PR, iteration=1)
+    transcript = tmp_path / f"{uuid.uuid4()}.jsonl"
+    transcript.write_text("")
     monkeypatch.setattr(review_loop, "_discover_iteration", lambda *a, **k:
                         AttemptDiscovery("adopt", pane_id="%9",
-                                         transcript=str(tmp_path / "t.jsonl")))
+                                         transcript=str(transcript)))
     monkeypatch.setattr(review_loop, "_poll_for_verdict",
                         MagicMock(side_effect=WorkspaceTrustBlocked("trust")))
     with pytest.raises(ReviewHoldError):
         review_loop._adopt_in_flight_review(state, _pr(tmp_path),
                                             str(tmp_path))
+
+
+def test_restart_handoff_does_not_adopt_a_transcript_this_loop_never_launched(
+        tmp_path, monkeypatch):
+    """The handoff shares discovery's fabrication guard: a loop that never
+    launched its iteration must not adopt an earlier run's transcript for the
+    same iteration number (the manual-<token> dir outlives a loop)."""
+    seen: dict = {}
+
+    def fake_discover(state, pr_data, tdir, iteration, *, allow_recovery=True):
+        seen["allow_recovery"] = allow_recovery
+        return AttemptDiscovery("launch")
+
+    monkeypatch.setattr(review_loop, "_discover_iteration", fake_discover)
+    state = ReviewLoopState(pr_id=PR, iteration=1)
+    assert review_loop._adopt_in_flight_review(
+        state, _pr(tmp_path), str(tmp_path)) is None
+    assert seen["allow_recovery"] is False
+
+    # Once this loop has launched the iteration (or a resumed breadcrumb
+    # recorded an attempt), recovery is allowed again.
+    for state in (ReviewLoopState(pr_id=PR, iteration=1,
+                                  iteration_attempted=True),
+                  ReviewLoopState(pr_id=PR, iteration=1, launch_attempts=1)):
+        review_loop._adopt_in_flight_review(state, _pr(tmp_path),
+                                            str(tmp_path))
+        assert seen["allow_recovery"] is True
+
+
+def test_restart_handoff_relaunches_when_the_transcript_has_no_session(
+        tmp_path, monkeypatch):
+    """A transcript whose session id cannot be recovered must fall back to a
+    relaunch, not raise a terminal error from inside the poller."""
+    state = ReviewLoopState(pr_id=PR, iteration=1)
+    monkeypatch.setattr(review_loop, "_discover_iteration", lambda *a, **k:
+                        AttemptDiscovery("adopt", pane_id="%9",
+                                         transcript=str(tmp_path / "t.jsonl")))
+    poll = MagicMock()
+    monkeypatch.setattr(review_loop, "_poll_for_verdict", poll)
+    assert review_loop._adopt_in_flight_review(state, _pr(tmp_path),
+                                               str(tmp_path)) is None
+    poll.assert_not_called()
 
 
 def test_recovered_attempt_is_adopted_not_relaunched(tmp_path, monkeypatch):
@@ -202,6 +246,33 @@ def test_new_owner_pane_is_adopted(tmp_path, monkeypatch):
     run.assert_not_called()
     assert result.latest_verdict == VERDICT_PASS
     assert result.last_pane_id == "%9"
+
+
+def test_retry_adopt_reads_a_verdict_that_landed_before_the_poll(
+        tmp_path, monkeypatch):
+    """A verdict that lands between discovery and the poll must be read, not
+    waited for: the poller only wakes on idle events newer than its start, so
+    it would hang until the pane died."""
+    from pm_core import hook_events
+
+    sid = str(uuid.uuid4())
+    transcript = tmp_path / f"{sid}.jsonl"
+    transcript.write_text(json.dumps({
+        "type": "assistant",
+        "message": {"content": [{"type": "text",
+                                 "text": "Looks good.\n\n**PASS**"}]},
+    }) + "\n")
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda _sid: {"event_type": "idle_prompt"})
+    monkeypatch.setattr(review_loop, "_discover_iteration", lambda *a, **k:
+                        AttemptDiscovery("adopt", pane_id="%9",
+                                         transcript=str(transcript)))
+    state = ReviewLoopState(pr_id=PR)
+    with patch.object(review_loop, "_poll_for_verdict") as poll:
+        result = _run(state, tmp_path)
+    poll.assert_not_called()
+    assert result.latest_verdict == VERDICT_PASS
+    assert [h.iteration for h in result.history] == [1]
 
 
 def test_another_loop_owner_stands_down(tmp_path, monkeypatch):
@@ -527,6 +598,51 @@ def test_discovery_adopts_another_drivers_live_session(tmp_path, monkeypatch):
                                            str(tmp_path), 1)
     assert disc.kind == "adopt"
     assert disc.transcript == str(tmp_path / f"{theirs}.jsonl")
+
+
+def test_discovery_treats_the_last_adopted_session_as_historical(
+        tmp_path, monkeypatch):
+    """An iteration whose verdict was adopted from another driver's session
+    must remember it: the next iteration replaces that (still-live) pane
+    instead of adopting its verdict a second time."""
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    sid = str(uuid.uuid4())
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: "%9")
+    monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
+                        lambda *_a, **_k: tmp_path / f"{sid}.jsonl")
+    state = ReviewLoopState(pr_id=PR, iteration=2, last_session_id=sid)
+    disc = review_loop._discover_iteration(state, _pr(tmp_path),
+                                           str(tmp_path), 2)
+    assert disc.kind == "launch"
+
+
+def test_adopted_verdict_records_the_session_as_historical(tmp_path,
+                                                          monkeypatch):
+    """A verdict adopted from another driver's pane — including one read by
+    the pre-poll check — must be remembered as the iteration's session, or
+    the next iteration adopts the same idle pane again."""
+    from pm_core import hook_events
+
+    sid = str(uuid.uuid4())
+    transcript = tmp_path / f"{sid}.jsonl"
+    transcript.write_text(json.dumps({
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "**NEEDS_WORK**"}]},
+    }) + "\n")
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda _sid: {"event_type": "idle_prompt"})
+    monkeypatch.setattr(review_loop, "_discover_iteration", lambda *a, **k:
+                        AttemptDiscovery("adopt", pane_id="%9",
+                                         transcript=str(transcript),
+                                         session_id=sid))
+    state = ReviewLoopState(pr_id=PR)
+    with patch.object(review_loop, "_poll_for_verdict") as poll:
+        result = _run(state, tmp_path, max_iterations=1)
+    poll.assert_not_called()
+    assert result.last_session_id == sid
+    assert [h.iteration for h in result.history] == [1]
 
 
 def test_discovery_stands_down_for_another_loop(tmp_path, monkeypatch):
@@ -1144,6 +1260,22 @@ def test_bare_http_code_lookalikes_stay_retryable(tmp_path):
     assert review_loop._looks_like_auth_failure("status code 403")
 
 
+def test_auth_failure_reported_on_stdout_is_not_retryable(tmp_path):
+    """A child can print the real error on stdout while stderr carries only
+    warnings; classification must look at both streams."""
+    with patch.object(review_loop.subprocess, "run",
+                      return_value=MagicMock(
+                          returncode=1,
+                          stdout="Error: 401 Unauthorized — invalid api key",
+                          stderr="warning: retrying connection")):
+        with pytest.raises(ReviewLaunchError) as ei:
+            review_loop._launch_review_window(
+                PR, str(tmp_path), iteration=1,
+                transcript=str(tmp_path / "t.jsonl"))
+    assert ei.value.retryable is False
+    assert ei.value.reason == "auth"
+
+
 def test_discovery_waits_for_a_starting_pane_after_our_attempt(tmp_path,
                                                                monkeypatch):
     """After our own attempt failed, a live pane that has not exposed its
@@ -1204,6 +1336,33 @@ def test_start_loop_marks_running_before_the_thread_starts(tmp_path,
             app, PR, pr, transcript_dir=str(tmp_path), resume_state=state)
     assert seen["running"] is True
     assert state.running is True
+
+
+def test_start_loop_clears_running_when_the_thread_cannot_start(tmp_path,
+                                                                monkeypatch):
+    """A failed thread start must not leave the loop marked running: the
+    poller and the auto-start scheduler would then never retry the target."""
+    from pm_core import runtime_state as rs
+    from pm_core import tmux as tmux_mod
+    from pm_core.tui import review_loop_ui
+
+    monkeypatch.setattr(rs, "_runtime_dir", lambda: tmp_path)
+    app = MagicMock()
+    app._review_loops = {}
+    app._review_loop_timer = None
+    pr = {"id": PR, "workdir": str(tmp_path), "status": "in_review"}
+    state = ReviewLoopState(pr_id=PR, iteration=1)
+    with patch.object(tmux_mod, "in_tmux", return_value=True), \
+            patch("pm_core.tui.review_loop_ui.store") as store_mock, \
+            patch("pm_core.tui.review_loop_ui.start_review_loop_background",
+                  side_effect=RuntimeError("can't start new thread")), \
+            patch("pm_core.tui.review_loop_ui._ensure_poll_timer"):
+        store_mock.find_project_root.return_value = Path("/tmp/pm")
+        with pytest.raises(RuntimeError):
+            review_loop_ui._start_loop(
+                app, PR, pr, transcript_dir=str(tmp_path),
+                resume_state=state)
+    assert state.running is False
 
 
 def test_completion_drops_a_previous_episodes_retry_evidence(tmp_path,

@@ -367,6 +367,8 @@ class ProjectManagerApp(App):
         # Review loop state: dict of pr_id -> ReviewLoopState (supports multiple)
         self._review_loops: dict = {}
         self._review_loop_timer: Timer | None = None
+        # One-shot scheduler pass after a retryable review-launch failure.
+        self._review_retry_timer: Timer | None = None
         # Pane idle tracker: detects when implementation windows go idle
         from pm_core.pane_idle import PaneIdleTracker
         self._pane_idle_tracker = PaneIdleTracker()

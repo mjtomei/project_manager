@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T07:07:37.771952+00:00'
+  updated_at: '2026-10-27T08:01:10.224127+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36296,6 +36296,26 @@ prs:
       _retry_rearm_blocked logs once per scheduler pass at the episode cap. (2026-10-27)'
     created_at: '2026-10-27T07:07:37Z'
     last_edited: '2026-10-27T07:07:37Z'
+  - id: note-23080bb
+    text: 'Review 385e i6 (fixes applied): the restart handoff now passes discovery''s
+      allow_recovery gate (a merge restart between the iteration bump and the first
+      launch can no longer adopt a previous run''s transcript) and falls back to a
+      relaunch when an adopted transcript has no recoverable session id (that was
+      a terminal ERROR). Both adopt paths re-read a verdict that landed between discovery
+      and the poll (the poller only wakes on idle events newer than its start). AttemptDiscovery
+      now carries the session it resolved to and both callers record it as last_session_id,
+      so the next iteration replaces a still-live adopted pane instead of re-adopting
+      its verdict (an idle adopted pane previously made the next iteration read the
+      same verdict again). Auth classification now sees stderr+stdout (a 401 printed
+      on stdout was retried and re-armed as transient). _wait_for_claim claims the
+      iteration it retries; a failed thread start no longer leaves the loop marked
+      running. Spec updated (iteration 6 + re-arm scope wording). Full suite 3789
+      passed; remaining failures are the base tree''s pre-existing markdown/hook-installer/merge/signoff/git
+      env failures. Residual (non-blocking): review_loop.py ~1360 lines; two lease
+      mechanisms coexist; the runs popup can show the previous episode''s attempt
+      count while a re-armed loop runs. (2026-10-27)'
+    created_at: '2026-10-27T08:01:10Z'
+    last_edited: '2026-10-27T08:01:10Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

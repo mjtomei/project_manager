@@ -116,7 +116,9 @@ fabricated agent verdict) when retries are exhausted.
    - Cap consecutive re-arm episodes (5); after that the explicit retryable
      failure stays (manual `review-loop start` or a new loop resets it).
      Cancellation (`KILLED`), holds, closures and non-retryable errors never
-     re-arm.  Manual (non-auto-start) loops never re-arm.
+     re-arm.  Re-arming only happens for a PR in auto-start scope: a loop for
+     a PR outside the target set (e.g. a manual loop on an unscoped PR) keeps
+     its explicit failure for the user.
    - `_poll_loop_state_inner` schedules one timer for the cooldown so the
      re-arm happens without waiting for an unrelated event.
 
@@ -382,3 +384,63 @@ Findings from the fifth review pass, applied on top of iteration 4:
    `test_bare_http_code_lookalikes_stay_retryable` covers both directions.
 4. **Dead local removed.** `_start_loop`'s unused `mode_label` (pre-existing)
    is gone.
+
+## Review iteration 6 (385e) — refinements
+
+Findings from the sixth review pass, applied on top of iteration 5:
+
+1. **The restart handoff shares the fabrication guard (correctness fix).**
+   `_adopt_in_flight_review` called `_discover_iteration` with the default
+   `allow_recovery=True`, bypassing iterations 1/3's gate.  A merge restart
+   landing in the window between the iteration counter bump and the first
+   launch attempt persists `iteration_attempted=False`; on resume the handoff
+   could then adopt a previous run's `review-<pr>-i<N>.jsonl` verdict for an
+   iteration this loop never ran.  It now passes
+   `allow_recovery=iteration_attempted or launch_attempts > 0`, matching
+   `_run_iteration_with_retry`.  Covered by
+   `test_restart_handoff_does_not_adopt_a_transcript_this_loop_never_launched`.
+2. **The handoff falls back to a relaunch when the transcript has no session
+   id.** The iteration-2 refactor dropped the old `if not session_id: return
+   None` guard, so an adopted transcript whose session id could not be
+   recovered went on to `poll_for_verdict`, which raises — turning a
+   recoverable race into a terminal `ERROR`.  It returns `None` (the loop
+   relaunches) again.  Covered by
+   `test_restart_handoff_relaunches_when_the_transcript_has_no_session`.
+3. **The retry's adopt path re-reads a just-landed verdict.** The poller only
+   wakes on idle events *newer* than its own start, so a verdict that landed
+   between discovery and `_poll_for_verdict` would be waited on until the
+   pane died.  Both adopt paths now share `_landed_verdict()` (idle event +
+   transcript read) before polling; the restart handoff used to inline the
+   same check.  Covered by
+   `test_retry_adopt_reads_a_verdict_that_landed_before_the_poll`.
+4. **Auth classification reads both streams.** `stderr or stdout` ignored a
+   real auth error printed on stdout whenever stderr carried any warning, so
+   an auth failure was retried (and re-armed) as transient.  The classifier
+   now sees `stderr + "\n" + stdout`.  Covered by
+   `test_auth_failure_reported_on_stdout_is_not_retryable`.
+5. **`_wait_for_claim` claims the iteration it is retrying.** It used
+   `state.iteration`; it now takes the iteration explicitly (the only caller
+   passes the same value, but the lease metadata must name the iteration
+   being launched, not whatever the shared state holds).
+6. **A failed thread start no longer leaves the loop "running".**
+   `_start_loop` set `state.running = True` before
+   `start_review_loop_background`; if the thread could not start, the poller
+   and the auto-start scheduler treated the dead loop as live forever.  The
+   flag is cleared on the exception path.  Covered by
+   `test_start_loop_clears_running_when_the_thread_cannot_start`.
+7. **`_review_retry_timer` is declared on the app** (`App.__init__`), like
+   `_review_loop_timer`, instead of being created lazily by `getattr`.
+8. **An adopted session is remembered as historical (correctness fix).**
+   `AttemptDiscovery` now carries the `session_id` its verdict/pane came from,
+   and both callers record it on `ReviewLoopState.last_session_id`.  Without
+   it, an iteration that adopted another driver's still-live pane (a sign-off
+   route racing a retry) left the next iteration rediscovering the same idle
+   pane: `_is_historical_session` did not know it, so the loop either adopted
+   the same verdict again or waited on an idle event that would never come.
+   Covered by `test_adopted_verdict_records_the_session_as_historical` and
+   `test_discovery_treats_the_last_adopted_session_as_historical`.
+
+Not changed (documented residuals): `review_loop.py` is ~1360 lines; two
+lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
+`runtime_state.claim_action_lease`); the retry re-arm's `_progress` label can
+show the previous episode's attempt count while the resumed loop runs.

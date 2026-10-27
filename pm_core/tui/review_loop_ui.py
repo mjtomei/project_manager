@@ -283,14 +283,21 @@ def _start_loop(app, pr_id: str, pr: dict | None,
     # otherwise see a non-running loop for a tick, re-announce a stale
     # terminal verdict, or start a duplicate loop thread.
     state.running = True
-    start_review_loop_background(
-        state=state,
-        pm_root=pm_root,
-        pr_data=pr,
-        on_iteration=lambda s: _on_iteration_from_thread(app, s),
-        on_complete=lambda s: _on_complete_from_thread(app, s),
-        transcript_dir=transcript_dir,
-    )
+    try:
+        start_review_loop_background(
+            state=state,
+            pm_root=pm_root,
+            pr_data=pr,
+            on_iteration=lambda s: _on_iteration_from_thread(app, s),
+            on_complete=lambda s: _on_complete_from_thread(app, s),
+            transcript_dir=transcript_dir,
+        )
+    except Exception:
+        # The thread never started (e.g. resource exhaustion).  Leaving
+        # ``running`` set would make the poller and the auto-start scheduler
+        # treat a dead loop as live and never retry it.
+        state.running = False
+        raise
     return True
 
 
