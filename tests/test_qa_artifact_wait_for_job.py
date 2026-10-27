@@ -139,6 +139,8 @@ class TestHelperBasics:
         ["--timeout", "5", "--artifact", "/tmp/x"],   # no command
         ["--timeout", "5", "--artifact", "/tmp/x",
          "-c", "true", "extra"],                      # -c takes one string
+        ["--timeout", "5", "--artifact", "/tmp/x",
+         "--validate", "", "-c", "true"],             # empty validator
         ["--bogus"],                                  # unknown flag
     ])
     def test_usage_errors(self, args):
@@ -148,8 +150,11 @@ class TestHelperBasics:
 
     def test_does_not_poll_process_names(self):
         text = HELPER.read_text()
-        # The anti-pattern appears only in comments/help; no invocation.
+        # The anti-patterns appear only in comments/help; no invocation.
         assert not re.search(r"^\s*(pgrep|pkill)\b", text, re.M)
+        # No bare `wait`: it blocks on every child, including a deliberately
+        # persistent observer/reaper — every wait here names its PID.
+        assert not re.search(r"^\s*wait\s*(2>\S+)?\s*$", text, re.M)
         assert 'wait "$job_pid"' in text
         assert "timeout" in text
         assert "pipefail" in text
@@ -284,6 +289,42 @@ class TestWaitOutcomes:
         assert elapsed < 5, f"interrupt took {elapsed:.1f}s"
         _wait_gone(job_pid)
 
+    def test_interrupt_kills_a_term_ignoring_descendant(self, tmp_path):
+        """Reaping the wrapper is not enough to end the job's group.
+
+        ``timeout`` exits as soon as its *direct* child dies, so a
+        descendant that ignores TERM (or was orphaned when its parent
+        died) outlives the interrupt.  Cancelling the escalator on the
+        wrapper's exit would leave that renderer running behind a killed
+        wait, to race a later run over the same artifact.
+        """
+        art = tmp_path / "recording.mp4"
+        pid_file = tmp_path / "grandchild.pid"
+        proc = subprocess.Popen(
+            ["bash", str(HELPER), "--timeout", "120", "--artifact", str(art),
+             "-c", f'bash -c \'trap "" TERM; sleep 60\' & '
+                   f'echo $! > {shlex.quote(str(pid_file))}; wait'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=dict(os.environ, WAIT_FOR_JOB_KILL_GRACE="1"))
+        try:
+            deadline = time.monotonic() + 10
+            while not pid_file.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert pid_file.exists(), "grandchild never started"
+            grandchild_pid = int(pid_file.read_text().strip())
+            started = time.monotonic()
+            proc.terminate()
+            _, err = proc.communicate(timeout=30)
+            elapsed = time.monotonic() - started
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.communicate()
+        assert proc.returncode == 130, err
+        assert "interrupted" in err
+        assert elapsed < 5, f"interrupt took {elapsed:.1f}s"
+        _wait_gone(grandchild_pid)
+
     def test_interrupt_during_validation_stops_the_validator(self, tmp_path):
         """An interrupt while `--validate` runs must stop the validator too.
 
@@ -360,6 +401,26 @@ class TestWaitOutcomes:
             "-c", f'echo $$ > {shlex.quote(str(pid_file))}; sleep 30',
         ])
         assert r.returncode == 3
+        _wait_gone(int(pid_file.read_text().strip()))
+
+    def test_timeout_kills_a_term_ignoring_descendant(self, tmp_path):
+        """A descendant that ignores TERM must not outlive the timeout.
+
+        ``timeout`` sends the signal to the job's group but exits as soon
+        as its direct child dies, so it never KILLs a grandchild that
+        ignored TERM.  The helper owns that group and must finish it — a
+        renderer left running here is the orphan the helper exists to
+        prevent.
+        """
+        art = tmp_path / "recording.mp4"
+        pid_file = tmp_path / "grandchild.pid"
+        r = run_helper([
+            "--timeout", "1", "--artifact", str(art),
+            "-c", f'bash -c \'trap "" TERM; sleep 60\' & '
+                  f'echo $! > {shlex.quote(str(pid_file))}; sleep 30',
+        ])
+        assert r.returncode == 3
+        assert pid_file.exists(), "grandchild never started"
         _wait_gone(int(pid_file.read_text().strip()))
 
     def test_persistent_observer_does_not_block_finite_job(self, tmp_path):
@@ -570,22 +631,28 @@ class TestRecipes:
         assert "leftover" in text.lower()
         assert "ffprobe" in text
 
-    @pytest.mark.parametrize("name,marker", [
-        ("tmux-screen-recording.md", "until tmux ls"),
-        ("web-ui-recording.md", "until curl"),
+    @pytest.mark.parametrize("name,marker,probe_bound", [
+        ("tmux-screen-recording.md", "until tmux ls", None),
+        ("web-ui-recording.md", "until curl", "--max-time"),
     ])
-    def test_readiness_waits_are_bounded(self, name, marker):
+    def test_readiness_waits_are_bounded(self, name, marker, probe_bound):
         """Readiness polls must have a deadline, not just a sleep loop.
 
         The recipes teach bounded waits; an `until ...; do sleep; done`
         with no deadline hangs the worker forever when the session or
-        server never comes up.
+        server never comes up.  The probe itself must be bounded too — a
+        deadline is only consulted between attempts, so a single blocking
+        call (curl with no timeout) stalls the loop regardless.
         """
         text = _recipe_text(name)
         idx = text.index(marker)
         window = text[max(0, idx - 700):idx + 700]
         assert "deadline" in window, f"{name}: unbounded readiness wait"
         assert "exit 1" in window, f"{name}: readiness wait has no failure path"
+        if probe_bound:
+            line = text[idx:text.index("\n", idx)]
+            assert probe_bound in line, (
+                f"{name}: readiness probe is unbounded (no {probe_bound})")
 
     def test_helper_is_loaded_beside_recipes(self, tmp_path):
         """_install_artifact_files copies *.sh helpers with the recipes."""

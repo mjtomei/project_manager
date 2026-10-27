@@ -31078,7 +31078,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-27T07:02:45.382013+00:00'
+  updated_at: '2026-10-27T07:34:31.901654+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31151,6 +31151,29 @@ prs:
       known baseline test_installer_writes_standalone_receiver.'
     created_at: '2026-10-27T06:56:15Z'
     last_edited: '2026-10-27T07:02:45Z'
+  - id: note-88d0ff1
+    text: 'Review loop i7: the interrupt path cancelled its SIGKILL escalator as soon
+      as the `timeout` wrapper was reaped, and the timeout path trusted `timeout`
+      alone — but `timeout` exits as soon as its *direct* child dies, so a descendant
+      that ignores TERM (verified with a `trap "" TERM` grandchild) survived both
+      a timeout and an interrupt: the orphan class this helper exists to prevent.
+      The helper now KILLs whatever is left in the job''s own process group after
+      a job timeout, a validation timeout, or an interrupt (the interrupt keeps the
+      KILL_GRACE escalator alive while the group is non-empty instead of cancelling
+      it on the wrapper''s exit). Also: an empty `--validate` is now a usage error
+      instead of silently skipping validation and reporting success; the web-ui readiness
+      probe carries `--connect-timeout 2 --max-time 5` because a deadline is only
+      consulted between attempts, so one blocking curl stalled the loop regardless.
+      Tests: +2 (TERM-ignoring descendant under timeout and interrupt; both fail against
+      the previous helper), +1 usage case, a no-bare-`wait` static assertion, and
+      the readiness test now asserts the probe bound. New file: 56 pass. Full suite:
+      3747 passed; remaining failures are environment-only (push proxy rejects pushes
+      to master, so test_merge_publish/test_signoff_integration cannot run) plus the
+      known baseline test_installer_writes_standalone_receiver and TestPullRebase::test_keeps_unpushed_merge
+      (both reproduce on origin/master). No change to the captures; the pre/post-fix
+      evidence still stands.'
+    created_at: '2026-10-27T07:34:12Z'
+    last_edited: '2026-10-27T07:34:31Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

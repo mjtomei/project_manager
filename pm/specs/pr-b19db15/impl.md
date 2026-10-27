@@ -27,7 +27,10 @@ R1. **Reusable, safe wait helper.** Add a checked-in helper
    - waits only on that captured PID (never bare `wait`, never
      `pgrep -f` / `pkill -f` process-name polling);
    - enforces a bounded timeout and reports expiry as failure (kills only the
-     job's own process group, leaving unrelated jobs alone);
+     job's own process group, leaving unrelated jobs alone, and SIGKILLs
+     whatever is left in that group afterwards — `timeout` exits as soon as
+     its direct child dies, so a descendant that ignores TERM would otherwise
+     outlive the run);
    - returns the job's real exit status;
    - preserves pipeline failure status for `-c` commands (`bash -o pipefail`);
    - treats a finished-but-unreaped (zombie) job as complete (reaped via
@@ -174,6 +177,12 @@ verifier's FLAGGED rule is asserted there too, not only the prose paragraph.
   ignores SIGTERM is SIGKILLed once `KILL_GRACE` expires, so the interrupt
   path is explicitly bounded instead of depending on `timeout`'s own
   `--kill-after`.
+- A *descendant* of the job that ignores TERM (or is orphaned when its parent
+  dies) does not outlive a timeout or an interrupt: reaping the `timeout`
+  wrapper does not mean the group is empty, so the helper KILLs the group it
+  owns on those paths (review loop i7). Asserted by
+  `test_timeout_kills_a_term_ignoring_descendant` and
+  `test_interrupt_kills_a_term_ignoring_descendant`.
 - `--validate` command fails → artifact invalid → fail.
 - `--validate` command hangs → killed at the `--timeout` bound, reported as a
   failed validation (exit 4), never an unbounded wait (review loop i6).

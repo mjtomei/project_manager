@@ -63,9 +63,12 @@ SERVER_PID=$!
 
 # Wait for the server to answer before driving it (no fixed sleep), but
 # bound it: an unbounded poll hangs the worker forever when the app never
-# comes up, so stop with the reason and stop the server we started.
+# comes up, so stop with the reason and stop the server we started. Bound
+# each attempt too — a server that accepts the connection but never answers
+# would otherwise block inside one curl call and the deadline would never
+# be consulted.
 deadline=$(( $(date +%s) + 120 ))
-until curl -sf -o /dev/null "$APP_URL/"; do
+until curl -sf --connect-timeout 2 --max-time 5 -o /dev/null "$APP_URL/"; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
         echo "app did not answer on $APP_URL within 120s — check its startup output" >&2
         kill "$SERVER_PID" 2>/dev/null || true

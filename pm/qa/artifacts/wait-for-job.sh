@@ -19,16 +19,21 @@
 #
 # `--validate` runs only after a successful job, with `$ARTIFACT` exported to
 # it, and is bounded by the same `--timeout`: a validator that hangs is a
-# failed validation, not an unbounded wait. On timeout only the job's own
-# process group is signalled, so unrelated jobs (including a deliberately
-# persistent observer started by the caller) are left alone. If the helper
-# itself is signalled (Ctrl-C, or a supervisor killing the waiting shell) it
-# terminates the running step's process group (the job, or the `--validate`
-# command once the job has finished) — escalating to SIGKILL after a short
-# grace period (`WAIT_FOR_JOB_KILL_GRACE`, default 5s) — and reports the
-# interruption: a killed wait is never passed off as a job failure, never
-# hangs on a job that ignores SIGTERM, and never leaves a renderer running
-# behind it to race a later run over the artifact.
+# failed validation, not an unbounded wait.
+#
+# On timeout only the job's own process group is signalled, so unrelated jobs
+# (including a deliberately persistent observer started by the caller) are left
+# alone; whatever is left in that group afterwards is SIGKILLed, because
+# `timeout` exits as soon as its direct child dies and a descendant that
+# ignores TERM would otherwise outlive the run.
+#
+# If the helper itself is signalled (Ctrl-C, or a supervisor killing the
+# waiting shell) it terminates the running step's process group (the job, or
+# the `--validate` command once the job has finished) — escalating to SIGKILL
+# after a short grace period (`WAIT_FOR_JOB_KILL_GRACE`, default 5s) — and
+# reports the interruption: a killed wait is never passed off as a job failure,
+# never hangs on a job that ignores SIGTERM, and never leaves a renderer
+# running behind it to race a later run over the artifact.
 #
 # Exit status:
 #   0  job exited 0 and the artifact is fresh (and --validate passed)
@@ -70,7 +75,11 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --timeout)  [ $# -ge 2 ] || die "--timeout needs a value"; timeout_secs=$2; shift 2 ;;
     --artifact) [ $# -ge 2 ] || die "--artifact needs a value"; artifact=$2; shift 2 ;;
-    --validate) [ $# -ge 2 ] || die "--validate needs a value"; validate_cmd=$2; shift 2 ;;
+    --validate) [ $# -ge 2 ] || die "--validate needs a value"
+                # An empty validator would silently skip the check and still
+                # report success — fail loudly instead.
+                [ -n "$2" ] || die "--validate needs a non-empty command"
+                validate_cmd=$2; shift 2 ;;
     -c)         [ $# -ge 2 ] || die "-c needs a command"; use_shell=1; shell_cmd=$2; shift 2 ;;
     --)         shift; break ;;
     -h|--help)  usage; exit 0 ;;
@@ -111,6 +120,20 @@ signal_job() {
       kill -"$1" "$job_pid" 2>/dev/null || true
 }
 
+# A group that still has members after its leader (`timeout`) was reaped means
+# a descendant outlived the signal — either it ignores TERM or it was orphaned
+# when its parent died. On the paths where *we* killed the run, KILL what is
+# left in our own group so no renderer survives to race a later run over the
+# same artifact. The group id cannot be recycled while a member exists, and a
+# group that is already empty makes this a harmless ESRCH.
+kill_job_group() {
+  kill -KILL -- "-$job_pid" 2>/dev/null || true
+}
+
+job_group_alive() {
+  kill -0 -- "-$job_pid" 2>/dev/null
+}
+
 # If the helper is signalled, stop the job too. Without this the `wait` would
 # return 143 and be reported as a *job* failure while the renderer kept running
 # — a misleading diagnostic and an orphan that can race a retry over the same
@@ -120,14 +143,22 @@ on_signal() {
   if [ -n "$job_pid" ]; then
     signal_job TERM
     # Escalator: a child of this shell (so it inherits no ignored disposition)
-    # that SIGKILLs the job's group if the grace period runs out. It is
-    # cancelled as soon as the job is reaped; if this helper is itself killed
-    # outright, the escalator still stops the orphaned renderer.
+    # that SIGKILLs the job's group if the grace period runs out; if this
+    # helper is itself killed outright, the escalator still stops the
+    # orphaned renderer.
     ( sleep "$KILL_GRACE"; signal_job KILL ) &
     escalator=$!
     wait "$job_pid" 2>/dev/null || true
-    kill "$escalator" 2>/dev/null || true
-    wait "$escalator" 2>/dev/null || true
+    # Reaping the `timeout` wrapper does *not* mean the group is empty: a
+    # descendant that ignores TERM (or was orphaned when its parent died)
+    # outlives it, and `timeout` exits as soon as its direct child is gone.
+    # Cancelling the escalator here would leave that renderer running.
+    if job_group_alive; then
+      wait "$escalator" 2>/dev/null || true
+    else
+      kill "$escalator" 2>/dev/null || true
+      wait "$escalator" 2>/dev/null || true
+    fi
   fi
   printf 'wait-for-job: interrupted before the run finished — this is a failure, not a result\n' >&2
   exit 130
@@ -169,6 +200,10 @@ if { [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; } && \
    [ "$elapsed" -ge "$timeout_secs" ]; then
   printf 'wait-for-job: job exceeded %ss and was killed — this is a failure, not a result\n' \
       "$timeout_secs" >&2
+  # `timeout` signals the group but exits as soon as its direct child dies,
+  # so a descendant that ignores TERM can outlive it. Finish our own group
+  # here rather than leaving a renderer behind to race a later run.
+  kill_job_group
   exit 3
 fi
 if [ "$status" -eq 125 ]; then
@@ -229,6 +264,7 @@ if [ -n "$validate_cmd" ]; then
      [ "$validate_elapsed" -ge "$timeout_secs" ]; then
     printf 'wait-for-job: artifact validation exceeded %ss and was killed — treating as failed validation: %s\n' \
         "$timeout_secs" "$artifact" >&2
+    kill_job_group
     exit 4
   fi
   if [ "$vstatus" -ne 0 ]; then

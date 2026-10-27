@@ -212,7 +212,10 @@ A leftover artifact from an earlier run, or a killed/timed-out wait,
 is not evidence that a capture succeeded. If the helper itself is
 interrupted it stops the job's process group (escalating to SIGKILL
 after a short grace period) and exits 130 — a killed wait is reported
-as a failure, never as a finished render.
+as a failure, never as a finished render. On a timeout or an
+interruption it also SIGKILLs whatever is left in that group, because
+`timeout` exits as soon as its direct child dies and a renderer that
+ignores SIGTERM would otherwise outlive the run.
 
 A minimal example:
 
