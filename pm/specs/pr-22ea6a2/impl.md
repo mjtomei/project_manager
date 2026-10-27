@@ -588,3 +588,18 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   ``stop_reason`` text record, so requiring a set ``stop_reason`` would stall
   the handoff on the majority of sessions — but the code comment (and this
   note) now describe the residual risk instead of claiming it cannot happen.
+
+## Review-iteration notes (2aac i8)
+
+* **Plain ``O`` has a continuation regression test** — the PR modifies
+  ``action_auto_sequence_pr`` (``z O`` = fresh reset), but only plain ``A``
+  was pinned as a continuation; nothing stopped a later change from making
+  plain ``O`` rewind a PR too.  ``test_plain_upper_o_still_arms_the_sequence``
+  now mirrors the plain-``A`` test.  ``test_plain_a_still_toggles`` was
+  renamed to ``test_plain_upper_a_still_toggles`` (it exercises ``A``, not
+  ``a``).
+* **No functional change to the fresh flow** — the end-to-end paths were
+  re-verified against the real (unmocked) helpers: the #250 reproduction
+  (a stopped ``ReviewLoopState`` is retired, the fresh review starts exactly
+  once, the marker is consumed), a busy turn holds the handoff across poll
+  ticks, and a complete turn advances on the next tick without a duplicate.

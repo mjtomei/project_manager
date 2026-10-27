@@ -809,13 +809,26 @@ class TestKeyBindings:
         ProjectManagerApp.action_show_auto_runs(app)
         assert opened == [app]
 
-    def test_plain_a_still_toggles(self, monkeypatch):
+    def test_plain_upper_a_still_toggles(self, monkeypatch):
+        # Plain ``A`` keeps its continuation semantics (toggle auto-merge);
+        # only ``z A`` is the fresh reset.
         from pm_core.tui.app import ProjectManagerApp
         sentinel = object()
         monkeypatch.setattr(auto_start, "toggle",
                             lambda app, selected_pr_id=None: sentinel)
         app = _KeyApp(z=0, pr_id="pr-a")
         ProjectManagerApp.action_toggle_auto_start(app)
+        assert app.workers == [sentinel]
+
+    def test_plain_upper_o_still_arms_the_sequence(self, monkeypatch):
+        # Plain ``O`` keeps its continuation semantics (arm a stop-before-merge
+        # auto-sequence target); only ``z O`` is the fresh reset.
+        from pm_core.tui.app import ProjectManagerApp
+        sentinel = object()
+        monkeypatch.setattr(auto_start, "auto_sequence_for_pr",
+                            lambda app, pr_id: sentinel)
+        app = _KeyApp(z=0, pr_id="pr-a")
+        ProjectManagerApp.action_auto_sequence_pr(app)
         assert app.workers == [sentinel]
 
     def test_z_lower_a_without_a_selection_does_nothing(self, monkeypatch):
