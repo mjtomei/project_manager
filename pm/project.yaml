@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T16:31:04.966398+00:00'
+  updated_at: '2026-10-27T16:55:05.267653+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25758,6 +25758,29 @@ prs:
       Spec updated (grace bullet + tests).'
     created_at: '2026-10-27T16:31:04Z'
     last_edited: '2026-10-27T16:31:04Z'
+  - id: note-35c6868
+    text: 'Review-loop d476 i2 (4fec787d): no other functional defects found in the
+      recovery machinery — handle()/deferral bounds, the completed-verdict guard,
+      the grace-window idle processing, QA tick-loop episode bookkeeping (_no_verdict_since/_recovery_ev_ts),
+      planner stop ordering and the pr-8efa789 merge coordination all hold under adversarial
+      tracing. Fixed one remaining hang of this PR''s own class: the QA verifier RE-CHECK
+      follow-up (_verify_single_scenario re-verification branch) asked the verifier
+      pane for a new VERIFIED/FLAGGED outcome through wait_for_follow_up_verdict,
+      which is deliberately unbounded because it is the human INPUT_REQUIRED wait.
+      That follow-up is machine-driven, so a verifier idling without a verdict there
+      hung QA forever (spec ambiguity 3 only justified leaving the human wait unbounded).
+      It now uses the shared poll_for_verdict, so the re-check gets the same settle/nudge/exhaustion
+      and surfaces "verifier produced no verdict: …" (blocks finalize); it also checks
+      the verifier pane instead of the window first pane. Hoisted the verifier outcome
+      request to _VERIFIER_OUTCOME_REQUEST and added _VERIFIER_RESUME_REQUEST naming
+      VERIFIED / FLAGGED_START..FLAGGED_END (the initial poll had the generic resume
+      message, unlike planner/refiner block variants). New test drives the re-check
+      branch. Spec updated (design, ambiguity 3, tests). Full suite: 3851 passed,
+      1 skipped. Residual unchanged: verdict-recovery-response-timeout (1 h) can retire
+      a silently-busy worker; a poller that starts while its session is already idle
+      (review adoption) is bounded only by overall_timeout/pane death.'
+    created_at: '2026-10-27T16:55:05Z'
+    last_edited: '2026-10-27T16:55:05Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
