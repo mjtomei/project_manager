@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-c94e588
+  active_pr: pr-62db99c
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T20:27:44.454535+00:00'
+  updated_at: '2026-10-27T21:42:54.804033+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11024,6 +11024,19 @@ prs:
       to stop". Captures: /pm-captures/scenarios/54 (pre-fix/, post-fix/).'
     created_at: '2026-10-27T20:27:44Z'
     last_edited: '2026-10-27T20:27:44Z'
+  - id: note-5d66fee
+    text: 'QA S64 (2026-10-27, b94fb58c, nested rootless podman 3.4.4): 5 stories
+      PASS live, no code change; Docker story skipped (no docker binary). X=1.106GB
+      -> pm 3.1G (3x1055 MiB, other-hog excluded), system 70.3G vs meminfo 70.4G.
+      3 parallel pm pr cleanup --resources: 12/12 peak 1332 = ceil(memory.peak/2^20),
+      no skip warnings; history 3 kept the 3 newest. pm session kill from outside:
+      impl peak 5489 sampled before the EXIT trap. Snapshots 887/891/881 -> "1.7G
+      used + 1.3G projected > 2.9G target"; oddname cleanup left stats sha256 identical.
+      Scenario arithmetic: used is ~2X, not X, while oddname (a pm- container) is
+      still running. Filed pr-62db99c: refused pm pr start leaves the PR in_progress.
+      Captures /pm-captures/scenarios/64.'
+    created_at: '2026-10-27T21:42:54Z'
+    last_edited: '2026-10-27T21:42:54Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
@@ -36558,6 +36571,29 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T18:34:51.008193+00:00'
   updated_at: '2026-10-27T18:34:51.008193+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-62db99c
+  plan: bugs
+  title: 'Bug: a pm pr start refused by the memory governor leaves the PR in_progress
+    with no window'
+  branch: pm/pr-62db99c-bug-a-pm-pr-start-refused-by-the-memory-governor-l
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py pr start: the PR is moved to in_progress (prints
+    "PR <id> is now in_progress") before the impl launch, and the memory-governor
+    admission refusal in the launch path then exits 1 with no window or container,
+    so the PR stays in_progress. Repro (pr-eb2dbfc QA S64): container mode on, set
+    system-memory-target just below used+projected impl, pm pr start <pending PR>
+    -> "Memory governor blocked impl ..." exit 1, project.yaml status in_progress.
+    Expect: check admission before the status change, or revert it on refusal.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T21:42:46.652885+00:00'
+  updated_at: '2026-10-27T21:42:46.652885+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
