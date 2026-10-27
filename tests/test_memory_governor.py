@@ -186,6 +186,32 @@ class TestProjection:
         assert project_memory("impl", stats=stats) == int(
             2000 * mg._SNAPSHOT_GROWTH_FACTOR)
 
+    def test_malformed_samples_are_skipped(self):
+        """A hand-edited stats file must not raise inside admission (E9)."""
+        stats = {"impl": {"samples": [
+            {"memory_mb": "4g", "kind": "peak"}, {"memory_mb": None},
+            {"memory_mb": True, "kind": "peak"}, "junk", 7,
+            {"memory_mb": float("inf"), "kind": "peak"},
+            {"memory_mb": float("nan"), "kind": "peak"},
+            {"memory_mb": 3000, "kind": "peak"},
+        ]}}
+        assert project_memory("impl", stats=stats) == 3000
+
+    def test_malformed_sample_list_falls_back(self):
+        with patch("pm_core.memory_governor._fallback_projection",
+                   return_value=4096):
+            for bad in ({"impl": {"samples": 5}}, {"impl": []},
+                        {"impl": {"samples": {"memory_mb": 1}}}):
+                assert project_memory("impl", stats=bad) == 4096
+
+    def test_record_sample_repairs_malformed_entry(self, tmp_path):
+        with patch("pm_core.memory_governor.pm_home", return_value=tmp_path), \
+             patch("pm_core.launch_queue.pm_home", return_value=tmp_path):
+            for bad in ([], {"samples": "x"}):
+                save_stats({"impl": bad})
+                record_sample("impl", 3000, 5.0, kind="peak")
+                assert load_stats()["impl"]["samples"][-1]["memory_mb"] == 3000
+
     def test_no_samples_uses_default_projection(self, tmp_path):
         with patch("pm_core.memory_governor.pm_home", return_value=tmp_path), \
              patch("pm_core.memory_governor.get_global_setting_value") as mock_setting:

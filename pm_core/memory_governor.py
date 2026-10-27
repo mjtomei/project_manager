@@ -565,8 +565,12 @@ def record_sample(container_type: str, memory_mb: int,
     try:
         with governor_lock(timeout=_CAPTURE_TIMEOUT):
             stats = load_stats()
-            entry = stats.setdefault(container_type, {})
-            samples = entry.setdefault("samples", [])
+            entry = stats.get(container_type)
+            if not isinstance(entry, dict):
+                entry = stats[container_type] = {}  # hand-edited/corrupt
+            samples = entry.get("samples")
+            if not isinstance(samples, list):
+                samples = entry["samples"] = []
 
             samples.append({
                 "memory_mb": memory_mb,
@@ -588,11 +592,21 @@ def record_sample(container_type: str, memory_mb: int,
 # Memory projection
 # ---------------------------------------------------------------------------
 
-def _sample_value(sample: dict) -> float:
-    mb = float(sample.get("memory_mb", 0) or 0)
+def _sample_value(sample) -> float | None:
+    """A sample's projected MiB, or None for a malformed sample.
+
+    The stats file may be hand-edited (E9): a bad sample is skipped, never
+    allowed to raise inside admission.
+    """
+    if not isinstance(sample, dict):
+        return None
+    mb = sample.get("memory_mb")
+    if (isinstance(mb, bool) or not isinstance(mb, (int, float))
+            or not math.isfinite(mb) or mb <= 0):
+        return None
     if sample.get("kind") != "peak":
         mb *= _SNAPSHOT_GROWTH_FACTOR
-    return mb
+    return float(mb)
 
 
 def _fallback_projection() -> int:
@@ -618,9 +632,10 @@ def project_memory(container_type: str, stats: dict | None = None) -> int:
     if stats is None:
         stats = load_stats()
     entry = stats.get(container_type, {})
-    samples = entry.get("samples", []) if isinstance(entry, dict) else []
-    values = sorted(_sample_value(s) for s in samples
-                    if isinstance(s, dict) and (s.get("memory_mb") or 0) > 0)
+    samples = entry.get("samples") if isinstance(entry, dict) else None
+    if not isinstance(samples, list):
+        samples = []
+    values = sorted(v for v in map(_sample_value, samples) if v is not None)
     if values:
         rank = max(1, math.ceil(_PROJECTION_PERCENTILE * len(values)))
         return max(1, int(math.ceil(values[rank - 1])))

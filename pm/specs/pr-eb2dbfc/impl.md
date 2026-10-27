@@ -513,7 +513,7 @@ If the planner generates 10 scenarios but only 3 fit in memory, the governor que
 If the user changes the target while a QA run is active, the new value should take effect on the next governor check (next launch attempt or next poll cycle). No need to stop running containers — they're already within their individual limits.
 
 ### E9: Stats file corruption
-If `container-stats.json` is corrupted (truncated write, manual edit), the governor should catch JSON parse errors, log a warning, and reset to empty stats (falling back to per-container limits for projection).
+If `container-stats.json` is corrupted (truncated write, manual edit), the governor should catch JSON parse errors, log a warning, and reset to empty stats (falling back to per-container limits for projection). Malformed entries in otherwise valid JSON (a non-numeric `memory_mb`, a `samples` that is not a list) are skipped by projection and replaced on the next `record_sample` — they must never raise inside admission (review 1811 i8).
 
 ### E14: Stale queue entries from dead processes
 A pm process may crash or be killed with entries still in the launch queue. Every queue operation drops entries whose pid is dead or recycled (start time mismatch), entries of this process's previous instance (restart re-exec keeps the PID), waiting entries not renewed for 300s, and acquired entries older than 30 min.
