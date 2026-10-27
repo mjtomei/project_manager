@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T18:44:33.073039+00:00'
+  updated_at: '2026-10-27T19:55:38.405139+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25828,6 +25828,29 @@ prs:
       episode. (2026-10-27T18:45:00Z)'
     created_at: '2026-10-27T18:44:33Z'
     last_edited: '2026-10-27T18:44:33Z'
+  - id: note-27055cc
+    text: 'Review-loop d476 i5 (4bdb8776): no other functional defects found in the
+      recovery machinery — handle()/deferral bounds, the completed-verdict guard,
+      the grace-window idle processing, QA tick-loop episode bookkeeping, planner
+      stop ordering and the pr-8efa789 merge coordination all hold under adversarial
+      tracing. Fixed one remaining spurious-exhaustion window of the class i4 addressed:
+      the `stopping` guard in `_poll_tmux_verdicts` is a snapshot taken just before
+      the check, and handle()''s deferral/attempt bound runs before its own stop_check,
+      so a stop landing *while* handle decides could still retire the worker as INPUT_REQUIRED
+      and persist the reason into the resume snapshot. Both `except VerdictRecoveryExhausted`
+      handlers now re-check state.stop_requested and leave the worker pending during
+      teardown; new regression test sets the stop inside handle and fails on the previous
+      code. Also: the planner exhaustion `_error` now names the validator''s rejection
+      when the planner emitted a QA_PLAN block that could not be consumed (e.g. non-contiguous
+      numbering), matching the non-exhaustion "plan incomplete" surface (new test);
+      dropped an unreachable `if not pane_id: continue` in the tick loop. Spec updated.
+      Full suite: 3796 passed, 1 skipped; 42 failed + 17 errors all reproduce on the
+      unmodified tree here (41 in test_merge_publish/test_signoff_integration, plus
+      test_git_ops::test_keeps_unpushed_merge on git 2.34.1). Note: pr-f2fee05 (verifier
+      re-check hang) is now covered by this PR''s i2 change (the re-check uses poll_for_verdict),
+      so that bug PR looks redundant — flagged for the planner.'
+    created_at: '2026-10-27T19:55:38Z'
+    last_edited: '2026-10-27T19:55:38Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
