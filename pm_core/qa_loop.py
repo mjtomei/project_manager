@@ -3741,7 +3741,6 @@ def run_qa_sync(
     Returns the updated state.
     """
     from pm_core import tmux as tmux_mod, prompt_gen, git_ops, store
-    from pm_core import pane_layout, pane_registry
     from pm_core.claude_launcher import build_claude_shell_cmd
     _qa_planning_resolution = _resolve_qa_model(pr_data, store.load(pm_root), session_type="qa_planning")
 
