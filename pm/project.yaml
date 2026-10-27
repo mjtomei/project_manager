@@ -33244,7 +33244,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T00:22:11.846191+00:00'
+  updated_at: '2026-10-27T00:48:27.423261+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36118,6 +36118,25 @@ prs:
       QA (pr-bddda0f).'
     created_at: '2026-10-27T00:22:11Z'
     last_edited: '2026-10-27T00:22:11Z'
+  - id: note-bc551f0
+    text: 'QA S81 (2026-10-27, host, all fake-claude, two PRs + actor, HEAD 5b78ba40
+      vs control 62ba5b0f side by side; captures /pm-captures/scenarios/81, REPORT.md):
+      CODE CHANGE f83b3963 needs normal re-review. 3 s/10 s rounds (tick + TUI, review/impl/REQA
+      returns) held on both builds. The opted-in CLI review/impl launches and qa-run-bg
+      logged `waiting up to 180s more`, cleared awaiting (and R claim) <=0.30 s after
+      release, one window/driver each, no relaunch by hop+210 s, TUI answered keys.
+      150 s round (TUI review return): on HEAD and control the review loop subprocess.run
+      timeout=120 killed the `pm pr review --fresh --review-loop` child mid-clear
+      (loop ERROR), awaiting+claim stayed, and a tick at hop+181 s relaunched over
+      the live review pane. Fix f83b3963: review_loop relauncher timeout = _LAUNCH_TIMEOUT
+      (S82, still the window-open bound) + LOCK_TIMEOUT_SECONDS + RETURN_CLEAR_WAIT_SECONDS;
+      post-fix live: child waited 150.35 s, cleared +0.25 s, one window, PASS. Incidental
+      in the same commit: signoff_ui.advance_all logs a StoreLockTimeout as one warning,
+      not a traceback. Filed pr-7f74c77: that sign-off step still waits 2 s on the
+      TUI event loop (one frozen frame in a 10 s hold). Suite on 783cdb62: 4044 passed,
+      6 known test_worker_route failures (same on 5b78ba40).'
+    created_at: '2026-10-27T00:48:27Z'
+    last_edited: '2026-10-27T00:48:27Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
