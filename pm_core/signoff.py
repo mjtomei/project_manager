@@ -181,6 +181,10 @@ def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
             record["evidence"] = _evidence_block(pr, sha, integration,
                                                  verdict=verdict)
             pr["signoff"] = record
+            # A new verdict ends any "the merge gate invalidated this"
+            # episode: its reason (and the previous report it pointed at) no
+            # longer describe why sign-off is running.
+            pr.pop("signoff_invalidated", None)
             # A new sign-off decision closes the previous return episode.
             ret = pr.get("signoff_return")
             if isinstance(ret, dict) and not ret.get("resolved_at"):
@@ -297,15 +301,36 @@ def invalidate_signoff(root: Path, pr_id: str, reason: str) -> None:
     matches: the record stays for provenance, but it is never adopted or
     accepted again, so the sign-off driver retires the run and re-runs
     sign-off against the current base ("return to sign-off").
+
+    The reason is also kept beside the record (``pr['signoff_invalidated']``)
+    because the driver clears ``pr['signoff']`` before relaunching: the
+    prompt builder must still be able to say *why* sign-off is running again,
+    and which revision it last approved, to point at the previous report when
+    the PR's own changes have not moved since.
     """
     from datetime import datetime, timezone
 
     def _apply(data):
         pr = store.get_pr(data, pr_id)
-        rec = (pr or {}).get("signoff")
+        if pr is None:
+            return
+        rec = pr.get("signoff")
         if isinstance(rec, dict) and rec.get("verdict"):
+            ts = datetime.now(timezone.utc).isoformat()
             rec["invalidated"] = reason
-            rec["invalidated_at"] = datetime.now(timezone.utc).isoformat()
+            rec["invalidated_at"] = ts
+            integ = rec.get("integration")
+            integ = integ if isinstance(integ, dict) else {}
+            # Hand-edited state: a non-string revision is no revision.
+            approved = rec.get("sha")
+            bound_base = integ.get("base_sha")
+            pr["signoff_invalidated"] = {
+                "reason": reason,
+                "at": ts,
+                "verdict": rec.get("verdict"),
+                "sha": approved if isinstance(approved, str) else None,
+                "base_sha": bound_base if isinstance(bound_base, str) else None,
+            }
 
     store.locked_update(root, _apply)
 

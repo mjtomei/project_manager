@@ -975,6 +975,55 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
     return "\n" + "\n".join(lines) + "\n"
 
 
+def _signoff_invalidated_block(pr: dict) -> str:
+    """Why sign-off is running again after a refused merge (else empty).
+
+    Only a merge-gate invalidation points at the previous report, and only
+    while the PR's own changes are unchanged.  The gate refuses when the base
+    moved under an approval, and the relaunch then applies the base merge to
+    the branch — which moves HEAD without being PR work.  Any commit the PR
+    added since that approval makes the previous report's conclusions stale,
+    so it is not referenced then (a bounce is a different episode entirely:
+    it writes ``signoff_return``, not this record).
+    """
+    from pm_core import integration as integ
+    inv = pr.get("signoff_invalidated")
+    inv = inv if isinstance(inv, dict) else {}
+    reason = inv.get("reason")
+    approved = inv.get("sha")
+    if not (isinstance(reason, str) and reason.strip()):
+        return ""
+    if not (isinstance(approved, str) and approved):
+        return ""
+    rec = pr.get("integration")
+    rec = rec if isinstance(rec, dict) else {}
+    resolved_from = integ.resolution_of(rec).get("resolved_from")
+    resolved_from = resolved_from if isinstance(resolved_from, dict) else {}
+    # ``rec['head']`` is the revision the current check saw; when pm applied
+    # the base merge it is the merge commit and ``resolved_from.head`` is the
+    # head it applied on top of.  Either matching the approved revision means
+    # no PR work was added since.
+    applied_from = resolved_from.get("head")
+    if rec.get("head") != approved and not (
+            isinstance(applied_from, str) and applied_from == approved):
+        return ""
+    prior = inv.get("verdict")
+    prior = (f"The previous sign-off concluded **{prior}** at "
+             f"`{approved[:12]}`, and pm's merge gate refused that approval — "
+             if isinstance(prior, str) and prior
+             else "pm's merge gate refused the previous approval — ")
+    return (
+        f"\n**Why sign-off is running again:** {prior}{reason}. "
+        "The PR's own changes are "
+        "unchanged since that sign-off (pm may have merged the base into the "
+        "branch, but no PR work was added), so the previous report at "
+        "`$CAP/report.html` still records the verdict and evidence sign-off "
+        "reached for these exact changes. Read it before you overwrite it "
+        "and reuse its conclusions where they still hold — but you must "
+        "still write a fresh report bound to the head, base and candidate "
+        "above, and the evidence/checks statement below still applies.\n")
+
+
 def _evidence_revision_lines(pr_id: str) -> list[str]:
     """The revisions the existing review/QA evidence was produced against.
 
@@ -1066,6 +1115,7 @@ def generate_signoff_prompt(data: dict, pr_id: str,
     tui_block = tui_section(session_name) if session_name else ""
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
     signoff_return_block = _signoff_return_block(pr, for_signoff=True)
+    invalidated_block = _signoff_invalidated_block(pr)
     impl_spec_block = format_spec_for_prompt(pr, "impl") or ""
     # The QA block is split: the overall verdict and the QA error are
     # pm-generated evidence, inlined whole; only the per-scenario verdict
@@ -1112,7 +1162,7 @@ PR-level *comprehensive* review and a routing decision.
 
 ## Description
 {description}
-{pr_notes_block}{signoff_return_block}{impl_spec_block}{plan_context}{tui_block}
+{pr_notes_block}{signoff_return_block}{invalidated_block}{impl_spec_block}{plan_context}{tui_block}
 ## QA scenarios (from the QA run)
 {qa_head}{qa_listing}
 ## Integration with the latest base

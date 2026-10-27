@@ -3928,3 +3928,120 @@ def test_a_coerced_conflict_reason_says_the_list_is_abbreviated():
     assert verdict == SIGNOFF_IMPL
     assert "f0.py" in reason and "f5.py" not in reason
     assert "… 3 more" in reason
+
+
+
+
+# --- why sign-off is running again (a refused merge) ------------------------
+
+# The block's distinctive opening: the prompt always tells the agent to
+# *produce* ``$CAP/report.html``, so only this phrase proves the pointer.
+POINTER = "Why sign-off is running again"
+
+
+def _approve_and_refuse(w, approved: str, reason: str) -> None:
+    """Record an approval at *approved*, then have the merge gate refuse it."""
+    rec = integration.check_integration(w.pm_dir, PR)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, approved, "manual",
+        integration=integration.binding(rec))
+    signoff.invalidate_signoff(w.pm_dir, PR, reason)
+
+
+def _signoff_prompt(w) -> str:
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        return prompt_gen.generate_signoff_prompt(data, PR)
+
+
+def test_a_refused_merge_points_the_rerun_at_the_previous_report(w):
+    """No PR work since the refusal: name the previous report and its verdict.
+
+    The relaunch applies the metadata resolution, so HEAD moves — but that is
+    pm's base merge, not PR work, and the previous report still describes the
+    PR's own changes.  The re-run must be told it may reuse those conclusions.
+    """
+    rec = _metadata_conflict(w)
+    approved = rec["_original_head"]
+    _approve_and_refuse(w, approved, "master moved since sign-off (aaaa -> bbbb)")
+    after = integration.prepare(w.pm_dir, PR)
+    # pm applied the base on top of exactly the approved head.
+    assert after["resolution"]["resolved_from"]["head"] == approved
+    assert after["resolution"]["applied_merge_sha"]
+
+    text = _signoff_prompt(w)
+    assert POINTER in text
+    assert "master moved since sign-off" in text
+    assert f"`{approved[:12]}`" in text
+    assert "Read it before you overwrite it" in text
+
+
+def test_a_refused_merge_without_an_apply_still_points_at_the_previous_report(w):
+    """A clean base move applies nothing, so HEAD is unchanged — reuse too."""
+    commit(w.wd, "feature2.txt", "feature 2\n", "feature work")
+    approved = git(w.wd, "rev-parse", "HEAD")
+    _approve_and_refuse(w, approved, "master moved since sign-off (aaaa -> bbbb)")
+    commit(w.repo, "late.txt", "late\n", "base moves after approval")
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.CLEAN, rec
+    assert rec["head"] == approved
+    assert not rec.get("resolution")
+
+    text = _signoff_prompt(w)
+    assert POINTER in text
+    assert f"`{approved[:12]}`" in text
+
+
+def test_pr_work_since_the_refusal_does_not_point_at_the_previous_report(w):
+    """Real PR work makes the previous report's conclusions stale."""
+    commit(w.wd, "feature2.txt", "feature 2\n", "feature work")
+    approved = git(w.wd, "rev-parse", "HEAD")
+    _approve_and_refuse(w, approved, "master moved since sign-off (aaaa -> bbbb)")
+    commit(w.wd, "later.txt", "later\n", "PR work after the refusal")
+    integration.prepare(w.pm_dir, PR)
+
+    text = _signoff_prompt(w)
+    assert POINTER not in text
+    assert "Read it before you overwrite it" not in text
+
+
+def test_a_verdict_bounce_does_not_point_at_the_previous_report(w):
+    """A bounce is a different episode: it has its own return block."""
+    pr = pr_entry(w)
+    ret = signoff.build_return_record(
+        pr, SIGNOFF_REVIEW, "review", reviewed_head=w.head)
+
+    def _set(d):
+        store.get_pr(d, PR)["signoff_return"] = ret
+    store.locked_update(w.pm_dir, _set)
+
+    text = _signoff_prompt(w)
+    assert "## Previous sign-off return" in text
+    assert POINTER not in text
+
+
+def test_recording_a_new_verdict_clears_the_invalidation_reason(w):
+    commit(w.wd, "feature2.txt", "feature 2\n", "feature work")
+    approved = git(w.wd, "rev-parse", "HEAD")
+    _approve_and_refuse(w, approved, "master moved since sign-off")
+    assert pr_entry(w).get("signoff_invalidated")
+    signoff.record_signoff_verdict(w.pm_dir, PR, SIGNOFF_REVIEW, w.head,
+                                   "manual")
+    assert not pr_entry(w).get("signoff_invalidated")
+    assert POINTER not in _signoff_prompt(w)
+
+
+def test_a_malformed_invalidation_record_is_not_a_pointer(w):
+    """Hand-edited state: no revision means nothing to point at, never raise."""
+    def _set(d):
+        pr = store.get_pr(d, PR)
+        pr["signoff_invalidated"] = {"reason": "base moved", "sha": 5}
+    store.locked_update(w.pm_dir, _set)
+    assert POINTER not in _signoff_prompt(w)
+
+    def _set_reason(d):
+        pr = store.get_pr(d, PR)
+        pr["signoff_invalidated"] = {"reason": None, "sha": w.head}
+    store.locked_update(w.pm_dir, _set_reason)
+    assert POINTER not in _signoff_prompt(w)

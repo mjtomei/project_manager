@@ -352,6 +352,26 @@ the branch contains instead of the stale workdir ref. The pane's fallback ref
 like every other interpolated value: `base_branch` is project.yaml state, and
 an unquoted value with shell metacharacters would run in the pane's shell.
 
+**Why sign-off is running again.** When the merge gate refuses an approval
+because the base moved (`invalidate_signoff`), the driver clears
+`pr['signoff']` before relaunching, so the prompt builder cannot read the
+reason (or the approved revision) from the record. The reason is therefore
+also kept beside it as `pr['signoff_invalidated'] = {reason, at, verdict,
+sha, base_sha}` (non-string revisions read as absent). A new verdict clears
+it (`record_signoff_verdict`), so it only describes the current re-run.
+
+The sign-off prompt then emits a "Why sign-off is running again" block —
+naming the refusal reason, the previous verdict and the revision it approved,
+and pointing at `$CAP/report.html` as reusable — **only** when the PR's own
+changes are unchanged since that approval. The relaunch may apply the base
+merge, which moves HEAD without being PR work, so "unchanged" means either
+the current check's `head` equals the approved revision, or the applied
+resolution's `resolved_from.head` does. Any commit the PR added since the
+refusal leaves neither matching and the block is omitted. A verdict bounce is
+a different episode (it writes `signoff_return`) and never emits this block.
+The agent is told to read the previous report *before* overwriting it and
+that a fresh report bound to the new head/base/candidate is still required.
+
 ### R7. Merge gate / publication identity
 `merge_gate_refusal` additionally requires:
 - the PR's current `integration` record, when present, still has the bound
