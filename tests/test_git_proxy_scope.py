@@ -75,7 +75,7 @@ def _real_git_env(tmp_path, monkeypatch):
                  ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t")):
         monkeypatch.setenv(k, v)
     resolved = shutil.which("git")
-    assert resolved and open(resolved, "rb").read(2) != b"#!", (
+    assert resolved and Path(resolved).read_bytes()[:2] != b"#!", (
         f"git on PATH is a wrapper ({resolved}); refusing to run")
 
 

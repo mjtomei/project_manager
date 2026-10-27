@@ -48,7 +48,7 @@ _CONTAINER_SOCKET_PATH = f"{_CONTAINER_SOCKET_DIR}/push.sock"
 _BROAD_PUSH_OPTIONS = ("--all", "--branches", "--mirror", "--tags")
 
 
-def _long_option_match(arg: str, options) -> str | None:
+def _long_option_match(arg: str, options: tuple[str, ...]) -> str | None:
     """Return the long option in *options* that git would read *arg* as.
 
     git's option parser accepts any unambiguous prefix of a long option,
