@@ -34032,7 +34032,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T06:48:50.100155+00:00'
+  updated_at: '2026-10-27T08:12:57.028383+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34929,6 +34929,24 @@ prs:
       would touch prompt output in a heavily-tested area; I left it alone.'
     created_at: '2026-10-27T06:48:50Z'
     last_edited: '2026-10-27T06:48:50Z'
+  - id: note-3101807
+    text: 'QA scenario 22 (concurrent workdir/record/captures/base) PASS at 25fb1918
+      — all four triples held live, no code change. Harness facts for the next run:
+      (1) the scenario literal fixture order no longer reproduces the metadata conflict:
+      run `pm pr start` FIRST, commit the post-start state on master, fast-forward
+      the PR branch to that commit, and only then let each side `pm pr add` its own
+      record at the same position (that gives `resolved: pm/project.yaml (by record
+      id)`, 1 added from PR / 1 from base). (2) Story 3 race window is ~33 ms: the
+      merge prints `Checking master of` at 0.065 s of its cast and refuses at 0.102
+      s, so a barrier released by polling tmux capture-pane is too slow. Poll the
+      pane asciinema cast file (written live) in a tight background loop and touch
+      the re-check barrier on the `Checking master of` line; the re-check then starts
+      inside the revalidation and records the new base without clearing the invalidation.
+      (3) `grep -c <id>` over the merged project.yaml over-counts (branch names contain
+      the id) — parse the YAML and count record ids to prove no duplicate records
+      from the concurrent merge. Captures: /pm-captures/scenarios/22/{story1-apply-race,story2-apply-vs-record-and-notes,story3-merge-vs-recheck,story4-merge-race}.'
+    created_at: '2026-10-27T08:12:56Z'
+    last_edited: '2026-10-27T08:12:56Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
