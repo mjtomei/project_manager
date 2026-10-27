@@ -206,7 +206,11 @@ def _print_changes(payload: dict) -> None:
         if prev:
             pol_s = f" ({pol.replace('_', '-')}; was {prev.replace('_', '-')})"
         click.echo(f"{action}: {c.get('pr_id')}{pol_s}")
-    if payload.get("message"):
+    # A successful reply may carry the owner's log line (e.g. ``fresh``'s
+    # "waiting for the current implementation turn").  A failed one already
+    # prints its message via ``_finish``'s ``Error (...)`` line; echoing it
+    # here too would duplicate the text.
+    if payload.get("ok") and payload.get("message"):
         click.echo(payload["message"])
     for f in payload.get("failed") or []:
         click.echo(f"failed: {f.get('pr_id')} ({f.get('error')}): "

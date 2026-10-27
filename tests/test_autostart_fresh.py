@@ -462,6 +462,96 @@ class TestFreshStart:
                 app, ["pr-a"], policy=st.POLICY_AUTO)
         assert auto_start.target_policy(app, "pr-a") == st.POLICY_AUTO
 
+    def test_fresh_leaves_unrelated_targets_alone(self, project):
+        # A fresh reset must not disturb another target's policy or status.
+        data = store.load(project)
+        data["prs"].append(_pr("pr-b", workdir=str(project.parent / "wd-b")))
+        store.save(data, project)
+        app = FakeApp(store.load(project)["prs"], project)
+        app._pane_idle_tracker = MagicMock()
+        auto_start.add_targets(app, ["pr-b"], policy=st.POLICY_AUTO,
+                               source="test")
+        with patch.object(autostart_fresh, "handoff_ready",
+                          return_value=False), \
+             patch("pm_core.tui.review_loop_ui._auto_review_idle_prs"):
+            autostart_fresh.fresh_start(app, ["pr-a"])
+        assert auto_start.target_policy(app, "pr-b") == st.POLICY_AUTO
+        assert store.get_pr(store.load(project), "pr-b")["status"] == "in_review"
+        assert "pr-a" in auto_start.get_targets(app)
+        assert "pr-b" in auto_start.get_targets(app)
+
+
+# ---------------------------------------------------------------------------
+# z O / z A key wiring
+# ---------------------------------------------------------------------------
+
+class _KeyApp:
+    """Minimal app for calling the TUI's bound action methods directly."""
+
+    def __init__(self, z, pr_id):
+        self._z = z
+        self._pr_id = pr_id
+        self.logs = []
+        self.workers = []
+
+    def _consume_z(self):
+        return self._z
+
+    def query_one(self, *_a, **_k):
+        from types import SimpleNamespace
+        return SimpleNamespace(selected_pr_id=self._pr_id)
+
+    def log_message(self, msg, **kw):
+        self.logs.append(msg)
+
+    def run_worker(self, coro, *a, **kw):
+        self.workers.append(coro)
+        if asyncio.iscoroutine(coro):
+            coro.close()
+
+
+class TestKeyBindings:
+    """`z O`/`z A` are the fresh variants; plain `O`/`A` keep their meaning."""
+
+    def _fresh_calls(self, monkeypatch):
+        calls = []
+
+        def fake(app, ids, policy=None, source=None):
+            calls.append((ids, policy, source))
+            return {"ok": True}
+
+        monkeypatch.setattr(autostart_fresh, "fresh_start", fake)
+        return calls
+
+    def test_z_a_requests_auto_merge_fresh(self, monkeypatch):
+        from pm_core.tui.app import ProjectManagerApp
+        calls = self._fresh_calls(monkeypatch)
+        ProjectManagerApp.action_toggle_auto_start(_KeyApp(z=1, pr_id="pr-a"))
+        assert calls == [(["pr-a"], st.POLICY_AUTO, "key:zA")]
+
+    def test_z_o_requests_stop_before_merge_fresh(self, monkeypatch):
+        from pm_core.tui.app import ProjectManagerApp
+        calls = self._fresh_calls(monkeypatch)
+        ProjectManagerApp.action_auto_sequence_pr(_KeyApp(z=1, pr_id="pr-a"))
+        assert calls == [(["pr-a"], st.POLICY_STOP, "key:zO")]
+
+    def test_plain_a_still_toggles(self, monkeypatch):
+        from pm_core.tui.app import ProjectManagerApp
+        sentinel = object()
+        monkeypatch.setattr(auto_start, "toggle",
+                            lambda app, selected_pr_id=None: sentinel)
+        app = _KeyApp(z=0, pr_id="pr-a")
+        ProjectManagerApp.action_toggle_auto_start(app)
+        assert app.workers == [sentinel]
+
+    def test_z_a_without_a_selection_does_nothing(self, monkeypatch):
+        from pm_core.tui.app import ProjectManagerApp
+        calls = self._fresh_calls(monkeypatch)
+        app = _KeyApp(z=1, pr_id=None)
+        ProjectManagerApp.action_toggle_auto_start(app)
+        assert calls == []
+        assert any("No PR selected" in line for line in app.logs)
+
 
 # ---------------------------------------------------------------------------
 # Restart recovery
@@ -634,10 +724,11 @@ class TestStaleQa:
 # ---------------------------------------------------------------------------
 
 class TestStatus:
-    def _status(self, pr, idle):
+    def _status(self, pr, idle, windows=None):
         return st.build_status({
             "prs": [pr], "targets": {"pr-a": st.make_target_record("test")},
-            "enabled": True, "windows": {"#1": "%1"},
+            "enabled": True,
+            "windows": {"#1": "%1"} if windows is None else windows,
             "impl_idle": {"pr-a": idle} if idle else {},
         })
 
@@ -648,6 +739,14 @@ class TestStatus:
         run = self._status(pr, "active")["runs"][0]
         assert run["state"] == "waiting"
         assert "waiting for the current implementation turn" in run["reason"]
+
+    def test_missing_implementation_window_reason(self):
+        pr = _pr(status="in_progress", gh_pr_number=1,
+                 **{FRESH_KEY: {"requested_at": st.now_iso(),
+                                "awaiting_handoff": True}})
+        run = self._status(pr, "active", windows={})["runs"][0]
+        assert run["state"] == "waiting"
+        assert "implementation window missing" in run["reason"]
 
     def test_idle_reason_says_review_is_starting(self):
         pr = _pr(status="in_progress", gh_pr_number=1,
@@ -714,6 +813,18 @@ class TestCli:
             res = _cli(["fresh", "pr-a", "-s", "pm-x"])
         assert res.exit_code == 0, res.output
         assert "fresh: pr-a (in_review → in_progress)" in res.output
+        assert "Auto-start fresh: pr-a: waiting" in res.output
+
+    def test_failed_reply_prints_the_error_once(self, cli_project):
+        # The owner's failure message is reported by `_finish`'s Error line;
+        # echoing it from `_print_changes` too would duplicate it.
+        with patch("pm_core.cli.autostart._request",
+                   return_value={"ok": False, "error": "not_later_stage",
+                                 "message": "pr-a is already in implementation",
+                                 "changes": []}):
+            res = _cli(["fresh", "pr-a", "-s", "pm-x"])
+        assert res.exit_code == 1
+        assert res.output.count("already in implementation") == 1
 
     def test_merged_rejected_before_sending(self, cli_project):
         with patch("pm_core.cli.autostart.trigger_tui_command") as trig:

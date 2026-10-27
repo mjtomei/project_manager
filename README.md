@@ -259,6 +259,7 @@ implementation turn to finish before starting exactly one fresh review. Plain
 pm autostart add pr-abc123 pr-def456   # add targets (default: stop before merge)
 pm autostart add 42 --auto-merge       # merge automatically (sign-off gate still applies)
 pm autostart add pr-final --wait-for-merge  # whole chain, every merge manual
+pm autostart fresh pr-abc123           # reviewed PR back to impl after feedback
 pm autostart remove pr-abc123          # stop scheduling it; running windows are kept
 pm autostart status --json             # what every target and dependency is doing
 ```
