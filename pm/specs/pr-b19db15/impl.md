@@ -134,9 +134,14 @@ A2. *Which prompts get the shared block?* → QA child, review (covers review
 loop), and impl. Scenario 0 (interactive) is left alone to keep the change
 small; it does not produce artifact captures and is user-driven.
 
-A3. *Do we update `web-ui-recording.md`?* → No full rewrite. Its ffmpeg
-transcode is a short synchronous step; the task names the two recording
-recipes. The helper is shared and can be adopted there later.
+A3. *Do we update `web-ui-recording.md`?* → No helper adoption there (it has
+no agg→ffmpeg render step; Playwright records the video directly), and the
+task names the two recording recipes. Incidental hardening (review loop i4):
+its unbounded `until curl ...; do sleep; done` readiness poll — and the
+matching `until tmux ls ...` poll in `tmux-screen-recording.md` — now carry a
+deadline and an actionable failure, because an unbounded poll stalls a worker
+forever when the server/session never comes up, the same stall class this PR
+fixes. Asserted by `TestRecipes::test_readiness_waits_are_bounded`.
 
 A4. *Timeout default?* → No default; `--timeout` is required. The recording
 recipes use 1800 s (a long TUI encode is explicitly expected to take several

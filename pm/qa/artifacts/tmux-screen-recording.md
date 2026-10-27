@@ -55,7 +55,16 @@ the same tmux server is enough to break that recursion.
 #    moving on. The subshell form keeps job-control noise out of the
 #    recording.
 ( pm session >/dev/null 2>&1 ) &
-until tmux ls 2>/dev/null | grep -q '^pm-'; do sleep 0.2; done
+# Bounded readiness wait: poll for the session to exist, but give up with a
+# reason instead of hanging forever if `pm session` never starts it.
+deadline=$(( $(date +%s) + 60 ))
+until tmux ls 2>/dev/null | grep -q '^pm-'; do
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+        echo "pm session did not appear within 60s — check 'pm session' output" >&2
+        exit 1
+    fi
+    sleep 0.2
+done
 TARGET=$(pm session name)             # canonical pm session name
 
 # 2. Stream the home pane's scrollback to transcript.log.

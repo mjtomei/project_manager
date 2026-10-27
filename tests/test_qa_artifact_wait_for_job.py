@@ -501,6 +501,23 @@ class TestRecipes:
         assert "leftover" in text.lower()
         assert "ffprobe" in text
 
+    @pytest.mark.parametrize("name,marker", [
+        ("tmux-screen-recording.md", "until tmux ls"),
+        ("web-ui-recording.md", "until curl"),
+    ])
+    def test_readiness_waits_are_bounded(self, name, marker):
+        """Readiness polls must have a deadline, not just a sleep loop.
+
+        The recipes teach bounded waits; an `until ...; do sleep; done`
+        with no deadline hangs the worker forever when the session or
+        server never comes up.
+        """
+        text = _recipe_text(name)
+        idx = text.index(marker)
+        window = text[max(0, idx - 700):idx + 700]
+        assert "deadline" in window, f"{name}: unbounded readiness wait"
+        assert "exit 1" in window, f"{name}: readiness wait has no failure path"
+
     def test_helper_is_loaded_beside_recipes(self, tmp_path):
         """_install_artifact_files copies *.sh helpers with the recipes."""
         pm_root = tmp_path / "pm"

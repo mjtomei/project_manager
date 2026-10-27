@@ -191,12 +191,12 @@ than one recipe).
 
 ### Shared helpers
 
-Executable helpers that ship beside the recipes are copied into the
-scenario's `qa-artifacts/` directory along with the recipe that
-references them (the QA library loader only globs `*.md`, so a helper
-is not listed by `pm qa list`). Currently the only one is
-`wait-for-job.sh`, used by the recording recipes for the agg→ffmpeg
-render step.
+Executable helpers that ship beside the recipes (`*.sh`) are copied
+into the scenario's `qa-artifacts/` directory whenever it installs any
+recipe, so a recipe can invoke the helper sitting next to it (the QA
+library loader only globs `*.md`, so a helper is not listed by
+`pm qa list`). Currently the only one is `wait-for-job.sh`, used by
+the recording recipes for the agg→ffmpeg render step.
 
 Use `wait-for-job.sh` for any renderer or long-running capture step.
 It starts the job as one background process, waits on that job's

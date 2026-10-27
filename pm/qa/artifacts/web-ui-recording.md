@@ -61,8 +61,18 @@ APP_START="my-app serve"
 $APP_START --port "$PORT" &
 SERVER_PID=$!
 
-# Wait for the server to answer before driving it (no fixed sleep).
-until curl -sf -o /dev/null "$APP_URL/"; do sleep 0.2; done
+# Wait for the server to answer before driving it (no fixed sleep), but
+# bound it: an unbounded poll hangs the worker forever when the app never
+# comes up, so stop with the reason and stop the server we started.
+deadline=$(( $(date +%s) + 120 ))
+until curl -sf -o /dev/null "$APP_URL/"; do
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+        echo "app did not answer on $APP_URL within 120s — check its startup output" >&2
+        kill "$SERVER_PID" 2>/dev/null || true
+        exit 1
+    fi
+    sleep 0.2
+done
 ```
 
 ### 2. Drive Chromium with the Playwright driver
