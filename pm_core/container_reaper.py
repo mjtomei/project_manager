@@ -1357,13 +1357,19 @@ def _note_pid_pressure(out: Outcome) -> None:
     Unowned exhausted containers were just removed like any leftover; an
     owned one may hold a live session, so it is reported (with the restart
     command) rather than restarted behind the user's back.
+
+    Reuses the pass's own inventory (``out.inventory``) instead of listing
+    every container again: ``pids_pressure`` only needs the managed-name set,
+    and every row it reports must also be a kept decision — so a container
+    this pass removed (or one created after its inventory) cannot change the
+    outcome.
     """
     kept = {d.info.name: d.reason for d in out.decisions
             if d.action == "keep" and d.info.running}
     if not kept:
         return
     try:
-        hot = container_mod.pids_pressure()
+        hot = container_mod.pids_pressure(inventory=out.inventory)
     except Exception:
         _log.debug("PID usage probe failed", exc_info=True)
         return

@@ -598,7 +598,9 @@ container cleared it and kept its files.  Running state is not health.
 - `pids_usage()` reads cgroup stats (`stats --no-stream`, works when exec
   can't) + `HostConfig.PidsLimit`, accepting both tabs and Podman's expanded
   whitespace separators. PID stats are filtered through label-first managed
-  inventory so runtime-renamed containers remain visible. Non-targeted reconcile passes report
+  inventory so runtime-renamed containers remain visible; a reconcile pass
+  hands its own inventory to that filter instead of listing every container
+  a second time. Non-targeted reconcile passes report
   kept containers ≥ 90 % of their limit (`Outcome.pid_pressure`; TUI log
   line, `pm container reap` WARNING rows); `pm container status` lists
   ≥ 80 %.  Unowned ones are simply reaped like any leftover.

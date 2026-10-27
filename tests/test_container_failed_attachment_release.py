@@ -22,7 +22,7 @@ def allocation(monkeypatch):
     monkeypatch.setattr(reaper, "_release_unused_proxies", lambda *a: ([], True))
     monkeypatch.setattr(cm, "running_container_count", lambda: int(state["info"] is not None))
     monkeypatch.setattr(cm, "keyring_summary", lambda: "")
-    monkeypatch.setattr(cm, "pids_pressure", lambda *a: [])
+    monkeypatch.setattr(cm, "pids_pressure", lambda *a, **k: [])
     monkeypatch.setattr(push_proxy, "stop_push_proxy", MagicMock())
 
     def remove(name, *, container_id=None):

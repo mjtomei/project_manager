@@ -269,7 +269,8 @@ def fake_env(monkeypatch):
     monkeypatch.setattr(cm, "running_container_count",
                         lambda: len(state["containers"]))
     monkeypatch.setattr(cm, "keyring_summary", lambda: "")
-    monkeypatch.setattr(cm, "pids_pressure", lambda threshold=0.9: [])
+    monkeypatch.setattr(cm, "pids_pressure",
+                        lambda threshold=0.9, inventory=None: [])
     monkeypatch.setattr(reaper, "_release_unused_proxies",
                         lambda scope, failures, checked=None: ([], True))
     return state
@@ -653,11 +654,26 @@ class TestReaperOwnership:
         fake_env["containers"] = [_info(name)]
         fake_env["panes"] = _Panes([f"podman exec -it {name} claude"])
         monkeypatch.setattr(cm, "pids_pressure",
-                            lambda threshold=0.9: [(name, 2041, 2048)])
+                            lambda threshold=0.9, inventory=None:
+                            [(name, 2041, 2048)])
         out = reaper.reconcile(reason="manual")
         assert out.removed == []
         assert out.pid_pressure and out.pid_pressure[0][:3] == (name, 2041, 2048)
         assert "near PID limit" in out.summary()
+
+    def test_pid_pressure_reuses_the_pass_inventory(self, fake_env, monkeypatch):
+        """A full pass must not list every container a second time for PIDs."""
+        name = "pm-repo-ab12-qa-pr-aaaa-L-s28"
+        fake_env["containers"] = [_info(name)]
+        fake_env["panes"] = _Panes([f"podman exec -it {name} claude"])
+        seen = []
+        monkeypatch.setattr(cm, "pids_pressure",
+                            lambda threshold=0.9, inventory=None:
+                            (seen.append(inventory), [])[1])
+        out = reaper.reconcile(reason="manual")
+        assert out.pid_pressure == []
+        assert seen == [out.inventory], (
+            "the pass must hand its own inventory to the PID probe")
 
     def test_runtime_unavailable_is_outcome_not_exception(self, monkeypatch):
         monkeypatch.setattr(reaper, "list_containers", lambda: None)

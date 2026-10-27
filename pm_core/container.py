@@ -1508,11 +1508,15 @@ def restart_container(name: str, *, container_id: str | None = None) -> None:
                            "setup markers missing after restart", stage="restart")
 
 
-def pids_usage() -> dict[str, tuple[int, int]] | None:
+def pids_usage(inventory: list | None = None) -> dict[str, tuple[int, int]] | None:
     """``{name: (pids, limit)}`` for running pm containers (limit 0 = none).
 
     Read from the runtime's cgroup stats, so it works even when the
     container is too exhausted to ``exec`` into.  None if unavailable.
+
+    *inventory* is an already-read label-first inventory (the reaper's
+    ``Outcome.inventory``); pass it to avoid re-listing every container on a
+    pass that just did so.  Omitted, the inventory is read here.
     """
     try:
         st = _run_runtime("stats", "--no-stream", "--format",
@@ -1521,8 +1525,9 @@ def pids_usage() -> dict[str, tuple[int, int]] | None:
         return None
     if st.returncode != 0:
         return None
-    from pm_core.container_reaper import list_containers
-    inventory = list_containers()
+    if inventory is None:
+        from pm_core.container_reaper import list_containers
+        inventory = list_containers()
     if inventory is None:
         return None
     managed = {info.name for info in inventory}
@@ -1553,9 +1558,13 @@ def pids_usage() -> dict[str, tuple[int, int]] | None:
     return {n: (c, limits.get(n, 0)) for n, c in current.items()}
 
 
-def pids_pressure(threshold: float = 0.9) -> list[tuple[str, int, int]]:
-    """Running pm containers at ≥ *threshold* of their PID limit."""
-    usage = pids_usage() or {}
+def pids_pressure(threshold: float = 0.9,
+                  inventory: list | None = None) -> list[tuple[str, int, int]]:
+    """Running pm containers at ≥ *threshold* of their PID limit.
+
+    *inventory* is forwarded to :func:`pids_usage`; see there.
+    """
+    usage = pids_usage(inventory) or {}
     return sorted((n, c, lim) for n, (c, lim) in usage.items()
                   if lim > 0 and c >= threshold * lim)
 
