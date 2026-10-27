@@ -415,6 +415,46 @@ def test_cli_qa_status_older_than_an_impl_return_does_not_advance(tmp_path):
     qa.assert_called_once()
 
 
+def _qa_run_record(base, started_at):
+    import json
+    qa_wd = base / "qa" / f"{PR}-{int(started_at)}"
+    qa_wd.mkdir(parents=True)
+    (qa_wd / "qa_run.json").write_text(json.dumps(
+        {"pr_id": PR, "loop_id": "x", "started_at": started_at}))
+
+
+@pytest.mark.parametrize("run_after_return, launched", [(True, False),
+                                                        (False, True)])
+def test_cli_qa_return_whose_rerun_started_is_left_to_it(
+        tmp_path, run_after_return, launched):
+    """S87: the TUI started the REQA re-run while project.yaml was busy and
+    its clear of ``awaiting`` is still pending.  A tick that got the lock at
+    the release must not launch a second QA driver over that run; a qa
+    window from a run that started before the return (the judged run) is
+    still relaunched over."""
+    ts = "2026-10-27T04:07:14+00:00"
+    start = signoff.parse_ts(ts).timestamp() + (15 if run_after_return
+                                                 else -120)
+    _qa_run_record(tmp_path / "wd", start)
+    claim = MagicMock(return_value=True)
+    result, _, _, qa = _seq(
+        tmp_path, _returned("qa", "qa", ts=ts),
+        **{"pm_core.cli.pr._qa_status_for": {"return_value": (None, None)},
+           "pm_core.cli.pr.tmux_mod.find_window_by_name":
+               {"return_value": "@7"},
+           "pm_core.paths.workdirs_base": {"return_value": tmp_path / "wd"},
+           "pm_core.cli.pr._check_qa_launch": {"return_value": None},
+           "pm_core.signoff.claim_return_launch": {"new": claim}})
+    assert result.exit_code == 0, result.output
+    if launched:
+        assert result.output.strip() == "running: qa (launched)"
+        qa.assert_called_once()
+    else:
+        assert result.output.strip() == "running: qa"
+        qa.assert_not_called()
+        claim.assert_not_called()
+
+
 def _review_transcripts(tmp_path, *iters):
     tdir = tmp_path / "transcripts" / "auto-sequence" / PR
     tdir.mkdir(parents=True)

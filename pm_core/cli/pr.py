@@ -3564,6 +3564,23 @@ def _older_than(path: Path | None, iso_ts: str | None) -> bool:
         return False
 
 
+def _qa_run_started_since(pr_id: str, iso_ts: str | None) -> bool:
+    """Whether a QA run of *pr_id* started at or after the ISO timestamp
+    *iso_ts*, by the start record each run writes in its QA workdir."""
+    from pm_core.paths import workdirs_base
+    from pm_core.qa_loop import read_run_record
+    from pm_core.signoff import parse_ts
+    try:
+        since = parse_ts(iso_ts).timestamp()
+    except (TypeError, ValueError):
+        return False
+    for qa_wd in (workdirs_base() / "qa").glob(f"{pr_id}-*"):
+        started = (read_run_record(qa_wd) or {}).get("started_at")
+        if isinstance(started, (int, float)) and started >= since:
+            return True
+    return False
+
+
 def _qa_status_for(pr_id: str) -> tuple[str | None, Path | None]:
     """Find the latest QA status.json for *pr_id*; return (overall, path)."""
     import json
@@ -3818,6 +3835,15 @@ def pr_auto_sequence(pr_id: str):
                 pm_session, f"qa-{display_id}",
             ) if pm_session else None
             if awaiting == "qa":
+                if qa_win and _qa_run_started_since(
+                        pr_id, (open_return(pr_entry) or {}).get("ts")):
+                    # The TUI started the re-run while project.yaml was
+                    # busy: its clear of ``awaiting`` is still pending (the
+                    # poll tick retries it), and a tick queued on the lock
+                    # got it first at the release (S87).  That run's window
+                    # is the re-run's, not the judged run's.
+                    click.echo("running: qa")
+                    return
                 # Sign-off sent this back to QA and no driver has started
                 # the re-run yet (each clears ``awaiting`` as it starts), so
                 # a qa window is the judged run's: launch — unless another
