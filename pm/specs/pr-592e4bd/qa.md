@@ -2161,6 +2161,33 @@ S13, S14, S22, S101.
     with no model) from the TUI and from an auto-sequence tick (RQ53),
     and in container mode an unusable bridge (RQ54). S102's RQ47 a/b and
     the S73 double-drive question stay open, carried separately.
+    QA38 planner (2026-10-27): HEAD c5e9764f adds e6d986dd (the
+    refiner/worker provider check runs before any scenario workdir is
+    cloned, fake-claude refiner/worker included) and c5e9764f (cleanup
+    only). Scenarios S103+:
+    - S103: host, routed refiner/worker on real claude, one routed PR R
+      and one unrouted PR U running QA at the same time, cap
+      `qa-max-scenarios` 1. The router is down before the refiners
+      launch, killed mid-turn for a worker, and down while a queued
+      scenario waits for its slot. It is brought back without pm acting.
+    - S104: the same stories in container mode (podman 3, slirp4netns),
+      plus RQ54: bridge mount and forwarder, the host bridge killed
+      mid-run (E6), and an unusable bridge (symlinked or foreign-owned
+      dir) for impl/review/sign-off and for a QA worker's `ensure`.
+    - S105: RQ52 for impl/review/sign-off/review loop/auto-start on a PR
+      routed for every role, with the router down at launch and coming
+      back, host and container. A second PR on the default provider is
+      worked at the same time.
+    - S106: RQ53 setup errors. Unknown provider, router with no model,
+      api_base with no host, non-executable host launcher, unreadable
+      providers.yaml, for the refiner/worker (fake and real) from the TUI
+      and an auto-sequence tick, at first launch and mid-run (relaunch
+      and queued launch), host and container. Also the CLI start/review/
+      sign-off surfaces, and a broken PR beside a healthy one.
+    The pass decides one point from code reading: `setup_problem` checks
+    a host `launcher` only outside a container, so in container mode a
+    non-executable launcher is not an error. That is expected, because
+    containers never use the launcher.
 
 ## 3. Edge cases
 
