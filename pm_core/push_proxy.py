@@ -37,6 +37,7 @@ import subprocess
 import threading
 from pathlib import Path
 
+from pm_core.git_ops import NO_HOOKS_ARGS
 from pm_core.paths import configure_logger
 
 _log = configure_logger("pm.push_proxy")
@@ -49,9 +50,8 @@ _CONTAINER_SOCKET_PATH = f"{_CONTAINER_SOCKET_DIR}/push.sock"
 # makes. The workdir is container-writable, so ``.git/hooks/pre-push`` (or
 # ``core.hooksPath``) is container-authored code that would otherwise run on
 # the host — the same escape ``--upload-pack``/``--exec`` are blocked for.
-# ``/dev/null`` is not a directory, so git finds no hook to run; a
-# command-line ``-c`` outranks the repository's own config.
-_NO_HOOKS = "core.hooksPath=/dev/null"
+# Shared with pm's own workdir git calls (:data:`git_ops.NO_HOOKS_ARGS`).
+_NO_HOOKS = list(NO_HOOKS_ARGS)
 
 
 def _resolve_local_remote_url(workdir: str, remote: str = "origin") -> str | None:
@@ -435,7 +435,7 @@ class PushProxy:
         # exactly the sandbox escape ``_check_dangerous_flags`` exists to
         # block. Disable hooks (the command-line ``-c`` outranks the repo
         # config); the proxy needs none of them.
-        cmd = ["git", "-C", source, "-c", _NO_HOOKS, "push"] + push_args
+        cmd = ["git", "-C", source, *_NO_HOOKS, "push"] + push_args
         _log.info("Push proxy push: %s", cmd)
         try:
             result = subprocess.run(
@@ -472,7 +472,7 @@ class PushProxy:
         workdir = caller_workdir or self.workdir
         # ``git pull`` runs repo hooks (e.g. post-merge) from this
         # container-writable workdir; see ``_NO_HOOKS``.
-        cmd = ["git", "-c", _NO_HOOKS, git_cmd] + args
+        cmd = ["git", *_NO_HOOKS, git_cmd] + args
         _log.info("Git proxy executing read cmd: %s (in %s)", cmd, workdir)
         try:
             result = subprocess.run(
