@@ -33257,7 +33257,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T06:41:44.020687+00:00'
+  updated_at: '2026-10-27T06:51:26.310003+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36361,6 +36361,43 @@ prs:
       pane missing. launch_claim stays until its 180 s expiry (by design).'
     created_at: '2026-10-27T06:41:43Z'
     last_edited: '2026-10-27T06:41:43Z'
+  - id: note-fc50000
+    text: 'S89 refine: run every `pm pr auto-sequence` tick from a pane INSIDE the
+      test pm tmux session. Outside tmux, _get_pm_session still finds the session
+      by cwd (so qa_win is found), but qa_loop.get_pm_session() is None. launched_elsewhere()
+      then reads every tagged qa_run.json as another clone''s, so the a69b6945/373fb92c
+      re-run-driver guard never fires and HEAD launches like the control. That makes
+      the round invalid, not a product failure; it is worth a separate look for cron/outside-tmux
+      tickers. On HEAD the guarded tick returns without taking the lock, so only the
+      control has ticks "queued on the flock" at the release.'
+    created_at: '2026-10-27T05:36:35Z'
+    last_edited: '2026-10-27T05:36:35Z'
+  - id: note-5448f71
+    text: 'QA S89 (2026-10-27, host, all fake-claude, HEAD 373fb92c vs control d93d39a9
+      side by side; captures /pm-captures/scenarios/89, REPORT.md): CODE CHANGE 3e0a32d8
+      needs normal re-review. a69b6945/373fb92c held live: story 1 (zz t stop+start
+      in the hold) and story 2 (TUI REQA re-run, no key) on HEAD had ticks print only
+      running: qa (never waited on the lock, max 0.18 s) then paused, no qa-run-bg,
+      one cleared line about 1 s after the release, awaiting null with ts unchanged,
+      one QA note; post pass `already ended INPUT_REQUIRED, not relaunching`. The
+      control reproduced S87 both times (tick spanning the release printed running:
+      qa (launched), fresh claim, qa-run-bg, two QA complete). Story 3 (3 concurrent
+      ticks after a hop whose claim gave up): exactly 1 launched + 1 qa-run-bg. Story
+      4 (pm edit re-arm): launched once, then running: qa. Story 5 FAILED pre-fix:
+      user closed qa-<pr> inside the hold; at the release a tick launched qa-run-bg
+      beside the live TUI run and BOTH reached INPUT_REQUIRED (the TUI finalizer even
+      opened in the new driver window). Fix 3e0a32d8: auto-sequence counts a run of
+      this session whose qa_resume.json owner is another live process (qa_loop.own_run_driven_since)
+      as the driver, in the awaiting-qa branch and the no-window/no-claim branch;
+      dead owner still relaunches. Rebased over S91 be90863c (_qa_run_starting covers
+      the pre-snapshot planning gap that this fix alone left open); both conditions
+      ORed. Post-fix story 5 live: 0 launched, no qa-run-bg, TUI finalizer opened
+      its own qa window, one QA complete + one note. Full suite 4081 passed, 1 skipped
+      (PATH=/usr/bin; the sandbox git wrapper fails the integration tests). Known
+      pre-existing: qa-run-bg runs write no QA note (pr-ad4af06), seen in stories
+      3/4.'
+    created_at: '2026-10-27T06:51:26Z'
+    last_edited: '2026-10-27T06:51:26Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
