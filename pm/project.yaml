@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-27T22:56:47.465961+00:00'
+  updated_at: '2026-10-27T23:20:10.629345+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14813,6 +14813,27 @@ prs:
       PYTHONPATH).'
     created_at: '2026-10-27T22:56:47Z'
     last_edited: '2026-10-27T22:56:47Z'
+  - id: note-6f39a52
+    text: 'Review loop 1e74 i6 (2026-10-27): re-reviewed the i1–i5 fixes and the full
+      pidfile/IPC path; no production defect found in the signalling, capability-gate,
+      or takeover logic. Two robustness gaps fixed: (a) claim_tui_pidfile wrote the
+      descriptor with a single unchecked os.write and, if that raised (ENOSPC) or
+      short-wrote, left the O_EXCL-created empty/partial file behind — every caller
+      would then report "has not finished starting up" for the whole life of the TUI,
+      with no path to recovery short of a restart. New tui_pidfile._write_all retries
+      short writes, and a failed write removes the file it just created (only while
+      it still holds our empty/partial bytes, never a successor descriptor). (b) The
+      TuiPidfileConflict message now names the pidfile path: on a platform without
+      procfs the identity check degrades to liveness, so a recycled PID refuses startup
+      and the user needs the path to get unstuck. Tests added: claim write-failure
+      leaves no pidfile, _write_all retries short writes, unwritable queue -> queue_error
+      with the TUI unsignaled (E9 coverage gap), and the conflict-message path assertion.
+      Spec impl.md test items 8/22/23 updated (item 8 now notes the child-process
+      guard test; tests 22/23 are new). Affected suites: 523 passed (test_tui_pidfile,
+      picker spinner, popup picker/session-code, autostart x2, cmd-queue startup,
+      view-focus). Full suite: see next line.'
+    created_at: '2026-10-27T23:20:10Z'
+    last_edited: '2026-10-27T23:20:10Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

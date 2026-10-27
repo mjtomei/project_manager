@@ -254,7 +254,8 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
 7. `trigger_tui_reload`: legacy → child SIGUSR1 handler fires; JSON without
    `sigusr1` → False, child survives; dead pid → False + cleanup.
 8. no-op guard: install guards, `os.kill(os.getpid(), SIGUSR2)`, still
-   alive (handlers restored in `finally`).
+   alive. Runs in a **child process** (a regression used to kill the whole
+   pytest run instead of failing one test).
 8a. pidfd delivery: `_signal_tui` uses `signal.pidfd_send_signal` (not
     `os.kill`) when a pidfd is available; refuses when the starttime no
     longer matches after the pidfd is opened; falls back to `os.kill`.
@@ -302,6 +303,15 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     `_signal_tui` returns `"process is a zombie"` without sending, and
     `submit_tui_command` reports `stale_pidfile`, removes the pidfile and
     rolls the queued line back (E2).
+22. the claim's descriptor write fails (ENOSPC / short write): the empty
+    file created by `O_EXCL` is removed before the error propagates, so
+    callers are not told "has not finished starting up" for the whole
+    life of the TUI; `_write_all` retries a short `os.write` instead of
+    leaving a truncated descriptor. The conflict message names the
+    pidfile path (the only way out when procfs is unavailable and a
+    recycled PID refuses startup).
+23. an unwritable command queue (E9) returns `queue_error`, keeps the
+    pidfile, and never signals the TUI.
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;

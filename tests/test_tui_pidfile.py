@@ -226,6 +226,10 @@ class TestClaim:
         with pytest.raises(tpf.TuiPidfileConflict) as exc:
             tpf.claim_tui_pidfile(path, SESSION)
         assert str(sibling.pid) in str(exc.value)
+        # Name the file: on a platform without procfs the identity check
+        # degrades to liveness, so a recycled PID refuses startup and the
+        # user needs the path to get unstuck.
+        assert str(path) in str(exc.value)
         # The sibling's descriptor is untouched.
         assert tpf.read_pidfile(path).pid == sibling.pid
         assert sibling.poll() is None
@@ -305,6 +309,41 @@ class TestClaim:
             assert tpf.read_pidfile(path).pid == os.getpid()
         finally:
             claim.release()
+
+    def test_write_failure_leaves_no_pidfile(self, tmp_path, monkeypatch):
+        """A descriptor we could not write must not strand callers.
+
+        The O_EXCL create happens before the write; leaving the resulting
+        empty file behind would make every caller report "has not finished
+        starting up" for as long as this TUI runs.
+        """
+        path = tmp_path / "tui-pm-test.pid"
+
+        def boom(fd, data):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(tpf, "_write_all", boom)
+        with pytest.raises(OSError):
+            tpf.claim_tui_pidfile(path, SESSION)
+        assert not path.exists()
+
+    def test_short_writes_are_retried(self, tmp_path, monkeypatch):
+        """A partial ``os.write`` must not leave a truncated descriptor."""
+        path = tmp_path / "descriptor"
+        real_write = os.write
+        chunks = []
+
+        def short(fd, data):
+            chunk = bytes(data)[:3]
+            chunks.append(len(chunk))
+            return real_write(fd, chunk)
+
+        with open(path, "wb") as f:
+            with monkeypatch.context() as m:
+                m.setattr(tpf.os, "write", short)
+                tpf._write_all(f.fileno(), b"abcdefgh")
+        assert path.read_bytes() == b"abcdefgh"
+        assert chunks == [3, 3, 2]
 
     def test_publish_updates_caps(self, tmp_path):
         path = tmp_path / "tui-pm-test.pid"
@@ -499,6 +538,22 @@ class TestSubmitCommand:
         assert res.reason == "stale_pidfile"
         assert not pidfile.exists()
         assert queue.read_text() == ""
+
+    def test_queue_write_failure(self, ipc_paths, start_fake_tui):
+        """An unwritable queue is reported, and the TUI is not signaled."""
+        pidfile, queue = ipc_paths
+        tui = start_fake_tui()
+        _write_json(pidfile, tui.pid, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+        queue.mkdir()  # open(queue, "a") -> IsADirectoryError
+
+        res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
+
+        assert res.ok is False
+        assert res.reason == "queue_error"
+        assert "command queue" in res.message
+        assert pidfile.exists()  # live TUI: keep its descriptor
+        time.sleep(0.2)
+        assert tui.poll() is None  # and never signaled
 
     def test_empty_pidfile_is_starting_not_stale(self, ipc_paths):
         """A peer mid-claim must keep its file: deleting it reopens the race.

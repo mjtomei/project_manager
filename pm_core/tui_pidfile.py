@@ -305,6 +305,22 @@ def _atomic_write(path: Path, text: str) -> None:
             pass
 
 
+def _write_all(fd: int, data: bytes) -> None:
+    """Write all of *data* to *fd*, tolerating short writes.
+
+    A regular-file write is normally all-or-nothing, but the kernel is
+    allowed to write fewer bytes than asked; treating that as success
+    would leave a truncated descriptor that every caller reads as
+    "unreadable pidfile" and unlinks.
+    """
+    view = memoryview(data)
+    while view:
+        written = os.write(fd, view)
+        if written <= 0:
+            raise OSError("short write to TUI pidfile")
+        view = view[written:]
+
+
 def unlink_if_unchanged(path: Path, expected_text: str | None) -> bool:
     """Remove *path* only if it still holds *expected_text*.
 
@@ -420,12 +436,26 @@ def claim_tui_pidfile(path: Path, session: str) -> TuiPidfileClaim:
             if problem is None:
                 raise TuiPidfileConflict(
                     f"another TUI (pid {existing.pid}) already owns "
-                    f"session {session!r}; refusing to start a second TUI"
+                    f"session {session!r} ({path}); refusing to start a "
+                    f"second TUI"
                 )
             unlink_if_unchanged(path, raw)
             continue
+        data = claim.descriptor_text().encode()
         try:
-            os.write(fd, claim.descriptor_text().encode())
+            try:
+                _write_all(fd, data)
+            except OSError:
+                # We created this file a moment ago and could not fill it
+                # in.  Leaving it behind would make every caller report
+                # "has not finished starting up" for as long as this TUI
+                # runs, so remove it — but only while it still holds our
+                # (empty or partial) bytes, never a successor's
+                # descriptor.
+                current = read_pidfile_text(path)
+                if current is not None and data.startswith(current.encode()):
+                    unlink_if_unchanged(path, current)
+                raise
         finally:
             os.close(fd)
         return claim
