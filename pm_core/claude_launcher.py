@@ -291,7 +291,7 @@ def _resolve_provider(provider: str | None = None, model: str | None = None):
     overrides the provider's).  The routing environment is built from that
     selection, as build_claude_shell_cmd's (providers.launch_env).
     """
-    from pm_core.providers import get_provider, launch_env
+    from pm_core.providers import get_provider, is_secret_env_var, launch_env
     provider_cfg = get_provider(provider, strict=bool(provider))
     model_flag = model or provider_cfg.model_flag()
     provider_env, unset = launch_env(provider_cfg, provider_cfg.env_vars(),
@@ -945,7 +945,7 @@ def build_claude_shell_cmd(
         _log.info("transcript: symlink %s -> %s", transcript_path, target)
 
     # Resolve provider configuration
-    from pm_core.providers import get_provider, launch_env
+    from pm_core.providers import get_provider, is_secret_env_var, launch_env
     provider_cfg = get_provider(provider, strict=bool(provider))
     # Explicit model param overrides provider's model_flag
     effective_model = model or provider_cfg.model_flag()
@@ -966,8 +966,20 @@ def build_claude_shell_cmd(
                                      effective_model)
 
     env_prefix = ""
+    # (inline text, logged text) for secret values that could not be moved
+    # to a file: the debug log gets the redacted form.
+    redact: list[tuple[str, str]] = []
     if provider_env:
-        parts = [f"{k}={shlex.quote(v)}" for k, v in provider_env.items()]
+        parts = []
+        for k, v in provider_env.items():
+            part = f"{k}={shlex.quote(v)}"
+            if v and is_secret_env_var(k):
+                ref = _secret_env_ref(v, cwd, write_dir)
+                if ref:
+                    part = f"{k}={ref}"
+                else:
+                    redact.append((part, f"{k}=<redacted>"))
+            parts.append(part)
         env_prefix = " ".join(parts) + " "
     if unset:
         env_prefix = "env " + "".join(f"-u {v} " for v in unset) + env_prefix
@@ -983,7 +995,7 @@ def build_claude_shell_cmd(
                                       session_type=session_type,
                                       session_tag=session_tag)
         cmd = env_prefix + shlex.quote(_FAKE_CLAUDE_BIN) + " " + " ".join(shlex.quote(a) for a in fake_args)
-        log_shell_command(cmd, prefix="claude")
+        log_shell_command(_redacted(cmd, redact), prefix="claude")
         return cmd
     else:
         # Host launches establish workspace trust here, at the one boundary
@@ -1067,7 +1079,53 @@ def build_claude_shell_cmd(
             escaped = prompt.replace("'", "'\\''")
             cmd += f" '{escaped}'"
 
-    log_shell_command(cmd, prefix="claude")
+    log_shell_command(_redacted(cmd, redact), prefix="claude")
+    return cmd
+
+
+def _secret_env_ref(value: str, cwd: str | None,
+                    write_dir: str | None) -> str | None:
+    """Shell text that expands to *value* without containing it.
+
+    The value goes to a 0600 file under the workdir's ``pm/prompts/`` (as
+    the prompt does) that the expansion reads and deletes as claude starts,
+    so the pane's start command and pm's debug log never carry it.  None
+    when there is no workdir to write it in (the caller then inlines it).
+    """
+    host_dir = Path(write_dir) if write_dir else (Path(cwd) if cwd else None)
+    if host_dir is None or not host_dir.is_dir():
+        return None
+    name = f"pm_env_{uuid.uuid4().hex}"
+    try:
+        subdir = host_dir / "pm" / "prompts"
+        subdir.mkdir(parents=True, exist_ok=True)
+        fd = os.open(subdir / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                     0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(value)
+    except OSError:
+        return None
+    ref = shlex.quote(str((Path(cwd) if cwd else host_dir)
+                          / "pm" / "prompts" / name))
+    return f'"$(cat {ref}; rm -f {ref})"'
+
+
+_SECRET_ENV_FILE_RE = re.compile(r"/pm/prompts/(pm_env_[0-9a-f]{32})\b")
+
+
+def discard_secret_env_files(cmd: str, write_dir: str) -> None:
+    """Delete the secret env files *cmd* reads (they sit under
+    ``<write_dir>/pm/prompts/``) when it will never run."""
+    for name in set(_SECRET_ENV_FILE_RE.findall(cmd)):
+        try:
+            (Path(write_dir) / "pm" / "prompts" / name).unlink()
+        except OSError:
+            pass
+
+
+def _redacted(cmd: str, redact: list[tuple[str, str]]) -> str:
+    for inline, logged in redact:
+        cmd = cmd.replace(inline, logged)
     return cmd
 
 

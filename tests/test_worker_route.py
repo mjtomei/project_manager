@@ -6,6 +6,7 @@ the QA loop's route gating / role isolation.
 """
 
 import json
+import re
 import os
 import shutil
 import socket
@@ -3509,3 +3510,154 @@ def test_reqa_hop_leaves_a_launch_another_tick_claimed(pm_home_dir, tmp_path):
     assert result.exit_code == 0, result.output
     assert "sign_off: re-qa" in result.output
     popen.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# QA S98 (pr-592e4bd): host route gate, secret env values, concurrent
+# provider edits, live probe mismatch wording.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("up", [True, False])
+def test_host_workflow_launch_is_route_gated(pm_home_dir, monkeypatch, up):
+    """Outside container mode a routed impl/review/sign-off launch is
+    refused like a container one: S98 saw `pm pr start` open a window and
+    claude retry against a router that was down."""
+    from pm_core import container as cm
+    _write_providers(pm_home_dir, remedy="Run acme-router up")
+    monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: False)
+    monkeypatch.setattr(route_bridge, "tcp_connectable", lambda *a, **k: up)
+    if up:
+        assert cm.wrap_claude_cmd("CMD", "/w", provider=ROUTE,
+                                  session_type="impl") == ("CMD", "")
+    else:
+        with pytest.raises(cm.ContainerError,
+                           match="router not reachable.*Remedy: Run acme-router up"):
+            cm.wrap_claude_cmd("CMD", "/w", provider=ROUTE, session_type="impl")
+    # Unrouted launches are untouched.
+    assert cm.wrap_claude_cmd("CMD", "/w") == ("CMD", "")
+
+
+@pytest.mark.parametrize("container", [False, True])
+def test_secret_env_values_stay_out_of_the_command_and_log(
+        pm_home_dir, tmp_path, monkeypatch, container):
+    """A provider env value that may be a credential is read from a 0600
+    file the command deletes, never written into the pane command or
+    pm's debug log (S98: x-team:secretvalue in both)."""
+    import subprocess
+    from pm_core.claude_launcher import build_claude_shell_cmd
+    _write_providers(pm_home_dir, env={
+        "ANTHROPIC_CUSTOM_HEADERS": "x-team:secretvalue", "EXTRA_FLAG": "1"})
+    monkeypatch.setattr("pm_core.claude_launcher.prepare_workspace",
+                        lambda cwd: None)
+    wd = tmp_path / "wd"
+    wd.mkdir()
+    logged = []
+    with patch("pm_core.claude_launcher.log_shell_command",
+               lambda cmd, **kw: logged.append(cmd)):
+        cmd = build_claude_shell_cmd(
+            provider=ROUTE, cwd=str(wd), session_type="impl",
+            container=container)
+    assert "secretvalue" not in cmd and "secretvalue" not in logged[0]
+    assert "EXTRA_FLAG=1" in cmd
+    files = list((wd / "pm" / "prompts").glob("pm_env_*"))
+    assert len(files) == 1 and files[0].stat().st_mode & 0o777 == 0o600
+    # The assignment expands to the value and removes the file.
+    m = re.search(r'ANTHROPIC_CUSTOM_HEADERS=("\$\(cat [^)]*\)")', cmd)
+    out = subprocess.run(["bash", "-c", f"printf %s {m.group(1)}"],
+                         capture_output=True, text=True).stdout
+    assert out == "x-team:secretvalue"
+    assert not files[0].exists()
+
+
+def test_secret_env_value_without_a_workdir_is_redacted_in_the_log(
+        pm_home_dir, monkeypatch):
+    from pm_core.claude_launcher import build_claude_shell_cmd
+    _write_providers(pm_home_dir, env={"MY_TOKEN": "tok-123"})
+    logged = []
+    with patch("pm_core.claude_launcher.log_shell_command",
+               lambda cmd, **kw: logged.append(cmd)):
+        cmd = build_claude_shell_cmd(provider=ROUTE, session_type="impl")
+    assert "MY_TOKEN=tok-123" in cmd
+    assert "tok-123" not in logged[0] and "MY_TOKEN=<redacted>" in logged[0]
+
+
+def test_concurrent_provider_edits_lose_nothing(pm_home_dir):
+    """Edits of different providers at the same moment all land (S98: one
+    in seven rounds lost an update with an unlocked in-place write)."""
+    import yaml
+    from concurrent.futures import ThreadPoolExecutor
+    from pm_core import providers
+    names = [f"p{i}" for i in range(6)]
+    providers.save_providers({"providers": {
+        n: {"type": "router", "api_base": "http://127.0.0.1:1", "model": "m"}
+        for n in names}})
+    real_save = providers.save_providers
+
+    def slow_save(data):  # widen the read-modify-write window
+        time.sleep(0.05)
+        real_save(data)
+
+    def edit(n):
+        with providers.providers_lock():
+            cfg = providers.load_providers_for_edit()
+            cfg["providers"][n]["effort"] = "low"
+            slow_save(cfg)
+
+    with ThreadPoolExecutor(len(names)) as ex:
+        list(ex.map(edit, names))
+    data = yaml.safe_load((pm_home_dir / "providers.yaml").read_text())
+    assert all(data["providers"][n].get("effort") == "low" for n in names)
+    assert not list(pm_home_dir.glob(".providers.*.tmp"))
+
+
+def test_save_providers_keeps_a_symlink_and_the_file_mode(pm_home_dir, short_dir):
+    from pm_core import providers
+    real = short_dir / "dotfiles-providers.yaml"
+    real.write_text("providers: {}\n")
+    real.chmod(0o600)
+    (pm_home_dir / "providers.yaml").symlink_to(real)
+    providers.save_providers({"providers": {"a": {"type": "local"}}})
+    assert (pm_home_dir / "providers.yaml").is_symlink()
+    assert "a:" in real.read_text()
+    assert real.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("out,why", [
+    ({"models": [MODEL], "transcript_models": ["other-model"]},
+     f"model mismatch: the transcript records other-model; expected {MODEL} "
+     "or a probe model (p1, p2)"),
+    ({"models": [MODEL, "stray"], "transcript_models": [MODEL]},
+     f"model mismatch: Claude requested stray; expected only {MODEL}"),
+    ({"models": [], "transcript_models": []},
+     f"no model requested; expected only {MODEL}"),
+], ids=["transcript", "requested", "none"])
+def test_live_probe_failure_names_the_models(out, why, capsys):
+    from pm_core.cli.provider import _report_probe
+    from pm_core.providers import ProviderConfig
+    p = ProviderConfig(name=ROUTE, type="router", model=MODEL,
+                       probe_models=["p1", "p2"])
+    with pytest.raises(SystemExit):
+        _report_probe({"ok": False, "exit": 0, "result": "ok", **out}, p)
+    assert f"Live: FAILED — {why}" in capsys.readouterr().err
+
+
+def test_refused_launch_deletes_its_secret_env_file(pm_home_dir, tmp_path,
+                                                    monkeypatch):
+    """S98: a host launch refused for a down route left the 0600 file with
+    the header value in the workdir's untracked pm/prompts/."""
+    from pm_core import container as cm
+    from pm_core.claude_launcher import build_claude_shell_cmd
+    _write_providers(pm_home_dir, env={"ANTHROPIC_CUSTOM_HEADERS": "x:s"})
+    monkeypatch.setattr("pm_core.claude_launcher.prepare_workspace",
+                        lambda cwd: None)
+    monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: False)
+    monkeypatch.setattr(route_bridge, "tcp_connectable", lambda *a, **k: False)
+    wd = tmp_path / "wd"
+    wd.mkdir()
+    with patch("pm_core.claude_launcher.log_shell_command"):
+        cmd = build_claude_shell_cmd(provider=ROUTE, cwd=str(wd),
+                                     session_type="impl")
+    assert len(list((wd / "pm" / "prompts").glob("pm_env_*"))) == 1
+    with pytest.raises(cm.ContainerError):
+        cm.wrap_claude_cmd(cmd, str(wd), provider=ROUTE, session_type="impl")
+    assert not list((wd / "pm" / "prompts").glob("pm_env_*"))

@@ -244,7 +244,8 @@ def provider_add(name: str, ptype: str, skip_check: bool, **opts):
       pm provider add my-router --type router --api-base http://127.0.0.1:<port> \\
           --model <model as the router names it> --effort high
     """
-    from pm_core.providers import _config_to_provider, check_provider, save_providers
+    from pm_core.providers import (_config_to_provider, check_provider,
+                                   providers_lock, save_providers)
 
     if not opts.get("api_base"):
         click.echo("Error: --api-base is required.", err=True)
@@ -271,8 +272,10 @@ def provider_add(name: str, ptype: str, skip_check: bool, **opts):
                 click.echo("Aborted.")
                 raise SystemExit(1)
 
-    config["providers"][name] = entry
-    save_providers(config)
+    with providers_lock():  # re-read: another edit may have saved meanwhile
+        config = _load_for_edit()
+        config["providers"][name] = entry
+        save_providers(config)
     click.echo(f"Added provider '{name}' ({ptype}: {entry['api_base']})")
 
 
@@ -296,23 +299,24 @@ def provider_edit(name: str, ptype: str | None, clear: tuple, **opts):
       pm provider edit my-router --classifier-model <model>
       pm provider edit my-router --clear launcher
     """
-    from pm_core.providers import save_providers
+    from pm_core.providers import providers_lock, save_providers
 
-    config = _load_for_edit()
-    entry = config["providers"].get(name)
-    if not isinstance(entry, dict):
-        click.echo(f"Error: provider {name!r} is not configured (add it with "
-                   f"'pm provider add {name} ...')", err=True)
-        raise SystemExit(1)
-    entry = dict(entry)
-    for key in clear:
-        entry.pop(key, None)
-    if ptype:
-        entry["type"] = ptype
-    _apply_fields(entry, opts)
-    _check_entry(name, entry)
-    config["providers"][name] = entry
-    save_providers(config)
+    with providers_lock():
+        config = _load_for_edit()
+        entry = config["providers"].get(name)
+        if not isinstance(entry, dict):
+            click.echo(f"Error: provider {name!r} is not configured (add it "
+                       f"with 'pm provider add {name} ...')", err=True)
+            raise SystemExit(1)
+        entry = dict(entry)
+        for key in clear:
+            entry.pop(key, None)
+        if ptype:
+            entry["type"] = ptype
+        _apply_fields(entry, opts)
+        _check_entry(name, entry)
+        config["providers"][name] = entry
+        save_providers(config)
     click.echo(f"Updated provider '{name}'")
     _echo_provider(name)
 
@@ -339,15 +343,10 @@ def _echo_provider(name: str, status: bool = False) -> None:
         click.echo(line)
 
 
-# Launch variables whose values ``pm provider show`` never prints (an
-# ``env`` entry may carry a key, e.g. ANTHROPIC_CUSTOM_HEADERS).
-_SECRET_VAR_PARTS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL",
-                     "AUTH", "HEADER")
-
-
 def provider_detail_lines(p, *, status: bool = False) -> list[str]:
     """Credential-free description of provider *p* (also used by the TUI)."""
-    from pm_core.providers import BUILTIN_CLAUDE, get_default_provider, launch_env
+    from pm_core.providers import (BUILTIN_CLAUDE, get_default_provider,
+                                   is_secret_env_var, launch_env)
     default = " (default)" if p.name == get_default_provider() else ""
     lines = [f"{p.name}{default}  type={p.type}"]
     if p.name == BUILTIN_CLAUDE and not p.api_base:
@@ -367,8 +366,8 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
     if assign:
         lines.append("  launch env:")
         for var, value in assign.items():
-            secret = any(t in var for t in _SECRET_VAR_PARTS)
-            lines.append(f"    {var}={'<redacted>' if secret and value else value}")
+            secret = is_secret_env_var(var) and value
+            lines.append(f"    {var}={'<redacted>' if secret else value}")
     if unset:
         lines.append(f"  launch unsets: {', '.join(unset)}")
     lines.extend(f"  warning: {line}" for line in _retired_key_lines(p.name))
@@ -384,23 +383,24 @@ def provider_detail_lines(p, *, status: bool = False) -> list[str]:
 @click.argument("name")
 def provider_remove(name: str):
     """Remove a configured provider."""
-    from pm_core.providers import save_providers
+    from pm_core.providers import providers_lock, save_providers
 
     if name == "claude":
         click.echo("Cannot remove the built-in 'claude' provider.", err=True)
         raise SystemExit(1)
 
-    config = _load_for_edit()
-    providers = config["providers"]
-    if name not in providers:
-        click.echo(f"Provider '{name}' not found.", err=True)
-        raise SystemExit(1)
+    with providers_lock():
+        config = _load_for_edit()
+        providers = config["providers"]
+        if name not in providers:
+            click.echo(f"Provider '{name}' not found.", err=True)
+            raise SystemExit(1)
 
-    del providers[name]
-    # Reset default if we removed the default provider
-    if config.get("default") == name:
-        config["default"] = "claude"
-    save_providers(config)
+        del providers[name]
+        # Reset default if we removed the default provider
+        if config.get("default") == name:
+            config["default"] = "claude"
+        save_providers(config)
     click.echo(f"Removed provider '{name}'")
 
 
@@ -529,6 +529,26 @@ def _test_router(provider, *, in_container: bool, live: bool) -> None:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+def _probe_mismatch(out: dict, provider) -> str:
+    """Why a probe that reported no error failed, naming the models."""
+    from pm_core.worker_route import model_on_route
+    requested = out.get("models") or []
+    if not requested:
+        return f"no model requested; expected only {provider.model}"
+    off = [m for m in requested if m != provider.model]
+    if off:
+        return (f"model mismatch: Claude requested {', '.join(off)}; "
+                f"expected only {provider.model}")
+    off = [m for m in out.get("transcript_models") or []
+           if not model_on_route(provider, m)]
+    if off:
+        return (f"model mismatch: the transcript records {', '.join(off)}; "
+                f"expected {provider.model} or a probe model "
+                f"({', '.join(provider.probe_models)})")
+    return (f"live prompt failed (exit={out.get('exit')} "
+            f"reply={out.get('result')!r})")
+
+
 def _report_probe(out: dict, provider) -> None:
     click.echo(f"  Live prompt: exit={out.get('exit')} "
                f"reply={out.get('result')!r}")
@@ -537,8 +557,7 @@ def _report_probe(out: dict, provider) -> None:
                f"models={', '.join(out.get('transcript_models') or []) or '(none)'}")
     click.echo(f"  Hook event: {out.get('hook_event') or '(none)'}")
     if not out.get("ok"):
-        why = out.get("error") or (f"model mismatch; expected only "
-                                   f"{provider.model}")
+        why = out.get("error") or _probe_mismatch(out, provider)
         click.echo(f"  Live: FAILED — {why}", err=True)
         raise SystemExit(1)
     click.echo("  Live: OK")

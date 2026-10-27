@@ -52,6 +52,7 @@ Provider resolution order:
 """
 
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -187,6 +188,17 @@ def _configured_router_urls() -> set[str]:
         except ValueError:
             pass
     return {u.rstrip("/") for u in urls}
+
+
+# Launch variables whose values pm never prints, logs or puts in a pane
+# command (an ``env`` entry may carry a key, e.g. ANTHROPIC_CUSTOM_HEADERS).
+SECRET_ENV_VAR_PARTS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL",
+                        "AUTH", "HEADER")
+
+
+def is_secret_env_var(name: str) -> bool:
+    """Whether launch variable *name* may hold a credential."""
+    return any(part in name.upper() for part in SECRET_ENV_VAR_PARTS)
 
 
 def launch_env(provider: "ProviderConfig", env: dict[str, str],
@@ -551,11 +563,53 @@ def load_providers_for_edit() -> dict[str, Any]:
     return data
 
 
+@contextmanager
+def providers_lock():
+    """Hold the providers.yaml edit lock (an flock on a sidecar
+    ``providers.yaml.lock``) across a read-modify-write, so concurrent
+    ``pm provider`` edits never lose one another's changes.  Readers need
+    no lock: :func:`save_providers` replaces the file atomically."""
+    import fcntl
+    path = _providers_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_name(PROVIDERS_FILE + ".lock"), "a") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
 def save_providers(data: dict[str, Any]) -> None:
-    """Write the providers config to ~/.pm/providers.yaml."""
+    """Write the providers config to ~/.pm/providers.yaml.
+
+    Written to a temp file and renamed over the old one, so a reader never
+    sees a truncated file; a symlinked providers.yaml keeps its link (the
+    target is replaced) and an existing file keeps its mode.  Callers that
+    read, change and save hold :func:`providers_lock`.
+    """
+    import stat
+    import tempfile
     import yaml
     path = _providers_path()
-    path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+    target = os.path.realpath(path)
+    text = yaml.dump(data, default_flow_style=False, sort_keys=False)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target),
+                               prefix=".providers.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        try:
+            os.chmod(tmp, stat.S_IMODE(os.stat(target).st_mode))
+        except FileNotFoundError:
+            pass
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     _log.info("Saved provider config to %s", path)
 
 
@@ -664,9 +718,10 @@ def set_default_provider(name: str) -> None:
 
     Raises :class:`ProvidersFileError` when the file cannot be changed.
     """
-    config = load_providers_for_edit()
-    config["default"] = name
-    save_providers(config)
+    with providers_lock():
+        config = load_providers_for_edit()
+        config["default"] = name
+        save_providers(config)
 
 
 # ---------------------------------------------------------------------------
