@@ -149,3 +149,10 @@ No **[UNRESOLVED]** items.
   can be derived AND the bind-mount isn't present". After the fail-closed
   change it also returns `None` when the mount exists but is not owned by
   *pr_id*. Reworded to state both conditions; no behaviour change.
+- (i2) Two remaining doc-truth gaps from the fail-closed change:
+  - The step-2 docstring said "only an exact match may use the mount", but
+    the code strips surrounding whitespace first (A2); reworded to say so.
+  - `pm qa captures-path` errors with "cannot resolve session tag (not
+    inside a git repo?)" when `captures_dir` returns `None`. Fail-closed adds
+    a second cause — the mount is absent or owned by a different PR and no
+    tag resolves — so the message now names both. No behaviour change.

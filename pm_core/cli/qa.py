@@ -213,7 +213,9 @@ def qa_captures_path(pr_id: str):
     path = captures_dir(pr_entry["id"])
     if path is None:
         click.echo(
-            "Error: cannot resolve session tag (not inside a git repo?)",
+            "Error: cannot resolve captures dir: no session tag (not "
+            "inside a git repo?) and no /pm-captures mount owned by this "
+            "PR (PM_CAPTURES_PR)",
             err=True,
         )
         raise click.exceptions.Exit(1)

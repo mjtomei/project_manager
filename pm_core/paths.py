@@ -102,12 +102,14 @@ def captures_dir(pr_id: str,
     2. Otherwise the container bind-mount at
        :data:`CONTAINER_CAPTURES_MOUNT` if it exists and belongs to
        *pr_id*: the container's :data:`CAPTURES_PR_ENV` names the mounted
-       PR, and only an exact match may use the mount. A missing, empty or
-       different marker fails closed — a throwaway pm project driven
-       inside the container (nested QA runs) must never write its own
-       PRs' captures into the enclosing PR's evidence, and losing a
-       marker-less worker's captures to its container-local home is
-       recoverable where overwriting host evidence is not.
+       PR, and only a match may use the mount (surrounding whitespace is
+       stripped first, so a trailing newline from a shell export still
+       matches). A missing, empty or different marker fails closed — a
+       throwaway pm project driven inside the container (nested QA runs)
+       must never write its own PRs' captures into the enclosing PR's
+       evidence, and losing a marker-less worker's captures to its
+       container-local home is recoverable where overwriting host
+       evidence is not.
     3. Otherwise create and return the host path.
 
     The ``~/.pm`` path takes precedence so on the host we always land
