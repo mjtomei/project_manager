@@ -34,6 +34,12 @@ POLICY_AUTO = "auto_merge"
 POLICY_WAIT = "wait_for_merge"
 WAIT_KEY = "wait_for_merge"
 POLICIES = (POLICY_STOP, POLICY_AUTO, POLICY_WAIT)
+
+# PR-level marker for the explicit "fresh autostart" action (z O / z A /
+# ``pm autostart fresh``): a later-stage PR was returned to implementation
+# after human feedback and waits for the current implementation turn before
+# one fresh review starts.  See ``pm_core.tui.autostart_fresh``.
+FRESH_KEY = "fresh_autostart"
 # The command-line flag selecting each policy (CLI + command bar).
 POLICY_FLAGS = {POLICY_STOP: "--stop-before-merge",
                 POLICY_AUTO: "--auto-merge",
@@ -170,6 +176,26 @@ def held_by_text(h: dict | None) -> str:
     if h.get("targets"):
         parts.append("wait-for-merge ← " + ", ".join(h["targets"]))
     return "; ".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Fresh-autostart marker (explicit return to implementation after feedback)
+# ---------------------------------------------------------------------------
+
+def fresh_marker(pr: dict | None) -> dict:
+    """The PR's ``fresh_autostart`` marker, or {} when absent/malformed."""
+    m = (pr or {}).get(FRESH_KEY)
+    return m if isinstance(m, dict) else {}
+
+
+def fresh_awaiting(pr: dict | None) -> bool:
+    """True while a fresh attempt waits for its implementation handoff."""
+    return bool(fresh_marker(pr).get("awaiting_handoff"))
+
+
+def fresh_requested_at(pr: dict | None) -> str | None:
+    """ISO timestamp of the current fresh attempt (None when no marker)."""
+    return fresh_marker(pr).get("requested_at") or None
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +355,23 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
     if status == "in_progress":
         if pr.get("spec_pending"):
             return phase, "waiting", "spec generation awaiting input"
+        # Explicit fresh autostart (z O / z A / `pm autostart fresh`): the PR was
+        # returned to implementation after feedback and waits for the
+        # current implementation turn before one fresh review starts.
+        if fresh_awaiting(pr):
+            idle = (inp.get("impl_idle") or {}).get(pr_id)
+            if not win_live("implementation"):
+                return (phase, "waiting",
+                        "fresh autostart: implementation window missing; "
+                        "relaunching")
+            if idle == "waiting":
+                return (phase, "waiting", "fresh autostart: permission "
+                        "prompt in implementation window")
+            if idle == "idle":
+                return (phase, "waiting", "fresh autostart: implementation "
+                        "turn complete; starting fresh review")
+            return (phase, "waiting", "fresh autostart: waiting for the "
+                    "current implementation turn after feedback")
         if pr_id in (inp.get("launching") or set()):
             return phase, "running", "launching implementation"
         if not win_live("implementation"):

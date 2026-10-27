@@ -89,6 +89,112 @@ def _read_transcript_text(transcript_path: str | Path | None) -> str:
         return ""
 
 
+def _resolve_transcript_file(transcript_path: str | Path | None) -> Path | None:
+    """The readable JSONL for *transcript_path*, tolerating broken symlinks.
+
+    Mirrors :func:`_read_transcript_text`'s slug-mismatch band-aid but
+    returns a path so callers can read only the tail of a large transcript.
+    """
+    if not transcript_path:
+        return None
+    p = Path(transcript_path)
+    try:
+        if p.exists():
+            return p
+    except OSError:
+        pass
+    sid: str | None = None
+    try:
+        if p.is_symlink():
+            sid = Path(os.readlink(p)).stem
+    except OSError:
+        sid = None
+    if not sid:
+        sid = p.stem
+    if not (len(sid) == 36 and sid.count("-") == 4):
+        return None
+    projects_dir = Path.home() / ".claude" / "projects"
+    try:
+        matches = list(projects_dir.glob(f"*/{sid}.jsonl"))
+    except OSError:
+        return None
+    if not matches:
+        return None
+    try:
+        return max(matches, key=lambda m: m.stat().st_mtime)
+    except OSError:
+        return matches[0]
+
+
+# The latest turn lives at the end of the transcript; reading a bounded tail
+# keeps the scheduler's per-tick check cheap on multi-megabyte sessions.
+_TURN_TAIL_BYTES = 262144
+
+
+def _read_transcript_tail(path: Path, max_bytes: int = _TURN_TAIL_BYTES) -> str:
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+                data = f.read()
+                nl = data.find(b"\n")
+                if nl >= 0:
+                    data = data[nl + 1:]
+            else:
+                data = f.read()
+        return data.decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+def latest_turn_state(transcript_path: str | Path | None) -> str:
+    """Whether the transcript's newest turn is finished.
+
+    Returns ``"complete"`` when the newest record is an assistant message
+    that is not waiting on a tool (no ``tool_use`` block and no
+    ``stop_reason == "tool_use"``), ``"in_progress"`` when a newer user
+    record (a submitted prompt or a ``tool_result``) means the agent still
+    owes a response, and ``"unknown"`` when the transcript is missing,
+    empty or unparseable.
+
+    Used by the explicit fresh-autostart handoff: a completed turn is the
+    signal that the user's implementation feedback turn is over.
+    """
+    path = _resolve_transcript_file(transcript_path)
+    if path is None:
+        return "unknown"
+    text = _read_transcript_tail(path)
+    if not text.strip():
+        return "unknown"
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(rec, dict):
+            continue
+        typ = rec.get("type")
+        if typ == "user":
+            return "in_progress"
+        if typ == "assistant":
+            msg = rec.get("message") or {}
+            content = msg.get("content") if isinstance(msg, dict) else None
+            if isinstance(content, list) and any(
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_use"
+                    for block in content):
+                return "in_progress"
+            if isinstance(msg, dict) and msg.get("stop_reason") == "tool_use":
+                return "in_progress"
+            return "complete"
+        # Other record kinds (system/meta) are not turn boundaries.
+    return "unknown"
+
+
 def extract_verdict_from_transcript(
     transcript_path: str | Path | None,
     verdicts: tuple[str, ...],

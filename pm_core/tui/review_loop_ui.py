@@ -922,6 +922,8 @@ def _poll_impl_idle(app) -> None:
     """
     from pm_core.cli.helpers import _pr_display_id
     from pm_core.tui import auto_start as _auto_start
+    from pm_core.autostart_state import fresh_awaiting
+    from pm_core.tui import autostart_fresh
 
     session = app._session_name
     if not session:
@@ -965,12 +967,40 @@ def _poll_impl_idle(app) -> None:
             except ValueError:
                 # Symlink not yet created — try again next tick.  It never
                 # will be for a pane an earlier TUI launched: still watch
-                # that one for the trust dialog.
-                _watch_untracked_trust(app, pane_id, pr.get("workdir"),
-                                       untracked_seen)
-                continue
+                # that one for the trust dialog.  A fresh-autostart attempt
+                # must survive a TUI restart though, so recover that pane's
+                # native transcript from its start command instead.
+                registered = False
+                if fresh_awaiting(pr):
+                    try:
+                        from pm_core.claude_launcher import pane_transcript_path
+                        native = pane_transcript_path(
+                            pane_id, pr.get("workdir"))
+                        if native:
+                            tracker.register(pr_id, pane_id, str(native))
+                            registered = True
+                    except ValueError:
+                        registered = False
+                    except Exception:
+                        _log.debug("impl_idle: native transcript lookup "
+                                   "failed for %s", pr_id, exc_info=True)
+                if not registered:
+                    _watch_untracked_trust(app, pane_id, pr.get("workdir"),
+                                           untracked_seen)
+                    continue
 
         tracker.poll(pr_id)
+
+        # Explicit fresh autostart (z O / z A / `pm autostart fresh`): the PR was
+        # returned to implementation after feedback and waits for the
+        # *current* turn to finish.  Use the dedicated handoff check rather
+        # than the generic one-shot became_idle(), which cannot distinguish a
+        # stale idle flag from the user's resumed turn (and must not be
+        # advanced by an old hook event).
+        if status == "in_progress" and fresh_awaiting(pr):
+            if autostart_fresh.handoff_ready(app, pr, tracker):
+                newly_idle.append((pr_id, pr))
+            continue
 
         # Detect newly-idle in_progress PRs for auto-review
         if status == "in_progress" and tracker.became_idle(pr_id):
@@ -1193,6 +1223,11 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
             return
         updated_pr = store.get_pr(app._data, pr_id)
         if updated_pr and updated_pr.get("status") == "in_review":
+            # A fresh-autostart attempt has now reached its handoff: mark it
+            # consumed so the status row stops saying "waiting" and a later
+            # in_progress bounce is not mistaken for this attempt.
+            from pm_core.tui import autostart_fresh
+            autostart_fresh.consume_handoff(app, pr_id)
             # Start a review loop (same as _auto_start_review_loops)
             loop = app._review_loops.get(pr_id)
             if not loop:

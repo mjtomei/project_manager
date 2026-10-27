@@ -173,8 +173,13 @@ class PaneIdleTracker:
                 state.last_hook_ts = ev_ts
                 etype = event.get("event_type")
                 if etype == "idle_prompt":
-                    if not state.idle:
-                        state.idle_notified = False
+                    # Re-arm on every *new* idle_prompt, not only on the
+                    # first one: a user can resume work in the same pane
+                    # (e.g. implementation feedback after a review) without
+                    # any hook firing at turn start, so the previous turn's
+                    # idle=True would otherwise swallow the new turn's
+                    # became_idle() notification.
+                    state.idle_notified = False
                     state.idle = True
                     state.waiting_for_input = False
                 elif etype == "permission_prompt":

@@ -946,7 +946,23 @@ def recorded_qa_verdict(pr_id: str, pr: dict | None = None) -> str | None:
         return None
     if pr is not None and _predates_open_return(rec.get("updated_at"), pr):
         return None
+    if pr is not None and _predates_fresh_request(rec.get("updated_at"), pr):
+        # A QA PASS from before the explicit fresh reset verified the old
+        # code; it must neither suppress the new QA run nor advance it.
+        return None
     return rec.get("verdict") or None
+
+
+def _predates_fresh_request(at: str | None, pr: dict) -> bool:
+    """Whether *at* predates the PR's current fresh-autostart attempt."""
+    since = autostart_state.fresh_requested_at(pr)
+    if not since:
+        return False
+    from pm_core.signoff import parse_ts
+    try:
+        return not at or parse_ts(at) < parse_ts(since)
+    except (TypeError, ValueError):
+        return False
 
 
 def _predates_open_return(at: str | None, pr: dict) -> bool:
@@ -1192,7 +1208,8 @@ def build_status(app) -> dict:
 # ---------------------------------------------------------------------------
 
 USAGE = ("autostart add PR_ID... [--stop-before-merge|--auto-merge|"
-         "--wait-for-merge] | remove PR_ID... | list | status | clear | all")
+         "--wait-for-merge] | fresh PR_ID... [same flags] | remove PR_ID... "
+         "| list | status | clear | all")
 
 # Flag → policy (the inverse of ``autostart_state.POLICY_FLAGS``).
 _FLAG_POLICIES = {flag: p for p, flag in autostart_state.POLICY_FLAGS.items()}
@@ -1226,12 +1243,15 @@ def write_reply(reply_id: str, payload: dict) -> Path | None:
 def handle_command(app, args: list[str]) -> dict:
     """Dispatch ``autostart <verb> …`` (tokens after ``autostart``).
 
-    Verbs: ``add``/``target`` IDS, ``remove``/``rm`` IDS, ``clear``/``off``,
-    ``all``, ``list``, ``status``; bare ``autostart`` turns auto-start off
-    when on and prints usage when off (it no longer enables the whole
-    backlog).  Flags: ``--stop-before-merge`` / ``--auto-merge`` /
-    ``--wait-for-merge`` (``add`` only; at most one distinct policy — a
-    contradiction rejects the whole command before any change),
+    Verbs: ``add``/``target`` IDS, ``fresh`` IDS, ``remove``/``rm`` IDS,
+    ``clear``/``off``, ``all``, ``list``, ``status``; bare ``autostart``
+    turns auto-start off when on and prints usage when off (it no longer
+    enables the whole backlog).  ``fresh`` is the explicit workflow reset
+    behind ``z O`` / ``z A``: a reviewed PR returns to implementation after feedback,
+    keeps its live session, and waits for its handoff before one fresh
+    review.  Flags: ``--stop-before-merge`` / ``--auto-merge`` /
+    ``--wait-for-merge`` (``add``/``fresh`` only; at most one distinct
+    policy — a contradiction rejects the whole command before any change),
     ``--reply ID`` (CLI: write the JSON reply file).  Returns the result.
     """
     reply_id = None
@@ -1258,10 +1278,10 @@ def handle_command(app, args: list[str]) -> dict:
                       + ", ".join(autostart_state.POLICY_FLAGS[p]
                                   for p in policies),
                       "changes": []}
-        elif policies and verb not in ("add", "target"):
+        elif policies and verb not in ("add", "target", "fresh"):
             result = {"ok": False, "error": "usage",
-                      "message": f"merge policy flags only apply to add; "
-                      f"usage: {USAGE}", "changes": []}
+                      "message": f"merge policy flags only apply to "
+                      f"add/fresh; usage: {USAGE}", "changes": []}
         else:
             result, open_popup = _dispatch(
                 app, verb, ids, policies[0] if policies else None, source,
@@ -1310,6 +1330,15 @@ def _dispatch(app, verb: str, ids: list[str], policy: str | None,
                       "changes": []}
         else:
             result = add_targets(app, ids, policy=policy, source=source)
+    elif verb == "fresh":
+        if not ids:
+            result = {"ok": False, "error": "usage",
+                      "message": f"no PR ids given; usage: {USAGE}",
+                      "changes": []}
+        else:
+            from pm_core.tui import autostart_fresh
+            result = autostart_fresh.fresh_start(
+                app, ids, policy=policy, source=source)
     elif verb in ("remove", "rm"):
         result = remove_targets(app, ids)
     elif verb in ("clear", "off"):
