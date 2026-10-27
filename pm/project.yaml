@@ -14493,6 +14493,25 @@ prs:
       pad template tabs to spaces, so split on whitespace.'
     created_at: '2026-10-27T23:42:36Z'
     last_edited: '2026-10-27T23:42:36Z'
+  - id: note-4225b7c
+    text: 'S53 refine (2026-10-27, HEAD a696fa52): all four stories are drivable on
+      real rootless Podman with the S37 fixture (/pm-captures/scenarios/37/qualification:
+      env.sh, t wrapper, podman-shim.sh with down/hang modes) and the S39 two-store
+      F2 recipe. Code facts: (1) a retained-container relaunch refusal names only
+      ''pm container retain --release <name>'' (stopped or incomplete retained container,
+      then pm pr start). The ''pm container restart <name>'' variant is printed only
+      for a retained container wedged by PID or memory exhaustion, which this sandbox
+      cannot produce (S46). Restart guidance is therefore checked via pm help plus
+      a real restart. (2) pm pr cleanup <A> --resources removes retained containers
+      (include_retained=True). The marker survives until the next full reap, and status
+      hides it via the inventory filter (85f35730). (3) With the runtime down or hung,
+      status prints no Retained: line at all: every domain-stamped marker, the store''s
+      own included, moves to Saved cleanup diagnostics. (4) Hung status should take
+      about 10 s with 1 info call (fdf4a1d5). (5) TUI startup and the 600 s periodic
+      pass remove stale B and legacy fixtures, so create them after the TUI mounts
+      and discard a trial if Last cleanup shows startup or periodic.'
+    created_at: '2026-10-27T23:24:48Z'
+    last_edited: '2026-10-27T23:24:48Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
