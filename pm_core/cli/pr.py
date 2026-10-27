@@ -1181,8 +1181,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
                                               allowed_push_branch=branch,
                                               session_tag=_stag, pr_id=pr_id,
-                                              provider=resolved_provider,
-                                              session_type="impl")
+                                              provider=resolved_provider)
             except ContainerError as e:
                 click.echo(str(e), err=True)
                 raise SystemExit(1)
@@ -1384,8 +1383,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                               allowed_push_branch=branch,
                                               session_tag=_review_stag,
                                               pr_id=pr_id,
-                                              provider=_resolution.provider,
-                                              session_type="review")
+                                              provider=_resolution.provider)
     except ContainerError as e:
         click.echo(str(e), err=True)
         raise SystemExit(1)
@@ -1697,7 +1695,7 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
             transcript=transcript)
     except ContainerError as e:
         # Like impl/review: the TUI's sign-off driver discards stdout and
-        # shows a failed launch's last stderr line, so a route remedy
+        # shows a failed launch's last stderr line, so a setup remedy
         # printed to stdout with rc 0 was never seen (it logged "launched").
         click.echo(str(e), err=True)
         raise SystemExit(1)
@@ -4164,9 +4162,9 @@ def pr_auto_sequence(pr_id: str):
 
 def _check_qa_launch(root: Path, pr_id: str) -> None:
     """Raise the provider setup error a detached QA driver would die on."""
-    from pm_core.qa_loop import check_ungated_qa_providers
+    from pm_core.qa_loop import check_qa_providers
     data = store.load(root)
-    check_ungated_qa_providers(store.get_pr(data, pr_id) or {}, data)
+    check_qa_providers(store.get_pr(data, pr_id) or {}, data)
 
 
 def _launch_qa_detached(root: Path, pr_id: str) -> None:
@@ -4177,7 +4175,7 @@ def _launch_qa_detached(root: Path, pr_id: str) -> None:
     auto-sequence ticks read the resulting ``qa_status.json``.
 
     The driver's output goes nowhere, so a provider setup error of a QA
-    session without a route gate is raised here (one ``Error:`` line from
+    session is raised here (one ``Error:`` line from
     this tick, no driver spawned) instead of ending the driver unseen and
     being relaunched on every tick.
     """

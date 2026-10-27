@@ -531,16 +531,15 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         if is_container_mode_enabled():
             remove_container(_make_container_name(f"signoff-{pr_id}",
                                                   session_tag=_stag))
-        # A ContainerError (e.g. the selected route is down, host or
-        # container) propagates: `pm pr signoff` reports it on stderr
+        # A ContainerError (e.g. a route bridge or container that cannot
+        # be set up) propagates: `pm pr signoff` reports it on stderr
         # with rc 1.
         claude_cmd, _cname = wrap_claude_cmd(
             claude_cmd, workdir, label=f"signoff-{pr_id}",
             allowed_push_branch=branch,
             session_tag=_stag,
             pr_id=pr_id,
-            provider=_resolution.provider,
-            session_type="signoff")
+            provider=_resolution.provider)
 
         # background -> don't steal focus (auto-sequence); explicit switch below
         # moves exactly the sessions that were watching the old window.

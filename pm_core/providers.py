@@ -36,7 +36,7 @@ Configuration is stored in ~/.pm/providers.yaml:
         # All optional:
         classifier_model: <model for the auto-mode classifier>
         launcher: <host executable used instead of claude>
-        remedy: <what to tell the user when the route is unavailable>
+        remedy: <hint shown when a check finds the router down>
         env: {VAR: value}       # extra env; VAR: null drops a default
         unset_env: [VAR, ...]   # replaces the router default list
         probe_models: [...]     # models 'pm provider test --live' accepts
@@ -237,7 +237,7 @@ class ProviderEntryError(ProviderNotFoundError):
     Hand-edited YAML: a null or string entry, a non-string field, an
     unknown type, a list alias_models.  A ProviderNotFoundError, so every
     launch surface reports it as it reports a missing provider (one
-    ``Error:`` line, a route gate's remedy, ``QA stopped: …``) and nothing
+    ``Error:`` line, ``QA stopped: …``) and nothing
     falls back to the built-in claude provider.
     """
 

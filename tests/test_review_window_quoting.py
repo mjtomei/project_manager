@@ -324,7 +324,6 @@ def test_review_container_uses_selected_route(fake_tmux, monkeypatch):
     assert build.call_args.kwargs["container"] is True
     assert build.call_args.kwargs["provider"] == "claude-work"
     assert wrap.call_args.kwargs["provider"] == "claude-work"
-    assert wrap.call_args.kwargs["session_type"] == "review"
     # The old container goes under the session-tagged name the wrapper
     # creates; the untagged name left a running one to be reused.
     remove.assert_called_once_with(

@@ -939,7 +939,9 @@ class TestLaunchFailureReason:
         state.planner_head = "c" * 40
         err = RuntimeError("scenario 1 clone of b is at aaaa but the "
                            "published planner head is cccc")
-        with patch("pm_core.qa_loop._resolve_qa_model"), \
+        from pm_core.model_config import ModelResolution
+        with patch("pm_core.qa_loop._resolve_qa_model",
+                   return_value=ModelResolution()), \
              patch("pm_core.qa_loop.create_scenario_workdir",
                    side_effect=err) as create:
             qa_loop._launch_scenarios_in_tmux(

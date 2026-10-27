@@ -612,7 +612,8 @@ def add_targets(app, ids: list[str], policy: str | None = None,
     # An explicit (re-)add asks for a scheduler pass now, which retries
     # every in-scope start, the targets' dependencies included: a start
     # failure already shown is said again, or a retry that fails the same
-    # way (route still down) would leave only the targets line.
+    # way (a provider still misconfigured) would leave only the targets
+    # line.
     _start_failures_shown(app).clear()
     released = sorted(held_before - set(merge_holds(app)))
     if released:
@@ -1233,7 +1234,7 @@ async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:
         if isinstance(quiet, dict):
             quiet.pop(pr_id, None)
         # The reason is the last stderr line, as for a failed sign-off
-        # launch (e.g. a routed impl whose route is down, with its
+        # launch (e.g. an impl whose provider is not set up, with its
         # remedy).  No periodic pass retries this start, so it is shown
         # like the other one-shot errors: forced and held.  Every later
         # scheduler pass starts the PR again (an in_progress PR whose spec

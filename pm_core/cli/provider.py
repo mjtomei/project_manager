@@ -137,8 +137,8 @@ _FIELD_OPTIONS = [
     click.option("--launcher", default=None,
                  help="router: host executable used instead of claude"),
     click.option("--remedy", default=None,
-                 help="router: what to tell the user when the route is "
-                      "unavailable"),
+                 help="router: hint shown when 'pm provider test' or "
+                      "'show' finds the router down"),
     click.option("--classifier-model", default=None,
                  help="router: model for Claude Code's auto-mode "
                       "permission classifier"),

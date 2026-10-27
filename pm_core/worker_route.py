@@ -16,13 +16,18 @@ This module owns everything route-specific outside the launch command:
 
   * :func:`describe` -- the ``route=... model=... via=...`` line shown in QA
     logs and status so the selection is visible without credentials;
-  * :func:`check_route` -- preflight used before every refiner / worker
-    launch, retry and queued launch.  QA never launches a session on a
-    route that fails it (no silent fallback to another account);
-  * the host side of the container bridge (pm_core.route_bridge): QA
+  * :func:`setup_problem` -- the provider settings a launch cannot work
+    without.  :func:`launch_parts` raises :class:`RouteSetupError` for them,
+    so the session fails like any other launch of a misconfigured provider
+    and never falls back to another provider or account;
+  * :func:`check_route` -- the diagnostic behind ``pm provider test`` /
+    ``show`` and the TUI provider list (is the router answering now?).
+    Launches do not consult it: a router that is down is an API failure
+    inside the session, handled like one on the default provider;
+  * the host side of the container bridge (pm_core.route_bridge):
     containers run under slirp4netns and cannot reach the host loopback,
     so the router is exposed to them only through a 0600 Unix socket in a
-    0700 directory that is bind-mounted into route-enabled QA containers.
+    0700 directory that is bind-mounted into route-enabled containers.
 """
 
 from __future__ import annotations
@@ -51,7 +56,8 @@ from pm_core.providers import (ProviderConfig, ProviderEntryError,
 
 _log = configure_logger("pm.worker_route")
 
-# Session types whose QA launches are gated on their route (refiner, worker).
+# QA session types that run in scenario containers (refiner, worker): a
+# scenario container mounts the bridge for whichever of them is routed.
 ROUTED_SESSION_TYPES = ("qa_concretize", "qa_scenario")
 # Session types that run inside a pm container in container mode, so a
 # route reaches them through the container bridge: impl, review and
@@ -63,15 +69,21 @@ CONTAINER_SESSION_TYPES = ("impl", "review", "signoff") + ROUTED_SESSION_TYPES
 # moves a session off the route names it first.
 _PR_OVERRIDE_REMEDY = ("change the PR's model setting if it selects this "
                        "route ('pm pr model show <pr>')")
-# How to move them off the route, quoted in remedies.
-_OFF_ROUTE_REMEDY = (f"move them off this route: {_PR_OVERRIDE_REMEDY}, "
-                     "or " + "; ".join(
-    f"'pm model set {st} <model> --project'" for st in ROUTED_SESSION_TYPES))
+# How to move sessions off the route, quoted in remedies.
+_OFF_ROUTE_REMEDY = (f"move its sessions off this route: {_PR_OVERRIDE_REMEDY}"
+                     ", or 'pm model set <session-type> <model> --project'")
 
 _BRIDGE_DIRNAME = "route-bridge"
 # Unix socket paths are limited to 107 bytes.
 _SOCK_PATH_MAX = 100
 _bridge_lock = threading.Lock()
+
+
+class RouteSetupError(ProviderEntryError):
+    """A router provider whose own settings cannot launch a session (no
+    model, an unusable api_base or launcher, a container bridge that cannot
+    be set up).  A ProviderNotFoundError, so every launch surface reports
+    it as it reports a missing provider instead of launching elsewhere."""
 
 
 @dataclass
@@ -143,6 +155,48 @@ def container_ensure_cmd(cfg: ProviderConfig) -> str:
             f"ensure {sock} {port} {shlex.quote(cfg.name)}")
 
 
+def setup_problem(cfg: ProviderConfig, *,
+                  container: bool) -> tuple[str, str] | None:
+    """``(problem, remedy)`` when router *cfg*'s settings cannot launch a
+    session (in a container when *container*), else None.
+
+    Settings only: whether the router answers right now is not checked
+    (see :func:`check_route`).
+    """
+    where = pm_home() / "providers.yaml"
+    if not cfg.model:
+        return ("no model configured",
+                f"set its 'model' in {where} "
+                f"('pm provider edit {cfg.name} --model <model>')")
+    try:
+        router_address(cfg)
+    except ValueError as exc:
+        return str(exc), f"fix its api_base in {where}"
+    if not container and cfg.launcher:
+        launcher = os.path.expanduser(cfg.launcher)
+        if not (os.path.isfile(launcher) and os.access(launcher, os.X_OK)):
+            return (f"launcher {cfg.launcher} is not an executable file",
+                    f"install it or remove 'launcher' from {where}")
+    return None
+
+
+def _setup_error(cfg: ProviderConfig, problem: str,
+                 remedy: str) -> RouteSetupError:
+    return RouteSetupError(f"provider '{cfg.name}': {problem}. "
+                           f"Remedy: {remedy}")
+
+
+def require_setup(resolution, *, container: bool = False) -> None:
+    """Raise :class:`~pm_core.providers.ProviderNotFoundError` (a
+    :class:`RouteSetupError` for a router's own settings) when
+    *resolution*'s provider cannot launch a session."""
+    cfg = router_for(resolution)
+    if cfg is not None:
+        bad = setup_problem(cfg, container=container)
+        if bad:
+            raise _setup_error(cfg, *bad)
+
+
 def launch_parts(cfg: ProviderConfig, *,
                  container: bool) -> tuple[str, dict[str, str], str]:
     """``(prefix, env, exe)`` for a claude launch on router *cfg*.
@@ -150,8 +204,12 @@ def launch_parts(cfg: ProviderConfig, *,
     In a container: the bridge-ensure step (``prefix`` ends in ``&&``),
     ``ANTHROPIC_BASE_URL`` pointed at the in-container forwarder and plain
     ``claude``.  On the host: no prefix, the router env and the route's
-    ``launcher`` when configured.
+    ``launcher`` when configured.  Raises :class:`RouteSetupError` when
+    :func:`setup_problem` finds one.
     """
+    bad = setup_problem(cfg, container=container)
+    if bad:
+        raise _setup_error(cfg, *bad)
     env = cfg.env_vars()
     if container:
         env["ANTHROPIC_BASE_URL"] = container_base_url(cfg)
@@ -277,23 +335,36 @@ def ensure_host_bridge(cfg: ProviderConfig) -> Path:
     return sock
 
 
-def container_mounts(resolution) -> dict[Path, str]:
-    """Extra rw mounts a QA container needs for *resolution*'s route.
+def container_mounts(resolution, *, strict: bool = False) -> dict[Path, str]:
+    """Extra rw mounts a container needs for *resolution*'s route.
 
-    Empty when it is not a router provider, or when the bridge directory
-    is unsafe to mount (the launch gate then reports the problem).  Starts
-    the host bridge so the bind source exists before the container is
-    created.
+    Empty when it is not a router provider.  Starts the host bridge so the
+    bind source exists before the container is created.  *strict* raises
+    (:class:`~pm_core.providers.ProviderNotFoundError` /
+    :class:`RouteSetupError`) when the provider or the bridge cannot be
+    set up.  Otherwise such a problem leaves the mount out, or mounts the
+    empty directory: the session's in-container bridge step then fails
+    and its launch fails with it.
     """
     try:
         cfg = router_for(resolution)
     except ProviderNotFoundError:
+        if strict:
+            raise
         return {}
     if cfg is None:
         return {}
     try:
         sock = ensure_host_bridge(cfg)
-    except (OSError, ValueError):
+        if strict and not route_bridge.unix_connectable(str(sock)):
+            raise OSError(f"host route bridge at {sock} is not accepting "
+                          "connections")
+    except (OSError, ValueError) as exc:
+        if strict:
+            raise _setup_error(
+                cfg, f"cannot set up the host route bridge: {exc}",
+                f"run 'pm provider test {cfg.name} --container' on the "
+                "host and fix what it reports") from exc
         _log.warning("could not start route bridge for %s", cfg.name,
                      exc_info=True)
         # Still mount the (empty) dir so a bridge started later reaches
@@ -335,44 +406,20 @@ def ensure_in_container(cfg: ProviderConfig, name: str) -> tuple[bool, str]:
     return r.returncode == 0, (r.stderr or "").strip()
 
 
-def _off_route_remedy(session_type: str | None) -> str:
-    """How to move the checked session off its route.
-
-    *session_type* None means the gated QA refiner/worker launches.  Other
-    roles (implementation, review, sign-off containers) are selected by
-    their own type or by the PR's ``session_models`` / ``model`` override,
-    which wins over it.
-    """
-    if session_type is None:
-        return _OFF_ROUTE_REMEDY
-    return (f"move it off this route: {_PR_OVERRIDE_REMEDY}, or "
-            f"'pm model set {session_type} <model> --project'")
-
-
-def _relaunch_hint(session_type: str | None, when: str) -> str:
-    """QA's route gates wait and launch by themselves; other roles are
-    refused once and must be launched again."""
-    if session_type is None:
-        return f"QA launches the session automatically once {when}"
-    return f"then launch the {session_type} session again"
-
-
 # ---------------------------------------------------------------------------
-# Preflight
+# Diagnostic (pm provider test / show, TUI provider list)
 # ---------------------------------------------------------------------------
 
 def check_route(resolution, *, container: bool = False,
-                container_name: str | None = None,
-                session_type: str | None = None) -> RouteStatus:
-    """Validate that a session can be launched on *resolution*'s route.
+                container_name: str | None = None) -> RouteStatus:
+    """Report whether *resolution*'s route works right now.
 
-    Always ok for unrouted resolutions.  For a router provider checks the
-    config, the router's TCP port, the launcher (host workers) and, for
+    Always ok for unrouted resolutions.  For a router provider checks its
+    settings (:func:`setup_problem`), the router's TCP port and, for
     containers, the host bridge, the container's socket mount and the
     in-container forwarder.  Credentials are not pm's: the router (or
     whatever signs it in) manages them.  *container_name* implies
-    *container*.  *session_type* names a role launched once (no QA wait),
-    so the remedies say how to relaunch it or move it off the route.
+    *container*.  A diagnostic only: launches neither run nor wait on it.
     """
     container = container or bool(container_name)
     try:
@@ -383,35 +430,23 @@ def check_route(resolution, *, container: bool = False,
             remedy=((f"fix {pm_home() / 'providers.yaml'} by hand"
                      if isinstance(exc, ProvidersFileUnreadableError) else
                      "configure the provider on this host")
-                    + f", or {_off_route_remedy(session_type)}"))
+                    + f", or {_OFF_ROUTE_REMEDY}"))
     if cfg is None:
         return RouteStatus(True)
 
     def fail(problem: str, remedy: str) -> RouteStatus:
         return RouteStatus(False, cfg.name, problem=problem, remedy=remedy)
 
-    where = pm_home() / "providers.yaml"
-    if not cfg.model:
-        return fail("no model configured",
-                    f"set its 'model' in {where} "
-                    f"('pm provider edit {cfg.name} --model <model>')")
-    try:
-        host, port = router_address(cfg)
-    except ValueError as exc:
-        return fail(str(exc), f"fix its api_base in {where}")
-
-    if not container and cfg.launcher:
-        launcher = os.path.expanduser(cfg.launcher)
-        if not (os.path.isfile(launcher) and os.access(launcher, os.X_OK)):
-            return fail(f"launcher {cfg.launcher} is not an executable file",
-                        f"install it or remove 'launcher' from {where}")
+    bad = setup_problem(cfg, container=container)
+    if bad:
+        return fail(*bad)
+    host, port = router_address(cfg)
 
     if not route_bridge.tcp_connectable(host, port):
         return fail(f"router not reachable at {host}:{port}",
                     cfg.remedy or
                     (f"start the router listening on {host}:{port} (or fix "
-                     f"the provider's api_base); "
-                     f"{_relaunch_hint(session_type, 'it answers')}"))
+                     "the provider's api_base)"))
 
     if container:
         try:
@@ -430,8 +465,8 @@ def check_route(resolution, *, container: bool = False,
             if mounted is False:
                 return fail(f"container {container_name} was created without "
                             "the route socket mount",
-                            "restart QA for this PR so its containers are "
-                            "recreated with the route mount")
+                            "remove the container so its next launch "
+                            "creates it with the mount")
             if mounted:
                 ok, err = ensure_in_container(cfg, container_name)
                 if not ok:

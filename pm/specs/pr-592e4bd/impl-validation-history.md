@@ -5,6 +5,8 @@ to keep the generated review / sign-off prompts under Linux
 MAX_ARG_STRLEN (pr-ace66e5; the a183 native review launch failed at
 131310 bytes). Nothing below was edited. `impl.md` §5 keeps an index of
 every item (behaviour rule, commit, where to look) and the current item 27.
+(2026-10-27: the route waits, deferrals and stall nudges described here
+were removed by impl.md R6; those entries are historical.)
 
 ## 5. Validation status
 - Unit/regression: `tests/test_worker_route.py` (provider env, launcher

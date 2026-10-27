@@ -1,8 +1,9 @@
 """Tests for QA worker routing through a host router provider.
 
 Covers pm_core.worker_route, pm_core.route_bridge, the router provider
-type, the launcher boundary (claude_launcher.build_claude_shell_cmd) and
-the QA loop's route gating / role isolation.
+type, the launcher boundary (claude_launcher.build_claude_shell_cmd), the
+QA loop's role isolation, and that a router that is down gets no special
+waiting or recovery (it fails like the default provider does).
 """
 
 import json
@@ -211,11 +212,41 @@ class TestBuildShellCmd:
         assert "route_bridge" not in cmd
         assert "credentials" not in cmd
 
-    def test_host_launcher_replaces_claude(self, pm_home_dir):
-        _write_providers(pm_home_dir, launcher="/opt/bin/claude-mixed")
+    def test_host_launcher_replaces_claude(self, pm_home_dir, short_dir):
+        launcher = short_dir / "my-launcher"
+        launcher.write_text("#!/bin/sh\n")
+        launcher.chmod(0o755)
+        _write_providers(pm_home_dir, launcher=str(launcher))
         cmd = self._build(provider=ROUTE)
-        assert " /opt/bin/claude-mixed --model" in cmd
+        assert f" {launcher} --model" in cmd
         assert " claude --model" not in cmd
+
+    @pytest.mark.parametrize("entry,problem", [
+        ({"model": ""}, "no model configured"),
+        ({"api_base": "not a url"}, "has no host"),
+        ({"launcher": "/nonexistent/launcher"}, "is not an executable file"),
+    ])
+    def test_unusable_router_settings_fail_the_launch(self, pm_home_dir,
+                                                      entry, problem):
+        """A router whose own settings cannot launch a session fails the
+        build like a missing provider: no command, no fallback."""
+        _write_providers(pm_home_dir, **entry)
+        with pytest.raises(worker_route.RouteSetupError, match=problem) as exc:
+            self._build(provider=ROUTE)
+        assert isinstance(exc.value, ProviderNotFoundError)
+        assert f"provider '{ROUTE}'" in str(exc.value)
+        assert "Remedy:" in str(exc.value)
+
+    def test_down_router_still_builds_the_launch(self, pm_home_dir):
+        """Whether the router answers is not a launch question: the
+        command is built and Claude meets the outage as API errors."""
+        s, port = _listener()
+        s.close()
+        _write_providers(pm_home_dir, api_base=f"http://127.0.0.1:{port}")
+        with patch("pm_core.route_bridge.tcp_connectable",
+                   side_effect=AssertionError("router probed")):
+            cmd = self._build(provider=ROUTE)
+        assert f"ANTHROPIC_BASE_URL=http://127.0.0.1:{port} " in cmd
 
     def test_container_cmd_ensures_bridge_first(self, pm_home_dir):
         _write_providers(pm_home_dir, api_base="http://localhost:8790",
@@ -1052,7 +1083,8 @@ class TestCheckRoute:
     def test_missing_provider(self, pm_home_dir):
         st = worker_route.check_route(ModelResolution(provider="ghost"))
         assert not st.ok and "not configured" in st.problem
-        assert "pm model set qa_scenario" in st.remedy
+        assert "'pm model set <session-type> <model> --project'" in st.remedy
+        assert "change the PR's model setting" in st.remedy
 
     def test_router_down(self, pm_home_dir):
         s, port = _listener()
@@ -1117,7 +1149,7 @@ class TestCheckRoute:
             for p in pm_home_dir.glob("route-bridge/*/router.sock"):
                 p.unlink()
         assert not st.ok and "without the route socket mount" in st.problem
-        assert "restart QA" in st.remedy
+        assert "remove the container" in st.remedy
 
     def test_describe_is_credential_free(self, pm_home_dir):
         _write_providers(pm_home_dir)
@@ -1331,14 +1363,8 @@ class TestBridge:
 
 
 # ---------------------------------------------------------------------------
-# QA loop gating
+# QA loop: no route gating
 # ---------------------------------------------------------------------------
-
-def _status(ok):
-    return worker_route.RouteStatus(
-        ok, ROUTE, *(() if ok else ("router not reachable at 127.0.0.1:8790",
-                                    "start the router")))
-
 
 def _api_error_record(uid):
     """A transcript record as Claude Code writes it when a request still
@@ -1349,60 +1375,42 @@ def _api_error_record(uid):
                          "text": "API Error: Connection dropped (ECONNRESET)"}]}}
 
 
-class TestAwaitRoute:
-    def test_waits_then_launches(self):
+class TestPollLoopNoRouteGating:
+    def _poll(self, state, tmp_path, data=None, **kw):
         from pm_core import qa_loop
-        state = qa_loop.QALoopState(pr_id="pr-1")
-        seen = []
-        state._notify_cb = lambda: seen.append(state.latest_output)
-        results = iter([_status(False), _status(False), _status(True)])
-        with patch("pm_core.qa_loop._ROUTE_RECHECK_INTERVAL", 0), \
-             patch("pm_core.qa_loop.time.sleep"):
-            assert qa_loop._await_route(state, lambda: next(results), "S1 worker")
-        assert "router not reachable" in seen[0] and "start the router" in seen[0]
-        assert len(seen) == 2  # repeated failure is not re-announced
-        assert "available — launching" in seen[-1]
-        assert not state.scenario_verdicts
-
-    def test_stop_while_waiting(self):
-        from pm_core import qa_loop
-        state = qa_loop.QALoopState(pr_id="pr-1")
-        state.stop_requested = True
-        assert not qa_loop._await_route(state, lambda: _status(False), "S1")
-
-    def test_fake_claude_skips_gate(self, pm_home_dir):
-        from pm_core import qa_loop
-        with patch("pm_core.paths.fake_claude_config_for_type",
-                   return_value={"verdicts": {"PASS": 1}}):
-            check = qa_loop._route_checker({}, PROJECT, "qa_scenario",
-                                           session_tag="t")
-            assert check().ok  # provider is not even configured
-
-
-class TestPollLoopRouteGating:
-    def _poll(self, state, tmp_path, statuses, **kw):
-        from pm_core import qa_loop
-        it = iter(statuses)
-        last = [statuses[-1]]
-
-        def checker(*a, **k):
-            def check():
-                try:
-                    last[0] = next(it)
-                except StopIteration:
-                    pass
-                return last[0]
-            return check
-        with patch("pm_core.qa_loop._route_checker", side_effect=checker), \
-             patch("pm_core.qa_loop._ROUTE_RECHECK_INTERVAL", 0), \
-             patch("pm_core.qa_loop._is_verification_enabled", return_value=False), \
+        with patch("pm_core.qa_loop._is_verification_enabled", return_value=False), \
              patch("pm_core.qa_loop._write_resume_file"):
-            qa_loop._poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/w",
+            qa_loop._poll_tmux_verdicts(state, data or {}, {}, "sess", "/tmp/w",
                                         tmp_path / "status.json",
                                         lambda *a: None, **kw)
 
-    def test_dead_worker_relaunch_waits_without_spending_retries(self, tmp_path):
+    def test_stopped_run_does_not_relaunch_dead_worker(self, tmp_path):
+        """``z t`` stops the run, then kills its windows and removes its
+        containers: the stopped loop does not relaunch the dead worker."""
         from pm_core import qa_loop
+        sc = qa_loop.QAScenario(index=1, title="t", focus="f")
+        sc.window_name, sc.session_id = "w1", "sid-1"
+        state = qa_loop.QALoopState(pr_id="pr-1")
+        state.scenarios = [sc]
+
+        def stop_on_sleep(_):
+            state.stop_requested = True
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window") as relaunch, \
+             patch("pm_core.qa_loop.time.sleep", side_effect=stop_on_sleep):
+            self._poll(state, tmp_path)
+        relaunch.assert_not_called()
+        assert 1 not in state.scenario_verdicts
+
+    def test_dead_worker_on_a_down_route_is_relaunched_at_once(
+            self, tmp_path, pm_home_dir):
+        """User decision (S101): a router that is down gets no special
+        handling.  A routed worker that died is relaunched with the usual
+        retry and backoff, without checking the router first."""
+        from pm_core import qa_loop
+        s, port = _listener()
+        s.close()  # nothing answers on the router's port
+        _write_providers(pm_home_dir, api_base=f"http://127.0.0.1:{port}")
         sc = qa_loop.QAScenario(index=1, title="t", focus="f")
         sc.window_name, sc.session_id = "w1", "sid-1"
         state = qa_loop.QALoopState(pr_id="pr-1")
@@ -1410,16 +1418,13 @@ class TestPollLoopRouteGating:
         relaunches = []
 
         def relaunch(scenario, *a):
-            relaunches.append(time.time())
+            relaunches.append(scenario.index)
             scenario.pane_id = "%9"
             return True
-        panes = {"n": 0}
-
-        def get_pane(session, win):
-            panes["n"] += 1
-            return None if panes["n"] <= 4 else "%9"
+        panes = iter([None] + ["%9"] * 50)
         ev = {"event_type": "idle_prompt", "timestamp": time.time() + 1e4}
-        with patch("pm_core.qa_loop._get_scenario_pane", side_effect=get_pane), \
+        with patch("pm_core.qa_loop._get_scenario_pane",
+                   side_effect=lambda *a: next(panes)), \
              patch("pm_core.qa_loop._relaunch_scenario_window",
                    side_effect=relaunch), \
              patch("pm_core.qa_loop.time.sleep"), \
@@ -1429,168 +1434,14 @@ class TestPollLoopRouteGating:
                    return_value="PASS"), \
              patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
                    return_value=""), \
-             patch("pm_core.tmux.pane_exists", return_value=True):
-            # down for 3 checks: three dead-pane polls defer, then relaunch
-            self._poll(state, tmp_path,
-                       [_status(False)] * 3 + [_status(True)])
-        assert len(relaunches) == 1
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.worker_route.check_route",
+                   side_effect=AssertionError("route checked")), \
+             patch("pm_core.route_bridge.tcp_connectable",
+                   side_effect=AssertionError("router probed")):
+            self._poll(state, tmp_path, data=PROJECT)
+        assert relaunches == [1]
         assert state.scenario_verdicts[1] == "PASS"
-
-    def test_stopped_run_does_not_gate_or_defer_dead_worker(self, tmp_path):
-        """``z t`` stops the run, then kills its windows and removes its
-        containers: the stopped loop must not run the route check (an exec
-        into the dying container) or announce a relaunch deferral."""
-        from pm_core import qa_loop
-        sc = qa_loop.QAScenario(index=1, title="t", focus="f")
-        sc.window_name, sc.session_id = "w1", "sid-1"
-        state = qa_loop.QALoopState(pr_id="pr-1")
-        state.scenarios = [sc]
-        seen = []
-        state._notify_cb = lambda: seen.append(state.latest_output)
-
-        def stop_on_sleep(_):
-            state.stop_requested = True
-        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
-             patch("pm_core.qa_loop._relaunch_scenario_window") as relaunch, \
-             patch("pm_core.qa_loop.time.sleep", side_effect=stop_on_sleep):
-            self._poll(state, tmp_path, [_status(False)])
-        relaunch.assert_not_called()
-        assert not [o for o in seen if "deferred" in (o or "")]
-        assert 1 not in state.scenario_verdicts
-
-    def test_stop_during_route_wait_leaves_scenario_unverdicted(self, tmp_path):
-        """A scenario stopped in its initial route wait has no window; the
-        launch-failed INPUT_REQUIRED marking must not give it a verdict."""
-        from pm_core import qa_loop
-        waited = qa_loop.QAScenario(index=1, title="w", focus="f")
-        failed = qa_loop.QAScenario(index=2, title="x", focus="f")
-        state = qa_loop.QALoopState(pr_id="pr-1")
-        state.scenarios = [waited, failed]
-        state.stop_requested = True
-        qa_loop._note_route_wait_stopped(state, waited)
-        with patch("pm_core.qa_loop.time.sleep"):
-            self._poll(state, tmp_path, [_status(False)])
-        assert 1 not in state.scenario_verdicts
-        assert state.scenario_verdict_reasons[1] == (
-            "stopped while waiting for the route")
-        # a genuine launch failure is still marked
-        assert state.scenario_verdicts[2] == "INPUT_REQUIRED"
-
-    def test_queued_scenario_stays_queued_while_route_down(self, tmp_path):
-        from pm_core import qa_loop
-        queued = qa_loop.QAScenario(index=2, title="q", focus="f")
-        state = qa_loop.QALoopState(pr_id="pr-1")
-        state.scenarios = [queued]
-        ticks = {"n": 0}
-
-        def sleep(_):
-            ticks["n"] += 1
-            if ticks["n"] > 3:
-                state.stop_requested = True
-        with patch("pm_core.qa_loop.time.sleep", side_effect=sleep), \
-             patch("pm_core.qa_loop._launch_scenarios_in_tmux") as launch:
-            self._poll(state, tmp_path, [_status(False)],
-                       queued_scenarios=[queued], concurrency_cap=1)
-        launch.assert_not_called()
-        assert 2 not in state.scenario_verdicts
-        assert "deferred" in state.latest_output
-        assert "start the router" in state.latest_output
-
-    def test_queued_scenario_launches_once_route_recovers(self, tmp_path):
-        """No other scenario is running, so no verdict event refills the
-        slot: the deferred queue is retried on every poll tick."""
-        from pm_core import qa_loop
-        queued = qa_loop.QAScenario(index=2, title="q", focus="f")
-        state = qa_loop.QALoopState(pr_id="pr-1")
-        state.scenarios = [queued]
-        launched = []
-
-        def launch(st, *a, **k):
-            sc = st.scenarios[0]
-            launched.append(sc.index)
-            state.stop_requested = True  # done once it is launched
-            sc.window_name = "w2"
-        ticks = {"n": 0}
-
-        def sleep(_):
-            ticks["n"] += 1
-            if ticks["n"] > 50:  # fail rather than hang
-                state.stop_requested = True
-        with patch("pm_core.qa_loop.time.sleep", side_effect=sleep), \
-             patch("pm_core.qa_loop._launch_scenarios_in_tmux",
-                   side_effect=launch):
-            self._poll(state, tmp_path,
-                       [_status(False)] * 4 + [_status(True)],
-                       queued_scenarios=[queued], concurrency_cap=1)
-        assert launched == [2]
-        assert 2 not in state.scenario_verdicts
-
-    def test_route_failure_after_queue_check_requeues_without_blocking(
-            self, tmp_path):
-        """The route dies between the queue check and the launch gate: the
-        launch must not wait inside the verdict-collection loop.  The
-        scenario goes back to the queue unchanged while the running
-        scenario's verdict is still collected, and launches once the route
-        is back."""
-        from pm_core import qa_loop
-        running = qa_loop.QAScenario(index=1, title="r", focus="f")
-        running.window_name, running.session_id = "w1", "sid-1"
-        running.pane_id = "%5"
-        queued = qa_loop.QAScenario(index=2, title="q", focus="f",
-                                    instruction_path="instructions/q.md")
-        state = qa_loop.QALoopState(pr_id="pr-1")
-        state.scenarios = [running, queued]
-        route = {"up": True}
-
-        def checker(*a, **k):
-            return lambda: _status(route["up"])
-        launches = []
-
-        def launch(st, *a, _route_deferred=None, **k):
-            sc = st.scenarios[0]
-            launches.append(sc.instruction_path)
-            sc.instruction_path = None  # preparation rewrites the scenario
-            if len(launches) == 1:
-                route["up"] = False  # router dies right after the check
-                with patch("pm_core.qa_loop._await_route",
-                           side_effect=AssertionError("blocking wait")):
-                    assert not qa_loop._route_gate(
-                        st, {}, {}, sc, "qa_concretize",
-                        deferred=_route_deferred)
-                return
-            sc.window_name, sc.session_id, sc.pane_id = "w2", "sid-2", "%6"
-
-        ticks = {"n": 0}
-
-        def sleep(_):
-            ticks["n"] += 1
-            if ticks["n"] == 3:
-                route["up"] = True
-            if ticks["n"] > 50:  # fail rather than hang
-                state.stop_requested = True
-        ev = {"event_type": "idle_prompt", "timestamp": time.time() + 1e4}
-        with patch("pm_core.qa_loop._route_checker", side_effect=checker), \
-             patch("pm_core.qa_loop._ROUTE_RECHECK_INTERVAL", 0), \
-             patch("pm_core.qa_loop._is_verification_enabled",
-                   return_value=False), \
-             patch("pm_core.qa_loop._write_resume_file"), \
-             patch("pm_core.qa_loop._launch_scenarios_in_tmux",
-                   side_effect=launch), \
-             patch("pm_core.qa_loop.time.sleep", side_effect=sleep), \
-             patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
-             patch("pm_core.hook_events.read_event", return_value=ev), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   return_value="PASS"), \
-             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
-                   return_value=""), \
-             patch("pm_core.tmux.pane_exists", return_value=True):
-            qa_loop._poll_tmux_verdicts(
-                state, {}, {}, "sess", "/tmp/w", tmp_path / "status.json",
-                lambda *a: None, queued_scenarios=[queued],
-                concurrency_cap=2)
-        # Second launch saw the restored scenario, not the mutated one.
-        assert launches == ["instructions/q.md", "instructions/q.md"]
-        assert state.scenario_verdicts == {1: "PASS", 2: "PASS"}
 
     def test_queued_launch_status_keeps_remaining_queue(self, tmp_path):
         """Dequeuing one scenario passes the rest of the queue to the
@@ -1615,7 +1466,7 @@ class TestPollLoopRouteGating:
         with patch("pm_core.qa_loop.time.sleep", side_effect=sleep), \
              patch("pm_core.qa_loop._launch_scenarios_in_tmux",
                    side_effect=launch):
-            self._poll(state, tmp_path, [_status(True)],
+            self._poll(state, tmp_path,
                        queued_scenarios=[q2, q3], concurrency_cap=1)
         assert seen == [(2, {3})]
 
@@ -1633,9 +1484,7 @@ class TestPollLoopRouteGating:
             status = json.loads((tmp_path / "qa_status.json").read_text())
             seen.update({s["index"]: s["verdict"] for s in status["scenarios"]})
             return None, "stop here"
-        with patch("pm_core.qa_loop._route_checker",
-                   return_value=lambda: _status(True)), \
-             patch("pm_core.qa_loop.create_scenario_workdir",
+        with patch("pm_core.qa_loop.create_scenario_workdir",
                    return_value=(tmp_path / "repo", tmp_path / "scratch")), \
              patch("pm_core.qa_loop._build_concretize_cmd",
                    return_value="refiner"), \
@@ -1646,95 +1495,6 @@ class TestPollLoopRouteGating:
                 state, {}, {"id": "pr-1"}, "sess", None, str(tmp_path),
                 _status_scenarios=scs, _status_queued={2, 3})
         assert seen == {1: "", 2: "queued", 3: "queued"}
-
-    def test_queued_launch_gate_does_not_create_windows(self, tmp_path):
-        """_launch_scenarios_in_tmux with a deferral dict never opens the
-        refiner window when the route is down."""
-        from pm_core import qa_loop
-        sc = qa_loop.QAScenario(index=4, title="t", focus="f")
-        state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
-        state.scenarios = [sc]
-        deferred = {}
-        with patch("pm_core.qa_loop._route_checker",
-                   return_value=lambda: _status(False)), \
-             patch("pm_core.qa_loop.create_scenario_workdir",
-                   return_value=(tmp_path / "repo", tmp_path / "scratch")), \
-             patch("pm_core.qa_loop._await_route",
-                   side_effect=AssertionError("blocking wait")), \
-             patch("pm_core.tmux.new_window_get_pane") as new_window:
-            qa_loop._launch_scenarios_in_tmux(
-                state, {}, {"id": "pr-1"}, "sess", None, str(tmp_path),
-                _route_deferred=deferred)
-        new_window.assert_not_called()
-        assert list(deferred) == [4] and not deferred[4].ok
-        assert not sc.window_name and 4 not in state.scenario_verdicts
-
-    @pytest.mark.parametrize("failing", ["qa_concretize", "qa_scenario"])
-    def test_deferred_container_launch_removes_its_container(
-            self, tmp_path, failing):
-        """A queued container launch deferred at either gate removes the
-        container it created: the relaunch re-clones the workdir, and a
-        container reused by name would keep its bind mount on the deleted
-        clone."""
-        from pm_core import qa_loop
-        sc = qa_loop.QAScenario(index=4, title="t", focus="f")
-        state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
-        state.scenarios = [sc]
-        deferred = {}
-
-        def checker(pr, data, session_type, **k):
-            return lambda: _status(session_type != failing)
-        with patch("pm_core.qa_loop._route_checker", side_effect=checker), \
-             patch("pm_core.qa_loop._route_mounts", return_value={}), \
-             patch("pm_core.container.load_container_config"), \
-             patch("pm_core.container.create_qa_container"), \
-             patch("pm_core.container.remove_container") as remove, \
-             patch("pm_core.qa_loop.create_scenario_workdir",
-                   return_value=(tmp_path / "repo", tmp_path / "scratch")), \
-             patch("pm_core.qa_loop._build_concretize_cmd",
-                   return_value="refiner"), \
-             patch("pm_core.tmux.new_window_get_pane", return_value="%9"), \
-             patch("pm_core.tmux.pane_exists", return_value=True), \
-             patch("pm_core.tmux.kill_window"), \
-             patch("pm_core.qa_loop._concretize_scenario",
-                   return_value=(None, None)), \
-             patch("pm_core.qa_loop._await_route",
-                   side_effect=AssertionError("blocking wait")):
-            qa_loop._launch_scenarios_in_containers(
-                state, {}, {"id": "pr-1"}, "sess", None, str(tmp_path),
-                _route_deferred=deferred)
-        assert list(deferred) == [4]
-        remove.assert_called_once_with(sc.container_name)
-
-    def test_stopped_refiner_route_wait_removes_its_container(self, tmp_path):
-        """QA stopped during an initial refiner launch's route wait (S101):
-        the container created for the gate's in-container check never ran
-        anything and the scenario has no window, so it is removed."""
-        from pm_core import qa_loop
-        sc = qa_loop.QAScenario(index=2, title="t", focus="f")
-        state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
-        state.scenarios = [sc]
-        created = []
-        with patch("pm_core.qa_loop._route_checker",
-                   return_value=lambda: _status(False)), \
-             patch("pm_core.qa_loop._route_mounts", return_value={}), \
-             patch("pm_core.container.load_container_config"), \
-             patch("pm_core.container.create_qa_container",
-                   side_effect=lambda **k: created.append(k["name"])), \
-             patch("pm_core.container.remove_container") as remove, \
-             patch("pm_core.qa_loop.create_scenario_workdir",
-                   return_value=(tmp_path / "repo", tmp_path / "scratch")), \
-             patch("pm_core.qa_loop._await_route", return_value=False), \
-             patch("pm_core.tmux.new_window_get_pane") as new_window:
-            qa_loop._launch_scenarios_in_containers(
-                state, {}, {"id": "pr-1"}, "sess", None, str(tmp_path))
-        new_window.assert_not_called()
-        assert len(created) == 1
-        remove.assert_called_once_with(created[0])
-        assert sc.container_name is None
-        assert (state.scenario_verdict_reasons[2]
-                == "stopped while waiting for the route")
-        assert 2 not in state.scenario_verdicts
 
     @pytest.mark.parametrize("mode", ["container", "tmux"])
     def test_worker_split_after_window_closed_is_not_a_launch(
@@ -1748,9 +1508,7 @@ class TestPollLoopRouteGating:
         state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
         state.scenarios = [sc]
         gone = subprocess.CalledProcessError(1, ["tmux", "split-window"])
-        with patch("pm_core.qa_loop._route_checker",
-                   return_value=lambda: _status(True)), \
-             patch("pm_core.qa_loop._route_mounts", return_value={}), \
+        with patch("pm_core.qa_loop._route_mounts", return_value={}), \
              patch("pm_core.container.load_container_config"), \
              patch("pm_core.container.create_qa_container"), \
              patch("pm_core.qa_loop.create_scenario_workdir",
@@ -1857,26 +1615,17 @@ class TestPollLoopRouteGating:
             shutil.rmtree(d, ignore_errors=True)
 
     @pytest.mark.parametrize("mode", ["container", "tmux"])
-    def test_closed_refiner_window_skips_the_worker_route_gate(
+    def test_closed_refiner_window_builds_no_worker(
             self, tmp_path, caplog, mode):
         """PR cleanup closes the refiner's window (and removes its
-        container) under a stopping run: the worker is not gated on its
-        route, which would report the container being removed as an
-        unusable route ("worker waiting — ... Remedy: ...")."""
+        container) under a stopping run: no worker command is built for
+        a window that is gone."""
         import logging
         from pm_core import qa_loop
         sc = qa_loop.QAScenario(index=5, title="t", focus="f")
         state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
         state.scenarios = [sc]
-        gates = []
-
-        def gate(state, pr_data, data, scenario, session_type, **kw):
-            gates.append(session_type)
-            return session_type != "qa_scenario"
-        with patch("pm_core.qa_loop._route_gate", side_effect=gate), \
-             patch("pm_core.qa_loop._route_checker",
-                   return_value=lambda: _status(True)), \
-             patch("pm_core.qa_loop._route_mounts", return_value={}), \
+        with patch("pm_core.qa_loop._route_mounts", return_value={}), \
              patch("pm_core.container.load_container_config"), \
              patch("pm_core.container.create_qa_container"), \
              patch("pm_core.qa_loop.create_scenario_workdir",
@@ -1884,7 +1633,7 @@ class TestPollLoopRouteGating:
              patch("pm_core.qa_loop._build_concretize_cmd",
                    return_value="refiner"), \
              patch("pm_core.qa_loop._build_scenario_run_cmd",
-                   return_value=("worker", str(tmp_path))), \
+                   return_value=("worker", str(tmp_path))) as build, \
              patch("pm_core.tmux.new_window_get_pane", return_value="%38"), \
              patch("pm_core.tmux.split_pane_at") as split, \
              patch("pm_core.tmux.pane_exists", return_value=False), \
@@ -1898,155 +1647,87 @@ class TestPollLoopRouteGating:
                       else qa_loop._launch_scenarios_in_tmux)
             launch(state, {}, {"id": "pr-1"}, "sess", None, str(tmp_path))
         msgs = [r.getMessage() for r in caplog.records]
-        assert "qa_scenario" not in gates, gates
+        build.assert_not_called()
         split.assert_not_called()
         assert any("refiner pane %38 is gone" in m for m in msgs), msgs
         assert any("worker pane not created" in m for m in msgs), msgs
         assert not any(m.startswith("Launched scenario") for m in msgs), msgs
         assert sc.pane_id is None
 
-    def test_idle_without_verdict_on_down_route_then_resume(self, tmp_path):
+    @pytest.mark.parametrize("mode", ["container", "tmux"])
+    def test_scenario_setup_error_stops_before_any_launch(
+            self, tmp_path, pm_home_dir, mode):
+        """A routed refiner/worker whose provider cannot be set up stops
+        the run before any scenario is prepared (RQ53): no workdir, no
+        window, no container, no wait."""
+        from pm_core import qa_loop
+        _write_providers(pm_home_dir, model="")
+        sc = qa_loop.QAScenario(index=1, title="t", focus="f")
+        state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
+        state.scenarios = [sc]
+        with patch("pm_core.qa_loop.create_scenario_workdir") as clone, \
+             patch("pm_core.container.load_container_config"), \
+             patch("pm_core.container.create_qa_container") as create, \
+             patch("pm_core.tmux.new_window_get_pane") as window:
+            launch = (qa_loop._launch_scenarios_in_containers
+                      if mode == "container"
+                      else qa_loop._launch_scenarios_in_tmux)
+            with pytest.raises(worker_route.RouteSetupError,
+                               match="no model configured"):
+                launch(state, PROJECT, {"id": "pr-1"}, "sess", None,
+                       str(tmp_path))
+        clone.assert_not_called()
+        create.assert_not_called()
+        window.assert_not_called()
+        assert not state.scenario_verdicts
+
+    def test_setup_error_in_a_launch_thread_is_raised_after_join(
+            self, tmp_path):
+        """A provider that breaks between the pre-launch check and a
+        thread's command build is raised by the launcher (the run stops
+        with it) instead of dying in the thread."""
         from pm_core import qa_loop
         sc = qa_loop.QAScenario(index=1, title="t", focus="f")
-        sc.window_name, sc.session_id, sc.pane_id = "w1", "sid-1", "%5"
-        state = qa_loop.QALoopState(pr_id="pr-1")
+        state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
         state.scenarios = [sc]
-        t0 = time.time() + 1e4
-        events = iter([{"event_type": "idle_prompt", "timestamp": t0}] * 3
-                      + [{"event_type": "idle_prompt", "timestamp": t0 + 5}] * 50)
-        verdicts = iter([None, "PASS"])
-        sent = []
-        with patch("pm_core.qa_loop.time.sleep"), \
-             patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
-             patch("pm_core.qa_loop._get_verdict_reminder_timeout",
-                   return_value=0), \
-             patch("pm_core.hook_events.read_event",
-                   side_effect=lambda sid: next(events)), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   side_effect=lambda *a: next(verdicts)), \
-             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
-                   return_value=""), \
-             patch("pm_core.tmux.pane_exists", return_value=True), \
-             patch("pm_core.tmux.send_keys",
-                   side_effect=lambda p, m: sent.append(m)):
-            self._poll(state, tmp_path, [_status(False), _status(True)])
-        # No verdict reminder while the route was down; one resume nudge,
-        # followed by the Enters that submit it.
-        assert sent == [qa_loop._RouteStallWatch.NUDGE, "", ""]
-        assert state.scenario_verdicts[1] == "PASS"
+        err = ProviderNotFoundError("provider 'x' is not configured")
+        with patch("pm_core.qa_loop.create_scenario_workdir",
+                   return_value=(tmp_path / "repo", tmp_path / "scratch")), \
+             patch("pm_core.qa_loop._build_concretize_cmd", side_effect=err), \
+             patch("pm_core.tmux.new_window_get_pane") as window:
+            with pytest.raises(ProviderNotFoundError, match="'x'"):
+                qa_loop._launch_scenarios_in_tmux(
+                    state, {}, {"id": "pr-1"}, "sess", None, str(tmp_path))
+        window.assert_not_called()
 
-    def test_api_error_turn_on_recovered_route_is_resumed_once(self, tmp_path):
-        """The outage ends between Claude giving up (API error ends the
-        turn) and its idle notification a minute later: the route already
-        answers, and the worker is resumed anyway -- once per error."""
+    def test_setup_error_at_relaunch_stops_the_run(self, tmp_path):
+        """A provider that broke mid-run makes the dead-worker relaunch
+        raise the setup error (the run stops with ``QA stopped: …``)
+        instead of spending retries on a launch that cannot work."""
         from pm_core import qa_loop
-        tr = tmp_path / "t.jsonl"
-        tr.write_text(json.dumps({"type": "user", "message": {"content": "go"}})
-                      + "\n" + json.dumps(_api_error_record("e1")) + "\n")
         sc = qa_loop.QAScenario(index=1, title="t", focus="f")
-        sc.window_name, sc.session_id, sc.pane_id = "w1", "sid-1", "%5"
-        sc.transcript_path = str(tr)
-        state = qa_loop.QALoopState(pr_id="pr-1")
+        sc.window_name, sc.session_id = "w1", "sid-1"
+        state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
         state.scenarios = [sc]
-        t0 = time.time() + 1e4
-        events = iter([{"event_type": "idle_prompt", "timestamp": t0}] * 3
-                      + [{"event_type": "idle_prompt", "timestamp": t0 + 5}] * 3
-                      + [{"event_type": "idle_prompt", "timestamp": t0 + 9}] * 50)
-        verdicts = iter([None, None, "PASS"])
-        sent = []
-        with patch("pm_core.qa_loop.time.sleep"), \
-             patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
-             patch("pm_core.qa_loop._get_verdict_reminder_timeout",
-                   return_value=None), \
-             patch("pm_core.hook_events.read_event",
-                   side_effect=lambda sid: next(events)), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   side_effect=lambda *a: next(verdicts)), \
-             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
-                   return_value=""), \
-             patch("pm_core.tmux.pane_exists", return_value=True), \
-             patch("pm_core.tmux.send_keys",
-                   side_effect=lambda p, m: sent.append(m)):
-            self._poll(state, tmp_path, [_status(True)])
-        # The second idle still ends on the same error record: no re-nudge.
-        assert sent == [qa_loop._RouteStallWatch.NUDGE, "", ""]
-        assert state.scenario_verdicts[1] == "PASS"
+        err = ProviderNotFoundError("provider 'x' is not configured")
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._scenario_window_name", return_value="w1"), \
+             patch("pm_core.qa_loop._build_scenario_run_cmd", side_effect=err), \
+             patch("pm_core.container.is_container_mode_enabled",
+                   return_value=False), \
+             patch("pm_core.qa_loop.time.sleep"):
+            with pytest.raises(ProviderNotFoundError, match="'x'"):
+                self._poll(state, tmp_path)
+        assert 1 not in state.scenario_verdicts
 
-    def test_healthy_route_idle_without_api_error_is_not_resumed(self, tmp_path):
-        from pm_core import qa_loop
-        tr = tmp_path / "t.jsonl"
-        tr.write_text(json.dumps({"type": "assistant", "message": {
-            "content": [{"type": "text", "text": "still working"}]}}) + "\n")
-        watch = qa_loop._RouteStallWatch(
-            qa_loop.QALoopState(pr_id="pr-1"), lambda: _status(True), "w")
-        with patch("pm_core.tmux.send_keys") as send:
-            assert not watch.on_idle_without_verdict("%5", str(tr))
-            assert not watch.on_idle_without_verdict("%5", None)
-        send.assert_not_called()
-
-    def test_api_error_resumes_are_capped(self, tmp_path):
-        from pm_core import qa_loop
-        tr = tmp_path / "t.jsonl"
-        watch = qa_loop._RouteStallWatch(
-            qa_loop.QALoopState(pr_id="pr-1"), lambda: _status(True), "w")
-        results = []
-        with patch("pm_core.qa_loop.time.sleep"), \
-             patch("pm_core.tmux.pane_exists", return_value=True), \
-             patch("pm_core.tmux.send_keys"):
-            for i in range(qa_loop._RouteStallWatch.MAX_ERROR_RESUMES + 2):
-                tr.write_text(json.dumps(_api_error_record(f"e{i}")) + "\n")
-                results.append(watch.on_idle_without_verdict("%5", str(tr)))
-        assert results.count(True) == qa_loop._RouteStallWatch.MAX_ERROR_RESUMES
-
-    def test_recovered_route_does_not_claim_resume_of_a_dead_pane(self):
-        """The stalled pane died before the route came back: no nudge is
-        sent, so the status must not say the session was resumed."""
-        from pm_core import qa_loop
-        state = qa_loop.QALoopState(pr_id="pr-1")
-        statuses = iter([_status(False), _status(True)])
-        watch = qa_loop._RouteStallWatch(state, lambda: next(statuses), "w")
-        with patch("pm_core.tmux.send_keys") as send:
-            assert watch.on_idle_without_verdict("%5", None)
-            stalled_msg = state.latest_output
-            with patch("pm_core.tmux.pane_exists", return_value=False), \
-                 patch("pm_core.qa_loop._route_clock", return_value=1e12):
-                watch.tick()
-        send.assert_not_called()
-        assert watch.stalled_pane is None
-        assert state.latest_output == stalled_msg
-        assert "resumed" not in (state.latest_output or "")
-
-    def test_nudge_send_failure_does_not_claim_resume(self, tmp_path):
-        """The pane dies between the liveness check and the nudge: the
-        failed send is not reported as a resume."""
-        from pm_core import qa_loop
-        tr = tmp_path / "t.jsonl"
-        tr.write_text(json.dumps(_api_error_record("e1")) + "\n")
-        state = qa_loop.QALoopState(pr_id="pr-1")
-        watch = qa_loop._RouteStallWatch(state, lambda: _status(True), "w")
-        with patch("pm_core.tmux.pane_exists", return_value=True), \
-             patch("pm_core.tmux.send_keys",
-                   side_effect=RuntimeError("can't find pane")):
-            assert watch.on_idle_without_verdict("%5", str(tr))
-        assert "resumed" not in (state.latest_output or "")
-
-    def test_api_error_on_unrouted_session_is_not_resumed(self, tmp_path):
-        """A main-account (unrouted) worker's API error is not a route
-        outage: it keeps the usual reminder handling, with no nudge."""
-        from pm_core import qa_loop
-        tr = tmp_path / "t.jsonl"
-        tr.write_text(json.dumps(_api_error_record("e1")) + "\n")
-        watch = qa_loop._RouteStallWatch(
-            qa_loop.QALoopState(pr_id="pr-1"),
-            lambda: worker_route.RouteStatus(True), "w")
-        with patch("pm_core.tmux.send_keys") as send:
-            assert not watch.on_idle_without_verdict("%5", str(tr))
-        send.assert_not_called()
-
-    def test_unrouted_api_error_idle_gets_submitted_reminder(self, tmp_path):
-        """An unrouted worker idles on an API error: no route nudge, and
-        the verdict reminder is followed by the Enters that submit it
-        (a single text+Enter burst can sit unsent in Claude's prompt)."""
+    @pytest.mark.parametrize("routed", [True, False])
+    def test_api_error_idle_gets_the_ordinary_reminder(self, tmp_path,
+                                                         pm_home_dir, routed):
+        """A worker idles on an API error (its router went down, or any
+        endpoint failed): routed or not, it gets the ordinary verdict
+        reminder -- no route check, no route nudge -- followed by the
+        Enters that submit it (a single text+Enter burst can sit unsent
+        in Claude's prompt)."""
         from pm_core import qa_loop
         tr = tmp_path / "t.jsonl"
         tr.write_text(json.dumps(_api_error_record("e1")) + "\n")
@@ -2072,8 +1753,10 @@ class TestPollLoopRouteGating:
                    return_value=""), \
              patch("pm_core.tmux.pane_exists", return_value=True), \
              patch("pm_core.tmux.send_keys",
-                   side_effect=lambda p, m: sent.append(m)):
-            self._poll(state, tmp_path, [worker_route.RouteStatus(True)])
+                   side_effect=lambda p, m: sent.append(m)), \
+             patch("pm_core.worker_route.check_route",
+                   side_effect=AssertionError("route checked")):
+            self._poll(state, tmp_path, data=PROJECT if routed else None)
         assert len(sent) == 3 and sent[0].startswith("Reminder: your verdict")
         assert sent[1:] == ["", ""]
         assert state.scenario_verdicts[1] == "PASS"
@@ -2112,7 +1795,7 @@ class TestPollLoopRouteGating:
                    return_value=""), \
              patch("pm_core.tmux.pane_exists", return_value=True), \
              patch("pm_core.tmux.send_keys", side_effect=send):
-            self._poll(state, tmp_path, [worker_route.RouteStatus(True)])
+            self._poll(state, tmp_path)
         assert len(sent) == 1 and sent[0].startswith("Reminder: your verdict")
         assert state.scenario_verdicts[1] == "PASS"
 
@@ -2154,8 +1837,6 @@ class TestPollLoopRouteGating:
              patch("pm_core.tmux.send_keys", side_effect=send), \
              patch("pm_core.qa_loop._is_verification_enabled",
                    return_value=True), \
-             patch("pm_core.qa_loop._route_checker",
-                   return_value=lambda: worker_route.RouteStatus(True)), \
              patch("pm_core.qa_loop._write_resume_file"):
             qa_loop._poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/w",
                                         tmp_path / "status.json",
@@ -2208,8 +1889,6 @@ class TestPollLoopRouteGating:
                    side_effect=lambda p, m: sent.append((p, m))), \
              patch("pm_core.qa_loop._is_verification_enabled",
                    return_value=True), \
-             patch("pm_core.qa_loop._route_checker",
-                   return_value=lambda: worker_route.RouteStatus(True)), \
              patch("pm_core.qa_loop._write_resume_file"):
             qa_loop._poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/w",
                                         tmp_path / "status.json",
@@ -2220,10 +1899,10 @@ class TestPollLoopRouteGating:
         assert "window gone" in state.scenario_verdict_reasons[1]
 
     def test_dead_worker_is_not_taken_for_the_refiner_pane(self, tmp_path):
-        """Host mode: a worker dies while its route is down, and the
-        window's first pane is the still-live refiner.  Later ticks must
-        still see the worker as gone (not poll the refiner as if it were
-        the worker), so it is relaunched once the route answers."""
+        """Host mode: a worker dies and the window's first pane is the
+        still-live refiner.  Later ticks must still see the worker as gone
+        (not poll the refiner as if it were the worker), so it is
+        relaunched."""
         from pm_core import qa_loop
         sc = qa_loop.QAScenario(index=1, title="t", focus="f")
         sc.window_name, sc.session_id, sc.pane_id = "w1", "sid-1", "%5"
@@ -2260,7 +1939,7 @@ class TestPollLoopRouteGating:
              patch("pm_core.tmux.pane_exists",
                    side_effect=lambda p: p != "%5"), \
              patch("pm_core.tmux.send_keys") as send:
-            self._poll(state, tmp_path, [_status(False)] * 3 + [_status(True)])
+            self._poll(state, tmp_path)
         assert relaunches == [1]
         assert state.scenario_verdicts[1] == "PASS"
         assert not [c for c in send.call_args_list if c.args[0] == "%3"]
@@ -2345,104 +2024,6 @@ class TestPollLoopRouteGating:
                    side_effect=subprocess.CalledProcessError(1, ["tmux"])):
             with pytest.raises(subprocess.CalledProcessError):
                 qa_loop._send_submitted("%5", "hi")
-
-    def test_relaunched_worker_gets_a_fresh_route_watch(self, tmp_path):
-        """A worker stalled on the route dies and is relaunched once the
-        route answers: the dead session's stalled pane is not "resumed"
-        and the new session starts with its own API-error budget."""
-        from pm_core import qa_loop
-        sc = qa_loop.QAScenario(index=1, title="t", focus="f")
-        sc.window_name, sc.session_id, sc.pane_id = "w1", "sid-1", "%5"
-        state = qa_loop.QALoopState(pr_id="pr-1")
-        state.scenarios = [sc]
-        seen = []
-        state._notify_cb = lambda: seen.append(state.latest_output)
-        dead = set()
-        t0 = time.time() + 1e4
-
-        def relaunch(scenario, *a):
-            scenario.pane_id, scenario.session_id = "%9", "sid-2"
-            return True
-
-        def verdict(*a):
-            if sc.pane_id == "%5":
-                dead.add("%5")
-                return None
-            return "PASS"
-        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
-             patch("pm_core.qa_loop._relaunch_scenario_window",
-                   side_effect=relaunch), \
-             patch("pm_core.qa_loop.time.sleep"), \
-             patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
-             patch("pm_core.qa_loop._get_verdict_reminder_timeout",
-                   return_value=None), \
-             patch("pm_core.hook_events.read_event", side_effect=lambda sid: {
-                 "event_type": "idle_prompt",
-                 "timestamp": t0 + (sid == "sid-2")}), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   side_effect=verdict), \
-             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
-                   return_value=""), \
-             patch("pm_core.tmux.pane_exists",
-                   side_effect=lambda p: p not in dead), \
-             patch("pm_core.tmux.send_keys") as send:
-            self._poll(state, tmp_path, [_status(False), _status(True)])
-        assert any("worker stalled" in (o or "") for o in seen)
-        assert not [o for o in seen if "recovered — resumed" in (o or "")]
-        send.assert_not_called()
-        assert state.scenario_verdicts[1] == "PASS"
-
-    def test_repeat_deferral_after_recovery_is_surfaced_again(self):
-        """Same failure message as the previous deferral, but the route
-        recovered in between: the TUI must show the new deferral."""
-        from pm_core import qa_loop
-        state = qa_loop.QALoopState(pr_id="pr-1")
-        watch = qa_loop._RouteStallWatch(state, lambda: _status(True),
-                                         "Queued scenario launch")
-        with patch("pm_core.qa_loop._notify_state"):
-            watch.remember(_status(False))
-            watch.surface(_status(False), "deferred")
-            first = state.latest_output
-            watch.surface(_status(False), "deferred")  # still down: once
-            state.latest_output = "Scenario 2 (b): PASS (verified)"
-            watch.remember(_status(True))
-            watch.surface(_status(False), "deferred")
-        assert first.startswith("Queued scenario launch deferred — ")
-        assert state.latest_output == first
-
-    def test_resumed_container_worker_checks_its_container(self, tmp_path):
-        """Restart adoption: the resumed state carries container_name, and
-        the relaunch gate checks that container's route mount."""
-        from pm_core import qa_loop
-        sc = qa_loop.QAScenario(index=3, title="t", focus="f")
-        sc.window_name, sc.session_id, sc.container_name = "w3", "s3", "pm-qa-c3"
-        state = qa_loop.QALoopState(pr_id="pr-1")
-        state.scenarios = [sc]
-        calls = []
-        ticks = {"n": 0}
-
-        def sleep(_):
-            ticks["n"] += 1
-            if ticks["n"] > 2:
-                state.stop_requested = True
-
-        def checker(*a, **k):
-            calls.append(k)
-            return lambda: _status(False)
-        with patch("pm_core.qa_loop._route_checker", side_effect=checker), \
-             patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
-             patch("pm_core.qa_loop._relaunch_scenario_window") as relaunch, \
-             patch("pm_core.qa_loop.time.sleep", side_effect=sleep), \
-             patch("pm_core.qa_loop._is_verification_enabled", return_value=False), \
-             patch("pm_core.qa_loop._write_resume_file"):
-            qa_loop._poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/w",
-                                        tmp_path / "status.json",
-                                        lambda *a: None, use_containers=True)
-        relaunch.assert_not_called()
-        assert {"session_tag": None, "container": True,
-                "container_name": "pm-qa-c3"} in calls
-        assert 3 not in state.scenario_verdicts
-
 
 # ---------------------------------------------------------------------------
 # Live probe evidence (pm provider test --live)
@@ -2629,15 +2210,17 @@ class TestProviderCLI:
 
 
 @pytest.mark.parametrize("state", ["down", "fresh", "reused_mounted",
-                                   "reused_unmounted"])
+                                   "reused_unmounted", "bridge_fails"])
 def test_workflow_container_route_mount_and_fail_closed(pm_home_dir, monkeypatch, state):
-    """The shared impl/review/signoff wrapper never launches an unavailable
-    route, and never reuses a running container that lacks the route mount
-    (create_container reuses by name; the ensure step would refuse there)."""
+    """The shared impl/review/signoff wrapper mounts the route bridge and
+    never reuses a running container that lacks the mount (create_container
+    reuses by name; the ensure step would refuse there).  A router that is
+    down is not checked: it launches, and the session meets API errors."""
     from pm_core import container as cm
     from unittest.mock import Mock
-    _write_providers(pm_home_dir)
-    ready = state != "down"
+    s, port = _listener()
+    s.close()
+    _write_providers(pm_home_dir, api_base=f"http://127.0.0.1:{port}")
     monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: True)
     monkeypatch.setattr(cm, "load_container_config", lambda: cm.ContainerConfig())
     monkeypatch.setattr(cm, "_make_container_name", lambda *a, **k: "review-test")
@@ -2649,58 +2232,46 @@ def test_workflow_container_route_mount_and_fail_closed(pm_home_dir, monkeypatch
     monkeypatch.setattr(cm, "create_container", create)
     monkeypatch.setattr(cm, "build_exec_cmd", lambda name, cmd, **kw: cmd)
     monkeypatch.setattr("pm_core.push_proxy.get_proxy_socket_path", lambda name: None)
-    check = Mock(return_value=worker_route.RouteStatus(
-        ready, ROUTE, "router offline" if not ready else "", "start router"))
-    monkeypatch.setattr(worker_route, "check_route", check)
-    bridge = {Path("/bridge"): "/run/pm-route"}
-    mounts = Mock(return_value=bridge)
-    monkeypatch.setattr(worker_route, "container_mounts", mounts)
+    monkeypatch.setattr(worker_route, "check_route",
+                        Mock(side_effect=AssertionError("route checked")))
+    monkeypatch.setattr(route_bridge, "tcp_connectable",
+                        Mock(side_effect=AssertionError("router probed")))
+    sock = worker_route.bridge_socket(ROUTE)
+    if state == "bridge_fails":
+        monkeypatch.setattr(worker_route, "ensure_host_bridge",
+                            Mock(side_effect=OSError("permission denied")))
+    else:
+        monkeypatch.setattr(worker_route, "ensure_host_bridge",
+                            lambda cfg: sock)
+        monkeypatch.setattr(route_bridge, "unix_connectable", lambda p: True)
+    bridge = {sock.parent: "/run/pm-route"}
     existing = {Path("/evidence"): "/evidence"}
-    if state in ("down", "reused_unmounted"):
-        match = ("router offline" if state == "down"
-                 else "review-test is running without the route socket mount")
+    if state in ("reused_unmounted", "bridge_fails"):
+        match = ("review-test is running without the route socket mount"
+                 if state == "reused_unmounted"
+                 else f"provider '{ROUTE}': cannot set up the host route "
+                      "bridge: permission denied")
         with pytest.raises(cm.ContainerError, match=match):
-            cm.wrap_claude_cmd("ROUTED", "/w", provider=ROUTE, extra_rw_mounts=existing,
-                               session_type="review")
+            cm.wrap_claude_cmd("ROUTED", "/w", provider=ROUTE,
+                               extra_rw_mounts=existing)
         create.assert_not_called()
-        assert mounts.called == (state != "down")
     else:
         cmd, name = cm.wrap_claude_cmd("ROUTED", "/w", provider=ROUTE,
-                                       extra_rw_mounts=existing,
-                                       session_type="review")
+                                       extra_rw_mounts=existing)
         assert (cmd, name) == ("ROUTED", "review-test")
         assert create.call_args.kwargs["extra_rw_mounts"] == {**existing, **bridge}
         assert existing == {Path("/evidence"): "/evidence"}
-    assert check.call_args.args[0].provider == ROUTE
-    assert check.call_args.kwargs == {"container": True,
-                                      "session_type": "review"}
 
 
-@pytest.mark.parametrize("failure", ["router_down", "unconfigured"])
-def test_workflow_role_remedy_says_relaunch_not_qa_wait(pm_home_dir, monkeypatch,
-                                                         failure):
-    """impl/review/sign-off are refused once (ContainerError), not waited
-    for, so their remedy must not promise QA's automatic launch or point at
-    the QA session types; the QA gate keeps its wording."""
-    from pm_core.model_config import ModelResolution
-    _write_providers(pm_home_dir)
-    monkeypatch.setattr(route_bridge, "tcp_connectable",
-                        lambda *a, **k: failure != "router_down")
-    res = ModelResolution(provider="nope" if failure == "unconfigured" else ROUTE)
-    qa = worker_route.check_route(res, container=True)
-    impl = worker_route.check_route(res, container=True, session_type="impl")
-    assert not qa.ok and not impl.ok and qa.problem == impl.problem
-    assert "QA" not in impl.remedy and "qa_" not in impl.remedy
-    if failure != "unconfigured":
-        assert "QA launches the session automatically" in qa.remedy
-        assert "then launch the impl session again" in impl.remedy
-    if failure != "router_down":  # these also name the way off the route
-        assert "pm model set qa_scenario" in qa.remedy
-        assert "'pm model set impl <model> --project'" in impl.remedy
-        # A PR override wins over the project setting, and since per-PR
-        # role exceptions either of its keys can be what selects the route.
-        for st in (qa, impl):
-            assert "change the PR's model setting" in st.remedy
+def test_workflow_container_unconfigured_provider_is_refused(pm_home_dir,
+                                                             monkeypatch):
+    """A provider missing on this host refuses the container launch with
+    the setup error (never a fallback to another account)."""
+    from pm_core import container as cm
+    monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: True)
+    monkeypatch.setattr(cm, "_make_container_name", lambda *a, **k: "impl-test")
+    with pytest.raises(cm.ContainerError, match="'nope' is not configured"):
+        cm.wrap_claude_cmd("CMD", "/w", provider="nope")
 
 
 def test_unrouted_provider_reuses_a_running_container_untouched(pm_home_dir, monkeypatch):
@@ -2727,7 +2298,8 @@ def test_unrouted_provider_reuses_a_running_container_untouched(pm_home_dir, mon
 def test_impl_start_builds_and_wraps_for_the_selected_route(tmp_path, monkeypatch, route_ok):
     """`pm pr start` in container mode builds the impl command for the
     container on the selected route and hands the provider to the shared
-    wrapper; a route the wrapper refuses launches no window (exit 1)."""
+    wrapper; a route bridge the wrapper cannot set up launches no window
+    (exit 1)."""
     import yaml
     from types import SimpleNamespace
     from unittest.mock import MagicMock, Mock
@@ -2752,7 +2324,8 @@ def test_impl_start_builds_and_wraps_for_the_selected_route(tmp_path, monkeypatc
     build = Mock(return_value="ROUTED")
     wrap = Mock(return_value=("WRAPPED", "impl-pr-001"))
     if not route_ok:
-        wrap.side_effect = cm.ContainerError("work route 'claude-work' unavailable: x")
+        wrap.side_effect = cm.ContainerError(
+            f"provider '{ROUTE}': cannot set up the host route bridge: x")
     committed = SimpleNamespace(returncode=0, stdout=yaml.safe_dump(store.load(pm_dir)),
                                 stderr="")
     monkeypatch.setattr(pr_mod.git_ops, "run_git", lambda *a, **k: committed)
@@ -2776,14 +2349,13 @@ def test_impl_start_builds_and_wraps_for_the_selected_route(tmp_path, monkeypatc
     assert (kw["session_type"], kw["container"], kw["provider"]) == ("impl", True, ROUTE)
     assert kw["cwd"] == cm._CONTAINER_WORKDIR and kw["write_dir"] == str(workdir)
     assert wrap.call_args.kwargs["provider"] == ROUTE
-    assert wrap.call_args.kwargs["session_type"] == "impl"  # names the remedy
     if route_ok:
         assert result.exit_code == 0, result.output
         launched = tmux.new_window.call_args or tmux.new_window_get_pane.call_args
         assert "WRAPPED" in launched.args
     else:
         assert result.exit_code == 1
-        assert "unavailable" in result.output
+        assert "cannot set up the host route bridge" in result.output
         tmux.new_window.assert_not_called()
         tmux.new_window_get_pane.assert_not_called()
 
@@ -3081,42 +2653,57 @@ def test_other_qa_thread_crashes_keep_their_message(starter, default, caplog):
 # Review a5a3 i1: `pm pr auto-sequence` runs QA in a detached
 # `pm pr qa-run-bg` driver whose output goes to /dev/null and which writes
 # no qa_status.json before the planner launches.  A provider setup error of
-# a gate-less QA session (planner, s0, verifier, finalizer) ended that driver
-# with a traceback in the pm log only, and every later tick relaunched it
-# ("running: qa (launched)") with no remedy anywhere it reports.
-_UNGATED_ROLES = ["qa_planning", "qa_interactive", "qa_verification",
-                  "qa_finalize"]
+# a QA session ended that driver with a traceback in the pm log only, and
+# every later tick relaunched it ("running: qa (launched)") with no remedy
+# anywhere it reports.  With no route gate the refiner and worker are
+# checked the same way.
+_QA_ROLES = ["qa_planning", "qa_interactive", "qa_concretize", "qa_scenario",
+             "qa_verification", "qa_finalize"]
 
 
-@pytest.mark.parametrize("role", _UNGATED_ROLES)
-def test_ungated_qa_provider_check_raises(pm_home_dir, role):
+@pytest.mark.parametrize("role", _QA_ROLES)
+def test_qa_provider_check_raises(pm_home_dir, role):
     from pm_core import qa_loop
     pr = {"id": "pr-001", "session_models": {role: "provider:missing-route"}}
     with pytest.raises(ProviderNotFoundError, match="missing-route"):
-        qa_loop.check_ungated_qa_providers(pr, {})
+        qa_loop.check_qa_providers(pr, {})
 
 
-@pytest.mark.parametrize("pr", [
-    {"id": "pr-001"},
-    # Routed roles wait at their route gate with a remedy instead.
-    {"id": "pr-001", "session_models": {"qa_scenario": "provider:missing-route",
-                                        "qa_concretize": "provider:missing-route"}},
-])
-def test_ungated_qa_provider_check_passes(pm_home_dir, pr):
+def test_qa_provider_check_passes(pm_home_dir):
     from pm_core import qa_loop
-    qa_loop.check_ungated_qa_providers(pr, {})
+    qa_loop.check_qa_providers({"id": "pr-001"}, {})
 
 
-def test_ungated_qa_provider_check_reports_bad_entry(pm_home_dir):
+def test_qa_provider_check_passes_a_down_router(pm_home_dir):
+    """A configured router is not probed: the run starts and its sessions
+    meet the outage as API errors."""
+    from pm_core import qa_loop
+    _write_providers(pm_home_dir)
+    with patch("pm_core.route_bridge.tcp_connectable",
+               side_effect=AssertionError("router probed")):
+        qa_loop.check_qa_providers({"id": "pr-001"}, PROJECT)
+
+
+@pytest.mark.parametrize("role", ["qa_scenario", "qa_finalize"])
+def test_qa_provider_check_reports_unusable_router_settings(pm_home_dir, role):
+    from pm_core import qa_loop
+    _write_providers(pm_home_dir, model="")
+    pr = {"id": "pr-001", "session_models": {role: f"provider:{ROUTE}"}}
+    with pytest.raises(worker_route.RouteSetupError,
+                       match="no model configured"):
+        qa_loop.check_qa_providers(pr, {})
+
+
+def test_qa_provider_check_reports_bad_entry(pm_home_dir):
     from pm_core import qa_loop
     (pm_home_dir / "providers.yaml").write_text(
         "providers:\n  claude-work: just a string\n")
     pr = {"id": "pr-001", "model": "provider:claude-work"}
     with pytest.raises(ProviderNotFoundError, match="providers.yaml"):
-        qa_loop.check_ungated_qa_providers(pr, {})
+        qa_loop.check_qa_providers(pr, {})
 
 
-@pytest.mark.parametrize("role", _UNGATED_ROLES)
+@pytest.mark.parametrize("role", _QA_ROLES)
 def test_auto_sequence_qa_launch_is_a_clean_error(pm_home_dir, role,
                                                   monkeypatch, capsys):
     import pm_core.cli as cli_mod
@@ -3141,8 +2728,9 @@ def test_auto_sequence_qa_launch_is_a_clean_error(pm_home_dir, role,
 def test_auto_sequence_qa_launch_spawns_driver_when_configured(pm_home_dir,
                                                                monkeypatch):
     from pm_core.cli import pr as pr_cli
+    _write_providers(pm_home_dir)
     pr = {"id": "pr-001", "status": "qa",
-          "session_models": {"qa_scenario": "provider:missing-route"}}
+          "session_models": {"qa_scenario": f"provider:{ROUTE}"}}
     monkeypatch.setattr(pr_cli.store, "load",
                         lambda root: {"project": {}, "prs": [pr]})
     with patch.object(pr_cli.subprocess, "Popen") as popen:
@@ -3355,12 +2943,12 @@ def test_verifier_provider_is_checked_only_when_verification_runs(
     with patch.object(qa_loop, "_is_verification_enabled", return_value=verify):
         if verify:
             with pytest.raises(ProviderNotFoundError, match="missing-route"):
-                qa_loop.check_ungated_qa_providers(pr, {})
+                qa_loop.check_qa_providers(pr, {})
         else:
-            qa_loop.check_ungated_qa_providers(pr, {})
+            qa_loop.check_qa_providers(pr, {})
         pr["session_models"] = {"qa_finalize": "provider:missing-route"}
         with pytest.raises(ProviderNotFoundError, match="missing-route"):
-            qa_loop.check_ungated_qa_providers(pr, {})
+            qa_loop.check_qa_providers(pr, {})
 
 
 # A provider broken mid-run (after the launch check): each verification
@@ -3517,26 +3105,6 @@ def test_reqa_hop_leaves_a_launch_another_tick_claimed(pm_home_dir, tmp_path):
 # provider edits, live probe mismatch wording.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("up", [True, False])
-def test_host_workflow_launch_is_route_gated(pm_home_dir, monkeypatch, up):
-    """Outside container mode a routed impl/review/sign-off launch is
-    refused like a container one: S98 saw `pm pr start` open a window and
-    claude retry against a router that was down."""
-    from pm_core import container as cm
-    _write_providers(pm_home_dir, remedy="Run acme-router up")
-    monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: False)
-    monkeypatch.setattr(route_bridge, "tcp_connectable", lambda *a, **k: up)
-    if up:
-        assert cm.wrap_claude_cmd("CMD", "/w", provider=ROUTE,
-                                  session_type="impl") == ("CMD", "")
-    else:
-        with pytest.raises(cm.ContainerError,
-                           match="router not reachable.*Remedy: Run acme-router up"):
-            cm.wrap_claude_cmd("CMD", "/w", provider=ROUTE, session_type="impl")
-    # Unrouted launches are untouched.
-    assert cm.wrap_claude_cmd("CMD", "/w") == ("CMD", "")
-
-
 @pytest.mark.parametrize("container", [False, True])
 def test_secret_env_values_stay_out_of_the_command_and_log(
         pm_home_dir, tmp_path, monkeypatch, container):
@@ -3643,21 +3211,24 @@ def test_live_probe_failure_names_the_models(out, why, capsys):
 
 def test_refused_launch_deletes_its_secret_env_file(pm_home_dir, tmp_path,
                                                     monkeypatch):
-    """S98: a host launch refused for a down route left the 0600 file with
-    the header value in the workdir's untracked pm/prompts/."""
+    """S98: a refused launch left the 0600 file with the header value in
+    the workdir's untracked pm/prompts/.  A container launch whose route
+    bridge cannot be set up is refused the same way."""
     from pm_core import container as cm
     from pm_core.claude_launcher import build_claude_shell_cmd
     _write_providers(pm_home_dir, env={"ANTHROPIC_CUSTOM_HEADERS": "x:s"})
     monkeypatch.setattr("pm_core.claude_launcher.prepare_workspace",
                         lambda cwd: None)
-    monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: False)
-    monkeypatch.setattr(route_bridge, "tcp_connectable", lambda *a, **k: False)
+    monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: True)
+    monkeypatch.setattr(cm, "_make_container_name", lambda *a, **k: "impl-t")
+    monkeypatch.setattr(worker_route, "ensure_host_bridge",
+                        lambda cfg: (_ for _ in ()).throw(OSError("denied")))
     wd = tmp_path / "wd"
     wd.mkdir()
     with patch("pm_core.claude_launcher.log_shell_command"):
         cmd = build_claude_shell_cmd(provider=ROUTE, cwd=str(wd),
-                                     session_type="impl")
+                                     session_type="impl", container=True)
     assert len(list((wd / "pm" / "prompts").glob("pm_env_*"))) == 1
     with pytest.raises(cm.ContainerError):
-        cm.wrap_claude_cmd(cmd, str(wd), provider=ROUTE, session_type="impl")
+        cm.wrap_claude_cmd(cmd, str(wd), provider=ROUTE)
     assert not list((wd / "pm" / "prompts").glob("pm_env_*"))

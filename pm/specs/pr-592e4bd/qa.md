@@ -1,9 +1,10 @@
 # pr-592e4bd — QA spec: route QA refiners/workers through a host account router
 
-Grounding: `pm/specs/pr-592e4bd/impl.md` (R1–R7), diff `master...HEAD`
+Grounding: `pm/specs/pr-592e4bd/impl.md` (R1–R13), diff `master...HEAD`
 (`pm_core/worker_route.py`, `pm_core/route_bridge.py`, `pm_core/providers.py`
 router type, `pm_core/claude_launcher.py` launcher boundary,
-`pm_core/qa_loop.py` gates / stall watch / `qa_interactive`,
+`pm_core/qa_loop.py` setup checks / `qa_interactive` (the route gates and
+stall watch were removed 2026-10-27),
 `pm_core/cli/provider.py`, `pm_core/cli/model.py`, `pm_core/container.py`
 env-by-name).
 
@@ -32,6 +33,26 @@ below name the retired behaviour, RQ48–RQ51 win:
 - QA fixtures may keep a `work/`-prefix stub contract, but the R10
   stories use a router whose model has another name, to show that nothing
   in pm assumes `work/`.
+
+Scope update (2026-10-27, user decision: route failure simplification;
+impl.md header and R6). pm keeps no route-specific waiting or recovery. A
+routed provider that is unavailable fails through the same launch /
+API-failure handling as the default provider. The user resolved S101's
+open point (route-wait vs container) by removing the route wait. RQ52–RQ54
+state the new behaviour and win over every older Then that describes route
+waits, deferrals, stall/recovery nudges or a refusal because the router is
+down. Those Thens are rewritten (RQ9–RQ14) or marked "(superseded …)" in
+place: RQ16, RQ20–RQ22, RQ25, the route-gate clauses of RQ24, RQ26, RQ27,
+RQ40, RQ45, RQ46 and RQ48–RQ51, and the S98 host-gate and S101 route-wait
+stories. Evidence recorded for them (S3/S5, S13/S14, S22, S52/S55, S53,
+S64/S65, S88, S94, S98, S101) is historical. It is not a passing result
+under RQ52–RQ54 and must not be counted as one. Unrelated open acceptance
+criteria stay open:
+- the S73 double-drive question (pr-bddda0f);
+- S101's recording limitation (no mp4: `agg` was not installed, so the
+  casts and transcripts are the recordings);
+- S102, frozen mid-run by the user. Its worktree and evidence are kept,
+  and it has no verdict.
 
 ## 1. Requirements (Given / When / Then)
 
@@ -102,41 +123,59 @@ below name the retired behaviour, RQ48–RQ51 win:
   `http://127.0.0.1:<port>` inside the container, and the router sees the
   `work/` model; containers for unrouted runs get no such mount.
 
-### Failure, recovery and no-fallback
-- **RQ9** Given the router is down (or sign-in expired, or launcher
-  missing, or provider not configured on this host), When QA reaches a
-  refiner/worker initial launch, Then that launch waits with a status line
-  "Scenario N refiner|worker waiting — <problem>; <remedy>", no verdict is
-  recorded, nothing is launched on the main account; When the router comes
-  back, Then within ~15 s the line changes to "… available — launching"
-  and the session starts.
-- **RQ10** Given QA waiting on the route, When the user stops QA, Then the
-  loop stops promptly and the scenario carries the reason "stopped while
-  waiting for the work route" (not a PASS/FAIL/INPUT_REQUIRED verdict):
-  no per-scenario verdict and no `verdict.md` for it; the overall QA
-  result is INPUT_REQUIRED because a scenario is unverdicted (fixed in
-  0b1edfca after QA s3).
-- **RQ11** Given more scenarios than the concurrency cap, When the route
-  fails while scenarios are queued, Then queued scenarios stay queued
-  ("Queued scenario launch deferred — …"), other running scenarios keep
-  reporting verdicts, and once the route recovers the queue drains by
-  itself even if no other verdict event happens.
-- **RQ12** Given a running routed worker whose window dies while the route
-  is down, When the loop notices, Then relaunch is deferred ("relaunch
-  deferred — …") without consuming a retry; after recovery it relaunches
-  with the same routed command.
-- **RQ13** Given a routed worker/refiner mid-run, When the router goes away
-  and the session idles without a verdict, Then the status shows
-  "… stalled — <problem>; <remedy>", the usual verdict reminder is not
-  sent, and when the router returns the session is nudged ("The model
-  route is available again…"); the nudge is actually *submitted* (not left
-  typed in the prompt box — fixed in c5d7d64f after QA s4), a new request
-  reaches the router, and the session finishes with its verdict.
-- **RQ14** Given a QA run in container mode was interrupted (TUI restart),
-  When QA resumes, Then adopted live panes keep running, and relaunches of
-  dead/queued workers are gated against the adopted container's mount; a
-  container created without the mount is reported with the remedy
-  "restart QA for this PR so its containers are recreated…".
+### Failure and no-fallback (rewritten 2026-10-27; impl.md R6)
+- **RQ9** Given a refiner/worker (or any role) routed to a router that
+  is down, When QA (or the role) launches it, Then it launches at once:
+  - There is no "waiting — …", "deferred — …" or "available — launching"
+    line and no reachability check first.
+  - The session runs Claude against the router's `ANTHROPIC_BASE_URL`,
+    so the pane shows Claude Code's own API errors and retries. Nothing
+    is sent to another provider or account (the main stub gets no
+    request for the routed role).
+  - pm then treats the session as on the default provider. A worker
+    whose turn ends without a verdict gets the ordinary verdict reminder.
+    A refiner follows its normal marker timeout and fallback. A pane that
+    exits is relaunched by the ordinary dead-worker retry ("Scenario N
+    window died — retry n/10", backoff, retry budget spent).
+  - When the router comes back, a session that is still retrying, or one
+    relaunched later, reaches it. No pm message announces the recovery.
+- **RQ10** Given a provider setup error for a QA role (provider not
+  configured, invalid entry, unreadable providers.yaml, or a router with
+  no `model`, an `api_base` with no host, or a host `launcher` that is
+  not executable), When QA starts from the TUI, `zz t` or a `pm pr
+  auto-sequence` tick, Then the error is reported once with its remedy.
+  It is `QA stopped: … then start QA again` in the TUI, or one `Error:`
+  line rc 1 from the tick with no driver spawned. No window or container
+  is left for a scenario that never launched, no verdict is recorded,
+  and nothing launches elsewhere.
+- **RQ11** Given more scenarios than the concurrency cap and a router
+  that is down, When QA runs, Then queued scenarios are launched as slots
+  free up, exactly as for an unrouted run. There is no "Queued scenario
+  launch deferred" line and no extra launch retry each tick.
+- **RQ12** Given a routed worker whose window dies (router down or not),
+  When the loop notices, Then it takes the ordinary relaunch with retries
+  and backoff, spending a retry. There is no "relaunch deferred".
+- **RQ13** Given a routed worker/refiner mid-run, When the router goes
+  away, Then there is no "stalled", "recovered — resumed" or "answers
+  again — resumed" line and no "The model route is available again…"
+  nudge. The worker's idle turn gets the ordinary verdict reminder
+  (submitted, as RQ24), however its last turn ended.
+- **RQ14** Given container-mode QA with a routed refiner/worker, When a
+  scenario container is created, Then it has the bridge mount. If the
+  bridge cannot be used (socket missing, container created without the
+  mount, e.g. adopted after a resume), the pane's `ensure` step prints
+  `pm route: …` with its remedy and exits, Claude never starts there, and
+  the poll loop's ordinary dead-worker handling applies. Impl, review and
+  sign-off containers refuse a bridge they cannot set up, or a running
+  container without the mount, with one `ContainerError` line (rc 1).
+
+Superseded Thens (historical, 2026-10-22 to 2026-10-27). The old RQ9
+waited at the initial launch. The old RQ10 left a scenario stopped in that
+wait as "stopped while waiting for the route". The old RQ11 and RQ12
+deferred queued launches and relaunches. The old RQ13 suppressed the
+reminder and nudged the session after recovery. The old RQ14 gated
+resumed relaunches against the adopted container. Evidence: S3, S4, S5,
+S13, S14, S22, S101.
 
 ### Credential hygiene
 - **RQ15** Given any of the above flows, When the user inspects generated
@@ -147,7 +186,8 @@ below name the retired behaviour, RQ48–RQ51 win:
   does not contain their values.
 
 ### Fixed in scope during QA (pre-existing on master or found in QA)
-- **RQ16** Given container mode and a route that fails while a scenario
+- **RQ16** (superseded 2026-10-27, RQ11: nothing is deferred) Given
+  container mode and a route that fails while a scenario
   is queued, When the queued launch reaches the refiner or worker route
   gate and is deferred, Then the container created for that launch is
   removed (no `pm-qa-…-sN` container left running, its push proxy gone);
@@ -170,7 +210,9 @@ below name the retired behaviour, RQ48–RQ51 win:
   completed newer run's result is processed rather than dropped, and
   superseded snapshots are cleared unless a live loop elsewhere owns them
   (60574f28, aea1fb8a, review loop acdb i1–i3).
-- **RQ20** Given a routed refiner or worker whose turn ended on a Claude
+- **RQ20** (superseded 2026-10-27, RQ13: an API-error turn gets the
+  ordinary reminder, routed or not) Given a routed refiner or worker
+  whose turn ended on a Claude
   Code API error (e.g. "API Error: Connection dropped" or a 4xx/5xx from
   the router) while the router already answers again, When its idle
   notification arrives without a verdict, Then the session is resumed with
@@ -181,11 +223,13 @@ below name the retired behaviour, RQ48–RQ51 win:
   (no endless loop). An *unrouted* (main-account) worker's API error is
   never answered with a route nudge and never mentions "work route
   'None'"; it gets the usual reminder (7c401141, review 8a99 i1).
-- **RQ21** Given a routed worker that used up resumes (or was stalled)
+- **RQ21** (superseded 2026-10-27, RQ13) Given a routed worker that used
+  up resumes (or was stalled)
   and whose window then dies, When it is relaunched, Then the new session
   has a fresh resume budget and no later "recovered — resumed" message
   refers to the dead pane (review 8a99 i1).
-- **RQ22** Given a route that failed, recovered, and fails again with the
+- **RQ22** (superseded 2026-10-27, RQ11) Given a route that failed,
+  recovered, and fails again with the
   same problem, When a queued or initial launch is deferred the second
   time, Then the TUI shows the deferral again (not only the pm log)
   (7c401141).
@@ -210,8 +254,8 @@ below name the retired behaviour, RQ48–RQ51 win:
   box). When the target pane dies around that send, Then the QA run
   goes on and does not end in "QA thread crashed" or "verification thread
   crashed":
-  a reminder to a vanished worker leads to the usual relaunch (through the
-  route gate), a flag follow-up to a vanished worker window settles the
+  a reminder to a vanished worker leads to the usual relaunch (no route
+  gate since 2026-10-27), a flag follow-up to a vanished worker window settles the
   scenario INPUT_REQUIRED ("window gone during PASS verification…"), a
   re-verify request to a vanished verifier runs the check in a fresh
   verifier pane, and a verifier that dies while re-verifying ends that
@@ -231,7 +275,8 @@ below name the retired behaviour, RQ48–RQ51 win:
   "Cannot send follow-up to scenario N — window gone, marking
   INPUT_REQUIRED". Resuming a snapshot written by older pm (dead worker
   saved as `pane_id: null`) still hits the fallback: pr-d1d0139.
-- **RQ25** Given a routed worker or refiner stalled on a route outage (or
+- **RQ25** (superseded 2026-10-27, RQ13: there is no stall watch or
+  nudge) Given a routed worker or refiner stalled on a route outage (or
   idle on an API-error turn), When its pane dies before the route answers
   again and the nudge can be sent, Then no "… recovered — resumed" or
   "… — resumed" status appears for it (the pm log says "pane … gone — not
@@ -240,8 +285,8 @@ below name the retired behaviour, RQ48–RQ51 win:
 - **RQ26** Given container-mode QA on a PR, whose scenario containers
   share one host push proxy per (session, PR), When the PR's last QA
   container is removed and a new one is created right away (a fresh start
-  `z t` over a running run, a queued launch deferred at the route gate and
-  relaunched after recovery, stop then start, parallel scenario creates),
+  `z t` over a running run, stop then start, parallel scenario creates;
+  a launch deferred at the route gate no longer exists, RQ11),
   Then within a few seconds exactly one push-proxy daemon serves the PR's
   socket path: a replaced daemon exits by itself ("Push proxy socket
   removed, exiting") and never removes the newer socket; parallel creates
@@ -265,14 +310,13 @@ below name the retired behaviour, RQ48–RQ51 win:
   %X so the worker is relaunched" carries its traceback, whose last
   line names tmux's reason (`pm_core.tmux.TmuxCommandError: ... tmux:
   no space for new pane`, 2314f1a8), and that refiner pane is closed
-  (ded27fcd). A closed refiner skips the worker route gate: no "worker
-  waiting — work route …" line or TUI notice for it, even when its
-  container is being removed (2314f1a8, S20). In both cases a *running* loop
-  then takes the dead-worker path: "Scenario N window died — retry
-  1/10", gated on the route ("relaunch deferred — …" with no retry spent
-  while the route is down). The worker is relaunched in a fresh
+  (ded27fcd). A closed refiner builds no worker command (2314f1a8, S20;
+  the worker route gate it used to skip was removed 2026-10-27). In both
+  cases a *running* loop then takes the dead-worker path: "Scenario N
+  window died — retry 1/10" (since 2026-10-27 never deferred on the
+  route, RQ12). The worker is relaunched in a fresh
   `qa-<pr>-sN` window (container mode: the same container, still
-  running). The refiner is never polled, reminded or nudged as if it
+  running). The refiner is never polled or reminded as if it
   were the worker, and never yields a verdict for the scenario. Only
   the relaunched worker's verdict counts. Sibling scenarios launched in
   parallel, and another PR's run, are unaffected. A *stopping* loop
@@ -632,19 +676,25 @@ below name the retired behaviour, RQ48–RQ51 win:
   sign-off and host QA planner/s0/verifier/finalizer are not gated (impl.md
   §3). They start with the router env, so a down router shows an API error
   in the pane, never a main-account fallback.
-- **RQ40** Given a role routed per RQ39 whose route is unavailable
-  (router down, sign-in expired, provider missing from this host's
-  providers.yaml), When the role is launched from the TUI, the CLI,
-  auto-start or the review loop, Then nothing is launched on the main
-  account and the user sees the reason and remedy:
+- **RQ40** Given a role routed per RQ39 whose provider cannot be set up
+  (provider missing from this host's providers.yaml, a router entry that
+  cannot launch, or in container mode a bridge that cannot be set up or a
+  running container without the mount), When the role is launched from
+  the TUI, the CLI, auto-start or the review loop, Then nothing is
+  launched on another account and the user sees the reason and remedy.
+  (Superseded 2026-10-27, RQ52: a router that is *down* or whose
+  upstream sign-in expired no longer refuses the launch. The role
+  launches and meets API errors. The bullets below describe the setup
+  refusals. Their "router down" evidence, S53, S88 and S98, is
+  historical.)
   - `pm pr start`, `pm pr review` and `pm pr signoff` print it on stderr
     and exit 1. No window opens, the per-PR launch lock is released, and no
     container is left (57f04ee6).
-  - The remedies for these roles say to launch the session again, or to
-    move it off the route by removing "the PR's 'session_models' entry or
-    'model' override" or with `pm model set <type> <model> --project`
-    (c08c7627, 0c577dd2). They are not QA-worded ("QA launches the
-    session automatically" appears only on QA gates).
+  - The remedies name the fix (configure the provider, fix its
+    settings, or move its sessions off the route: "change the PR's model
+    setting if it selects this route ('pm pr model show <pr>')" or `pm
+    model set <session-type> <model> --project`). Since 2026-10-27 no
+    remedy promises an automatic QA launch.
   - The TUI sign-off driver shows "Sign-off launch failed for <pr>: work
     route … Remedy: …" as plain text. Brackets in the reason are kept, and
     a `[/…]` does not blank the line (5fbbedad).
@@ -652,7 +702,7 @@ below name the retired behaviour, RQ48–RQ51 win:
     <pr> failed: <last stderr line>", forced and held. It is shown once
     per reason per PR. An explicit re-arm (`A`, a target re-add,
     `autostart all`) says it again even when the failing PR is a
-    dependency of the target. Once the route is back and a start goes
+    dependency of the target. Once the setting is fixed and a start goes
     through, the PR runs routed (d76cc9d5, d361858c, 620327fa).
   - A provider that is not configured gives one line from every CLI
     launch: `Error: … ; or change the model setting that selects it ('pm
@@ -863,9 +913,9 @@ below name the retired behaviour, RQ48–RQ51 win:
     while an endpoint is inherited (i8).
   - When the selected provider's entry is such an entry, every surface
     reports it like a missing provider: one `Error:` line for
-    impl/review/sign-off, the refiner/worker route gate's wait with its
-    remedy (the launch goes ahead by itself once the entry is fixed),
-    `QA stopped: …` for planner/s0/verifier/finalizer, `(INVALID ENTRY in
+    impl/review/sign-off, `QA stopped: …` for every QA role (since
+    2026-10-27 the refiner/worker too, RQ53; before that their route
+    gate waited with its remedy), `(INVALID ENTRY in
     providers.yaml)` in `pm model show`, `INVALID ENTRY: <problem>` in
     `pm provider list` beside the valid entries. Never a traceback, a
     "QA thread crashed", or a launch on plain claude (i9).
@@ -884,14 +934,15 @@ below name the retired behaviour, RQ48–RQ51 win:
   - Concurrent use: `pm provider add`/`default` rewrite the file in place
     (`save_providers`, not an atomic replace) while QA and other launches
     read it. A launch that reads it mid-write must end in one of the
-    states above (gate wait then launch, or a clean `Error:`), never a
+    states above (a clean `Error:` / `QA stopped: …`), never a
     traceback, a verdict, or a main-account launch for a routed role.
 
 - **RQ46** (review loop a5a3 i1, 3e9f6b19; QA S64 bad02547) Given a PR
   driven by `pm pr auto-sequence` ticks, When a tick launches QA (review
   PASS -> qa, a qa tick with no status and no qa window, or a sign-off
-  `qa` hop) while the provider of a QA role without a route gate
-  (planner, s0, verifier, finalizer) cannot be looked up (not configured,
+  `qa` hop) while the provider of a QA role (planner, s0, verifier,
+  finalizer; since 2026-10-27 also refiner and worker, RQ53) cannot be
+  looked up (not configured,
   invalid entry, unreadable providers.yaml; PR `session_models`, PR
   `model` or project setting), Then:
   - The tick prints one `Error:` line naming the problem and remedy,
@@ -899,8 +950,9 @@ below name the retired behaviour, RQ48–RQ51 win:
     makes no request to any endpoint. Every later tick says the same
     until the setting or file is fixed; the first tick after the fix
     launches QA once and the run reaches its normal verdict.
-  - A broken routed refiner/worker provider is not checked here: the
-    driver launches and the route gate waits with its remedy, as RQ45.
+  - (Superseded 2026-10-27, RQ53.) A broken routed refiner/worker
+    provider used not to be checked here, and its route gate waited. It
+    is now checked like the others.
   - A driver that still meets a provider setup error after launch (the
     file broken mid-run) logs one `QA stopped for <pr>: …` warning in the
     pm log, no traceback; the same for the TUI `t` path (bad02547).
@@ -970,9 +1022,10 @@ below name the retired behaviour, RQ48–RQ51 win:
     `ANTHROPIC_API_KEY` through. What the session's claude process
     actually sees matches `pm provider show`'s "launch env" and
     "launch unsets", in host and container mode.
-  - A configured `remedy` replaces the router-down hint wherever that
-    hint appears: the QA wait/stall line, the `pm pr start/review/signoff`
-    stderr line, and `pm provider show`/`test` status.
+  - A configured `remedy` replaces the router-down hint where that hint
+    appears: `pm provider show`/`test` status and the TUI provider list.
+    (The QA wait/stall line and the router-down `pm pr start/review/
+    signoff` refusal it also replaced were removed 2026-10-27, RQ52.)
   - `pm provider test <route> --live`: every model Claude requested must
     be the route's `model`. Without `probe_models`, any model the
     transcript records is accepted and shown. With `probe_models`, it must
@@ -1055,6 +1108,43 @@ below name the retired behaviour, RQ48–RQ51 win:
     {signoff: }` (absent for launches per RQ41) still shows the badge.
     This is an observation unless the popup and launches disagree.
 
+### Route failure simplification (2026-10-27; impl.md R6)
+- **RQ52** No route waiting or recovery. Given any role routed to a
+  router that is down, or goes down mid-run, When pm launches or
+  supervises it (TUI, CLI, auto-start, review loop, sign-off, QA in host
+  or container mode), Then:
+  - pm launches it without checking reachability.
+  - It handles failures exactly as for a session on the default
+    provider: Claude Code's API errors and retries in the pane, the
+    ordinary verdict reminder, refiner timeout, dead-worker relaunch with
+    its retry budget, and ERROR for a review iteration that produced no
+    verdict.
+  - It writes no route-specific wait, deferral, stall, recovery or
+    resume line and sends no route nudge.
+  - It sends no request for that role to another provider or account.
+  - Once the router is back, sessions reach it without pm acting.
+- **RQ53** Setup errors fail normally. Given a role whose provider is not
+  configured, whose entry is invalid, whose providers.yaml cannot be
+  read, or whose router has no `model`, an `api_base` with no host, or a
+  host `launcher` that is not executable, When it is launched, Then it is
+  refused when its command is built:
+  - CLI: one `Error: … Remedy: …` line, rc 1.
+  - QA: the TUI shows `QA stopped: …`. An auto-sequence tick prints one
+    `Error:` line and spawns no driver. This now covers the refiner and
+    worker too: every QA role is checked before the run, and the run
+    records no verdict.
+  - No traceback, nothing launched elsewhere, and no wait.
+- **RQ54** The bridge stays. Given container mode and a routed role,
+  When it launches, Then the container has the route bridge mount and
+  Claude reaches the router through the in-container forwarder.
+  Impl, review and sign-off refuse a bridge they cannot set up (or a
+  running container without the mount) with one `ContainerError` line
+  and no container left. A QA worker whose `ensure` fails exits before
+  Claude starts and takes the ordinary relaunch path. `pm provider test
+  [--container] [--live]`, `pm provider show` and the TUI provider list
+  still report the router's live status and configured `remedy`, as
+  diagnostics only.
+
 ## 2. Setup
 
 - Install pm from this PR's clone (`./install.sh --local` or venv per
@@ -1075,8 +1165,8 @@ below name the retired behaviour, RQ48–RQ51 win:
 - Fake-claude config (`pm fake-claude config set`) for `qa_planning`
   (scripted `QA_PLAN` body with 2–3 scenarios), `qa_verification`,
   `qa_finalize` so the loop is deterministic, **with no entry and no `_all`
-  for `qa_concretize`/`qa_scenario`** — fake sessions skip the route gate,
-  so routed roles must run real `claude` against the stub router. Scenario
+  for `qa_concretize`/`qa_scenario`** — routed roles must run real
+  `claude` against the stub router (a fake never uses the network). Scenario
   0 is launched with session type `qa_scenario` for fake purposes, so it
   will be real Claude as well; that is expected (it should go to the main
   account, not the stub).
@@ -1404,10 +1494,9 @@ below name the retired behaviour, RQ48–RQ51 win:
       actually reaches, including s0 with a legacy plain `qa_scenario`.
     The stub router needs canned answers for review prompts (a `PASS`
     verdict line), sign-off prompts (a SIGNOFF verdict) and impl prompts
-    (`ok`). The QA route gate skips fake sessions, but `wrap_claude_cmd`
-    checks the route even for a fake impl/review/sign-off command, so a
-    fake can drive the failure stories while real Claude proves the
-    router traffic. Harness: copy `/pm-captures/scenarios/23/scripts` or
+    (`ok`). (Historical: until 2026-10-27 `wrap_claude_cmd` checked the
+    route even for a fake impl/review/sign-off command, so a fake could
+    drive the failure stories. Since RQ52 it checks only the setup.) Harness: copy `/pm-captures/scenarios/23/scripts` or
     `/36/scripts` (container, two PRs) or `/50/scripts` (host, scratch
     TUI) and change S, the ports and the paths. Render with this branch's
     `/workspace/pm/qa/artifacts` `render_cast`, and never use
@@ -2044,11 +2133,34 @@ below name the retired behaviour, RQ48–RQ51 win:
       classifier_model) in container mode. A routed QA run with route-down
       wait, stop and recovery lines in the new wording and with the
       configured remedy. The classifier env is gone until
-      `--classifier-model` is set.
+      `--classifier-model` is set. Ran INPUT_REQUIRED: the container
+      route-wait Then conflicted with the designed check, and the user
+      resolved that by removing route waiting (RQ52). Its route-wait
+      results are historical. Its upgrade, wording and classifier
+      results stand for the code they ran on. Its recording limitation
+      stands (no mp4, `agg` missing).
     - S102: S97 carried forward unchanged (it never reported): where the
       runtime records land depending on how pm is run, and `pm tui
       restart` while a `qa-run-bg` driver is alive (RQ47 open points a
-      and b). Host, fake-claude.
+      and b). Host, fake-claude. Run 1d3e360382689633 was stopped by the
+      user for the route failure simplification. Its only remaining
+      worker container is frozen to keep its work, and it has no verdict.
+      It is not completed QA. RQ47 a/b stay open.
+  - Thirty-eighth pass, delta-only, for the route failure simplification
+    (impl.md R6; RQ9–RQ14 rewritten, RQ52–RQ54 new). None of it has run
+    live. Use real claude against the router and main stubs, in host and
+    container mode, and stop the router at the points below:
+    - Before a QA run's refiners launch.
+    - Mid-turn for a worker.
+    - While a queued scenario waits for a slot.
+    - Before `pm pr start`, `pm pr review` and `pm pr signoff`.
+    Expected: no route wait, deferral, stall or nudge lines; ordinary API
+    errors, reminders and relaunches; no main-stub traffic for routed
+    roles; recovery without pm acting once the router is back. Also
+    cover setup errors for the refiner/worker (unknown provider, router
+    with no model) from the TUI and from an auto-sequence tick (RQ53),
+    and in container mode an unusable bridge (RQ54). S102's RQ47 a/b and
+    the S73 double-drive question stay open, carried separately.
 
 ## 3. Edge cases
 
@@ -2057,13 +2169,15 @@ below name the retired behaviour, RQ48–RQ51 win:
 - **E2** Given `qa_scenario` set to `provider:nosuch` (not in
   providers.yaml), When QA launches a worker or the user runs
   `pm provider test nosuch`, Then it is refused with a "not configured"
-  problem and the remedy names configuring the provider or moving both
-  routed types back to a model — never a silent launch on built-in claude.
+  problem and the remedy names configuring the provider or moving its
+  sessions back to a model — never a silent launch on built-in claude.
+  Since 2026-10-27 (RQ53) QA stops with `QA stopped: …` before any
+  scenario launches instead of waiting.
 - **E3** *(retired 2026-10-27, R11; see RQ49.)* Given an entry with
   `credentials_file` pointing at an expired file and a
-  `refresh_command`, When preflight runs, Then neither is read or run:
-  the launch depends only on the router answering, and list/show warn
-  about the ignored keys.
+  `refresh_command`, When preflight runs, Then neither is read or run,
+  and list/show warn about the ignored keys. (Since 2026-10-27 a launch
+  does not depend on the router answering either, RQ52.)
 - **E4** Given a stub that pauses >10 s mid-stream, When a container worker
   streams through the bridge, Then the response completes (no EOF at the
   connect timeout).
@@ -2095,18 +2209,19 @@ Pass: every Then above observed on the user surface (CLI output, TUI
 status line / pane, stub-router request log, transcripts, hook output,
 `podman inspect`, pm logs). In particular: the stub sees only `work/`
 models and only from refiner/worker sessions; s0/planner/verifier/finalizer
-never hit the stub; route failures never produce a verdict or a launch on
-the main endpoint, and recover automatically; no secret values in any
-artifact.
+never hit the stub; a route outage never produces a launch on the main
+endpoint, and is handled like an outage of the default provider (RQ52:
+no route wait, deferral or nudge; ordinary reminders, relaunches and
+results); no secret values in any artifact.
 
 With a PR-level override (RQ39) "routed" means the role's resolved
 setting selects the route. For that PR the router may then see every
 role, while another PR's unrouted roles must still reach only main.
 
 Fail: any routed request reaching the main endpoint or a non-`work/`
-model (subagent requests included, RQ42), any unrouted role hitting the router, a verdict recorded because of
-a route outage, the verdict loop stalling for other scenarios while one
-waits, a queue that never drains after recovery, a leaked throwaway
+model (subagent requests included, RQ42), any unrouted role hitting the router, any
+route-specific wait, deferral, stall/recovery line or nudge (RQ52), a
+setup error that waits instead of failing (RQ53), a leaked throwaway
 container, a token value in output/logs, or hooks/transcripts missing for
 routed sessions.
 
@@ -2117,9 +2232,9 @@ routed sessions.
   impl.md §5). Scenarios use a stub router that mimics the `work/`-prefix
   contract; real end-to-end transport (bridge, slirp4netns, claude, hooks,
   transcripts) is still exercised.
-- *How to exercise gates with fake-claude.* Fake sessions bypass the gate
-  by design, so routed roles run real `claude` against the stub; other
-  roles may be faked.
+- *How to exercise routes with fake-claude.* A fake never uses the
+  network, so routed roles run real `claude` against the stub; other
+  roles may be faked. (There is no route gate since 2026-10-27.)
 - *Config changes mid-run.* Route/model config takes effect on the next
   QA run (impl.md §3) and is not tested as a live switch. The one live
   switch that is tested is `qa-verify-pass` (RQ28): a running loop keeps

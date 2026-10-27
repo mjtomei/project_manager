@@ -28,6 +28,17 @@ assumed command for now; removing that is plan-delivery D1/D4.
 This PR also owns the configuration story for which command, model and
 effort each PR uses (R10-R13).
 
+Scope update (2026-10-27, user decision: route failure simplification).
+pm keeps no route-specific waiting or recovery. A routed provider that is
+unavailable fails through the same launch / API-failure handling as the
+default provider. Kept: the explicit provider/model/effort binding, the
+host-to-container bridge, safe secret handling, and setup/configuration
+errors that fail the launch normally. Nothing ever falls back to another
+provider or account. This resolves S101's route-wait/container policy
+conflict in favour of no route waiting. Evidence recorded for the earlier
+waits (R6 history, S5, S52/S55, S98's host gate, S101) is historical, not a
+passing result under the new R6.
+
 R10. **Generic router provider.**
 - The endpoint comes only from `api_base` (ANTHROPIC_BASE_URL).
 - The Claude Code proxy behaviours stay as overridable defaults: alias/subagent
@@ -99,12 +110,13 @@ existing model config, per session type:
   (`_relaunch_scenario_window`).
 Both resolve via `_resolve_qa_model`, so existing overrides (`PM_MODEL` > PR
 `model` > project > global) apply identically to launch, retry and resume.
-For implementation, review, and sign-off, the shared container wrapper checks
-an explicitly selected provider before launch and mounts its router bridge.
-Their command builders use container mode, avoiding host-only launcher paths.
-An unavailable route blocks launch; it must not switch to the main account.
-The isolated route tests cover bridge mount preservation, refusal to launch an
-unavailable route, and the review/sign-off callers' container/provider wiring.
+For implementation, review, and sign-off, the shared container wrapper starts
+and mounts an explicitly selected router's bridge (R6). Their command builders
+use container mode, avoiding host-only launcher paths. A provider that cannot
+be set up fails the launch; nothing switches to another account. The isolated
+route tests cover bridge mount preservation, refusal of a bridge or container
+that cannot be set up, and the review/sign-off callers' container/provider
+wiring.
 
 
 R2. **Route definition is host-local.** A route is a provider in
@@ -168,39 +180,63 @@ new session type `qa_interactive` (fallback `qa`) through
 `build_claude_shell_cmd` so fake-claude behaviour is unchanged. Planner,
 verifier, finalize, impl/review/sign-off/watcher/merge keep their own types.
 
-R6. **No silent fallback; recoverable errors.** `worker_route.check_route()`
-validates: provider configured, type router, model set; router TCP port
-answers; launcher executable (host); (credential expiry/refresh checks
-removed 2026-10-27, R11); for containers the host bridge is alive, the container has the mount, and
-the in-container ensure succeeds (`exec`). On failure, for refiner and
-worker alike:
-- initial launch: `_await_route` waits (stop-aware, rechecks every 15 s)
-  with `latest_output` = problem + remedy, then launches by itself;
-- queued launch: stays queued (`… deferred — …`). Queued launches run
-  inside the verdict-collection loop (`_launch_next_queued`), so their
-  launch gates never wait there (`_route_gate(deferred=…)`): if the route
-  fails between the queue check and the refiner/worker gate, the scenario
-  is restored to its pre-launch state, put back at the front of the queue
-  and the failing status cached for the queue check; a refiner window
-  already opened is closed (the refiner reruns at relaunch) and a QA
-  container created for the launch is removed (the relaunch re-clones the
-  workdir; a container reused by name would keep its bind mount on the
-  deleted clone). The poll loop
-  retries the queue every tick (cached check), so a deferred scenario also
-  launches when no other verdict event would refill its slot;
-- window-death retry: deferred without spending a retry slot;
-- session idle without its verdict/markers while the route is unhealthy
-  (`_RouteStallWatch`, workers in the poll loop, refiners via
-  `poll_for_verdict(on_idle_without_verdict=, on_tick=)`): remedy surfaced,
-  the verdict reminder suppressed, and once the route is healthy the
-  session is nudged to continue (nudge text, then two bare Enters, as
-  the verdict follow-ups do: Claude can take one text+Enter burst as a
-  paste and leave it unsent);
-- QA stopped during an initial launch's route wait: the scenario has no
-  window and keeps reason `stopped while waiting for the work route`; the
-  poll loop's "no window → INPUT_REQUIRED" marking skips it, so it stays
-  unverdicted (overall INPUT_REQUIRED via the unverdicted check).
-None of these records a verdict. Fake-claude sessions skip the gate.
+R6. **No silent fallback; an outage is an ordinary failure** (user decision
+2026-10-27; replaces the route waits, see "R6 history" below).
+- *Setup errors fail the launch.* These are: a provider that is not
+  configured, an unreadable providers.yaml, an invalid entry (all
+  `ProviderNotFoundError`), and a router whose own settings cannot launch a
+  session. `worker_route.setup_problem` finds the router cases: no `model`,
+  an `api_base` with no host, a host `launcher` that is not executable.
+  `launch_parts` raises them as `RouteSetupError` (a `ProviderEntryError`)
+  when the command is built. Every surface reports them like a missing
+  provider:
+  - CLI: one `Error:` line, rc 1.
+  - QA: `check_qa_providers` covers every QA role, the refiner and worker
+    included. It runs before the detached auto-sequence driver starts, and
+    `_require_scenario_setup` runs before scenarios launch. The run then
+    stops with `QA stopped: …` (`record_setup_stop`).
+  - Launch threads re-raise a setup error after they are joined.
+- *Container bridge.* In container mode `wrap_claude_cmd` (impl, review,
+  sign-off) starts and mounts the router's host bridge
+  (`container_mounts(strict=True)`). A bridge that cannot be set up is a
+  `ContainerError` (rc 1), as is a running container without the mount.
+  QA scenario containers mount the bridge leniently. If it cannot be used,
+  the in-container `ensure` step exits 3 with problem and remedy, so
+  `ensure && claude` never starts Claude. The pane exits and the poll
+  loop's ordinary dead-worker relaunch and retry budget apply.
+- *A router that is down gets no special handling.* pm does not check
+  reachability before a launch, and has no route wait, deferred queue,
+  route-specific idle or API-error watch, or recovery nudge. Claude Code
+  meets the outage as API errors and retries by itself. A turn that ends on
+  the error is an ordinary idle without a verdict: a worker gets the
+  verdict reminder, a refiner its normal timeout and fallback. A dead pane
+  takes the ordinary relaunch with retries. All of this is the same as on
+  the default provider.
+- `worker_route.check_route` remains only as a diagnostic: `pm provider
+  test`, `pm provider show` and the TUI provider list. A configured
+  `remedy` is shown there.
+- Removed:
+  - `_await_route`, `_route_gate`, `_route_checker`, `_RouteStallWatch`
+    and `_drop_deferred_launch`;
+  - the `stopped while waiting for the route` reason;
+  - `poll_for_verdict(on_idle_without_verdict=, on_tick=)` and
+    `verdict_transcript.latest_api_error`;
+  - `QALoopState._notify_cb`;
+  - `wrap_claude_cmd(session_type=)` and its host-mode reachability gate
+    (S98);
+  - the per-tick queue refill for deferred launches.
+
+R6 history (historical; not current behaviour). From 2026-10-22 to
+2026-10-27, `check_route` gated every refiner and worker launch:
+- Initial launches waited, rechecking every 15 s.
+- Queued launches were deferred and requeued.
+- Window-death retries were deferred without spending a retry.
+- Idle-without-verdict turns on an unhealthy route were surfaced and then
+  nudged once the route recovered.
+- Impl, review and sign-off were refused while the router was down.
+
+The validation index entries 5, 6/11/14, 99cf, acdb and S98's host gate,
+and the S101 container removal, record that design.
 
 R7. **Visibility.** Each refiner/worker launch logs
 `route=<name> model=<m> effort=<e> via=<host|launcher:…|container-bridge>`
@@ -378,10 +414,12 @@ variables, so the suite gives the same result inside a routed session.
   and resume.
 - *Config changes mid-run.* Launches within a run use the project data the
   run loaded at start (as before this PR); a change takes effect on the next
-  QA run. A container created without the bridge mount cannot gain it; the
-  gate reports "restart QA" as the remedy.
-- *Failure semantics.* "Recoverable" = wait with an explained message and
-  continue automatically once fixed (no verdict), not INPUT_REQUIRED.
+  QA run. A container created without the bridge mount cannot gain it: a
+  workflow launch is refused with "remove it and launch again", and a QA
+  worker's ensure step fails (dead-worker relaunch).
+- *Failure semantics* (2026-10-27, R6). A setup error fails the launch, or
+  stops a QA run. An unavailable router is an API failure inside the
+  session, handled as on the default provider. Nothing waits on a route.
 - *s0 legacy fallback.* `qa_interactive` → `qa`; if neither is configured and
   `qa_scenario` is a plain model (not a provider), s0 keeps using it.
   `resolve_model_and_provider("qa_interactive")` applies this (source
@@ -402,21 +440,20 @@ variables, so the suite gives the same result inside a routed session.
   Containers never use the launcher.
 - *Other session types on a router provider.* Routing is generic config, so
   a user could put any type on a router provider (a PR-level override puts
-  every role there). Refiner and worker launches are gated with the
-  recoverable waits of R6. In container mode, implementation, review and
-  sign-off are gated once by the shared `container.wrap_claude_cmd`: an
-  unavailable route is a `ContainerError` with the remedy, and nothing is
-  launched. Host-mode launches of those roles, and host QA planner, s0,
-  verifier and finalizer, are not gated: they start Claude with the
-  router's `ANTHROPIC_BASE_URL`, so a down router shows an API error in the
-  pane, never a main-account fallback.  A provider that is not configured
-  on this host is refused for every role when its command is built: one
+  every role there). No role is gated on the router answering (R6). Every
+  role starts Claude with the router's `ANTHROPIC_BASE_URL`, so a down
+  router shows API errors in the pane, never another account. A provider
+  that is not configured on this host, or a router whose settings cannot
+  launch, is refused for every role when its command is built: one
   `Error:` line from the CLI, `QA stopped: …` for a QA run (item 41(f)).
+  In container mode `container.wrap_claude_cmd` also refuses a bridge it
+  cannot set up (`ContainerError`).
 
 ## 4. Edge cases
-- Router up but work token expired → caught by the `expiresAt` check
-  before launch; mid-run expiry → session idles with an API error, the
-  stall watch surfaces the remedy and nudges it once fixed.
+- Router down, or its upstream sign-in expired (before or during a run) →
+  the session gets API errors, Claude Code retries, and pm treats the
+  outcome like any session's: a reminder for an idle worker without a
+  verdict, a relaunch with retries for a dead pane (R6, R11).
 - Host bridge killed while containers run → next check restarts it at the
   same path; the container sees the new socket through the directory
   mount; the in-container forwarder reconnects per connection.
@@ -426,8 +463,8 @@ variables, so the suite gives the same result inside a routed session.
   (thread lock + flock).
 - Unix socket path ≤ 100 bytes (hash fallback, then /tmp).
 - Coordination with #241/#245/#247: changes confined to command building,
-  route-gate calls, one `create_qa_container` kwarg and two optional
-  `poll_for_verdict` callbacks.
+  setup checks and one `create_qa_container` kwarg (the route gates and
+  the two `poll_for_verdict` callbacks were removed by R6, 2026-10-27).
 
 ## 5. Validation status
 
@@ -463,20 +500,18 @@ below (item 42 records the suites up to 3738).
   passed as `-e NAME`, with values only in the runtime's process env.
   `_claude_project_dir` mangles every non-alphanumeric cwd character to
   `-`. `live_probe` fails with `missing evidence: …` (81cebf17).
-- 5. A scenario stopped during a route wait stays unverdicted (0b1edfca).
-- 6, 11, 14. Route nudges and the verdict reminder are submitted (text,
-  then two Enters, `_send_submitted`; c5d7d64f, 7b765217). A repeat
-  deferral is shown again. A routed API-error turn is resumed once the
-  route answers, once per error record, max 3 per worker session. That
-  applies to routed sessions only, and a relaunch gets a fresh watch
-  (7c401141, 8a99 i1). A resume is announced only after the nudge is
-  typed (5432f736).
-- 99cf i1–i4. Shared `worker_route.launch_parts`. Queued gates never
-  block the verdict loop (defer → restore → requeue, queue retried each
-  tick). `_resolve_provider` drops a router provider's unset vars. The
-  bridge dir must be a real directory the user owns (lstat).
-- acdb i4. A queued container launch deferred at a gate removes its
-  container and proxy (`_drop_deferred_launch`).
+- 5. (Historical: the route wait was removed by R6.) A scenario stopped
+  during a route wait stayed unverdicted (0b1edfca).
+- 6, 11, 14. The verdict reminder is submitted (text, then two Enters,
+  `_send_submitted`; c5d7d64f, 7b765217). Historical (removed by R6):
+  route nudges, repeat-deferral notices and the resume of a routed
+  API-error turn (7c401141, 8a99 i1, 5432f736).
+- 99cf i1–i4. Shared `worker_route.launch_parts`. `_resolve_provider`
+  drops a router provider's unset vars. The bridge dir must be a real
+  directory the user owns (lstat). Historical (removed by R6): queued
+  gates deferred and requeued without blocking the verdict loop.
+- acdb i4. Historical (removed by R6): a queued container launch deferred
+  at a gate removed its container and proxy (`_drop_deferred_launch`).
 - 7, 17. The push proxy runs with cwd `/`. Shared proxy start and stop
   hold a per-key lock. The daemon exits when its socket is removed or
   replaced and unlinks only its own socket (dbb88ea8, 75649ae4, 8a3d3412,

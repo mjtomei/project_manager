@@ -181,10 +181,15 @@ A model value is a model name (`opus`, `claude-opus-5-5`, ...) or
 `provider:<name>` for a provider defined on this host in
 `~/.pm/providers.yaml`. A provider of type `router` points Claude at an
 Anthropic-compatible endpoint that holds its own credentials (an account
-router or proxy). pm sets `ANTHROPIC_BASE_URL` from its `api_base`, checks
-that it answers before launching, and, in container mode, bridges it into
-the container. pm never stores, checks or refreshes credentials: signing in
-happens outside pm, as it does for plain `claude`.
+router or proxy). pm sets `ANTHROPIC_BASE_URL` from its `api_base` and, in
+container mode, bridges it into the container. A provider that is missing
+or misconfigured stops the launch with an error; pm never falls back to
+another provider or account. A router that is down is not special: the
+session sees the API errors Claude Code reports for any unreachable
+endpoint, and pm handles that session like one on the default provider
+(`pm provider test` checks a router on demand). pm never stores, checks or
+refreshes credentials: signing in happens outside pm, as it does for plain
+`claude`.
 
 ```yaml
 # ~/.pm/providers.yaml
@@ -196,7 +201,7 @@ providers:
     effort: high                    # optional default effort
     classifier_model: <model>       # optional: auto-mode permission classifier
     launcher: <executable>          # optional: run instead of claude (host)
-    remedy: <text>                  # optional: shown when the route is down
+    remedy: <text>                  # optional: shown when a check finds it down
     env: {VAR: value}               # optional; VAR: null drops a default
 ```
 

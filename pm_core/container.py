@@ -1094,7 +1094,6 @@ def _wrap_claude_cmd(
     session_tag: str | None = None,
     pr_id: str | None = None,
     provider: str | None = None,
-    session_type: str | None = None,
 ) -> tuple[str, str]:
     """Create a container and return a wrapped command for tmux.
 
@@ -1113,51 +1112,41 @@ def _wrap_claude_cmd(
             for shared push proxies (with *pr_id*).
         pr_id: PR identifier — combined with *session_tag* to share push
             proxies across containers on the same branch.
-        provider: The provider *claude_cmd* was built for.  A router
-            provider (pm_core.worker_route) is checked before the
-            container is created and its bridge socket dir is mounted
-            (outside container mode it is still checked); an unavailable
-            route raises ContainerError.
-        session_type: The role being launched (``impl``, ``review``,
-            ``signoff``), named in that error's remedy.
+        provider: The provider *claude_cmd* was built for.  In container
+            mode a router provider (pm_core.worker_route) gets its host
+            bridge started and its socket dir mounted; a bridge or
+            container that cannot be set up raises ContainerError.  Whether
+            the router answers is not checked: a router that is down is an
+            API failure inside the session, as on any other provider.
 
     Returns:
         (wrapped_cmd, container_name).  container_name is "" if not containerised.
     """
     if not is_container_mode_enabled():
-        # Host sessions get the same gate (no container, no bridge): a
-        # route that is down never launches claude against a dead router.
-        if provider:
-            from pm_core import worker_route
-            from pm_core.model_config import ModelResolution
-            ready = worker_route.check_route(
-                ModelResolution(provider=provider), session_type=session_type)
-            if not ready.ok:
-                raise ContainerError(ready.message())
         return claude_cmd, ""
 
     cname = _make_container_name(label, session_tag=session_tag)
 
-    # Non-QA workflow roles need the same account-router bridge as QA
-    # workers. Validate before creating a container; never fall back to
-    # another account when an explicitly selected route is unavailable.
+    # Workflow roles on a router reach it through the same bridge as QA
+    # workers.  Never fall back to another account when an explicitly
+    # selected route cannot be set up.
     if provider:
         from pm_core import worker_route
         from pm_core.model_config import ModelResolution
-        resolution = ModelResolution(provider=provider)
-        ready = worker_route.check_route(resolution, container=True,
-                                         session_type=session_type)
-        if not ready.ok:
-            raise ContainerError(ready.message())
-        route_mounts = worker_route.container_mounts(resolution)
+        from pm_core.providers import ProviderNotFoundError
+        try:
+            route_mounts = worker_route.container_mounts(
+                ModelResolution(provider=provider), strict=True)
+        except ProviderNotFoundError as exc:
+            raise ContainerError(str(exc)) from exc
         # create_container reuses a running container by name, and a
         # container created before the route was selected cannot gain the
         # mount: its in-container ensure step would refuse to start Claude.
         if (route_mounts and container_is_running(cname)
                 and worker_route.container_has_route_mount(cname) is False):
             raise ContainerError(
-                f"route '{ready.route}' unavailable: container {cname} is "
-                "running without the route socket mount. Remedy: end the "
+                f"provider '{provider}': container {cname} is running "
+                "without the route socket mount. Remedy: end the "
                 f"session using it, remove it ({_get_runtime()} rm -f "
                 f"{cname}) and launch again.")
         extra_rw_mounts = dict(extra_rw_mounts or {})

@@ -4,7 +4,9 @@ Moved here verbatim from `qa.md` §2 (Setup), right after "Lessons from
 the first QA run", in review loop a183 i1 (2026-10-23). This keeps the QA
 planner / sign-off / review prompts under Linux MAX_ARG_STRLEN
 (pr-ace66e5). Every pass below is complete. Their requirements are RQ1–RQ34
-and E1–E10 in `qa.md`, which still apply. This file keeps each pass's
+and E1–E10 in `qa.md`, which still apply, except the route waits,
+deferrals and nudges removed on 2026-10-27 (`qa.md` RQ9–RQ14, RQ52–RQ54):
+results recorded below for those are historical. This file keeps each pass's
 delta scope, the harness it reused and its harness gotchas. The text is
 unchanged (list items keep their `qa.md` indentation).
 

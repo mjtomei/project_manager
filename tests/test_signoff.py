@@ -774,7 +774,6 @@ class TestWindowLaunchWorkdir:
         assert self.build.call_args.kwargs["provider"] == "claude-work"
         assert self.build.call_args.kwargs["session_tag"] == "x"
         assert self.wrap.call_args.kwargs["provider"] == "claude-work"
-        assert self.wrap.call_args.kwargs["session_type"] == "signoff"
 
     def test_signoff_removes_the_session_tagged_container_it_recreates(
             self, tmp_path):
