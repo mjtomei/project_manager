@@ -875,6 +875,9 @@ class TestBuildExecCmd:
                              proxy_socket_path="/tmp/pm-push-proxy-x/push.sock")
         assert "rm -f" in cmd
         assert "/tmp/pm-push-proxy-x/push.sock" in cmd
+        # The proxy's metadata sidecar must go too, or rmdir fails and the
+        # directory leaks in /tmp.
+        assert "/tmp/pm-push-proxy-x/proxy.json" in cmd
         assert "rmdir" in cmd
         assert "/tmp/pm-push-proxy-x" in cmd
         # Socket removal should come before container rm

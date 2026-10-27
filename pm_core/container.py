@@ -1019,6 +1019,12 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
             f"{runtime} rm -f {shlex.quote(name)} >/dev/null 2>&1")
         if proxy_socket_path:
             sock_dir = str(Path(proxy_socket_path).parent)
+            # The proxy records its workdir/branch in a metadata sidecar next
+            # to the socket.  Leaving it behind makes `rmdir` fail, so the
+            # directory (and the sidecar) would leak in /tmp.
+            from pm_core.push_proxy import _METADATA_NAME
+            cleanup_parts.append(
+                f"rm -f {shlex.quote(str(Path(sock_dir) / _METADATA_NAME))}")
             cleanup_parts.append(f"rmdir {shlex.quote(sock_dir)} 2>/dev/null")
         # Wrap in a bash trap so cleanup runs even when the pane is killed
         # via tmux kill-pane/kill-window (SIGHUP to the outer shell causes

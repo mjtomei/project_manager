@@ -424,3 +424,49 @@ Tests: `test_legacy_registration_happens_under_the_start_lock`,
 848ab98c for the right reason (registration observed after lock release;
 lock path missing after a racing unlink; a replacement lock file deleted;
 `OSError` escaping `start_push_proxy`).
+
+## Review iteration 7 refinements
+
+Added during the seventh review pass (consistent with R5/R6/R7; no
+requirement changed):
+
+- **Teardown resolves the glob's parent.** `_remove_proxy_dirs` compared
+  the resolved entry path (`os.path.realpath(path)`) against the *literal*
+  glob parent (`os.path.dirname(glob_pattern)`). Where `/tmp` is a symlink
+  (macOS: `/tmp -> /private/tmp`) the two never match, so every legitimate
+  proxy directory was refused as "non-proxy" and session teardown leaked
+  them. `_kill_proxy_socket` already resolved both sides; the sweep now
+  does too.
+- **An unusable start-lock file no longer escapes as a bare `OSError`.**
+  `/tmp` is world-writable, so another user can plant
+  `pm-push-proxy-*.lock` with a mode we cannot open. `_start_lock` let
+  `os.open()`/`fcntl.flock()` raise `PermissionError`, which aborted a
+  whole teardown sweep and, on the start path, surfaced through
+  `wrap_claude_cmd` as the misleading "Is docker running?" message. The
+  non-blocking form now treats "cannot open/lock" like "busy" (yields
+  `False`, the directory is skipped); the blocking form raises
+  `PushProxyError` naming the lock path.
+- **The discovery-symlink replacement cannot delete another user's
+  directory.** `_shared_sock_dir` `shutil.rmtree`s a *real* directory
+  squatting on the long name before linking to the hashed directory. It
+  now only does so when the directory is ours, matching the `st_uid`
+  guard the sweep and `_kill_proxy_socket` got in iterations 1–2.
+- **A busy proxy is no longer mistaken for a dead one.** The daemon
+  serves one request at a time (a push can run 120 s) and
+  `proxy_is_alive` probes connect without sending. With `listen(1)` a
+  single queued probe made the next connect block until its 2 s timeout,
+  so a live-but-busy proxy looked dead and callers replaced it — the
+  failure mode R3 exists to prevent. The backlog is now 16.
+- **The legacy in-pane cleanup removes the metadata sidecar.** For a
+  non-shared proxy, `build_exec_cmd`'s EXIT trap removed `push.sock` and
+  then `rmdir`'d the directory, but the daemon's `proxy.json` sidecar
+  (new in this change) kept it non-empty, so the `rmdir` failed and the
+  directory leaked. The trap now removes the sidecar first.
+
+Tests: `test_unopenable_lock_file_is_skipped_by_teardown`,
+`test_sweep_resolves_a_symlinked_parent`,
+`test_shared_sock_dir_keeps_a_foreign_directory`, and an extended
+`test_cleanup_removes_proxy_socket` (metadata sidecar in the EXIT trap).
+The first three fail at 23b21cc0 for the right reason (a `PermissionError`
+escapes both lock modes; the sweep leaves the directory; the foreign
+directory is `rmtree`d).

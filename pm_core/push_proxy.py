@@ -240,7 +240,13 @@ class PushProxy:
         # Record the served workdir/branch so start_push_proxy can refuse a
         # mismatched reuse instead of silently replacing this daemon.
         _write_metadata(self.socket_path, self.workdir, self.allowed_branch)
-        self._server_socket.listen(1)
+        # A small backlog matters: the handler serves one request at a time
+        # (a push can run for up to two minutes), and ``proxy_is_alive``
+        # probes connect without sending.  With a backlog of 1 a single
+        # queued probe made the next connect block until the 2 s timeout,
+        # so a *busy but live* proxy looked dead and callers replaced it —
+        # the very failure this keying change exists to prevent.
+        self._server_socket.listen(16)
         self._server_socket.settimeout(2.0)
 
         self._thread = threading.Thread(
@@ -792,8 +798,20 @@ def _shared_sock_dir(session_tag: str, pr_id: str,
     try:
         os.symlink(short_dir, long_dir)
     except FileExistsError:
-        # If it's a stale real directory, replace with symlink
+        # A real directory squatting on the long name blocks the link.
         if os.path.isdir(long_dir) and not os.path.islink(long_dir):
+            # /tmp is world-writable, so the path may belong to someone else.
+            # A foreign directory is not ours to delete (and its entries
+            # would not be removable anyway); the discovery link is optional,
+            # so leave it and carry on with the hashed directory.
+            try:
+                ours = os.stat(long_dir).st_uid == os.getuid()
+            except OSError:
+                ours = False
+            if not ours:
+                _log.warning("Push proxy: refusing to replace a directory "
+                             "owned by another user: %s", long_dir)
+                return short_dir
             shutil.rmtree(long_dir, ignore_errors=True)
             try:
                 os.symlink(short_dir, long_dir)
@@ -850,11 +868,38 @@ def _start_lock(sock_dir: str, blocking: bool = True):
     lock_path = os.path.realpath(sock_dir) + ".lock"
     flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
     for _attempt in range(_LOCK_ATTEMPTS):
-        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        except OSError as exc:
+            # /tmp is world-writable: another user can plant
+            # ``pm-push-proxy-*.lock`` with a mode we cannot open.  Teardown
+            # must skip that directory instead of aborting the whole sweep,
+            # and a start must fail as a proxy error rather than leak a bare
+            # OSError (which wrap_claude_cmd would blame on the runtime).
+            if blocking:
+                raise PushProxyError(
+                    f"could not open push proxy start lock {lock_path}: "
+                    f"{exc}") from exc
+            _log.warning("Push proxy start lock %s is unusable (%s); "
+                         "skipping", lock_path, exc)
+            yield False
+            return
         try:
             try:
                 fcntl.flock(fd, flags)
             except BlockingIOError:
+                yield False
+                return
+            except OSError as exc:
+                # Same treatment for a lock we cannot take (e.g. EACCES on a
+                # file another user opened): skip during teardown, fail
+                # loudly during a start.
+                if blocking:
+                    raise PushProxyError(
+                        f"could not lock push proxy start lock {lock_path}: "
+                        f"{exc}") from exc
+                _log.warning("Push proxy start lock %s is not lockable (%s); "
+                             "skipping", lock_path, exc)
                 yield False
                 return
             if _fd_is_path_file(fd, lock_path):
@@ -1237,7 +1282,11 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
     socket a container still bind-mounts.
     """
     import glob as _glob
-    parent = os.path.dirname(glob_pattern)
+    # Resolve the parent too: on platforms where /tmp is a symlink (macOS:
+    # /tmp -> /private/tmp) the literal glob parent never matches the
+    # resolved entry path, so every directory would be refused and teardown
+    # would leak them.  _kill_proxy_socket resolves both sides already.
+    parent = os.path.realpath(os.path.dirname(glob_pattern))
     for path in _glob.glob(glob_pattern):
         if path.endswith(".lock"):
             continue

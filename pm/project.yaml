@@ -14491,7 +14491,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T07:49:36.874007+00:00'
+  updated_at: '2026-10-27T08:15:36.888505+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14700,6 +14700,43 @@ prs:
       sweeps without the start-lock guard.'
     created_at: '2026-10-27T07:49:36Z'
     last_edited: '2026-10-27T07:49:36Z'
+  - id: note-68f453f
+    text: 'Review-loop db89 i4 (2026-10-27): reviewed 23b21cc0 (unchanged since db89
+      i3). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact); test_impl_and_qa_get_distinct_proxies fails at
+      74462d76 for the right reason (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock,
+      assert 1 == 3). Five fixes applied, each with a test that fails at 23b21cc0
+      and passes at HEAD: (1) _remove_proxy_dirs compared the resolved entry path
+      against the literal glob parent; where /tmp is a symlink (macOS /tmp -> /private/tmp)
+      every legitimate proxy dir was refused and teardown leaked them — the parent
+      is now realpath-ed (reproduced: dir survives the sweep). (2) _start_lock let
+      os.open()/fcntl.flock() raise PermissionError for a lock file another user planted
+      in world-writable /tmp: a teardown sweep aborted, and a start surfaced through
+      wrap_claude_cmd as "Is docker running?" — non-blocking now treats it like busy
+      (yields False), blocking raises PushProxyError (reproduced: PermissionError
+      escapes both modes). (3) _shared_sock_dir rmtree-d a real directory squatting
+      on the long discovery name without checking ownership; it now requires st_uid
+      == ours, matching the sweep/kill guards from i1-i2. (4) listen(1) -> listen(16):
+      the daemon serves one request at a time (a push can run 120 s) and proxy_is_alive
+      probes connect without sending, so one queued probe made the next connect time
+      out and a live-but-busy proxy was replaced — the failure R3 exists to prevent.
+      (5) build_exec_cmd EXIT trap (legacy per-container proxies) removed push.sock
+      then rmdir-d the dir, but the new proxy.json sidecar kept it non-empty so the
+      rmdir failed and the dir leaked; the trap now removes the sidecar first. Tests:
+      tests/test_push_proxy.py 95 passed, tests/test_container.py 101 passed (196
+      together); full suite 3784 passed, 1 skipped, 13 failed (all pre-existing environment:
+      12 test_markdown_render missing markdown module + test_hook_events::test_installer_writes_standalone_receiver),
+      run with PATH=/usr/bin:/bin, PYTHONPATH=/workspace. Residual, unchanged and
+      out of scope: in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir (option (3), workdir-per-request, remains the cleaner
+      long-term design); stop_all_proxies (no non-test callers) still sweeps without
+      the start-lock guard; proxy_is_alive still cannot distinguish a busy daemon
+      from a dead one beyond the larger backlog. Also noted on pr-a9803aa: the local-path-origin
+      rejection is bypassed by a positional local path/file:// URL, not only --repo
+      (pre-existing).'
+    created_at: '2026-10-27T08:15:36Z'
+    last_edited: '2026-10-27T08:15:36Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -35800,8 +35837,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-27T07:45:34.452329+00:00'
-  updated_at: '2026-10-27T07:45:34.452329+00:00'
+  updated_at: '2026-10-27T08:10:08.615809+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-913e50f
+    text: 'Additional bypass found while reviewing pr-748e708 (2026-10-27): the same
+      local-path-origin rejection is also bypassed by naming the local repository
+      as the *positional remote* instead of `--repo`, e.g. `git push /tmp/victim.git
+      <allowed-branch>` or `git push file:///tmp/victim.git <allowed-branch>`. `_extract_remote_name`
+      returns that string, `_resolve_local_remote_url(workdir, "/tmp/victim.git")`
+      runs `git remote get-url /tmp/victim.git`, which fails (not a configured remote)
+      and returns None, so `_execute_push` treats it as a real remote and `_local_push`
+      runs `git -C <workdir> push /tmp/victim.git ...` on the host. A `file://` URL
+      is also treated as a real remote by the `"://" in url` test in `_resolve_local_remote_url`.
+      Fixing this PR should therefore reject a local path/`file://` URL in the positional
+      remote too, not only `--repo`. The in-container wrapper forwards args verbatim,
+      so both are reachable from a container. Pre-existing on master, unchanged by
+      pr-748e708.'
+    created_at: '2026-10-27T08:10:08Z'
+    last_edited: '2026-10-27T08:10:08Z'

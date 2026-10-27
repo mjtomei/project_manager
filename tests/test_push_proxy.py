@@ -593,6 +593,31 @@ class TestStartLock:
             "teardown deleted a replacement lock file another process owns")
         assert Path(lock_path).read_text() == "new"
 
+    @pytest.mark.skipif(os.geteuid() == 0,
+                        reason="root ignores the 0o000 lock-file mode")
+    def test_unopenable_lock_file_is_skipped_by_teardown(self, tmp_path):
+        """A /tmp lock file another user planted must not abort a sweep.
+
+        Teardown takes the lock non-blocking and treats "cannot open" like
+        "busy": skip this directory.  A start, by contrast, must fail loudly
+        as a PushProxyError rather than leak a bare PermissionError.
+        """
+        from pm_core.push_proxy import PushProxyError
+
+        sock_dir = str(tmp_path / "lockperm")
+        os.makedirs(sock_dir, exist_ok=True)
+        lock_path = sock_dir + ".lock"
+        Path(lock_path).write_text("")
+        os.chmod(lock_path, 0o000)
+        try:
+            with push_proxy_mod._start_lock(sock_dir, blocking=False) as held:
+                assert held is False
+            with pytest.raises(PushProxyError, match="start lock"):
+                with push_proxy_mod._start_lock(sock_dir, blocking=True):
+                    pass
+        finally:
+            os.chmod(lock_path, 0o600)
+
 
 class TestSharedProxy:
     """Tests for (session_tag, pr_id) shared proxy behaviour."""
@@ -1409,6 +1434,46 @@ class TestWorkdirKeyedProxies:
         push_proxy_mod._remove_proxy_dirs("/tmp/pm-push-proxy-lockguard-*")
         assert not os.path.exists(sock_dir)
         assert not os.path.exists(lock)
+
+    def test_sweep_resolves_a_symlinked_parent(self, tmp_path):
+        """A symlinked /tmp (macOS: /tmp -> /private/tmp) must not defeat the sweep.
+
+        ``_remove_proxy_dirs`` compares the resolved entry path against the
+        glob's parent, so the parent has to be resolved too — otherwise every
+        legitimate proxy directory is refused and teardown leaks them.
+        """
+        alias = str(tmp_path / "tmpalias")
+        os.symlink("/tmp", alias)
+        sock_dir = os.path.join(alias, "pm-push-proxy-sweepparent-impl")
+        os.makedirs(sock_dir, exist_ok=True)
+        Path(sock_dir, "push.sock").write_text("stale\n")
+        try:
+            push_proxy_mod._remove_proxy_dirs(
+                os.path.join(alias, "pm-push-proxy-sweepparent-*"))
+            assert not os.path.exists(sock_dir)
+        finally:
+            shutil.rmtree(sock_dir, ignore_errors=True)
+
+    def test_shared_sock_dir_keeps_a_foreign_directory(self, monkeypatch):
+        """/tmp is world-writable; a planted real dir is not ours to delete."""
+        tag = "t" * 80  # forces the hashed directory + discovery symlink
+        impl = "/tmp/some-impl-workdir"
+        token = push_proxy_mod._workdir_token(impl)
+        short_dir = push_proxy_mod._shared_sock_dir_path(tag, self.PR, token)
+        long_dir = f"/tmp/{push_proxy_mod._SOCKET_DIR_PREFIX}{tag}-{self.PR}-{token}"
+        os.makedirs(long_dir, exist_ok=True)
+        Path(long_dir, "keep.txt").write_text("keep\n")
+        real_uid = os.getuid()  # capture before patching the module's os
+        monkeypatch.setattr("pm_core.push_proxy.os.getuid",
+                            lambda: real_uid + 1)
+        try:
+            assert push_proxy_mod._shared_sock_dir(tag, self.PR, token) == short_dir
+            assert Path(long_dir, "keep.txt").exists(), (
+                "teardown replaced a directory owned by another user")
+            assert not os.path.islink(long_dir)
+            assert os.path.isdir(short_dir)
+        finally:
+            shutil.rmtree(long_dir, ignore_errors=True)
 
 
 class TestIntegrationFetchPull:
