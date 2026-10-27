@@ -737,23 +737,57 @@ def _shared_sock_dir(session_tag: str, pr_id: str,
 
 
 @contextlib.contextmanager
-def _start_lock(sock_dir: str):
+def _start_lock(sock_dir: str, blocking: bool = True):
     """Serialise check-and-spawn across processes for one socket directory.
 
     The lock file sits *next to* the directory (not inside it) so it never
     keeps a bind-mounted directory from being removed at session teardown.
+
+    Yields True when the lock was taken.  With ``blocking=False`` the lock
+    is only attempted (``LOCK_NB``): on contention the context yields False
+    immediately, so teardown can skip a directory that a proxy start is
+    using right now instead of stalling behind it.
     """
     os.makedirs(sock_dir, exist_ok=True)
     lock_path = os.path.realpath(sock_dir) + ".lock"
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
-    finally:
+        flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            fcntl.flock(fd, flags)
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
         finally:
-            os.close(fd)
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def _clear_lock_file(path: str) -> None:
+    """Unlink a start-lock file, unless a process is holding it right now.
+
+    Deleting a lock file that another process has flocked would let a third
+    process create a fresh one and bypass the cross-process serialisation
+    in :func:`_start_lock`.
+    """
+    try:
+        fd = os.open(path, os.O_RDWR)
+    except OSError:
+        return
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return  # in use — its owner (or a later teardown) clears it
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    finally:
+        os.close(fd)
 
 
 def _start_proxy_subprocess(sock_path: str, workdir: str,
@@ -913,13 +947,17 @@ def start_push_proxy(container_name: str, workdir: str,
     return sock_path
 
 
-def _kill_proxy_socket(sock_path: str, remove_dir: bool = True) -> None:
+def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
+                       lock_held: bool = False) -> None:
     """Stop a subprocess proxy by removing its socket (triggers exit).
 
     When *remove_dir* is False the socket directory is kept.  Shared
     proxies use that mode: a container may still bind-mount the
     directory, and deleting it would leave the container pointing at a
     dead inode (restarting the daemon alone cannot heal that).
+
+    *lock_held* says the caller holds the directory's start lock, which
+    makes clearing that lock file safe even though it is flocked.
     """
     sock_dir = str(Path(sock_path).parent)
     # Resolve the real directory if sock_dir is a symlink
@@ -946,10 +984,16 @@ def _kill_proxy_socket(sock_path: str, remove_dir: bool = True) -> None:
         os.rmdir(real_dir)
     except OSError:
         pass
-    try:
-        os.unlink(real_dir + ".lock")
-    except OSError:
-        pass
+    if lock_held:
+        # The caller holds this directory's start lock, so no other process
+        # can be using it — unlinking it here is safe (and necessary: the
+        # probe in _clear_lock_file would see our own lock and skip).
+        try:
+            os.unlink(real_dir + ".lock")
+        except OSError:
+            pass
+    else:
+        _clear_lock_file(real_dir + ".lock")
 
 
 def stop_push_proxy(container_name: str) -> None:
@@ -1014,6 +1058,10 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
     symlink pointing anywhere else is unlinked but its target is left alone.
     Directories owned by another user are left alone too — ``/tmp`` is
     world-writable, so anyone can create a matching name there.
+
+    A directory whose proxy is alive, or whose start lock is held by a
+    proxy start in flight, is left in place: removing it would delete a
+    socket a container still bind-mounts.
     """
     import glob as _glob
     import shutil
@@ -1040,17 +1088,25 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
             pass  # already gone — still clear a leftover lock below
         except OSError:
             continue
-        if os.path.isdir(real):
+        if not os.path.isdir(real):
+            _clear_lock_file(real + ".lock")
+            continue
+        with _start_lock(real, blocking=False) as locked:
+            if not locked:
+                _log.info("Proxy directory busy (start in flight); leaving "
+                          "it in place: %s", real)
+                continue
+            if proxy_is_alive(os.path.join(real, "push.sock")):
+                _log.info("Leaving live proxy directory in place: %s", real)
+                continue
             shutil.rmtree(real, ignore_errors=True)
-        try:
-            os.unlink(real + ".lock")
-        except OSError:
-            pass
+            # Safe: we hold the lock, so no other process is using it.
+            try:
+                os.unlink(real + ".lock")
+            except OSError:
+                pass
     for lock in _glob.glob(glob_pattern + ".lock"):
-        try:
-            os.unlink(lock)
-        except OSError:
-            pass
+        _clear_lock_file(lock)
 
 
 def stop_all_proxies() -> None:
@@ -1084,11 +1140,18 @@ def stop_session_proxies(session_tag: str) -> int:
             for cname in _proxy_refs.pop(k, set()):
                 _container_to_proxy_key.pop(cname, None)
 
-    # Kill sockets matching the session tag
+    # Kill sockets matching the session tag.  Skip a directory whose start
+    # lock is held: a container is creating that proxy right now, and the
+    # dir sweep below will leave it for the next teardown.
     count = 0
     for sock in _glob.glob(f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-*/push.sock"):
-        _kill_proxy_socket(sock)
-        count += 1
+        with _start_lock(os.path.dirname(sock), blocking=False) as locked:
+            if not locked:
+                _log.info("Session proxy start in flight; not stopping: %s",
+                          sock)
+                continue
+            _kill_proxy_socket(sock, lock_held=True)
+            count += 1
 
     # Remove directories even when their socket was already stopped (shared
     # stops keep the directory for live container mounts).

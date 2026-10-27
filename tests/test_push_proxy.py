@@ -1,6 +1,7 @@
 """Tests for the host-side git push proxy."""
 
 import glob
+import fcntl
 import json
 import os
 import shutil
@@ -1012,6 +1013,78 @@ class TestWorkdirKeyedProxies:
                    return_value=False):
             with pytest.raises(PushProxyError):
                 self._start("not-ready", impl)
+
+    def test_concurrent_starts_spawn_one_daemon(self, tmp_path):
+        """The per-directory start lock serialises check-and-spawn (R7)."""
+        impl = self._workdir(tmp_path, "impl")
+        spawns: list[str] = []
+        started: list[PushProxy] = []
+        spawn_lock = threading.Lock()
+
+        def fake_start(sock_path, workdir, branch):
+            with spawn_lock:
+                spawns.append(sock_path)
+            time.sleep(0.2)  # widen the unlink→bind window
+            os.makedirs(os.path.dirname(sock_path), exist_ok=True)
+            p = PushProxy(sock_path, workdir, branch)
+            p.start()
+            started.append(p)
+            return True
+
+        results: list[str] = []
+
+        def worker(name: str) -> None:
+            results.append(self._start(name, impl))
+
+        with patch("pm_core.push_proxy._start_proxy_subprocess",
+                   side_effect=fake_start):
+            threads = [threading.Thread(target=worker, args=(f"c{i}",))
+                       for i in range(3)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=20)
+
+        try:
+            assert not any(t.is_alive() for t in threads)
+            assert len(spawns) == 1, f"expected one spawn, got {len(spawns)}"
+            assert len(set(results)) == 1
+            assert push_proxy_mod.proxy_is_alive(results[0])
+        finally:
+            for p in started:
+                p.stop()
+
+    def test_sweep_leaves_a_live_proxy_dir_in_place(self, tmp_path,
+                                                    live_proxies):
+        """Teardown must not delete a socket dir a container still mounts."""
+        impl = self._workdir(tmp_path, "impl")
+        sock = self._start("impl-wd", impl)
+        sock_dir = os.path.dirname(sock)
+
+        push_proxy_mod._remove_proxy_dirs(f"/tmp/pm-push-proxy-{self.TAG}-*")
+
+        assert push_proxy_mod.proxy_is_alive(sock)
+        assert os.path.isdir(sock_dir)
+
+    def test_sweep_skips_a_dir_whose_start_lock_is_held(self, tmp_path):
+        """A start in flight keeps its dir and lock file through teardown."""
+        sock_dir = "/tmp/pm-push-proxy-lockguard-impl"
+        os.makedirs(sock_dir, exist_ok=True)
+        lock = sock_dir + ".lock"
+        fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            push_proxy_mod._remove_proxy_dirs(
+                "/tmp/pm-push-proxy-lockguard-*")
+            assert os.path.isdir(sock_dir)
+            assert os.path.exists(lock)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+        push_proxy_mod._remove_proxy_dirs("/tmp/pm-push-proxy-lockguard-*")
+        assert not os.path.exists(sock_dir)
+        assert not os.path.exists(lock)
 
 
 class TestIntegrationFetchPull:

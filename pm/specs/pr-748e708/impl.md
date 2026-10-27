@@ -262,3 +262,28 @@ requirement changed):
   world-writable, so `_remove_proxy_dirs` now also skips a real directory
   whose `st_uid` is not ours, completing iteration 1's symlink-target
   guard (`_is_proxy_dir`).
+
+## Review iteration 3 refinements
+
+Added during the third review pass (consistent with R6/R7; no requirement
+changed):
+
+- **Teardown cannot delete a live proxy directory.** `_remove_proxy_dirs`
+  now takes the per-directory start lock (non-blocking) and re-checks
+  `proxy_is_alive` before `rmtree`. Previously a `stop_session_proxies`
+  sweep that raced a container start could delete the directory that a
+  just-started proxy — and the container bind-mounted to it — depends on,
+  i.e. the S18 failure through a different door. A directory whose start
+  is in flight, or whose socket answers, is now left for the next
+  teardown.
+- **Cleanup no longer deletes a lock file another process holds.**
+  `_clear_lock_file()` probes with `LOCK_NB` before unlinking, so teardown
+  cannot break the R7 serialisation by removing a lock a start is using.
+  `_kill_proxy_socket(lock_held=True)` unlinks directly when the caller
+  owns the lock; `stop_session_proxies`'s kill loop now takes that lock
+  and skips a directory whose start is in flight.
+- **R7 has a test.** `test_concurrent_starts_spawn_one_daemon` drives
+  three threads through `start_push_proxy` for one workdir and asserts
+  exactly one spawn; with `_start_lock` stubbed out it observes three
+  spawns (one of them failing to bind), so the assertion would catch a
+  regression.
