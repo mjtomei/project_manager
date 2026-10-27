@@ -117,9 +117,12 @@ def test_inspection_output_is_one_line_for_the_tui_log(tmp_path, exists):
         result = _invoke(root, PR)
 
     assert result.exit_code == 0, result.output
-    lines = result.output.strip().splitlines()
+    # The TUI (and the picker's direct route) read stdout only, so the
+    # notice must be a single line there — not on stderr.
+    lines = result.stdout.strip().splitlines()
     assert len(lines) == 1, lines
     assert "in QA" in lines[0] and "status" in lines[0]
+    assert result.stderr == ""
 
 
 def test_review_inspection_preserves_signoff_and_return_records(tmp_path):
@@ -196,7 +199,10 @@ def test_fresh_review_after_review_step_is_refused(tmp_path, status):
     assert _pr(root)["status"] == status
     launch.assert_not_called()
     select.assert_not_called()
-    assert "refused" in result.output
+    # Refusals go to stderr so the picker renders `pm error: ...` and waits
+    # for dismissal instead of closing as if the command had succeeded.
+    assert "refused" in result.stderr
+    assert result.stdout == ""
 
 
 def test_review_loop_after_review_step_is_refused(tmp_path):
@@ -209,6 +215,7 @@ def test_review_loop_after_review_step_is_refused(tmp_path):
     assert result.exit_code != 0
     assert _pr(root)["status"] == "sign_off"
     launch.assert_not_called()
+    assert "refused" in result.stderr
 
 
 @pytest.mark.parametrize("status", ["qa", "sign_off"])
@@ -302,7 +309,7 @@ def test_in_progress_github_still_upgrades_draft(tmp_path):
 def test_focus_review_window_selects_existing(tmp_path):
     root, _ = _make_project(tmp_path, status="qa")
     pr = _pr(root)
-    focus = getattr(pr_mod, "_focus_review_window")
+    focus = pr_mod._focus_review_window
 
     with _review_window("review-#42") as select:
         name = focus(pr)
@@ -314,7 +321,7 @@ def test_focus_review_window_selects_existing(tmp_path):
 def test_focus_review_window_never_creates_a_window(tmp_path):
     root, _ = _make_project(tmp_path, status="qa")
     pr = _pr(root)
-    focus = getattr(pr_mod, "_focus_review_window")
+    focus = pr_mod._focus_review_window
 
     with _review_window(exists=False) as select, \
          mock.patch.object(tmux_mod, "new_window") as new_window, \
@@ -330,7 +337,7 @@ def test_focus_review_window_never_creates_a_window(tmp_path):
 def test_focus_review_window_reports_failure_to_switch(tmp_path):
     root, _ = _make_project(tmp_path, status="qa")
     pr = _pr(root)
-    focus = getattr(pr_mod, "_focus_review_window")
+    focus = pr_mod._focus_review_window
 
     with _review_window() as select:
         select.return_value = False
@@ -340,7 +347,7 @@ def test_focus_review_window_reports_failure_to_switch(tmp_path):
 def test_focus_review_window_outside_tmux_is_a_noop(tmp_path):
     root, _ = _make_project(tmp_path, status="qa")
     pr = _pr(root)
-    focus = getattr(pr_mod, "_focus_review_window")
+    focus = pr_mod._focus_review_window
 
     with mock.patch.object(tmux_mod, "in_tmux", return_value=False), \
          mock.patch.object(tmux_mod, "find_window_by_name") as find:

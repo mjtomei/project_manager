@@ -1259,9 +1259,10 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
     click.echo("Added companion pane.")
 
 
-# Statuses at or past the review step.  ``pm pr review`` on one of these is
-# an *inspection* of the earlier review, not a new review: it must never move
-# the PR backwards (QA/sign-off own the branch and may be mid-flight).
+# Phases past the review step where ``pm pr review`` is an *inspection* of
+# the earlier review, not a new review: it must never move the PR backwards
+# (QA/sign-off own the branch and may be mid-flight).  ``merged``/``closed``
+# are past the review step too, but they are refused outright instead.
 _REVIEW_INSPECTION_PHASES = {
     "qa": "QA",
     "sign_off": "sign-off",
