@@ -262,7 +262,12 @@ Auto-start (multiple targets; also `pm autostart --help`):
   A                Toggle selected PR as auto-merge target (no PR: all off)
   a                Runs popup: targets + running/queued deps (Enter/f focus,
                    r refresh, Esc/q/a close)
-  /autostart add|remove ID...   Command bar (also: list, status, clear, all)
+  z a              Fresh autostart after feedback: return a reviewed PR to
+                   implementation (its live session is kept), then wait for
+                   its current turn before one fresh review.  Keeps the
+                   target's merge policy; z O / z A force stop / auto-merge.
+  /autostart add|remove ID...   Command bar (also: fresh, list, status,
+                   clear, all)
 
 Other:
   r                Refresh / sync

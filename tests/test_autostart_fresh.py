@@ -1249,6 +1249,17 @@ class TestCli:
         assert res.exit_code == 0
         assert "fresh" in res.output
 
+    def test_tui_keys_lists_the_fresh_chords(self):
+        # ``pm tui keys`` is the CLI twin of the in-TUI help screen; both
+        # must name the fresh-autostart chords (plain ``a`` still opens the
+        # runs popup) and the new command-bar verb.
+        from pm_core.cli import cli
+        res = CliRunner().invoke(cli, ["tui", "keys"])
+        assert res.exit_code == 0, res.output
+        assert "z a" in res.output
+        assert "z O / z A" in res.output
+        assert "add|remove ID...   Command bar (also: fresh" in res.output
+
     def test_fresh_sends_the_verb(self, cli_project):
         sent = []
 

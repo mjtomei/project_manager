@@ -557,3 +557,14 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   immediate; ``fresh_start``'s explicit immediate handoff is unaffected.
   Pinned by a poll-routing test (two ticks inside the window → one launch,
   after the window → a second).
+
+## Review-iteration notes (2aac i6)
+
+* **The CLI twin of the help screen names the fresh chords too** — the
+  in-TUI help screen (`?`), the README, `pm autostart --help`, the command
+  bar's `USAGE` and `pm`'s command list all name `z a` / `z O` / `z A` and
+  `autostart fresh`, but `pm tui keys` (the user-facing keybinding reference
+  printed by the CLI) and the `auto_start` module docstring still listed only
+  the old controls.  Both now name the fresh chords (and plain `a` keeps its
+  runs-popup meaning), and `autostart fresh` is listed among the command-bar
+  verbs.  Pinned by `TestCli::test_tui_keys_lists_the_fresh_chords`.

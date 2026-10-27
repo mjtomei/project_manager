@@ -19,10 +19,12 @@ status resolve the effective hold through :func:`merge_hold` /
 auto-merge.
 
 Controls: ``O`` (add selected, stop-before-merge), ``A`` (toggle selected as
-an auto-merge target), the command bar ``autostart …`` verbs, and the CLI
-``pm autostart add/remove/clear/list/status`` which reaches this module via
-the session command queue (``--reply`` writes a JSON reply file).  State is
-in-memory but preserved across the merge-restart breadcrumb.
+an auto-merge target), ``z a`` / ``z O`` / ``z A`` (explicit fresh autostart:
+a reviewed PR goes back to implementation after feedback — see
+:mod:`pm_core.tui.autostart_fresh`), the command bar ``autostart …`` verbs,
+and the CLI ``pm autostart add/remove/fresh/clear/list/status`` which reaches
+this module via the session command queue (``--reply`` writes a JSON reply
+file).  State is in-memory but preserved across the merge-restart breadcrumb.
 """
 
 import json
