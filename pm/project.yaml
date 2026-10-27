@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T15:42:10.064334+00:00'
+  updated_at: '2026-10-27T16:17:33.057614+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37057,6 +37057,23 @@ prs:
       so resolving the single active_pr hunk (base value wins) is enough.'
     created_at: '2026-10-27T15:42:09Z'
     last_edited: '2026-10-27T15:42:09Z'
+  - id: note-dd54a3d
+    text: 'review-loop 640d i1: closed four residual honesty gaps, each with a test
+      that fails on the pre-fix code. (1) A modify/delete of pm/project.yaml (git
+      stages no blob for the deleted side) now reports a deletion/edit conflict instead
+      of "project.yaml is not a mapping on one side" — the spec calls modify/delete
+      a deletion/edit conflict, and the old wording sent the agent hunting a YAML
+      syntax error in the surviving file. (2) The sign-off prompt and the return text
+      render `applied_merge_sha` / the bounce applied merge only when it is a git
+      object name (`_sha_like`), falling back to `<merge>` / `?` — project.yaml is
+      hand-editable and those lines sit beside commands the agent runs. (3) A bounce
+      that applied the resolution no longer reports the same merge twice (the resolution
+      block and the `applied` block named it; the diff hint is kept). (4) A resolution
+      `path` that is not a string is no longer printed as "resolved" by `pm pr show`,
+      `pm pr signoff integrate` or the sign-off launch — it reads as absent everywhere.
+      Full suite: 3979 passed, 1 skipped.'
+    created_at: '2026-10-27T16:17:32Z'
+    last_edited: '2026-10-27T16:17:32Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
