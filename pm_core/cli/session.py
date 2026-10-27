@@ -1061,6 +1061,26 @@ def _current_window_phase(window_name: str) -> str | None:
     return "start"
 
 
+# Prefixes used for a PR's per-action windows (see _ACTION_WINDOW_PATTERNS).
+_WINDOW_ACTION_PREFIXES = ("review-", "merge-", "qa-", "signoff-")
+
+
+def _strip_action_window_prefix(window_name: str) -> str:
+    """Drop one action prefix (``review-``, ``qa-``, …) from a window name.
+
+    Used only as a fallback when the raw window name and
+    ``_current_window_pr_id``'s grammar both fail to name a PR: a legacy
+    local id the grammar cannot read (e.g. ``pr-a_b``) still appears in a
+    prefixed window (``review-pr-a_b``), which must anchor home on it
+    rather than on the first live PR.  A ``-s<N>`` suffix is never
+    stripped — an id that legitimately ends in one must win.
+    """
+    for prefix in _WINDOW_ACTION_PREFIXES:
+        if window_name.startswith(prefix) and len(window_name) > len(prefix):
+            return window_name[len(prefix):]
+    return window_name
+
+
 def _format_action_status(pr_id: str, action: str) -> str:
     """Return a short status badge for an action, or '' when nothing useful.
 
@@ -2010,10 +2030,15 @@ def popup_picker_cmd(session: str, window_name: str):
     # name: it keeps home anchored for a legacy numeric, dotted or
     # underscored local id, and for an id that itself ends in ``-s<N>``
     # (which the grammar would otherwise read as a QA scenario suffix).
+    # The same match is retried without the action prefix so a prefixed
+    # window (``review-pr-a_b``) anchors on an id the grammar cannot read.
     # Non-PR windows (``tui``, ``pm-meta``) match no PR and are unaffected.
     if window_name and isinstance(prs, list):
-        if _find_pr_for_window_id(prs, window_name) is not None:
-            window_pr_id = window_name
+        for candidate in (window_name,
+                          _strip_action_window_prefix(window_name)):
+            if candidate and _find_pr_for_window_id(prs, candidate) is not None:
+                window_pr_id = candidate
+                break
     home_local_id = None
 
     def _navigation(prs, windows):

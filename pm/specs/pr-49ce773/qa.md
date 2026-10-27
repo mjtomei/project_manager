@@ -283,7 +283,9 @@ whose only id is the legacy numeric string `12` (window `12`, no
 `gh_pr_number`), and a live PR whose local id ends in `-s1` (window `pr-a-s1`)
 next to a live `pr-a`. In both cases home must be the invoking window's PR (its
 header names it, `0` returns to it, an action dispatches for its local id), not
-the first live PR in file order and not the `-s`-stripped `pr-a`.
+the first live PR in file order and not the `-s`-stripped `pr-a`. Repeat with a
+*prefixed* window for an id the grammar cannot read (a live `pr-a_b` opened from
+`review-pr-a_b`): home must still be `pr-a_b`, not the first live PR.
 
 E12. **Given** the popup body cannot run pm (e.g. `pm` is missing from the
 tmux server's PATH, or pm exits non-zero without its own pause), **When** the
@@ -306,6 +308,11 @@ client session), the pm log file (warnings).
   crash/exit, and dispatch from one popup doesn't corrupt the other's view.
   When another client changes its selected window, the next navigation reload
   moves the corresponding open-circle indicator to that window's action row.
+  The indicators must render with the tmux server running under a non-UTF-8
+  locale (`LC_ALL=C`) as well: tmux rewrites control characters in
+  `list-sessions` format output to `_`, which used to blank the whole map
+  (review 32f9 i1). Repeat the indicator check with the server under
+  `LC_ALL=C` (a second scratch socket started with that locale is fine).
 - C2. Rapid nav keypresses while project.yaml is being rewritten in a loop: no
   traceback, index never out of range, header id always matches rows.
 - C3. Two clients attached to grouped sessions (e.g. `<base>~1`, `<base>~2`):
@@ -347,7 +354,9 @@ client session), the pm log file (warnings).
 B1. **Given** a project where a merged PR with retained windows (like #238)
 comes first in project.yaml order and a live PR (like #193, in_review) has
 open windows, **When** the user opens prefix+P from the TUI window on the
-base-branch (master 4dcbff73) build, **Then** the popup prints `No actions
+base-branch build (current `master`, 211a6128 or newer — check it out in a
+second worktree; the branch already has master merged, so a plain
+`git diff` won't show the old behaviour), **Then** the popup prints `No actions
 available (PR is merged or closed).` and exits on a keypress; opening it on
 the live PR and pressing next onto the merged entry and next again exits too.
 **When** the same steps run on this branch, **Then** the popup lands on the

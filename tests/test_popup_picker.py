@@ -8,6 +8,7 @@ from pm_core.cli.session import (
     _actions_for_status,
     _status_phase,
     _current_window_pr_id,
+    _strip_action_window_prefix,
     _build_picker_lines,
     _build_nav_entries,
     _find_pr_for_window_id,
@@ -133,6 +134,26 @@ class TestCurrentWindowPrId:
 
     def test_review_pr_nnn(self):
         assert _current_window_pr_id("review-pr-001") == "pr-001"
+
+
+class TestStripActionWindowPrefix:
+    """Fallback for ids the window-name grammar cannot read (e.g. ``_``)."""
+
+    @pytest.mark.parametrize("window,expected", [
+        ("review-pr-a_b", "pr-a_b"),
+        ("qa-pr-a_b", "pr-a_b"),
+        ("signoff-pr-a_b", "pr-a_b"),
+        ("merge-pr-a_b", "pr-a_b"),
+        ("pr-a_b", "pr-a_b"),
+        ("tui", "tui"),
+        # Never strip a scenario-like suffix: an id ending in -s1 is legal.
+        ("qa-pr-a-s1", "pr-a-s1"),
+    ])
+    def test_strips_only_the_action_prefix(self, window, expected):
+        assert _strip_action_window_prefix(window) == expected
+
+    def test_bare_prefix_is_not_emptied(self):
+        assert _strip_action_window_prefix("review-") == "review-"
 
 
 class TestBuildPickerLines:
@@ -815,6 +836,34 @@ class TestPopupPickerNoActions:
         fzf, run_cmd = _run_picker(
             tmp_path, monkeypatch, prs, ["pr-a", "pr-a-s1"], "pr-a-s1",
             [(0, "s\n")])
+        assert _header(fzf.calls[0]).startswith("PR Actions — pr-a-s1  (2/2)")
+        run_cmd.assert_called_once_with("pr start pr-a-s1", "pm-x")
+
+    def test_prefixed_window_pins_home_for_unreadable_local_id(
+            self, tmp_path, monkeypatch):
+        """A prefixed window anchors on a local id the grammar cannot read.
+
+        ``review-pr-a_b`` names pr-a_b, but ``_current_window_pr_id`` only
+        accepts ``pr-<alnum>``, so without the prefix-stripped snapshot match
+        the picker opens on the first live PR instead of the invoking one.
+        """
+        prs = [_pr("pr-x", status="in_review"),
+               _pr("pr-a_b", status="in_review")]
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["pr-x", "review-pr-a_b"],
+            "review-pr-a_b", [(0, "s\n")])
+        assert _header(fzf.calls[0]).startswith("PR Actions — pr-a_b  (2/2)")
+        run_cmd.assert_called_once_with("pr start pr-a_b", "pm-x")
+
+    def test_prefixed_window_still_prefers_exact_scenario_suffixed_id(
+            self, tmp_path, monkeypatch):
+        """``qa-pr-a-s1`` must resolve to the PR whose id is literally
+        ``pr-a-s1``, not to pr-a via the grammar's scenario-suffix strip."""
+        prs = [_pr("pr-a", status="in_review"),
+               _pr("pr-a-s1", status="in_progress")]
+        fzf, run_cmd = _run_picker(
+            tmp_path, monkeypatch, prs, ["pr-a", "qa-pr-a-s1"],
+            "qa-pr-a-s1", [(0, "s\n")])
         assert _header(fzf.calls[0]).startswith("PR Actions — pr-a-s1  (2/2)")
         run_cmd.assert_called_once_with("pr start pr-a-s1", "pm-x")
 

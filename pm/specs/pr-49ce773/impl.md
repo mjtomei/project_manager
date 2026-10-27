@@ -272,8 +272,12 @@ for the removed number resolves to whichever PR now owns that number.
   accepts legacy numeric (`12`), dotted/underscored (`pr-a_b`) and
   `-s<digits>`-suffixed local ids that the grammar cannot read (the suffix
   rule would otherwise strip `-s1` and resolve `pr-a` instead of `pr-a-s1`,
-  dispatching that PR's action).  Non-PR windows (`tui`, `pm-meta`) match no
-  PR and are unaffected.
+  dispatching that PR's action).  The exact match is retried with the
+  action prefix removed (`review-pr-a_b` -> `pr-a_b`), because a prefixed
+  window is named by the same unreadable id; a `-s<N>` suffix is never
+  stripped in that retry, so `qa-pr-a-s1` still resolves to the PR whose id
+  is literally `pr-a-s1` rather than to `pr-a`'s scenario window.  Non-PR
+  windows (`tui`, `pm-meta`) match no PR and are unaffected.
 
 - Single PR in nav list and it's actionless: no nav hint or `(i/n)`; h/l/0
   only reload (req 8); Enter is ignored; q/Esc quits.  No exit-on-keypress.
