@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T21:35:19.037139+00:00'
+  updated_at: '2026-10-27T22:22:37.750700+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25884,6 +25884,31 @@ prs:
       stop.'
     created_at: '2026-10-27T21:35:18Z'
     last_edited: '2026-10-27T21:35:18Z'
+  - id: note-1757cc5
+    text: 'Review-loop 3dd4 i1 (a65e6799): found and fixed one remaining instance
+      of the spurious-exhaustion-on-teardown class (i4/i5 covered the QA tick loop;
+      the planner, review and watcher loops did not). handle() checks its deferral
+      bound *before* its own stop_check, so a stop that lands while recovery is deciding
+      surfaces VerdictRecoveryExhausted for a run the user stopped: the planner then
+      ended INPUT_REQUIRED with a QA note (the S2 bug again), the review loop recorded
+      a NO_VERDICT history entry, and the watcher recorded NO_VERDICT instead of its
+      KILLED stop convention. Both planner except handlers (check_response and handle)
+      now re-check state.stop_requested and fall through to the clean STOPPED path;
+      the review loop breaks like its top-of-loop stop check (no NO_VERDICT iteration);
+      the watcher mirrors PaneKilledError (KILLED). Regression tests added for all
+      four paths (planner handle-path, planner response-timeout path, review, watcher)
+      — each fails on the pre-fix code. Spec updated. Full suite: 3865 passed, 1 skipped.
+      No other functional defects found in the recovery machinery (handle() bounds,
+      completed-verdict guard, grace-window idle processing, QA tick-loop episode
+      bookkeeping, merge coordination with pr-8efa789 all hold). Residuals unchanged:
+      verdict-recovery-response-timeout (1 h) can retire a silently-busy worker; a
+      poller that starts while its session is already idle (review adoption) is bounded
+      only by overall_timeout/pane death; a recovery nudge can still land in a permission
+      hold that begins during an open episode. Note: pr-f2fee05 (verifier re-check
+      hang) is subsumed by this PRs i2 change (the re-check uses poll_for_verdict),
+      so that bug PR is redundant. (2026-10-27T22:28:00Z)'
+    created_at: '2026-10-27T22:22:37Z'
+    last_edited: '2026-10-27T22:22:37Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
