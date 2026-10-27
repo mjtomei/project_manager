@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-27T00:50:23.180756+00:00'
+  updated_at: '2026-10-27T00:58:41.627597+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16972,6 +16972,16 @@ prs:
       and dispatch streams).'
     created_at: '2026-10-27T00:50:23Z'
     last_edited: '2026-10-27T00:50:23Z'
+  - id: note-e2183a0
+    text: 'QA S31 (2026-10-27, head dbcb36bd): all five empty-project/odd-title/unprintable-number
+      stories PASS live in tmux+fzf 0.56.3. Incidental fix carried here: the TUI tech
+      tree crashed on mount when a PR had title: null (or a YAML integer / control
+      characters) — PRNode.render called cell_len(title) and raised TypeError, unmounting
+      the TUI and killing the pm session before the picker could open; titles are
+      now normalised like the popup picker (None -> blank, scalars -> str(), non-printables
+      -> space) with a regression test. Captures /pm-captures/scenarios/31.'
+    created_at: '2026-10-27T00:58:41Z'
+    last_edited: '2026-10-27T00:58:41Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
