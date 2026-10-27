@@ -93,11 +93,13 @@ container when:
   "retained human session"), or ownership cannot be determined;
 - the session transcript changed after the idle/verdict point (someone
   resumed it);
-- (impl / standalone review, TUI) the pane was not started with the
-  session whose idle event and verdict fired: the TUI registers a window's
-  pane against its own transcript symlink, which can name an earlier
-  session after a review loop or auto-sequence iteration reused the window
-  (review 1811 i5);
+- (impl / review) the pane was not started with the session whose idle
+  event and verdict fired: the TUI registers a window's pane against its
+  own transcript symlink, which can name an earlier session after a review
+  loop or auto-sequence iteration reused the window (review 1811 i5); a
+  review loop compares the window's pane with its last iteration's
+  transcript, since the window may have been replaced by then (review
+  1811 i6);
 - the verdict is INPUT_REQUIRED or verification is in flight (unchanged).
 The ownership and resumed checks run again right before removal, after
 the stats capture (which takes seconds), so a person who attaches or
@@ -105,8 +107,10 @@ resumes during the capture keeps the container.
 Standalone reviews stop only after a final review verdict (not
 INPUT_REQUIRED) is mirrored by master's hook-driven review pass.  A
 review loop stops its container only on PASS, NEEDS_WORK or KILLED —
-not INPUT_REQUIRED, and not ERROR (a failed launch or poll may leave the
-reviewer starting or running).
+not INPUT_REQUIRED, not ERROR (a failed launch or poll may leave the
+reviewer starting or running), and not when the loop was stopped or
+superseded (`stop_requested`): `z d` / `zz d` kill the loop's window and
+start a fresh review that reuses the same `review-<pr>` container.
 
 Container types are read from the label at the *end* of the name
 (`…-impl-pr-x`, `…-qa-pr-x-<loop>-sN`): the session tag comes from the

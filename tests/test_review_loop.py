@@ -320,25 +320,67 @@ class TestStopOnIdle:
     """At loop exit the review container is removed (policy permitting)
     only when the session finished — never after a launch/poll ERROR."""
 
-    def _run(self, review_effect):
-        state = ReviewLoopState(pr_id="pr-001")
+    def _run(self, review_effect, pane="%7", state=None):
+        state = state or ReviewLoopState(pr_id="pr-001")
         with patch("pm_core.review_loop._run_claude_review",
                    side_effect=review_effect), \
              patch("pm_core.review_loop._get_pm_session",
                    return_value="pm-repo-abc"), \
-             patch("pm_core.review_loop._find_claude_pane", return_value="%7"), \
-             patch("pm_core.container.stop_idle_in_background") as stop:
-            run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
+             patch("pm_core.review_loop._find_claude_pane", return_value=pane), \
+             patch("pm_core.container.stop_idle_in_background") as stop, \
+             patch("time.time", return_value=1000.0):
+            run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/t")
         return stop
 
     def test_pass_stops_exact_container(self):
         stop = self._run(["All good.\n\n**PASS**"])
-        stop.assert_called_once_with("pm-repo-abc-review-pr-001", "review",
-                                     pane_ids=["%7"])
+        stop.assert_called_once_with(
+            "pm-repo-abc-review-pr-001", "review", pane_ids=["%7"],
+            transcript_path="/t/review-pr-001-i1.jsonl", idle_since=1000.0,
+            session_matches=ANY)
+
+    def test_session_check_uses_last_iteration_transcript(self):
+        """The window can be replaced (``pm pr review --fresh``) by the
+        time the loop ends: a pane running another session is kept."""
+        stop = self._run(["x\n\n**NEEDS_WORK**", "x\n\n**PASS**"])
+        session_matches = stop.call_args.kwargs["session_matches"]
+        with patch("pm_core.claude_launcher.session_id_from_transcript",
+                   return_value="11111111-1111-1111-1111-111111111111"
+                   ) as from_transcript, \
+             patch("pm_core.tmux.pane_start_command",
+                   return_value="claude --session-id "
+                   "22222222-2222-2222-2222-222222222222") as start_cmd:
+            assert session_matches() is False
+        from_transcript.assert_called_once_with("/t/review-pr-001-i2.jsonl")
+        start_cmd.assert_called_once_with("%7")
 
     def test_pane_killed_stops(self):
-        stop = self._run(PaneKilledError("gone"))
+        stop = self._run(PaneKilledError("gone"), pane=None)
         stop.assert_called_once()
+        assert stop.call_args.kwargs["pane_ids"] is None
+        assert stop.call_args.kwargs["session_matches"] is None
+
+    def test_superseded_loop_keeps_container(self):
+        """``z d`` / ``zz d`` set stop_requested and kill the window; the
+        fresh review they start reuses this container."""
+        state = ReviewLoopState(pr_id="pr-001")
+
+        def superseded(*a, **k):
+            state.stop_requested = True
+            raise PaneKilledError("gone")
+
+        stop = self._run(superseded, state=state)
+        stop.assert_not_called()
+
+    def test_stop_between_iterations_keeps_container(self):
+        state = ReviewLoopState(pr_id="pr-001")
+
+        def needs_work_then_stop(*a, **k):
+            state.stop_requested = True
+            return "x\n\n**NEEDS_WORK**"
+
+        stop = self._run(needs_work_then_stop, state=state)
+        stop.assert_not_called()
 
     def test_error_keeps_container(self):
         """A failed launch/poll may leave the reviewer starting or running."""
@@ -687,15 +729,15 @@ class TestTuiStopOnIdle:
             assert session_matches() is True
 
     def test_session_check_fails_closed_without_pane_or_transcript(self):
-        from pm_core.tui import review_loop_ui
+        from pm_core.claude_launcher import pane_runs_session
         with patch("pm_core.tmux.pane_start_command") as start_cmd:
-            assert review_loop_ui._pane_runs_session(None, "/t/x.jsonl") is False
-            assert review_loop_ui._pane_runs_session("%5", None) is False
+            assert pane_runs_session(None, "/t/x.jsonl") is False
+            assert pane_runs_session("%5", None) is False
         start_cmd.assert_not_called()
         with patch("pm_core.claude_launcher.session_id_from_transcript",
                    return_value="22222222-2222-2222-2222-222222222222"), \
              patch("pm_core.tmux.pane_start_command", return_value="bash"):
-            assert review_loop_ui._pane_runs_session("%5", "/t/x.jsonl") is False
+            assert pane_runs_session("%5", "/t/x.jsonl") is False
 
     def _poll_review(self, verdict, idle=True):
         from types import SimpleNamespace

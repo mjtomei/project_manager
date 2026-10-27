@@ -321,6 +321,9 @@ def run_review_loop_sync(
 
     last_done = state.history[-1].iteration if state.history else 0
     adopt = state.iteration > last_done
+    # Transcript of the iteration whose verdict ends the loop (stop-on-idle
+    # checks that the review pane still runs that session).
+    last_transcript: str | None = None
 
     try:
         while state.iteration < max_iterations or adopt:
@@ -332,6 +335,9 @@ def run_review_loop_sync(
                 output = None
                 if adopt:
                     adopt = False
+                    if saved_transcript_dir:
+                        last_transcript = (f"{saved_transcript_dir}/review-"
+                                           f"{state.pr_id}-i{state.iteration}.jsonl")
                     output = _adopt_in_flight_review(
                         state, pr_data, saved_transcript_dir)
                     if output is None:
@@ -341,6 +347,7 @@ def run_review_loop_sync(
                     state.iteration += 1
                     _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
                     iter_transcript = f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+                    last_transcript = iter_transcript
                     output = _run_claude_review(
                         state.pr_id, pm_root, pr_data,
                         iteration=state.iteration, loop_id=state.loop_id,
@@ -434,23 +441,36 @@ def run_review_loop_sync(
         # policy is on and the session finished — a final verdict, or its
         # pane is gone.  Not on INPUT_REQUIRED (the user may still need
         # it) or ERROR (launch/poll failed; the reviewer may still be
-        # starting or running).
-        if state.latest_verdict in (VERDICT_PASS, VERDICT_NEEDS_WORK,
-                                    VERDICT_KILLED):
+        # starting or running), and not when the loop was stopped or
+        # superseded: ``z d`` / ``zz d`` kill the window and start a fresh
+        # review that reuses this container.
+        if (state.latest_verdict in (VERDICT_PASS, VERDICT_NEEDS_WORK,
+                                     VERDICT_KILLED)
+                and not state.stop_requested):
             try:
                 session = _get_pm_session()
                 if session:
+                    from pm_core.claude_launcher import pane_runs_session
                     from pm_core.container import (
                         _make_container_name, stop_idle_in_background,
                     )
                     pane_id = _find_claude_pane(
                         session, _compute_review_window_name(pr_data))
+                    # A pane in the window that runs another session (the
+                    # window was replaced) is not ours to stop.
+                    session_matches = None
+                    if pane_id:
+                        session_matches = (lambda: pane_runs_session(
+                            pane_id, last_transcript))
                     stop_idle_in_background(
                         _make_container_name(
                             f"review-{state.pr_id}",
                             session_tag=session.removeprefix("pm-")),
                         "review",
                         pane_ids=[pane_id] if pane_id else None,
+                        transcript_path=last_transcript,
+                        idle_since=time.time(),
+                        session_matches=session_matches,
                     )
             except Exception:
                 _log.debug("review_loop: stop-on-idle failed",

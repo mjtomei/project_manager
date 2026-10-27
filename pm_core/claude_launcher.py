@@ -1095,6 +1095,20 @@ def pane_session_id(pane_id: str) -> str | None:
     return m.group(1) if m else None
 
 
+def pane_runs_session(pane_id: str | None, transcript_path: str | None) -> bool:
+    """True if *pane_id* was started with the session *transcript_path* names.
+
+    False when either is unknown.  A window's pane can be replaced while
+    a caller still holds an older session's transcript (a review loop or
+    auto-sequence iteration reusing the window, a superseded loop), and
+    that session's idle event or verdict says nothing about the new one.
+    """
+    if not pane_id or not transcript_path:
+        return False
+    sid = session_id_from_transcript(transcript_path)
+    return bool(sid) and pane_session_id(pane_id) == sid
+
+
 def pane_transcript_path(pane_id: str, workdir: str | None) -> Path | None:
     """Claude's native transcript for the session a pane was launched with.
 

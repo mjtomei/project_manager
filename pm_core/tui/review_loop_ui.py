@@ -37,6 +37,7 @@ def _try_stop_idle_container(app, pr_id: str, container_type: str,
     session = app._session_name
     if not session:
         return
+    from pm_core.claude_launcher import pane_runs_session
     from pm_core.container import _make_container_name, stop_idle_in_background
     tracker = app._pane_idle_tracker
     pane_id = tracker.get_pane_id(key)
@@ -49,26 +50,8 @@ def _try_stop_idle_container(app, pr_id: str, container_type: str,
         pane_ids=[pane_id] if pane_id else None,
         transcript_path=transcript_path,
         idle_since=_time.time(),
-        session_matches=lambda: _pane_runs_session(pane_id, transcript_path),
+        session_matches=lambda: pane_runs_session(pane_id, transcript_path),
     )
-
-
-def _pane_runs_session(pane_id: str | None,
-                       transcript_path: str | None) -> bool:
-    """True if *pane_id* was started with the session *transcript_path* names.
-
-    The tracker registers a window's pane against this TUI's transcript
-    symlink, which can still name an earlier session: e.g. a standalone
-    review's ``review-<pr>.jsonl`` after a review loop or auto-sequence
-    iteration (whose transcripts are named per iteration) reused the
-    window.  That old session's idle event and verdict say nothing about
-    the session now in the pane, so stop-on-idle must not act on them.
-    """
-    if not pane_id or not transcript_path:
-        return False
-    from pm_core.claude_launcher import pane_session_id, session_id_from_transcript
-    sid = session_id_from_transcript(transcript_path)
-    return bool(sid) and pane_session_id(pane_id) == sid
 
 
 # Icons for review verdicts (used in log line)
