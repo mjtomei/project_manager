@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-27T01:30:45.243514+00:00'
+  updated_at: '2026-10-27T03:01:32.203712+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -17086,6 +17086,40 @@ prs:
       No architectural blocker.'
     created_at: '2026-10-27T01:30:45Z'
     last_edited: '2026-10-27T01:30:45Z'
+  - id: note-a5b0116
+    text: 'QA S39 (2026-10-27, HEAD 89bc976e, workdir /workspace) PASS on all six
+      window-drift stories, no code change. Live in a real tmux session with fzf 0.56.3,
+      driving `pm _popup-picker $S <window>` (the exact prefix+P body) in a picker
+      pane: (1) A window renamed to `notes` -> 0 re-renders "PR Actions — pr-aaa111
+      (1/4)" with A rows, start loses [open], popup stays open; l -> B (2/4), 0 ->
+      A (1/4); l x4 wraps B(2/4)->C(3/4)->D(4/4)->A(1/4), A listed once. (2) A window
+      renamed to `pr-bbb222` -> l shows B (2/4) with B rows; 0 returns to A (1/4)
+      with no window named for A; d dispatches `pr review pr-aaa111` route=direct,
+      opens review-pr-aaa111 running fake-claude --verdict PASS, never review-pr-bbb222.
+      (3) Opened from non-PR `main` (no 0: home hint), B window renamed to scratch-b,
+      l -> C (2/3) with counter shrinking; l/h keep working; with one live PR left
+      the (i/n) counter and the whole h/l hint line disappear. (4) Opened from review-pr-a_b
+      (bare id unreadable by the window-name grammar) -> "pr-a_b (4/4)" with review
+      [open]; renamed to bare pr-a_b + 0 keeps (4/4) once and moves [open] review->start;
+      reopen from pr-a_b resolves by exact snapshot match at (4/4). (5) kill-window
+      of the originating pr-aaa111 -> picker survives, 0 still shows A (1/4) with
+      start without [open], q closes normally (pane back to bash). (6) A renamed to
+      live B name + 0 still shows A (1/4); after q a fresh open from the renamed window
+      shows B (1/3) with A dropped — pinning is per-popup-lifetime. Whole-run log:
+      0 Traceback, exactly 2 picker dispatch lines both `pr review pr-aaa111`; only
+      warnings were environmental (PM_HOST_HOME=/home/matt blocks /home/matt/.claude;
+      set-hook window-resized unsupported on tmux 3.2a). Harness for next run: container
+      has NO fzf and NO agg — install fzf 0.56.3 linux_arm64 (raw binary, not a tarball)
+      and agg 1.4.3 aarch64 to /usr/local/bin; start the tmux server with LANG=LC_ALL=C.UTF-8
+      or the em dash/box art render as _; `tmux capture-pane -S -` returns empty on
+      this build so use an explicit depth (-S -40); capture-pane is blank for a window
+      no client displays, so keep the asciinema recorder client attached and select-window
+      + refresh-client -S before capturing; end a cast with `tmux detach-client -s
+      =pmrec`; rename-window allows duplicate window names, which the picker matches
+      by name. Captures /pm-captures/scenarios/39 (REPORT.md + story1..story6 each
+      with manifest.md, recording.cast/mp4 and numbered pane snapshots, plus pm-debug-evidence.log).'
+    created_at: '2026-10-27T03:01:32Z'
+    last_edited: '2026-10-27T03:01:32Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
