@@ -14491,7 +14491,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T08:58:07.617102+00:00'
+  updated_at: '2026-10-27T09:35:31.163882+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14802,6 +14802,40 @@ prs:
       from a dead one beyond the backlog of 16.'
     created_at: '2026-10-27T08:58:07Z'
     last_edited: '2026-10-27T08:58:07Z'
+  - id: note-f2ae091
+    text: 'Review-loop db89 i7 (2026-10-27): reviewed fc5832d7 (unchanged since db89
+      i6). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact); test_impl_and_qa_get_distinct_proxies fails at
+      74462d76 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      Four fixes applied, each with a test that fails at fc5832d7 for the right reason:
+      (1) _start_lock opens the start-lock file with O_NOFOLLOW — a symlink planted
+      at the world-writable /tmp lock name made our process flock (and possibly create)
+      a file at an arbitrary host path; teardown now treats it like any unusable lock
+      file (skips the dir), a start raises PushProxyError, and _clear_lock_file removes
+      the link itself (never the target). (2) _write_metadata uses tempfile.mkstemp
+      (O_CREAT|O_EXCL, random name) instead of a predictable <proxy.json>.<pid>.tmp
+      name: the socket dir is bind-mounted writable into the container, so a planted
+      symlink there made the daemon write the sidecar through it and then os.replace
+      the link onto proxy.json. (3) _read_metadata opens with O_RDONLY|O_NOFOLLOW|O_NONBLOCK
+      and only accepts a regular file of bounded size (_METADATA_MAX_BYTES) — a planted
+      link, FIFO (blocks a start under the lock) or huge file is refused. (4) stop_all_proxies
+      now uses the guarded kill through the new _stop_socket_under_lock(), shared
+      with stop_session_proxies — the residual noted since i3. Also removed the legacy
+      start''s duplicated makedirs (_start_lock already reports it as PushProxyError)
+      and hoisted sys/tempfile imports to module level. Tests: tests/test_push_proxy.py
+      + tests/test_container.py 211 passed (log /pm-captures/review-db89-i7/); full
+      suite 3799 passed, 1 skipped, 13 failed (all pre-existing environment: 12 test_markdown_render
+      without the markdown module + test_hook_events::test_installer_writes_standalone_receiver),
+      log /pm-captures/review-db89-i7/full-suite.log. Two new tests/test_container.py
+      reuse-path tests pin R8''s get_proxy_socket_path(..., workdir=...) lookup and
+      the workdir a proxy restart uses. Spec updated with a Review iteration 10 refinements
+      section. Residual, unchanged and out of scope: in-process refcounts only (cross-process
+      cleanup stays with #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request,
+      remains the cleaner long-term design); proxy_is_alive still cannot distinguish
+      a busy daemon from a dead one beyond the backlog of 16.'
+    created_at: '2026-10-27T09:35:31Z'
+    last_edited: '2026-10-27T09:35:31Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
