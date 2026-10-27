@@ -236,6 +236,31 @@ class TestLaunchClaude:
     @patch("pm_core.claude_launcher.subprocess.run")
     @patch("pm_core.claude_launcher._skip_permissions", return_value=False)
     @patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude")
+    def test_debug_env_dump_names_only(self, mock_fc, mock_sp, mock_run,
+                                       mock_log, tmp_path):
+        """The debug env dump must name the provider vars, never print values.
+
+        This is a debug log in ~/.pm/debug; an api_key value there is the
+        same class of leak the launch-command fix removed.
+        """
+        mock_run.return_value = MagicMock(returncode=0)
+        run_env = {**os.environ, "ANTHROPIC_API_KEY": CANARY}
+        with patch(
+            "pm_core.claude_launcher._resolve_provider",
+            return_value=({"ANTHROPIC_API_KEY": CANARY}, None, run_env),
+        ), patch("pm_core.claude_launcher._log.debug") as debug:
+            launch_claude("hello", "key1", tmp_path)
+        dumped = " ".join(str(a) for call in debug.call_args_list
+                          for a in call.args)
+        assert "ANTHROPIC_API_KEY" in dumped
+        assert CANARY not in dumped
+        # The command handed to log_shell_command is clean too.
+        assert CANARY not in " ".join(str(c) for c in mock_log.call_args_list)
+
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.claude_launcher.subprocess.run")
+    @patch("pm_core.claude_launcher._skip_permissions", return_value=False)
+    @patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude")
     def test_new_session(self, mock_fc, mock_sp, mock_run, mock_log, tmp_path):
         mock_run.return_value = MagicMock(returncode=0)
         rc = launch_claude("hello", "key1", tmp_path, resume=True)

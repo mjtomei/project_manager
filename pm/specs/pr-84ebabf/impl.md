@@ -203,3 +203,13 @@ only exercised `create_session`, the one path that works.
 Replaced with the env-file transport described in R2/A1. The new real-tmux
 tests assert both that the value lands in the pane environment and that
 `pane_start_command` stays clean; they fail on the `-e NAME` implementation.
+
+## 8. Review iteration 2 — doc/test follow-ups
+
+No behavioural changes. Three docstrings still described the superseded
+`tmux -e NAME` transport (`container.wrap_claude_cmd`,
+`TestBuildExecCmdProviderEnv`, `tui.pane_ops.launch_pane`); corrected to the
+env-file mechanism. Added
+`tests/test_claude_launcher.py::TestLaunchClaude::test_debug_env_dump_names_only`
+covering R4 (`launch_claude`'s debug dump names provider vars but never logs
+their values, and the command handed to `log_shell_command` is clean).

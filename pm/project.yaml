@@ -36166,7 +36166,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/268
   gh_pr_number: 268
   created_at: '2026-10-26T05:09:15.878235+00:00'
-  updated_at: '2026-10-27T20:30:01.899888+00:00'
+  updated_at: '2026-10-27T20:54:02.205686+00:00'
   started_at: '2026-10-27T19:07:41.620041+00:00'
   reviewed_at: null
   merged_at: null
@@ -36213,6 +36213,20 @@ prs:
       a §7 finding. Full suite: 3841 passed, 1 skipped (pytest 8.4.2) in /pm-captures/impl/post-fix/pytest-full-review1.log.'
     created_at: '2026-10-27T20:30:01Z'
     last_edited: '2026-10-27T20:30:01Z'
+  - id: note-2aebc10
+    text: 'review-loop b1c1 i2: no behavioural changes. Fixed three docstrings that
+      still described the superseded `tmux -e NAME` transport (container.wrap_claude_cmd,
+      TestBuildExecCmdProviderEnv, tui.pane_ops.launch_pane) — they now describe the
+      0600 env-file transport. Added TestLaunchClaude::test_debug_env_dump_names_only
+      covering spec R4 (launch_claude debug dump names provider vars only; the command
+      handed to log_shell_command carries no value). Re-verified pane_start_command
+      parsing survives the wrapper (leading `cd ... && ` still matches _PANE_CD_RE;
+      --session-id and container exec still detected). Full suite 3842 passed / 1
+      skipped (pytest 8.4.2, markdown installed) in /pm-captures/review-b1c1-i2/pytest-full.log.
+      Out of scope, unchanged: create_container still passes `-e NAME=value` in its
+      argv (#249 owns that).'
+    created_at: '2026-10-27T20:54:02Z'
+    last_edited: '2026-10-27T20:54:02Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

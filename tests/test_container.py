@@ -1265,7 +1265,8 @@ class TestBuildExecCmdProviderEnv:
     """Provider secrets reach the container by name, never by value.
 
     ``podman/docker exec -e NAME`` reads the value from the runtime client's
-    environment, which the tmux pane carries (set with ``tmux -e NAME``).
+    environment, which the tmux pane carries (its command sources a private
+    env file before running the runtime).
     """
 
     @patch("pm_core.container._get_runtime", return_value="podman")

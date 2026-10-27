@@ -153,8 +153,9 @@ def launch_pane(app, cmd: str, role: str, fresh: bool = False,
     that tmux window rather than the TUI's current window. Used by watchers
     that need to keep launched sessions alongside their own work log.
 
-    *env* carries provider values; it is passed to the new pane by name so
-    the values never appear in the command string.
+    *env* carries provider values; they are exported into the new pane's
+    environment through a private file, so the values never appear in the
+    command string.
     """
     info = get_session_and_window(app)
     if not info:

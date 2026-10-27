@@ -1099,8 +1099,10 @@ def wrap_claude_cmd(
         pr_id: PR identifier — combined with *session_tag* to share push
             proxies across containers on the same branch.
         env: Provider environment variables to pass to the exec'd claude by
-            name (see ``build_exec_cmd``).  Callers must also give the tmux
-            pane the same env (``tmux -e NAME``).
+            name (see ``build_exec_cmd``).  Callers must also export the same
+            values into the tmux pane (``env=`` on the pane helper); the pane
+            command sources a private env file, so only the names reach the
+            runtime command line.
 
     Returns:
         (wrapped_cmd, container_name).  container_name is "" if not containerised.
