@@ -101,6 +101,12 @@ PR) so the path it prints is inspectable.
 `added_ours`/`added_theirs`/`merged_fields`/`removed` name nested-list ids
 with their list path (`prs[pr-200].notes:note-1`), so a resolution that only
 merged notes inside an existing record is visible instead of looking empty.
+A one-sided *field* deletion is a merge, not a removed record: it does not
+appear in `removed` (the delta shows it), which names whole records only.
+`compact` keeps at most 20 ids per list and records the real length in
+`<key>_total` (preserved across re-compaction so the digest stays stable);
+the sign-off prompt and `pm pr signoff integrate` list a prefix and say
+"… N more" from that total rather than dropping ids silently.
 `summary()` renders resolved candidates ("conflicts with master@… resolved by
 record (N added from PR, M from base)", counting nested records) and failed
 resolutions.
@@ -202,6 +208,11 @@ published. So the sign-off launch
    refuse). The ancestry is resolved from the same checkout the check used
    (the recorded workdir, or the current checkout when that path is not
    visible), so a check run from the fallback does not drop the provenance.
+   A check that could not resolve HEAD at all (a transient failure: a broken
+   or replaced workdir) cannot prove the ancestry, but it carries the
+   applied resolution anyway rather than losing it — the record is `error`
+   (never mergeable), and a later successful check re-verifies the ancestry
+   before any approval can bind to it.
    The merge itself is still blocked until a check can verify the candidate
    again.
    Concurrent applies cannot lose the applied record. When the apply loses the
@@ -211,7 +222,9 @@ published. So the sign-off launch
    winner's applied one. `_record_check` additionally refuses, inside the
    locked read-modify-write, to write a check computed before HEAD moved when
    the stored record already describes the branch's current revision
-   (`_check_is_stale`) — the loser's record is then dropped, not written.
+   (`_check_is_stale`, which resolves HEAD from the same fallback checkout as
+   `_carry_forward`, so the container case is covered too) — the loser's
+   record is then dropped, not written.
    The apply itself runs under the repository lock (`_repo_lock`), like the
    check's fetches and candidate worktrees: otherwise two applies (the
    sign-off launch, a `--apply`, a bounce) can both pass the HEAD check and
@@ -244,8 +257,13 @@ made: that check describes the same revision but cannot know about the apply
 (it carried from a record without `applied_merge_sha`), so letting it stand
 would silently drop the provenance. The return record (`build_return_record`,
 `format_signoff_return`) adds the resolution summary, `applied_merge_sha`,
-and the original `resolved_from` revisions; the prompt tells the next stage
-to verify the integrated result, not only the PR's own diff. When the launch
+the original `resolved_from` revisions and the base's `base_behavior_error`
+(a summary pm could not compute is not evidence that the base is
+behaviour-neutral), and the return text says so. A `HEAD_MOVED`/
+`HEAD_MOVED_APPLYING` apply error is reported as a concurrent move of the
+branch (the winner's merge is in it), not as "pm did not merge the base";
+the prompt tells the next stage to verify the integrated result, not only
+the PR's own diff. When the launch
 `prepare` already applied the resolution (so the bounce has nothing left to
 apply and no `applied` block), the return text also gives the corrected diff
 command (`git diff <applied base> HEAD`) — the workdir's own base refs are
@@ -259,13 +277,16 @@ merged base commits as PR changes.
 - `review` (recorded `reviewed_at`; when QA recorded `planner_head` and no
   `planner_code_changes`, that revision is recorded as the review's with
   `sha_source: inferred-from-qa` — otherwise pm states it does not record
-  the review revision),
+  the review revision; a *malformed* (non-list) `planner_code_changes` is
+  not proof that QA committed nothing, so it suppresses the inference
+  instead of recording a review revision pm cannot confirm),
 - `qa` (latest `qa_status.json` `overall`, plus `planner_head` and
   `planner_code_changes` from its sibling `qa_resume.json`; malformed evidence
   is recorded as unreadable/absent, never raised — a non-string
-  `planner_head` is no revision, so the block and the prompt do not slice it;
-  no host path is recorded — the block travels to master in the tracked
-  project.yaml, where a per-host absolute path is dead weight),
+  `planner_head` is no revision, so the block and the prompt do not slice it,
+  and a non-list `planner_code_changes` carries a `planner_code_changes_error`
+  marker; no host path is recorded — the block travels to master in the
+  tracked project.yaml, where a per-host absolute path is dead weight),
 - `prior_signoff` (previous record's sha/verdict/ts, if any),
 - `required_return_stage` (the verdict mapped to its stage),
 - agent-declared reuse from `report.html` meta tags (only trusted when the
@@ -316,13 +337,16 @@ the exact base revision the branch contains — an applied resolution or a
 clean base merged by a bounce — instead of `origin/<base>`, which pm never
 updates and which would list the merged base commits as PR changes; the
 base-changes range is shown as the pre-apply range only while the base
-inside HEAD is still the checked base (the recorded merge base equals it),
-and omitted (rather than printed empty as "0 file(s)") when the base is
-inside HEAD with no recorded pre-apply range. Once the base has moved on
-past an applied resolution, the recorded merge base is the applied base, so
-the range starts there — using the pre-apply merge base would list the
-commits the resolution already merged as new base changes and disagree with
-the recorded file count. The same exact-base
+inside HEAD is still the one the resolution applied (the recorded merge base
+equals the checked base *and* `resolved_from.base_sha` does), and omitted
+(rather than printed empty as "0 file(s)") when the base is inside HEAD with
+no recorded pre-apply range. Once the base has moved on past an applied
+resolution, the recorded merge base is the applied base, so the range starts
+there — using the pre-apply merge base would list the commits the resolution
+already merged as new base changes and disagree with the recorded file
+count. The same holds when a *newer* base is merged by a bounce after the
+resolution: the range starts at the applied base, not the resolution's
+pre-apply merge base. The same exact-base
 rule applies to the review and QA prompts' own diff command (and the QA
 interactive prompt): once a bounce has integrated the base, diffing the
 workdir's stale `<base>`/`origin/<base>` ref would list the merged base
@@ -331,8 +355,11 @@ a newer `up_to_date` check, or the merge a bounce recorded in
 `signoff_return.applied` (a clean bounce leaves the pre-merge `clean` check
 in place). The branch can contain more than one base revision (a resolution
 applied at sign-off, then a newer base merged by a later bounce), so
-`integration.contained_base(pr)` collects those candidates, drops any HEAD
-does not contain, and keeps the newest by ancestry — the last check's
+`integration.contained_base(pr)` collects those candidates (only values that
+look like git object names: the value is interpolated into a command the
+agent is told to run, so a hand-edited shell fragment must not become the
+diff ref), drops any HEAD does not contain, and keeps the newest by
+ancestry — the last check's
 recorded `merge_base` (which survives a later check replacing the
 `up_to_date` record) is one candidate, but only when a base merge is known;
 without one it is just the branch point and the usual base-branch diff
@@ -368,9 +395,13 @@ merge, which moves HEAD without being PR work, so "unchanged" means either
 the current check's `head` equals the approved revision, or the applied
 resolution's `resolved_from.head` does. Any commit the PR added since the
 refusal leaves neither matching and the block is omitted. A verdict bounce is
-a different episode (it writes `signoff_return`) and never emits this block.
-The agent is told to read the previous report *before* overwriting it and
-that a fresh report bound to the new head/base/candidate is still required.
+a different episode (it writes `signoff_return`) and never emits this block:
+the marker outlives the bounce (only a new verdict clears it), and the
+bounce's own run overwrites `$CAP/report.html`, so while a sign-off return is
+open the pointer is suppressed — the head test alone cannot tell that re-run
+from the invalidation relaunch when the bounce added no PR work. The agent is
+told to read the previous report *before* overwriting it and that a fresh
+report bound to the new head/base/candidate is still required.
 
 ### R7. Merge gate / publication identity
 `merge_gate_refusal` additionally requires:
@@ -460,7 +491,13 @@ tests):
    check sees the same base inside HEAD with no applied resolution: the file
    count, the overlap, the behaviour changes and the prompt's base range
    survive (and the gate still requires the statement when the base changed
-   behaviour-relevant configuration).
+   behaviour-relevant configuration). A **newer** base merged by a bounce
+   after an applied resolution starts the base-changes range at the applied
+   base (not the resolution's pre-apply merge base, which would re-list the
+   already-merged commits and disagree with the file count). A resolution
+   with more than 10 ids per list names the remainder ("… N more") in the
+   prompt and in `integrate`, and `contained_base` refuses a value that is
+   not a git object name (it becomes a command the agent runs).
 10. Notes appended to the same PR record on both sides (the merge base has no
     `notes` key) resolve, both notes survive, and the nested ids are named in
     the summary/prompt; the same id with different content is still ambiguous.
@@ -495,7 +532,11 @@ tests):
     mergeable (and never looks approved without its provenance); a changed
     (or digest-inconsistent) resolution invalidates the approval; an applied
     resolution's behavioural changes survive a benign re-check and a failed
-    check keeps the bound resolution; a config-file base change (e.g.
+    check keeps the bound resolution — including a check that could not
+    resolve HEAD at all (a transient failure) and one recorded from the
+    fallback checkout when the recorded workdir is not visible (the stale
+    check is still recognised there, so a loser cannot overwrite the
+    winner's applied record); a config-file base change (e.g.
     `pyproject.toml`) requires the same justification as `project.yaml`; the
     full `integration.json` record carries the digest of the resolution it
     describes; a failed behaviour summary still requires the justification
@@ -503,7 +544,16 @@ tests):
     resolution and a later benign re-check; a resolved approval whose head
     is already in the base is recovered, not refused for a missing candidate.
 14. Malformed evidence and honest surfaces: a non-string `qa_resume.json`
-    `planner_head` is recorded as no revision and does not crash the prompt;
+    `planner_head` is recorded as no revision and does not crash the prompt,
+    and a non-list `planner_code_changes` does not get a review revision
+    inferred from it (the prompt says pm cannot tell whether QA committed
+    changes);
+    a `qa_status.json` that is valid JSON but not a mapping, and one whose
+    `scenarios` member is not a list, are reported as malformed evidence
+    instead of raising out of the sign-off prompt; a verdict recorded
+    without a revision does not inherit a *headless* stored check's
+    candidate/resolution; a `HEAD_MOVED` bounce apply is reported as a
+    concurrent branch move, not as "pm did not merge the base";
     the `integrate` CLI (and the launch) label a failed attempt's paths as
     attempted, never resolved, while a resolution carried forward from an
     earlier applied merge is not labelled an attempt (the current conflict is

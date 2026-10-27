@@ -1904,7 +1904,12 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
             values = entry.get(key)
             values = values if isinstance(values, list) else []
             if values:
-                click.echo(f"    {label}: {', '.join(map(str, values[:10]))}")
+                shown = values[:10]
+                # Name the ids the record holds but this listing omits.
+                more = max(0, integration.resolution_id_total(entry, key)
+                           - len(shown))
+                click.echo(f"    {label}: {', '.join(map(str, shown))}"
+                           + (f", … {more} more" if more else ""))
     for entry in integration.resolution_entries(resolution, "unresolved"):
         click.echo(f"  unresolved: {entry.get('path')}: "
                    f"{entry.get('conflicts')}", err=True)

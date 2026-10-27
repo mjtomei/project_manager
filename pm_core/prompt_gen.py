@@ -695,6 +695,11 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
     scenarios = data.get("scenarios") or []
     if isinstance(scenarios, dict):
         scenarios = list(scenarios.values())
+    elif not isinstance(scenarios, list):
+        # Hand-edited evidence: a scalar `scenarios` is malformed, not a
+        # collection to iterate (``for s in 5`` raises TypeError out of the
+        # sign-off prompt, the same contract the non-mapping guard follows).
+        scenarios = []
     valid = [s for s in scenarios if isinstance(s, dict)]
     if not valid:
         return (head, "")
@@ -805,13 +810,17 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         if resolution.get("applied_merge_sha") \
                 and isinstance(pre.get("merge_base"), str) \
                 and pre["merge_base"] and range_base == base_sha:
-            # Only when the base is the one already inside HEAD.  If the base
-            # has moved on since the apply, the recorded merge base is the
-            # current one and the range below is already correct — using the
+            # Only when the base inside HEAD is the one the resolution
+            # applied.  If a newer base was merged by a bounce since, the
             # pre-apply merge base would list the commits the resolution
             # already merged as if they were new base changes (and disagree
-            # with the recorded base_files_count).
-            range_base = pre["merge_base"]
+            # with the recorded base_files_count, which describes the range
+            # from the applied base): start at the applied base instead.
+            applied_base = integ.revision_of(pre.get("base_sha"))
+            if applied_base == base_sha:
+                range_base = pre["merge_base"]
+            elif applied_base:
+                range_base = applied_base
         elif range_base == base_sha \
                 and isinstance(rec.get("base_range_from"), str) \
                 and rec["base_range_from"]:
@@ -886,8 +895,15 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
                 values = entry.get(key)
                 values = values if isinstance(values, list) else []
                 if values:
+                    shown = values[:10]
+                    # Never silent loss: name the ids the record holds but
+                    # this listing does not show (``compact`` keeps 20 and
+                    # records the real total).
+                    more = max(0, integ.resolution_id_total(entry, key)
+                               - len(shown))
                     bits.append(f"{label}: "
-                                + ", ".join(f"`{v}`" for v in values[:10]))
+                                + ", ".join(f"`{v}`" for v in shown)
+                                + (f", … {more} more" if more else ""))
             lines.append("- " + "; ".join(bits))
         resolved_from = resolution.get("resolved_from")
         resolved_from = resolved_from if isinstance(resolved_from, dict) else {}
@@ -983,8 +999,9 @@ def _signoff_invalidated_block(pr: dict) -> str:
     moved under an approval, and the relaunch then applies the base merge to
     the branch — which moves HEAD without being PR work.  Any commit the PR
     added since that approval makes the previous report's conclusions stale,
-    so it is not referenced then (a bounce is a different episode entirely:
-    it writes ``signoff_return``, not this record).
+    so it is not referenced then.  A bounce is a different episode entirely
+    (it writes ``signoff_return``, and its run overwrites the report this
+    block would name): while a return is open it never emits this block.
     """
     from pm_core import integration as integ
     inv = pr.get("signoff_invalidated")
@@ -995,17 +1012,32 @@ def _signoff_invalidated_block(pr: dict) -> str:
         return ""
     if not (isinstance(approved, str) and approved):
         return ""
+    # An open sign-off return is the current episode: the bounce's own run
+    # overwrote `$CAP/report.html`, so pointing at it would present the
+    # bounce's report as the invalidated approval's, and the reason sign-off
+    # is running again is the return — not the refused merge.  The marker
+    # outlives the bounce (only a new verdict clears it), so suppress it here.
+    from pm_core.signoff import open_return
+    if open_return(pr):
+        return ""
     rec = pr.get("integration")
     rec = rec if isinstance(rec, dict) else {}
-    resolved_from = integ.resolution_of(rec).get("resolved_from")
+    resolution = integ.resolution_of(rec)
+    resolved_from = resolution.get("resolved_from")
     resolved_from = resolved_from if isinstance(resolved_from, dict) else {}
     # ``rec['head']`` is the revision the current check saw; when pm applied
     # the base merge it is the merge commit and ``resolved_from.head`` is the
     # head it applied on top of.  Either matching the approved revision means
-    # no PR work was added since.
+    # no PR work was added since — but the applied-resolution path must also
+    # require that the merge is still the revision the check saw: a later
+    # commit (and a re-check of it) is PR work, not the base merge, and the
+    # previous report no longer describes these exact changes.
     applied_from = resolved_from.get("head")
-    if rec.get("head") != approved and not (
-            isinstance(applied_from, str) and applied_from == approved):
+    applied_merge = integ.revision_of(resolution.get("applied_merge_sha"))
+    unchanged = rec.get("head") == approved or (
+        isinstance(applied_from, str) and applied_from == approved
+        and applied_merge and rec.get("head") == applied_merge)
+    if not unchanged:
         return ""
     prior = inv.get("verdict")
     prior = (f"The previous sign-off concluded **{prior}** at "
@@ -1044,7 +1076,13 @@ def _evidence_revision_lines(pr_id: str) -> list[str]:
         return lines
     overall = qa.get("overall") or "?"
     lines.append(f"- QA: `qa@{head[:12]}` (overall {overall})")
-    if qa.get("planner_code_changes"):
+    if qa.get("planner_code_changes_error"):
+        # A malformed change list is not proof that QA committed nothing: the
+        # inferred review revision would be a guess recorded as fact.
+        lines.append("- Review: pm cannot tell whether QA committed changes "
+                     "(qa_resume.json `planner_code_changes` is malformed), so "
+                     "it does not record the revision the review ran on.")
+    elif qa.get("planner_code_changes"):
         lines.append("- Review: pm does not record the revision the review ran "
                      "on (QA committed changes after it).")
     else:

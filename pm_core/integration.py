@@ -454,19 +454,19 @@ def _merge_dict(base: dict, ours: dict, theirs: dict, path: str, actions: dict):
                 out[key] = value
         elif in_o:
             if in_b:
-                if ours[key] == base[key]:
-                    _record_action(actions, path, "removed", rec_id=str(key))
-                else:
+                if ours[key] != base[key]:
                     conflicts.append(
                         f"{key_path}: deleted on the new base, changed on the "
                         "PR branch")
+                # A one-sided field deletion is a merge, not a removed
+                # record: the ``removed`` action list names whole records
+                # (``_merge_id_list``), and the resolution delta shows the
+                # field change.
             else:
                 out[key] = ours[key]           # added by the PR branch
         elif in_t:
             if in_b:
-                if theirs[key] == base[key]:
-                    _record_action(actions, path, "removed", rec_id=str(key))
-                else:
+                if theirs[key] != base[key]:
                     conflicts.append(
                         f"{key_path}: deleted on the PR branch, changed on the "
                         "new base")
@@ -717,6 +717,22 @@ def revision_of(value) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+_OBJECT_NAME_RE = re.compile(r"[0-9a-fA-F]{7,64}\Z")
+
+
+def _sha_like(value) -> str | None:
+    """*value* when it looks like a git object name, else ``None``.
+
+    ``contained_base`` returns a revision that prompt builders interpolate
+    into a suggested ``git diff`` command (and the review pane into a shell
+    command).  project.yaml is hand-editable, so a value that is not a hex
+    object name — a shell fragment, a ref with metacharacters — must not
+    become part of that command.
+    """
+    return value if isinstance(value, str) and _OBJECT_NAME_RE.match(value) \
+        else None
+
+
 def _as_int(value, default: int = 0) -> int:
     """*value* as an int, or *default* when it is not one (hand-edited state)."""
     try:
@@ -755,6 +771,22 @@ def resolution_entries(resolution, key: str) -> list[dict]:
     if not isinstance(values, list):
         return []
     return [v for v in values if isinstance(v, dict)]
+
+
+def resolution_id_total(entry: dict, key: str) -> int:
+    """The real length of a compact resolution id list (*key*).
+
+    ``_compact_resolution`` keeps at most 20 ids and records the full length
+    in ``<key>_total``; a prompt/CLI that lists a prefix must report the
+    remainder from that total rather than dropping ids silently.
+    """
+    entry = _mapping(entry)
+    values = entry.get(key)
+    n = len(values) if isinstance(values, list) else 0
+    total = entry.get(f"{key}_total")
+    if isinstance(total, int) and not isinstance(total, bool) and total > n:
+        return total
+    return n
 
 
 def _resolution_digest(resolution: dict | None) -> str | None:
@@ -1350,14 +1382,23 @@ def _compact_resolution(resolution: dict) -> dict:
             "path": path if isinstance(path, str) else None,
             "resolver": resolver if isinstance(resolver, str) else None,
             "blob": blob if isinstance(blob, str) else None,
-            # ``_as_list``: ``list(5)`` raises and ``list("x")`` splits the
-            # value into characters, so a malformed scalar must read as [].
-            "added_ours": _as_list(entry.get("added_ours"))[:20],
-            "added_theirs": _as_list(entry.get("added_theirs"))[:20],
-            "merged_fields": _as_list(entry.get("merged_fields"))[:20],
-            "removed": _as_list(entry.get("removed"))[:20],
             "records": records,
         }
+        # ``_as_list``: ``list(5)`` raises and ``list("x")`` splits the value
+        # into characters, so a malformed scalar must read as [].  A truncated
+        # id list records its real length (like ``records_total``), so the
+        # prompt can name what it omits instead of dropping ids silently.  A
+        # recorded total is carried through re-compaction so the digest stays
+        # stable.
+        for key in ("added_ours", "added_theirs", "merged_fields", "removed"):
+            values = _as_list(entry.get(key))
+            item[key] = values[:20]
+            total = entry.get(f"{key}_total")
+            if total is None and len(values) > 20:
+                total = len(values)
+            if isinstance(total, int) and not isinstance(total, bool) \
+                    and total > len(item[key]):
+                item[f"{key}_total"] = total
         if records_total is not None:
             item["records_total"] = records_total
         paths.append(item)
@@ -1589,9 +1630,17 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
             # the applied resolution is not silently dropped.
             workdir = _cwd_checkout_of(pr_entry)
         new_head = revision_of(record.get("head"))
-        if applied and workdir and new_head and Path(workdir).is_dir() \
-                and (applied == new_head
-                     or is_ancestor(workdir, applied, new_head)):
+        verified = bool(
+            applied and workdir and new_head and Path(workdir).is_dir()
+            and (applied == new_head
+                 or is_ancestor(workdir, applied, new_head)))
+        # A check that could not resolve HEAD (a transient failure: a broken
+        # or replaced workdir) cannot prove the ancestry, but it must not
+        # lose what was applied.  The record is not mergeable (status error),
+        # and a later successful check re-verifies the ancestry before any
+        # approval can bind to it.
+        unverifiable = bool(applied and not new_head)
+        if verified or unverifiable:
             carried = dict(old_resolution)
             carried.pop("diff", None)      # compact state never holds it
             # Hand-edited state: a non-string path is not a path (``Path(5)``
@@ -1689,6 +1738,13 @@ def _check_is_stale(record: dict, pr_entry: dict) -> bool:
     old = _mapping(pr_entry.get("integration"))
     workdir = pr_entry.get("workdir")
     if not isinstance(workdir, str) or not Path(workdir).is_dir():
+        # The recorded host workdir is not visible (the container case): the
+        # check may have run from the current checkout (``run_check`` falls
+        # back the same way), so the stale check must be recognised there
+        # too — otherwise a loser's stale record overwrites the winner's
+        # applied one and drops the resolution provenance.
+        workdir = _cwd_checkout_of(pr_entry)
+    if not workdir:
         return False
     now = _out(_git("rev-parse", "HEAD", cwd=workdir))
     head = record.get("head")
@@ -1979,10 +2035,14 @@ def contained_base(pr: dict) -> str | None:
     applied = _mapping(_mapping(pr.get("signoff_return")).get("applied"))
     resolution = _mapping(record.get("resolution"))
     candidates: list[str] = []
-    if record.get("status") == UP_TO_DATE and revision_of(record.get("base_sha")):
-        candidates.append(record["base_sha"])
-    if applied.get("merge_sha") and revision_of(applied.get("base_sha")):
-        candidates.append(applied["base_sha"])
+    # Only a hex object name may become the diff ref: the value is
+    # interpolated into a command the agent is told to run.
+    base_sha = _sha_like(record.get("base_sha"))
+    if record.get("status") == UP_TO_DATE and base_sha:
+        candidates.append(base_sha)
+    applied_base = _sha_like(applied.get("base_sha"))
+    if applied.get("merge_sha") and applied_base:
+        candidates.append(applied_base)
     workdir = pr.get("workdir")
     workdir = workdir if isinstance(workdir, str) else None
     have_workdir = bool(workdir) and Path(workdir).is_dir()
@@ -1997,7 +2057,7 @@ def contained_base(pr: dict) -> str | None:
     # absent from HEAD's first-parent chain, while the branch point is on it.
     carries_base = bool(revision_of(resolution.get("applied_merge_sha"))) \
         or bool(applied.get("merge_sha"))
-    merge_base = revision_of(record.get("merge_base"))
+    merge_base = _sha_like(record.get("merge_base"))
     if merge_base and (
             carries_base
             or (have_workdir and is_ancestor(workdir, merge_base, "HEAD")
@@ -2005,12 +2065,10 @@ def contained_base(pr: dict) -> str | None:
         candidates.append(merge_base)
     if revision_of(resolution.get("applied_merge_sha")):
         resolved_from = _mapping(resolution.get("resolved_from"))
-        base = revision_of(resolved_from.get("base_sha")) \
-            or revision_of(record.get("base_sha"))
+        base = _sha_like(resolved_from.get("base_sha")) or base_sha
         if base:
             candidates.append(base)
-    candidates = list(dict.fromkeys(
-        c for c in candidates if isinstance(c, str) and c))
+    candidates = list(dict.fromkeys(candidates))
     if not candidates:
         return None
     if len(candidates) > 1 and have_workdir:

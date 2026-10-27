@@ -653,6 +653,23 @@ def test_evidence_does_not_attribute_another_revisions_candidate(w):
     assert ev["candidate_tree"] is None
     assert ev["resolved_from"] is None
 
+    # A verdict recorded without any revision must not inherit a *headless*
+    # stored check either: ``None != None`` is false, so the head comparison
+    # alone would keep its candidate/resolution.
+    def _headless(d):
+        store.get_pr(d, PR)["integration"] = {
+            "status": "error", "head": None, "base_sha": None,
+            "candidate_tree": "c" * 40,
+            "resolution": {"applied_merge_sha": "d" * 40,
+                           "resolved_from": {"head": "e" * 40}}}
+    store.locked_update(w.pm_dir, _headless)
+    signoff.record_signoff_verdict(w.pm_dir, PR, SIGNOFF_REVIEW, None,
+                                   "manual")
+    ev = pr_entry(w)["signoff"]["evidence"]
+    assert ev["reviewed_head"] is None
+    assert ev["candidate_tree"] is None
+    assert ev["resolved_from"] is None
+
 
 def test_malformed_qa_evidence_does_not_crash_the_record(w):
     """A corrupt QA snapshot is reported, not raised out of sign-off."""
@@ -665,11 +682,18 @@ def test_malformed_qa_evidence_does_not_crash_the_record(w):
     evidence = signoff.qa_evidence(PR)
     assert evidence["overall"] is None
     assert evidence["planner_code_changes"] == []
+    assert evidence["planner_code_changes_error"] == "malformed"
     rec = integration.check_integration(w.pm_dir, PR)
     signoff.record_signoff_verdict(
         w.pm_dir, PR, SIGNOFF_REVIEW, rec["head"], "manual",
         integration=integration.binding(rec))
-    assert pr_entry(w)["signoff"]["evidence"]["qa"]["planner_code_changes"] == []
+    evidence_block = pr_entry(w)["signoff"]["evidence"]
+    assert evidence_block["qa"]["planner_code_changes"] == []
+    # A malformed change list is not proof that QA committed nothing: the
+    # review revision must not be inferred from it (that would record a
+    # revision pm cannot confirm).
+    assert evidence_block["review"]["sha"] is None
+    assert evidence_block["review"]["sha_source"] is None
 
     # An unparseable qa_status.json must not discard the revision the
     # sibling resume snapshot records: it is still the evidence's revision.
@@ -681,6 +705,8 @@ def test_malformed_qa_evidence_does_not_crash_the_record(w):
                side_effect=FileNotFoundError):
         text = prompt_gen.generate_signoff_prompt(store.load(w.pm_dir), PR)
     assert f"qa@{'f' * 12}" in text
+    assert f"review@{'f' * 12}" not in text
+    assert "cannot tell whether QA committed changes" in text
 
 
 def test_malformed_qa_status_does_not_crash_the_signoff_prompt(w):
@@ -700,6 +726,26 @@ def test_malformed_qa_status_does_not_crash_the_signoff_prompt(w):
                side_effect=FileNotFoundError):
         text = prompt_gen.generate_signoff_prompt(store.load(w.pm_dir), PR)
     assert "qa_status.json malformed" in text
+
+
+def test_malformed_qa_scenarios_does_not_crash_the_signoff_prompt(w):
+    """A non-list ``scenarios`` member is malformed evidence, not iterable.
+
+    The QA block lists the per-scenario verdicts; a hand-edited scalar would
+    raise ``TypeError`` out of the sign-off prompt, which the malformed-
+    evidence contract forbids just like the non-mapping top level.
+    """
+    qa_dir = w.tmp / "home" / ".pm" / "workdirs" / "qa" / f"{PR}-abcd"
+    qa_dir.mkdir(parents=True)
+    (qa_dir / "qa_status.json").write_text(json.dumps(
+        {"overall": "PASS", "scenarios": 5}))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": "f" * 40, "planner_code_changes": []}))
+
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(store.load(w.pm_dir), PR)
+    assert "Overall QA verdict: **PASS**" in text
 
 
 def test_malformed_qa_resume_revision_does_not_crash_the_prompt(w):
@@ -993,6 +1039,56 @@ def test_a_stale_check_does_not_replace_the_record_for_the_current_head(w):
     assert stored["resolution"]["applied_merge_sha"] == applied
 
 
+def test_a_stale_check_is_dropped_when_the_recorded_workdir_is_not_visible(
+        w, monkeypatch):
+    """The container case: the host workdir path does not exist here.
+
+    ``run_check`` falls back to the current checkout, so ``_check_is_stale``
+    must resolve HEAD the same way — otherwise a loser's stale record
+    overwrites the winner's applied one and drops the provenance.
+    """
+    rec = _metadata_conflict(w)
+    applied = rec["resolution"]["applied_merge_sha"]
+    old_head = rec["resolution"]["resolved_from"]["head"]
+    stale = {"status": integration.RESOLVED, "head": old_head,
+             "base_sha": rec["base_sha"], "base_branch": "master",
+             "target_repo": str(w.repo),
+             "candidate_tree": rec["candidate_tree"],
+             "conflicts": ["pm/project.yaml"]}
+
+    def _hide(d):
+        store.get_pr(d, PR)["workdir"] = str(w.tmp / "host-only" / "gone")
+    store.locked_update(w.pm_dir, _hide)
+    monkeypatch.chdir(w.wd)          # the process runs in the PR checkout
+    out = integration._record_check(w.pm_dir, PR, stale)
+    assert out["head"] == rec["head"]
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.UP_TO_DATE
+    assert stored["head"] == rec["head"]
+    assert stored["resolution"]["applied_merge_sha"] == applied
+
+
+def test_a_transient_check_without_a_head_keeps_the_applied_resolution(w):
+    """A re-check that cannot resolve HEAD must not lose what was applied.
+
+    The record is ``error`` (never mergeable), and a later successful check
+    re-verifies the ancestry before anything can bind to it.
+    """
+    rec = _metadata_conflict(w)
+    applied = rec["resolution"]["applied_merge_sha"]
+    out = integration._record_check(
+        w.pm_dir, PR,
+        {"status": integration.ERROR, "error": "no PR workdir", "head": None,
+         "base_sha": None, "target_repo": str(w.repo),
+         "base_branch": "master"})
+    assert out["status"] == integration.ERROR
+    assert out["resolution"]["applied_merge_sha"] == applied
+    assert out["resolution_digest"] == rec["resolution_digest"]
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.ERROR
+    assert stored["resolution"]["applied_merge_sha"] == applied
+
+
 def test_prepare_records_the_recheck_once_with_the_resolution(w, monkeypatch):
     """The post-apply re-check is written once, already carrying the
     resolution.
@@ -1137,6 +1233,33 @@ def test_compact_resolution_bounds_records_and_is_idempotent():
     assert integration._compact_resolution(compact) == compact
     assert integration._resolution_digest(resolution) == \
         integration._resolution_digest(compact)
+
+
+def test_resolution_id_lists_name_what_they_omit():
+    """A truncated id list records its real total and the prompt says so.
+
+    ``compact`` keeps at most 20 ids per list; the prompt shows 10.  Neither
+    may drop ids silently — the same "the marker must describe what was
+    dropped" rule the overlap/conflicts lists follow.
+    """
+    entry = {"path": "pm/project.yaml",
+             "added_ours": [f"pr-{i}" for i in range(25)],
+             "added_theirs": [], "merged_fields": [], "removed": []}
+    compact = integration._compact_resolution(
+        {"paths": [entry], "unresolved": []})
+    stored = compact["paths"][0]
+    assert len(stored["added_ours"]) == 20
+    assert stored["added_ours_total"] == 25
+    # Re-compaction is a fixed point, so the digest stays stable.
+    assert integration._compact_resolution(compact) == compact
+    assert integration._resolution_digest({"paths": [entry]}) == \
+        integration._resolution_digest(compact)
+    pr = {"id": PR, "integration": {
+        "status": integration.RESOLVED, "base_branch": "master",
+        "base_sha": "a" * 40, "head": "b" * 40,
+        "candidate_tree": "c" * 40, "resolution": compact}}
+    block = prompt_gen._signoff_integration_block(pr, PR)
+    assert "… 15 more" in block
 
 
 def test_summary_counts_records_beyond_the_bounded_id_lists():
@@ -1478,6 +1601,43 @@ def test_prompt_base_range_after_the_base_moves_past_an_applied_resolution(w):
     assert "(1 file(s))" in text
 
 
+def test_base_range_starts_at_the_applied_base_after_a_newer_base_is_merged(w):
+    """A newer base merged past an applied resolution keeps the right range.
+
+    The resolution applied base B1; a bounce then merged B2.  The next check's
+    merge base is B2 itself (the base is inside HEAD), so the pre-apply merge
+    base (the branch point) must not be used as the range start: it would list
+    the commits the resolution already merged as new base changes, and it
+    would disagree with the recorded file count (computed over B1..B2).
+    """
+    rec = _metadata_conflict(w)
+    b1 = rec["base_sha"]
+    commit(w.repo, "base_only.txt", "base\n", "base moves ahead")
+    b2 = git(w.repo, "rev-parse", "HEAD")
+    clean = integration.check_integration(w.pm_dir, PR)
+    assert clean["status"] == integration.CLEAN, clean
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, clean["head"], clean["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    again = integration.prepare(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert again["base_sha"] == b2
+    pre_merge_base = again["resolution"]["resolved_from"]["merge_base"]
+    assert pre_merge_base not in (b1, b2)
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert f"git log --oneline {b1[:12]}..{b2[:12]}" in text
+    assert f"{pre_merge_base[:12]}.." not in text
+    assert "(1 file(s))" in text
+
+
 def test_the_post_apply_record_keeps_the_base_overlap_and_file_count(w):
     """The re-check after the apply sees no base diff — the prompt still shows
     which files both sides changed and how many the base touched.
@@ -1583,6 +1743,12 @@ def test_contained_base_reads_malformed_state_as_absent(w):
         {"id": PR, "workdir": str(w.wd),
          "integration": {"status": "up_to_date", "base_sha": "a" * 40}}) \
         == "a" * 40
+    # A value that is not a git object name must never become the diff ref:
+    # prompt builders interpolate it into a command the agent is told to run.
+    assert integration.contained_base(
+        {"id": PR, "workdir": str(w.wd),
+         "integration": {"status": "up_to_date",
+                         "base_sha": "abc; touch /tmp/pwned"}}) is None
 
 
 def test_malformed_resolution_state_reads_as_absent(w):
@@ -2215,6 +2381,14 @@ def test_an_unsummarisable_base_change_still_requires_the_evidence_statement(
         text = prompt_gen.generate_signoff_prompt(store.load(w.pm_dir), PR)
     assert "could not summarise the base's behaviour-relevant changes" in text
 
+    # A bounce's return snapshot carries the failure too: the routed step
+    # must be told to assess the base itself, not read "no listed changes".
+    ret = signoff.build_return_record(
+        pr_entry(w), SIGNOFF_REQA, "qa", reviewed_head=rec["head"])
+    assert "summary exploded" in ret["integration"]["base_behavior_error"]
+    assert "could not summarise the base's behaviour-relevant changes" in \
+        signoff.format_signoff_return({"id": PR, "signoff_return": ret})
+
     write_report(w, rec, candidate=False)
     with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
          patch.object(pr_mod, "trigger_tui_refresh"):
@@ -2605,6 +2779,17 @@ def test_field_deletion_vs_edit_is_refused_and_one_sided_deletion_is_kept():
     merged, details = integration.resolve_project_yaml(base, ours, base)
     assert merged is not None, details
     assert "skip_qa" not in merged
+    # ... and it is a field change, not a removed *record*: the provenance
+    # lists name records, so a scalar key must not appear as one.  The other
+    # side changes another key so the mapping is actually merged (an
+    # untouched side is taken wholesale and records no actions).
+    theirs = ("project:\n  name: q\n  skip_qa: true\n"
+              "prs:\n- id: pr-1\n  status: pending\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is not None, details
+    actions = details["actions"].get("project", {})
+    assert actions.get("removed", []) == []
+    assert actions.get("changed", []) == []
 
 
 def test_invalid_merged_shape_is_refused():
@@ -3864,6 +4049,26 @@ def test_a_non_utf8_launch_stamp_does_not_crash_the_driver(w):
     assert signoff.signoff_launched_base(w.tdir, PR) == "b" * 40
 
 
+def test_a_concurrent_apply_is_not_reported_as_pm_not_merging(w):
+    """A HEAD race during a bounce apply is not "pm did not merge the base".
+
+    ``apply_integration`` returns ``HEAD_MOVED`` when a concurrent apply won;
+    the winner's merge is in the branch, so the return text must not claim the
+    base was not integrated.
+    """
+    ret = {"verdict": SIGNOFF_REVIEW, "hop": "review", "reason": "r",
+           "reviewed_head": "a" * 40, "awaiting": "review",
+           "apply_error": integration.HEAD_MOVED}
+    text = signoff.format_signoff_return({"id": PR, "signoff_return": ret})
+    assert "pm did not merge the base into the branch" not in text
+    assert "moved while pm was merging the base" in text
+
+    # A genuine apply failure keeps the direct wording.
+    ret["apply_error"] = "workdir has uncommitted changes"
+    text = signoff.format_signoff_return({"id": PR, "signoff_return": ret})
+    assert "pm did not merge the base into the branch" in text
+
+
 def test_the_return_text_says_how_many_behaviour_changes_it_omitted():
     """A trimmed behaviour list must name what it dropped.
 
@@ -4011,6 +4216,50 @@ def test_a_verdict_bounce_does_not_point_at_the_previous_report(w):
     pr = pr_entry(w)
     ret = signoff.build_return_record(
         pr, SIGNOFF_REVIEW, "review", reviewed_head=w.head)
+
+    def _set(d):
+        store.get_pr(d, PR)["signoff_return"] = ret
+    store.locked_update(w.pm_dir, _set)
+
+    text = _signoff_prompt(w)
+    assert "## Previous sign-off return" in text
+    assert POINTER not in text
+
+
+def test_pr_work_after_an_applied_resolution_does_not_point_at_the_previous_report(w):
+    """A commit on top of the applied base merge is PR work after the refusal.
+
+    ``resolved_from.head`` stays the approved revision permanently, so the
+    pointer must also require that the applied merge is still the revision
+    the current check saw.
+    """
+    rec = _metadata_conflict(w)
+    approved = rec["_original_head"]
+    _approve_and_refuse(w, approved, "master moved since sign-off (aaaa -> bbbb)")
+    after = integration.prepare(w.pm_dir, PR)
+    assert after["resolution"]["resolved_from"]["head"] == approved
+    commit(w.wd, "later.txt", "later\n", "PR work after the relaunch")
+    moved = integration.check_integration(w.pm_dir, PR)
+    assert moved["head"] == git(w.wd, "rev-parse", "HEAD")
+    assert moved["head"] != after["resolution"]["applied_merge_sha"]
+
+    text = _signoff_prompt(w)
+    assert POINTER not in text
+
+
+def test_a_bounce_after_a_refused_merge_does_not_point_at_the_previous_report(w):
+    """The invalidation marker outlives the bounce, but the bounce is now the
+    current episode — and its run overwrote the report the marker names."""
+    rec = _metadata_conflict(w)
+    approved = rec["_original_head"]
+    _approve_and_refuse(w, approved, "master moved since sign-off (aaaa -> bbbb)")
+    after = integration.prepare(w.pm_dir, PR)
+    assert after["resolution"]["resolved_from"]["head"] == approved
+    # Sign-off bounced (say a targeted QA) without adding PR work, so HEAD is
+    # still the approved revision via the applied resolution — the head test
+    # alone cannot tell this episode from the invalidation relaunch.
+    ret = signoff.build_return_record(
+        pr_entry(w), SIGNOFF_REQA, "qa", reviewed_head=after["head"])
 
     def _set(d):
         store.get_pr(d, PR)["signoff_return"] = ret

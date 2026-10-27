@@ -374,6 +374,11 @@ def qa_evidence(pr_id: str) -> dict | None:
     if not isinstance(resume, dict):
         resume = {}
     changes = resume.get("planner_code_changes")
+    # A non-list value is malformed evidence, not "QA committed nothing": the
+    # review-revision inference below treats an empty list as proof that QA
+    # saw the reviewed revision, so a malformed value must stay distinguishable
+    # (it is recorded as a marker and suppresses the inference).
+    changes_malformed = changes is not None and not isinstance(changes, list)
     # The revision is printed/sliced by the prompt and written to project.yaml:
     # a non-string value is malformed evidence, not a revision (slicing it
     # would raise out of the sign-off launch).
@@ -384,6 +389,8 @@ def qa_evidence(pr_id: str) -> dict | None:
         "planner_code_changes": (
             changes if isinstance(changes, list) else []),
     }
+    if changes_malformed:
+        out["planner_code_changes_error"] = "malformed"
     # No path is recorded: the block is written into the git-tracked
     # project.yaml, where a host-specific absolute path is dead weight that is
     # wrong in every other clone.  The revisions identify the evidence.
@@ -439,11 +446,14 @@ def _evidence_block(pr: dict, reviewed_head: str | None,
                                                   "origin", "invalidated")}
         prior_block["integration"] = prior.get("integration")
     full = _mapping(pr.get("integration"))
-    if full.get("head") != reviewed_head:
+    if not reviewed_head or full.get("head") != reviewed_head:
         # The stored check describes another revision (the branch moved after
         # it ran, or it failed and recorded no HEAD).  Its candidate tree and
         # resolution are not this decision's: recording them beside the
         # reviewed HEAD would attribute provenance the decision never had.
+        # ``None != None`` is false, so a headless check must be refused
+        # explicitly — it cannot lend its candidate/resolution to a verdict
+        # that also has no revision.
         full = {}
     seen = _mapping(integration)
     qa = qa_evidence(pr["id"])
@@ -455,9 +465,12 @@ def _evidence_block(pr: dict, reviewed_head: str | None,
                       planner_code_changes_total=len(changes))
     review_sha, review_note = None, (
         "pm does not record the revision the review ran on")
-    if qa and qa.get("planner_head") and not qa.get("planner_code_changes"):
+    if qa and qa.get("planner_head") and not qa.get("planner_code_changes") \
+            and not qa.get("planner_code_changes_error"):
         # QA runs after review and records the revision it exercised.  When
-        # QA committed nothing, review saw that same revision.
+        # QA committed nothing, review saw that same revision.  A malformed
+        # change list is not proof of "nothing": do not infer a revision from
+        # it (that would record a review revision pm cannot confirm).
         review_sha = qa["planner_head"]
         review_note = ("inferred: QA exercised this revision and recorded no "
                        "code changes")
@@ -1114,7 +1127,7 @@ def build_return_record(pr: dict, verdict: str, hop: str, *,
         integ = {k: rec.get(k) for k in (
             "target_repo", "base_branch", "base_sha", "merge_base", "status",
             "conflicts", "overlap", "error", "resolution",
-            "base_behavior_changes")}
+            "base_behavior_changes", "base_behavior_error")}
         # ``compact`` caps each list (paths at _YAML_LIST_LIMIT, behaviour
         # changes at _BEHAVIOR_LIMIT) and records the real length separately;
         # the return block's omission markers report how much of the record is
@@ -1420,6 +1433,13 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                             "be stale and include the merged base commits).")
         behavior = integ.get("base_behavior_changes")
         behavior = behavior if isinstance(behavior, list) else []
+        if not behavior and integ.get("base_behavior_error"):
+            # A summary pm could not compute is not evidence that the base is
+            # behaviour-neutral: tell the routed step to assess it itself.
+            lines.append(
+                "pm could not summarise the base's behaviour-relevant changes "
+                f"({integ['base_behavior_error']}); assess the base diff "
+                "yourself before relying on the previous evidence.")
         if behavior:
             shown = behavior[:10]
             # The record's real total, not just this list's: ``compact`` keeps
@@ -1456,8 +1476,18 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 f"`{integ.get('base_branch') or 'the base'}` may be stale and "
                 "include the merged base commits).")
     elif rec.get("apply_error"):
-        lines.append(f"pm did not merge the base into the branch: "
-                     f"{rec['apply_error']}.")
+        if rec["apply_error"] in (integration.HEAD_MOVED,
+                                  integration.HEAD_MOVED_APPLYING):
+            # A concurrent actor moved the branch during the merge; its
+            # merge is in the branch (or the next check re-checks it), so
+            # "pm did not merge the base" would be false and misleading.
+            lines.append(
+                "the PR branch moved while pm was merging the base (a "
+                "concurrent apply may have integrated it); the next "
+                "integration check re-checks the branch's current revision.")
+        else:
+            lines.append(f"pm did not merge the base into the branch: "
+                         f"{rec['apply_error']}.")
     if not for_signoff and integ.get("status") == "conflict":
         base_rev = integ.get("base_sha")
         base_rev = (base_rev[:12]
