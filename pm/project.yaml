@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T16:55:05.267653+00:00'
+  updated_at: '2026-10-27T18:12:21.123078+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25781,6 +25781,31 @@ prs:
       (review adoption) is bounded only by overall_timeout/pane death.'
     created_at: '2026-10-27T16:55:05Z'
     last_edited: '2026-10-27T16:55:05Z'
+  - id: note-a6eacbb
+    text: 'Review-loop d476 i3 (3ec04b77): found and fixed one remaining instance
+      of this PR''s own failure class in the QA tick loop. `_poll_tmux_verdicts` ran
+      `check_response()` (post-nudge response deadline) BEFORE the fresh-event/verdict
+      scan, so a worker whose verdict landed in the same 5 s tick as its deadline
+      was retired as INPUT_REQUIRED/no_response although the outcome was already in
+      the transcript — a completed result treated as absent. The check now runs after
+      the scan and is skipped when a verdict was found (it still runs every tick when
+      none appears, so a silent worker is still retired). Regression test `test_verdict_landing_on_the_response_timeout_tick_is_recorded`
+      fails on the previous ordering (INPUT_REQUIRED vs PASS). Also: per-scenario
+      recovery bookkeeping now goes through `_close_episode` (episode dicts only,
+      keeps the attempt budget) / `_drop_recovery` (all three dicts) so `_recoveries`/`_no_verdict_since`/`_recovery_ev_ts`
+      cannot drift apart; `pm set` rejects non-finite values for the two float recovery
+      settings and `_setting_float` ignores them from a hand-edited file (inf as a
+      settle window would be unbounded); `finalize_verdict` comment documents NO_VERDICT;
+      spec updated (bookkeeping helpers, check_response ordering, finite-value rule,
+      new test). Full suite: 3840 passed, 1 skipped, 13 failed — all 13 reproduce
+      on the unmodified tree here (12 x missing `markdown` module, test_hook_events::test_installer_writes_standalone_receiver).
+      Residuals unchanged: verdict-recovery-response-timeout (1 h) can retire a silently-busy
+      worker; a poller that starts while its session is already idle (review adoption)
+      is bounded only by overall_timeout/pane death; a recovery nudge can still land
+      in a permission hold that begins during an open episode (documented queued-input
+      residual). (2026-10-27T17:20:00Z)'
+    created_at: '2026-10-27T18:12:21Z'
+    last_edited: '2026-10-27T18:12:21Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
