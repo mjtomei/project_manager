@@ -311,10 +311,6 @@ class MissingOutputRecovery:
         self.last_output = ""
         self.last_kind = ""
         self._last_nudge_ts: float | None = None
-        # Latest assistant text observed by this tracker.  A newer idle
-        # event whose turn text is unchanged is a hook *refresh*, not new
-        # activity — it must not reset the recovery budget.
-        self._seen_text: str | None = None
 
     @property
     def enabled(self) -> bool:
@@ -372,10 +368,12 @@ class MissingOutputRecovery:
         window looking for a newer idle event.  When omitted, a non-blocking
         hook read is used (for tick-based loops).
 
-        A newer event whose transcript text actually changed is a genuine
-        new turn (provider-native retry / queued input): it defers and
-        resets the budget.  A newer event that re-announces the *same* turn
-        (a hook refresh) is counted against *max_deferrals* instead, so a
+        A newer event whose transcript text changed *during the settle
+        window* is a genuine new turn (provider-native retry / queued
+        input): it defers and resets the budget.  A newer event that leaves
+        the transcript text unchanged re-announces a turn we are already
+        deciding about (a hook refresh, or a turn the caller had already
+        consumed); it is counted against *max_deferrals* instead, so a
         session that keeps refreshing cannot defer forever.
 
         *verdict_check* is re-evaluated immediately before a nudge.  The
@@ -396,10 +394,6 @@ class MissingOutputRecovery:
         kind = self.classify(transcript_path)
         self.last_kind = kind
         text = self.last_output
-        # Did the transcript advance since the previous recovery decision?
-        # (The caller may have consumed a newer turn before calling us.)
-        advanced = self._seen_text is not None and text != self._seen_text
-        self._seen_text = text
 
         # Let a provider-native retry / queued input land before nudging.
         if self.settle_seconds > 0:
@@ -408,17 +402,19 @@ class MissingOutputRecovery:
             else:
                 newer = self._newer_event(ev_ts)
             if newer is not None:
-                if not advanced:
-                    # Re-read: the newer turn may have been written while we
-                    # waited (a genuine turn) or not (a hook refresh).
-                    from pm_core.verdict_transcript import (
-                        read_latest_assistant_text,
-                    )
-                    after = read_latest_assistant_text(transcript_path) or ""
-                    advanced = after != text
-                    if advanced:
-                        self._seen_text = after
-                if advanced:
+                # Re-read: a genuine new turn writes new assistant text while
+                # we waited, whereas a hook refresh of the turn we are
+                # deciding about does not.  Comparing against the text seen
+                # *before* the wait (not against the text of a previous
+                # recovery decision) matters: the poller may already be
+                # looking at a newer turn than the one recovery last saw, and
+                # treating a refresh of *that* turn as native recovery would
+                # reset both bounds and let the loop defer forever.
+                from pm_core.verdict_transcript import (
+                    read_latest_assistant_text,
+                )
+                after = read_latest_assistant_text(transcript_path) or ""
+                if after != text:
                     self.reset()
                     _log.info("%s: newer turn during settle — deferring "
                               "recovery (session %s)", self.log_prefix,

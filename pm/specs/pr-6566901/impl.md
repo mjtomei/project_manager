@@ -147,8 +147,14 @@ All four poller families use one shared helper so behaviour cannot drift.
   nudging. In tick-based loops, re-read the hook event and defer if its
   timestamp advanced. This is the 242-S40 race (`02:54:31Z`) guard.
   **Deferral must itself be bounded.** A newer `idle_prompt` only counts as
-  native recovery when the transcript's latest assistant text actually
-  changed; a *refresh* that re-announces the same turn (FakeClaude re-emits
+  native recovery when the transcript's latest assistant text changed
+  **during the settle window** — i.e. the re-read taken after the wait
+  differs from the text observed just before it. (Comparing against the
+  text of recovery's *previous decision* instead is wrong: the poller may
+  already be deciding about a turn recovery has not seen, and then a refresh
+  of *that* turn would reset both the attempt budget and the deferral count,
+  letting the loop defer forever without nudging or exhausting.) A *refresh*
+  that re-announces the same turn (FakeClaude re-emits
   `idle_prompt` every 2s while held open) is counted against
   `max_deferrals` (default `10`, derived in `MissingOutputRecovery`) and then
   raises `VerdictRecoveryExhausted(reason="no_progress")`. Without this the
@@ -201,9 +207,10 @@ class MissingOutputRecovery:
     def handle(self, transcript_path, ev_ts, *,
                wait_for_newer=None, stop_check=None,
                verdict_check=None) -> RecoveryResult
-        # "deferred"  — a newer *turn* landed (transcript changed); no nudge,
-        #               budget reset.  A refresh of the same turn counts a
-        #               deferral instead and exhausts with "no_progress".
+        # "deferred"  — a newer *turn* landed (transcript text changed during
+        #               the settle wait); no nudge, budget reset.  A refresh of
+        #               the turn being decided counts a deferral instead and
+        #               exhausts with "no_progress".
         # "completed" — verdict_check found the expected outcome just before
         #               the nudge (transcript write raced the idle hook);
         #               no nudge; the caller records it
@@ -268,8 +275,8 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
 
 ### QA loop (`pm_core/qa_loop.py`)
 
-* **finalize** — pass recovery config; catch exhaustion → return
-  `"NO_VERDICT"`.
+* **finalize** — relies on the settings-driven defaults; catch exhaustion →
+  return `"NO_VERDICT"`.
 * **refiner** (`_concretize_scenario`) — pass a block outcome request;
   catch → `(None, "no refiner outcome: …")`; teach
   `_concretize_failure_label` to pass that prefix through unchanged.
@@ -384,7 +391,10 @@ values (e.g. `0.5`) are accepted by `pm set`.
   error line among findings is `no_verdict`); a
   genuine newer turn during settle defers and resets; a hook refresh of the
   same turn defers without resetting and exhausts with `no_progress`
-  (including the `poll_for_verdict` and QA-tick-loop integration cases);
+  (including the `poll_for_verdict` and QA-tick-loop integration cases); a
+  refresh that follows a *new* turn the poller is already deciding about
+  still does not reset the nudge budget; `retry_prompt` reaches the session
+  through `poll_for_verdict` (the "re-send the original prompt" knob);
   a newer non-idle event (`Stop`) is not a new turn; overall timeout;
   response timeout; recovery disabled keeps legacy behaviour; `stop_check`
   during settle does not nudge; a verdict flushed during the settle window

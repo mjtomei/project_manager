@@ -255,6 +255,35 @@ class TestMissingOutputRecovery:
         assert rec.deferrals == 1
         assert sent == []
 
+    def test_refresh_after_a_new_turn_does_not_reset_the_budget(self, tmp_path):
+        """A refresh must not reset the budget just because the poller moved on.
+
+        The poller hands ``handle`` a turn recovery has not seen before, so
+        the transcript is newer than recovery's previous decision.  If a hook
+        refresh of *that* turn lands during the settle, resetting here would
+        zero both the nudge budget and the deferral count and let the loop
+        defer forever without ever nudging or exhausting.
+        """
+        rec, sent = _recovery(tmp_path, max_attempts=3, settle=5.0)
+        transcript = _transcript_with_assistant(tmp_path, "turn one")
+        assert rec.handle(str(transcript), ev_ts=1.0,
+                          wait_for_newer=lambda t, ts: None).status == "nudged"
+        assert rec.attempts == 1
+        # The session answers with a new (still verdictless) turn, which the
+        # poller is now deciding about ...
+        _write_transcript(transcript, [("user", "review"),
+                                       ("assistant", "turn two")])
+        newer = {"event_type": "idle_prompt", "timestamp": 9.0}
+
+        # ... and a hook refresh of that turn lands during the settle.
+        result = rec.handle(str(transcript), ev_ts=2.0,
+                            wait_for_newer=lambda t, ts: newer)
+
+        assert result.status == "deferred"
+        assert rec.attempts == 1, "a refresh must not reset the nudge budget"
+        assert rec.deferrals == 1
+        assert len(sent) == 1  # only the nudge from the first handle
+
     def test_repeated_hook_refresh_exhausts_without_nudging(self, tmp_path):
         """An endlessly refreshing session is bounded, not hung."""
         rec, sent = _recovery(tmp_path, max_attempts=3, settle=5.0,
@@ -449,6 +478,32 @@ class TestPollForVerdictRecovery:
         )
         assert "NEEDS_WORK" in content
         assert len(sent) == 1
+
+    def test_retry_prompt_is_sent_instead_of_the_resume_request(
+            self, tmp_path, monkeypatch):
+        """``retry_prompt`` is the configurable "re-send the original prompt" knob.
+
+        It must reach the session through the poller, not only through the
+        tracker: re-sending the original prompt is an acceptance criterion.
+        """
+        link, target = _uuid_transcript(tmp_path)
+        # An empty turn (no assistant text) classifies as no_output.
+        _write_transcript(target, [("user", "review")])
+        _patch_poll_env(monkeypatch, [_idle(1), None, _idle(2)])
+        sent: list[str] = []
+
+        def send(msg: str) -> None:
+            sent.append(msg)
+            _write_transcript(target, [("user", "review"),
+                                       ("assistant", "PASS")])
+
+        content = loop_shared.poll_for_verdict(
+            "%1", str(link), ("PASS",),
+            grace_period=0, wait_timeout=0.01, send=send,
+            retry_prompt="ORIGINAL PROMPT", log_prefix="test",
+        )
+        assert "PASS" in content
+        assert sent == ["ORIGINAL PROMPT"]
 
     def test_exhausts_without_verdict(self, tmp_path, monkeypatch):
         link, target = _uuid_transcript(tmp_path)
