@@ -81,9 +81,12 @@ def test_popup_without_client_args_keeps_old_resolution():
 def test_get_session_name_uses_popup_session_without_pane(monkeypatch):
     monkeypatch.delenv("TMUX_PANE", raising=False)
     monkeypatch.setenv(tmux_mod.POPUP_SESSION_ENV, SESSION)
-    with mock.patch.object(tmux_mod, "_run") as run:
+    alive = subprocess.CompletedProcess([], 0, stdout="")
+    with mock.patch.object(tmux_mod, "_run", return_value=alive) as run:
         assert tmux_mod.get_session_name() == SESSION
-    run.assert_not_called()
+    # Only the has-session liveness check; no current-client query.
+    run.assert_called_once()
+    assert "has-session" in run.call_args[0][0]
 
 
 def test_get_session_name_prefers_pane(monkeypatch):
@@ -128,3 +131,27 @@ def test_popup_pins_session_when_window_query_fails():
     body = next(c for c in calls if "display-popup" in c)[-1]
     assert "S='pm-demo-c5a1006b~1';" in body
     assert session_mod._POPUP_BODY_W in body
+
+
+def test_failure_handler_reports_status_and_waits_under_posix_sh():
+    """tmux 3.2 runs popup bodies with /bin/sh (dash on Debian/Ubuntu).
+
+    bash's ``read -n 1 -s -p`` made dash exit at once, so the popup closed
+    before the failure could be read, and ``$?`` was read after an echo
+    had reset it to 0.
+    """
+    body = "sh -c 'exit 3'" + session_mod._POPUP_FAILURE_HANDLER + "; echo AFTER"
+    proc = subprocess.run(["/bin/sh", "-c", body], input="x", text=True,
+                          capture_output=True, timeout=10)
+    assert "pm popup failed (exit 3)." in proc.stdout
+    assert "Press any key to close..." in proc.stdout
+    assert "Illegal option" not in proc.stderr
+    # The single key was consumed by the wait before the body continued.
+    assert proc.stdout.rstrip().endswith("AFTER")
+
+
+def test_failure_handler_skipped_on_success():
+    body = "true" + session_mod._POPUP_FAILURE_HANDLER
+    proc = subprocess.run(["/bin/sh", "-c", body], input="", text=True,
+                          capture_output=True, timeout=10)
+    assert proc.stdout == ""

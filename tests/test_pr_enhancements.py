@@ -807,3 +807,46 @@ class TestFinalizeMergeOutput:
             {"id": "pr-x", "title": "X", "status": "pending"},
         ])
         assert lines[-1] == "PR pr-a marked as merged."
+
+
+# ---------------------------------------------------------------------------
+# pr start fast path: printed session names the grouped session it switched
+# ---------------------------------------------------------------------------
+
+class TestPrStartFastPathSessionMessage:
+    """`pr start` on an existing window reports the session it targeted.
+
+    select_window targets the calling client's grouped session
+    (<base>~N), not the base session, so the message must name that one
+    — QA S24 observed the popup print the base name while the grouped
+    client switched.
+    """
+
+    def _invoke(self, tmp_path, grouped_session):
+        pm_dir = tmp_path / "pm"
+        pm_dir.mkdir()
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+        store.save({
+            "project": {"name": "test", "repo": str(tmp_path),
+                        "base_branch": "master"},
+            "prs": [{"id": "pr-001", "title": "Test", "branch": "pm/pr-001",
+                     "status": "in_progress", "workdir": str(workdir)}],
+        }, pm_dir)
+
+        with patch.object(pr_mod, "tmux_mod") as mock_tmux, \
+             patch.object(pr_mod, "state_root", return_value=pm_dir), \
+             patch.object(pr_mod, "_get_pm_session", return_value="pm-sess"):
+            mock_tmux.session_exists.return_value = True
+            mock_tmux.find_window_by_name.return_value = {
+                "id": "@1", "index": "1", "name": "pr-001"}
+            mock_tmux.current_or_base_session.return_value = grouped_session
+            result = CliRunner().invoke(pr_mod.pr, ["start", "pr-001"])
+        return result
+
+    def test_names_grouped_session_not_base(self, tmp_path):
+        result = self._invoke(tmp_path, "pm-sess~2")
+        assert result.exit_code == 0, result.output
+        assert ("Switched to existing window 'pr-001' (session: pm-sess~2)"
+                in result.output)
+        assert "(session: pm-sess)" not in result.output

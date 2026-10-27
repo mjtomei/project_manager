@@ -15,6 +15,7 @@ import copy
 from pm_core.paths import configure_logger
 from pm_core import store, guide, pr_sync
 from pm_core.cli.helpers import _record_status_timestamp
+from pm_core.pr_utils import usable_prs
 
 _log = configure_logger("pm.tui.sync")
 
@@ -127,9 +128,13 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
 
         # Snapshot PR statuses before reload so we can detect merges that
         # happened outside of sync (e.g. `pm pr merge` for local/vanilla).
+        # Entries without a usable string id are skipped rather than
+        # indexed: a partial or externally written project.yaml must not
+        # raise out of the sync loop (the popup picker rejects such
+        # snapshots too, with a readable reason).
         old_statuses = {
             pr["id"]: pr.get("status")
-            for pr in (app._data.get("prs") or [])
+            for pr in usable_prs(app._data.get("prs"))
         }
 
         # Reload from disk and apply sync results (merged PRs) atomically.
@@ -137,7 +142,7 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
             merged_set = set(result.merged_prs)
 
             def apply_merged(data):
-                for pr in data.get("prs") or []:
+                for pr in usable_prs(data.get("prs")):
                     if pr["id"] in merged_set:
                         pr["status"] = "merged"
                         _record_status_timestamp(pr, "merged")
@@ -171,7 +176,7 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
         # (e.g. `pm pr merge` for local/vanilla backends saves status
         # to disk before triggering a TUI refresh).
         newly_merged = set(result.merged_prs)
-        for pr in app._data.get("prs") or []:
+        for pr in usable_prs(app._data.get("prs")):
             if pr.get("status") == "merged" and old_statuses.get(pr["id"]) != "merged":
                 newly_merged.add(pr["id"])
 
@@ -261,7 +266,7 @@ async def startup_github_sync(app) -> None:
             newly_merged = set()
 
             def apply_github(data):
-                for pr in data.get("prs") or []:
+                for pr in usable_prs(data.get("prs")):
                     new_status = updates.get(pr["id"])
                     if new_status and pr.get("status") != new_status:
                         if new_status == "merged":
