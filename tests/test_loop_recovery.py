@@ -1149,6 +1149,84 @@ class TestQARecoveryWiring:
         assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
         assert "no_response" in state.scenario_verdict_reasons[1]
 
+    def test_verdict_landing_on_the_response_timeout_tick_is_recorded(
+            self, tmp_path, monkeypatch):
+        """A verdict that lands as the nudge deadline expires must win.
+
+        The response-timeout check ran before the fresh-event gate, so a
+        worker whose verdict landed in the same tick as its deadline was
+        retired as ``no_response`` even though its outcome was already in
+        the transcript — the "completed result treated as absent" failure
+        this recovery exists to prevent.
+        """
+        from pm_core import qa_loop
+        from pm_core.qa_loop import QALoopState, QAScenario
+
+        scenario = QAScenario(index=1, title="S", focus="f")
+        scenario.window_name = "qa-s1"
+        scenario.session_id = "sid-s1"
+        scenario.pane_id = "%1"
+        transcript = _transcript_with_assistant(tmp_path, "still testing")
+        scenario.transcript_path = str(transcript)
+
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+        state.qa_workdir = None
+
+        clock = {"t": 1000.0}
+
+        def fake_time():
+            clock["t"] += 1.0
+            return clock["t"]
+
+        nudged = {"sent": False}
+
+        def fake_send(_pane, _msg):
+            nudged["sent"] = True
+
+        # Once nudged, the worker answers on a *new* turn that carries the
+        # verdict — landing in the same tick the deadline expires.
+        def fake_read_event(_sid):
+            return {"event_type": "idle_prompt",
+                    "timestamp": 200.0 if nudged["sent"] else 100.0,
+                    "session_id": "sid-s1"}
+
+        def fake_extract(*_a, **_kw):
+            return "PASS" if nudged["sent"] else None
+
+        monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+        monkeypatch.setattr(qa_loop, "recovery_max_attempts", lambda: 3)
+        monkeypatch.setattr(qa_loop, "recovery_settle_seconds", lambda: 5.0)
+        # Expired by the tick after the nudge.
+        monkeypatch.setattr(qa_loop, "recovery_response_timeout", lambda: 1.0)
+        monkeypatch.setattr(qa_loop, "_is_verification_enabled",
+                            lambda: False)
+        monkeypatch.setattr(qa_loop, "_get_verdict_reminder_timeout",
+                            lambda: None)
+
+        with patch("pm_core.hook_events.read_event",
+                   side_effect=fake_read_event), \
+             patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   side_effect=fake_extract), \
+             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
+                   return_value=None), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.time", side_effect=fake_time), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=fake_time), \
+             patch("pm_core.tmux.send_keys", side_effect=fake_send), \
+             patch("pm_core.tmux.pane_exists", return_value=True):
+            qa_loop._poll_tmux_verdicts(
+                state, {}, {}, "sess", str(tmp_path),
+                tmp_path / "status.json", lambda *a: None,
+            )
+
+        assert nudged["sent"], "worker was never nudged"
+        assert state.scenario_verdicts[1] == "PASS"
+        assert 1 not in state.scenario_verdict_reasons
+
     def test_scenario_worker_verdict_flushed_after_idle_is_recorded(
             self, tmp_path, monkeypatch):
         """A verdict that lands after the idle hook is recorded, not nudged.
@@ -1390,5 +1468,31 @@ class TestRecoverySettings:
                 == loop_shared.DEFAULT_MAX_MISSING)
         assert (loop_shared.recovery_settle_seconds()
                 == loop_shared.DEFAULT_SETTLE_SECONDS)
+        assert (loop_shared.recovery_response_timeout()
+                == loop_shared.DEFAULT_RESPONSE_TIMEOUT)
+
+    def test_non_finite_seconds_are_rejected(self, pm_home):
+        """``float()`` accepts nan/inf; as a duration neither is meaningful.
+
+        ``inf`` is the dangerous one: it would make the settle window
+        unbounded, which is the hang this recovery exists to prevent.
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        from pm_core.paths import set_global_setting_value
+
+        runner = CliRunner()
+        for bad in ("nan", "inf"):
+            result = runner.invoke(
+                cli, ["set", "verdict-recovery-settle-seconds", bad])
+            assert result.exit_code != 0, (bad, result.output)
+        assert (loop_shared.recovery_settle_seconds()
+                == loop_shared.DEFAULT_SETTLE_SECONDS)
+
+        # A hand-edited settings file falls back the same way.
+        set_global_setting_value("verdict-recovery-settle-seconds", "inf")
+        assert (loop_shared.recovery_settle_seconds()
+                == loop_shared.DEFAULT_SETTLE_SECONDS)
+        set_global_setting_value("verdict-recovery-response-timeout", "nan")
         assert (loop_shared.recovery_response_timeout()
                 == loop_shared.DEFAULT_RESPONSE_TIMEOUT)

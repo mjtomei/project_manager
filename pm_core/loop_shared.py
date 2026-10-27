@@ -23,6 +23,7 @@ or tests, and defers to a newer hook event (a provider-native retry or
 queued input) instead of racing it.
 """
 
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -90,10 +91,16 @@ def _setting_float(name: str, default: float) -> float:
     if not raw:
         return default
     try:
-        return float(raw)
+        value = float(raw)
     except ValueError:
-        _log.warning("ignoring invalid %s=%r (want a number)", name, raw)
+        value = float("nan")
+    if not math.isfinite(value):
+        # ``nan``/``inf`` parse as floats but are meaningless as a number
+        # of seconds (``inf`` would make the settle window unbounded).
+        _log.warning("ignoring invalid %s=%r (want a finite number)",
+                     name, raw)
         return default
+    return value
 
 
 def recovery_max_attempts() -> int:

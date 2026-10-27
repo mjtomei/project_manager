@@ -15,6 +15,7 @@ Command groups are split into submodules:
 - cli.container — Container isolation management
 """
 
+import math
 from pathlib import Path
 
 import click
@@ -387,9 +388,13 @@ def set_cmd(setting, value):
         set_global_setting_value(setting, value)
     elif setting in _FLOAT_SETTINGS:
         try:
-            float(value)
+            parsed = float(value)
         except ValueError:
-            click.echo(f"Setting '{setting}' takes a number", err=True)
+            parsed = float("nan")
+        if not math.isfinite(parsed):
+            # ``float()`` also accepts nan/inf, which are meaningless as a
+            # duration (and inf would make a settle window unbounded).
+            click.echo(f"Setting '{setting}' takes a finite number", err=True)
             raise SystemExit(1)
         set_global_setting_value(setting, value)
     click.echo(f"{setting} = {value}")

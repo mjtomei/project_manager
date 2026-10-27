@@ -208,8 +208,9 @@ class QALoopState:
     latest_verdict: str = ""
     latest_output: str = ""
     # Result of the post-QA finalize pane: "FINALIZE_DONE",
-    # "FINALIZE_BLOCKED", or None if it didn't run (no workdir,
-    # missing pm session, polling timed out).
+    # "FINALIZE_BLOCKED", "NO_VERDICT" (bounded recovery exhausted: the
+    # finalizer idled without either outcome), or None if it didn't run
+    # (no workdir, missing pm session, polling timed out).
     finalize_verdict: str | None = None
     qa_workdir: str | None = None
     # Session tag derived from the orchestrator's tmux session name
@@ -2814,6 +2815,26 @@ def _poll_tmux_verdicts(
     for _ in range(len(_launch_queue)):
         _launch_next_queued()  # returns immediately once cap is reached
 
+    def _close_episode(idx: int) -> None:
+        """Close a scenario's no-verdict episode but keep its tracker.
+
+        The tracker outlives an episode on purpose: it carries the attempt
+        budget and the nudge deadline, so a worker that answers with another
+        verdictless turn keeps counting against ``max_attempts``.
+        """
+        _no_verdict_since.pop(idx, None)
+        _recovery_ev_ts.pop(idx, None)
+
+    def _drop_recovery(idx: int) -> None:
+        """Forget everything about a scenario's recovery.
+
+        The three dicts must always be cleared together — an episode left
+        open without its tracker (or a tracker without its episode) either
+        re-counts a stale turn or retires a healthy relaunched worker.
+        """
+        _recoveries.pop(idx, None)
+        _close_episode(idx)
+
     def _recovery_for(scenario: QAScenario,
                       pane_id: str) -> MissingOutputRecovery:
         """Return the bounded recovery tracker for *scenario*.
@@ -2856,9 +2877,7 @@ def _poll_tmux_verdicts(
             f"Scenario {scenario.index} ({scenario.title}): "
             f"INPUT_REQUIRED (worker produced no verdict: {exc.reason})")
         _notify()
-        _recoveries.pop(scenario.index, None)
-        _no_verdict_since.pop(scenario.index, None)
-        _recovery_ev_ts.pop(scenario.index, None)
+        _drop_recovery(scenario.index)
 
     while (pending or verifying or _launch_queue) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
@@ -3027,9 +3046,7 @@ def _poll_tmux_verdicts(
                         # A relaunched worker is a new identity: drop the
                         # old recovery tracker and its settle window so
                         # attempt counts never leak across panes/sessions.
-                        _recoveries.pop(scenario.index, None)
-                        _no_verdict_since.pop(scenario.index, None)
-                        _recovery_ev_ts.pop(scenario.index, None)
+                        _drop_recovery(scenario.index)
                         continue
                     # Relaunch failed — will retry on next poll iteration
                     continue
@@ -3091,27 +3108,20 @@ def _poll_tmux_verdicts(
                 continue
 
             # A recovery nudge with no following turn means the worker has
-            # gone silent.  Check this before the fresh-event gate so it is
-            # caught even when no new idle_prompt ever arrives.  Drop the
-            # tracker if the pane/session changed underneath us: a stale
-            # nudge deadline must never retire a healthy relaunched worker.
+            # gone silent.  The check itself runs *after* the verdict scan
+            # below so it is caught even when no new idle_prompt ever
+            # arrives, but a verdict that landed in this same tick still
+            # wins: retiring a worker whose outcome is already in the
+            # transcript would be the "completed result treated as absent"
+            # failure this recovery exists to avoid.  Drop the tracker if
+            # the pane/session changed underneath us: a stale nudge deadline
+            # must never retire a healthy relaunched worker.
             _rec = _recoveries.get(scenario.index)
             if _rec is not None and (
                     _rec.pane_id != pane_id
                     or _rec.session_id != (scenario.session_id or "")):
-                _recoveries.pop(scenario.index, None)
-                _no_verdict_since.pop(scenario.index, None)
-                _recovery_ev_ts.pop(scenario.index, None)
+                _drop_recovery(scenario.index)
                 _rec = None
-            if _rec is not None:
-                try:
-                    _rec.check_response()
-                except VerdictRecoveryExhausted as e:
-                    _recovery_exhausted(scenario, e)
-                    pending.discard(scenario.index)
-                    verdicts_changed = True
-                    _launch_next_queued()
-                    continue
 
             ev = _hook_events.read_event(scenario.session_id)
             ev_ts = float((ev or {}).get("timestamp") or 0)
@@ -3139,6 +3149,16 @@ def _poll_tmux_verdicts(
                     _no_verdict_since.setdefault(scenario.index, time.time())
                     _recovery_ev_ts.setdefault(scenario.index, ev_ts)
 
+            if _rec is not None and verdict is None:
+                try:
+                    _rec.check_response()
+                except VerdictRecoveryExhausted as e:
+                    _recovery_exhausted(scenario, e)
+                    pending.discard(scenario.index)
+                    verdicts_changed = True
+                    _launch_next_queued()
+                    continue
+
             # Bounded missing-output recovery: an idle turn without a
             # verdict means the worker ended a turn without its outcome.
             # Ask the same session for its own standalone outcome (or to
@@ -3159,8 +3179,7 @@ def _poll_tmux_verdicts(
                 if not rec.enabled:
                     # Recovery disabled: legacy behaviour — leave the
                     # worker running; a later turn may still produce it.
-                    _no_verdict_since.pop(scenario.index, None)
-                    _recovery_ev_ts.pop(scenario.index, None)
+                    _close_episode(scenario.index)
                 elif (time.time()
                       - _no_verdict_since[scenario.index]) >= _recovery_settle:
                     try:
@@ -3212,13 +3231,10 @@ def _poll_tmux_verdicts(
                         # A nudge was sent — or a stop was requested during
                         # teardown — so the next no-verdict turn starts a
                         # fresh settle window.
-                        _no_verdict_since.pop(scenario.index, None)
-                        _recovery_ev_ts.pop(scenario.index, None)
+                        _close_episode(scenario.index)
 
             if verdict:
-                _recoveries.pop(scenario.index, None)
-                _no_verdict_since.pop(scenario.index, None)
-                _recovery_ev_ts.pop(scenario.index, None)
+                _drop_recovery(scenario.index)
                 state.scenario_verdicts[scenario.index] = verdict
                 reason = extract_verdict_reason_from_transcript(
                     scenario.transcript_path,

@@ -310,6 +310,14 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   (setting retained but now only tunes the settle interval). A `deferred`
   result restarts the settle window rather than closing the episode; a
   `completed` result records the verdict that landed during the settle.
+  The per-scenario bookkeeping lives in `_recoveries` / `_no_verdict_since`
+  / `_recovery_ev_ts` and is always cleared through `_close_episode`
+  (episode only, keeping the attempt budget) or `_drop_recovery` (all
+  three) so the three dicts cannot drift apart. The post-nudge
+  `check_response()` runs *after* the fresh-event/verdict scan and is
+  skipped when a verdict was found: a verdict that lands on the very tick
+  the response deadline expires must be recorded, not retired as
+  `no_response` (the "completed result treated as absent" failure).
 * **planner** — per-attempt `MissingOutputRecovery` with a `QA_PLAN_START/END`
   outcome request and a resume request; on exhaustion break out with
   `INPUT_REQUIRED` + `_error` (reusing the existing "plan incomplete" surface
@@ -328,7 +336,10 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
 
 `verdict-recovery-max-attempts` is registered in `_INT_SETTINGS`; the two
 seconds-valued keys are in a new `_FLOAT_SETTINGS` table so sub-second
-values (e.g. `0.5`) are accepted by `pm set`.
+values (e.g. `0.5`) are accepted by `pm set`. Non-finite values (`nan`,
+`inf`) are rejected by `pm set` and ignored (default used) when read from a
+hand-edited settings file — `inf` as a settle window would otherwise be
+unbounded.
 
 ## Ambiguities and resolutions
 
@@ -431,7 +442,9 @@ values (e.g. `0.5`) are accepted by `pm set`.
   reason (initial poll and the machine-driven re-check follow-up, which must
   call the shared poller rather than the unbounded human wait), finalize
   `NO_VERDICT`, scenario-worker exhaustion
-  (`INPUT_REQUIRED` + reason, slot freed).
+  (`INPUT_REQUIRED` + reason, slot freed); a verdict landing on the tick the
+  post-nudge response deadline expires is recorded, not retired as
+  `no_response`.
 * `tests/test_qa_planner_handoff.py`: planner exhaustion surfaces
   `INPUT_REQUIRED` + error and stops planning; a plan written while recovery
   settles (the idle-hook/transcript-write race) is accepted from the settle
