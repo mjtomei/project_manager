@@ -33,6 +33,11 @@ substitutes the actual captures directory for `<capture-dir>`):
 
 ## Capture
 
+Create the capture directory first: `mkdir -p <capture-dir>/<short-name>`.
+`asciinema rec` reports "asciicast saved" and exits 0 even when the
+directory does not exist, so a missing `mkdir` looks like a successful
+capture that wrote nothing.
+
 ### One command, end-to-end
 
 ```

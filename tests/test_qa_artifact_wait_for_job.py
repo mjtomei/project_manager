@@ -148,6 +148,26 @@ class TestHelperBasics:
         assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
         assert "wait-for-job:" in r.stderr
 
+    def test_missing_timeout_is_a_usage_failure(self, tmp_path):
+        """Without coreutils `timeout` the helper must say so, not report 127.
+
+        The guard is what keeps a missing tool from surfacing as
+        "job failed with exit status 127", which would send the worker after
+        a phantom command problem instead of installing coreutils.
+        """
+        empty = tmp_path / "empty-path"
+        empty.mkdir()
+        r = subprocess.run(
+            [shutil.which("bash") or "/bin/bash", str(HELPER),
+             "--timeout", "5", "--artifact", str(tmp_path / "out.txt"),
+             "-c", "true"],
+            capture_output=True, text=True,
+            env=dict(os.environ, PATH=str(empty)), timeout=30,
+        )
+        assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+        assert "timeout" in r.stderr
+        assert "required" in r.stderr
+
     def test_does_not_poll_process_names(self):
         text = HELPER.read_text()
         # The anti-patterns appear only in comments/help; no invocation.
@@ -690,6 +710,20 @@ class TestRecipes:
         r = subprocess.run(["bash", "-n"], input=block,
                            capture_output=True, text=True)
         assert r.returncode == 0, f"{name} render block:\n{r.stderr}\n{block}"
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_capture_section_creates_the_capture_dir(self, name):
+        """The capture dir must be created before asciinema writes into it.
+
+        ``asciinema rec`` prints "asciicast saved" and exits 0 when the
+        parent directory is missing — it writes nothing — so a recipe that
+        only names the path produces a capture that looks successful and
+        does not exist.
+        """
+        section = _recipe_text(name).split("## Capture", 1)[1]
+        intro = section.split("```", 1)[0]
+        assert "mkdir -p <capture-dir>" in intro, (
+            f"{name}: capture section never creates the capture directory")
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_recipe_states_completion_rules(self, name):

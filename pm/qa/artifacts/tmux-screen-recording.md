@@ -46,6 +46,11 @@ recorder pane rendering the attach client rendering the recorder
 pane — endless recursion and a useless cast. Different sessions on
 the same tmux server is enough to break that recursion.
 
+Create the capture directory first: `mkdir -p <capture-dir>`.
+`asciinema rec` reports "asciicast saved" and exits 0 even when the
+directory does not exist, so a missing `mkdir` looks like a successful
+capture that wrote nothing.
+
 ```
 # 1. Start the canonical pm session. `pm session` (no subcommand)
 #    creates the project's pm session and then attaches; the attach

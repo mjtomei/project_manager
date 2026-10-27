@@ -215,7 +215,15 @@ verifier's FLAGGED rule is asserted there too, not only the prose paragraph.
   to the even-rounding filter instead of aborting under `set -e` before
   ffmpeg — `read` carries `|| true`; asserted by
   `TestRenderScript::test_unreadable_gif_falls_back_to_even_rounding`.
-- `timeout` missing → usage failure (exit 2) with an actionable message.
+- `timeout` missing → usage failure (exit 2) with an actionable message;
+  asserted by `TestHelperBasics::test_missing_timeout_is_a_usage_failure`
+  (without the guard the missing tool surfaces as "job failed with exit
+  status 127", sending the worker after a phantom command problem).
+- The capture directory does not exist → `asciinema rec` prints "asciicast
+  saved" and exits 0 while writing nothing, so both recording recipes now
+  `mkdir -p` it before recording (asserted by
+  `TestRecipes::test_capture_section_creates_the_capture_dir`); the render
+  step would otherwise fail on a cast that was never written.
 - `-c` with extra positional args → usage error.
 - Pipe: `pytest ... | tail` under pipefail → non-zero on test failure.
 
