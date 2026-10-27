@@ -31078,7 +31078,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-27T19:39:35.518355+00:00'
+  updated_at: '2026-10-27T19:39:47.699956+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31276,6 +31276,22 @@ prs:
       + pip "pytest<9"; -k VerifierFreshness -> 3 passed.'
     created_at: '2026-10-27T19:39:35Z'
     last_edited: '2026-10-27T19:39:35Z'
+  - id: note-a826392
+    text: Scenario 20 (web-ui R18) refinement — two container facts the worker needs.
+      (1) The recipe driver.mjs is ESM; the image installs Playwright globally at
+      /usr/lib/node_modules and sets NODE_PATH, which ESM ignores, so a bare `import
+      "playwright"` raises ERR_MODULE_NOT_FOUND. Save driver.mjs with a local node_modules
+      symlink to /usr/lib/node_modules (or `npm i playwright` beside it). Verified
+      npx playwright 1.60.0 and Chromium at /opt/ms-playwright. (2) PID 1 in the QA
+      container is `sleep infinity`, so a killed server PID remains a zombie (state
+      Z) and `kill -0` keeps succeeding. Check cleanup as `ps -p PID -o stat=` showing
+      Z/defunct or absent, plus a refused TCP connect on the port; never wait on kill
+      -0. With that, the 120 s bounded readiness failure (exit 1, message on stderr),
+      all three failure modes (accept-but-never-answer, immediate exit, never-listens),
+      and the nominal Playwright capture (h264 mp4, trace.zip, pngs, dom.html, http.log,
+      sse.log) were verified.
+    created_at: '2026-10-27T19:39:47Z'
+    last_edited: '2026-10-27T19:39:47Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
