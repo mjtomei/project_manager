@@ -21,6 +21,11 @@
 # it, and is bounded by the same `--timeout`: a validator that hangs is a
 # failed validation, not an unbounded wait.
 #
+# The artifact's parent directory is created if it is missing, so a worker who
+# forgot to `mkdir` its capture dir gets the job's own error (or a missing
+# artifact) rather than a failed redirect; the artifact itself is only ever
+# checked, never repaired.
+#
 # On timeout only the job's own process group is signalled, so unrelated jobs
 # (including a deliberately persistent observer started by the caller) are left
 # alone; whatever is left in that group afterwards is SIGKILLed, because

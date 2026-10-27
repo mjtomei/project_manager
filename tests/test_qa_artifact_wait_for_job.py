@@ -108,6 +108,19 @@ def _render_block(text):
     return m.group(1)
 
 
+def _scaffold_block(text):
+    """The capture-section fenced block that starts the recorder.
+
+    Identified by ``new-session`` so it is the block a worker actually pastes
+    for the no-TTY path, not one of the shorter command-form examples.
+    """
+    section = text.split("## Capture", 1)[1].split("## Render to video", 1)[0]
+    for block in re.findall(r"```[a-z]*\n(.*?)```", section, re.S):
+        if "new-session" in block:
+            return block
+    raise AssertionError("no recorder scaffold block found")
+
+
 # ---------------------------------------------------------------------------
 # Helper presence and usage
 # ---------------------------------------------------------------------------
@@ -657,6 +670,20 @@ class TestArtifactChecks:
         assert r.returncode == 4
         assert "failed validation" in r.stderr
 
+    def test_artifact_parent_directory_is_created(self, tmp_path):
+        """The documented convenience: create the dir, never repair the file.
+
+        A worker that forgot to `mkdir` its capture dir should get the job's
+        own error (or a missing-artifact report), not a failed redirect.
+        """
+        art = tmp_path / "captures" / "deep" / "recording.mp4"
+        r = run_helper(["--timeout", "10", "--artifact", str(art),
+                        "-c", f"printf video > {shlex.quote(str(art))}"])
+        assert r.returncode == 0, r.stderr
+        assert art.read_text() == "video"
+        # Documented where users look, not only in the source comment.
+        assert "parent directory" in run_helper(["--help"]).stdout
+
 
 # ---------------------------------------------------------------------------
 # Pipeline status
@@ -755,6 +782,86 @@ class TestRecipes:
             line = text[idx:text.index("\n", idx)]
             assert probe_bound in line, (
                 f"{name}: readiness probe is unbounded (no {probe_bound})")
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_scaffold_block_parses(self, name):
+        """The no-TTY scaffold must be runnable shell, not just prose."""
+        block = (_scaffold_block(_recipe_text(name))
+                 .replace("<capture-dir>", "/tmp/cap")
+                 .replace("<short-name>", "run")
+                 .replace("<command-to-record>", "true"))
+        r = subprocess.run(["bash", "-n"], input=block,
+                           capture_output=True, text=True)
+        assert r.returncode == 0, f"{name} scaffold block:\n{r.stderr}\n{block}"
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_capture_section_removes_a_stale_cast(self, name):
+        """An earlier run's cast must not be rendered as this run's capture.
+
+        The render step rewrites the ``.mp4`` from whatever cast is on disk,
+        so a recording that silently wrote nothing (``asciinema`` exits 0
+        after "asciicast saved" even with no directory; without
+        ``--overwrite`` it aborts on an existing file) would still produce a
+        *fresh* mp4 — of the previous run. Deleting the cast first is what
+        makes a failed recording fail the render instead.
+        """
+        block = _scaffold_block(_recipe_text(name))
+        rm = re.search(r"^rm -f [^\n]*recording\.cast", block, re.M)
+        assert rm, f"{name}: scaffold never removes an earlier cast"
+        start = block.index("asciinema rec")
+        assert rm.start() < start, (
+            f"{name}: the stale cast is removed only after the recorder starts")
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_recorder_stop_is_bounded_and_cast_is_checked(self, name):
+        """The stop step must wait on the recorder, not just kill the pane.
+
+        Tearing the pane down under a still-running recorder can truncate
+        the cast, and nothing else in the recipe proves the recording
+        finished. ``has-session`` is the recorder's real handle (the pane is
+        started *as* the asciinema command), so the wait is bounded and
+        name-free.
+        """
+        block = _scaffold_block(_recipe_text(name))
+        stop = block[block.index("asciinema rec"):]
+        assert "has-session" in stop, (
+            f"{name}: stop step does not wait for the recorder to exit")
+        assert "deadline" in stop, f"{name}: recorder wait is unbounded"
+        assert "test -s" in stop, f"{name}: the cast is never checked"
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_recorder_is_ready_before_keys_are_sent(self, name):
+        """Keystrokes sent before the recorder draws are silently dropped.
+
+        Driving the recorded shell (or detaching the recorder) right after
+        ``new-session`` races asciinema's startup: the keys vanish, the
+        recording keeps running, and the only symptom is a stop-step
+        timeout. A bounded readiness wait on the pane's content removes the
+        race without polling a process name.
+        """
+        block = _scaffold_block(_recipe_text(name))
+        ready = block.find("capture-pane")
+        assert ready != -1, f"{name}: no recorder readiness wait"
+        first_key = min(
+            i for i in (block.find("send-keys"), block.find("pm tui send"))
+            if i != -1)
+        assert ready < first_key, (
+            f"{name}: keys are sent before the recorder readiness wait")
+        assert "deadline" in block[:first_key], (
+            f"{name}: readiness wait is unbounded")
+
+    def test_cli_stop_ends_the_recorded_shell(self):
+        """Ctrl-C reaches the *recorded* command, not asciinema.
+
+        With ``-c bash`` the recorded command is bash, so a Ctrl-C at the
+        pane is swallowed by it and the recording keeps running; the
+        interactive form has to be ended with ``exit``.
+        """
+        block = _scaffold_block(_recipe_text("cli-recording.md"))
+        assert re.search(r"send-keys[^\n]*'exit' Enter", block), (
+            "cli-recording: an interactive `bash` recording needs `exit`")
+        assert "does not stop the recording" in block, (
+            "cli-recording: must say Ctrl-C does not stop the recording")
 
     def test_helper_is_loaded_beside_recipes(self, tmp_path):
         """_install_artifact_files copies *.sh helpers with the recipes."""

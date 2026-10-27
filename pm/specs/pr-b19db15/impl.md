@@ -51,7 +51,15 @@ R2. **Recipe guidance.** `pm/qa/artifacts/tmux-screen-recording.md` and
 `pm/qa/artifacts/cli-recording.md` must use the helper for the agg→ffmpeg
 render step, with a bounded timeout, ffprobe validation of the mp4, and a short
 explanation of why process-name polling and bare `wait` are wrong. A leftover
-file alone must not count as a completed render.
+file alone must not count as a completed render. The capture step itself must
+be completion-checked the same way (review loop i12): clear any cast an
+earlier run left behind *before* recording (the render step rewrites the
+`.mp4` from whatever cast is on disk, so a recording that wrote nothing would
+still yield a fresh-looking video of the previous run), end the recording by
+ending the *recorded* command rather than signalling the pane (Ctrl-C reaches
+the recorded command, not asciinema), and wait on the recorder's real handle
+(`tmux has-session` — the pane is started *as* the asciinema command) with a
+deadline plus a `test -s` on the cast.
 
 R3. **Shared background-job guidance in prompts.** Add one shared prompt block
 (`_background_jobs_block` in `pm_core/prompt_gen.py`) injected into:
@@ -224,6 +232,25 @@ verifier's FLAGGED rule is asserted there too, not only the prose paragraph.
   `mkdir -p` it before recording (asserted by
   `TestRecipes::test_capture_section_creates_the_capture_dir`); the render
   step would otherwise fail on a cast that was never written.
+- A cast left by an *earlier* run is worse than a missing one: the render step
+  rewrites the `.mp4` from it, so a recording that wrote nothing still yields
+  a fresh mp4 of the previous run (with `--overwrite` asciinema silently
+  leaves the old file; without it, `asciinema rec` aborts and the recorder
+  session dies). Both recipes `rm -f` the cast before starting the recorder
+  (asserted by `TestRecipes::test_capture_section_removes_a_stale_cast`,
+  which fails on the pre-i12 recipes).
+- Ctrl-C at the recorder pane reaches the *recorded* command (asciinema is a
+  pty proxy), so with `-c bash` it prints `^C` and the recording keeps
+  running; tearing the pane down can then leave a truncated cast. The stop
+  step ends an interactive `bash` with `exit`, waits (bounded) on the
+  recorder's session handle, and checks the cast is non-empty (asserted by
+  `TestRecipes::test_recorder_stop_is_bounded_and_cast_is_checked` and
+  `test_cli_stop_ends_the_recorded_shell`).
+- `--artifact` in a directory that does not exist → the helper creates the
+  parent directory (documented in `--help`, asserted by
+  `TestArtifactChecks::test_artifact_parent_directory_is_created`) so a
+  worker that forgot `mkdir` gets the job's own error or a missing-artifact
+  report rather than a failed redirect; the artifact itself is never repaired.
 - `-c` with extra positional args → usage error.
 - Pipe: `pytest ... | tail` under pipefail → non-zero on test failure.
 

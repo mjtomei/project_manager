@@ -46,10 +46,15 @@ recorder pane rendering the attach client rendering the recorder
 pane — endless recursion and a useless cast. Different sessions on
 the same tmux server is enough to break that recursion.
 
-Create the capture directory first: `mkdir -p <capture-dir>`.
+Create the capture directory first: `mkdir -p <capture-dir>`, and delete
+any cast an earlier run left there (`rm -f <capture-dir>/recording.cast`).
 `asciinema rec` reports "asciicast saved" and exits 0 even when the
 directory does not exist, so a missing `mkdir` looks like a successful
-capture that wrote nothing.
+capture that wrote nothing. A leftover cast is worse in the other
+direction: without `--overwrite`, `asciinema rec` aborts with "recording
+already exists", the recorder session dies, and the render step then
+rewrites the `.mp4` from the *old* cast — a failed recording that looks
+like a fresh capture.
 
 ```
 # 1. Start the canonical pm session. `pm session` (no subcommand)
@@ -80,10 +85,30 @@ tmux pipe-pane -t "$TARGET:0.0" -o "cat >> <capture-dir>/transcript.log"
 #    $TARGET`. tmux sizes the session group to the smallest attached
 #    client, so set -x and -y large enough to render the TUI legibly
 #    (the cast inherits this size). 200x50 fits a typical desktop
-#    layout; bump them up if your scenario needs more room.
+#    layout; bump them up if your scenario needs more room. Clear any
+#    cast from an earlier run first: without --overwrite asciinema
+#    refuses to start, and the render step would then re-render the old
+#    one into a fresh-looking mp4.
+rm -f <capture-dir>/recording.cast
 tmux new-session -d -s pm-recorder -x 200 -y 50 \
     "asciinema rec --quiet <capture-dir>/recording.cast \
         -c 'tmux attach -t $TARGET'"
+# Wait (bounded) for the recorder to draw: the detach key in step 5 is
+# lost if the attach client has not started yet. If the recorder exits
+# first (the attach could not start), the session is already gone — step
+# 5's cast check reports that, so this wait must not hang on it.
+deadline=$(( $(date +%s) + 30 ))
+until tmux capture-pane -p -t pm-recorder 2>/dev/null \
+        | grep -q '[^[:space:]]' ||
+      ! tmux has-session -t pm-recorder 2>/dev/null; do
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+        echo "recorder did not come up within 30s — check" \
+            "'tmux capture-pane -p -t pm-recorder'" >&2
+        tmux kill-session -t pm-recorder 2>/dev/null
+        exit 1
+    fi
+    sleep 0.2
+done
 
 # 4. Drive the TUI from outside via pm tui send. Keys reach the TUI
 #    via the same tmux server; the recorder's attach client renders
@@ -94,10 +119,27 @@ pm tui send a -s "$TARGET"            # open the picker
 
 # 5. End the recording by detaching the recorder's attach client.
 #    The attach exits, the recorded command exits, asciinema flushes
-#    the cast.
+#    the cast and the pane (started *as* the asciinema command) closes,
+#    which ends the recorder session. Wait for that — it is the only
+#    evidence the cast was flushed — instead of tearing the session
+#    down underneath a still-running recorder.
 tmux send-keys -t pm-recorder C-b d
+deadline=$(( $(date +%s) + 30 ))
+while tmux has-session -t pm-recorder 2>/dev/null; do
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+        echo "recorder did not exit within 30s — check" \
+            "'tmux capture-pane -p -t pm-recorder'" >&2
+        tmux kill-session -t pm-recorder 2>/dev/null
+        exit 1
+    fi
+    sleep 0.2
+done
+test -s <capture-dir>/recording.cast || {
+    echo "asciinema wrote no cast — check the recorder pane" >&2
+    exit 1
+}
 tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
-tmux kill-session -t pm-recorder 2>/dev/null
+tmux kill-session -t pm-recorder 2>/dev/null || true   # already gone if it exited
 ```
 
 ## Render to video

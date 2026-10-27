@@ -33,10 +33,14 @@ substitutes the actual captures directory for `<capture-dir>`):
 
 ## Capture
 
-Create the capture directory first: `mkdir -p <capture-dir>/<short-name>`.
-`asciinema rec` reports "asciicast saved" and exits 0 even when the
-directory does not exist, so a missing `mkdir` looks like a successful
-capture that wrote nothing.
+Create the capture directory first: `mkdir -p <capture-dir>/<short-name>`,
+and delete any cast an earlier run left there (`rm -f
+<capture-dir>/<short-name>/recording.cast`). `asciinema rec` reports
+"asciicast saved" and exits 0 even when the directory does not exist, so a
+missing `mkdir` looks like a successful capture that wrote nothing — and a
+leftover cast is worse: the render step rewrites the `.mp4` from it, so a
+run that recorded nothing would still produce a fresh-looking video of the
+*previous* run.
 
 ### One command, end-to-end
 
@@ -77,32 +81,76 @@ capture, you do **not** need a `tmux attach` — the pane itself is
 where the CLI runs.
 
 ```
-# 1. Scaffold tmux on its own socket and open one pane. The capture
-#    subdirectory has to exist before asciinema writes into it.
+# 1. Scaffold tmux on its own socket and start the recorder as the pane's
+#    command, so the pane's lifetime *is* the recording's lifetime: when
+#    asciinema exits, the session ends and step 4's wait can see it. The
+#    capture subdirectory has to exist (and hold no earlier cast) before
+#    asciinema writes into it.
 mkdir -p <capture-dir>/<short-name>
-tmux -L scaffold new-session -d -s rec -x 100 -y 30
-
-# 2. Start asciinema in the pane, wrapping whichever command form
-#    fits from above (one command, bash + manual, or bash -c script).
-tmux -L scaffold send-keys -t rec:0.0 \
+rm -f <capture-dir>/<short-name>/recording.cast
+tmux -L scaffold new-session -d -s rec -x 100 -y 30 \
     "asciinema rec --quiet --overwrite <capture-dir>/<short-name>/recording.cast \
-        -c '<command-to-record>'" Enter
+        -c '<command-to-record>'"
 
-# 3. If you wrapped `bash`, drive it from outside via tmux send-keys
-#    on the same scaffold socket; if you wrapped a single command or
-#    a `bash -c` script, just wait for it to finish.
+# 2. Wait (bounded) for the recorder to draw its first screen before any
+#    keys go in: keystrokes sent before asciinema has attached to the pane
+#    are silently lost, so an immediate `exit` leaves it recording. A quick
+#    one-shot command can finish first — then the session is already gone
+#    and there is nothing left to drive.
+deadline=$(( $(date +%s) + 30 ))
+until tmux -L scaffold capture-pane -p -t rec:0.0 2>/dev/null \
+        | grep -q '[^[:space:]]' ||
+      ! tmux -L scaffold has-session -t rec 2>/dev/null; do
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+        echo "recorder did not come up within 30s — check the pane with" \
+            "'tmux -L scaffold capture-pane -p -t rec'" >&2
+        tmux -L scaffold kill-server 2>/dev/null
+        exit 1
+    fi
+    sleep 0.2
+done
 
-# 4. Stop: have the recorded process exit (it'll flush the cast), or
-#    send Ctrl-C to the pane. Do NOT reach for `pkill -f 'asciinema
-#    rec.*'` — that pattern can match the shell running it, and killing
-#    by process name is the anti-pattern the render step warns about.
-tmux -L scaffold send-keys -t rec:0.0 C-c
-tmux -L scaffold kill-server   # cleanup
+# 3. Drive the recorded command from outside on the same scaffold socket,
+#    e.g.:
+#      tmux -L scaffold send-keys -t rec:0.0 'pm --version' Enter
+#      tmux -L scaffold send-keys -t rec:0.0 'exit' Enter
+#    An interactive `bash` needs that final `exit` — it is what ends the
+#    recording. Ctrl-C is forwarded to the recorded command, not to
+#    asciinema, so it does not stop the recording, and tearing the pane
+#    down first can leave a truncated cast. Do NOT reach for
+#    `pkill -f 'asciinema rec.*'` either: that pattern can match the shell
+#    running it, and killing by process name is the anti-pattern the render
+#    step warns about. A single command or a `bash -c` script needs no
+#    driving at all.
+
+# 4. Wait (bounded) for asciinema to exit — the pane *is* the recording, so
+#    the session ending is the completion signal — then confirm the cast is
+#    there and non-empty.
+deadline=$(( $(date +%s) + 30 ))
+while tmux -L scaffold has-session -t rec 2>/dev/null; do
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+        echo "recorder did not exit within 30s — check the pane with" \
+            "'tmux -L scaffold capture-pane -p -t rec'" >&2
+        tmux -L scaffold kill-server 2>/dev/null
+        exit 1
+    fi
+    sleep 0.2
+done
+test -s <capture-dir>/<short-name>/recording.cast || {
+    echo "asciinema wrote no cast — check the pane output" >&2
+    exit 1
+}
+tmux -L scaffold kill-server 2>/dev/null || true   # cleanup
 ```
 
 If `asciinema` isn't installed and can't be installed, fall back to
 appending `| tee transcript.log` to the command line — you lose
 animation but keep the output. Note the fallback in the manifest.
+
+`<command-to-record>` sits inside a double-quoted tmux command string, so
+when the recorded command itself contains quotes, put it in a small script
+and record that (`-c 'bash /tmp/demo.sh'`) rather than fighting the
+nesting.
 
 ## Render to video
 
