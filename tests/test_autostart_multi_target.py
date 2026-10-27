@@ -18,6 +18,7 @@ from click.testing import CliRunner
 from pm_core import autostart_state as st
 from pm_core import store
 from pm_core.autostart_state import POLICY_AUTO, POLICY_STOP
+from pm_core.cli.helpers import TuiIpcResult
 from pm_core.qa_loop import QALoopState, QAScenario
 from pm_core.review_loop import ReviewLoopState
 from pm_core.tui import auto_start
@@ -812,7 +813,7 @@ class TestCLI:
             assert word in res.output
 
     def test_unknown_id_rejected_before_sending(self, project):
-        with patch("pm_core.cli.autostart.trigger_tui_command") as trig:
+        with patch("pm_core.cli.autostart.submit_tui_command") as trig:
             res = _cli(["add", "pr-a", "nope", "--json", "-s", "pm-x"])
         assert res.exit_code == 1
         assert json.loads(res.output)["error"] == "unknown_pr"
@@ -823,14 +824,14 @@ class TestCLI:
         def missing():
             raise FileNotFoundError("No project.yaml found")
         monkeypatch.setattr("pm_core.cli.autostart.state_root", missing)
-        with patch("pm_core.cli.autostart.trigger_tui_command") as trig:
+        with patch("pm_core.cli.autostart.submit_tui_command") as trig:
             res = _cli(["remove", "pr-a", "--json", "-s", "pm-x"])
         assert res.exit_code == 1
         assert json.loads(res.output)["error"] == "no_project"
         trig.assert_not_called()
 
     def test_merged_rejected(self, project):
-        with patch("pm_core.cli.autostart.trigger_tui_command") as trig:
+        with patch("pm_core.cli.autostart.submit_tui_command") as trig:
             res = _cli(["add", "pr-m", "-s", "pm-x"])
         assert res.exit_code == 1 and "merged" in res.output
         trig.assert_not_called()
@@ -857,7 +858,7 @@ class TestCLI:
         try:
             with patch("pm_core.cli.autostart._tui_pidfile_for_session",
                        return_value=pidfile), \
-                 patch("pm_core.cli.autostart.trigger_tui_command") as trig:
+                 patch("pm_core.cli.autostart.submit_tui_command") as trig:
                 res = _cli(["status", "--json", "-s", "pm-x", "--timeout", "5"])
         finally:
             child.wait()
@@ -867,13 +868,35 @@ class TestCLI:
         assert "stale pidfile" in out["message"]
         trig.assert_not_called()
 
+    def test_owner_failure_message_is_surfaced(self, project):
+        """A capability/identity failure reaches the user verbatim.
+
+        A generic "could not signal" hides the action the user needs
+        ("restart the TUI"), which is the whole point of the reason
+        codes on ``TuiIpcResult``.
+        """
+        import os
+        reason = ("The TUI for session pm-x predates the command-queue "
+                  "feature; restart the TUI (Ctrl+R) to use it.")
+        failure = TuiIpcResult(False, "missing_capability", reason)
+        with patch("pm_core.cli.autostart._resolve_owner",
+                   return_value=("pm-x", os.getpid())), \
+             patch("pm_core.cli.autostart.submit_tui_command",
+                   return_value=failure):
+            res = _cli(["status", "--json", "-s", "pm-x"])
+        assert res.exit_code == 2
+        out = json.loads(res.output)
+        assert out["error"] == "owner_unavailable"
+        assert out["message"] == reason
+
     def test_owner_timeout(self, project, tmp_path):
         pidfile = tmp_path / "tui.pid"
         import os
         pidfile.write_text(str(os.getpid()))
         with patch("pm_core.cli.autostart._tui_pidfile_for_session",
                    return_value=pidfile), \
-             patch("pm_core.cli.autostart.trigger_tui_command", return_value=True):
+             patch("pm_core.cli.autostart.submit_tui_command",
+                   return_value=TuiIpcResult(True)):
             res = _cli(["list", "--json", "-s", "pm-x", "--timeout", "0.3"])
         assert res.exit_code == 2
         assert json.loads(res.output)["error"] == "owner_timeout"
@@ -938,11 +961,11 @@ class TestCLI:
             sent.append(cmd)
             with patch("pm_core.tui.auto_start.pm_home", return_value=home):
                 auto_start.handle_command(app, shlex.split(cmd)[1:])
-            return True
+            return TuiIpcResult(True)
 
         with patch("pm_core.cli.autostart._tui_pidfile_for_session",
                    return_value=pidfile), \
-             patch("pm_core.cli.autostart.trigger_tui_command", fake_trigger):
+             patch("pm_core.cli.autostart.submit_tui_command", fake_trigger):
             r1 = _cli(["add", "pr-a", "--json", "-s", "pm-x"])
             r2 = _cli(["add", "pr-b", "--auto-merge", "--json", "-s", "pm-x"])
             r3 = _cli(["status", "--json", "-s", "pm-x"])

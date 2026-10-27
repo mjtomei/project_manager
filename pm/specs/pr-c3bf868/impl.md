@@ -89,7 +89,12 @@ I1. `pm_core/cli/autostart.py::_resolve_owner` must read the JSON
     change every pidfile is JSON and autostart would report every TUI as
     "stale pidfile"). It keeps its `kill(pid,0)` + zombie semantics so
     existing autostart tests (which write bare numeric pidfiles) still pass;
-    the shared reader handles both formats.
+    the shared reader handles both formats. Its dispatch
+    (`_request`) calls `submit_tui_command` rather than the bool
+    `trigger_tui_command`, so the specific failure reason (missing
+    capability, stale pidfile, ...) reaches the user instead of a generic
+    "could not signal the TUI" — autostart is the other consumer of the
+    SIGUSR2 path and would otherwise hide the "restart the TUI" fix.
 
 I2. `on_unmount` must not delete a successor's pidfile: unlink only when
     the file still names our pid **and** our `starttime` (exec restarts and
@@ -156,9 +161,12 @@ A4. *How long is "continuously invalid" for the spinner abort?* **Resolution:**
     to ride out an exec/Ctrl+R restart, short enough to not strand the user.
 
 A5. *Should a JSON descriptor with `caps: []` (TUI starting) be retried
-    rather than errored?* **Resolution:** return False with "still starting
-    up; try again in a moment" — the picker pops a dismissable message;
-    the user re-runs the action. No blocking retry loop in the picker.
+    rather than errored?* **Resolution:** return False with reason
+    `starting` and a message that names both possibilities — the TUI is
+    still starting up (retry in a moment) or the handler install failed and
+    the capabilities were never published (restart the TUI with Ctrl+R).
+    The picker pops a dismissable message; the user re-runs the action. No
+    blocking retry loop in the picker.
 
 No **[UNRESOLVED]** items.
 
@@ -260,3 +268,15 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
 16. `submit_tui_command` when `_signal_tui` reports `permission denied`
     returns `signal_error` and leaves the pidfile in place (E4); reload
     with no pidfile returns False.
+17. reload against a `caps=[]` descriptor (starting) → False and the
+    pidfile is kept; reload against a descriptor missing `sigusr1` also
+    keeps the pidfile.
+18. `pm autostart` surfaces `submit_tui_command`'s message verbatim (the
+    `owner_unavailable` failure carries "restart the TUI (Ctrl+R)", not a
+    generic "could not signal the TUI").
+
+The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
+returns `(pidfile, raw, descriptor, problem)` and never modifies anything;
+`_validate_tui_owner` adds the stale-file cleanup and `tui_owner_problem`
+(polled by the picker spinner) is a thin wrapper over it, so the two paths
+cannot drift apart.

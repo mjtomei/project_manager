@@ -22,6 +22,7 @@ from click.testing import CliRunner
 
 from pm_core import autostart_state as st
 from pm_core import store
+from pm_core.cli.helpers import TuiIpcResult
 from pm_core.autostart_state import POLICY_AUTO, POLICY_STOP, POLICY_WAIT
 from pm_core.tui import auto_start, signoff_ui
 from pm_core.tui import review_loop_ui
@@ -283,7 +284,7 @@ class TestFlags:
                     "prs": _diamond()}, pm_dir)
         monkeypatch.setattr("pm_core.cli.autostart.state_root", lambda: pm_dir)
         from pm_core.cli import cli
-        with patch("pm_core.cli.autostart.trigger_tui_command") as trig:
+        with patch("pm_core.cli.autostart.submit_tui_command") as trig:
             res = CliRunner().invoke(cli, [
                 "autostart", "add", "f", "--wait-for-merge",
                 "--stop-before-merge", "--json", "-s", "pm-x"])
@@ -541,7 +542,7 @@ def test_diamond_wait_for_merge_end_to_end(tmp_path):
     def fake_trigger(session, cmd):
         with patch("pm_core.tui.auto_start.pm_home", return_value=home):
             auto_start.handle_command(app, shlex.split(cmd)[1:])
-        return True
+        return TuiIpcResult(True)
 
     with patch.object(auto_start, "_start_pr_quiet", fake_start), \
          patch("pm_core.signoff.head_sha", return_value="head"), \
@@ -554,7 +555,7 @@ def test_diamond_wait_for_merge_end_to_end(tmp_path):
          patch("pm_core.cli.autostart.pm_home", lambda: home), \
          patch("pm_core.cli.autostart._tui_pidfile_for_session",
                return_value=pidfile), \
-         patch("pm_core.cli.autostart.trigger_tui_command", fake_trigger):
+         patch("pm_core.cli.autostart.submit_tui_command", fake_trigger):
         from pm_core.cli import cli
         res = CliRunner().invoke(cli, ["autostart", "add", "f",
                                        "--wait-for-merge", "-s", "pm-x"])

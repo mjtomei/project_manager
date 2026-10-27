@@ -1496,11 +1496,15 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     """Show a spinner while a queued TUI command transitions states.
 
     Polls the shared runtime-state file and the tmux window list and
-    exits when the target window appears.  No timeout — long-running
-    launches stay visible until they complete.  The user can press
-    ``q`` or ``Esc`` at any time to dismiss the spinner *without*
-    cancelling the queued command (the TUI continues to handle it
-    once it picks the entry up off the queue).
+    exits when the target window appears.  No timeout on the action
+    itself — long-running launches stay visible until they complete —
+    but the TUI's pidfile is re-validated once a second, and the spinner
+    aborts after ``_TUI_GONE_GRACE_S`` of continuous owner invalidity
+    (the TUI died or was replaced), so a dead target cannot strand the
+    user on "queued…" forever.  The user can press ``q`` or ``Esc`` at
+    any time to dismiss the spinner *without* cancelling the queued
+    command (the TUI continues to handle it once it picks the entry up
+    off the queue).
     """
     import select
     import sys

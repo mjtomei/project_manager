@@ -507,6 +507,29 @@ class TuiIpcResult:
     message: str = ""
 
 
+def _read_tui_owner(
+    session: str,
+) -> tuple[Path, str | None, tui_pidfile.TuiPidfile | None, str | None]:
+    """Read *session*'s pidfile and report why its owner is unusable.
+
+    Returns ``(pidfile, raw_text, descriptor, problem)``.  ``problem`` is
+    ``None`` when the file names a live TUI; otherwise it is a short
+    human-readable reason (``"no pidfile"``, ``"unreadable pidfile"``, or
+    an identity problem from :func:`tui_pidfile.identity_problem`).
+    Nothing is modified here, so the result is safe to poll; callers that
+    want the stale file removed go through :func:`_validate_tui_owner`.
+    """
+    path = _tui_pidfile_for_session(session)
+    raw = tui_pidfile.read_pidfile_text(path)
+    if raw is None:
+        return path, None, None, (
+            "unreadable pidfile" if path.exists() else "no pidfile")
+    desc = tui_pidfile.parse_pidfile(raw)
+    if desc is None:
+        return path, raw, None, "unreadable pidfile"
+    return path, raw, desc, tui_pidfile.identity_problem(desc)
+
+
 def _validate_tui_owner(
     session: str,
 ) -> tuple[Path, str | None, tui_pidfile.TuiPidfile | None, TuiIpcResult | None]:
@@ -517,27 +540,22 @@ def _validate_tui_owner(
     failure ``error`` carries the result to hand back to the caller and
     any stale pidfile has already been removed.
     """
-    pidfile = _tui_pidfile_for_session(session)
-    raw = tui_pidfile.read_pidfile_text(pidfile)
-    if raw is None and not pidfile.exists():
+    pidfile, raw, desc, problem = _read_tui_owner(session)
+    if problem == "no pidfile":
         return pidfile, None, None, TuiIpcResult(
             False, "no_pidfile",
             f"No TUI is running for session {session}.")
-    desc = tui_pidfile.parse_pidfile(raw)
-    if desc is None:
-        # Present but empty/corrupt/undecodable: stale garbage.
-        tui_pidfile.unlink_if_unchanged(pidfile, raw)
-        return pidfile, raw, None, TuiIpcResult(
-            False, "stale_pidfile",
-            f"The TUI pidfile for session {session} is unreadable; "
-            f"restart the TUI.")
-    problem = tui_pidfile.identity_problem(desc)
     if problem is not None:
+        # Unreadable, dead, recycled, or not a TUI: stale.
         tui_pidfile.unlink_if_unchanged(pidfile, raw)
+        if desc is None:
+            message = (f"The TUI pidfile for session {session} is "
+                       f"unreadable; restart the TUI.")
+        else:
+            message = (f"The TUI for session {session} is not running "
+                       f"({problem}); restart the TUI.")
         return pidfile, raw, desc, TuiIpcResult(
-            False, "stale_pidfile",
-            f"The TUI for session {session} is not running ({problem}); "
-            f"restart the TUI.")
+            False, "stale_pidfile", message)
     return pidfile, raw, desc, None
 
 
@@ -545,19 +563,15 @@ def tui_owner_problem(session: str) -> str | None:
     """Why *session* has no live TUI to signal, or ``None`` when it does.
 
     Identity-only: capabilities are deliberately not checked, so this is
-    safe to poll while a TUI is starting up or restarting.
+    safe to poll while a TUI is starting up or restarting.  Unlike
+    :func:`_validate_tui_owner` it never removes the pidfile.
     """
-    path = _tui_pidfile_for_session(session)
-    raw = tui_pidfile.read_pidfile_text(path)
-    if raw is None:
-        return "unreadable pidfile" if path.exists() else "no pidfile"
-    desc = tui_pidfile.parse_pidfile(raw)
-    if desc is None:
-        return "unreadable pidfile"
-    return tui_pidfile.identity_problem(desc)
+    return _read_tui_owner(session)[3]
 
 
-def _missing_cap_result(session: str, desc, cap: str) -> TuiIpcResult:
+def _missing_cap_result(
+    session: str, desc: tui_pidfile.TuiPidfile, cap: str,
+) -> TuiIpcResult:
     """Explain that the live TUI cannot handle *cap*."""
     feature = ("command-queue" if cap == tui_pidfile.CAP_COMMAND else "reload")
     if desc.legacy:
@@ -566,11 +580,13 @@ def _missing_cap_result(session: str, desc, cap: str) -> TuiIpcResult:
             f"The TUI for session {session} predates the {feature} "
             f"feature; restart the TUI (Ctrl+R) to use it.")
     if not desc.caps:
-        # Claimed but no handler published yet: mid-startup.
+        # Claimed but nothing published yet: mid-startup, or the handler
+        # install failed and the capabilities were never advertised.
         return TuiIpcResult(
             False, "starting",
-            f"The TUI for session {session} is still starting up; "
-            f"try again in a moment.")
+            f"The TUI for session {session} has not advertised its signal "
+            f"handlers yet; if it is still starting up, try again in a "
+            f"moment, otherwise restart the TUI (Ctrl+R).")
     return TuiIpcResult(
         False, "missing_capability",
         f"The TUI for session {session} does not advertise the "

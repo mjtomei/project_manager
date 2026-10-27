@@ -406,6 +406,9 @@ class TestSubmitCommand:
         assert res.ok is False
         assert res.reason == "starting"
         assert "still starting up" in res.message
+        # A claim that never publishes (handler install failed) must still
+        # point the user at the one action that fixes it.
+        assert "restart the TUI" in res.message
         assert not queue.exists()
 
     def test_partial_caps_tui_is_not_signaled(self, ipc_paths,
@@ -481,6 +484,18 @@ class TestReload:
         assert helpers.trigger_tui_reload(SESSION) is False
         time.sleep(0.3)
         assert _marker_lines(marker) == []
+        assert tui.poll() is None
+        assert pidfile.exists()  # live TUI: never remove its descriptor
+
+    def test_reload_is_refused_while_starting(self, ipc_paths,
+                                              start_fake_tui):
+        """caps=[] means claimed but not published: never signal."""
+        pidfile, _queue = ipc_paths
+        tui = start_fake_tui()
+        _write_json(pidfile, tui.pid, [])
+        assert helpers.trigger_tui_reload(SESSION) is False
+        assert pidfile.exists()
+        time.sleep(0.3)
         assert tui.poll() is None
 
     def test_dead_pid_removes_pidfile(self, ipc_paths):

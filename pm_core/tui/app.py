@@ -347,7 +347,7 @@ class ProjectManagerApp(App):
                 return False
         return True
 
-    def __init__(self, pidfile_claim=None):
+    def __init__(self, pidfile_claim: tui_pidfile.TuiPidfileClaim | None = None):
         super().__init__()
         self._data: dict = {}
         self._root: Path | None = None
