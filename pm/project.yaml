@@ -14508,7 +14508,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T22:17:03.640842+00:00'
+  updated_at: '2026-10-27T23:49:26.109779+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15240,6 +15240,24 @@ prs:
       /tmp (filed as pr-e618b9c).'
     created_at: '2026-10-27T22:17:03Z'
     last_edited: '2026-10-27T22:17:03Z'
+  - id: note-3c66775
+    text: 'QA S1 (2026-10-27, container mode, nested podman, real file:// upstream):
+      PASS. Impl and QA containers on one PR got distinct workdir-keyed proxies —
+      impl proxy recorded the PR workdir, QA proxy the QA scenario clone; each container
+      saw its own /run/pm-push-proxy/push.sock and `git ls-remote origin` worked from
+      both; the QA start left the impl socket mount and proxy pid unchanged. impl
+      push -> QA push -> impl push 2 each landed its own commit upstream, each a fast-forward
+      of the previous, and the other clone branch ref never moved. Two scenario-script
+      caveats for the next run: (1) the literal glob /tmp/pm-push-proxy-<tag>-<prid>-*
+      also matches each proxy start-lock sibling <sockdir>.lock — filter to directories
+      to get the expected 2; (2) `git rev-parse --verify --quiet <full-sha>` returns
+      0 and echoes the SHA even for a nonexistent object, so use `git cat-file -e`
+      for the "commit absent from the other clone" checks. Captures: /pm-captures/scenarios/1/{impl-launch,qa-launch,verify-push}.
+      Setup note: pm-dev:latest had to be built inside the QA container first (`pm
+      container build-base`); nested podman needs --uts=host, which pm adds under
+      nested_podman.'
+    created_at: '2026-10-27T23:49:26Z'
+    last_edited: '2026-10-27T23:49:26Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
