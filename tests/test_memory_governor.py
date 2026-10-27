@@ -558,6 +558,19 @@ class TestMemoryStatus:
         mg.record_blocked("impl pr-new", "over")
         assert list(mg._load_blocked()) == ["impl pr-new"]
 
+    def test_wrong_typed_blocked_file_is_ignored_then_rewritten(self):
+        """A hand-edited file (``"at": "x"``) must not crash status or refusals."""
+        path = mg._blocked_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"impl pr-zzz": {"at": "x", "reason": 1},'
+                        ' "impl pr-bad": 5, "impl pr-ok": {"at": %f, "reason": 2}}'
+                        % time.time())
+        assert mg.recent_blocked() == [("impl pr-ok", "2")]
+        assert "blocked: impl pr-ok" in self._status(1024)
+        mg.record_blocked("impl pr-1", "over")
+        assert sorted(mg._load_blocked()) == ["impl pr-1", "impl pr-ok"]
+        assert "pr-zzz" not in path.read_text()
+
     def test_unmeasurable_is_shown_not_hidden(self):
         """Regression: a failed measurement used to blank the indicator."""
         assert self._status(None, error="stats failed") == "mem ?/48G (pm) unmeasurable"

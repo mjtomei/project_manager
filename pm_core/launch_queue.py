@@ -133,10 +133,37 @@ def _load_queue() -> dict:
     if not isinstance(data, dict) or not isinstance(data.get("entries", []), list):
         return _empty_queue()
     data.setdefault("entries", [])
-    data.setdefault("last_served_qa_run", None)
-    data["entries"] = [e for e in data["entries"]
-                       if isinstance(e, dict) and e.get("id")]
+    if not isinstance(data.get("last_served_qa_run"), str):
+        data["last_served_qa_run"] = None
+    entries = []
+    for e in data["entries"]:
+        if _valid_entry(e):
+            entries.append(e)
+        else:
+            _log.warning("Dropping malformed queue entry %r", e)
+    data["entries"] = entries
     return data
+
+
+def _is_number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _valid_entry(e) -> bool:
+    """True when *e* has the field types the queue logic relies on."""
+    if not isinstance(e, dict) or not e.get("id") or not isinstance(e["id"], str):
+        return False
+    pid = e.get("pid")
+    if pid is not None and (not isinstance(pid, int) or isinstance(pid, bool)):
+        return False
+    for k in ("enqueued_at", "heartbeat_at", "acquired_at"):
+        if e.get(k) is not None and not _is_number(e[k]):
+            return False
+    for k in ("status", "container_type", "key", "container_name",
+              "qa_run_id", "instance", "pid_start"):
+        if e.get(k) is not None and not isinstance(e[k], str):
+            return False
+    return True
 
 
 def _save_queue(data: dict) -> None:

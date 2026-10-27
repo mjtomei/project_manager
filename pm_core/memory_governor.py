@@ -861,11 +861,21 @@ def _blocked_path() -> Path:
 
 
 def _load_blocked() -> dict:
+    """Blocked launches on disk; malformed records (e.g. a non-numeric
+    ``at``) are dropped so the status bar and refusals never raise."""
     try:
         data = json.loads(_blocked_path().read_text())
-        return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError):
         return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: {"reason": str(v.get("reason", "")), "at": v["at"]}
+            for k, v in data.items()
+            if isinstance(v, dict) and _is_number(v.get("at"))}
+
+
+def _is_number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
 def _save_blocked(data: dict) -> None:
@@ -895,7 +905,8 @@ def _update_blocked(mutate) -> None:
             mutate(data)
             cutoff = time.time() - _BLOCKED_DISPLAY_SECONDS
             data = {k: v for k, v in data.items()
-                    if isinstance(v, dict) and v.get("at", 0) >= cutoff}
+                    if isinstance(v, dict) and _is_number(v.get("at"))
+                    and v["at"] >= cutoff}
             _save_blocked(data)
     except GovernorLockTimeout as e:
         _log.debug("Skipping blocked-launch update: %s", e)

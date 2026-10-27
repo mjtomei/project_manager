@@ -1,6 +1,7 @@
 """Tests for pm_core.launch_queue."""
 
 import contextlib
+import json
 import os
 import time
 from pathlib import Path
@@ -131,6 +132,37 @@ class TestQueueIO:
             (tmp_path / "launch-queue.json").write_text("{{not json")
             q = _load_queue()
             assert q["entries"] == []
+
+    def test_wrong_typed_entries_are_dropped(self, tmp_path):
+        """A hand-edited file must not raise in every admission."""
+        now = time.time()
+        good = {"id": "ok", "pid": os.getpid(), "status": "waiting",
+                "enqueued_at": now, "heartbeat_at": now}
+        bad = [
+            {"id": "x1", "pid": "abc", "status": "waiting",
+             "enqueued_at": "x", "heartbeat_at": "x"},
+            {"id": "x2", "pid": True},
+            {"id": "x3", "pid": 1, "acquired_at": [1]},
+            {"id": "x4", "status": 3},
+            {"id": 5},
+        ]
+        with _patch_home(tmp_path):
+            (tmp_path / "launch-queue.json").write_text(json.dumps(
+                {"entries": bad + [good], "last_served_qa_run": 7}))
+            q = _load_queue()
+            assert [e["id"] for e in q["entries"]] == ["ok"]
+            assert q["last_served_qa_run"] is None
+
+    def test_wrong_typed_entry_does_not_break_admission(self, tmp_path):
+        with _patch_home(tmp_path), _patch_governor_inactive():
+            (tmp_path / "launch-queue.json").write_text(json.dumps(
+                {"entries": [{"id": "x1", "pid": "abc", "status": "waiting",
+                              "enqueued_at": "x", "heartbeat_at": "x"}]}))
+            eid, acquired, reason = enqueue_and_try_acquire("impl")
+            assert acquired and reason == ""
+            ids = [e["id"] for e in json.loads(
+                (tmp_path / "launch-queue.json").read_text())["entries"]]
+            assert ids == [eid]
 
 
 # ---------------------------------------------------------------------------
