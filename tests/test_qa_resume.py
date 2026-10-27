@@ -724,3 +724,25 @@ def test_resume_that_aborts_releases_adopted_entries(tmp_path, failure):
     assert not resumed.running
     assert resumed.latest_verdict == "ERROR"
     assert keys == ["pm-other-impl"]
+
+
+@pytest.mark.parametrize("failure", ["no_session", "workdir_missing"])
+def test_resume_that_aborts_tells_the_tui_why(tmp_path, failure):
+    """The poll tick's completion line only says "QA finished: ERROR", so an
+    aborted resume must push its reason through on_update for the TUI log."""
+    qa_dir = _seed_run(tmp_path)
+    state = build_resume_state(_load_resume_file(qa_dir))
+    updates = []
+    pr = {"id": "pr-001", "workdir": str(tmp_path / "gone")}
+    with patch.object(qa_loop, "get_pm_session",
+                      return_value=None if failure == "no_session" else "pm-x"), \
+         patch.object(store, "load", return_value={"prs": [pr]}), \
+         patch.object(qa_loop, "_compute_qa_window_name", return_value="qa-pr-001"):
+        qa_loop.resume_qa_sync(state, tmp_path, pr,
+                               lambda s: updates.append(s.latest_output))
+
+    assert not state.running
+    assert state.latest_verdict == "ERROR"
+    expected = ("No pm session found" if failure == "no_session"
+                else "Workdir for pr-001 missing — cannot resume QA")
+    assert updates == [expected]

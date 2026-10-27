@@ -4668,10 +4668,22 @@ def resume_qa_sync(
     from pm_core import store
 
     state.running = True
+
+    def _notify():
+        if on_update:
+            on_update(state)
+
+    def _abort(output: str | None = None) -> QALoopState:
+        # Say why in the TUI log: the poll tick's completion line only
+        # carries the verdict ("QA finished for <pr>: ERROR").
+        abort_resume(state, output)
+        _notify()
+        return state
+
     session = get_pm_session()
     if not session:
         _log.error("QA resume aborted: no pm session for %s", state.pr_id)
-        return abort_resume(state, "No pm session found")
+        return _abort("No pm session found")
     if not state.session_tag:
         state.session_tag = session.removeprefix("pm-")
 
@@ -4683,12 +4695,11 @@ def resume_qa_sync(
     workdir_path = (live_pr or {}).get("workdir")
     if not workdir_path or not Path(workdir_path).is_dir():
         _log.error("QA resume aborted: workdir for %s missing", state.pr_id)
-        return abort_resume(
-            state, f"Workdir for {state.pr_id} missing — cannot resume QA")
+        return _abort(f"Workdir for {state.pr_id} missing — cannot resume QA")
 
     if not state.qa_workdir:
         _log.error("QA resume aborted: no qa_workdir for %s", state.pr_id)
-        return abort_resume(state)
+        return _abort(f"QA workdir for {state.pr_id} missing — cannot resume QA")
 
     status_path = Path(state.qa_workdir) / "qa_status.json"
     repo_root = Path(workdir_path) if Path(workdir_path).is_dir() else None
@@ -4698,10 +4709,6 @@ def resume_qa_sync(
     concurrency_cap = int(resume_data.get("concurrency_cap", 0) or 0)
     queued_idx = set(resume_data.get("queued_indices") or [])
     queued_scenarios = [s for s in state.scenarios if s.index in queued_idx]
-
-    def _notify():
-        if on_update:
-            on_update(state)
 
     _log.info("Resuming QA for %s: %d scenario(s), %d queued",
               state.pr_id, len(state.scenarios), len(queued_scenarios))
