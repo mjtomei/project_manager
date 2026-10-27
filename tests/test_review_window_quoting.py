@@ -21,6 +21,7 @@ from unittest import mock
 
 import pytest
 
+from pm_core.model_config import get_pr_model_override
 from pm_core.cli import pr as pr_mod
 
 # The ``fake_tmux`` fixture monkeypatches ``pr_mod.subprocess.run`` — that
@@ -312,7 +313,7 @@ def test_review_container_uses_selected_route(fake_tmux, monkeypatch):
     monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: True)
     resolved = []
     monkeypatch.setattr("pm_core.model_config.resolve_model_and_provider",
-                        lambda st, **k: resolved.append((st, k["pr_model"])) or
+                        lambda st, **k: resolved.append((st, get_pr_model_override(k["pr_entry"], st))) or
                         SimpleNamespace(model=None, provider="claude-work",
                                         effort="high"))
     # Only review is routed, by a PR role exception over a PR-wide model.

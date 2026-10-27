@@ -126,7 +126,7 @@ def _compute_review_window_name(pr_data: dict) -> str:
 class ReviewLaunchError(RuntimeError):
     """``pm pr review`` exited non-zero; its stderr is already logged.
 
-    An expected failure (a work route down, a container that cannot be
+    An expected failure (a route down, a container that cannot be
     created): the loop reports it as its ERROR verdict without a traceback.
     """
 

@@ -19,6 +19,7 @@ from unittest.mock import patch
 
 import pytest
 
+from pm_core.model_config import get_pr_model_override
 from pm_core import route_bridge, worker_route
 from pm_core.model_config import ModelResolution, resolve_model_and_provider
 from pm_core.providers import (
@@ -48,7 +49,6 @@ def pm_home_dir(short_dir, monkeypatch):
     monkeypatch.delenv("PM_PROVIDER", raising=False)
     monkeypatch.delenv("PM_MODEL", raising=False)
     monkeypatch.delenv("PM_EFFORT", raising=False)
-    worker_route._last_refresh.clear()
     return home
 
 
@@ -135,12 +135,31 @@ class TestRouterProvider:
         assert get_provider("nope").name == "claude"
 
     def test_loads_router_fields(self, pm_home_dir):
-        _write_providers(pm_home_dir, launcher="~/bin/claude-mixed",
-                         credentials_file="~/.claude-work/.credentials.json",
-                         refresh_command="claude-work-ping")
+        _write_providers(pm_home_dir, launcher="~/bin/my-launcher",
+                         remedy="start the router", effort="high",
+                         classifier_model="rt/small", probe_models=["x"],
+                         unset_env=["FOO"], env={"BAR": "1", "BAZ": None})
         p = get_provider(ROUTE, strict=True)
-        assert (p.type, p.launcher, p.refresh_command) == (
-            "router", "~/bin/claude-mixed", "claude-work-ping")
+        assert (p.type, p.launcher, p.remedy, p.effort, p.classifier_model,
+                p.probe_models, p.unset_env, p.env) == (
+            "router", "~/bin/my-launcher", "start the router", "high",
+            "rt/small", ["x"], ["FOO"], {"BAR": "1", "BAZ": None})
+
+    def test_retired_credential_keys_are_ignored(self, pm_home_dir):
+        # Credentials are managed outside pm (user decision 2026-10-27):
+        # an entry that still names a credentials file / refresh command
+        # loads and launches as before, and pm says it ignores them.
+        from pm_core.providers import retired_keys, _provider_entries
+        _write_providers(pm_home_dir, credentials_file="/c/creds.json",
+                         refresh_command="refresh-it")
+        p = get_provider(ROUTE, strict=True)
+        assert not hasattr(p, "credentials_file")
+        assert retired_keys(_provider_entries()[ROUTE]) == [
+            "credentials_file", "refresh_command"]
+        from pm_core.cli.provider import _retired_key_lines
+        (line,) = _retired_key_lines()
+        assert "ignoring credentials_file, refresh_command" in line
+        assert "--clear credentials_file --clear refresh_command" in line
 
 
 # ---------------------------------------------------------------------------
@@ -183,12 +202,10 @@ class TestBuildShellCmd:
             return build_claude_shell_cmd(**kw)
 
     def test_host_worker_cmd(self, pm_home_dir):
-        _write_providers(pm_home_dir, api_base="http://127.0.0.1:8790",
-                         credentials_file="/creds/.credentials.json")
+        _write_providers(pm_home_dir, api_base="http://127.0.0.1:8790")
         cmd = self._build(provider=ROUTE, effort="high", session_id="s" * 8)
-        assert cmd.startswith(
-            "env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN "
-            "ANTHROPIC_BASE_URL=http://127.0.0.1:8790 ")
+        assert cmd.startswith("env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN ")
+        assert " ANTHROPIC_BASE_URL=http://127.0.0.1:8790 " in cmd
         assert f" claude --model {MODEL} --effort high --session-id" in cmd
         assert "route_bridge" not in cmd
         assert "credentials" not in cmd
@@ -307,8 +324,9 @@ class TestClassifierRoute:
     QA S59/S61 (pr-1071c5a): the classifier refuses an Opus-class
     ANTHROPIC_DEFAULT_SONNET_MODEL (and an Opus-class
     CLAUDE_CODE_AUTO_MODE_MODEL) and falls back to its Sonnet 5 default,
-    requested without ``work/``, which the router sends to the main
-    account.  ``work/claude-sonnet-5`` kept it on the real work route.
+    requested without the route's prefix, which that router sends to its
+    default account.  The provider's ``classifier_model`` names the model
+    to send instead; pm no longer derives one from the model name.
     """
 
     CLASSIFIER = "work/claude-sonnet-5"
@@ -324,23 +342,32 @@ class TestClassifierRoute:
                               text=True, check=True).stdout.strip()
 
     @pytest.mark.parametrize("model", [MODEL, f"{MODEL}[1m]"])
-    def test_router_sends_the_classifier_default_through_its_route(self, model):
+    def test_router_sends_its_configured_classifier_model(self, model):
+        p = ProviderConfig(name=ROUTE, type="router", api_base="http://x:1",
+                           model=model, classifier_model=self.CLASSIFIER)
+        assert p.env_vars()["CLAUDE_CODE_AUTO_MODE_MODEL"] == self.CLASSIFIER
+
+    @pytest.mark.parametrize("model", [MODEL, f"{MODEL}[1m]"])
+    def test_no_classifier_model_is_derived_from_the_model_name(self, model):
         p = ProviderConfig(name=ROUTE, type="router", api_base="http://x:1",
                            model=model)
-        assert p.env_vars()["CLAUDE_CODE_AUTO_MODE_MODEL"] == self.CLASSIFIER
+        assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in p.env_vars()
+        assert "CLAUDE_CODE_AUTO_MODE_MODEL" in launch_env(
+            p, p.env_vars(), model, {})[1]
 
     @pytest.mark.parametrize("container", [False, True])
     def test_routed_launch_carries_it_over_an_inherited_value(
             self, pm_home_dir, monkeypatch, container):
         monkeypatch.setenv("CLAUDE_CODE_AUTO_MODE_MODEL", "claude-sonnet-5")
-        _write_providers(pm_home_dir, model=f"{MODEL}[1m]")
+        _write_providers(pm_home_dir, model=f"{MODEL}[1m]",
+                         classifier_model=self.CLASSIFIER)
         cmd = self._build(provider=ROUTE, container=container)
         assert _cmd_env(cmd)["CLAUDE_CODE_AUTO_MODE_MODEL"] == self.CLASSIFIER
         if not container:
             assert self._shell_env(cmd) == self.CLASSIFIER
 
     def test_live_probe_cmd_carries_it(self, pm_home_dir):
-        _write_providers(pm_home_dir)
+        _write_providers(pm_home_dir, classifier_model=self.CLASSIFIER)
         cfg = get_provider(ROUTE, strict=True)
         cmd = worker_route._probe_shell_cmd(cfg, "sid", container=False)
         assert _cmd_env(cmd)["CLAUDE_CODE_AUTO_MODE_MODEL"] == self.CLASSIFIER
@@ -398,7 +425,7 @@ class TestClassifierRoute:
 
     def test_pinned_route_does_not_also_unset_it(self):
         p = ProviderConfig(name=ROUTE, type="router", api_base="http://x:1",
-                           model=MODEL)
+                           model=MODEL, classifier_model=self.CLASSIFIER)
         assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in launch_env(
             p, p.env_vars(), MODEL, {})[1]
 
@@ -433,7 +460,7 @@ class TestClassifierRoute:
         monkeypatch.setenv("CLAUDE_CODE_AUTO_MODE_MODEL", self.CLASSIFIER)
         _, _, run_env = _resolve_provider(model="claude-opus-5-5")
         assert "CLAUDE_CODE_AUTO_MODE_MODEL" not in run_env
-        _write_providers(pm_home_dir)
+        _write_providers(pm_home_dir, classifier_model=self.CLASSIFIER)
         monkeypatch.setenv("CLAUDE_CODE_AUTO_MODE_MODEL", "claude-sonnet-5")
         _, _, run_env = _resolve_provider(provider=ROUTE)
         assert run_env["CLAUDE_CODE_AUTO_MODE_MODEL"] == self.CLASSIFIER
@@ -467,12 +494,12 @@ class TestClassifierRoute:
 
     def test_provider_list_names_the_classifier_route(self, pm_home_dir):
         from pm_core.cli.provider import _router_detail_lines
-        _write_providers(pm_home_dir)
+        _write_providers(pm_home_dir, classifier_model=self.CLASSIFIER)
         lines = _router_detail_lines(get_provider(ROUTE, strict=True))
         assert f"auto-mode classifier: {self.CLASSIFIER}" in lines
         _write_providers(pm_home_dir, model="deepseek/deepseek-v4.1-flash-1017")
         lines = _router_detail_lines(get_provider(ROUTE, strict=True))
-        assert any(line.startswith("auto-mode classifier: not pinned")
+        assert any(line.startswith("auto-mode classifier: not set")
                    for line in lines)
         # It names what launches set, so an alias_models entry wins here too.
         _write_providers(pm_home_dir, alias_models={
@@ -1034,52 +1061,32 @@ class TestCheckRoute:
         assert not st.ok and f"127.0.0.1:{port}" in st.problem
         assert "start the router" in st.remedy
 
-    def test_expired_credentials(self, pm_home_dir, short_dir):
+    def test_expired_credentials_file_is_not_pms_business(self, pm_home_dir,
+                                                         short_dir):
+        # pm neither reads nor refreshes credentials: an expired file named
+        # by a (retired) credentials_file key does not block a launch, and
+        # its refresh_command never runs.
         s, port = _listener()
         creds = short_dir / "creds.json"
         _creds(creds, -3600)
+        marker = short_dir / "ran"
         _write_providers(pm_home_dir, api_base=f"http://127.0.0.1:{port}",
-                         credentials_file=str(creds))
-        try:
-            st = worker_route.check_route(ModelResolution(provider=ROUTE))
-        finally:
-            s.close()
-        assert not st.ok and "sign-in expired" in st.problem
-        assert "sign in" in st.remedy
-        assert "SECRET" not in st.message()
-
-    def test_valid_credentials_ok(self, pm_home_dir, short_dir):
-        s, port = _listener()
-        creds = short_dir / "creds.json"
-        _creds(creds, 3600)
-        _write_providers(pm_home_dir, api_base=f"http://127.0.0.1:{port}",
-                         credentials_file=str(creds))
+                         credentials_file=str(creds),
+                         refresh_command=f"touch {marker}")
         try:
             st = worker_route.check_route(ModelResolution(provider=ROUTE))
         finally:
             s.close()
         assert st.ok and st.route == ROUTE
+        assert not marker.exists()
 
-    def test_refresh_command_runs_once_then_cools_down(self, pm_home_dir, short_dir):
+    def test_configured_remedy_replaces_the_router_down_hint(self, pm_home_dir):
         s, port = _listener()
-        creds = short_dir / "creds.json"
-        _creds(creds, -10)
-        marker = short_dir / "ran"
-        # The refresh "succeeds" the first time: it rewrites the expiry.
-        refresh = (f"echo x >> {marker}; {sys.executable} -c "
-                   f"\"import json,time;json.dump({{'claudeAiOauth':"
-                   f"{{'expiresAt':int(time.time()*1000)+3600000}}}},"
-                   f"open('{creds}','w'))\"")
+        s.close()
         _write_providers(pm_home_dir, api_base=f"http://127.0.0.1:{port}",
-                         credentials_file=str(creds), refresh_command=refresh)
-        try:
-            assert worker_route.check_route(ModelResolution(provider=ROUTE)).ok
-            _creds(creds, -10)
-            st = worker_route.check_route(ModelResolution(provider=ROUTE))
-        finally:
-            s.close()
-        assert not st.ok  # second expiry within the cooldown: not re-run
-        assert marker.read_text().count("x") == 1
+                         remedy="run 'my-router start'")
+        st = worker_route.check_route(ModelResolution(provider=ROUTE))
+        assert not st.ok and st.remedy == "run 'my-router start'"
 
     def test_missing_launcher(self, pm_home_dir):
         s, port = _listener()
@@ -1112,7 +1119,7 @@ class TestCheckRoute:
         assert "restart QA" in st.remedy
 
     def test_describe_is_credential_free(self, pm_home_dir):
-        _write_providers(pm_home_dir, credentials_file="/c/.credentials.json")
+        _write_providers(pm_home_dir)
         res = ModelResolution(provider=ROUTE, effort="high")
         assert worker_route.describe(res) == (
             f"route={ROUTE} model={MODEL} effort=high via=host")
@@ -1120,7 +1127,7 @@ class TestCheckRoute:
             "via=container-bridge")
         assert worker_route.describe(ModelResolution(
             model="claude-opus-5-5", effort="high")) == (
-            "route=main model=claude-opus-5-5 effort=high via=claude")
+            "route=none model=claude-opus-5-5 effort=high via=claude")
 
 
 # ---------------------------------------------------------------------------
@@ -1464,7 +1471,7 @@ class TestPollLoopRouteGating:
             self._poll(state, tmp_path, [_status(False)])
         assert 1 not in state.scenario_verdicts
         assert state.scenario_verdict_reasons[1] == (
-            "stopped while waiting for the work route")
+            "stopped while waiting for the route")
         # a genuine launch failure is still marked
         assert state.scenario_verdicts[2] == "INPUT_REQUIRED"
 
@@ -2483,12 +2490,22 @@ class TestLiveProbe:
         assert out["ok"], out
 
     def test_transcript_model_off_the_route_still_fails(self):
+        # With probe_models the backend's answer is judged against them;
+        # pm assumes no renaming convention of its own (e.g. prefix
+        # stripping).
         cfg = ProviderConfig(name=ROUTE, type="router",
-                             api_base="http://127.0.0.1:1", model=f"{MODEL}[1m]")
+                             api_base="http://127.0.0.1:1", model=f"{MODEL}[1m]",
+                             probe_models=["claude-opus-5-5"])
         assert worker_route.model_on_route(cfg, "claude-opus-5-5")
         assert worker_route.model_on_route(cfg, f"{MODEL}[1m]")
+        assert worker_route.model_on_route(cfg, MODEL)
         assert not worker_route.model_on_route(cfg, "claude-fable-5-1")
         assert not worker_route.model_on_route(cfg, "opus-5-5")
+
+    def test_transcript_model_unjudged_without_probe_models(self):
+        cfg = ProviderConfig(name=ROUTE, type="router",
+                             api_base="http://127.0.0.1:1", model=MODEL)
+        assert worker_route.model_on_route(cfg, "anything-the-backend-says")
 
     def test_missing_transcript_is_a_failure(self, probe_env, monkeypatch):
         monkeypatch.setenv("PROBE_TRANSCRIPT", "0")
@@ -2542,16 +2559,21 @@ class TestProviderCLI:
         return CliRunner().invoke(cli, ["provider", *args])
 
     def test_add_router_and_list_without_secrets(self, pm_home_dir, short_dir):
-        creds = short_dir / "creds.json"
-        _creds(creds, 3600)
         r = self._run("add", ROUTE, "--type", "router",
                       "--api-base", "http://127.0.0.1:8790", "--model", MODEL,
-                      "--credentials-file", str(creds))
+                      "--effort", "high", "--classifier-model", "rt/small")
         assert r.exit_code == 0, r.output
         r = self._run("list")
-        assert f"{ROUTE}  type=router  api_base=http://127.0.0.1:8790" in r.output
-        assert str(creds) in r.output and "expires" in r.output
+        assert (f"{ROUTE}  type=router  api_base=http://127.0.0.1:8790  "
+                f"model={MODEL}  effort=high") in r.output
+        assert "auto-mode classifier: rt/small" in r.output
         assert "SECRET" not in r.output
+
+    def test_credential_options_are_gone(self, pm_home_dir):
+        for opt in ("--credentials-file", "--refresh-command"):
+            r = self._run("add", ROUTE, "--type", "router", "--api-base",
+                          "http://127.0.0.1:8790", "--model", MODEL, opt, "x")
+            assert r.exit_code == 2 and "No such option" in r.output
 
     def test_add_router_rejects_api_key_and_requires_model(self, pm_home_dir):
         r = self._run("add", ROUTE, "--type", "router", "--api-base",
@@ -2623,17 +2645,14 @@ def test_workflow_container_route_mount_and_fail_closed(pm_home_dir, monkeypatch
                                       "session_type": "review"}
 
 
-@pytest.mark.parametrize("failure", ["router_down", "expired", "unconfigured"])
+@pytest.mark.parametrize("failure", ["router_down", "unconfigured"])
 def test_workflow_role_remedy_says_relaunch_not_qa_wait(pm_home_dir, monkeypatch,
                                                          failure):
     """impl/review/sign-off are refused once (ContainerError), not waited
     for, so their remedy must not promise QA's automatic launch or point at
     the QA session types; the QA gate keeps its wording."""
     from pm_core.model_config import ModelResolution
-    creds = pm_home_dir / "creds.json"
-    _creds(creds, -60)
-    _write_providers(pm_home_dir, **({"credentials_file": str(creds)}
-                                     if failure == "expired" else {}))
+    _write_providers(pm_home_dir)
     monkeypatch.setattr(route_bridge, "tcp_connectable",
                         lambda *a, **k: failure != "router_down")
     res = ModelResolution(provider="nope" if failure == "unconfigured" else ROUTE)
@@ -2644,13 +2663,13 @@ def test_workflow_role_remedy_says_relaunch_not_qa_wait(pm_home_dir, monkeypatch
     if failure != "unconfigured":
         assert "QA launches the session automatically" in qa.remedy
         assert "then launch the impl session again" in impl.remedy
-    if failure != "router_down":  # these also name the main-account way out
+    if failure != "router_down":  # these also name the way off the route
         assert "pm model set qa_scenario" in qa.remedy
         assert "'pm model set impl <model> --project'" in impl.remedy
         # A PR override wins over the project setting, and since per-PR
         # role exceptions either of its keys can be what selects the route.
         for st in (qa, impl):
-            assert "PR's 'session_models' entry or 'model' override" in st.remedy
+            assert "change the PR's model setting" in st.remedy
 
 
 def test_unrouted_provider_reuses_a_running_container_untouched(pm_home_dir, monkeypatch):
@@ -2718,7 +2737,7 @@ def test_impl_start_builds_and_wraps_for_the_selected_route(tmp_path, monkeypatc
     monkeypatch.setattr(cm, "is_container_mode_enabled", lambda: True)
     resolved = []
     monkeypatch.setattr("pm_core.model_config.resolve_model_and_provider",
-                        lambda st, **k: resolved.append((st, k["pr_model"])) or
+                        lambda st, **k: resolved.append((st, get_pr_model_override(k["pr_entry"], st))) or
                         SimpleNamespace(model=None, provider=ROUTE, effort="high"))
     result = CliRunner().invoke(pr_mod.pr, ["start", "pr-001"])
     assert resolved == [("impl", f"provider:{ROUTE}")]

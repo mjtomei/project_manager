@@ -6,10 +6,13 @@ Supports multiple provider types:
     LM Studio 0.4.1+, llama.cpp).  Recommended for local models.
   - openai: OpenAI-compatible API endpoint (vLLM, etc.).
     Use only if your server doesn't speak the Anthropic Messages API.
-  - router: A host-local Anthropic-compatible router (e.g. the claude-mixed
-    router) that picks the upstream account from a model prefix such as
-    ``work/``.  Credentials stay with the router; pm only points Claude at
-    it.  See pm_core/worker_route.py.
+  - router: A host-local Anthropic-compatible endpoint that holds its own
+    upstream credentials (an account router or proxy).  pm only points
+    Claude at it (ANTHROPIC_BASE_URL from ``api_base``), checks that it
+    answers and, in container mode, bridges it into containers.  Signing in
+    and refreshing the router's credentials happen outside pm, as for
+    plain claude.  See
+    pm_core/worker_route.py.
 
 Configuration is stored in ~/.pm/providers.yaml:
 
@@ -25,13 +28,18 @@ Configuration is stored in ~/.pm/providers.yaml:
         api_base: http://localhost:8000/v1
         model: codellama
 
-      claude-work:
+      my-router:
         type: router
-        api_base: http://127.0.0.1:8790
-        model: work/claude-opus-5-5
-        launcher: ~/.local/bin/claude-mixed   # optional, host workers only
-        credentials_file: ~/.claude-work/.credentials.json  # expiry check
-        refresh_command: claude-work-ping              # optional
+        api_base: http://127.0.0.1:<port>   # where the router listens
+        model: <model as the router names it>
+        effort: high                        # optional default effort
+        # All optional:
+        classifier_model: <model for the auto-mode classifier>
+        launcher: <host executable used instead of claude>
+        remedy: <what to tell the user when the route is unavailable>
+        env: {VAR: value}       # extra env; VAR: null drops a default
+        unset_env: [VAR, ...]   # replaces the router default list
+        probe_models: [...]     # models 'pm provider test --live' accepts
 
     default: claude
 
@@ -81,35 +89,19 @@ ROUTER_ALIAS_ENV_VARS = (
 SUBAGENT_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
 SUBAGENT_FORCE_ENV = "CLAUDE_CODE_SUBAGENT_MODEL_FORCE"
 
-# Auto permission mode's classifier picks its own model: it refuses an
-# Opus-class or Sonnet 5.5 ANTHROPIC_DEFAULT_SONNET_MODEL (and the same in
-# CLAUDE_CODE_AUTO_MODE_MODEL) and falls back to its Sonnet 5 default, sent
-# without a route prefix -- on the router, to the main account.  A router
-# session therefore sends that default through its route.  Best effort
-# only: Claude Code >= 2.1.311 prefers an account's server-configured
-# classifier model over this variable, and those calls still reach the main
-# account (accepted by the user, 2026-10-27; see the pr-592e4bd impl spec).
+# Auto permission mode's classifier picks its own model and, without a
+# setting, sends it unprefixed -- on a router that may mean another
+# backend.  A router provider names the model to send instead
+# (``classifier_model``).  Best effort only: Claude Code >= 2.1.311 prefers
+# an account's server-configured classifier model over this variable
+# (accepted by the user, 2026-10-27; see the pr-592e4bd impl spec).
 AUTO_MODE_MODEL_ENV = "CLAUDE_CODE_AUTO_MODE_MODEL"
-CLASSIFIER_DEFAULT_MODEL = "claude-sonnet-5"
 
-
-def route_classifier_model(model: str | None) -> str | None:
-    """The auto-mode classifier model for a router session on *model*.
-
-    Claude Code's own classifier default under the route's prefix
-    (``work/claude-opus-5-5[1m]`` -> ``work/claude-sonnet-5``).  None for a
-    model without a prefix: the router sends it, and so the default
-    classifier, to the same backend.  None too when the route does not
-    serve Claude models (``deepseek/…``, ``z-ai/…``, ``chatgpt/…``): such a
-    prefix names another vendor's models, so ``<prefix>/claude-sonnet-5``
-    would be a model no backend has, and the classifier is left to Claude.
-    """
-    if not model or "/" not in model:
-        return None
-    prefix, name = model.split("/", 1)
-    if not name.startswith("claude-"):
-        return None
-    return f"{prefix}/{CLASSIFIER_DEFAULT_MODEL}"
+# What a router provider removes from its sessions' environment unless its
+# ``unset_env`` says otherwise: the router authenticates upstream itself,
+# so a stray key or token would only make Claude Code prompt about it
+# (blocking an unattended worker).
+ROUTER_DEFAULT_UNSET = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 
 
 def subagent_pin_env(model: str | None,
@@ -117,8 +109,7 @@ def subagent_pin_env(model: str | None,
     """Env that runs every subagent of a session on *model*.
 
     *model* is the session's effective ``--model`` value, kept verbatim
-    (route prefix such as ``work/`` and context suffix such as ``[1m]``
-    included).  A router provider's explicit ``alias_models`` entry for
+    (any route prefix and context suffix such as ``[1m]`` included).  A router provider's explicit ``alias_models`` entry for
     CLAUDE_CODE_SUBAGENT_MODEL takes its place.  Empty when pm selected no
     model: the session then runs on the CLI default and pm has nothing to
     enforce.
@@ -151,7 +142,7 @@ def _is_route_base_url(url: str | None, environ) -> bool:
     It is when it is the URL a routed launch recorded (ROUTE_BASE_URL_ENV),
     or the address of a router configured here, on the host or as its
     in-container forwarder (a session started before that marker existed,
-    or by the host claude-mixed launcher).
+    or by a host launcher that points Claude at the router itself).
     """
     if not url:
         return False
@@ -256,11 +247,16 @@ class ProviderConfig:
       - openai: OpenAI-compatible API endpoint (vLLM, older Ollama, etc.).
         Uses OPENAI_BASE_URL with --model openai:name prefix.  Use this
         only if your server doesn't speak the Anthropic Messages API.
-      - router: host-local account router (claude-mixed).  Uses
-        ANTHROPIC_BASE_URL only; the router holds the credentials.  The
-        router-only fields (launcher, credentials_file, refresh_command,
-        remedy, alias_models) are consumed by pm_core.worker_route and
-        claude_launcher.
+      - router: host-local Anthropic-compatible endpoint that holds its
+        own credentials.  Uses ANTHROPIC_BASE_URL only.  The router-only
+        fields (launcher, remedy, classifier_model, unset_env,
+        probe_models) are consumed by
+        pm_core.worker_route and claude_launcher.
+
+    Every type may set ``effort`` (the default effort of the sessions it
+    runs; a PR's own effort setting wins, see model_config) and ``env``
+    (extra variables; for a router a null value drops one of its
+    defaults).  ``alias_models`` is the older name for ``env``.
     """
     name: str
     type: str = "claude"  # "claude", "local", "openai", or "router"
@@ -270,10 +266,25 @@ class ProviderConfig:
     capabilities: list[str] = field(default_factory=list)
     # router-only
     launcher: str = ""
-    credentials_file: str = ""
-    refresh_command: str = ""
     remedy: str = ""
     alias_models: dict[str, str] = field(default_factory=dict)
+    classifier_model: str = ""
+    unset_env: list[str] | None = None
+    probe_models: list[str] = field(default_factory=list)
+    # every type
+    effort: str = ""
+    env: dict[str, str | None] = field(default_factory=dict)
+
+    def _apply_env(self, env: dict[str, str]) -> dict[str, str]:
+        """*env* plus ``alias_models`` and ``env``; a null ``env`` value
+        removes that variable (e.g. one of a router's defaults)."""
+        env.update(self.alias_models)
+        for var, value in self.env.items():
+            if value is None:
+                env.pop(var, None)
+            else:
+                env[var] = value
+        return env
 
     def env_vars(self) -> dict[str, str]:
         """Return environment variables needed to use this provider."""
@@ -285,21 +296,16 @@ class ProviderConfig:
             env = {}
             if self.api_base:
                 env["ANTHROPIC_BASE_URL"] = self.api_base
-            # Routed ids (work/...) are not names Claude Code knows; without
-            # this it refuses them on context-window grounds (as claude-mixed
-            # does).
+            # A router's model ids are often not names Claude Code knows;
+            # without this it refuses them on context-window grounds.
             env["CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"] = "1"
             if self.model:
                 for var in ROUTER_ALIAS_ENV_VARS:
                     env[var] = self.model
-            classifier = route_classifier_model(self.model)
-            if classifier:
-                env[AUTO_MODE_MODEL_ENV] = classifier
-            for var, value in self.alias_models.items():
-                env[var] = value
-            if self.model:
                 env[SUBAGENT_FORCE_ENV] = "1"
-            return env
+            if self.classifier_model:
+                env[AUTO_MODE_MODEL_ENV] = self.classifier_model
+            return self._apply_env(env)
 
         if self.type in ("claude", "local"):
             env: dict[str, str] = {}
@@ -315,8 +321,7 @@ class ProviderConfig:
                 env["ANTHROPIC_MODEL"] = self.model
             # launch_env unsets every alias a launch does not set, so this
             # is where a provider's own alias models go.
-            env.update(self.alias_models)
-            return env
+            return self._apply_env(env)
 
         if self.type == "openai":
             env = {}
@@ -324,22 +329,21 @@ class ProviderConfig:
                 env["OPENAI_BASE_URL"] = self.api_base
             if self.api_key:
                 env["OPENAI_API_KEY"] = _resolve_env_ref(self.api_key)
-            env.update(self.alias_models)
-            return env
+            return self._apply_env(env)
 
         return {}
 
     def unset_env_vars(self) -> tuple[str, ...]:
         """Environment variables to remove for this provider's sessions.
 
-        Only what this provider type removes on top of launch_env's
-        routing variables: a router authenticates upstream itself, so a
-        stray API key or auth token in the caller's environment would only
-        make Claude Code prompt about it (blocking an unattended worker) --
-        the same variables the claude-mixed launcher unsets.
+        Only what this provider removes on top of launch_env's routing
+        variables: its ``unset_env`` when set, else for a router
+        ROUTER_DEFAULT_UNSET.
         """
+        if self.unset_env is not None:
+            return tuple(self.unset_env)
         if self.type == "router":
-            return ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+            return ROUTER_DEFAULT_UNSET
         return ()
 
     def model_flag(self) -> str | None:
@@ -367,7 +371,19 @@ def _resolve_env_ref(value: str) -> str:
 
 
 _PROVIDER_STR_FIELDS = ("type", "api_base", "api_key", "model", "launcher",
-                        "credentials_file", "refresh_command", "remedy")
+                        "remedy", "classifier_model", "effort")
+# Keys earlier pm versions read (credential expiry checks and refresh).
+# Credentials are managed outside pm, so an entry that still has them works
+# as before; pm ignores them and 'pm provider list/show' says so.
+RETIRED_PROVIDER_KEYS = ("credentials_file", "refresh_command")
+
+
+def retired_keys(entry) -> list[str]:
+    """The RETIRED_PROVIDER_KEYS a providers.yaml *entry* still sets."""
+    if not isinstance(entry, dict):
+        return []
+    return [k for k in RETIRED_PROVIDER_KEYS if entry.get(k) is not None]
+_PROVIDER_LIST_FIELDS = ("capabilities", "unset_env", "probe_models")
 
 
 def _entry_problem(entry) -> str | None:
@@ -381,16 +397,28 @@ def _entry_problem(entry) -> str | None:
     if entry.get("type") and entry["type"] not in PROVIDER_TYPES:
         return (f"unknown type {entry['type']!r} "
                 f"(one of {', '.join(PROVIDER_TYPES)})")
-    caps = entry.get("capabilities")
-    if caps is not None and not (
-            isinstance(caps, list) and all(isinstance(c, str) for c in caps)):
-        return "'capabilities' must be a list of names"
+    for key in _PROVIDER_LIST_FIELDS:
+        value = entry.get(key)
+        if value is not None and not (
+                isinstance(value, list)
+                and all(isinstance(c, str) for c in value)):
+            return f"{key!r} must be a list of names"
     aliases = entry.get("alias_models")
     if aliases is not None and not (
             isinstance(aliases, dict)
             and all(isinstance(k, str) and isinstance(v, str)
                     for k, v in aliases.items())):
         return "'alias_models' must map variable names to model names"
+    env = entry.get("env")
+    if env is not None and not (
+            isinstance(env, dict)
+            and all(isinstance(k, str) and (v is None or isinstance(v, str))
+                    for k, v in env.items())):
+        return "'env' must map variable names to strings (or null)"
+    from pm_core.model_config import EFFORT_LEVELS
+    if entry.get("effort") and entry["effort"] not in EFFORT_LEVELS:
+        return (f"unknown effort {entry['effort']!r} "
+                f"(one of {', '.join(EFFORT_LEVELS)})")
     return None
 
 
@@ -415,10 +443,14 @@ def _config_to_provider(name: str, entry: dict) -> ProviderConfig:
         model=entry.get("model") or "",
         capabilities=entry.get("capabilities") or [],
         launcher=entry.get("launcher") or "",
-        credentials_file=entry.get("credentials_file") or "",
-        refresh_command=entry.get("refresh_command") or "",
         remedy=entry.get("remedy") or "",
         alias_models=dict(entry.get("alias_models") or {}),
+        classifier_model=entry.get("classifier_model") or "",
+        unset_env=(list(entry["unset_env"])
+                   if entry.get("unset_env") is not None else None),
+        probe_models=list(entry.get("probe_models") or []),
+        effort=entry.get("effort") or "",
+        env=dict(entry.get("env") or {}),
     )
 
 

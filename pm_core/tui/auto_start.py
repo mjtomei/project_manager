@@ -1226,7 +1226,7 @@ async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:
         if isinstance(quiet, dict):
             quiet.pop(pr_id, None)
         # The reason is the last stderr line, as for a failed sign-off
-        # launch (e.g. a routed impl whose work route is down, with its
+        # launch (e.g. a routed impl whose route is down, with its
         # remedy).  No periodic pass retries this start, so it is shown
         # like the other one-shot errors: forced and held.  Every later
         # scheduler pass starts the PR again (an in_progress PR whose spec

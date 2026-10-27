@@ -1,4 +1,4 @@
-# pr-592e4bd — Route QA scenario refinement and execution through the claude-mixed work route
+# pr-592e4bd — Route sessions through configured router providers; per-PR model/effort configuration
 
 Scope update (2026-10-24): the original refiner/executor-only routing remains
 available. The user also authorized running every role for this PR on the
@@ -17,6 +17,69 @@ trials. A PR's `session_models` mapping selects exceptions to its `model`:
 their parent-role fallbacks take precedence over the PR-wide model;
 `PM_MODEL` remains the highest-priority override. Implementation, review,
 all QA roles, sign-off, and merge resolve through this same rule.
+
+Scope update (2026-10-27, user decisions; PR notes note-985fb4d,
+note-e3ca18a, note-7131c29, note-67a9e08, note-0c8ce8a). claude-mixed is a
+dependency pm does not distribute. Product code must therefore not assume it
+or carry this environment's state: no claude-mixed, `127.0.0.1:8790`, `work/`
+prefix, `~/.claude-work`, `claude-work-ping`, or "main account" / "work
+route" wording. Everything comes from provider config. Claude Code stays the
+assumed command for now; removing that is plan-delivery D1/D4.
+This PR also owns the configuration story for which command, model and
+effort each PR uses (R10-R13).
+
+R10. **Generic router provider.**
+- The endpoint comes only from `api_base` (ANTHROPIC_BASE_URL).
+- The Claude Code proxy behaviours stay as overridable defaults: alias/subagent
+  pins, the unknown-model flag, and unsetting `ANTHROPIC_API_KEY` and
+  `ANTHROPIC_AUTH_TOKEN`. Overrides:
+  - `env` (a null value drops a default; applies to every provider type)
+  - `unset_env` (replaces the default list)
+  - `alias_models` (the older name for `env`)
+- The auto-mode classifier model is the explicit `classifier_model`. It is
+  no longer derived as `<prefix>/claude-sonnet-5`.
+- `pm provider test --live` judges the transcript's model only against
+  `model` plus an optional `probe_models` list. pm assumes no prefix
+  stripping.
+- Remedies and help use neutral wording: "route '<name>'", "move it off this
+  route", `pm pr model show`. A configured `remedy` also replaces the
+  router-down hint.
+
+R11. **No credential management in pm.** `credentials_file` and
+`refresh_command` are removed: no expiry check, no automatic refresh, no
+sign-in remedies. Credentials are handled outside pm, as for plain claude.
+Entries that still set these keys load and launch unchanged. pm ignores the
+keys (`providers.RETIRED_PROVIDER_KEYS`), and `pm provider list/show` warn
+about them and name `pm provider edit <name> --clear <key>`.
+
+R12. **Effort per provider and per PR.** Order:
+`PM_EFFORT` > PR `session_effort[role]` (parent-role fallback) > PR `effort`
+> the selected provider's `effort` > project `session_effort` > global
+> built-in.
+- Invalid PR levels are ignored at launch and reported by
+  `validate_model_config` (`pm model show`).
+- `ModelResolution.source` / `effort_source` name the deciding setting.
+- Launch callers pass `pr_entry=` so PR effort applies everywhere a PR
+  model does (impl, review, merge, sign-off and every QA role).
+
+R13. **View and apply configurations (CLI + TUI).** `pm_core.model_settings`
+holds the shared row and edit logic.
+- **Providers:** `pm provider add` (all fields), `edit` (only the given
+  fields, plus `--clear`; an invalid result is refused and leaves the file
+  unchanged), `show` (settings, launch env with secrets redacted, router
+  status).
+- **Per PR:** `pm pr model show|set|unset` (`--role`, `--effort`, `--all`).
+  Unknown `provider:` names are refused before writing. `pm model show` also
+  lists PR effort overrides.
+- **TUI `o`:** a modal for the selected PR's roles (row 0 = every role).
+  - Enter picks clear / a configured provider / a model name already used
+    in the project; `e` cycles the effort of the row's own setting.
+  - `p` switches to the project view: per-role `model_config` plus the
+    provider list with route status.
+  - Writes go through `store.locked_update`; a busy or unreadable
+    project.yaml shows "Not saved: ..." on the screen.
+  - Tree nodes of PRs with their own settings show `⇄`.
+  - Running sessions keep their settings; new launches use the new ones.
 
 ## 1. Requirements (grounded)
 
@@ -46,15 +109,15 @@ R2. **Route definition is host-local.** A route is a provider in
 `~/.pm/providers.yaml` of new type `router` (`providers.ProviderConfig`):
 `api_base` (router URL, e.g. `http://127.0.0.1:8790`), `model`
 (`work/claude-opus-5-5`), optional `launcher` (host executable instead of
-`claude`), optional `credentials_file` (only `claudeAiOauth.expiresAt` is
-read), optional `refresh_command`, `remedy`, `alias_models`. No credential
+`claude`), optional `remedy`, `alias_models` (2026-10-27: plus the R10
+fields; `credentials_file` / `refresh_command` removed by R11). No credential
 value is stored in project.yaml, generated commands, logs or captures: the
 router type contributes only `ANTHROPIC_BASE_URL`, model-pin env vars and
 `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1`, and *unsets*
 `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` (`env -u`, as claude-mixed does),
 so a stray key never makes an unattended session prompt.
-`pm provider add --type router` (`--launcher`, `--credentials-file`,
-`--refresh-command`; rejects `--api-key`, requires `--model`).
+`pm provider add --type router` (`--launcher` and the R10/R13 fields;
+rejects `--api-key`, requires `--model`).
 
 R3. **Launcher boundary.** `claude_launcher.build_claude_shell_cmd` no
 longer hardcodes the executable for router providers: on the host it runs
@@ -105,9 +168,8 @@ verifier, finalize, impl/review/sign-off/watcher/merge keep their own types.
 
 R6. **No silent fallback; recoverable errors.** `worker_route.check_route()`
 validates: provider configured, type router, model set; router TCP port
-answers; launcher executable (host); credentials present and not expiring
-within 2 min (optional `refresh_command` tried, at most once per 5 min);
-for containers the host bridge is alive, the container has the mount, and
+answers; launcher executable (host); (credential expiry/refresh checks
+removed 2026-10-27, R11); for containers the host bridge is alive, the container has the mount, and
 the in-container ensure succeeds (`exec`). On failure, for refiner and
 worker alike:
 - initial launch: `_await_route` waits (stop-aware, rechecks every 15 s)

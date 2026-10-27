@@ -167,7 +167,7 @@ def run_host_bridge(sock_path: str, host: str, port: int) -> None:
 # ---------------------------------------------------------------------------
 
 def _fail(msg: str) -> int:
-    print(f"pm work route: {msg}", file=sys.stderr, flush=True)
+    print(f"pm route: {msg}", file=sys.stderr, flush=True)
     return EXIT_ROUTE_UNAVAILABLE
 
 

@@ -416,7 +416,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
     from pm_core.claude_launcher import build_claude_shell_cmd
     from pm_core import pane_registry, home_window
     from pm_core.model_config import (
-        resolve_model_and_provider, get_pr_model_override,
+        resolve_model_and_provider,
     )
 
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
@@ -491,7 +491,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
 
         _resolution = resolve_model_and_provider(
             "signoff",
-            pr_model=get_pr_model_override(pr_entry, "signoff"),
+            pr_entry=pr_entry,
             project_data=data,
         )
 
@@ -529,7 +529,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         if is_container_mode_enabled():
             remove_container(_make_container_name(f"signoff-{pr_id}",
                                                   session_tag=_stag))
-            # A ContainerError (e.g. the selected work route is down)
+            # A ContainerError (e.g. the selected route is down)
             # propagates: `pm pr signoff` reports it on stderr with rc 1.
             claude_cmd, _cname = wrap_claude_cmd(
                 claude_cmd, workdir, label=f"signoff-{pr_id}",

@@ -8,8 +8,14 @@ configuration hierarchy:
 
 Effort level resolution:
 
-    PM_EFFORT env var  >  project.yaml session_effort
+    PM_EFFORT env var  >  PR session_effort  >  PR effort
+    >  the selected provider's effort  >  project.yaml session_effort
     >  global ~/.pm/settings  >  (no default — use CLI setting)
+
+A PR's ``session_models`` / ``session_effort`` entries apply to one role
+(with the same parent-role fallback as the project blocks); its ``model``
+/ ``effort`` to every role.  ``pm pr model`` and the TUI's model popup
+(``o``) edit them.
 
 Model values like ``sonnet``, ``opus``, ``haiku`` are passed directly to
 the Claude CLI's ``--model`` flag, which resolves them to the latest
@@ -107,6 +113,11 @@ class ModelResolution:
     model: str | None = None
     provider: str | None = None
     effort: str | None = None
+    # Which setting decided each (for display): "PM_MODEL", "PR qa",
+    # "PR", "provider x", "project qa_scenario", "global qa", ...  None
+    # when nothing did (the CLI default).
+    source: str | None = None
+    effort_source: str | None = None
 
 
 def resolve_model(
@@ -137,6 +148,7 @@ def resolve_model_and_provider(
     *,
     pr_model: str | None = None,
     project_data: dict | None = None,
+    pr_entry: dict | None = None,
 ) -> ModelResolution:
     """Resolve model and/or provider for a session type.
 
@@ -145,6 +157,9 @@ def resolve_model_and_provider(
     ``provider:ollama``) are resolved as provider names.  All other
     values are passed through as-is to the Claude CLI's --model flag
     (bare names like ``sonnet`` are resolved by the CLI itself).
+
+    *pr_entry* is the PR the session belongs to: its model override (unless
+    *pr_model* is given) and its effort settings apply.
     """
     def _resolve_value(value: str) -> ModelResolution:
         if value.startswith(_PROVIDER_PREFIX):
@@ -154,14 +169,23 @@ def resolve_model_and_provider(
     # Types to try: the requested type, then its fallback (e.g. qa_planning -> qa)
     fallback = _FALLBACK_TYPES.get(session_type)
     type_chain = (session_type, fallback) if fallback else (session_type,)
+    if not isinstance(pr_entry, dict):
+        pr_entry = None
+    pr_source = "PR"
+    if pr_model is None and pr_entry is not None:
+        pr_model, role = _pr_override(pr_entry, "session_models", "model",
+                                      session_type)
+        pr_source = f"PR {role}" if role else "PR"
 
     # --- Model / provider resolution ---
     # 1. PM_MODEL env var
     if (env_model := os.environ.get("PM_MODEL")):
         resolution = _resolve_value(env_model)
+        resolution.source = "PM_MODEL"
     # 2. PR-level override
     elif pr_model:
         resolution = _resolve_value(pr_model)
+        resolution.source = pr_source
     # 3. Project-level config (try specific type, then fallback)
     else:
         resolution = None
@@ -173,12 +197,14 @@ def resolve_model_and_provider(
             # every launch of the type (or in `pm model show`).
             if _is_model_value(session_models.get(st)):
                 resolution = _resolve_value(session_models[st])
+                resolution.source = f"project {st}"
                 break
         # 4. Global setting (~/.pm/settings/model-<type>)
         if resolution is None:
             for st in type_chain:
                 if (global_val := get_global_setting_value(f"model-{st}")):
                     resolution = _resolve_value(global_val)
+                    resolution.source = f"global {st}"
                     break
         # 5. Built-in default tier -> concrete model
         if resolution is None:
@@ -191,42 +217,69 @@ def resolve_model_and_provider(
         if resolution is None:
             resolution = ModelResolution()
 
-    # --- Effort resolution (independent of model) ---
+    # --- Effort resolution ---
+    effort, effort_source = None, None
     # 1. PM_EFFORT env var
     if (env_effort := os.environ.get("PM_EFFORT")):
-        resolution.effort = env_effort
-    else:
-        # 2. Project-level effort config (try specific type, then fallback)
-        effort = None
+        effort, effort_source = env_effort, "PM_EFFORT"
+    # 2. The PR's role / PR-wide effort
+    if not effort and pr_entry is not None:
+        effort, role = _pr_override(pr_entry, "session_effort", "effort",
+                                    session_type)
+        effort_source = (f"PR {role}" if role else "PR") if effort else None
+    # 3. The selected provider's own default effort
+    if not effort and resolution.provider:
+        effort = provider_effort(resolution.provider)
+        effort_source = f"provider {resolution.provider}" if effort else None
+    if not effort:
+        # 4. Project-level effort config (try specific type, then fallback)
         effort_map = config_block(project_model_config(project_data),
                                   "session_effort")
         for st in type_chain:
             # A blank or non-string level counts as absent, as for models
             # (validate_model_config reports it).
             if _is_model_value(effort_map.get(st)):
-                effort = effort_map[st]
+                effort, effort_source = effort_map[st], f"project {st}"
                 break
-        # 3. Global setting (~/.pm/settings/effort-<type>)
-        if not effort:
-            for st in type_chain:
-                effort = get_global_setting_value(f"effort-{st}") or None
-                if effort:
-                    break
-        # 4. Built-in default
-        if not effort:
-            for st in type_chain:
-                effort = DEFAULT_SESSION_EFFORT.get(st)
-                if effort:
-                    break
-        resolution.effort = effort
+    # 5. Global setting (~/.pm/settings/effort-<type>)
+    if not effort:
+        for st in type_chain:
+            effort = get_global_setting_value(f"effort-{st}") or None
+            if effort:
+                effort_source = f"global {st}"
+                break
+    # 6. Built-in default
+    if not effort:
+        for st in type_chain:
+            effort = DEFAULT_SESSION_EFFORT.get(st)
+            if effort:
+                effort_source = "built-in"
+                break
+    resolution.effort = effort
+    resolution.effort_source = effort_source if effort else None
 
     # Suppress effort for models that don't support it (e.g. Haiku)
     if resolution.effort and resolution.model in _NO_EFFORT_MODELS:
         _log.debug("Suppressing effort=%s for model %s (not supported)",
                    resolution.effort, resolution.model)
         resolution.effort = None
+        resolution.effort_source = None
 
     return resolution
+
+
+def provider_effort(name: str) -> str | None:
+    """The ``effort`` a providers.yaml entry sets, else None.
+
+    Read raw: a missing or broken entry sets nothing here (the launch
+    itself reports it with its remedy)."""
+    try:
+        from pm_core.providers import _provider_entries
+        entry = _provider_entries().get(name)
+    except Exception:
+        return None
+    effort = entry.get("effort") if isinstance(entry, dict) else None
+    return effort if effort in EFFORT_LEVELS else None
 
 
 def get_model_config_summary(project_data: dict | None = None) -> dict[str, str]:
@@ -309,6 +362,26 @@ def validate_model_config(project_data: dict | None) -> list[str]:
                       else "ignored; the project settings apply")
             errors.append(f"prs[{pr.get('id')}].model: {model!r} is "
                           f"not a model name or 'provider:<name>' ({effect})")
+        effort = pr.get("effort")
+        if effort is not None and effort not in EFFORT_LEVELS:
+            errors.append(f"prs[{pr.get('id')}].effort: invalid effort "
+                          f"{effort!r} (ignored). Valid levels: "
+                          f"{list(EFFORT_LEVELS)}")
+        efforts = pr.get("session_effort")
+        if efforts is not None:
+            where = f"prs[{pr.get('id')}].session_effort"
+            if not isinstance(efforts, dict):
+                errors.append(f"{where} must be a mapping")
+            else:
+                for st, level in efforts.items():
+                    if st not in PR_SESSION_TYPES:
+                        errors.append(f"{where}: unknown session type "
+                                      f"{st!r}. Valid types: "
+                                      f"{sorted(PR_SESSION_TYPES)}")
+                    elif level not in EFFORT_LEVELS:
+                        errors.append(f"{where}[{st!r}]: invalid effort "
+                                      f"{level!r} (ignored). Valid levels: "
+                                      f"{list(EFFORT_LEVELS)}")
         if pr.get("session_models") is None:
             continue
         where = f"prs[{pr.get('id')}].session_models"
@@ -341,15 +414,28 @@ def get_pr_model_override(pr_entry: dict,
     model for development while routing sign-off to Claude. Role inheritance
     matches project configuration (e.g. qa_scenario -> qa, signoff -> review).
     """
-    models = pr_entry.get("session_models")
-    if session_type and isinstance(models, dict):
+    return _pr_override(pr_entry, "session_models", "model", session_type)[0]
+
+
+def _pr_override(pr_entry: dict, role_key: str, all_key: str,
+                 session_type: str | None):
+    """``(value, role)``: the PR's *role_key* entry for *session_type* (or
+    its parent role), else its *all_key* value with role None."""
+    # A blank or non-string entry (hand-edited YAML) counts as absent: it
+    # must neither drop the PR-wide value for that role nor raise at every
+    # launch of it.  So does an unknown effort level (validate_model_config
+    # reports it).
+    usable = ((lambda v: v in EFFORT_LEVELS) if role_key == "session_effort"
+              else _is_model_value)
+    entries = pr_entry.get(role_key)
+    if session_type and isinstance(entries, dict):
         for role in (session_type, _FALLBACK_TYPES.get(session_type)):
-            # A blank or non-string entry (hand-edited YAML) counts as
-            # absent: it must neither drop the PR model for that role nor
-            # raise at every launch of it.
-            if role and _is_model_value(models.get(role)):
-                return models[role]
-    return pr_entry.get("model")
+            if role and usable(entries.get(role)):
+                return entries[role], role
+    value = pr_entry.get(all_key)
+    if role_key == "session_effort" and not usable(value):
+        value = None
+    return value, None
 
 
 def _is_model_value(value) -> bool:

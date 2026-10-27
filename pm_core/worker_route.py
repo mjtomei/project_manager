@@ -1,16 +1,16 @@
-"""Route QA scenario refiners and workers through a host-local account router.
+"""Run sessions through a host-local router (an Anthropic-compatible
+endpoint that holds its own upstream credentials).
 
 A *route* is a ``type: router`` provider in ``~/.pm/providers.yaml`` (see
-pm_core.providers) selected for the refiner (``qa_concretize``) and worker
-(``qa_scenario``) session types:
+pm_core.providers), selected like any model: per session type, e.g. for the
+QA refiner (``qa_concretize``) and workers (``qa_scenario``)
 
-    pm model set qa_concretize provider:claude-work --effort high --project
-    pm model set qa_scenario provider:claude-work --effort high --project
+    pm model set qa_concretize provider:<name> --project
+    pm model set qa_scenario provider:<name> --project
 
-The router (e.g. the claude-mixed router on ``127.0.0.1:8790``) picks the
-upstream account from the model prefix (``work/...``) and holds that
-account's credentials, so pm only ever passes the router URL and model
-names to Claude -- never a token.
+or per PR (``pm pr model set <pr> provider:<name> [--role ...]``).  How the
+router picks its upstream is its own business; pm only ever passes the
+provider's ``api_base`` and model names to Claude -- never a token.
 
 This module owns everything route-specific outside the launch command:
 
@@ -18,7 +18,7 @@ This module owns everything route-specific outside the launch command:
     logs and status so the selection is visible without credentials;
   * :func:`check_route` -- preflight used before every refiner / worker
     launch, retry and queued launch.  QA never launches a session on a
-    route that fails it (no silent fallback to the main account);
+    route that fails it (no silent fallback to another account);
   * the host side of the container bridge (pm_core.route_bridge): QA
     containers run under slirp4netns and cannot reach the host loopback,
     so the router is exposed to them only through a 0600 Unix socket in a
@@ -27,7 +27,6 @@ This module owns everything route-specific outside the launch command:
 
 from __future__ import annotations
 
-import datetime as _dt
 import fcntl
 import hashlib
 import json
@@ -62,22 +61,16 @@ ROUTED_SESSION_TYPES = ("qa_concretize", "qa_scenario")
 CONTAINER_SESSION_TYPES = ("impl", "review", "signoff") + ROUTED_SESSION_TYPES
 # A PR's own override wins over the project setting, so a remedy that
 # moves a session off the route names it first.
-_PR_OVERRIDE_REMEDY = ("remove the PR's 'session_models' entry or 'model' "
-                       "override if one selects this route")
-# How to move them back to the main account, quoted in remedies.
-_MAIN_ACCOUNT_REMEDY = (f"run them on the main account: {_PR_OVERRIDE_REMEDY}, "
-                        "or " + "; ".join(
+_PR_OVERRIDE_REMEDY = ("change the PR's model setting if it selects this "
+                       "route ('pm pr model show <pr>')")
+# How to move them off the route, quoted in remedies.
+_OFF_ROUTE_REMEDY = (f"move them off this route: {_PR_OVERRIDE_REMEDY}, "
+                     "or " + "; ".join(
     f"'pm model set {st} <model> --project'" for st in ROUTED_SESSION_TYPES))
 
 _BRIDGE_DIRNAME = "route-bridge"
 # Unix socket paths are limited to 107 bytes.
 _SOCK_PATH_MAX = 100
-# Credentials expiring within this window count as expired: a worker may
-# run for a long time after launch.
-_EXPIRY_MARGIN_S = 120
-# refresh_command is attempted at most this often per route.
-_REFRESH_COOLDOWN_S = 300
-_last_refresh: dict[str, float] = {}
 _bridge_lock = threading.Lock()
 
 
@@ -85,8 +78,8 @@ _bridge_lock = threading.Lock()
 class RouteStatus:
     """Outcome of :func:`check_route`.
 
-    ``route`` is None when workers are not routed (main account) -- that
-    is always ``ok``.
+    ``route`` is None when the session is not routed -- that is always
+    ``ok``.
     """
     ok: bool
     route: str | None = None
@@ -96,7 +89,7 @@ class RouteStatus:
     def message(self) -> str:
         if self.ok:
             return ""
-        label = f"work route '{self.route}'" if self.route else "work route"
+        label = f"route '{self.route}'" if self.route else "route"
         return f"{label} unavailable: {self.problem}. Remedy: {self.remedy}"
 
 
@@ -194,7 +187,7 @@ def describe(resolution, *, container: bool = False) -> str:
         if getattr(resolution, "provider", None):
             return (f"route=provider:{resolution.provider} "
                     f"model={resolution.model or '(provider)'} effort={effort}")
-        return (f"route=main model={resolution.model or '(default)'} "
+        return (f"route=none model={resolution.model or '(default)'} "
                 f"effort={effort} via=claude")
     if container:
         via = "container-bridge"
@@ -342,53 +335,8 @@ def ensure_in_container(cfg: ProviderConfig, name: str) -> tuple[bool, str]:
     return r.returncode == 0, (r.stderr or "").strip()
 
 
-# ---------------------------------------------------------------------------
-# Credentials (expiry only -- token values are never read into pm state)
-# ---------------------------------------------------------------------------
-
-def credentials_expiry(path: str) -> float | None:
-    """Epoch seconds at which the OAuth credentials in *path* expire.
-
-    Reads only ``claudeAiOauth.expiresAt``.  None when unknown.  Raises
-    FileNotFoundError when the file is missing.
-    """
-    p = Path(os.path.expanduser(path))
-    try:
-        data = json.loads(p.read_text())
-    except FileNotFoundError:
-        raise
-    except (OSError, ValueError):
-        return None
-    oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
-    exp = (oauth or {}).get("expiresAt") if isinstance(oauth, dict) else None
-    if not isinstance(exp, (int, float)):
-        return None
-    return exp / 1000.0 if exp > 1e11 else float(exp)
-
-
-def _fmt_time(ts: float) -> str:
-    return _dt.datetime.fromtimestamp(ts).astimezone().strftime(
-        "%Y-%m-%d %H:%M %Z")
-
-
-def _run_refresh(cfg: ProviderConfig) -> None:
-    """Run the route's refresh_command (output discarded: it may print
-    account details).  Throttled per route."""
-    now = time.monotonic()
-    if now - _last_refresh.get(cfg.name, -1e9) < _REFRESH_COOLDOWN_S:
-        return
-    _last_refresh[cfg.name] = now
-    try:
-        r = subprocess.run(cfg.refresh_command, shell=True, timeout=120,
-                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
-        _log.info("route %s: refresh_command exited %d", cfg.name, r.returncode)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        _log.warning("route %s: refresh_command failed: %s", cfg.name, exc)
-
-
 def _main_account_remedy(session_type: str | None) -> str:
-    """How to move the checked session back to the main account.
+    """How to move the checked session off its route.
 
     *session_type* None means the gated QA refiner/worker launches.  Other
     roles (implementation, review, sign-off containers) are selected by
@@ -396,8 +344,8 @@ def _main_account_remedy(session_type: str | None) -> str:
     which wins over it.
     """
     if session_type is None:
-        return _MAIN_ACCOUNT_REMEDY
-    return (f"run it on the main account: {_PR_OVERRIDE_REMEDY}, or "
+        return _OFF_ROUTE_REMEDY
+    return (f"move it off this route: {_PR_OVERRIDE_REMEDY}, or "
             f"'pm model set {session_type} <model> --project'")
 
 
@@ -409,31 +357,20 @@ def _relaunch_hint(session_type: str | None, when: str) -> str:
     return f"then launch the {session_type} session again"
 
 
-def _signin_remedy(cfg: ProviderConfig,
-                   session_type: str | None = None) -> str:
-    if cfg.remedy:
-        return cfg.remedy
-    hint = (f"run '{cfg.refresh_command}' or sign in again"
-            if cfg.refresh_command else "sign in to that account again")
-    return (f"{hint} so {cfg.credentials_file} holds a valid session; "
-            f"{_relaunch_hint(session_type, 'it is valid')} "
-            f"(or {_main_account_remedy(session_type)})")
-
-
 # ---------------------------------------------------------------------------
 # Preflight
 # ---------------------------------------------------------------------------
 
 def check_route(resolution, *, container: bool = False,
                 container_name: str | None = None,
-                try_refresh: bool = True,
                 session_type: str | None = None) -> RouteStatus:
     """Validate that a session can be launched on *resolution*'s route.
 
     Always ok for unrouted resolutions.  For a router provider checks the
-    config, the router's TCP port, credential expiry, the launcher (host
-    workers) and, for containers, the host bridge, the container's socket
-    mount and the in-container forwarder.  *container_name* implies
+    config, the router's TCP port, the launcher (host workers) and, for
+    containers, the host bridge, the container's socket mount and the
+    in-container forwarder.  Credentials are not pm's: the router (or
+    whatever signs it in) manages them.  *container_name* implies
     *container*.  *session_type* names a role launched once (no QA wait),
     so the remedies say how to relaunch it or move it off the route.
     """
@@ -456,7 +393,8 @@ def check_route(resolution, *, container: bool = False,
     where = pm_home() / "providers.yaml"
     if not cfg.model:
         return fail("no model configured",
-                    f"set 'model: work/<model>' for it in {where}")
+                    f"set its 'model' in {where} "
+                    f"('pm provider edit {cfg.name} --model <model>')")
     try:
         host, port = router_address(cfg)
     except ValueError as exc:
@@ -470,26 +408,10 @@ def check_route(resolution, *, container: bool = False,
 
     if not route_bridge.tcp_connectable(host, port):
         return fail(f"router not reachable at {host}:{port}",
-                    "start the router (e.g. the claude-mixed router "
-                    f"listening on {host}:{port}); "
-                    f"{_relaunch_hint(session_type, 'it answers')}")
-
-    if cfg.credentials_file:
-        try:
-            exp = credentials_expiry(cfg.credentials_file)
-        except FileNotFoundError:
-            return fail(f"credentials file {cfg.credentials_file} not found",
-                        _signin_remedy(cfg, session_type))
-        if exp is not None and exp <= time.time() + _EXPIRY_MARGIN_S:
-            if try_refresh and cfg.refresh_command:
-                _run_refresh(cfg)
-                try:
-                    exp = credentials_expiry(cfg.credentials_file)
-                except FileNotFoundError:
-                    exp = 0.0
-            if exp is not None and exp <= time.time() + _EXPIRY_MARGIN_S:
-                return fail(f"account sign-in expired at {_fmt_time(exp)}",
-                            _signin_remedy(cfg, session_type))
+                    cfg.remedy or
+                    (f"start the router listening on {host}:{port} (or fix "
+                     f"the provider's api_base); "
+                     f"{_relaunch_hint(session_type, 'it answers')}"))
 
     if container:
         try:
@@ -621,8 +543,9 @@ def live_probe(cfg: ProviderConfig, *, container_name: str | None = None,
         time.sleep(0.25)
     out["hook_event"] = (ev or {}).get("event_type")
     ran = r.returncode == 0 and not payload.get("is_error")
-    # Requested models must all carry the route prefix: an unprefixed one
-    # would have gone to the router's default (main) account.
+    # Every model Claude requested must be the route's own: any other name
+    # (a background or subagent call that escaped the alias pins) may have
+    # been sent to whatever the router does with unknown names.
     routed = (bool(out["models"])
               and all(m == cfg.model for m in out["models"]))
     # The probe is evidence that routed sessions keep their transcript and
@@ -646,11 +569,15 @@ def live_probe(cfg: ProviderConfig, *, container_name: str | None = None,
 
 
 def model_on_route(cfg: ProviderConfig, model: str) -> bool:
-    """Whether *model* is the route's model as requested (``work/x``) or
-    as the upstream names it after the router strips the prefix (``x``,
-    which is what lands in the transcript).  A context-window suffix on
-    the route model (``work/x[1m]``) is a Claude Code selector, sent as a
-    beta header and never as part of the model name, so the transcript
-    records plain ``x``."""
+    """Whether a model the transcript records is one the route may report.
+
+    The transcript holds what the backend answered with, which a router
+    may rename (strip its own prefix, pick a dated id).  pm assumes no
+    such convention: without ``probe_models`` any recorded model is
+    accepted (and shown); with it, the recorded model must be the route's
+    ``model`` (a ``[...]`` context-window suffix is a Claude Code selector,
+    never part of the name sent) or one of ``probe_models``."""
+    if not cfg.probe_models:
+        return True
     base = re.sub(r"\[[^\]]*\]$", "", cfg.model)
-    return model in (cfg.model, base) or base.endswith("/" + model)
+    return model in (cfg.model, base, *cfg.probe_models)

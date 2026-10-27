@@ -72,15 +72,19 @@ def model_show():
     # PR overrides win over everything above except PM_MODEL.
     pr_lines = []
     for pr in data.get("prs") or []:
-        if pr.get("model"):
-            pr_lines.append(f"  {pr.get('id')}  model  -> {pr['model']}")
-        roles = pr.get("session_models")
-        if isinstance(roles, dict):
-            for st, val in roles.items():
-                pr_lines.append(f"  {pr.get('id')}  {st} model  -> {val}")
+        for kind, role_key in (("model", "session_models"),
+                               ("effort", "session_effort")):
+            if pr.get(kind):
+                pr_lines.append(f"  {pr.get('id')}  {kind}  -> {pr[kind]}")
+            roles = pr.get(role_key)
+            if isinstance(roles, dict):
+                for st, val in roles.items():
+                    pr_lines.append(f"  {pr.get('id')}  {st} {kind}  -> {val}")
     if pr_lines:
         click.echo()
-        click.echo("PR overrides (project.yaml prs[]: model, session_models):")
+        click.echo("PR overrides (project.yaml prs[]: model, session_models, "
+                   "effort, session_effort; 'pm pr model show <pr>' for one "
+                   "PR's roles):")
         for line in pr_lines:
             click.echo(line)
 
@@ -125,7 +129,7 @@ def model_show():
             if not pr_model or not isinstance(pr_model, str):
                 continue
             res = resolve_model_and_provider(
-                st, pr_model=pr_model, project_data=data)
+                st, pr_model=pr_model, project_data=data, pr_entry=pr)
             if res.provider:
                 key = describe(st, dataclasses.replace(res, effort=None))
                 routes.setdefault(key, []).append((st, res))

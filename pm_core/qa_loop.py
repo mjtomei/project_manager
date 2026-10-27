@@ -1845,10 +1845,10 @@ def _resolve_qa_model(pr_data: dict, project_data: dict | None = None,
     step), or "qa_finalize" (post-QA finalize pane). Each falls back to "qa"
     config when the specific type is not configured.
     """
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    from pm_core.model_config import resolve_model_and_provider
     return resolve_model_and_provider(
         session_type,
-        pr_model=get_pr_model_override(pr_data, session_type),
+        pr_entry=pr_data,
         project_data=project_data,
     )
 
@@ -1934,7 +1934,7 @@ def _await_route(state: QALoopState, check, what: str) -> bool:
         st = check()
         if st.ok:
             if shown:
-                state.latest_output = (f"{what}: work route '{st.route}' "
+                state.latest_output = (f"{what}: route '{st.route}' "
                                        "available — launching")
                 # The pm log is shared by every PR's runs: name the PR.
                 _log.info("QA run for %s: %s", state.pr_id,
@@ -1956,7 +1956,7 @@ def _await_route(state: QALoopState, check, what: str) -> bool:
 
 # Reason for a scenario whose launch was stopped during its route wait.
 # Such a scenario has no window and must stay unverdicted.
-_ROUTE_WAIT_STOPPED_REASON = "stopped while waiting for the work route"
+_ROUTE_WAIT_STOPPED_REASON = "stopped while waiting for the route"
 
 
 def _note_route_wait_stopped(state: QALoopState, scenario: "QAScenario") -> None:
@@ -2078,7 +2078,7 @@ class _RouteStallWatch:
             return False
         self._resumed_errors.add(key)
         self._resume(pane_id, f"{self.what}: turn ended on \"{text}\" and "
-                              f"work route '{st.route}' answers again — "
+                              f"route '{st.route}' answers again — "
                               "resumed")
         return True
 
@@ -2091,7 +2091,7 @@ class _RouteStallWatch:
             return
         pane, self.stalled_pane = self.stalled_pane, None
         self._shown = ""
-        self._resume(pane, f"{self.what}: work route '{st.route}' "
+        self._resume(pane, f"{self.what}: route '{st.route}' "
                            "recovered — resumed")
 
     def _resume(self, pane: str, msg: str) -> None:
@@ -2315,7 +2315,7 @@ def _concretize_scenario(
 ) -> tuple[str | None, str | None]:
     """Poll a concretization pane and return its outcome.
 
-    *route_watch* surfaces / recovers a refiner whose work route failed
+    *route_watch* surfaces / recovers a refiner whose route failed
     mid-run (it idles without a marker instead of exiting).
 
     Returns ``(refined_steps, reject_reason)``:

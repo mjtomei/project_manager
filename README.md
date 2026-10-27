@@ -166,6 +166,55 @@ machine-readable status, automated dependency resolution, interfaces that
 can handle dozens of concurrent contributors without friction. `pm` prepares
 for this by abstracting git hosting behind a minimal pluggable interface.
 
+## Models, providers and effort
+
+Every session pm launches (implementation, review, each QA role, sign-off,
+merge, watcher) runs Claude Code with a model and effort chosen per role:
+
+    PM_MODEL  >  the PR's role setting  >  the PR's setting
+              >  project.yaml model_config  >  global ~/.pm/settings  >  CLI default
+
+Effort follows the same order, with the selected provider's own `effort`
+between the PR's setting and the project's.
+
+A model value is a model name (`opus`, `claude-opus-5-5`, ...) or
+`provider:<name>` for a provider defined on this host in
+`~/.pm/providers.yaml`. A provider of type `router` points Claude at an
+Anthropic-compatible endpoint that holds its own credentials (an account
+router or proxy). pm sets `ANTHROPIC_BASE_URL` from its `api_base`, checks
+that it answers before launching, and, in container mode, bridges it into
+the container. pm never stores, checks or refreshes credentials: signing in
+happens outside pm, as it does for plain `claude`.
+
+```yaml
+# ~/.pm/providers.yaml
+providers:
+  my-router:
+    type: router
+    api_base: http://127.0.0.1:<port>
+    model: <model name as the router expects it>
+    effort: high                    # optional default effort
+    classifier_model: <model>       # optional: auto-mode permission classifier
+    launcher: <executable>          # optional: run instead of claude (host)
+    remedy: <text>                  # optional: shown when the route is down
+    env: {VAR: value}               # optional; VAR: null drops a default
+```
+
+```bash
+pm provider add my-router --type router --api-base http://127.0.0.1:<port> --model <model>
+pm provider show my-router          # settings, launch environment, status
+pm provider edit my-router --effort high
+pm model set qa_scenario provider:my-router --project   # project-wide, one role
+pm pr model set pr-001 provider:my-router               # one PR, every role
+pm pr model set pr-001 opus --role signoff --effort high
+pm pr model show pr-001             # per role: model, effort, command, why
+```
+
+In the TUI, `o` opens the same view for the selected PR. Enter picks a
+model or provider, `e` cycles the effort, and `p` switches to the
+project's settings and the provider list. A `⇄` on a PR node means that PR
+has settings of its own.
+
 ## Architecture
 
 **pm/ directory inside your repo:**

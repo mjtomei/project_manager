@@ -563,6 +563,11 @@ class PRNode(Widget):
             id_content = f"{truncated_id} ◎"
         else:
             id_content = display_id[:max_id_len]
+        # ⇄: this PR picks its own model/provider/effort ('o' shows them).
+        from pm_core.model_settings import has_pr_override
+        has_override = has_pr_override(pr)
+        if has_override:
+            id_content = f"{id_content[:max_id_len - 2]:<{max_id_len - 1}}⇄"
         id_line = f"{side} {id_content:<{max_id_len}} {side}"
 
         title = pr.get("title", "???")
@@ -688,6 +693,9 @@ class PRNode(Widget):
             target_dx = 2 + len(truncated_id) + 1
             if 0 <= target_dx < NODE_W:
                 style_grid[1][target_dx] = f"bold magenta {bg_style}".strip()
+
+        if has_override:
+            style_grid[1][NODE_W - 3] = f"bold blue {bg_style}".strip()
 
         if marker_offset >= 0 and loop_style:
             marker_len = len(loop_marker) if loop_marker else 1

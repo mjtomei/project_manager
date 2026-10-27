@@ -320,7 +320,7 @@ class TestGetPrModelOverride:
         seen = []
         monkeypatch.setattr(
             "pm_core.model_config.resolve_model_and_provider",
-            lambda st, **k: seen.append((st, k["pr_model"])) or
+            lambda st, **k: seen.append((st, get_pr_model_override(k["pr_entry"], st))) or
             SimpleNamespace(model=None, provider="claude-work", effort=None))
         pr = {"id": "pr-001", "model": "provider:deepseek-flash",
               "session_models": {"merge": "provider:claude-work"}}

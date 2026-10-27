@@ -204,6 +204,7 @@ class ProjectManagerApp(App):
         Binding("w", "focus_watcher", "Watcher", show=False),
         Binding("V", "review_spec", "Review Spec", show=False),
         Binding("Y", "cleanup_pr", "Cleanup", show=True),
+        Binding("o", "model_settings", "Models", show=True),
     ]
 
     def on_key(self, event) -> None:
@@ -328,7 +329,8 @@ class ProjectManagerApp(App):
                        "view_log", "refresh", "rebalance", "show_help",
                        "toggle_plans", "toggle_qa", "start_qa_on_pr", "hide_plan", "move_to_plan", "toggle_merged",
                        "cycle_filter", "cycle_sort", "toggle_auto_start", "auto_sequence_pr", "focus_watcher",
-                       "review_spec", "cleanup_pr", "show_auto_runs"):
+                       "review_spec", "cleanup_pr", "show_auto_runs",
+                       "model_settings"):
             cmd_bar = self.query_one("#command-bar", CommandBar)
             if cmd_bar.has_focus or self._command_pending:
                 _log.debug("check_action: blocked %s (command bar focused/pending)", action)
@@ -1239,6 +1241,18 @@ class ProjectManagerApp(App):
 
     def action_cleanup_pr(self) -> None:
         pr_view.cleanup_pr(self)
+
+    def action_model_settings(self) -> None:
+        """Model / provider / effort of the selected PR's roles (the
+        project's when no PR is selected); see tui/model_screen.py."""
+        from pm_core.tui.model_screen import ModelSettingsScreen
+        if not self._root:
+            self.log_message("No project root")
+            return
+        pr_id = None
+        if not (self._plans_visible or self._qa_visible):
+            pr_id = self.query_one("#tech-tree", TechTree).selected_pr_id
+        self.push_screen(ModelSettingsScreen(self._root, pr_id))
 
     def _action_focus_watcher(self) -> None:
         """Focus the watcher window (wf key chord)."""

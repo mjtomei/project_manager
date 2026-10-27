@@ -19,6 +19,7 @@ import yaml
 
 from pm_core import store, graph, git_ops, prompt_gen
 from pm_core.pr_utils import VALID_PR_STATES
+from pm_core.model_config import PR_SESSION_TYPES
 from pm_core.shell import shell_quote
 from pm_core import pr_sync as pr_sync_mod
 from pm_core import tmux as tmux_mod
@@ -1126,10 +1127,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)
 
     # Resolve model/provider for this implementation session
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    from pm_core.model_config import resolve_model_and_provider
     _resolution = resolve_model_and_provider(
         "impl",
-        pr_model=get_pr_model_override(pr_entry, "impl"),
+        pr_entry=pr_entry,
         project_data=data,
     )
     resolved_model = _resolution.model
@@ -1321,10 +1322,10 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     base_branch = data.get("project", {}).get("base_branch", "master")
 
     # Resolve model/provider for review session
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    from pm_core.model_config import resolve_model_and_provider
     _resolution = resolve_model_and_provider(
         "review",
-        pr_model=get_pr_model_override(pr_entry, "review"),
+        pr_entry=pr_entry,
         project_data=data,
     )
 
@@ -1933,10 +1934,10 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     display_id = _pr_display_id(pr_entry)
 
     # Resolve model/provider for merge session
-    from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
+    from pm_core.model_config import resolve_model_and_provider
     _resolution = resolve_model_and_provider(
         "merge",
-        pr_model=get_pr_model_override(pr_entry, "merge"),
+        pr_entry=pr_entry,
         project_data=data,
     )
 
@@ -3249,6 +3250,134 @@ def _clear_workdir(data: dict, pr_id: str) -> None:
     pr = store.get_pr(data, pr_id)
     if pr:
         pr["workdir"] = None
+
+
+@pr.group("model")
+def pr_model():
+    """View and set which model, provider and effort a PR's sessions use.
+
+    A PR's settings win over the project's and global ones (only PM_MODEL /
+    PM_EFFORT beat them).  Without --role a setting applies to every role of
+    the PR; with --role it applies to that role (and the roles that fall
+    back to it, e.g. qa -> qa_scenario).  Providers are configured with
+    'pm provider'.
+    """
+    pass
+
+
+_PR_ROLE_CHOICE = click.Choice(list(PR_SESSION_TYPES))
+
+
+@pr_model.command("show")
+@click.argument("pr_id")
+def pr_model_show(pr_id: str):
+    """Show the effective model, effort and command of each role of a PR."""
+    from pm_core import model_settings
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+    click.echo(f"{_pr_display_id(pr_entry)} model settings "
+               f"(model: {pr_entry.get('model') or '-'}, "
+               f"effort: {pr_entry.get('effort') or '-'}):")
+    for key in ("session_models", "session_effort"):
+        entries = pr_entry.get(key)
+        if isinstance(entries, dict) and entries:
+            click.echo(f"  {key}: " + ", ".join(
+                f"{k}={v}" for k, v in entries.items()))
+    click.echo()
+    for line in model_settings.format_rows(
+            model_settings.role_rows(data, pr_entry)):
+        click.echo(f"  {line}")
+
+
+@pr_model.command("set")
+@click.argument("pr_id")
+@click.argument("value", required=False)
+@click.option("--effort", type=click.Choice(["low", "medium", "high"]),
+              default=None, help="Also set the effort")
+@click.option("--role", "roles", multiple=True, type=_PR_ROLE_CHOICE,
+              help="Only this role (repeatable); default: every role")
+def pr_model_set(pr_id: str, value: str | None, effort: str | None,
+                 roles: tuple):
+    """Set a PR's model (VALUE) and/or effort.
+
+    VALUE is a model name (opus, claude-opus-5-5, ...) or provider:NAME
+    for a provider configured with 'pm provider'.
+
+    \b
+    Examples:
+      pm pr model set pr-001 provider:my-router --effort high
+      pm pr model set pr-001 provider:other --role signoff
+      pm pr model set pr-001 --effort medium --role qa_scenario
+    """
+    from pm_core import model_settings
+    if value is None and effort is None:
+        click.echo("Error: give a VALUE and/or --effort.", err=True)
+        raise SystemExit(1)
+    if value is not None:
+        problem = model_settings.check_model_value(value)
+        if problem:
+            click.echo(f"Error: {problem}", err=True)
+            raise SystemExit(1)
+    root = state_root()
+    pr_id = _require_pr(store.load(root), pr_id)["id"]
+
+    def apply(data):
+        pr_entry = store.get_pr(data, pr_id)
+        if pr_entry is None:
+            raise click.ClickException(f"PR {pr_id} disappeared")
+        if value is not None:
+            model_settings.set_pr_value(pr_entry, "model", value, list(roles))
+        if effort is not None:
+            model_settings.set_pr_value(pr_entry, "effort", effort,
+                                        list(roles))
+
+    store.locked_update(root, apply)
+    scope = ", ".join(roles) if roles else "every role"
+    what = " and ".join(x for x in (value and f"model {value}",
+                                    effort and f"effort {effort}") if x)
+    click.echo(f"{pr_id}: set {what} for {scope}")
+    click.echo("Running sessions keep their settings; new launches use "
+               "these.")
+
+
+@pr_model.command("unset")
+@click.argument("pr_id")
+@click.option("--role", "roles", multiple=True, type=_PR_ROLE_CHOICE,
+              help="Only this role's entry (repeatable)")
+@click.option("--model", "only_model", is_flag=True,
+              help="Only the model setting")
+@click.option("--effort", "only_effort", is_flag=True,
+              help="Only the effort setting")
+@click.option("--all", "everything", is_flag=True,
+              help="Every PR-wide and per-role setting")
+def pr_model_unset(pr_id: str, roles: tuple, only_model: bool,
+                   only_effort: bool, everything: bool):
+    """Remove a PR's model and/or effort setting.
+
+    Without --role removes the PR-wide setting (role entries stay); with
+    --role those roles' entries; with --all everything.
+    """
+    from pm_core import model_settings
+    kinds = [k for k, on in (("model", only_model), ("effort", only_effort))
+             if on] or ["model", "effort"]
+    root = state_root()
+    pr_id = _require_pr(store.load(root), pr_id)["id"]
+
+    def apply(data):
+        pr_entry = store.get_pr(data, pr_id)
+        if pr_entry is None:
+            raise click.ClickException(f"PR {pr_id} disappeared")
+        for kind in kinds:
+            if everything:
+                model_settings.clear_pr(pr_entry, kind)
+            else:
+                model_settings.set_pr_value(pr_entry, kind, None, list(roles))
+
+    store.locked_update(root, apply)
+    scope = ("all settings" if everything else
+             ", ".join(roles) if roles else "PR-wide setting")
+    click.echo(f"{pr_id}: removed {' and '.join(kinds)} ({scope})")
 
 
 @pr.group("note")

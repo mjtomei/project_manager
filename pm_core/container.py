@@ -1117,7 +1117,7 @@ def wrap_claude_cmd(
 
     # Non-QA workflow roles need the same account-router bridge as QA
     # workers. Validate before creating a container; never fall back to
-    # the main account when an explicitly selected route is unavailable.
+    # another account when an explicitly selected route is unavailable.
     if provider:
         from pm_core import worker_route
         from pm_core.model_config import ModelResolution
@@ -1133,7 +1133,7 @@ def wrap_claude_cmd(
         if (route_mounts and container_is_running(cname)
                 and worker_route.container_has_route_mount(cname) is False):
             raise ContainerError(
-                f"work route '{ready.route}' unavailable: container {cname} is "
+                f"route '{ready.route}' unavailable: container {cname} is "
                 "running without the route socket mount. Remedy: end the "
                 f"session using it, remove it ({_get_runtime()} rm -f "
                 f"{cname}) and launch again.")
