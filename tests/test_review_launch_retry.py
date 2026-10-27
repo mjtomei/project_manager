@@ -1256,6 +1256,30 @@ def test_claim_launch_fails_open_only_without_a_live_loop_owner(monkeypatch):
         assert review_loop._claim_launch(state, 1, 1) is False
 
 
+def test_claim_wait_stops_when_the_pr_closes(monkeypatch):
+    """A merge/close during the bounded wait for another loop's lease must
+    end the wait (the caller reports CLOSED) instead of claiming the freed
+    lease and launching a review for a dead PR."""
+    state = ReviewLoopState(pr_id=PR)
+    monkeypatch.setattr(review_loop, "REVIEW_LAUNCH_CLAIM_WAIT", 30.0)
+    claims: list = []
+    sleeps: list = []
+    monkeypatch.setattr(review_loop, "_claim_launch",
+                        lambda *a, **k: claims.append(a) or False)
+    monkeypatch.setattr(review_loop, "_pr_is_terminal", lambda *a, **k: True)
+
+    def fake_sleep(*_a, **_k):
+        sleeps.append(1)
+        if len(sleeps) > 3:
+            raise AssertionError("kept waiting after the PR closed")
+
+    monkeypatch.setattr(review_loop, "_interruptible_sleep", fake_sleep)
+
+    assert review_loop._wait_for_claim(state, "/root", 1) is False
+    assert claims == []
+    assert len(sleeps) == 1
+
+
 def test_running_progress_only_names_a_retry_after_the_first_attempt():
     """``launch_attempts`` is 1 for a normal first launch; the runs popup
     must not label every running review a launch retry."""
@@ -1300,6 +1324,23 @@ def test_follow_up_wait_refreshes_the_launch_lease(tmp_path, monkeypatch):
     n = len(claims)
     stop()
     assert len(claims) == n, "a stopping loop must not refresh the lease"
+
+
+def test_action_status_badge_flags_a_retryable_launch_failure():
+    """The ``pm session`` row must say a launch failure is retryable (it
+    will be retried) instead of looking like a dead loop, and must not
+    flag a HOLD as retryable."""
+    from pm_core import runtime_state as rs
+    from pm_core.cli.session import _format_action_status
+
+    rs.set_action_state("pr-badge", "review-loop", "failed", iteration=2,
+                        verdict=VERDICT_LAUNCH_FAILED, retryable=True,
+                        attempts=3, error="container setup failed")
+    assert _format_action_status("pr-badge", "review-loop") == \
+        " [failed; retryable]"
+    rs.set_action_state("pr-badge-hold", "review-loop", "failed",
+                        iteration=2, verdict=VERDICT_HOLD)
+    assert _format_action_status("pr-badge-hold", "review-loop") == " [failed]"
 
 
 def test_autostart_status_shows_the_retryable_launch_failure():
@@ -1722,6 +1763,38 @@ def test_discovery_waits_for_a_starting_pane_after_our_attempt(tmp_path,
                                            str(tmp_path), 2,
                                            allow_recovery=False)
     assert disc.kind == "launch"
+
+
+def test_pending_grace_is_per_launch_attempt(tmp_path, monkeypatch):
+    """Every launch attempt gets its own bounded grace for a pane that has
+    not exposed a session id yet.  A counter carried over from an earlier
+    attempt would replace a just-started session at once."""
+    state = ReviewLoopState(pr_id=PR)
+    launches: list[int] = []
+    discoveries: list[int] = []
+
+    def fake_discover(*_a, **_k):
+        discoveries.append(len(launches))
+        if len(launches) >= 2:
+            return AttemptDiscovery("launch")
+        return AttemptDiscovery("pending", pane_id="%1",
+                                transcript="t", reason="starting")
+
+    def fake_review(*_a, **kw):
+        launches.append(kw["attempt"])
+        if len(launches) == 1:
+            raise ReviewLaunchError("container setup failed", retryable=True)
+        return "**PASS**"
+
+    monkeypatch.setattr(review_loop, "_discover_iteration", fake_discover)
+    monkeypatch.setattr(review_loop, "_DISCOVERY_GRACE", 0.0)
+    with patch.object(review_loop, "_run_claude_review",
+                      side_effect=fake_review):
+        result = _run(state, tmp_path)
+    assert result.latest_verdict == VERDICT_PASS
+    assert launches == [1, 2]
+    # Four pending checks (three waits + the replacement) per attempt.
+    assert discoveries == [0, 0, 0, 0, 1, 1, 1, 1]
 
 
 def test_start_loop_marks_running_before_the_thread_starts(tmp_path,

@@ -763,3 +763,52 @@ while the retry runs; `_interruptible_sleep` re-reads and re-validates the
 ~2 MB `project.yaml` every 2 s to notice a merge/close (≈3 % of a core
 during a backoff, on the loop thread); `session._format_action_status`'s
 new `[failed; retryable]` badge has no test (the function has none).
+
+## Review iteration 5 (0688) — refinements
+
+Findings from the next review pass, applied on top of iteration 4 (0688):
+
+1. **The bounded claim wait stops when the PR closes (correctness fix —
+   dead-PR launch).** `_wait_for_claim` only looked at `stop_requested`; a
+   merge/close during the up-to-15 s wait for another loop's lease was
+   noticed by `_interruptible_sleep` (which returns early) but ignored, so
+   the wait kept polling the lease and — if the other loop released it —
+   claimed it and went on to launch a review for a merged PR without
+   re-checking terminal status.  It now re-checks `_pr_is_terminal` after
+   each sleep and returns False, which the caller already maps to
+   `ReviewClosedError` → `CLOSED`.  Covered by
+   `test_claim_wait_stops_when_the_pr_closes` (fails pre-fix: it keeps
+   claiming past the close).
+2. **The starting-pane grace is per launch attempt.** `pending_checks`
+   counted across the whole episode, so a pane that never exposed a session
+   was replaced correctly on attempt 1 but a *starting* pane discovered
+   before attempt 2 was replaced at once (the counter was already past the
+   cap) instead of getting its own bounded grace — the pane could be our
+   own just-started recovery or a racing driver's launch.  The counter now
+   resets when an attempt is launched.  Covered by
+   `test_pending_grace_is_per_launch_attempt` (fails pre-fix: attempt 2
+   launches after a single pending check).
+3. **The episode-reset lists cannot drift.** The start of a new iteration's
+   episode and `_reset_launch_retry` each cleared the same five
+   failed-attempt fields by hand; the episode start had already missed
+   `retry_ready_at`.  Both now call `_clear_launch_failure`; the episode
+   start also clears `retry_ready_at` (a no-op today, but it keeps the
+   "fresh episode" invariant explicit).
+4. **The `[failed; retryable]` badge has a test.**
+   `test_action_status_badge_flags_a_retryable_launch_failure` covers the
+   new `pm session` row badge (and that a HOLD is not flagged retryable),
+   closing the test gap noted in iteration 4's residuals.
+
+Not changed (documented residuals): `review_loop.py` is ~1520 lines; two
+lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
+`runtime_state.claim_action_lease`); discovery still adopts a transcript
+verdict without requiring an idle hook event (rationale in iteration 9);
+`other_owner` stand-down surfaces as a non-retryable `LAUNCH_FAILED` after
+the bounded claim wait, so a second TUI driving the same PR reports
+"needs attention" for a review another loop is actually running; the
+runtime_state mirror of a *re-armed* loop keeps the previous episode's
+`verdict`/`attempts` until the next iteration mirrors a new verdict, so
+`pm autostart status` reports `review iteration N (last LAUNCH_FAILED)`
+while the retry runs; `_interruptible_sleep` re-reads and re-validates the
+~2 MB `project.yaml` every 2 s to notice a merge/close (≈3 % of a core
+during a backoff, on the loop thread).

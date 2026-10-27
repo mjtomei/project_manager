@@ -1006,6 +1006,11 @@ def _wait_for_claim(state: ReviewLoopState, pm_root: str | None,
         _interruptible_sleep(2.0, state, pm_root)
         if state.stop_requested:
             return False
+        if _pr_is_terminal(state.pr_id, pm_root):
+            # The PR merged/closed while we waited for the lease: never
+            # launch a review for it just because the lease freed up.  The
+            # caller reports CLOSED for this False.
+            return False
         if _claim_launch(state, iteration, state.launch_attempts + 1):
             return True
     return False
@@ -1074,13 +1079,24 @@ def _interruptible_sleep(seconds: float, state: ReviewLoopState,
         time.sleep(min(0.25, end - now))
 
 
-def _reset_launch_retry(state: ReviewLoopState) -> None:
-    """A launch succeeded: clear the episode and its retry metadata."""
+def _clear_launch_failure(state: ReviewLoopState) -> None:
+    """Drop the failed-attempt evidence of an episode.
+
+    Shared by :func:`_reset_launch_retry` (a launch succeeded) and the
+    start of a new iteration's episode so the two cannot drift apart.
+    ``retry_episodes`` (the auto-start re-arm cap) and the UI notice key
+    span episodes and are cleared by the caller that owns them.
+    """
     state.launch_attempts = 0
     state.next_retry_at = 0.0
     state.last_launch_error = ""
     state.last_launch_artifact = None
     state.launch_retryable = False
+
+
+def _reset_launch_retry(state: ReviewLoopState) -> None:
+    """A launch succeeded: clear the episode and its retry metadata."""
+    _clear_launch_failure(state)
     state.retry_episodes = 0
     state.retry_ready_at = 0.0
     # This iteration is over, so nothing of ours is in flight any more.
@@ -1116,11 +1132,8 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
         # exists for it yet, so rediscovery must not adopt an older run's
         # transcript for this iteration number.
         state.retry_iteration = iteration
-        state.launch_attempts = 0
-        state.next_retry_at = 0.0
-        state.last_launch_error = ""
-        state.last_launch_artifact = None
-        state.launch_retryable = False
+        _clear_launch_failure(state)
+        state.retry_ready_at = 0.0
         state.iteration_attempted = False
         # Snapshot the transcript symlink *before* any attempt: if the
         # launch fails before the child replaces it, rediscovery must not
@@ -1228,6 +1241,11 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
         # From here on a transcript/verdict for this iteration may be ours:
         # rediscovery may adopt it instead of launching a duplicate.
         state.iteration_attempted = True
+        # Each launch attempt gets its own bounded grace for a pane that is
+        # still starting.  A counter carried over from an earlier attempt
+        # would replace a just-started session on the first pending check of
+        # a later one.
+        pending_checks = 0
 
         info: dict = {}
         try:
