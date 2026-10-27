@@ -653,6 +653,27 @@ def test_resume_that_cannot_start_reports_error(tmp_path):
     app.call_from_thread.assert_called()
 
 
+def test_resume_whose_adopt_thread_cannot_start_reports_error(tmp_path):
+    """The runs are published as running before the adoption thread starts;
+    if it cannot start they must not stay running with no loop behind them
+    (t / zz t would be blocked until the next TUI restart)."""
+    app = _make_app(tmp_path)
+    _seed_run(tmp_path)
+
+    def _no_thread(*a, **k):
+        raise RuntimeError("can't start new thread")
+
+    with patch.object(qa_loop_ui, "threading", SimpleNamespace(Thread=_no_thread)), \
+         patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    state = app._qa_loops["pr-001"]
+    assert not state.running
+    assert state.latest_verdict == "ERROR"
+    resume_bg.assert_not_called()
+
+
 @pytest.mark.parametrize("failure", ["no_session", "thread_crash"])
 def test_resume_that_aborts_releases_adopted_entries(tmp_path, failure):
     """The TUI adopts a resumed run's queue entries before resuming it.  A

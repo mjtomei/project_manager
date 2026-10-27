@@ -527,8 +527,20 @@ def _resume_incomplete_qa(app) -> None:
         # Adoption takes the governor lock, which another pm process may
         # hold for seconds while it measures runtime stats: not on the UI
         # thread.
-        threading.Thread(target=_adopt_and_resume, args=(app, to_resume),
-                         daemon=True, name="qa-resume-adopt").start()
+        try:
+            threading.Thread(target=_adopt_and_resume, args=(app, to_resume),
+                             daemon=True, name="qa-resume-adopt").start()
+        except Exception:
+            # Otherwise the runs would stay "running" with no loop behind
+            # them, blocking t / zz t until the next TUI restart.  Nothing
+            # was adopted yet, and the pre-restart entries are already stale
+            # to the next clean, so no release (and no lock on this thread).
+            _log.exception("Could not start QA resume thread")
+            for state, _pr, _cb in to_resume:
+                state.running = False
+                state.latest_verdict = "ERROR"
+                state.latest_output = "QA resume could not start"
+                _on_qa_update(app, state)
 
 
 def _adopt_and_resume(app, to_resume: list) -> None:
