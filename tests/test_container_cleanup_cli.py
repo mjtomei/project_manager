@@ -126,7 +126,7 @@ def test_status_resolves_the_runtime_identity_once(monkeypatch):
     container_reaper._record_release(
         "pm-tag-review-pr-001", "cid-1", "gen-1", "test")
     monkeypatch.setattr(container, "_runtime_available", lambda: True)
-    monkeypatch.setattr(container, "running_container_count", lambda: 0)
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: [])
     monkeypatch.setattr(container, "keyring_summary", lambda: "")
     monkeypatch.setattr(container, "pids_pressure", lambda *a, **k: [])
     calls.clear()
@@ -137,3 +137,31 @@ def test_status_resolves_the_runtime_identity_once(monkeypatch):
     assert calls, "status must resolve the runtime identity"
     assert len(calls) == 1, (
         f"status probed the runtime identity {len(calls)} times")
+
+
+def test_status_inventories_containers_once(monkeypatch):
+    """The running count and the PID-pressure filter share one inventory."""
+    name = "pm-tag-review-pr-001"
+    inventory = [container_reaper.ContainerInfo(name=name, id="cid-1", running=True)]
+    listed = []
+
+    def _list():
+        listed.append(1)
+        return inventory
+    seen = []
+
+    def _pressure(threshold=0.9, inventory=None):
+        seen.append(inventory)
+        return [(name, 1700, 2048)]
+    monkeypatch.setattr(container, "_runtime_available", lambda: True)
+    monkeypatch.setattr(container_reaper, "list_containers", _list)
+    monkeypatch.setattr(container, "keyring_summary", lambda: "")
+    monkeypatch.setattr(container, "pids_pressure", _pressure)
+    monkeypatch.setattr(container_reaper, "retained_names", lambda: [])
+
+    result = CliRunner().invoke(cli, ["container", "status"])
+    assert result.exit_code == 0, result.output
+    assert "Running pm containers: 1" in result.output
+    assert f"{name} at 1700/2048" in result.output
+    assert len(listed) == 1, f"status listed containers {len(listed)} times"
+    assert seen == [inventory]

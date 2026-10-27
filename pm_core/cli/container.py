@@ -38,17 +38,20 @@ def container_status():
     click.echo(f"CPU limit:       {cfg.cpu_limit}")
 
     if runtime_ok:
-        from pm_core.container import keyring_summary, running_container_count
-        running = running_container_count()
-        if running is not None:
-            click.echo(f"Running pm containers: {running}")
+        from pm_core.container import keyring_summary, pids_pressure
+        from pm_core.container_reaper import list_containers
+        # One inventory (two ``ps`` + an ``inspect`` of every container)
+        # serves both the running count and the PID-pressure filter.
+        inventory = list_containers()
+        if inventory is not None:
+            click.echo(f"Running pm containers: {sum(i.running for i in inventory)}")
         keyring = keyring_summary()
         if keyring:
             click.echo(f"Kernel keyring:  {keyring}")
-        from pm_core.container import pids_pressure
-        for name, pids, limit in pids_pressure(0.8):
-            click.echo(f"PID pressure:    {name} at {pids}/{limit} — "
-                       f"'pm container restart {name}' clears it")
+        if inventory is not None:
+            for name, pids, limit in pids_pressure(0.8, inventory=inventory):
+                click.echo(f"PID pressure:    {name} at {pids}/{limit} — "
+                           f"'pm container restart {name}' clears it")
     # Persisted failures and pending releases remain useful even when the
     # runtime executable is unavailable. They must not disappear with metrics.
     _echo_reaper_state()

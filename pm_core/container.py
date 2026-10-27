@@ -2385,10 +2385,7 @@ def discard_container(name: str, *, container_id: str | None = None) -> None:
     if not name:
         return
     try:
-        if container_id is None:
-            remove_container(name)
-        else:
-            remove_container(name, container_id=container_id)
+        remove_container(name, container_id=container_id)
     except Exception:
         _log.warning("Could not remove container %s", name, exc_info=True)
 
