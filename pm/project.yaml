@@ -13768,11 +13768,64 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-03T16:02:14.081159+00:00'
-  updated_at: '2026-05-03T16:02:14.081159+00:00'
+  updated_at: '2026-10-27T06:16:13.699144+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-c46e45f
+    text: 'Impl 54664e53. qa/sign_off (and closed) are now inspection-only: plain
+      `pm pr review` focuses the existing review-<display> window and writes nothing;
+      `--fresh`/`--review-loop` are refused while the PR is in those phases (would
+      start a second agent); `--no-window` is a no-op there; closed is refused like
+      merged. Evidence: /pm-captures/impl/{pre-fix,post-fix}/ — incl. signoff-exactly-once/
+      (real `pm pr review` CLI + picker direct dispatch between the launch stamp and
+      the driver tick; the original SIGNOFF_MERGE still routes once, record sha=HEAD,
+      second tick unchanged). Tests: tests/test_pr.py (20) + picker stdout-surfacing
+      test. Full suite 3771 passed, 1 pre-existing env failure (test_hook_events::test_installer_writes_standalone_receiver,
+      also fails on 59a31f40). Trap: run tests with PATH=/usr/bin:/bin — the QA git
+      wrapper intercepts local `git fetch`.'
+    created_at: '2026-10-27T04:49:04Z'
+    last_edited: '2026-10-27T04:49:04Z'
+  - id: note-648c467
+    text: 'Refiner S6 (two-inspector race) harness notes: (1) pm pr start refuses
+      until the PR entry is committed on base_branch — after pm pr add run git add
+      -A && git commit before starting. (2) fake-claude: _all:{} alone routes review
+      through the catch-all default PASS, so the review pane exits and the window
+      closes; set review:{verdicts:[]} to keep the review window open. (3) The sign-off
+      step lock is ~/.pm/workdirs/.signoff-step-<pr_id>.lock; hold it with flock to
+      simulate a driver mid-step. (4) Source the venv first, then export a PATH whose
+      git is the real /usr/bin/git ahead of the QA git wrapper, before pm session.'
+    created_at: '2026-10-27T06:00:48Z'
+    last_edited: '2026-10-27T06:00:48Z'
+  - id: note-cf8c29c
+    text: 'QA S6 (two inspectors racing the phase driver): PASS, no code change. Live
+      fixture pr-09ff3f8 (qa) / pr-7b4aa8f (sign_off), session pm-pm-test-1793081061-90127183.
+      Harness notes for future runs: (1) the `## Sign-off return` block is rendered
+      by `pm pr show` from the signoff_return record — grepping project.yaml for that
+      heading always reads 0; count it on `pm pr show` output. (2) `pm pr show` prints
+      two `Status:` lines (`Status:` then `Status: in_base`) — use `grep -m1`. (3)
+      This host is aarch64 and has no fzf/agg in the image: download agg-aarch64-unknown-linux-gnu
+      from the asciinema releases and chmod +x; the no-fzf picker fallback needs `d`
+      then Enter (not just `d`). (4) Interactive panes source ~/.bashrc, whose last
+      line activates /home/pm/.local/share/pm/venv and re-prepends the QA git wrapper
+      — export PATH inside the pane (or use a non-interactive `bash -c` pane) before
+      running pm.'
+    created_at: '2026-10-27T06:16:13Z'
+    last_edited: '2026-10-27T06:16:13Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
 - id: pr-0c530e1
   plan: bugs
   title: Cleanup leaves QA/review loop state stale and stops containers sequentially
