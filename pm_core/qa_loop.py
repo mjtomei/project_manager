@@ -3140,17 +3140,25 @@ def _poll_tmux_verdicts(
                 elif (time.time()
                       - _no_verdict_since[scenario.index]) >= _recovery_settle:
                     try:
-                        rec.handle(scenario.transcript_path,
-                                   ev_ts or last_ts)
+                        result = rec.handle(scenario.transcript_path,
+                                            ev_ts or last_ts)
                     except VerdictRecoveryExhausted as e:
                         _recovery_exhausted(scenario, e)
                         pending.discard(scenario.index)
                         verdicts_changed = True
                         _launch_next_queued()
                         continue
-                    # A nudge was sent — the next no-verdict turn starts a
-                    # fresh settle window.
-                    _no_verdict_since.pop(scenario.index, None)
+                    if result.status == "deferred":
+                        # A newer turn landed while we settled: give *it*
+                        # the settle window rather than nudging straight
+                        # away.  Repeated refreshes cannot defer forever —
+                        # MissingOutputRecovery bounds them with
+                        # ``max_deferrals`` (no_progress exhaustion).
+                        _no_verdict_since[scenario.index] = time.time()
+                    else:
+                        # A nudge was sent — the next no-verdict turn
+                        # starts a fresh settle window.
+                        _no_verdict_since.pop(scenario.index, None)
 
             if verdict:
                 _recoveries.pop(scenario.index, None)

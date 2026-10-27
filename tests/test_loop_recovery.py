@@ -257,6 +257,48 @@ class TestMissingOutputRecovery:
         # The session was never nudged — it is alive but not making progress.
         assert sent == []
 
+    def test_newer_non_idle_event_is_not_a_new_turn(
+            self, tmp_path, monkeypatch):
+        """A Stop/permission write must not look like a newer turn.
+
+        The hook file holds only the latest event, so a ``Stop`` write for
+        the same turn makes the non-blocking read see a newer event.  It is
+        not a turn boundary: recovery must nudge (matching the blocking
+        ``wait_for_event(event_types={"idle_prompt"})`` path) rather than
+        defer, since the tick loop only re-opens a no-verdict episode on a
+        fresh ``idle_prompt``.
+        """
+        from pm_core import hook_events
+
+        rec, sent = _recovery(tmp_path, max_attempts=2, settle=5.0)
+        transcript = _transcript_with_assistant(tmp_path, "still thinking")
+        monkeypatch.setattr(hook_events, "read_event", lambda _sid: {
+            "event_type": "Stop", "timestamp": 99.0, "session_id": "sid-1",
+        })
+
+        result = rec.handle(str(transcript), ev_ts=1.0)
+
+        assert result.status == "nudged"
+        assert rec.attempts == 1
+        assert rec.deferrals == 0
+        assert len(sent) == 1
+
+    def test_newer_idle_event_is_a_new_turn(self, tmp_path, monkeypatch):
+        """The non-blocking read still defers on a genuinely newer idle."""
+        from pm_core import hook_events
+
+        rec, sent = _recovery(tmp_path, max_attempts=2, settle=5.0)
+        transcript = _transcript_with_assistant(tmp_path, "still thinking")
+        newer = {"event_type": "idle_prompt", "timestamp": 99.0,
+                 "session_id": "sid-1"}
+        monkeypatch.setattr(hook_events, "read_event", lambda _sid: newer)
+
+        result = rec.handle(str(transcript), ev_ts=1.0)
+
+        assert result.status == "deferred"
+        assert result.event is newer
+        assert sent == []
+
     def test_stop_check_during_settle_does_not_nudge(self, tmp_path):
         """A stop requested while waiting for a newer turn must not nudge."""
         rec, sent = _recovery(tmp_path, max_attempts=3, settle=5.0)
@@ -807,5 +849,90 @@ class TestQARecoveryWiring:
             )
 
         assert sent, "silent worker was never nudged"
+        assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
+        assert "no_response" in state.scenario_verdict_reasons[1]
+
+    def test_scenario_worker_stop_event_does_not_strand_recovery(
+            self, tmp_path, monkeypatch):
+        """A Stop hook overwriting the idle event must not strand a worker.
+
+        The hook file holds only the latest event, so a ``Stop`` write for
+        the same turn makes ``read_event`` return a newer *non-idle* event.
+        That is not a new turn: recovery must still nudge (and then retire
+        on ``no_response``) instead of closing the no-verdict episode —
+        only a fresh ``idle_prompt`` re-opens one.
+        """
+        from pm_core import loop_shared, qa_loop
+        from pm_core.qa_loop import QALoopState, QAScenario
+
+        scenario = QAScenario(index=1, title="S", focus="f")
+        scenario.window_name = "qa-s1"
+        scenario.session_id = "sid-s1"
+        scenario.pane_id = "%1"
+        scenario.transcript_path = str(
+            _transcript_with_assistant(tmp_path, "still testing"))
+
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+        state.qa_workdir = None
+
+        clock = {"t": 1000.0}
+
+        def fake_time():
+            clock["t"] += 1.0
+            return clock["t"]
+
+        def fake_monotonic():
+            clock["t"] += 1.0
+            return clock["t"]
+
+        reads = {"n": 0}
+
+        def fake_read_event(_sid):
+            # The worker's idle turn is visible for a couple of ticks; the
+            # Stop hook for that same turn then overwrites the event file
+            # with a newer timestamp and it never changes again.
+            reads["n"] += 1
+            if reads["n"] <= 4:
+                return {"event_type": "idle_prompt", "timestamp": 100.0,
+                        "session_id": "sid-s1"}
+            return {"event_type": "Stop", "timestamp": 101.0,
+                    "session_id": "sid-s1"}
+
+        sent: list[str] = []
+        ticks = {"n": 0}
+
+        def fake_sleep(_seconds):
+            ticks["n"] += 1
+            assert ticks["n"] <= 500, "QA tick loop hung: no recovery"
+
+        monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+        monkeypatch.setattr(qa_loop, "recovery_max_attempts", lambda: 2)
+        monkeypatch.setattr(qa_loop, "recovery_settle_seconds", lambda: 5.0)
+        monkeypatch.setattr(qa_loop, "recovery_response_timeout", lambda: 50.0)
+        monkeypatch.setattr(qa_loop, "_is_verification_enabled",
+                            lambda: False)
+        monkeypatch.setattr(qa_loop, "_get_verdict_reminder_timeout",
+                            lambda: None)
+        monkeypatch.setattr(loop_shared.time, "monotonic", fake_monotonic)
+
+        with patch("pm_core.hook_events.read_event",
+                   side_effect=fake_read_event), \
+             patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value=None), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep), \
+             patch("pm_core.qa_loop.time.time", side_effect=fake_time), \
+             patch("pm_core.tmux.send_keys",
+                   side_effect=lambda _p, m: sent.append(m)), \
+             patch("pm_core.tmux.pane_exists", return_value=True):
+            qa_loop._poll_tmux_verdicts(
+                state, {}, {}, "sess", str(tmp_path),
+                tmp_path / "status.json", lambda *a: None,
+            )
+
+        assert sent, "worker was never nudged after its idle turn"
         assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
         assert "no_response" in state.scenario_verdict_reasons[1]

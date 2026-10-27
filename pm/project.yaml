@@ -21429,11 +21429,25 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-13T14:15:50.184464+00:00'
-  updated_at: '2026-05-13T14:15:50.184464+00:00'
+  updated_at: '2026-10-27T06:14:36.861290+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-39a24fc
+    text: 'Merge coordination with pr-6566901 (bounded verdict recovery), from its
+      review: both PRs edit pm_core/loop_shared.poll_for_verdict at the same lines.
+      8efa789 swaps the verdict test to find_verdict_turn() and returns hit.text;
+      6566901 inserts a missing-output recovery block immediately after that check.
+      When resolving, KEEP find_verdict_turn as the verdict test and let recovery
+      run only when it finds no hit — a post-verdict /loop wakeup turn must never
+      be treated as an absent outcome (6566901 would otherwise nudge a session that
+      already completed). 6566901 classifies a no-verdict turn with read_latest_assistant_text
+      only after the verdict scan fails, so it needs no change; wait_for_follow_up_verdict
+      is untouched by 6566901. Recovery is bounded by verdict-recovery-max-attempts
+      (default 3) and surfaces NO_VERDICT / INPUT_REQUIRED.'
+    created_at: '2026-10-27T06:14:36Z'
+    last_edited: '2026-10-27T06:14:36Z'
 - id: pr-06a96fa
   plan: plan-regression
   title: QA scenarios reuse regression tests as their flow driver

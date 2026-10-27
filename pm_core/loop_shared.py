@@ -473,9 +473,20 @@ class MissingOutputRecovery:
         )
 
     def _newer_event(self, ev_ts: float) -> dict | None:
+        """Non-blocking read of a newer *turn boundary* for tick-based loops.
+
+        Only ``idle_prompt`` counts, matching the blocking
+        ``hook_events.wait_for_event(event_types={"idle_prompt"})`` path.
+        The event file holds just the latest hook event, so a ``Stop`` /
+        ``permission_prompt`` write for the same turn would otherwise look
+        like a new turn: the tick loop would defer (and close its
+        no-verdict episode) without nudging, and it only re-opens an
+        episode on a fresh ``idle_prompt``.
+        """
         from pm_core import hook_events
         ev = hook_events.read_event(self.session_id)
-        if ev and float(ev.get("timestamp") or 0) > ev_ts:
+        if (ev and ev.get("event_type") == "idle_prompt"
+                and float(ev.get("timestamp") or 0) > ev_ts):
             return ev
         return None
 

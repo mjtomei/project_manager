@@ -177,7 +177,7 @@ VERDICT_NO_VERDICT = "NO_VERDICT"
 
 class VerdictRecoveryExhausted(RuntimeError): ...
 
-def build_outcome_request(verdicts, *, block: tuple[str,str] | None = None) -> str
+def build_outcome_request(verdicts) -> str
 def build_resume_request() -> str
 def build_block_outcome_request(blocks: tuple[tuple[str,str], ...]) -> str
 def build_block_resume_request(blocks: tuple[tuple[str,str], ...]) -> str
@@ -200,6 +200,12 @@ class MissingOutputRecovery:
         # raises VerdictRecoveryExhausted when attempts/deferrals exceed max
     def check_response(self) -> None            # raises after response_timeout
 ```
+
+For tick-based loops (`wait_for_newer` omitted) the settle check is a
+non-blocking `hook_events.read_event` that counts **only** a newer
+`idle_prompt` — matching the blocking `wait_for_event` filter. A newer
+`Stop` / `permission_prompt` write is not a turn boundary and must not defer
+(or close) a no-verdict episode.
 
 `poll_for_verdict` grows the kwargs in R1 and, after a non-matching idle:
 
@@ -238,13 +244,16 @@ class MissingOutputRecovery:
 * **verifier** (`_verify_single_scenario`) — pass recovery config; catch →
   `(False, "verifier produced no verdict: …", pane)`.
 * **scenario workers** (`_poll_tmux_verdicts`) — per-scenario
-  `MissingOutputRecovery`; on a fresh `idle_prompt` with no verdict, defer
-  while `time.time() - ev_ts < settle`, else `handle`; exhaustion marks the
-  scenario `INPUT_REQUIRED` with reason
-  `"worker idled N times without a verdict; recovery attempts exhausted"`,
-  discards `pending`, frees the slot. The legacy
+  `MissingOutputRecovery`; a fresh `idle_prompt` with no verdict opens a
+  no-verdict episode whose settle window is measured from *episode start*
+  (not the latest event), and the settle/nudge is evaluated on every tick
+  while the episode is open. On exhaustion the scenario is marked
+  `INPUT_REQUIRED` with a reason of the form
+  `"worker produced no verdict (<reason>) after N recovery attempt(s): …"`,
+  `pending` is discarded and the slot freed. The legacy
   `qa-verdict-reminder-timeout` path is replaced by this bounded recovery
-  (setting retained but now only tunes the settle interval).
+  (setting retained but now only tunes the settle interval). A `deferred`
+  result restarts the settle window rather than closing the episode.
 * **planner** — per-attempt `MissingOutputRecovery` with a `QA_PLAN_START/END`
   outcome request and a resume request; on exhaustion break out with
   `INPUT_REQUIRED` + `_error` (reusing the existing "plan incomplete" surface
@@ -254,10 +263,14 @@ class MissingOutputRecovery:
 
 | key | default | meaning |
 | --- | --- | --- |
-| `verdict-recovery-max-attempts` | `3` | nudges per session before exhaustion |
-| `verdict-recovery-settle-seconds` | `5` | wait for a newer idle before nudging |
-| `verdict-recovery-response-timeout` | `3600` | max seconds from nudge to next idle (`0` = off) |
+| `verdict-recovery-max-attempts` | `3` | nudges per session before exhaustion (integer; `<= 0` = off) |
+| `verdict-recovery-settle-seconds` | `5` | wait for a newer idle before nudging (float) |
+| `verdict-recovery-response-timeout` | `3600` | max seconds from nudge to next idle (float; `0` = off) |
 | `qa-verdict-reminder-timeout` | unset | retained: overrides the settle interval for QA scenario workers |
+
+`verdict-recovery-max-attempts` is registered in `_INT_SETTINGS`; the two
+seconds-valued keys are in a new `_FLOAT_SETTINGS` table so sub-second
+values (e.g. `0.5`) are accepted by `pm set`.
 
 ## Ambiguities and resolutions
 
@@ -318,15 +331,15 @@ class MissingOutputRecovery:
   genuine newer turn during settle defers and resets; a hook refresh of the
   same turn defers without resetting and exhausts with `no_progress`
   (including the `poll_for_verdict` and QA-tick-loop integration cases);
-  overall timeout; response timeout; recovery disabled keeps legacy
-  behaviour; `stop_check` during settle does not nudge.
-* `tests/test_review_loop.py`: exhaustion → `NO_VERDICT`, history entry,
-  callback fired.
-* `tests/test_watcher_loop.py`: exhaustion → `NO_VERDICT`, history entry.
-* `tests/test_qa_loop.py`: planner exhaustion surfaces `INPUT_REQUIRED` +
-  error; scenario-worker exhaustion marks `INPUT_REQUIRED` with reason and
-  frees the slot; refiner exhaustion label; verifier reason; finalize
-  `NO_VERDICT`.
+  a newer non-idle event (`Stop`) is not a new turn; overall timeout;
+  response timeout; recovery disabled keeps legacy behaviour; `stop_check`
+  during settle does not nudge. Also holds the loop wiring tests below.
+* `tests/test_loop_recovery.py` (review/watcher wiring): exhaustion →
+  `NO_VERDICT`, history entry, callback fired; QA refiner label, verifier
+  reason, finalize `NO_VERDICT`, scenario-worker exhaustion
+  (`INPUT_REQUIRED` + reason, slot freed).
+* `tests/test_qa_planner_handoff.py`: planner exhaustion surfaces
+  `INPUT_REQUIRED` + error and stops planning.
 * `tests/test_review_loop_terminal_state.py`: `NO_VERDICT` → `failed`.
 * `tests/test_autostart_multi_target.py`: `NO_VERDICT` review loop → phase
   state `failed` in the status builder.
