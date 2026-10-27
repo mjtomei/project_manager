@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T21:56:33.988124+00:00'
+  updated_at: '2026-10-27T22:11:09.049317+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11068,6 +11068,24 @@ prs:
       the L command-log pane.'
     created_at: '2026-10-27T21:56:33Z'
     last_edited: '2026-10-27T21:56:33Z'
+  - id: note-f4725fa
+    text: 'QA S62 (2026-10-27, nested rootless podman, fake-claude) fixed cc875109.
+      (1) Stop-on-idle leaves a dead-pane window (remain-on-exit). Plain s/d, and
+      pm pr start/review without --fresh, only switched to it, so s on an in_review
+      PR whose impl was stopped on idle never relaunched (no container in 120 s).
+      A window whose panes are all dead is now closed and relaunched (tmux.window_panes_dead).
+      (2) zz d pressed 1.8 s after z d, while the fresh standalone review was still
+      launching, started a parallel pr review --fresh. Both shared review-<pr> and
+      crossed panes into one window, so the loop PASS kept the container ("1 other
+      exec session(s) open"). zz d now uses the in-flight PR action guard ("Busy:
+      Reviewing <pr> (fresh)"); press it again once the review opens. Post-fix all
+      5 stories held live: policies-off kept, [open] [idle] -> [done PASS]; impl/review/in_review-impl/PR3
+      impl removed 11-17 s after idle; IR kept 17 min; Y1/Y2 lived to PASS; story
+      4 "name now belongs to a newer container"; B and shell-attached kept. Env: tmux
+      3.2a sometimes leaves a dead pane shell unreaped, so no "Pane is dead" footer.
+      Captures /pm-captures/scenarios/62.'
+    created_at: '2026-10-27T22:11:08Z'
+    last_edited: '2026-10-27T22:11:08Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
