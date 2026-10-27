@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T15:25:55.705031+00:00'
+  updated_at: '2026-10-27T16:06:04.559407+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14052,6 +14052,17 @@ prs:
       intentionally left untracked.'
     created_at: '2026-10-27T15:25:55Z'
     last_edited: '2026-10-27T15:25:55Z'
+  - id: note-e911fc9
+    text: 'Incidental fix (f54b i3, 47dd0b07): the push proxy sandbox-escape guard
+      matched only exact `--upload-pack`/`--receive-pack`/`--exec`, but git accepts
+      any unambiguous prefix, so `git fetch --upl=/workspace/evil.sh <remote>` ran
+      a container-written script on the host (verified against real git; `--upload-p=`
+      and `--upl=` both execute). `_check_dangerous_flags` now rejects any `--`-long
+      prefix of those three and names the full option; ordinary options (`--recurse-submodules`,
+      `--refetch`, `-u`, `--`) still pass. 33 abbreviation cases added, all failing
+      pre-fix. Full suite 4203 passed.'
+    created_at: '2026-10-27T16:06:04Z'
+    last_edited: '2026-10-27T16:06:04Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
