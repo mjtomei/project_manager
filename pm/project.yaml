@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-26T17:06:54.814861+00:00'
+  updated_at: '2026-10-27T08:47:23.923171+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -13332,11 +13332,11 @@ prs:
     created_at: '2026-10-26T17:06:54Z'
     last_edited: '2026-10-26T17:06:54Z'
   - id: note-bba331a
-    text: 'User-selected Sol trial, replacing #252 (2026-10-25). Continue existing #241
-      work from recorded review PASS (loop debe iteration16, HEAD86a70256), preserving
+    text: 'User-selected Sol trial, replacing #252 (2026-10-25). Continue existing
+      #241 work from recorded review PASS (loop debe iteration16, HEAD86a70256), preserving
       its implementation/specs and all review history. Old base-session implementation/review
-      windows are retired. Active controller is pm-project_manager-5b29c418 using the
-      #249 runtime. Run QA and any ensuing fixes/reviews through provider:chatgpt-sol
+      windows are retired. Active controller is pm-project_manager-5b29c418 using
+      the #249 runtime. Run QA and any ensuing fixes/reviews through provider:chatgpt-sol
       (chatgpt/gpt-6.1-sol-high); sign-off also uses provider:chatgpt-sol, explicitly
       requested by the user. All roles use Sol; keep sign-off independent as a separate
       session. Keep wait_for_merge and no spec-review pause. Prior review PASS does
@@ -13349,11 +13349,12 @@ prs:
     text: 'Infrastructure recovery handoff 2026-10-25: #241 S6/S9 sethostname blockers
       need fixture validation: enable project.nested_podman in the disposable project
       and build there (branch already adds --uts host); use /usr/bin/git for disposable
-      origins, preserving the outer PR push wrapper. S2/S8 Chromium smoke failures have
-      the recorded #249 S53/S55 setup workaround; retain original failures and explicitly
-      label any smoke-step-only omission, never claim build-base passed. Full guidance/evidence:
-      /pm-captures/infrastructure-recovery-20261025.md. PID-pressure S7 still requires
-      genuine cgroup isolation; no waived tests, quota changes or invented pass.'
+      origins, preserving the outer PR push wrapper. S2/S8 Chromium smoke failures
+      have the recorded #249 S53/S55 setup workaround; retain original failures and
+      explicitly label any smoke-step-only omission, never claim build-base passed.
+      Full guidance/evidence: /pm-captures/infrastructure-recovery-20261025.md. PID-pressure
+      S7 still requires genuine cgroup isolation; no waived tests, quota changes or
+      invented pass.'
     created_at: '2026-10-25T16:15:53Z'
     last_edited: '2026-10-25T16:15:53Z'
   - id: note-astra241
@@ -13363,54 +13364,56 @@ prs:
       existing implementation, review history and Sol QA evidence. Native QA run22e564c7cebc3be7
       was stopped for this model handoff, without waiving blocked coverage. S3 found
       and pushed actual cleanup inventory fixes in be658949; review those new fixes
-      before subsequent QA, not the already completed implementation from scratch. S4
-      was switched in place to Astra (same SID3503dee0-ad36-4b14-b1b1-cad14932448b)
+      before subsequent QA, not the already completed implementation from scratch.
+      S4 was switched in place to Astra (same SID3503dee0-ad36-4b14-b1b1-cad14932448b)
       and is preserving its evidence/handoff at /pm-captures/scenarios/4/astra-handoff.md;
       its pending assertions must carry forward. S6 omitted instructed nested_podman
       opt-in, while S9 continued after that edit failed because project.yaml is read-only;
       retry with correctly applied setup before diagnosing environment failure. Use
-      real /usr/bin/git for scratch origins. S2/5/8 genuine Chromium inotify build failures
-      need qualified setup; S7 PID-exhaustion still requires enforced isolated cgroups.
-      S1 lifecycle checks ran but debug fake transcript missing (pr-b28e042), not a
-      complete PASS. Previous failed/blocked attempts remain evidence. Do not start
-      unrelated PRs or infer approval.'
+      real /usr/bin/git for scratch origins. S2/5/8 genuine Chromium inotify build
+      failures need qualified setup; S7 PID-exhaustion still requires enforced isolated
+      cgroups. S1 lifecycle checks ran but debug fake transcript missing (pr-b28e042),
+      not a complete PASS. Previous failed/blocked attempts remain evidence. Do not
+      start unrelated PRs or infer approval.'
     created_at: '2026-10-25T16:59:34Z'
     last_edited: '2026-10-25T16:59:34Z'
   - id: note-2ea8dac
     text: 'QA planning refresh at d53b8fd2: qa.md now includes review6427 i1-i26 identity/domain/rename,
       stopped-owner, partial bulk-cleanup and cancellation/resume requirements; fresh
       scenarios start at 10, locked S1-S9 remain unchanged. Corrections for next QA
-      run: S1 cannot require native debug JSONL because qa debug has no transcript option
-      (already tracked by pr-b28e042); use genuine terminal recordings and durable debug
-      files, enable supported transcript options for other manual roles. Fake verdict
-      emission does not end a TTY, and recorder clients count as viewers. S4 prior sleeps/gate
-      expiry were not race proof: use unique acknowledged runtime/tmux forwarding gates,
-      verified actor PATH inheritance and short inspect barriers; independently bootstrap
-      each race subfixture. Use actual QA via TUI or pm qa run instruction-id --pr canonical-id,
-      not shell pm pr qa or unsupported pm pr show. Bootstrap nested_podman in writable
-      disposable project, qualify real PM image/exec first, use /usr/bin/git and absolute
-      file:// scratch origins. Keep original image failures and label the previously
-      authorized Chromium-smoke-only workaround; never report unmodified build success.
-      Implementation safe current-terminal fallback is permitted only after proven failed-allocation
-      disposal, never with live/unknown ownership. No runtime QA executed or prior blocked
-      coverage waived by this planning refresh.'
+      run: S1 cannot require native debug JSONL because qa debug has no transcript
+      option (already tracked by pr-b28e042); use genuine terminal recordings and
+      durable debug files, enable supported transcript options for other manual roles.
+      Fake verdict emission does not end a TTY, and recorder clients count as viewers.
+      S4 prior sleeps/gate expiry were not race proof: use unique acknowledged runtime/tmux
+      forwarding gates, verified actor PATH inheritance and short inspect barriers;
+      independently bootstrap each race subfixture. Use actual QA via TUI or pm qa
+      run instruction-id --pr canonical-id, not shell pm pr qa or unsupported pm pr
+      show. Bootstrap nested_podman in writable disposable project, qualify real PM
+      image/exec first, use /usr/bin/git and absolute file:// scratch origins. Keep
+      original image failures and label the previously authorized Chromium-smoke-only
+      workaround; never report unmodified build success. Implementation safe current-terminal
+      fallback is permitted only after proven failed-allocation disposal, never with
+      live/unknown ownership. No runtime QA executed or prior blocked coverage waived
+      by this planning refresh.'
     created_at: '2026-10-26T03:52:41Z'
     last_edited: '2026-10-26T03:52:41Z'
   - id: note-e8df1ff
-    text: 'Review-loop 0b6f i5 (main chatgpt/gpt-6-astra-high; inherited read-only reviewer,
-      no overrides): INPUT_REQUIRED on scope/architecture, no source patch. External
-      podman/docker exec started by NAME then runtime rename leaves OLDNAME in argv;
-      deterministic matcher probe loses ownership for renamed allocation while immutable-ID
-      control stays owned. R2 exact current-name/ID wording vs QA R19 broad rename-safe
-      ownership needs decision; recommend supporting external clients with reliable
-      attachment-to-ID association, not stale-name guessing. No real-container repro
-      claimed. Independent multiline-pane candidate disproved with actual private tmux:
-      start command newline is escaped, snapshot valid. Focused910 passed/2 skipped;
-      full sanitized4030 passed/2 skipped/4 existing-class warnings,196.75s. Evidence/all
-      per-file notes /pm-captures/review-0b6f-i5-per-file.md; full-suite-final.log,
-      external-rename-probe.txt and multiline-probe.txt share review-0b6f-i5 prefix.
-      Existing project routing/handoff/manual-gate and qa.md edits preserved; no source/spec/test
-      commit or push. Outstanding runtime QA/sign-off unwaived.'
+    text: 'Review-loop 0b6f i5 (main chatgpt/gpt-6-astra-high; inherited read-only
+      reviewer, no overrides): INPUT_REQUIRED on scope/architecture, no source patch.
+      External podman/docker exec started by NAME then runtime rename leaves OLDNAME
+      in argv; deterministic matcher probe loses ownership for renamed allocation
+      while immutable-ID control stays owned. R2 exact current-name/ID wording vs
+      QA R19 broad rename-safe ownership needs decision; recommend supporting external
+      clients with reliable attachment-to-ID association, not stale-name guessing.
+      No real-container repro claimed. Independent multiline-pane candidate disproved
+      with actual private tmux: start command newline is escaped, snapshot valid.
+      Focused910 passed/2 skipped; full sanitized4030 passed/2 skipped/4 existing-class
+      warnings,196.75s. Evidence/all per-file notes /pm-captures/review-0b6f-i5-per-file.md;
+      full-suite-final.log, external-rename-probe.txt and multiline-probe.txt share
+      review-0b6f-i5 prefix. Existing project routing/handoff/manual-gate and qa.md
+      edits preserved; no source/spec/test commit or push. Outstanding runtime QA/sign-off
+      unwaived.'
     created_at: '2026-10-26T07:20:51Z'
     last_edited: '2026-10-26T07:20:51Z'
   - id: note-6f3f109
@@ -13418,28 +13421,29 @@ prs:
       use safer durable identity where inexpensive, without substantial external-client
       tracking. Verified PM-generated impl/review/signoff/QA/debug attachments already
       target captured immutable IDs; foreground debug also holds ID/domain activity
-      locks. Resolved impl spec A7: arbitrary external exec by OLDNAME followed by runtime
-      rename is not guaranteed; use immutable ID or explicit retain for that manual
-      case. Existing retention/lease/release/proxy rename protections and outstanding
+      locks. Resolved impl spec A7: arbitrary external exec by OLDNAME followed by
+      runtime rename is not guaranteed; use immutable ID or explicit retain for that
+      manual case. Existing retention/lease/release/proxy rename protections and outstanding
       QA remain required. No application code/test change needed. Previous focused910
-      passed/2 skipped and full4030 passed/2 skipped/4 warnings remain applicable (documentation-only
-      resolution). Supersedes note-e8df1ff INPUT_REQUIRED; spec clarification committed
-      separately from existing project/qa working-tree edits.'
+      passed/2 skipped and full4030 passed/2 skipped/4 warnings remain applicable
+      (documentation-only resolution). Supersedes note-e8df1ff INPUT_REQUIRED; spec
+      clarification committed separately from existing project/qa working-tree edits.'
     created_at: '2026-10-26T13:03:36Z'
     last_edited: '2026-10-26T13:03:36Z'
   - id: note-c29f5ad
     text: 'Review-loop 0b6f i10 PASS (main chatgpt/gpt-6-astra-high; inherited read-only
       reviewer, no model overrides): reviewed origin/master...HEAD at 25751700, resolved
-      impl spec and related PRs. No new accepted code/test/architecture change. A7 scope
-      retained. Full locked inventories intentionally retained; proposed scoped filtering
-      does not remove same-PR batch repetition and no verified safe performance improvement
-      established. Focused lifecycle/launchers801 passed/2 skipped; adjacent proxy/cleanup/popup139
-      passed; final sanitized full suite4060 passed/2 skipped/4 existing-class warnings
-      (2 Click,2 AsyncMock),193.39s with pytest9.1.1. Evidence and all65 per-file notes
-      /pm-captures/review-0b6f-i10-per-file.txt; full log /pm-captures/review-0b6f-i10-full-suite-final.log.
-      Declared dependencies installed. Pre-existing project routing/handoff/manual-gate
-      and qa.md edits preserved; no source/spec/test commit or push. No real-container
-      QA or independent sign-off claimed; outstanding coverage remains required.'
+      impl spec and related PRs. No new accepted code/test/architecture change. A7
+      scope retained. Full locked inventories intentionally retained; proposed scoped
+      filtering does not remove same-PR batch repetition and no verified safe performance
+      improvement established. Focused lifecycle/launchers801 passed/2 skipped; adjacent
+      proxy/cleanup/popup139 passed; final sanitized full suite4060 passed/2 skipped/4
+      existing-class warnings (2 Click,2 AsyncMock),193.39s with pytest9.1.1. Evidence
+      and all65 per-file notes /pm-captures/review-0b6f-i10-per-file.txt; full log
+      /pm-captures/review-0b6f-i10-full-suite-final.log. Declared dependencies installed.
+      Pre-existing project routing/handoff/manual-gate and qa.md edits preserved;
+      no source/spec/test commit or push. No real-container QA or independent sign-off
+      claimed; outstanding coverage remains required.'
     created_at: '2026-10-26T14:46:50Z'
     last_edited: '2026-10-26T14:46:50Z'
   - id: note-4da5a88
@@ -13454,156 +13458,158 @@ prs:
       command; real TUI QA, contiguous scenario plans, host fake installed first and
       finite concretizer holds exceeding grace. S19 grouped preview/reap must genuinely
       overlap and post-launch picker navigation must be recorded. Independently qualify
-      Docker, delegated PID pressure, actual keyring relief and >1h lock aging so their
-      blockers do not erase ordinary lifecycle coverage. Preserve smoke-build failures
-      and label authorized smoke-RUN-only recovery; do not waive prior concretizer/setup
+      Docker, delegated PID pressure, actual keyring relief and >1h lock aging so
+      their blockers do not erase ordinary lifecycle coverage. Preserve smoke-build
+      failures and label authorized smoke-RUN-only recovery; do not waive prior concretizer/setup
       failures or outer-PID1 zombie gaps. No runtime QA or PASS claimed; no production
       runtime/settings touched.'
     created_at: '2026-10-26T15:29:19Z'
     last_edited: '2026-10-26T15:29:19Z'
   - id: note-d39aeb3
-    text: 'QA scenario 28 deferred at concretization: this worker has no docker or dockerd
-      executable, no /var/run/docker.sock or /run/docker.sock, no ~/.docker configuration,
-      and no DOCKER_HOST endpoint. Only Podman is installed; it is not evidence for
-      Docker default-USER ownership repair. Re-run in a worker with an accessible isolated
-      Docker daemon and a qualified developer image with default USER pm; explicitly
-      select Docker via pm container set runtime docker (auto-detection prefers Podman),
-      qualify real launch/exec/push, then test hooks-present/absent setup, genuine required-operation
-      failure and retry with existing-file preservation, and two-PR cleanup isolation.
-      No Docker ownership or retry result was inferred in this run.'
+    text: 'QA scenario 28 deferred at concretization: this worker has no docker or
+      dockerd executable, no /var/run/docker.sock or /run/docker.sock, no ~/.docker
+      configuration, and no DOCKER_HOST endpoint. Only Podman is installed; it is
+      not evidence for Docker default-USER ownership repair. Re-run in a worker with
+      an accessible isolated Docker daemon and a qualified developer image with default
+      USER pm; explicitly select Docker via pm container set runtime docker (auto-detection
+      prefers Podman), qualify real launch/exec/push, then test hooks-present/absent
+      setup, genuine required-operation failure and retry with existing-file preservation,
+      and two-PR cleanup isolation. No Docker ownership or retry result was inferred
+      in this run.'
     created_at: '2026-10-26T15:38:01Z'
     last_edited: '2026-10-26T15:38:01Z'
   - id: note-2e5cfff
     text: 'Scenario 30 concretization deferred (2026-10-26): genuine kernel-keyring
-      pressure and measured recovery cannot be driven safely in this run. Session is
-      containerized as UID 1000; neither a disposable VM nor verified exclusive host
-      kernel-keyring UID mapping has been supplied, and there is no independently approved
-      finite container/attempt budget or watchdog. Private HOME/runtime storage and
-      nested_podman do not establish kernel-quota isolation. /pm-captures/infrastructure-recovery-20261025.md
+      pressure and measured recovery cannot be driven safely in this run. Session
+      is containerized as UID 1000; neither a disposable VM nor verified exclusive
+      host kernel-keyring UID mapping has been supplied, and there is no independently
+      approved finite container/attempt budget or watchdog. Private HOME/runtime storage
+      and nested_podman do not establish kernel-quota isolation. /pm-captures/infrastructure-recovery-20261025.md
       explicitly forbids exhaustion against shared kernel quotas. Unblock by provisioning
-      and verifying the isolated environment, qualifying a real rootless Podman PM developer
-      image, and supplying an approved finite attempt/container/time budget, watchdog,
-      and exact ownership-scoped cleanup before rerunning concretization. Preserve real
-      runtime stderr and relevant UID key counts, measure stopped-leftover removal separately
-      from running-orphan reclamation with protected workers/proxies remaining usable,
-      then retry the same public launch and verify configuration/push access and bounded
-      completion/cancellation baseline. Do not raise host quotas or enlarge the budget;
-      if the approved budget cannot reproduce exhaustion, leave the assertion unexecuted.
-      No pressure or cleanup was performed and no relief/retry/PASS claim is made; fake
-      errors and source inspection cannot replace this scenario.'
+      and verifying the isolated environment, qualifying a real rootless Podman PM
+      developer image, and supplying an approved finite attempt/container/time budget,
+      watchdog, and exact ownership-scoped cleanup before rerunning concretization.
+      Preserve real runtime stderr and relevant UID key counts, measure stopped-leftover
+      removal separately from running-orphan reclamation with protected workers/proxies
+      remaining usable, then retry the same public launch and verify configuration/push
+      access and bounded completion/cancellation baseline. Do not raise host quotas
+      or enlarge the budget; if the approved budget cannot reproduce exhaustion, leave
+      the assertion unexecuted. No pressure or cleanup was performed and no relief/retry/PASS
+      claim is made; fake errors and source inspection cannot replace this scenario.'
     created_at: '2026-10-26T15:38:30Z'
     last_edited: '2026-10-26T15:38:30Z'
   - id: note-8e621ff
     text: 'Scenario 29 concretization deferred (2026-10-26, HEAD 25751700): genuine
       per-container PID pressure cannot safely be qualified in this run. Podman 3.4.4
       rootless/cgroupfs reports cgroup v2 and cpu,memory,pids at the outer boundary,
-      but cgroup.subtree_control is empty. A fresh empty child cgroup was created and
-      inspected: cgroup.controllers was empty and pids.max/pids.current did not exist;
-      the probe child was removed without moving any process or changing limits. The
-      populated outer QA/controller cgroup has pids.max=2048 and pids.current=30 at
-      snapshot; exhausting it is not a substitute for independent container enforcement.
+      but cgroup.subtree_control is empty. A fresh empty child cgroup was created
+      and inspected: cgroup.controllers was empty and pids.max/pids.current did not
+      exist; the probe child was removed without moving any process or changing limits.
+      The populated outer QA/controller cgroup has pids.max=2048 and pids.current=30
+      at snapshot; exhausting it is not a substitute for independent container enforcement.
       No Docker executable, standard Docker/Podman socket, or remote runtime endpoint
-      was available; Podman image inventory is empty (not proof an image cannot be built).
-      Unblock with a fresh disposable runtime with genuinely delegated per-container
+      was available; Podman image inventory is empty (not proof an image cannot be
+      built). Unblock with a fresh disposable runtime with genuinely delegated per-container
       PID enforcement, a qualified developer image, and recorded finite load budget/watchdog/exact
       teardown targets plus ample controller headroom. Do not move controller processes
       to manufacture delegation. Re-concretize all status/preview, ordinary refusal,
-      forced in-place restart/current-boot readiness, public reuse/stale EXIT and retained/unknown-owner
-      control stories there. Existing S17 notes remain relevant; no pressure workload
-      or recovery assertions executed and no PASS claimed.'
+      forced in-place restart/current-boot readiness, public reuse/stale EXIT and
+      retained/unknown-owner control stories there. Existing S17 notes remain relevant;
+      no pressure workload or recovery assertions executed and no PASS claimed.'
     created_at: '2026-10-26T15:38:58Z'
     last_edited: '2026-10-26T15:38:58Z'
   - id: note-f1c873d
     text: 'QA scenario 33 deferred during refinement: genuine launch-lock aging requires
       at least 3600 seconds of observed wall time (pm_core/container_reaper.py _LOCK_FILE_MAX_AGE),
-      plus setup, concurrent-operation observations and cleanup; this run supplies no
-      concrete long-duration execution budget or already observed independent fixtures.
+      plus setup, concurrent-operation observations and cleanup; this run supplies
+      no concrete long-duration execution budget or already observed independent fixtures.
       Re-enable with an explicitly provisioned observation window and private runtime/lifecycle
       directory, real PM launch/exit-created locks, and an acknowledged way to hold
       a real launcher while a second waits. Use plain pm container reap: pruning is
-      gated on Scope(), so --pr, --session, --include-retained and dry-run are not substitutes.
-      Preserve timestamps and generation records; do not replace the aging/waiter stories
-      with private-function calls, monkeypatches or unit-test results. Independent fixtures
-      can age concurrently, but both need genuine recorded elapsed time. No aging or
-      concurrency assertion was executed in this refinement.'
+      gated on Scope(), so --pr, --session, --include-retained and dry-run are not
+      substitutes. Preserve timestamps and generation records; do not replace the
+      aging/waiter stories with private-function calls, monkeypatches or unit-test
+      results. Independent fixtures can age concurrently, but both need genuine recorded
+      elapsed time. No aging or concurrency assertion was executed in this refinement.'
     created_at: '2026-10-26T15:39:01Z'
     last_edited: '2026-10-26T15:39:01Z'
   - id: note-d86f0df
     text: 'S31 concretization handoff (2026-10-26): refine as independent clean-load,
       single middle-dequeue fault, genuine Ctrl+r TUI recovery, successful dead-worker
-      retry, stop-during-retry and six-target reap/recovery stories. Settings are pm
-      set container-launch-concurrency 2 and container-max-running N; fresh processes
-      required for semaphore. qa-max-scenarios caps concurrent scenarios, not plan length;
-      headroom is an initial persisted batch cap and always permits at least one attempt.
-      Snapshot must be genuinely emitted after initial launch/polling with completed
-      verified, launch-failed, active and queued entries; do not manufacture it or use
-      z-t (new run) as resume. Launch failures have empty agent verdict and launch failed
-      reason; status may render pending, aggregate is not PASS. Dead-pane retry is automatic
-      (5s initial backoff), not a status-pane retry key; remove the recorded worker
-      pane and observe a genuinely new allocation for the cancellation trial. Independent
-      six-target reap must age beyond120s with real ownership ended, use bounded acknowledged
-      rm-by-ID fault and prove <=4 removal operations over the whole pass. Current podman
-      info works, default store empty and inotify_init1 errno24; prior S11/S12/S18 qualified
-      lifecycle images using the explicitly authorized Chromium-smoke-RUN-only omission.
-      These are setup leads, not S31 runtime evidence or an automatic rejection. Rebuild
-      isolated fixture, preserve original build failure if workaround needed, qualify
-      real launch/setup/exec/proxy, fake on PATH before TUI, finite holds >=180s. No
-      runtime lifecycle assertions executed by this concretization.'
+      retry, stop-during-retry and six-target reap/recovery stories. Settings are
+      pm set container-launch-concurrency 2 and container-max-running N; fresh processes
+      required for semaphore. qa-max-scenarios caps concurrent scenarios, not plan
+      length; headroom is an initial persisted batch cap and always permits at least
+      one attempt. Snapshot must be genuinely emitted after initial launch/polling
+      with completed verified, launch-failed, active and queued entries; do not manufacture
+      it or use z-t (new run) as resume. Launch failures have empty agent verdict
+      and launch failed reason; status may render pending, aggregate is not PASS.
+      Dead-pane retry is automatic (5s initial backoff), not a status-pane retry key;
+      remove the recorded worker pane and observe a genuinely new allocation for the
+      cancellation trial. Independent six-target reap must age beyond120s with real
+      ownership ended, use bounded acknowledged rm-by-ID fault and prove <=4 removal
+      operations over the whole pass. Current podman info works, default store empty
+      and inotify_init1 errno24; prior S11/S12/S18 qualified lifecycle images using
+      the explicitly authorized Chromium-smoke-RUN-only omission. These are setup
+      leads, not S31 runtime evidence or an automatic rejection. Rebuild isolated
+      fixture, preserve original build failure if workaround needed, qualify real
+      launch/setup/exec/proxy, fake on PATH before TUI, finite holds >=180s. No runtime
+      lifecycle assertions executed by this concretization.'
     created_at: '2026-10-26T15:42:52Z'
     last_edited: '2026-10-26T15:42:52Z'
   - id: note-dc09f42
-    text: 'S24 refinement (2026-10-26): use ownership-aware pm container reap --pr ID
-      --session TAG, not destructive container cleanup. Retention race must gate the
-      planning-time tmux ownership snapshot after real inventory but before the per-name
-      removal lock; an rm/locked-inspect gate deadlocks retain. Delayed EXIT must forward
-      the real interactive Podman exec, wait for its actual return, then hold its wrapper
-      return without killing the original shell. Separate same-ID forced restart from
-      different-ID replacement; capture actual mounts and verify push at disposable
-      origin. Attachment gate is selected tmux new-window after public pm pr start allocation;
-      wrappers must reach launcher, reaper and worker pane PATH and use actor-specific
-      acknowledgments. Renamed failed-disposal trial must preserve captured ID and refuse
-      host fallback. Lease proof needs an aged (>120s) reused allocation so creation
-      grace cannot mask the renewed ID lease; wait real expiry, no timestamp/state edits.
-      Current runtime info works, image store empty, inotify_init1 errno24; empty store
-      is not impossibility. Qualification must build/validate isolated image using nested_podman
-      bootstrap and existing /pm-captures/infrastructure-recovery-20261025.md authorized
-      Chromium-smoke-only recovery if needed. No real lifecycle PASS claimed by this
-      refinement.'
+    text: 'S24 refinement (2026-10-26): use ownership-aware pm container reap --pr
+      ID --session TAG, not destructive container cleanup. Retention race must gate
+      the planning-time tmux ownership snapshot after real inventory but before the
+      per-name removal lock; an rm/locked-inspect gate deadlocks retain. Delayed EXIT
+      must forward the real interactive Podman exec, wait for its actual return, then
+      hold its wrapper return without killing the original shell. Separate same-ID
+      forced restart from different-ID replacement; capture actual mounts and verify
+      push at disposable origin. Attachment gate is selected tmux new-window after
+      public pm pr start allocation; wrappers must reach launcher, reaper and worker
+      pane PATH and use actor-specific acknowledgments. Renamed failed-disposal trial
+      must preserve captured ID and refuse host fallback. Lease proof needs an aged
+      (>120s) reused allocation so creation grace cannot mask the renewed ID lease;
+      wait real expiry, no timestamp/state edits. Current runtime info works, image
+      store empty, inotify_init1 errno24; empty store is not impossibility. Qualification
+      must build/validate isolated image using nested_podman bootstrap and existing
+      /pm-captures/infrastructure-recovery-20261025.md authorized Chromium-smoke-only
+      recovery if needed. No real lifecycle PASS claimed by this refinement.'
     created_at: '2026-10-26T15:43:20Z'
     last_edited: '2026-10-26T15:43:20Z'
   - id: note-2e88cfb
     text: 'S32 refinement: picker h/l navigates only PRs with open recognized windows,
-      so launch a not-yet-open PR via the real prefix+M runner (pr start ID), then reopen
-      prefix+P and record h/l/0 navigation after launch. Keep actual attached-client
-      recordings at different widths; successful command popups close immediately. Preview/reap
-      overlap must be evidenced by a bounded pass-through Podman inventory gate ACK
-      for A plus observed live B CLI invocation before release; shared reaper locking
-      means B may correctly wait. A pending-launch trial needs a separate real allocation/launch
-      ACK before B reap, not adjacent captures. Use fresh isolated HOME/socket/runtime/state
-      and same-revision unmodified source copies; S19 evidence is a setup lead, not
-      S32 evidence.'
+      so launch a not-yet-open PR via the real prefix+M runner (pr start ID), then
+      reopen prefix+P and record h/l/0 navigation after launch. Keep actual attached-client
+      recordings at different widths; successful command popups close immediately.
+      Preview/reap overlap must be evidenced by a bounded pass-through Podman inventory
+      gate ACK for A plus observed live B CLI invocation before release; shared reaper
+      locking means B may correctly wait. A pending-launch trial needs a separate
+      real allocation/launch ACK before B reap, not adjacent captures. Use fresh isolated
+      HOME/socket/runtime/state and same-revision unmodified source copies; S19 evidence
+      is a setup lead, not S32 evidence.'
     created_at: '2026-10-26T15:43:32Z'
     last_edited: '2026-10-26T15:43:32Z'
   - id: note-443e125
-    text: 'Scenario 23 concretization (2026-10-26, HEAD 25751700): verified public CLI
-      help in isolated tmux; scoped nondestructive command is container reap --dry-run,
+    text: 'Scenario 23 concretization (2026-10-26, HEAD 25751700): verified public
+      CLI help in isolated tmux; scoped nondestructive command is container reap --dry-run,
       NOT container cleanup. session cleanup only has --dry-run and normalizes grouped-session
       tags; explicit PR action requires pr cleanup ID --resources; session kill --dir
       TARGET must run from surviving control session, and has no printed container-count
       contract. Runtime-wide running counts are not scope-local. Manual reaper lock
-      wait is 120s (not total command duration); rm timeout30s plus disappearance checks.
-      Preserve exact failure stderr/ID and timestamped runtime-boundary acknowledgments
+      wait is 120s (not total command duration); rm timeout30s plus disappearance
+      checks. Preserve exact failure stderr/ID and timestamped runtime-boundary acknowledgments
       for older-inventory/newer-explicit-failure and rename races. Separate rename-only
-      from rename+old-name-replacement trials to exercise both identity branches. Live/retained
-      fixtures must not carry an authorized owner-release request; create ordinary abandoned
-      allocations by killing the captured test wrapper/process group without EXIT cleanup,
-      not by writing state. Default Podman info succeeds here but image store is empty;
-      no real runtime QA or image-build failure claimed. Bootstrap nested_podman before
-      public build-base; existing /pm-captures/infrastructure-recovery-20261025.md permits
-      ONLY labelled Chromium-smoke-RUN omission after retaining original build failure.
-      Worker must qualify real PM launch/exec/bind/proxy push/removal in private storage
-      before trials; no helper calls, mocked lifecycle, edited timestamps/outcome records
-      or shared quota changes substitute for it.'
+      from rename+old-name-replacement trials to exercise both identity branches.
+      Live/retained fixtures must not carry an authorized owner-release request; create
+      ordinary abandoned allocations by killing the captured test wrapper/process
+      group without EXIT cleanup, not by writing state. Default Podman info succeeds
+      here but image store is empty; no real runtime QA or image-build failure claimed.
+      Bootstrap nested_podman before public build-base; existing /pm-captures/infrastructure-recovery-20261025.md
+      permits ONLY labelled Chromium-smoke-RUN omission after retaining original build
+      failure. Worker must qualify real PM launch/exec/bind/proxy push/removal in
+      private storage before trials; no helper calls, mocked lifecycle, edited timestamps/outcome
+      records or shared quota changes substitute for it.'
     created_at: '2026-10-26T15:45:44Z'
     last_edited: '2026-10-26T15:45:44Z'
   - id: note-5de3e8e
@@ -13612,63 +13618,64 @@ prs:
       isolated image and local file:// bare origin; retain normal Chromium smoke failure
       and use only documented smoke-RUN omission if needed. Use CLI pm pr start for
       create/reuse, pm qa run INSTRUCTION --pr ID for actual QA failure, and pm container
-      restart/retain/reap; never imported create_container helpers. Local-backend pm
-      push makes a sync branch, so commit bootstrap PR state on actual base before launch.
-      Existing impl window makes start focus-only; --fresh kills its owner and is not
-      a reuse fixture. Genuine interrupted fixture: gate first post-ready root mkdir
-      before delegation, kill exact launcher before 5s timeout, stop gate, then publicly
-      retain allocation; no launch generation was yet published, and non-destructive
-      completion is allowed while retained. Separate actual missing-readiness recreation
-      from diagnostic probe failures: intermediate readiness and final post-setup verification
-      errors must preserve existing ID/container-local sentinel. Only rc1/empty stderr
-      means ordinary missing readiness; missing final completion/config never licenses
-      recreation. Use acknowledged ID-specific real runtime forwarding gates; image-gated
-      second boot tests actual old marker mtime versus StartedAt, not forged probe success.
-      Fake session proves config readability/setup and branch-scoped real push only,
-      not authenticated onboarding; no provider calls. Finite adopted-child story gives
-      reaping credit only, not PID/keyring/memory pressure recovery. Refinement made
-      no runtime QA PASS claim.'
+      restart/retain/reap; never imported create_container helpers. Local-backend
+      pm push makes a sync branch, so commit bootstrap PR state on actual base before
+      launch. Existing impl window makes start focus-only; --fresh kills its owner
+      and is not a reuse fixture. Genuine interrupted fixture: gate first post-ready
+      root mkdir before delegation, kill exact launcher before 5s timeout, stop gate,
+      then publicly retain allocation; no launch generation was yet published, and
+      non-destructive completion is allowed while retained. Separate actual missing-readiness
+      recreation from diagnostic probe failures: intermediate readiness and final
+      post-setup verification errors must preserve existing ID/container-local sentinel.
+      Only rc1/empty stderr means ordinary missing readiness; missing final completion/config
+      never licenses recreation. Use acknowledged ID-specific real runtime forwarding
+      gates; image-gated second boot tests actual old marker mtime versus StartedAt,
+      not forged probe success. Fake session proves config readability/setup and branch-scoped
+      real push only, not authenticated onboarding; no provider calls. Finite adopted-child
+      story gives reaping credit only, not PID/keyring/memory pressure recovery. Refinement
+      made no runtime QA PASS claim.'
     created_at: '2026-10-26T15:45:57Z'
     last_edited: '2026-10-26T15:45:57Z'
   - id: note-a89999c
     text: 'S26 refinement (2026-10-26): source-verified startup/periodic/breadcrumb/merge
       surfaces; no runtime QA pass claimed. Use pm session to respawn a deliberately
       missing TUI while keeping a fixture shell; pm tui restart --breadcrumb --session
-      SESSION for active TUI-owned QA adoption. Bootstrap and commit a nonempty QA spec
-      before fake planning; fake signoff emits verdict but does not create report.html,
-      so actual merge needs real integrate --record plus a reviewed revision-bound test
-      report and signoff record. r refreshes state, not cleanup; periodic cleanup is
-      600s from mount, launch grace 120s. Merge may close retained discussion windows;
+      SESSION for active TUI-owned QA adoption. Bootstrap and commit a nonempty QA
+      spec before fake planning; fake signoff emits verdict but does not create report.html,
+      so actual merge needs real integrate --record plus a reviewed revision-bound
+      test report and signoff record. r refreshes state, not cleanup; periodic cleanup
+      is 600s from mount, launch grace 120s. Merge may close retained discussion windows;
       prove retained allocation usable by reconnecting. Runtime info succeeded here
-      but image inventory empty; build/qualify private developer image rather than infer
-      blocker from absence. Prior authorized Chromium-smoke-only recovery guidance is
-      /pm-captures/infrastructure-recovery-20261025.md. Use exact-ID rm forwarding faults,
-      unchanged timers, private HOME/state/runtime/socket, and preserve first-attempt
+      but image inventory empty; build/qualify private developer image rather than
+      infer blocker from absence. Prior authorized Chromium-smoke-only recovery guidance
+      is /pm-captures/infrastructure-recovery-20261025.md. Use exact-ID rm forwarding
+      faults, unchanged timers, private HOME/state/runtime/socket, and preserve first-attempt
       evidence; no shared-resource deletion or quota pressure.'
     created_at: '2026-10-26T15:47:07Z'
     last_edited: '2026-10-26T15:47:07Z'
   - id: note-225cf0d
     text: 'S25 concretization (2026-10-26, source 25751700): refine real public CLI/TUI
-      lifecycle stories, not helper tests. Runtime info works here, default image store
-      is empty; build/qualify private developer image and real disposable-origin push
-      before QA (authorized smoke-only recovery in /pm-captures/infrastructure-recovery-20261025.md).
+      lifecycle stories, not helper tests. Runtime info works here, default image
+      store is empty; build/qualify private developer image and real disposable-origin
+      push before QA (authorized smoke-only recovery in /pm-captures/infrastructure-recovery-20261025.md).
       Current outer PID1 is sleep infinity: preserve pr-2111fa0 dependency; Z/PPID1
       is exited but NOT reaped/disappeared. Shared sockets remain under /tmp regardless
       of HOME/TMPDIR; use unique real session tags and actual mount sources. Actual
       QA starts through TUI /pr qa ID, not shell pm pr qa; concretizer hold must last
-      through worker split. Debug public launches are random unshared allocations: create
-      two normally, then externally rename both by captured ID to obtain original-name
-      replacement with distinct actual mount. Preview must finish before old owner EXIT;
-      permission fault must be applied before owner closes and remain through removal/reap/status,
-      then restored and retried even if container is already absent. For domain gates
-      do NOT pause A reap and wait for B reap: manual reaps share global reaper lock
-      (120s), so that cannot prove B decision while held. Instead hold genuine A ordinary
-      restart identity-probe return (10s limit, <=8s watchdog), with live owner and
-      no --force; its name lock does not block B launch of another role or foreign-domain
-      sweep. Require B final outcome before gate release in separate launch/dead-daemon-repair/reap
-      trials, not just process overlap; otherwise ordering unachieved. All wrappers
-      must forward actual runtime bytes/status/TTY and never synthesize inventories/domain
-      identity. No runtime scenario PASS claimed by this refinement.'
+      through worker split. Debug public launches are random unshared allocations:
+      create two normally, then externally rename both by captured ID to obtain original-name
+      replacement with distinct actual mount. Preview must finish before old owner
+      EXIT; permission fault must be applied before owner closes and remain through
+      removal/reap/status, then restored and retried even if container is already
+      absent. For domain gates do NOT pause A reap and wait for B reap: manual reaps
+      share global reaper lock (120s), so that cannot prove B decision while held.
+      Instead hold genuine A ordinary restart identity-probe return (10s limit, <=8s
+      watchdog), with live owner and no --force; its name lock does not block B launch
+      of another role or foreign-domain sweep. Require B final outcome before gate
+      release in separate launch/dead-daemon-repair/reap trials, not just process
+      overlap; otherwise ordering unachieved. All wrappers must forward actual runtime
+      bytes/status/TTY and never synthesize inventories/domain identity. No runtime
+      scenario PASS claimed by this refinement.'
     created_at: '2026-10-26T15:48:03Z'
     last_edited: '2026-10-26T15:48:03Z'
   - id: note-085325e
@@ -13683,9 +13690,9 @@ prs:
       did not bypass refusal. Therefore both required container preview/reap and pending-launch/reap
       overlaps, proxies/writer/grace/normal container release remain UNEXECUTED. Six
       host impl workers ended through client EOF; meta bash-wrapper worker was missed
-      by teardown filter and ended only with owned server closure, so normal meta EOF
-      assertion unproven. No source fix/unit substitute/provider request/runtime cleanup.
-      Seven cast/H264 pairs and manifests at /pm-captures/scenarios/32/manifest.md;
+      by teardown filter and ended only with owned server closure, so normal meta
+      EOF assertion unproven. No source fix/unit substitute/provider request/runtime
+      cleanup. Seven cast/H264 pairs and manifests at /pm-captures/scenarios/32/manifest.md;
       all source hashes held. Next run needs permitted isolated fixture runner (not
       worktree-constrained external-Git helper), fresh runtime qualification, acknowledged
       gates and corrected meta EOF targeting. Host evidence is partial coverage, not
@@ -13696,169 +13703,249 @@ prs:
     text: 'QA scenario 22 (ownership: process-tree, full/abbreviated IDs, fresh pre-delete
       check, socket-qualified QA handoff) — all ten triples executed on 25751700 with
       real isolated rootless Podman (private fuse-overlayfs store, private HOME/state/tmux,
-      disposable file:// origin) and re-verified on tip 4c43ba38. Passed: baseline dry-run
-      on 16 age-qualified orphans (remove, nothing deleted, IDs/start/hashes intact);
-      owner preview+apply for NAME/FULL_ID/SHORT_ID (kept as owned, client responsive,
-      sentinels intact); ordinary restart refused for all three variants (exit 1, live
-      pane, nothing restarted); runtime-renamed allocation kept by PM labels; gated
-      removal-time inspect -f {{.Id}} recheck (ack with real ID, real exec attached,
-      keep "pane attached concurrently", then removal only after client exit with no
-      such object + private fs gone + host file intact); in-flight non-owner controls
-      (logs -f, host argv with full ID, payload mention into another container, global-option
-      exec) behaved as specified; ps-snapshot faults (nonzero + truncated) preserved
-      with ownership-unknown for reap and restart, each invoked once, healthy retries
-      identified the real owner; cross-server QA handoff: real /pr qa run, concretizer
-      %61 on server A vs real %61 client on fresh server B (same TMUX_TMPDIR), no clients
-      attached, genuine split failure "no space for new pane" recorded as launch failed
-      (TUI QA INPUT_REQUIRED), allocation survived with same ID/start, B client responsive,
-      proxy ls-remote rc0, no duplicate allocation or host fallback. SETUP: normal build-base
-      failed STEP17 Chromium smoke (inotify errno24 + GPU 1002); used the documented
-      smoke-RUN-only recovery image — not a build-base pass. INCIDENTAL: grouped-session
-      duplicate pane labels ("%24, %24") were observed; scenario 27 had already pushed
-      the same fix as 2976b016, so my duplicate commit was dropped and the tip was re-verified
-      (single %66/%67). FIXTURE INCIDENT (not product): killing the fixture TUI pane
-      fired after-kill-pane, which respawned a TUI in the caller cwd and ran an unscoped
-      startup reconcile that removed 8 unowned fixtures; those trials were re-prepared
-      fresh and re-run. Evidence: /pm-captures/scenarios/22 (manifest.md, assertions.json,
-      coverage.json, 213 validated cast/mp4 pairs, drivers/).'
+      disposable file:// origin) and re-verified on tip 4c43ba38. Passed: baseline
+      dry-run on 16 age-qualified orphans (remove, nothing deleted, IDs/start/hashes
+      intact); owner preview+apply for NAME/FULL_ID/SHORT_ID (kept as owned, client
+      responsive, sentinels intact); ordinary restart refused for all three variants
+      (exit 1, live pane, nothing restarted); runtime-renamed allocation kept by PM
+      labels; gated removal-time inspect -f {{.Id}} recheck (ack with real ID, real
+      exec attached, keep "pane attached concurrently", then removal only after client
+      exit with no such object + private fs gone + host file intact); in-flight non-owner
+      controls (logs -f, host argv with full ID, payload mention into another container,
+      global-option exec) behaved as specified; ps-snapshot faults (nonzero + truncated)
+      preserved with ownership-unknown for reap and restart, each invoked once, healthy
+      retries identified the real owner; cross-server QA handoff: real /pr qa run,
+      concretizer %61 on server A vs real %61 client on fresh server B (same TMUX_TMPDIR),
+      no clients attached, genuine split failure "no space for new pane" recorded
+      as launch failed (TUI QA INPUT_REQUIRED), allocation survived with same ID/start,
+      B client responsive, proxy ls-remote rc0, no duplicate allocation or host fallback.
+      SETUP: normal build-base failed STEP17 Chromium smoke (inotify errno24 + GPU
+      1002); used the documented smoke-RUN-only recovery image — not a build-base
+      pass. INCIDENTAL: grouped-session duplicate pane labels ("%24, %24") were observed;
+      scenario 27 had already pushed the same fix as 2976b016, so my duplicate commit
+      was dropped and the tip was re-verified (single %66/%67). FIXTURE INCIDENT (not
+      product): killing the fixture TUI pane fired after-kill-pane, which respawned
+      a TUI in the caller cwd and ran an unscoped startup reconcile that removed 8
+      unowned fixtures; those trials were re-prepared fresh and re-run. Evidence:
+      /pm-captures/scenarios/22 (manifest.md, assertions.json, coverage.json, 213
+      validated cast/mp4 pairs, drivers/).'
     created_at: '2026-10-26T17:05:10Z'
     last_edited: '2026-10-26T17:05:10Z'
   - id: note-fd67009
-    text: 'QA scenario 27 (real isolated rootless Podman 3.4.4, private VFS store, disposable
-      file:// origin; fake agents only). Found and fixed one scenario-scope bug: the
-      initial readiness wait only recognised "is not running"/"no such container", but
-      Podman 3.x reports exec into an exited container as "container state improper",
-      so a startup command that died before readiness was reported as a 30s setup timeout
-      with reap advice and the real cause in the container logs was never shown. Now
-      an unrecognised probe error asks the runtime for the running state and fails fast
-      with the logs (commit 95dc7074 + tests/test_container_setup_wait.py; the test
-      fails against the old code). Incidental: grouped sessions repeated the same owning
-      pane ("live pane(s) %13, %13") — deduped (2976b016). Observed, not fixed: after
-      an external `podman rename` during a fresh launch, the failed-setup cleanup leaves
-      the renamed allocation running (no rm is issued once the name no longer maps to
-      the captured ID); it is recoverable and was removed by `pm container reap`, and
-      the failure message names the container by NAME, which after a rename points at
-      the replacement. Evidence: /pm-captures/scenarios/27 (top-level manifest.md, per-story
-      manifests, 49 cast+mp4 pairs, pre-fix/ and post-fix/). Standard build-base still
-      fails the Chromium smoke step (inotify errno24 / GPU 1002, tracked by pr-af2418a);
-      the recovery image omits only that RUN. All scenario containers, proxies and retention
-      were cleaned up; final runtime inventory empty and 54 host witness hashes unchanged.'
+    text: 'QA scenario 27 (real isolated rootless Podman 3.4.4, private VFS store,
+      disposable file:// origin; fake agents only). Found and fixed one scenario-scope
+      bug: the initial readiness wait only recognised "is not running"/"no such container",
+      but Podman 3.x reports exec into an exited container as "container state improper",
+      so a startup command that died before readiness was reported as a 30s setup
+      timeout with reap advice and the real cause in the container logs was never
+      shown. Now an unrecognised probe error asks the runtime for the running state
+      and fails fast with the logs (commit 95dc7074 + tests/test_container_setup_wait.py;
+      the test fails against the old code). Incidental: grouped sessions repeated
+      the same owning pane ("live pane(s) %13, %13") — deduped (2976b016). Observed,
+      not fixed: after an external `podman rename` during a fresh launch, the failed-setup
+      cleanup leaves the renamed allocation running (no rm is issued once the name
+      no longer maps to the captured ID); it is recoverable and was removed by `pm
+      container reap`, and the failure message names the container by NAME, which
+      after a rename points at the replacement. Evidence: /pm-captures/scenarios/27
+      (top-level manifest.md, per-story manifests, 49 cast+mp4 pairs, pre-fix/ and
+      post-fix/). Standard build-base still fails the Chromium smoke step (inotify
+      errno24 / GPU 1002, tracked by pr-af2418a); the recovery image omits only that
+      RUN. All scenario containers, proxies and retention were cleaned up; final runtime
+      inventory empty and 54 host witness hashes unchanged.'
     created_at: '2026-10-26T17:24:11Z'
     last_edited: '2026-10-26T17:24:11Z'
   - id: note-23363ec
     text: 'QA S26 (tested 2976b016; fix pushed as 60e3d89e) ran four private real-Podman
       fixtures. FIXED: pm container status reported a retained allocation''s deferred
-      owner release as "Cleanup failures ... retry with pm container reap", which can
-      never succeed while retained (reap keeps it); now shown as deferred, display only,
-      regression test fails pre-fix/passes post-fix, full suite 4068 passed/2 skipped.
-      Cold respawn, genuine 600 s periodic tick, actual TUI merge and breadcrumb restart
-      all met their Then clauses; evidence /pm-captures/scenarios/26. Note: fixtures
-      were built on 2976b016; later upstream commits 0c9c05fc/9eb168ae were not exercised.
-      Normal image build still fails Chromium smoke (inotify errno24/GPU1002); authorized
-      smoke-RUN-only recovery used and labelled.'
+      owner release as "Cleanup failures ... retry with pm container reap", which
+      can never succeed while retained (reap keeps it); now shown as deferred, display
+      only, regression test fails pre-fix/passes post-fix, full suite 4068 passed/2
+      skipped. Cold respawn, genuine 600 s periodic tick, actual TUI merge and breadcrumb
+      restart all met their Then clauses; evidence /pm-captures/scenarios/26. Note:
+      fixtures were built on 2976b016; later upstream commits 0c9c05fc/9eb168ae were
+      not exercised. Normal image build still fails Chromium smoke (inotify errno24/GPU1002);
+      authorized smoke-RUN-only recovery used and labelled.'
     created_at: '2026-10-26T17:39:03Z'
     last_edited: '2026-10-26T17:39:03Z'
   - id: note-55aeaea
-    text: 'S26 follow-up detail: the public restart path was verified with `pm tui restart
-      --breadcrumb --session`; note it re-execs the TUI in place (same PID/pane), so
-      verify via the debug log (`action_restart` + `TUI mount`), and PM debug logs contain
-      NULs — use grep -a. All four S26 fixtures were torn down (0 containers, 0 fixture
-      proxies left).'
+    text: 'S26 follow-up detail: the public restart path was verified with `pm tui
+      restart --breadcrumb --session`; note it re-execs the TUI in place (same PID/pane),
+      so verify via the debug log (`action_restart` + `TUI mount`), and PM debug logs
+      contain NULs — use grep -a. All four S26 fixtures were torn down (0 containers,
+      0 fixture proxies left).'
     created_at: '2026-10-26T17:45:35Z'
     last_edited: '2026-10-26T17:45:35Z'
   - id: note-46db05f
-    text: 'QA scenario 22 artifact follow-up (re-evaluation): the two capture gaps are
-      closed. (1) The handoff TUI is now recorded per tmux-screen-recording.md: handoff3/tui.cast
-      (+tui.mp4, 3392x1998 yuv420p) comes from a separate recorder session running asciinema
-      around a real "tmux attach" to the test session, with the tester typing "/pr qa
-      pr-fead5e4" in the command bar and the status bar advancing to "QA INPUT_REQUIRED
-      for pr-fead5e4 — paused for human input"; frames at cast times 4.96s and 198.2s
-      plus viewed-window.log show the attached client stayed on the main window, so
-      the concretizer window remained unviewed and the disposal path was still exercised
-      (in that run no foreign client existed, so the abandoned allocation was correctly
-      discarded). handoff4/ is a second recorded run that also carried a real foreign-server
-      %90 client: allocation survived with the same ID/start time and unchanged sentinel
-      hashes and B stayed responsive, with the cast caveat documented (PM moved the
-      client to the QA window and its screen rendered blank, so the complete status
-      line is in handoff3). (2) Every capture directory now has its own manifest.md
-      in the recipe format: 234 cast/mp4 pairs, 234 per-capture manifests generated
-      from the recorded command and its actual output, plus tailored manifests for the
-      TUI and orchestrator captures; a single consolidated root manifest remains as
-      the index. No source change was made for this follow-up and no acceptance criterion
-      was altered. Evidence: /pm-captures/scenarios/22 (manifest.md, coverage.json,
-      handoff2/, handoff3/, handoff4/, drivers/).'
+    text: 'QA scenario 22 artifact follow-up (re-evaluation): the two capture gaps
+      are closed. (1) The handoff TUI is now recorded per tmux-screen-recording.md:
+      handoff3/tui.cast (+tui.mp4, 3392x1998 yuv420p) comes from a separate recorder
+      session running asciinema around a real "tmux attach" to the test session, with
+      the tester typing "/pr qa pr-fead5e4" in the command bar and the status bar
+      advancing to "QA INPUT_REQUIRED for pr-fead5e4 — paused for human input"; frames
+      at cast times 4.96s and 198.2s plus viewed-window.log show the attached client
+      stayed on the main window, so the concretizer window remained unviewed and the
+      disposal path was still exercised (in that run no foreign client existed, so
+      the abandoned allocation was correctly discarded). handoff4/ is a second recorded
+      run that also carried a real foreign-server %90 client: allocation survived
+      with the same ID/start time and unchanged sentinel hashes and B stayed responsive,
+      with the cast caveat documented (PM moved the client to the QA window and its
+      screen rendered blank, so the complete status line is in handoff3). (2) Every
+      capture directory now has its own manifest.md in the recipe format: 234 cast/mp4
+      pairs, 234 per-capture manifests generated from the recorded command and its
+      actual output, plus tailored manifests for the TUI and orchestrator captures;
+      a single consolidated root manifest remains as the index. No source change was
+      made for this follow-up and no acceptance criterion was altered. Evidence: /pm-captures/scenarios/22
+      (manifest.md, coverage.json, handoff2/, handoff3/, handoff4/, drivers/).'
     created_at: '2026-10-26T18:21:23Z'
     last_edited: '2026-10-26T18:21:23Z'
   - id: note-828df4e
     text: 'QA S31 (deepseek-v4.1-flash-1017, HEAD 25751700 + fix f02a1e70): real isolated
       rootless Podman 3.4.4 (VFS, private graphRoot/runRoot), real tmux TUI, editable
       /workspace checkout, host fake-claude for verdicts only; container create/setup/rm
-      forwarded unchanged through a logging runtime-boundary wrapper. EXECUTED AND PASSING
-      post-fix: (1) clean load - 8 scenarios accepted with 6 visibly queued, all 8 PASS,
-      peak create-through-setup overlap 2 per PM process (measured from real allocation
-      start to completion-marker exec by immutable ID), A allocations release to 0 while
-      B stays live/pushable, inventory bounded at 4; (2) planned single middle-queued
-      fault on s5 - fires exactly once at `run`, s5 keeps the real "launch failed: ...
-      injected at runtime boundary" with no verdict, s6/s7/s8 still launch and PASS,
-      aggregate INPUT_REQUIRED carries the real error, B usable, overlap still 2; (3)
-      genuine Ctrl+r resume - TUI says "Resuming QA after restart...", post-restart
-      creation attempts are ONLY s6/s7/s8 (no replay of verified s1/s3 or the failed
-      s2, no re-creation for live s4/s5), every container has exactly 2 worker attaches
-      (no duplicates), persisted cap 2 honoured; (4) six-target scoped reap - preview
-      shows all six eligible and B protected, one persistent rm fault yields FAILED
-      with the exact rc=125 diagnostic while 5 healthy targets are removed, peak concurrent
-      removals 3 (<=4), exit 1, `pm container status` retains the exact failed target
-      and diagnostic, B proxy/mounted sentinel usable, evidence hashes unchanged; after
-      disabling the fault the target is removed and the persisted failure clears. BUG
-      FOUND AND FIXED (f02a1e70): _wait_for_setup polls a 30s deadline but each probe
-      exec had a 5s subprocess timeout whose TimeoutExpired escaped the loop; under
-      concurrent creates (podman run took 34-51s on the loaded VFS store) one slow `podman
-      exec ID test -f /tmp/.pm-ready` aborted a launch with a raw "timed out after 5
-      seconds", and the best-effort discard also timed out, leaving the unowned allocation
-      running until a later full reconcile (~14 min). Now a probe timeout, and a timed-out
-      running-state fallback check, mean "not ready yet" and polling continues to the
-      deadline; exhaustion raises launch_error(timeout). Two regressions fail pre-fix
-      and pass after; full sanitized suite on the committed source 4065 passed, 2 skipped.
-      NOT EXECUTED: triple 4 (dead-worker retry scheduling plus retry cancellation at
-      the allocation gate) - no fixture reached the required state (live verdictless
-      worker owned by a still-running orchestrator, that exact pane+allocation ended,
-      bounded gate on the replacement allocation return). This is a coverage gap, not
-      a pass. SETUP/ENV GOTCHAS FOR NEXT RUN: unmodified `pm container build-base` still
-      fails STEP17 Chromium smoke (inotify errno24 / GPU 1002); the authorized smoke-RUN-only
-      recovery image (all packages/browsers/deps kept) was used and no unmodified build
-      PASS is claimed. The fixture fault matcher must match `--name` exactly - a substring
-      match on all argv matched "-s3" inside the in-container setup text "qa-s31@example.invalid"
-      and faulted the wrong scenario. Releasing container retention lets the TUI periodic
-      reconcile consume targets almost immediately; disable `auto-cleanup` for a scoped-reap
-      trial or release+preview+reap atomically. `pm qa run` reuses `cli-<PR-ID>` per
-      PR, so six targets need six distinct PR IDs. Six concurrent `pm qa run` launches
-      intermittently reported "Image pm-dev:s31 not found in podman" while `podman image
-      inspect` succeeded immediately before and after - recorded, not diagnosed. Evidence:
-      /pm-captures/scenarios/31/ (top-level manifest.md plus per-trial manifests, 42
-      casts with mp4 siblings, runtime-operations.jsonl, inventories, hashes).'
+      forwarded unchanged through a logging runtime-boundary wrapper. EXECUTED AND
+      PASSING post-fix: (1) clean load - 8 scenarios accepted with 6 visibly queued,
+      all 8 PASS, peak create-through-setup overlap 2 per PM process (measured from
+      real allocation start to completion-marker exec by immutable ID), A allocations
+      release to 0 while B stays live/pushable, inventory bounded at 4; (2) planned
+      single middle-queued fault on s5 - fires exactly once at `run`, s5 keeps the
+      real "launch failed: ... injected at runtime boundary" with no verdict, s6/s7/s8
+      still launch and PASS, aggregate INPUT_REQUIRED carries the real error, B usable,
+      overlap still 2; (3) genuine Ctrl+r resume - TUI says "Resuming QA after restart...",
+      post-restart creation attempts are ONLY s6/s7/s8 (no replay of verified s1/s3
+      or the failed s2, no re-creation for live s4/s5), every container has exactly
+      2 worker attaches (no duplicates), persisted cap 2 honoured; (4) six-target
+      scoped reap - preview shows all six eligible and B protected, one persistent
+      rm fault yields FAILED with the exact rc=125 diagnostic while 5 healthy targets
+      are removed, peak concurrent removals 3 (<=4), exit 1, `pm container status`
+      retains the exact failed target and diagnostic, B proxy/mounted sentinel usable,
+      evidence hashes unchanged; after disabling the fault the target is removed and
+      the persisted failure clears. BUG FOUND AND FIXED (f02a1e70): _wait_for_setup
+      polls a 30s deadline but each probe exec had a 5s subprocess timeout whose TimeoutExpired
+      escaped the loop; under concurrent creates (podman run took 34-51s on the loaded
+      VFS store) one slow `podman exec ID test -f /tmp/.pm-ready` aborted a launch
+      with a raw "timed out after 5 seconds", and the best-effort discard also timed
+      out, leaving the unowned allocation running until a later full reconcile (~14
+      min). Now a probe timeout, and a timed-out running-state fallback check, mean
+      "not ready yet" and polling continues to the deadline; exhaustion raises launch_error(timeout).
+      Two regressions fail pre-fix and pass after; full sanitized suite on the committed
+      source 4065 passed, 2 skipped. NOT EXECUTED: triple 4 (dead-worker retry scheduling
+      plus retry cancellation at the allocation gate) - no fixture reached the required
+      state (live verdictless worker owned by a still-running orchestrator, that exact
+      pane+allocation ended, bounded gate on the replacement allocation return). This
+      is a coverage gap, not a pass. SETUP/ENV GOTCHAS FOR NEXT RUN: unmodified `pm
+      container build-base` still fails STEP17 Chromium smoke (inotify errno24 / GPU
+      1002); the authorized smoke-RUN-only recovery image (all packages/browsers/deps
+      kept) was used and no unmodified build PASS is claimed. The fixture fault matcher
+      must match `--name` exactly - a substring match on all argv matched "-s3" inside
+      the in-container setup text "qa-s31@example.invalid" and faulted the wrong scenario.
+      Releasing container retention lets the TUI periodic reconcile consume targets
+      almost immediately; disable `auto-cleanup` for a scoped-reap trial or release+preview+reap
+      atomically. `pm qa run` reuses `cli-<PR-ID>` per PR, so six targets need six
+      distinct PR IDs. Six concurrent `pm qa run` launches intermittently reported
+      "Image pm-dev:s31 not found in podman" while `podman image inspect` succeeded
+      immediately before and after - recorded, not diagnosed. Evidence: /pm-captures/scenarios/31/
+      (top-level manifest.md plus per-trial manifests, 42 casts with mp4 siblings,
+      runtime-operations.jsonl, inventories, hashes).'
     created_at: '2026-10-26T18:26:00Z'
     last_edited: '2026-10-26T18:26:00Z'
   - id: note-8f00218
     text: 'QA scenario 25 (shared/renamed push proxies) result: stories 1,2,3,4,6,7,8,10
       executed and passed on 25751700 with real rootless Podman, real mounts and exact
-      origin SHAs (evidence /pm-captures/scenarios/25). NOT executed: story 9 (two stores
-      A/B, held identity-probe gates, B launch/repair/cleanup, A restart refusal) and
-      story 5 scap reaped-retirement path — live-owner keep and resume were verified,
+      origin SHAs (evidence /pm-captures/scenarios/25). NOT executed: story 9 (two
+      stores A/B, held identity-probe gates, B launch/repair/cleanup, A restart refusal)
+      and story 5 scap reaped-retirement path — live-owner keep and resume were verified,
       and the end state after owners ended was fully retired (container/socket/owner.json/daemon
       gone) but by the owner-exit release, so pm container reap itself only reported
-      "removed 0". Fixture notes for the next run: use hold>=86400 in fake config (3600
-      expired mid-run and correctly released containers); a fixture-only runtime wrapper
-      must be chmod +x or PM silently uses /usr/bin/podman; read launcher results only
-      after a per-attempt LAUNCH_BEGIN marker (tmux clear-history does not clear the
-      screen, which produced false refusals); kill a leftover review window before a
-      trial that must allocate, since pm pr review otherwise only focuses it and returns
-      0; pm qa debug clones --local so the PR branch must exist as a local ref and its
-      proxy allows only the PR branch; use an overlay storage driver (vfs exceeded the
-      60s run budget during builds). Image: normal build-base failed at the Chromium
-      smoke step (inotify errno 24 / GPU unusable, retained); the authorized smoke-RUN-only
-      recovery image was used and is not a build-base PASS. No source change made.'
+      "removed 0". Fixture notes for the next run: use hold>=86400 in fake config
+      (3600 expired mid-run and correctly released containers); a fixture-only runtime
+      wrapper must be chmod +x or PM silently uses /usr/bin/podman; read launcher
+      results only after a per-attempt LAUNCH_BEGIN marker (tmux clear-history does
+      not clear the screen, which produced false refusals); kill a leftover review
+      window before a trial that must allocate, since pm pr review otherwise only
+      focuses it and returns 0; pm qa debug clones --local so the PR branch must exist
+      as a local ref and its proxy allows only the PR branch; use an overlay storage
+      driver (vfs exceeded the 60s run budget during builds). Image: normal build-base
+      failed at the Chromium smoke step (inotify errno 24 / GPU unusable, retained);
+      the authorized smoke-RUN-only recovery image was used and is not a build-base
+      PASS. No source change made.'
     created_at: '2026-10-26T20:02:03Z'
     last_edited: '2026-10-26T20:02:03Z'
+  - id: note-9cecdbe
+    text: 'Review-loop 75b8 i6: eight fixes, each with a regression test verified
+      to fail pre-fix; sanitized full suite 4146 passed / 2 skipped (evidence /pm-captures/review-75b8-i6/).
+
+
+      (1) FALSE PASS, introduced by this PR: the retry-exhausted branch in _poll_tmux_verdicts
+      skipped the INPUT_REQUIRED downgrade whenever a launch failure was recorded,
+      which also preserved an existing verdict. A scenario that emitted PASS but was
+      still awaiting verification when the TUI restarted, whose pane then died and
+      whose relaunches all failed, stayed PASS and the run reported PASS (master downgraded
+      this branch unconditionally). It is now INPUT_REQUIRED with the launch-failure
+      reason preserved; a never-judged scenario still gets no verdict entry.
+
+
+      (2) container-max-running was clamped once at run start only. An unreadable
+      inventory clamps to one (correct), but nothing re-clamped, so the run stayed
+      serialized after the runtime recovered — spec R8 requires the re-clamp. _launch_next_queued
+      now re-clamps via _container_headroom_cap before each queued launch; the helper
+      is a no-op when the setting is unlimited (default 0), so the common path performs
+      no inventory.
+
+
+      (3) proxy_sweep_ran was computed from a second cached identity probe rather
+      than from the sweep, so a full pass whose sweep probe failed could clear a whole-sweep
+      failure it never swept (defeating i5d). _release_unused_proxies now returns
+      (released, enumerated); the flag follows what the sweep did. Its test doubles
+      now return the tuple.
+
+
+      (4) retained_names() crashed (TypeError in sorted, and in pm container status
+      join) on a marker with a non-string name — the class i5d item 6 hardened in
+      _prune_retain_markers but missed here. Non-string names are skipped; the marker
+      stays for a human.
+
+
+      (5) capture_unshared_proxy treated only ENOENT as "no socket"; EACCES/EIO/ENOTDIR
+      escaped remove_container before the rm, so a removed container was reported
+      as a failed removal. Now a classified, retryable ContainerError that defers
+      removal — tolerating it as success would report a completed removal while stranding
+      the socket and its proxy daemon.
+
+
+      (6) OSError from _ensure_reusable (proxy socket dirs, vanished runtime binary,
+      EMFILE/ENOSPC) escaped create_container because the reuse call sits outside
+      its classifying handlers; pm qa debug only catches ContainerError, so the user
+      saw a traceback. The call is wrapped: unanswered probe = retryable timeout,
+      other OS/runtime failures = classified launch error naming the container.
+
+
+      (7) qa debug treated a failed pane lookup as failed attachment; it now counts
+      an existing window as launched (with a setup warning), the guard pr_start/review/sign-off
+      already had.
+
+
+      (8) The three retained-container refusals described the remedy without naming
+      it; they now print pm container retain --release <name> / pm container restart
+      <name>.
+
+
+      Also: the queued-launch test pins container-max-running to 0 so it cannot depend
+      on the host real setting/inventory; spec R3/R6/R7 updated.
+
+
+      Filed not fixed (out of scope): pr-15734c1 — pre-existing push-proxy bypass:
+      the "local-path origins are explicitly rejected" guard only covers a named remote
+      that resolves to a local path, so a literal path/URL positional or --repo <path>
+      reaches git on the host (container-to-host write primitive). pr-ed9fc64 (Podman
+      tabwriter inventory) is a duplicate of a fix carried here; noted on that PR.
+
+
+      Not changed, worth a later look: pm container status -> _echo_reaper_state probes
+      the runtime domain ~5 times per invocation (no operation scope, and runtime_domain_scope
+      deliberately does not cache failed probes), so a hung runtime makes it slow;
+      container.py is ~3.1k lines (_create_fresh ~350, _ensure_reusable ~220).'
+    created_at: '2026-10-27T08:47:23Z'
+    last_edited: '2026-10-27T08:47:23Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -13870,7 +13957,7 @@ prs:
     qa_verification: provider:deepseek-flash
     qa_finalize: provider:deepseek-flash
     qa_interactive: provider:deepseek-flash
-    signoff: provider:deepseek-flash
+    signoff: provider:claude-work
     merge: provider:deepseek-flash
 - id: pr-d43d362
   plan: bugs
@@ -33602,7 +33689,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T16:39:05.632960+00:00'
-  updated_at: '2026-10-25T16:41:35.793394+00:00'
+  updated_at: '2026-10-27T08:15:04.089705+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33616,6 +33703,15 @@ prs:
       same-root-cause fixes carried by pr-1139060.'
     created_at: '2026-10-25T16:41:35Z'
     last_edited: '2026-10-25T16:41:35Z'
+  - id: note-3463786
+    text: 'Duplicate of a fix already carried by pr-1139060: container_reaper._inspect
+      now splits inspect output on whitespace (Podman 3.x tabwriter expands template
+      tabs to spaces) with the labels JSON preserved, and regression tests cover both
+      tab- and space-separated output (tests/test_container_lifecycle.py, tests/test_container_inventory_boundaries.py).
+      No separate fix is needed here; close this once pr-1139060 merges. Evidence
+      remains under /pm-captures/scenarios/3.'
+    created_at: '2026-10-27T08:15:04Z'
+    last_edited: '2026-10-27T08:15:04Z'
 - id: pr-b6c9f6a
   plan: bugs
   title: 'Bug: container reaper deletes a live exec started from an existing shell
@@ -33742,3 +33838,54 @@ prs:
       and helper-final-with-removal.log. No new runtime QA claim.'
     created_at: '2026-10-26T05:31:38Z'
     last_edited: '2026-10-26T05:31:38Z'
+- id: pr-15734c1
+  plan: bugs
+  title: 'Bug: push proxy lets a container push to an arbitrary local git repo path
+    on the host'
+  branch: pm/pr-15734c1-bug-push-proxy-lets-a-container-push-to-an-arbitra
+  status: pending
+  depends_on: []
+  description: 'Found while reviewing pr-1139060 (pre-existing on master since 7400c69f;
+    not a lifecycle regression).
+
+
+    Location: pm_core/push_proxy.py _execute_push (~L337-357) and _extract_remote_name
+    (~L427), _extract_target_branch (~L443).
+
+
+    The guard that rejects local-path targets only runs through a *named* remote:
+    it takes the first positional as a remote name, runs `git remote get-url <name>`,
+    and rejects when that resolves to a local directory. When the first positional
+    is a literal path or URL, `git remote get-url` fails, `_resolve_local_remote_url`
+    returns None, and the push is forwarded verbatim: `git -C <caller clone> push
+    <literal> <allowed_branch>` runs on the host. `--repo <path>` bypasses it too:
+    `_extract_remote_name` skips the flag value and reports `origin` (which may resolve
+    to a real URL), while `_local_push` passes `--repo <path>` through to git.
+
+
+    Repro (host, no container needed): start a push proxy for a clone whose origin
+    is a real URL, then `git push /tmp/some-host-repo <allowed-branch>` or `git push
+    --repo /tmp/some-host-repo <allowed-branch>`; the proxy accepts it and git runs
+    against the host path instead of rejecting it. From inside a container this is
+    a host-filesystem write primitive outside the bind-mounted workdir (e.g. updating
+    refs in the real project repo), i.e. it breaks the container isolation the proxy
+    exists to preserve. Requires the target to be an existing git repo path the pm
+    user can write.
+
+
+    Expected: reject any push target that is not a configured remote name of the caller
+    clone (and keep rejecting a named remote that resolves to a local path). Note
+    QA fixtures rely on local-path *origins* being followed via resolve_real_origin,
+    not on pushing to a literal path, so the tightening should not affect them.
+
+
+    Evidence: read-only code review; no runtime repro attempted.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T08:34:37.511161+00:00'
+  updated_at: '2026-10-27T08:34:37.511161+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
