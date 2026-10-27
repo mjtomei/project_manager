@@ -294,6 +294,10 @@ update; in-memory retirement and window teardown follow and are best-effort.
   `autostart_fresh.resume_pending`.
 * `pm_core/tui/screens.py` — help text.
 * `pm_core/cli/autostart.py` — `fresh` command + output.
+* `pm_core/cli/tui.py` — `pm tui keys` reference: the fresh chords and the
+  `autostart fresh` verb.
+* `pm_core/cli/__init__.py` — `pm`'s command list names `autostart fresh`.
+* `README.md` — the auto-start section: `z a` / `pm autostart fresh`.
 * `pm_core/signoff.py` — timestamp guard in `fresh_recorded_verdict`
   (fresh-marker aware).
 * `tests/test_autostart_fresh.py` (new) — reset/handoff/retirement/resume,
@@ -551,8 +555,9 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   tick.  But the *launch* it triggers (``_auto_review_idle_prs`` →
   ``pr review --no-window``) leaves the PR in ``in_progress`` when it fails
   (store lock timeout, corrupt YAML, subprocess error), so the transcript
-  still reads ``complete`` and the next 1 s tick ran the whole thing again —
-  a subprocess plus two log lines every second, forever, on the TUI thread.
+  still reads ``complete`` and the next ``_poll_impl_idle`` tick (every fifth
+  1 s tick, ~5 s) ran the whole thing again — a subprocess plus two log
+  lines, forever, on the TUI thread.
   ``autostart_fresh.handoff_attempt_due()`` now rate-limits the launch to one
   attempt per ``_HANDOFF_RETRY_SECONDS`` (15 s) per PR, recorded on the app
   (``_fresh_handoff_attempts``, so a restarted TUI retries at once).  It is
@@ -630,3 +635,26 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
 * **Files list completed** — the spec's "Files to change" now names
   ``tests/test_pane_idle.py`` and ``tests/test_review_loop_terminal_state.py``,
   which the i1 work added but the list never mentioned.
+
+## Review-iteration notes (2aac i10)
+
+* **A corrupt marker cannot abort the reset** — ``reset_pr`` read the
+  attempt counter with a bare ``int(marker.get("attempt") or 0)``, so a
+  hand-edited/corrupted ``fresh_autostart.attempt`` raised ``ValueError`` out
+  of the locked update.  The reset now falls back to ``attempt = 1``: the
+  counter is provenance only and must never fail the workflow reset.
+  Pinned by ``TestReset::test_corrupt_marker_attempt_does_not_abort_the_reset``.
+* **A raising reset stays a per-PR failure** — ``fresh_start`` called
+  ``reset_pr`` without a guard, so any unexpected exception (the case above,
+  or a future store error outside the handled set) escaped the loop *after*
+  earlier PRs in the same call had already been reset on disk: their changes
+  were dropped from the reply, their old loop/QA/sign-off state was never
+  retired and their target was never added (only ``resume_pending`` could
+  recover them, and only after a TUI restart).  Each PR's reset is now
+  wrapped: the exception is logged, recorded in ``failed`` for that PR, and
+  the remaining PRs still reset.  Pinned by
+  ``TestFreshStart::test_a_raising_reset_is_a_per_pr_failure``.
+* **The i5 note's poll cadence is corrected in place** — it still said the
+  failing handoff launch was retried on "the next 1 s tick ... every second";
+  ``_poll_impl_idle`` runs on every fifth 1 s tick (~5 s), which is what the
+  i9 note, the code comment and the test docstring already say.

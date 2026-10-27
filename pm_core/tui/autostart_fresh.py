@@ -152,7 +152,12 @@ def reset_pr(root: Path, pr_id: str, source: str,
             return
 
         marker = fresh_marker(pr)
-        attempt = int(marker.get("attempt") or 0) + 1
+        try:
+            # ``attempt`` is only a provenance counter; a hand-edited or
+            # corrupted marker value must not abort the reset.
+            attempt = int(marker.get("attempt") or 0) + 1
+        except (TypeError, ValueError):
+            attempt = 1
 
         # A sign-off return still waiting for its (fresh) launch would make
         # the scheduler relaunch the implementation session with --fresh,
@@ -626,7 +631,15 @@ def fresh_start(app, ids: list[str], policy: str | None = None,
         if effective is None:
             effective = (target_policy(app, pr_id)
                          if pr_id in get_targets(app) else default_policy)
-        result = reset_pr(app._root, pr_id, source, policy=effective)
+        try:
+            result = reset_pr(app._root, pr_id, source, policy=effective)
+        except Exception as e:
+            # reset_pr handles the expected store errors; anything else
+            # (e.g. a corrupt marker value) must stay a per-PR failure: the
+            # PRs already reset in this call are on disk and must still be
+            # reported and targeted rather than losing the whole command.
+            _log.exception("autostart_fresh: reset of %s raised", pr_id)
+            result = {"ok": False, "error": "internal", "message": str(e)}
         if not result.get("ok"):
             failed.append({"pr_id": pr["id"], **result})
             continue

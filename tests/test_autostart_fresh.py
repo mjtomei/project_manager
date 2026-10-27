@@ -184,6 +184,20 @@ class TestReset:
         pr = store.get_pr(store.load(pm_dir), "pr-a")
         assert len(pr["signoff_history"]) == 1
 
+    def test_corrupt_marker_attempt_does_not_abort_the_reset(self, project):
+        # ``attempt`` is a provenance counter; a hand-edited marker must not
+        # make the reset raise (which would escape as an owner-side error and
+        # leave the CLI waiting on a reply it never gets).
+        pm_dir = project
+        data = store.load(pm_dir)
+        store.get_pr(data, "pr-a")[FRESH_KEY] = {"attempt": "not-a-number"}
+        store.save(data, pm_dir)
+        out = autostart_fresh.reset_pr(pm_dir, "pr-a", "test")
+        assert out["ok"] and out["action"] == "fresh_reset"
+        marker = st.fresh_marker(store.get_pr(store.load(pm_dir), "pr-a"))
+        assert marker["attempt"] == 1
+        assert marker["awaiting_handoff"] is True
+
     def test_in_progress_without_marker_is_rejected(self, project):
         pm_dir = project
         data = store.load(pm_dir)
@@ -638,6 +652,38 @@ class TestFreshStart:
         # The TUI key path only shows the log line: the failure must be in it
         # (the CLI additionally prints ``failed:`` lines from the payload).
         assert any("failed: pr-b (terminal_pr)" in line for line in app.logs)
+
+    def test_a_raising_reset_is_a_per_pr_failure(self, project):
+        # ``reset_pr`` handles the expected store errors itself; anything
+        # else must not abort the loop *after* another PR was already reset
+        # on disk (that PR's reset would be lost from the reply, its old
+        # state unretired and its target never added).
+        data = store.load(project)
+        data["prs"].append(_pr("pr-b", workdir=str(project.parent / "wd-b")))
+        store.save(data, project)
+        app = FakeApp(store.load(project)["prs"], project)
+        app._pane_idle_tracker = MagicMock()
+        app._pane_idle_tracker.is_tracked.return_value = False
+
+        real_reset = autostart_fresh.reset_pr
+
+        def flaky(root, pr_id, source, policy=None):
+            if pr_id == "pr-b":
+                raise RuntimeError("boom")
+            return real_reset(root, pr_id, source, policy=policy)
+
+        with patch.object(autostart_fresh, "reset_pr", side_effect=flaky), \
+             patch.object(autostart_fresh, "handoff_ready",
+                          return_value=False), \
+             patch("pm_core.tui.review_loop_ui._auto_review_idle_prs"):
+            out = autostart_fresh.fresh_start(app, ["pr-a", "pr-b"])
+        assert out["ok"]
+        assert [c["pr_id"] for c in out["changes"]] == ["pr-a"]
+        assert out["failed"][0]["pr_id"] == "pr-b"
+        assert out["failed"][0]["error"] == "internal"
+        assert store.get_pr(store.load(project), "pr-a")["status"] == "in_progress"
+        assert auto_start.get_targets(app) == ["pr-a"]
+        assert any("failed: pr-b (internal)" in line for line in app.logs)
 
     def test_new_target_policies_match_the_z_keys(self, project):
         app = self._app(project)
