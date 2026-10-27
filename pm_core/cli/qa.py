@@ -623,6 +623,22 @@ End with a summary of which steps work and which don't, then one of:
             launch_error = tmux_mod.launch_error_detail(exc)
             pane = None
         if not pane:
+            # new_window_get_pane returns None when it cannot find the window
+            # or list its panes *after* tmux created the window and started the
+            # session in it.  Treat an existing window as launched (with a
+            # setup warning) instead of reporting failure — the same guard the
+            # implementation, review and sign-off launchers use — so a live
+            # debug session is not reported as failed.
+            try:
+                existing = tmux_mod.find_window_by_name(session, window_name)
+            except Exception:
+                existing = None
+            if existing:
+                click.echo(f"Launched debug session in window '{window_name}' "
+                           f"(pane lookup failed: {launch_error}).")
+                click.echo(f"  Instruction: {item['title']}")
+                click.echo(f"  Workdir: {qa_workdir}")
+                return
             if use_containers:
                 container_mod.discard_unowned_container(
                     cname, container_id=container_id,

@@ -165,3 +165,18 @@ def test_debug_unavailable_runtime_never_falls_back_to_host(debug_context, tmp_p
     builder.assert_not_called()
     window.assert_not_called()
     execute.assert_not_called()
+
+
+def test_failed_pane_lookup_with_existing_window_counts_as_launched(
+        debug_context, monkeypatch):
+    """Pane discovery can fail after tmux created the window and started the
+    session in it; a live debug session must not be reported as failed."""
+    discard = debug_context
+    monkeypatch.setattr(tmux, "new_window_get_pane", lambda *a, **k: None)
+    monkeypatch.setattr(tmux, "find_window_by_name",
+                        lambda *a, **k: {"id": "@1", "index": 0, "name": "x"})
+    result = CliRunner().invoke(cli, ["qa", "debug", "fixture", "--branch", "test"])
+    assert result.exit_code == 0, result.output
+    assert "Launched debug session" in result.output
+    assert "pane lookup failed" in result.output
+    discard.assert_not_called()

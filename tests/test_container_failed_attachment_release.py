@@ -19,7 +19,7 @@ def allocation(monkeypatch):
     monkeypatch.setattr(cm, "current_container_id", lambda name: state["info"].id if state["info"] else "")
     monkeypatch.setattr(reaper, "live_owner_panes", lambda *a, **kw: state["owners"])
     monkeypatch.setattr(reaper, "_owner_panes", lambda *a, **kw: (state["owners"], False))
-    monkeypatch.setattr(reaper, "_release_unused_proxies", lambda *a: [])
+    monkeypatch.setattr(reaper, "_release_unused_proxies", lambda *a: ([], True))
     monkeypatch.setattr(cm, "running_container_count", lambda: int(state["info"] is not None))
     monkeypatch.setattr(cm, "keyring_summary", lambda: "")
     monkeypatch.setattr(cm, "pids_pressure", lambda *a: [])

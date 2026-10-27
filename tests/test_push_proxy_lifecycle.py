@@ -272,3 +272,23 @@ def test_malformed_release_record_is_ignored_not_wedged(monkeypatch, tmp_path):
     assert push_proxy.retry_unshared_releases(
         container_reaper.Scope(), failures) == []
     assert failures == {}
+
+
+def test_capture_unshared_proxy_defers_an_unreadable_socket(monkeypatch, tmp_path):
+    """A stat error on the socket path must not escape before the container rm.
+
+    ``remove_container`` captures the mounted socket generation before it
+    removes anything.  An unverifiable generation cannot authorize cleanup, so
+    removal defers with a classified error instead of unlinking a socket it
+    cannot identify — or reporting success while stranding the socket and its
+    proxy daemon.
+    """
+    from pm_core.container import ContainerError
+
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x")
+    path = str(blocker / "push.sock")  # ENOTDIR, not ENOENT
+    monkeypatch.setattr(push_proxy, "mounted_unshared_proxy",
+                        lambda name: ("pm-x", path, "pm-x"))
+    with pytest.raises(ContainerError, match="Cannot capture the mounted push proxy"):
+        push_proxy.capture_unshared_proxy("pm-x")

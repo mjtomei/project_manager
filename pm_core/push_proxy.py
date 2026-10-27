@@ -1084,6 +1084,15 @@ def capture_unshared_proxy(name: str) -> tuple[str, str, tuple[int, int, int], s
         identity = (stat.st_dev, stat.st_ino, stat.st_ctime_ns)
     except FileNotFoundError:
         identity = (0, 0, 0)  # mount is authoritative even without a socket
+    except OSError as exc:
+        # An unverifiable socket generation cannot authorize cleanup. Defer
+        # removal with a classified error (retried later) instead of unlinking
+        # a socket we cannot identify or, worse, reporting success while
+        # stranding the socket and its proxy daemon.
+        from pm_core.container import ContainerError
+        raise ContainerError(
+            f"Cannot capture the mounted push proxy generation at {path}: "
+            f"{exc}") from exc
     return original, path, identity, current
 
 

@@ -196,7 +196,7 @@ class TestReaperInventory:
         monkeypatch.setattr(cm, "_run_runtime", lambda *a, **kw: response)
         monkeypatch.setattr(reaper, "list_containers",
                             lambda: reaper._inspect([kept, orphan], timeout=60))
-        proxies = MagicMock(return_value=[])
+        proxies = MagicMock(return_value=([], True))
         monkeypatch.setattr(reaper, "_release_unused_proxies", proxies)
 
         out = reaper.reconcile(reason="manual")
@@ -270,7 +270,8 @@ def fake_env(monkeypatch):
                         lambda: len(state["containers"]))
     monkeypatch.setattr(cm, "keyring_summary", lambda: "")
     monkeypatch.setattr(cm, "pids_pressure", lambda threshold=0.9: [])
-    monkeypatch.setattr(reaper, "_release_unused_proxies", lambda scope, failures, checked=None: [])
+    monkeypatch.setattr(reaper, "_release_unused_proxies",
+                        lambda scope, failures, checked=None: ([], True))
     return state
 
 

@@ -86,3 +86,42 @@ def test_unavailable_state_lock_is_visible(monkeypatch):
     reaper._record(outcome, reaper.Scope(), "test")
     assert "lock unavailable" in outcome.failures["cleanup state"]
     record.assert_not_called()
+
+
+def test_sweep_flag_follows_what_the_sweep_reported(monkeypatch):
+    """Only a pass that actually listed the proxies clears a sweep failure.
+
+    ``_release_unused_proxies`` probes the runtime identity itself, so a
+    second probe in ``_run`` could disagree with it and clear a whole-sweep
+    failure for a sweep that never ran.
+    """
+    monkeypatch.setattr(reaper, "list_containers", lambda: [])
+    monkeypatch.setattr(cm, "running_container_count", lambda: 0)
+    monkeypatch.setattr(cm, "keyring_summary", lambda: "")
+    monkeypatch.setattr(reaper, "_record", lambda out, *a, **k: None)
+    # The identity probe succeeds, but this pass never enumerated the proxies.
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: {"runtime": "test"})
+    monkeypatch.setattr(reaper, "_release_unused_proxies",
+                        lambda scope, failures, checked=None: ([], False))
+    out = reaper._run(reaper.Scope(), dry_run=False, reason="manual")
+    assert out.proxy_sweep_ran is False
+    monkeypatch.setattr(reaper, "_release_unused_proxies",
+                        lambda scope, failures, checked=None: ([], True))
+    out = reaper._run(reaper.Scope(), dry_run=False, reason="manual")
+    assert out.proxy_sweep_ran is True
+
+
+def test_release_unused_proxies_reports_whether_it_enumerated(monkeypatch):
+    """An unknown runtime identity means no proxy was listed, not 'swept'."""
+    from pm_core import push_proxy
+    monkeypatch.setattr(push_proxy, "retry_unshared_releases",
+                        lambda scope, failures: [])
+    listed = []
+    monkeypatch.setattr(push_proxy, "list_shared_proxies",
+                        lambda: listed.append(1) or [])
+    monkeypatch.setattr(push_proxy, "runtime_domain", lambda: None)
+    assert reaper._release_unused_proxies(reaper.Scope(), {}) == ([], False)
+    assert not listed
+    monkeypatch.setattr(push_proxy, "runtime_domain", lambda: {"runtime": "test"})
+    assert reaper._release_unused_proxies(reaper.Scope(), {}) == ([], True)
+    assert listed

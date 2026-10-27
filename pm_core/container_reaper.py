@@ -227,7 +227,14 @@ def unretain(name: str) -> bool:
 
 
 def retained_names() -> list[str]:
-    return sorted({rec["name"] for _, rec in _retention_records()})
+    """Names of retained containers; markers with no usable name are skipped.
+
+    A hand-edited or corrupt marker can carry a non-string ``name``.  It must
+    not crash ``pm container status`` (``", ".join(...)``) or ``sorted`` on a
+    mixed set — the marker itself is left for a human.
+    """
+    return sorted({rec["name"] for _, rec in _retention_records()
+                   if isinstance(rec.get("name"), str) and rec["name"]})
 
 
 def _prune_retain_markers(inventory: dict[str, str], since: float) -> None:
@@ -1179,8 +1186,13 @@ def _proxy_failure_actionable(key: str) -> bool:
 
 
 def _release_unused_proxies(scope: Scope, failures: dict[str, str],
-                            checked: list[str] | None = None) -> list[str]:
+                            checked: list[str] | None = None
+                            ) -> tuple[list[str], bool]:
     """Release unused proxies; append definitively-evaluated keys to *checked*.
+
+    Returns ``(released, enumerated)``.  *enumerated* is False when this pass
+    never listed the shared proxies (the runtime identity probe came back
+    unknown), so a caller must not treat the pass as having swept them.
 
     Only a definitive answer — released, or proven still in use by a live
     container — means there is no pending work, so only those clear an
@@ -1190,9 +1202,11 @@ def _release_unused_proxies(scope: Scope, failures: dict[str, str],
     """
     from pm_core import push_proxy
     released = push_proxy.retry_unshared_releases(scope, failures)
+    # The sweep's own probe decides whether it enumerated anything; the
+    # caller must not re-probe and infer it.
     domain = push_proxy.runtime_domain()
     if domain is None:
-        return released
+        return released, False
     for prox in push_proxy.list_shared_proxies():
         if prox.get("runtime_domain") != domain:
             continue
@@ -1215,7 +1229,7 @@ def _release_unused_proxies(scope: Scope, failures: dict[str, str],
         except Exception as exc:
             failures[f"push proxy {key}"] = str(exc)
             _log.warning("proxy release for %s failed", prox, exc_info=True)
-    return released
+    return released, True
 
 
 @runtime_domain_scope()
@@ -1296,13 +1310,12 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
                 else:
                     d.action, d.reason = "keep", msg
         try:
-            out.proxies_released = _release_unused_proxies(
+            out.proxies_released, swept = _release_unused_proxies(
                 scope, out.failures, out.proxies_checked)
-            # Only a full pass with a runtime identity actually enumerated the
-            # proxies; a scoped or identity-less pass cannot clear a failure
-            # recorded by a sweep it never performed.
-            out.proxy_sweep_ran = (_is_full_scope(scope)
-                                   and _runtime_domain() is not None)
+            # Only a full pass that actually enumerated the proxies may clear
+            # an earlier whole-sweep failure. Report what the sweep did, not a
+            # second identity probe that can disagree with it.
+            out.proxy_sweep_ran = swept and _is_full_scope(scope)
         except Exception as exc:
             out.failures["push proxy sweep"] = str(exc)
             _log.warning("proxy sweep failed", exc_info=True)

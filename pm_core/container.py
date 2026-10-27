@@ -1145,8 +1145,24 @@ def create_container(
             raise launch_error(
                 name, "runtime", "container is still owned by an attaching launch; "
                 "use that session or wait for it to finish", stage="be reused")
-        reused = _ensure_reusable(name, workdir, allowed_push_branch,
-                                  session_tag=session_tag, pr_id=pr_id)
+        try:
+            reused = _ensure_reusable(name, workdir, allowed_push_branch,
+                                      session_tag=session_tag, pr_id=pr_id)
+        except ContainerError:
+            raise
+        except subprocess.TimeoutExpired as exc:
+            raise launch_error(
+                name, "timeout",
+                f"inspecting the existing container did not return within "
+                f"{exc.timeout}s; retry when the runtime is responsive",
+                stage="be reused") from exc
+        except (OSError, RuntimeError) as exc:
+            # Reuse touches the proxy sockets and the runtime directly; an
+            # OS-level failure (full /tmp, EMFILE, a vanished runtime binary)
+            # must reach the launcher as a classified launch error naming the
+            # container, not escape as a traceback.
+            raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                               stage="be reused") from exc
         if reused:
             same_owner = same_owner and prior_id == reused
             if not same_owner:
@@ -1591,8 +1607,10 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
                            stage="inspect existing container") from exc
     if not running:
         if container_reaper.is_retained(name, container_id):
-            raise launch_error(name, "incomplete", "container is explicitly retained; release it before recreation",
-                               stage="be reused")
+            raise launch_error(
+                name, "incomplete",
+                f"container is explicitly retained; run 'pm container retain "
+                f"--release {name}' before recreation", stage="be reused")
         owners = container_reaper.live_owner_panes(name, container_id)
         if owners:
             raise launch_error(
@@ -1611,8 +1629,11 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
                            stage="verify existing setup") from exc
     retained = container_reaper.is_retained(name, container_id)
     if retained and wedged in ("pids", "memory"):
-        raise launch_error(name, wedged, f"{probe_err}\nContainer is explicitly retained; restart it explicitly.",
-                           stage="be reused")
+        raise launch_error(
+            name, wedged,
+            f"{probe_err}\nContainer is explicitly retained, so pm will not "
+            f"restart it automatically; run 'pm container restart {name}' once "
+            f"it is safe to end its session.", stage="be reused")
     if wedged in ("pids", "memory"):
         # Can't exec: the container's own processes exhausted it.  Restart
         # clears that and keeps its files, but ends every session inside —
@@ -1693,8 +1714,10 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
                                stage="verify existing setup")
         if not finished:
             if retained:
-                raise launch_error(name, "incomplete", "container is explicitly retained; release it before recreation",
-                                   stage="be reused")
+                raise launch_error(
+                    name, "incomplete",
+                    f"container is explicitly retained; run 'pm container retain "
+                    f"--release {name}' before recreation", stage="be reused")
             if container_reaper.live_owner_panes(name, container_id):
                 raise launch_error(
                     name, "incomplete",

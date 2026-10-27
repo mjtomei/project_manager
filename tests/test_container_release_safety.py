@@ -71,7 +71,8 @@ def fake_env(monkeypatch):
                         lambda: len(state["containers"]))
     monkeypatch.setattr(cm, "keyring_summary", lambda: "")
     monkeypatch.setattr(cm, "pids_pressure", lambda threshold=0.9: [])
-    monkeypatch.setattr(reaper, "_release_unused_proxies", lambda scope, failures, checked=None: [])
+    monkeypatch.setattr(reaper, "_release_unused_proxies",
+                        lambda scope, failures, checked=None: ([], True))
     return state
 
 

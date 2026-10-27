@@ -276,3 +276,43 @@ def test_worker_split_failure_keeps_real_launch_error(scenario_state, monkeypatc
         state, {}, {"id": state.pr_id}, "pm-t", str(clone),
         Path(state.qa_workdir) / "status.json", lambda: None)
     assert not state.scenario_verdicts
+
+
+def test_unverified_pass_downgraded_when_worker_cannot_be_recovered(
+        scenario_state, monkeypatch):
+    """A PASS still awaiting verification must not survive an unrecoverable worker.
+
+    The scenario emitted PASS, then the TUI restarted mid-verification: its
+    pane is gone and every relaunch fails.  Keeping PASS would report coverage
+    the run never verified (master downgraded this branch unconditionally to
+    INPUT_REQUIRED).
+    """
+    state, scenario = scenario_state
+    state.scenario_verdicts[1] = qa_loop.VERDICT_PASS
+    scenario.pane_id = "%1"
+    scenario.session_id = "sid-1"
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: True)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop, "_SCENARIO_MAX_RETRIES", 1)
+    monkeypatch.setattr(qa_loop, "_SCENARIO_RETRY_BASE", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_viewed_window_ids", lambda *a: set())
+    monkeypatch.setattr(tmux, "pane_exists", lambda pane: False)
+    monkeypatch.setattr(tmux, "pane_window_id", lambda *a: None)
+    monkeypatch.setattr(container, "discard_unowned_container", MagicMock())
+
+    def relaunch(*args, **kwargs):
+        qa_loop._record_launch_failure(state, scenario, "tmux session gone")
+        return False
+    monkeypatch.setattr(qa_loop, "_relaunch_scenario_window", relaunch)
+
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {"id": state.pr_id}, "pm-t", str(state.qa_workdir),
+        Path(state.qa_workdir) / "status.json", lambda: None,
+        use_containers=True)
+
+    assert state.scenario_verdicts[1] == qa_loop.VERDICT_INPUT_REQUIRED
+    # The real cause is preserved for the operator.
+    assert state.scenario_verdict_reasons[1].startswith("launch failed:")

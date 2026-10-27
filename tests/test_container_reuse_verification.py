@@ -405,3 +405,22 @@ def test_setup_wait_keeps_running_state_probe_cause(monkeypatch, tmp_path):
     assert error.value.kind == "timeout"
     assert "storage lock unavailable" in str(error.value)
     assert "container state improper" in str(error.value)
+
+
+def test_reuse_os_error_is_a_classified_launch_error(monkeypatch, tmp_path):
+    """A reuse-path OS failure must not escape as an unclassified traceback.
+
+    ``_ensure_reusable`` touches the push-proxy sockets and the runtime
+    directly.  ``qa debug`` only catches ContainerError, so a raw OSError
+    (full /tmp, EMFILE, a vanished runtime binary) reached the user as a
+    traceback instead of a launch error naming the container.
+    """
+    name = "pm-tag-review-pr-aaaa"
+    monkeypatch.setattr(cm, "recent_launch", lambda *a, **k: False)
+    monkeypatch.setattr(cm, "_ensure_reusable",
+                        Mock(side_effect=OSError(28, "No space left on device")))
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm.create_container(name, cm.ContainerConfig(), tmp_path)
+    assert error.value.kind == "runtime"
+    assert "No space left on device" in str(error.value)
+    assert name in str(error.value)

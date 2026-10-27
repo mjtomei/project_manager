@@ -2882,6 +2882,7 @@ def _poll_tmux_verdicts(
 
     def _launch_next_queued():
         """Release settled allocations before giving their slots to queued work."""
+        nonlocal concurrency_cap
         if use_containers:
             settled = [s for s in state.scenarios
                        if s.index not in pending and s.index not in verifying
@@ -2897,6 +2898,15 @@ def _poll_tmux_verdicts(
         active = len(pending) + len(verifying)
         if concurrency_cap > 0 and active >= concurrency_cap:
             return
+        if use_containers:
+            # The batch was clamped at run start, when the running-container
+            # count may have been unreadable (an unknown inventory clamps to
+            # one). Re-clamp with a fresh count before a launch so that
+            # degraded cap cannot serialize the rest of the run. The default
+            # (unlimited) path performs no inventory.
+            concurrency_cap = _container_headroom_cap(concurrency_cap)
+            if concurrency_cap > 0 and active >= concurrency_cap:
+                return
         scenario = _launch_queue.pop(0)
         _queued_indices.discard(scenario.index)
         _log.info("Launching queued scenario %d (%s), %d remain in queue",
@@ -3117,11 +3127,19 @@ def _poll_tmux_verdicts(
                 _log.warning("Scenario %d window exited without verdict "
                              "(retries exhausted)",
                              scenario.index)
-                if not _is_launch_failure(state, scenario.index):
+                # A scenario that never produced a verdict gets INPUT_REQUIRED,
+                # but a recorded launch failure keeps its own reason (nothing
+                # judged it).  A scenario that already has a verdict (a PASS
+                # still awaiting verification) cannot keep it either: its
+                # worker is gone and verification never ran, so reporting PASS
+                # would fabricate coverage the run never established.
+                if (not _is_launch_failure(state, scenario.index)
+                        or scenario.index in state.scenario_verdicts):
                     state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-                    state.scenario_verdict_reasons[scenario.index] = (
+                    state.scenario_verdict_reasons.setdefault(
+                        scenario.index,
                         f"worker exited before any verdict; no recovery after "
-                        f"{_SCENARIO_MAX_RETRIES} relaunches (killed/crashed mid-run)"
+                        f"{_SCENARIO_MAX_RETRIES} relaunches (killed/crashed mid-run)",
                     )
                 pending.discard(scenario.index)
                 verdicts_changed = True
@@ -4331,6 +4349,21 @@ def _clamp_to_container_headroom(cap: int) -> int:
                   "%d running)", headroom, limit, running)
         return headroom
     return cap
+
+
+def _container_headroom_cap(cap: int) -> int:
+    """Re-clamp *cap* against a fresh running count, but only when configured.
+
+    ``container-max-running`` is opt-in (0 = unlimited), so the default path
+    performs no runtime inventory.  The verdict poll re-clamps before each
+    queued launch: a cap derived from an unreadable inventory at run start
+    clamps to one, and leaving it there would serialize the whole run long
+    after the runtime recovered.
+    """
+    from pm_core import container as container_mod
+    if container_mod.max_running_containers() <= 0:
+        return cap
+    return _clamp_to_container_headroom(cap)
 
 
 def _execute_and_finalize(

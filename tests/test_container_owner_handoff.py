@@ -117,9 +117,12 @@ def test_proxy_sweep_requires_matching_runtime_domain(monkeypatch, current, owne
         {"session_tag":"tag", "pr_id":"pr-aaaa", "runtime_domain":owner}])
     release = MagicMock(return_value=pp.PROXY_RELEASED)
     monkeypatch.setattr(pp, "release_proxy_decision", release)
-    result = reaper._release_unused_proxies(reaper.Scope(), {})
-    assert bool(result) is allowed
+    released, enumerated = reaper._release_unused_proxies(reaper.Scope(), {})
+    assert bool(released) is allowed
     assert release.called is allowed
+    # An unknown runtime identity means the proxies were never enumerated, so
+    # the caller must not treat the pass as a completed sweep.
+    assert enumerated is (current is not None)
 
 
 @pytest.mark.parametrize("runtime,info,expected", [

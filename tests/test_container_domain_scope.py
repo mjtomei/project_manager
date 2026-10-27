@@ -119,7 +119,8 @@ def test_reconcile_propagates_domain_to_removal_workers(monkeypatch):
 
     monkeypatch.setattr(reaper, "_decide", decide)
     monkeypatch.setattr(reaper, "_remove_checked", remove)
-    monkeypatch.setattr(reaper, "_release_unused_proxies", lambda scope, failures, checked=None: [])
+    monkeypatch.setattr(reaper, "_release_unused_proxies",
+                        lambda scope, failures, checked=None: ([], True))
     monkeypatch.setattr(reaper, "_prune_releases", lambda *args: None)
     monkeypatch.setattr(reaper, "_record", lambda *args, **kwargs: None)
     monkeypatch.setattr(cm, "running_container_count", lambda: 0)

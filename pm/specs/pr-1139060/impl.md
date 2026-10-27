@@ -241,6 +241,15 @@ operations do not take PM's launch lock.
   could be released: it is logged and skipped rather than reported as a
   retryable failure that no pass could ever clear, and a failure to write the
   record defers removal with a classified error.
+  Capturing the mounted socket generation never escapes as a raw `OSError`:
+  an absent socket is an unverifiable generation that never unlinks a socket,
+  and any other stat failure (an inaccessible `sudo pm` socket dir, EIO,
+  ENOTDIR) defers removal with a classified, retryable error.  The capture
+  runs before the container `rm`, so tolerating it as success would report a
+  completed removal while stranding the socket and its proxy daemon, and
+  raising it raw would report a failed removal for a container that is then
+  removed.  A directory left at the socket path stats fine and is cleared by
+  the unlink path.
   Unshared proxy directories carry runtime-domain ownership too; another runtime
   cannot start, repair, or unlink their sockets based on its own empty inventory.
   Existing unreadable or malformed proxy owner records fail closed rather than
@@ -432,10 +441,18 @@ setup warnings through the shared `tmux.launch_error_detail` helper.
 QA records a failed scenario launch as `scenario_verdict_reasons[i] =
 "launch failed: …"` with **no** entry in `scenario_verdicts` (not an agent
 verdict); the overall verdict stays the existing "unverdicted ⇒
-INPUT_REQUIRED" aggregation and `state._error` names the launch failure.
+INPUT_REQUIRED" aggregation and `state._error` names the launch failure.  A
+scenario that already carries a verdict — a PASS still awaiting verification
+after a resume — does **not** keep it when its worker is gone and every
+relaunch failed: its verification never ran, so it becomes INPUT_REQUIRED with
+the launch-failure reason preserved (master downgraded this case
+unconditionally; reporting PASS would fabricate coverage).
 Deeper verdict presentation stays with pr-7ab0a99. Timeout diagnostics must not
 claim successful removal: reuse/restart preserves existing files, and fresh
 allocation cleanup can fail or defer. The recovery command remains available.
+OS-level failures inside reuse (`_ensure_reusable`: proxy sockets, a vanished
+runtime binary, EMFILE/ENOSPC) reach the launcher as a classified launch error
+naming the container, never as a raw `OSError` traceback.
 
 ### R7 — Scoped manual cleanup with preview + summary
 `pm container reap [--dry-run] [--pr ID] [--session TAG] [--include-retained]`
@@ -511,9 +528,11 @@ concurrent failures; inability to persist an outcome is itself reported. Once
 scoped state exists, an outcome whose runtime identity is unavailable is
 reported instead of written to the legacy unscoped store, where nothing would
 prune it and no later pass would see it. A whole-sweep proxy failure is
-cleared only by a full pass that actually enumerated the proxies, and a
-malformed persisted state or retention marker is ignored rather than aborting
-a pass that already removed containers.
+cleared only by a full pass that actually enumerated the proxies — the pass
+reports what its own sweep did rather than re-probing the runtime identity,
+which can disagree — and a malformed persisted state or retention marker is
+ignored rather than aborting a pass that already removed containers or
+crashing `pm container status`.
 
 ### R8 — Bounded launch concurrency / backpressure
 - A process-wide semaphore bounds concurrent container creates
@@ -523,8 +542,9 @@ a pass that already removed containers.
   `qa-max-containers` name from 7b6dc7b9): QA clamps its launch batch to the
   remaining headroom (≥1), counting renamed managed allocations as well as legacy
   names through the shared inventory — an inventory that cannot be read is
-  unknown, not zero running containers, so the batch clamps to one and the
-  next poll re-clamps with a fresh count; the rest queue through the existing
+  unknown, not zero running containers, so the batch clamps to one and each
+  later queued launch re-clamps with a fresh count before it starts (the
+  unlimited default performs no inventory); the rest queue through the existing
   queued-scenario mechanism. Settled scenarios release their allocations before
   handing slots to queued work (after PASS verification, with the same human,
   retention and viewed-window exceptions). The cap bounds the launch batch, not

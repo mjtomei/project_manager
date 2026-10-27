@@ -68,3 +68,20 @@ def test_release_renamed_retention_ignores_stale_same_name(monkeypatch):
     monkeypatch.setattr(container, "current_container_id", lambda name: "retained-id")
     assert reaper.unretain("pm-archive")
     assert not reaper.is_retained("pm-archive", "retained-id")
+
+
+def test_malformed_retention_marker_is_skipped_not_fatal():
+    """A corrupt marker must not crash 'pm container status'.
+
+    ``retained_names()`` is joined into one status line, so a non-string name
+    (hand-edited ``{"name": null}``) would raise TypeError there and in
+    ``sorted``.  The marker is skipped and left for a human.
+    """
+    d = reaper._retain_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "pm-tag-review-pr-aaaa").write_text("{}")  # legacy name-keyed marker
+    (d / "hashed.json").write_text('{"name": null, "id": "cid"}')
+    (d / "numeric.json").write_text('{"name": 7, "id": "cid2"}')
+    assert reaper.retained_names() == ["pm-tag-review-pr-aaaa"]
+    # And the status join that used to raise now succeeds.
+    assert ", ".join(reaper.retained_names()) == "pm-tag-review-pr-aaaa"
