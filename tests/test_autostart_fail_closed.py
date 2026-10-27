@@ -55,11 +55,13 @@ class FakeApp:
         self._pane_idle_tracker = MagicMock()
         self._pane_idle_tracker.is_tracked.return_value = False
         self.logs: list[str] = []
+        self.log_kwargs: list[dict] = []
         self.launched: list[str] = []
         self.workers: list = []
 
     def log_message(self, msg, **kw):
         self.logs.append(msg)
+        self.log_kwargs.append(dict(kw))
 
     def _update_display(self):
         pass
@@ -240,6 +242,43 @@ class TestBreadcrumbParserFailClosed:
             {"auto_start": False, "target": "pr-a", "run_id": "r"})
         assert result.targets == {} and result.error is None
 
+    @pytest.mark.parametrize("bad", ["yes", 1, 0, None, []])
+    def test_non_boolean_all_mode_rejected(self, bad):
+        """A truthy-or-ambiguous all-mode flag is never narrowed into a
+        restore: the shape must be unambiguous."""
+        result = st.targets_from_breadcrumb(
+            {"all_mode": bad, "targets": [{"pr_id": "pr-a"}]})
+        assert result.targets == {} and result.error
+        assert "all_mode" in result.error
+
+    @pytest.mark.parametrize("bad", [5, [], {}, True])
+    def test_non_string_run_id_rejected(self, bad):
+        result = st.targets_from_breadcrumb({"run_id": bad})
+        assert result.targets == {} and result.error
+
+    def test_auto_start_true_without_any_target_key_is_targetless(self):
+        """``auto_start`` with neither ``targets`` nor ``target`` is the
+        incident's legacy shape: it must never become all-mode."""
+        result = st.targets_from_breadcrumb({"auto_start": True})
+        assert result.targets == {} and result.error
+        assert "no target" in result.error
+
+    def test_target_null_alone_is_off_without_error(self):
+        """``target: null`` with no autostart request is no saved state.
+
+        (The pre-multi-target writer emitted ``target: null`` for all-mode,
+        always alongside ``auto_start: true``/``run_id`` — that shape is
+        rejected as targetless above.  On its own there is nothing to
+        restore and nothing to diagnose.)"""
+        result = st.targets_from_breadcrumb({"target": None})
+        assert result.targets == {} and result.error is None
+
+    def test_legacy_target_without_auto_start_still_migrates(self):
+        """Older breadcrumbs implied auto-start from ``target`` alone."""
+        result = st.targets_from_breadcrumb({"target": "pr-a"})
+        assert list(result.targets) == ["pr-a"]
+        assert result.migrated is True and result.error is None
+
 
 # ---------------------------------------------------------------------------
 # consume_breadcrumb: remain OFF, diagnose, preserve evidence
@@ -412,6 +451,73 @@ class TestConsumeFailClosed:
         assert auto_start.managed_ids(app) == set()
         assert _rejected_files(tmp_path)
 
+    def test_targets_without_loaded_prs_remain_off(self, tmp_path):
+        """Saved targets that cannot be validated (no project PRs loaded)
+        must not be restored."""
+        app = FakeApp([], tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "auto_start": True, "targets": [{"pr_id": "pr-a"}], "run_id": "r"})
+        _consume(app, tmp_path)
+        assert app._auto_start is False
+        assert auto_start.get_targets(app) == []
+        assert app.launched == []
+        assert any("no project PRs" in m for m in app.logs)
+        assert _rejected_files(tmp_path)
+
+    def test_valid_stop_marks_restored_even_when_targets_rejected(self, tmp_path):
+        """A valid merge-gate set is evidence worth keeping even when the
+        target parse fails (the rejected state still cannot merge)."""
+        app = FakeApp([_pr("pr-a")], tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "auto_start": True, "all_mode": True,
+            "targets": [{"pr_id": "pr-a"}],
+            "stop_before_merge": ["pr-a"],
+        })
+        _consume(app, tmp_path)
+        assert app._auto_start is False
+        assert app._stop_before_merge == {"pr-a"}
+        assert any("all-mode" in m for m in app.logs)
+
+    def test_malformed_review_loop_history_does_not_abort_restore(self, tmp_path):
+        """A malformed history entry must not raise out of startup; the loop
+        state is restored with the entries that are well formed."""
+        app = FakeApp([_pr("pr-a", status="in_review", workdir="/tmp/wd")],
+                      tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "review_loops": {"pr-a": {
+                "iteration": 2,
+                "history": [
+                    ["not", "a", "dict"],
+                    {"iteration": 1, "verdict": "PASS"},
+                    {"verdict": "missing iteration"},
+                ],
+            }},
+        })
+        with patch("pm_core.tui.review_loop_ui._start_loop") as start_loop:
+            _consume(app, tmp_path)
+        rstate = app._review_loops["pr-a"]
+        assert rstate.iteration == 2
+        assert [(h.iteration, h.verdict) for h in rstate.history] == [
+            (1, "PASS")]
+        start_loop.assert_called_once()
+
+    def test_rejection_diagnostic_not_replaced_by_loop_summary(self, tmp_path):
+        """The actionable "auto-start remains off" line must stay on the log
+        line; the informational loop-resume summary must not paint over it."""
+        app = FakeApp([_pr("pr-a", status="in_review", workdir="/tmp/wd")],
+                      tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "auto_start": True, "all_mode": True,
+            "targets": [{"pr_id": "pr-a"}],
+            "review_loops": {"pr-a": {"iteration": 1, "history": []}},
+        })
+        with patch("pm_core.tui.review_loop_ui._start_loop"):
+            _consume(app, tmp_path)
+        assert any("remains off" in m for m in app.logs)
+        summary = [kw for msg, kw in zip(app.logs, app.log_kwargs)
+                   if msg == "Resumed review loop state after restart"]
+        assert summary and summary[-1].get("sticky", 0) == 0
+
 
 class TestSaveNeverPersistsWildcard:
     def test_save_writes_targets_only(self, tmp_path):
@@ -425,6 +531,38 @@ class TestSaveNeverPersistsWildcard:
         data = json.loads((tmp_path / "autostart-resume.json").read_text())
         assert "all_mode" not in data
         assert [t["pr_id"] for t in data["targets"]] == ["pr-a"]
+
+    def test_save_while_off_writes_no_autostart_fields(self, tmp_path):
+        """Restarting with auto-start off must not persist a targetless or
+        wildcard record for the next startup to interpret."""
+        app = FakeApp([_pr("pr-a")], tmp_path)
+        app._auto_start = False
+        app._stop_before_merge = {"pr-a"}
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path):
+            (tmp_path / "merge-restart").touch()
+            auto_start.save_breadcrumb(app)
+        data = json.loads((tmp_path / "autostart-resume.json").read_text())
+        assert "auto_start" not in data
+        assert "targets" not in data
+        assert "all_mode" not in data
+        assert data["stop_before_merge"] == ["pr-a"]
+
+        fresh = FakeApp([_pr("pr-a")], tmp_path)
+        _consume(fresh, tmp_path)
+        assert fresh._auto_start is False
+        assert fresh.launched == []
+        assert "pr-a" in fresh._stop_before_merge
+
+    def test_save_enabled_with_no_targets_writes_no_autostart_fields(self, tmp_path):
+        """The impossible-through-the-API enabled/empty state must not write
+        an ambiguous record either."""
+        app = FakeApp([_pr("pr-a")], tmp_path)
+        app._auto_start = True
+        app._auto_start_targets = {}
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path):
+            (tmp_path / "merge-restart").touch()
+            auto_start.save_breadcrumb(app)
+        assert not (tmp_path / "autostart-resume.json").exists()
 
     def test_mixed_policies_roundtrip_exactly(self, tmp_path):
         """Save→consume reproduces the same targets, order and holds."""
@@ -532,6 +670,13 @@ class TestAllModeCommandRejected:
     def test_status_mode_is_never_all(self):
         s = st.build_status({"prs": [_pr("pr-a")], "targets": {},
                              "enabled": True, "all_mode": True})
+        assert s["mode"] == "off" and s["targets"] == [] and s["runs"] == []
+
+    def test_status_off_when_disabled_even_with_targets(self):
+        """A stale ``enabled``/``targets`` combination cannot report an
+        active scope while auto-start is off."""
+        s = st.build_status({"prs": [_pr("pr-a")],
+                             "targets": {"pr-a": {}}, "enabled": False})
         assert s["mode"] == "off" and s["targets"] == [] and s["runs"] == []
 
     def test_cli_all_subcommand_is_not_offered(self):

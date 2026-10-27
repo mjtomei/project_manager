@@ -103,8 +103,15 @@ Rules, in order:
      - non-empty `str` → `{target: record(source="legacy-breadcrumb")}`,
        `migrated=True`. This is the only permitted migration and it names
        exactly one validated target; no other PR gains authority.
-     - any other type (`None`, dict, number, empty/whitespace string) →
-       reject with a diagnostic.
+     - dict, number, empty/whitespace string → reject with a diagnostic.
+     - `None` → treated as "no target" rather than an invalid one: with
+       `auto_start`/`run_id` present it is rejected by the targetless rule
+       below (the pre-multi-target writer emitted exactly this shape for
+       its all-mode: `{"auto_start": true, "target": null, "run_id": …}`),
+       and on its own it is simply no autostart data.  The targetless
+       diagnostic is more accurate than "invalid legacy target" for that
+       historical shape, and no producer wrote `target: null` with an
+       autostart request that was not all-mode.
    - `target` absent and (`auto_start` truthy or `run_id` present) →
      reject as targetless legacy data. It must **not** become `all_mode`.
    - otherwise → no autostart data.
@@ -128,6 +135,9 @@ Rules, in order:
     `stop_before_merge` list and review-loop state (so merge gates and
     in-flight work are not silently dropped). But with autostart off these
     cannot cause an automatic merge (every merge path checks `is_enabled`).
+    Malformed review-loop records/history entries are skipped with a
+    warning (never raised out of startup); well-formed loop state and
+    entries are still restored.
 - Validate restored targets against the loaded project data:
   - unknown PR ids → reject the whole restore (remain OFF, diagnostic).
   - terminal (merged/closed) targets are kept; the existing
@@ -211,7 +221,10 @@ Rules, in order:
 6. **Diagnostics are actionable.** Every rejection names the reason and a
    next step (`pm autostart add PR_ID...`) and says autostart remains off.
 7. **Quarantine, don't destroy.** Malformed breadcrumb evidence is renamed
-   aside so merge-gate/incident evidence is preserved.
+   aside so merge-gate/incident evidence is preserved. If the rename
+   itself fails (e.g. a read-only directory) the file is left in place —
+   never deleted — and the next startup re-rejects it (auto-start stays
+   off either way).
 8. **Startup ordering.** `consume_breadcrumb` runs after `_load_state`, so
    validation against `app._data.prs` is meaningful; external commands are
    drained after it (existing ordering preserved).
@@ -280,9 +293,17 @@ New `tests/test_autostart_fail_closed.py` (isolated `FakeApp`, fake
    worker queued; bare `autostart` when off still usage-errors.
 6. Watcher prompt with explicit empty targets → restrictive scope block;
    with `None` → unchanged; with targets → managed set.
-7. `build_status` with `all_mode`/`enabled` hints but no targets → `off`.
+7. `build_status` with `all_mode`/`enabled` hints but no targets → `off`;
+   `enabled: false` with targets → `off`.
 8. Malformed `stop_before_merge` → autostart OFF but review-loop restore
-   still happens.
+   still happens; a valid set is restored even when the target parse was
+   rejected.
+9. Non-boolean `all_mode`, non-string `run_id`, `auto_start` with no target
+   key, and a legacy `target` without `auto_start` (migrates).
+10. Save→consume while autostart is off writes no autostart fields;
+    enabled-with-empty-targets writes no breadcrumb at all.
+11. A malformed review-loop history entry does not abort the restore, and
+    the loop-resume summary never paints over the rejection diagnostic.
 
 Updated existing tests: remove `_auto_start_all` fields and all-mode
 assertions; replace targetless fixtures with explicit targets; update

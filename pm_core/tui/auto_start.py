@@ -245,12 +245,26 @@ def save_breadcrumb(app) -> None:
     _log.info("save_breadcrumb: wrote %s", data)
 
 
+def _reset_autostart_state(app) -> None:
+    """Clear the in-memory auto-start scope (fail-closed reset).
+
+    Used when a saved restore is rejected: a rejected restore must never
+    leave a previous or wildcard scope live.
+    """
+    app._auto_start = False
+    app._auto_start_targets = {}
+    app._auto_start_run_id = None
+
+
 def _quarantine_breadcrumb(path: Path) -> Path | None:
     """Preserve a rejected/corrupt saved-state file instead of deleting it.
 
     Malformed evidence may explain an incident or carry merge-gate intent;
     it is renamed aside (never parsed again) so the next startup is not
-    blocked by it and the bytes remain available for diagnosis.
+    blocked by it and the bytes remain available for diagnosis.  If the
+    rename fails the file is deliberately left in place: deleting it would
+    destroy the evidence, and re-rejecting it on the next startup is safe
+    (auto-start stays off either way).
     """
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     dest = path.with_name(f"{path.stem}.rejected-{stamp}{path.suffix}")
@@ -265,12 +279,8 @@ def _quarantine_breadcrumb(path: Path) -> Path | None:
                      "at %s", dest)
         return dest
     except OSError:
-        _log.warning("consume_breadcrumb: could not preserve rejected saved "
-                     "state", exc_info=True)
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        _log.warning("consume_breadcrumb: could not move rejected saved "
+                     "state aside; leaving it in place", exc_info=True)
         return None
 
 
@@ -280,7 +290,8 @@ def _parse_stop_marks(raw) -> tuple[set[str] | None, str | None]:
     Returns ``(marks, error)``.  A malformed value must not be silently
     dropped while auto-start resumes (that would auto-merge without the
     user's holds); the caller then leaves auto-start OFF.  ``None`` means
-    the key was absent/empty.
+    the key was absent (or JSON ``null``); an empty list yields an empty
+    set.
 
     Each entry must be a valid PR id (see
     :func:`pm_core.autostart_state.valid_pr_id`).  A padded/whitespace id
@@ -343,9 +354,7 @@ async def consume_breadcrumb(app) -> None:
         _log.warning("consume_breadcrumb: failed to read breadcrumb: %s", e)
         # Fail closed exactly like a rejected parse: a corrupt file must not
         # leave any pre-existing in-memory scope active.
-        app._auto_start = False
-        app._auto_start_targets = {}
-        app._auto_start_run_id = None
+        _reset_autostart_state(app)
         _quarantine_breadcrumb(breadcrumb)
         app.log_message(
             "Auto-start: saved state is unreadable "
@@ -380,9 +389,7 @@ async def consume_breadcrumb(app) -> None:
                      diagnostic)
         # Fail closed even if this app somehow had autostart state already:
         # a rejected restore never leaves a previous/wildcard scope active.
-        app._auto_start = False
-        app._auto_start_targets = {}
-        app._auto_start_run_id = None
+        _reset_autostart_state(app)
         _quarantine_breadcrumb(breadcrumb)
         app.log_message(f"Auto-start: {diagnostic}; auto-start remains off. "
                         "Re-add targets with `pm autostart add PR_ID...`.",
@@ -435,7 +442,19 @@ async def consume_breadcrumb(app) -> None:
                 input_required=loop_data.get("input_required", False),
                 _transcript_dir=loop_data.get("_transcript_dir"),
             )
-            for h in loop_data.get("history", []):
+            history = loop_data.get("history") or []
+            if not isinstance(history, list):
+                _log.warning("consume_breadcrumb: ignoring malformed review "
+                             "loop history for %s", pr_id)
+                history = []
+            for h in history:
+                # Saved-state parsing is fail-soft here: a malformed history
+                # entry must not abort the whole startup restore.
+                if not isinstance(h, dict) or "iteration" not in h \
+                        or "verdict" not in h:
+                    _log.warning("consume_breadcrumb: ignoring malformed "
+                                 "review-loop history entry for %s", pr_id)
+                    continue
                 rstate.history.append(ReviewIteration(
                     iteration=h["iteration"],
                     verdict=h["verdict"],
@@ -511,7 +530,11 @@ async def consume_breadcrumb(app) -> None:
         _log.info("consume_breadcrumb: %s", msg)
         app.log_message(msg, sticky=5)
     elif review_loops_data:
-        app.log_message("Resumed review loop state after restart", sticky=5)
+        # A rejected restore's diagnostic is the message the user must see;
+        # do not paint this informational summary over it.  (It is still
+        # recorded in the ``L`` command log.)
+        app.log_message("Resumed review loop state after restart",
+                        sticky=0 if diagnostic else 5)
 
 
 def _adopt_live_qa(app) -> None:
