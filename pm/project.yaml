@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T21:42:54.804033+00:00'
+  updated_at: '2026-10-27T21:51:03.727579+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11037,6 +11037,24 @@ prs:
       Captures /pm-captures/scenarios/64.'
     created_at: '2026-10-27T21:42:54Z'
     last_edited: '2026-10-27T21:42:54Z'
+  - id: note-f3c0309
+    text: 'QA S61 (2026-10-27, b94fb58c, nested rootless podman 3.4.4, fake-claude):
+      INPUT_REQUIRED on one literal Then; every other Then held live. Story 1: NEEDS_WORK
+      s2 removed 12 s after the loop verdict; verified PASS s4 Up through the 60 s
+      verifier, removed 17 s after VERIFIED; IR s1 answered echo alive 5.2 min later;
+      shell-attached PASS s3 got "keeping … 1 other exec session(s) open" after VERIFIED
+      and stayed Up 99 s after exit; 0->2 peak samples. Story 2 (off, z t): only running
+      s3/s1 sampled (2->4); s5 NEEDS_WORK kept Up 69 s with no stop/sample. Story
+      3 (retries 0, FLAGGED): FLAGGED -> marking NEEDS_WORK -> stats -> removed 12
+      s later; reason "failed verification: …"; 5->6. Failed Then: scenario pane s6.1
+      went dead=1 with NO status and no "Pane is dead" line (not 137/255; not a signal
+      either — tmux 3.2a prints "signal 9" for that); pm only set remain-on-exit +
+      podman rm -f. A repeat (s7) and a 6-pane rm -f probe all gave 137, so it is
+      a rare tmux/podman exit-reporting race. Decide: accept any dead=1 with readable
+      scrollback, or make removal deterministic (end exec clients before rm -f). Captures
+      /pm-captures/scenarios/61.'
+    created_at: '2026-10-27T21:51:03Z'
+    last_edited: '2026-10-27T21:51:03Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
