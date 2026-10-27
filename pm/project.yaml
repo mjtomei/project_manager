@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e102089
+  active_pr: pr-d3ac02c
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -36284,6 +36284,31 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T16:36:06.306411+00:00'
   updated_at: '2026-10-27T16:36:06.306411+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d3ac02c
+  plan: bugs
+  title: 'Bug: refused impl start (memory governor / container error) still marks
+    the PR in_progress'
+  branch: pm/pr-d3ac02c-bug-refused-impl-start-memory-governor-container-e
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py pr_start sets status in_progress and started_at
+    (~line 1109) before wrap_claude_cmd (~line 1179) raises ContainerError, so a launch
+    the memory governor refuses leaves a pending PR shown as in_progress with no window
+    or container. Repro (QA S43 pr-eb2dbfc, 2026-10-27): container mode, pm container
+    set system-memory-target 1g, select a pending PR with no container in the TUI
+    and press s: the log shows "Error: Memory governor blocked impl <pr>: Container
+    projection (8G) exceeds ..." and the node now reads "in_progress". Expected: status
+    (and started_at) stay as before, or are reverted, when the launch is refused.
+    Sibling of pr-055e3a1 (sign_off spinner after a refused sign-off).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T17:55:27.332039+00:00'
+  updated_at: '2026-10-27T17:55:27.332039+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
