@@ -1295,6 +1295,96 @@ class TestQARecoveryWiring:
         assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
         assert "no_response" in state.scenario_verdict_reasons[1]
 
+    def test_reminder_timeout_overrides_the_settle_interval(
+            self, tmp_path, monkeypatch):
+        """``qa-verdict-reminder-timeout`` still tunes the settle interval.
+
+        The setting is retained for compatibility: when set it overrides
+        ``verdict-recovery-settle-seconds`` for QA scenario workers.  With a
+        100 s shared settle and a 1 s override, a worker that idles without a
+        verdict must be nudged within a couple of ticks instead of waiting
+        out the shared window.
+        """
+        from pm_core import loop_shared, qa_loop
+        from pm_core.qa_loop import QALoopState, QAScenario
+
+        scenario = QAScenario(index=1, title="S", focus="f")
+        scenario.window_name = "qa-s1"
+        scenario.session_id = "sid-s1"
+        scenario.pane_id = "%1"
+        scenario.transcript_path = str(
+            _transcript_with_assistant(tmp_path, "still testing"))
+
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+        state.qa_workdir = None
+
+        clock = {"t": 1000.0}
+
+        def fake_time():
+            clock["t"] += 1.0
+            return clock["t"]
+
+        def fake_monotonic():
+            clock["t"] += 1.0
+            return clock["t"]
+
+        def fake_read_event(_sid):
+            return {"event_type": "idle_prompt",
+                    "timestamp": 100.0,
+                    "session_id": "sid-s1"}
+
+        sent: list[str] = []
+        sent_at = {"tick": None}
+        ticks = {"n": 0}
+
+        def fake_sleep(_seconds):
+            ticks["n"] += 1
+            assert ticks["n"] <= 500, "QA tick loop hung: no recovery"
+
+        def fake_send(_pane, msg):
+            sent.append(msg)
+            if sent_at["tick"] is None:
+                sent_at["tick"] = ticks["n"]
+
+        monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+        monkeypatch.setattr(qa_loop, "recovery_max_attempts", lambda: 1)
+        # The shared settle is deliberately far larger than the run: only
+        # the retained setting can make the nudge happen this early.
+        monkeypatch.setattr(qa_loop, "recovery_settle_seconds",
+                            lambda: 100.0)
+        monkeypatch.setattr(qa_loop, "recovery_response_timeout",
+                            lambda: 50.0)
+        monkeypatch.setattr(qa_loop, "_is_verification_enabled",
+                            lambda: False)
+        monkeypatch.setattr(qa_loop, "_get_verdict_reminder_timeout",
+                            lambda: 1)
+        monkeypatch.setattr(loop_shared.time, "monotonic", fake_monotonic)
+
+        with patch("pm_core.hook_events.read_event",
+                   side_effect=fake_read_event), \
+             patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value=None), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep), \
+             patch("pm_core.qa_loop.time.time", side_effect=fake_time), \
+             patch("pm_core.tmux.send_keys", side_effect=fake_send), \
+             patch("pm_core.tmux.pane_exists", return_value=True):
+            qa_loop._poll_tmux_verdicts(
+                state, {}, {}, "sess", str(tmp_path),
+                tmp_path / "status.json", lambda *a: None,
+            )
+
+        assert sent, "worker was never nudged"
+        assert sent_at["tick"] is not None and sent_at["tick"] <= 5, (
+            "the qa-verdict-reminder-timeout override did not shorten the "
+            f"settle window (nudged on tick {sent_at['tick']})")
+        # The nudge is the scenario-worker outcome request, not a legacy
+        # format reminder.
+        assert "standalone outcome" in sent[0]
+
     def test_verdict_landing_on_the_response_timeout_tick_is_recorded(
             self, tmp_path, monkeypatch):
         """A verdict that lands as the nudge deadline expires must win.

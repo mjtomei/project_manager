@@ -355,7 +355,12 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   outcome request and a resume request; on exhaustion break out with
   `INPUT_REQUIRED` + `_error` (reusing the existing "plan incomplete" surface
   block, and naming the validator's last rejection when the planner did emit
-  a block that could not be consumed). A `completed` result re-reads and
+  a block that could not be consumed). The *nudge* names that rejection too
+  (the outcome request is a callable reading the current `plan_problem`,
+  collapsed to one line): a generic "re-emit your completed result" invites
+  the same malformed block again, so a plan `qa_plan_problem` refused (e.g.
+  non-contiguous numbering) must be told what was wrong. The request still
+  supplies or infers no plan. A `completed` result re-reads and
   accepts the plan. A stop request is honoured before `check_response`, and
   both `except VerdictRecoveryExhausted` handlers (the `check_response` one
   and the `handle` one) re-check `state.stop_requested` before setting
@@ -516,7 +521,8 @@ unbounded.
   exhaustion surfaces
   `INPUT_REQUIRED` + error and stops planning; exhaustion after a malformed
   block names the validator's rejection (e.g. non-contiguous numbering) in
-  `_error`; a plan written while recovery
+  `_error`, and the recovery *nudge* for that block names it too (single
+  line, still no plan supplied); a plan written while recovery
   settles (the idle-hook/transcript-write race) is accepted from the settle
   re-read rather than being asked for again.
 * `tests/test_review_loop_terminal_state.py`: `NO_VERDICT` → `failed`.
@@ -527,5 +533,8 @@ unbounded.
 * `tests/test_loop_recovery.py` (settings): the three keys are settable and
   listed through `pm set` (including a sub-second float), non-numeric values
   are rejected, a negative settle clamps to 0, and corrupt stored values fall
-  back to the defaults.
+  back to the defaults. The retained `qa-verdict-reminder-timeout` override
+  of the QA scenario-worker settle interval is covered end to end (a 1 s
+  override nudges within a couple of ticks even when the shared settle is
+  100 s).
 * Existing suite (4100+ tests) must stay green.

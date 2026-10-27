@@ -4195,6 +4195,28 @@ def run_qa_sync(
         # no complete plan is asked to re-emit its own QA_PLAN block (or to
         # resume after an empty/connection-loss turn).  Exhaustion surfaces
         # an actionable INPUT_REQUIRED instead of burning the whole timeout.
+        _PLANNER_BLOCKS = (("QA_PLAN_START", "QA_PLAN_END"),)
+
+        def _planner_outcome_request() -> str:
+            """Ask only for the planner's own block, naming a rejection.
+
+            A generic "re-emit your completed result" invites the same
+            malformed block again: when the planner *did* emit a block that
+            ``qa_plan_problem`` refused to consume (e.g. non-contiguous
+            scenario numbering), say what was wrong so the retry can fix it.
+            The request still never supplies or infers a plan.  The problem
+            text is collapsed to one line because it is delivered through
+            ``tmux send-keys``.
+            """
+            request = build_block_outcome_request(_PLANNER_BLOCKS)
+            if plan_problem:
+                one_line = " ".join(plan_problem.split())
+                request += (
+                    " The last plan block you emitted was rejected: "
+                    f"{one_line}. Correct that and re-emit the complete "
+                    "block.")
+            return request
+
         planner_recovery = MissingOutputRecovery(
             session_id=planner_session_id,
             pane_id=planner_pane,
@@ -4203,10 +4225,8 @@ def run_qa_sync(
             max_attempts=recovery_max_attempts(),
             settle_seconds=recovery_settle_seconds(),
             response_timeout=recovery_response_timeout(),
-            outcome_request=build_block_outcome_request(
-                (("QA_PLAN_START", "QA_PLAN_END"),)),
-            resume_request=build_block_resume_request(
-                (("QA_PLAN_START", "QA_PLAN_END"),)),
+            outcome_request=_planner_outcome_request,
+            resume_request=build_block_resume_request(_PLANNER_BLOCKS),
             log_prefix="qa-planner",
         )
         planner_exhausted: VerdictRecoveryExhausted | None = None

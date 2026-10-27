@@ -605,6 +605,41 @@ class TestPlannerRecovery:
         assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
         assert "contiguous" in state._error
 
+    def test_recovery_nudge_names_the_rejected_plan_problem(
+            self, tmp_path, monkeypatch):
+        """The recovery request tells the planner what was wrong.
+
+        A generic "re-emit your completed result" invites the same malformed
+        block again, so a plan the validator refused (here: non-contiguous
+        numbering) must be named in the nudge.  The request still asks only
+        for the planner's own block — no plan is supplied or inferred — and
+        it must stay a single tmux line.
+        """
+        # Drop scenario 2 so the plan's numbering is not contiguous.
+        malformed = FULL_PLAN.replace(_scenario(2, TITLES[1]), "")
+        assert "contiguous" in qa_loop.qa_plan_problem(
+            malformed, parse_qa_plan(malformed), 1)
+
+        sent: list[str] = []
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=TEMPLATE_PROMPT,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", malformed)],
+            idle_events=1,
+            extra_patches=(
+                patch("pm_core.qa_loop._add_status_pane"),
+                patch("pm_core.tmux.send_keys",
+                      side_effect=lambda _p, msg: sent.append(msg)),
+            ))
+
+        assert sent, "the planner was never nudged for its malformed block"
+        assert "contiguous" in sent[0]
+        assert "QA_PLAN_START" in sent[0]
+        assert "\n" not in sent[0]
+        # The rejected plan was never consumed, and the run stays bounded.
+        assert state.scenarios == []
+        assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
+
     def test_plan_landing_during_settle_is_accepted_not_renudged(
             self, tmp_path, monkeypatch):
         """A plan written after the idle hook (the transcript-write race) is
