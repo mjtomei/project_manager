@@ -430,3 +430,21 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   opening the popup, `z a` with no selection, `"a"` in the z-prefix key set,
   and the policy mapping (new target → stop; existing `wait_for_merge` /
   `auto_merge` target preserved).
+
+## Review-iteration notes (367f i4)
+
+* **The remaining untested safety fences now have direct coverage** — the
+  `return_awaiting(pr) == "impl"` guard in `handoff_ready` (a racing sign-off
+  bounce still expecting a fresh impl launch must not let a complete *old*
+  turn count as the handoff), and the live-merge-window branch of
+  `_merge_in_progress` (a merge whose in-memory sets were lost across a
+  restart still refuses the reset).
+* **R2's restart recovery is pinned** — `_poll_impl_idle` recovering a fresh
+  attempt's pane from its native transcript when the new run dir's
+  `impl-<pr>.jsonl` symlink is missing is now tested (tracker registered,
+  no trust-only fallback).
+* **R4's teardown is pinned** — `retire_in_memory` parks + kills the old
+  review window (matching the `z d` supersede path) and
+  `retire_downstream` retires the sign-off run via
+  `signoff.retire_signoff_run` (window + transcript + launch stamp).
+* Test module docstring now names `z a` alongside `z O` / `z A`.

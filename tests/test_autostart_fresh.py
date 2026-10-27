@@ -1,4 +1,4 @@
-"""Explicit fresh autostart (``z O``/``z A`` / ``pm autostart fresh``).
+"""Explicit fresh autostart (``z a``/``z O``/``z A`` / ``pm autostart fresh``).
 
 A reviewed PR is returned to implementation after user feedback: the live
 implementation session is adopted, obsolete review/QA/sign-off state is
@@ -323,6 +323,16 @@ class TestHandoff:
         assert not autostart_fresh.handoff_ready(
             None, pr, _Tracker(path, gone=True))
 
+    def test_signoff_return_impl_blocks_handoff(self, tmp_path):
+        # A racing sign-off bounce that still expects a fresh impl launch
+        # means the rework session has not run yet: a complete (old) turn
+        # must not count as the finished handoff.
+        path = _transcript(tmp_path, [_complete()])
+        pr = _marker_pr(st.now_iso())
+        pr["signoff_return"] = {"verdict": "SIGNOFF_IMPL", "hop": "impl",
+                                "awaiting": "impl"}
+        assert not autostart_fresh.handoff_ready(None, pr, _Tracker(path))
+
     def test_consume_handoff_clears_marker(self, project):
         pm_dir = project
         autostart_fresh.reset_pr(pm_dir, "pr-a", "test")
@@ -377,6 +387,46 @@ class TestPollRouting:
 
     def test_incomplete_handoff_waits(self, tmp_path):
         assert self._run(tmp_path, ready=False) == []
+
+    def test_restart_recovers_the_native_transcript(self, tmp_path):
+        # A restarted TUI has a new run dir, so ``impl-<pr>.jsonl`` is
+        # missing and the symlink registration raises.  A fresh attempt must
+        # still adopt the live pane from its start command (native
+        # transcript) rather than only trust-watching it — otherwise the
+        # wait never advances and the pane is never polled.
+        from types import SimpleNamespace
+        from pm_core.pane_idle import PaneIdleTracker
+        from pm_core.tui import review_loop_ui
+
+        native = tmp_path / "11111111-2222-3333-4444-555555555555.jsonl"
+        native.write_text("")
+        pr = _pr(status="in_progress",
+                 **{FRESH_KEY: {"requested_at": st.now_iso(),
+                                "awaiting_handoff": True}})
+        tracker = PaneIdleTracker()
+        watched = []
+        app = SimpleNamespace(
+            _session_name="sess", _pane_idle_tracker=tracker,
+            _data={"prs": [pr]}, _review_loops={},
+            _pending_merge_prs=set(), _merge_input_required_prs=set(),
+            log_message=lambda *a, **k: None)
+        with patch.object(review_loop_ui, "_find_impl_pane",
+                          return_value="%1"), \
+             patch("pm_core.tui.auto_start.get_transcript_dir",
+                   return_value=tmp_path), \
+             patch("pm_core.claude_launcher.pane_transcript_path",
+                   return_value=native), \
+             patch.object(review_loop_ui, "_watch_untracked_trust",
+                          side_effect=lambda *a, **k: watched.append(a)), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.hook_events.read_event", return_value=None), \
+             patch("pm_core.tui.auto_start.is_enabled", return_value=True), \
+             patch.object(review_loop_ui, "_auto_review_idle_prs"), \
+             patch.object(autostart_fresh, "handoff_ready",
+                          return_value=False):
+            review_loop_ui._poll_impl_idle(app)
+        assert tracker.is_tracked("pr-a")
+        assert watched == []
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +492,18 @@ class TestFreshStart:
         # Nothing changed.
         pr = store.get_pr(store.load(project), "pr-a")
         assert pr["status"] == "in_review"
+        assert not auto_start.get_targets(app)
+
+    def test_merge_window_alone_is_refused(self, project):
+        # R8 also covers a merge whose window is live but whose in-memory
+        # sets were lost (e.g. a restarted TUI): the window check alone must
+        # refuse the reset rather than tear state out from under it.
+        app = self._app(project)
+        with patch("pm_core.tui.review_loop_ui._merge_window_exists",
+                   return_value=True):
+            out = autostart_fresh.fresh_start(app, ["pr-a"])
+        assert not out["ok"] and out["error"] == "merge_in_progress"
+        assert store.get_pr(store.load(project), "pr-a")["status"] == "in_review"
         assert not auto_start.get_targets(app)
 
     def test_pending_pr_is_refused(self, project):
@@ -950,6 +1012,40 @@ class TestRetirement:
              patch("pm_core.runtime_state.set_action_state"):
             autostart_fresh.retire_in_memory(app, _pr())
         assert tracker.marked == []
+
+    def test_retirement_kills_the_review_window(self):
+        # A live/stopped loop's review window must be parked and killed so a
+        # running iteration's verdict poll exits (matching the z d supersede
+        # path), not left to finish against the reset attempt.
+        app = FakeApp([_pr()])
+        app._session_name = "sess"
+        app._review_loops["pr-a"] = ReviewLoopState(pr_id="pr-a",
+                                                    running=False)
+        killed = []
+        with patch("pm_core.tmux.find_window_by_name",
+                   return_value={"id": "@1"}), \
+             patch("pm_core.tmux.kill_window",
+                   side_effect=lambda s, w: killed.append((s, w))), \
+             patch("pm_core.home_window.park_if_on") as park, \
+             patch("pm_core.runtime_state.get_action_state", return_value={}), \
+             patch("pm_core.runtime_state.set_action_state"):
+            autostart_fresh.retire_in_memory(app, _pr())
+        park.assert_called_once_with("sess", "@1")
+        assert killed == [("sess", "review-pr-a")]
+
+    def test_retire_downstream_retires_the_signoff_run(self, tmp_path):
+        # The router window/transcript/launch stamp are driver-side state the
+        # bounce path also retires; historical captures are left alone.
+        app = FakeApp([_pr()])
+        app._session_name = "sess"
+        called = []
+        with patch("pm_core.tui.auto_start.get_transcript_dir",
+                   return_value=str(tmp_path)), \
+             patch("pm_core.signoff.retire_signoff_run",
+                   side_effect=lambda s, p, t: called.append(
+                       (s, p["id"], t))):
+            autostart_fresh.retire_downstream(app, _pr())
+        assert called == [("sess", "pr-a", tmp_path)]
 
 
 # ---------------------------------------------------------------------------
