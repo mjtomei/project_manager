@@ -1753,6 +1753,61 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
       router; s0, the planner and the verifier stay on main. The clear
       lands after the release, and an unrouted PR keeps reaching main.
       No containers leak.
+    Done: S89 (NEEDS_WORK, fix 3e0a32d8), S90 (NEEDS_WORK, fix
+    af0d5519), S91 (INPUT_REQUIRED, fix be90863c, filed pr-74159fd; F1
+    decided by the user 2026-10-27, note-6bc63eb: the classifier pin is
+    best effort, RQ43).
+  - Thirty-fifth pass (S92+), delta-only, planner 2026-10-27. Product
+    changes since the S89–S91 run: be90863c (a tick treats an own run
+    record started at/after the return `ts` and younger than a claim
+    expiry as the re-run's driver), af0d5519 (inside a pm session,
+    `latest_qa_status_path` skips runs whose qa_run.json names another
+    session) and 3e0a32d8 (a run whose resume snapshot names another live
+    process is the driver). Each ran live only in its own scenario, and
+    S91's post-fix ran before the other two; they have never run together.
+    dbaa91c8 is spec/comment only. The master merge 2a424a0d
+    (origin/master 450a6362: #243 background QA focus, #242 popup picker)
+    has never run live on this branch. Merge points: `start_qa(lock_timeout,
+    *, focus)`. Only `t`, `z t` and `zz t` select the new qa window. A `t`
+    on a run that is still starting keeps the focus request. A popup
+    spinner q/Esc suppresses the switch. Scheduler starts (auto-start,
+    the sign-off REQA hop, self-driving restarts, `qa-run-bg`) leave
+    attached clients where they are. `qa-run-bg` now mirrors itself into
+    `~/.pm/runtime/<pr>.json` (running → done+verdict, failed on a raised
+    error), which the picker and auto-start's `recorded_qa_verdict` read.
+    The tree uses `usable_prs`, keeping the `unavailable` hint, and the
+    NEEDS_WORK `_reload_tree` flushes the write queue first. Master's
+    duplicate `zz t` transition was dropped.
+    - S92: container mode, real claude against the work/ router and main
+      stubs. The router stub also answers unprefixed classifier calls and
+      logs them (RQ43, not a failure). Covers #243 on routed flows: an
+      auto-started routed QA run and the REQA re-run of the sign-off hop
+      do not move the attached client. `t` before and after the window
+      exists, and a q/Esc spinner dismissal. All three guards run on one
+      tree under a project.yaml hold, with ticks running inside the pm
+      session and the re-run's qa window closed mid-hold. Expected: one
+      driver, one container set, routed roles only on `work/`, s0, the
+      planner and the verifier on main, and the unrouted PR on main.
+    - S93: host, fake-claude, two clones sharing `~/.pm`. The three guards
+      run together, and the shared runtime mirror is probed.
+      `~/.pm/runtime/<pr>.json` is keyed by PR id only. Clone B's
+      `qa-run-bg` PASS of P writes done/PASS there, where clone A's
+      auto-start reads it as a verdict, and the file is shared like
+      qa_status.json before af0d5519. Open point (S93 decides it): A's
+      auto-start skips or hands on its own re-run of P because of B's
+      verdict, or A's picker shows B's run as A's. Treat that as the
+      af0d5519 class. Also: TUI restart adoption across clones, and the
+      focus of the self-driving restart, `z t` and `zz t` (over a pending
+      clear).
+    - S94: host, routed workers through the launcher against the stubs,
+      covering the merged `qa-run-bg` error paths. Router down, provider
+      `nosuch`, malformed providers.yaml, and a driver killed mid-run.
+      Expected: what the picker shows (running, failed or done(ERROR))
+      matches the run, and auto-start or a tick relaunches after the fix
+      (ERROR is not a QA hold), with no launch on main. The tree under a
+      malformed project.yaml and an id-less PR entry during a QA
+      completion: the unavailable hint, then recovery. A NEEDS_WORK
+      completion keeps the user's navigation.
 
 ## 3. Edge cases
 
