@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-26T23:56:07.931892+00:00'
+  updated_at: '2026-10-27T00:31:58.421986+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33241,6 +33241,26 @@ prs:
       + `integration_pointer`); do not take this branch’s block wholesale.'
     created_at: '2026-10-26T23:56:07Z'
     last_edited: '2026-10-26T23:56:07Z'
+  - id: note-c2b368b
+    text: 'review-loop aa73 i6: closed two residual apply-path issues. (1) `apply_integration`
+      now runs under `_repo_lock` (the merge moved to `_apply_locked`): two concurrent
+      applies (sign-off launch / `--apply` / a bounce) could both pass the HEAD check
+      and enter `git merge` in the same workdir, where the loser `merge --abort` discarded
+      the winner in-progress merge and both reported "merge failed"; serialized, the
+      loser returns HEAD_MOVED, which `prepare` re-checks and records. Test: two threads
+      -> one merge commit, one HEAD_MOVED (mutation-checked against the unlocked HEAD).
+      (2) `pm pr signoff integrate --apply` no longer checks the base twice before
+      `prepare` (three fetches/candidate merges -> two): with resolution enabled (default)
+      it delegates to `prepare` (check -> apply -> re-check, one recorded record);
+      `--no-resolve` keeps the plain check. Test counts run_check calls (mutation-checked).
+      Tests: 2 new (144 focused); full suite 3498 passed, 1 skipped, 17 deselected
+      (known pre-existing hook-receiver installer env failure). Spec R4/R8 synced.
+      MERGE RISK unchanged: branch behind origin/master (211a6128); `_signoff_integration_block`
+      changed on both sides — keep both this PR resolution/candidate/applied rendering
+      AND master bounded lists (bounded_join + omitted_path_count + integration_pointer);
+      do not take this branch block wholesale.'
+    created_at: '2026-10-27T00:31:58Z'
+    last_edited: '2026-10-27T00:31:58Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
