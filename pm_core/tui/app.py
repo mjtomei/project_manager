@@ -64,13 +64,13 @@ def _record_log_message(app, msg: str, suppressed: bool) -> None:
 
 # Keys whose action consumes the ``z`` prefix — the "kill existing before
 # next" modifier (``z s``/``S`` start, ``z d`` review, ``z e``/``v`` plan
-# panes, ``z n``/``L``/``m``/``H``/``c`` views, ``z t`` QA, ``z O``/``z A``
-# auto-start).  Any other key press cancels a pending ``z`` so a stale
-# prefix cannot turn a later plain ``A``/``O`` into its destructive
-# fresh-autostart variant (or silently re-interpret another action).  The
-# set must stay in sync with the ``_consume_z()`` callers.
+# panes, ``z n``/``L``/``m``/``H``/``c`` views, ``z t`` QA, ``z a``/``z O``/
+# ``z A`` auto-start).  Any other key press cancels a pending ``z`` so a
+# stale prefix cannot turn a later plain ``a``/``A``/``O`` into its
+# destructive fresh-autostart variant (or silently re-interpret another
+# action).  The set must stay in sync with the ``_consume_z()`` callers.
 _Z_PREFIX_KEYS = frozenset({
-    "s", "S", "d", "e", "v", "n", "L", "m", "H", "c", "t", "A", "O",
+    "s", "S", "d", "e", "v", "n", "L", "m", "H", "c", "t", "a", "A", "O",
 })
 
 # A pending ``z`` only applies to the next chord key.  Navigation keys are
@@ -315,7 +315,7 @@ class ProjectManagerApp(App):
                 self._z_count += 1
                 hint = ""
                 if self._z_count == 1:
-                    hint = (" [dim](d=review t=qa "
+                    hint = (" [dim](d=review t=qa a=fresh "
                             "O=fresh-stop A=fresh-auto)[/]")
                 self._prefix_hint_seq = self.log_message(
                     f"[bold]{'z' * self._z_count} …[/]{hint}")
@@ -616,7 +616,7 @@ class ProjectManagerApp(App):
         # Resume auto-start if a breadcrumb was left by a merge-triggered restart
         from pm_core.tui import auto_start
         await auto_start.consume_breadcrumb(self)
-        # An explicit fresh autostart (z O / z A) is a user request that must
+        # An explicit fresh autostart (z a / z O / z A) is a user request that must
         # survive a plain TUI restart: re-add its target from the PR marker.
         # ``resume_pending`` logs each resumed PR itself (through
         # ``add_targets``'s confirmation); an extra aggregate line here would
@@ -1190,8 +1190,36 @@ class ProjectManagerApp(App):
         return f"×{n}" if n > 1 else ""
 
     def action_show_auto_runs(self) -> None:
-        from pm_core.tui import auto_start as _auto_start
-        _auto_start.open_runs_popup(self)
+        # ``a`` opens the live runs popup.  ``z a`` is the explicit fresh
+        # autostart: a later-stage PR returns to implementation after
+        # feedback, keeps its live session, and waits for the current
+        # implementation turn before one fresh review.  ``z a`` is the
+        # policy-preserving variant — an existing target keeps its own
+        # policy (``wait_for_merge`` included) and a new target defaults to
+        # stop-before-merge (manual merge) — while ``z O``/``z A`` force
+        # stop-before-merge / auto-merge.
+        z = self._consume_z()
+        if not z:
+            from pm_core.tui import auto_start as _auto_start
+            _auto_start.open_runs_popup(self)
+            return
+        tree = self.query_one("#tech-tree", TechTree)
+        pr_id = tree.selected_pr_id
+        if not pr_id:
+            self.log_message(
+                "No PR selected (z a = fresh autostart after feedback)")
+            return
+        from pm_core.tui import autostart_fresh
+        try:
+            result = autostart_fresh.fresh_start(
+                self, [pr_id], policy=None, source="key:za")
+        except Exception as e:  # never let a key handler traceback
+            _log.exception("z a fresh autostart failed for %s", pr_id)
+            self.log_message(f"Auto-start fresh failed: {e}", force=True)
+            return
+        if not result.get("ok"):
+            self.log_message(
+                f"Auto-start: {result.get('message')}", force=True)
 
     def action_auto_sequence_pr(self) -> None:
         # ``O`` arms a stop-before-merge auto-sequence target (continuation

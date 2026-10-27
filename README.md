@@ -248,12 +248,15 @@ finishes the sequence: `O` stops there ("ready to merge — press g"), `A`
 merges. With `skip_qa`, sign-off follows the review PASS.
 
 If a PR already reached review/QA/sign-off but you stopped it and resumed its
-**existing** implementation session with feedback, `z O` (stop before merge)
-or `z A` (auto-merge) — or `pm autostart fresh <pr>` — explicitly return it to
-implementation: the live session is kept (never killed or duplicated), the old
-review/QA/sign-off state is retired, and auto-start waits for the current
-implementation turn to finish before starting exactly one fresh review. Plain
-`O`/`A` stay a continuation from the current phase and never rewind a PR.
+**existing** implementation session with feedback, `z a` — or `pm autostart
+fresh <pr>` — explicitly returns it to implementation: the live session is
+kept (never killed or duplicated), the old review/QA/sign-off state is
+retired, and auto-start waits for the current implementation turn to finish
+before starting exactly one fresh review. `z a` keeps an existing target's
+merge policy (including `--wait-for-merge`) and defaults a new target to
+stop-before-merge; `z O` / `z A` force stop-before-merge / auto-merge. Plain
+`a` still opens the runs popup, and plain `O`/`A` stay a continuation from the
+current phase and never rewind a PR.
 
 ```bash
 pm autostart add pr-abc123 pr-def456   # add targets (default: stop before merge)

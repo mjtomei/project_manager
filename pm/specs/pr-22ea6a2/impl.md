@@ -28,27 +28,38 @@ again.  Today this cannot work:
 An explicit **fresh autostart** action is the signal that a later-stage PR is
 returning to implementation after human feedback:
 
-* TUI: **`z O`** and **`z A`** — the fresh variants of the two existing
-  auto-start enable keys (`O` = stop-before-merge / auto-sequence,
-  `A` = auto-merge target).  Plain `O`/`A` keep their continuation semantics
-  and plain `a` keeps opening the runs popup.  (An earlier draft of the task
-  said `z a`; that was a mistake — `z A`/`z O` are the autostart enable
-  keys.)
+* TUI: **`z a`** is the generic fresh autostart (the shortcut the user asked
+  for).  **`z O`** and **`z A`** are explicit-policy variants of the two
+  existing auto-start enable keys (`O` = stop-before-merge / auto-sequence,
+  `A` = auto-merge target).  Plain `a` keeps opening the runs popup, and plain
+  `O`/`A` keep their continuation semantics.
+
+  Policy mapping: `z a` passes no explicit policy, so an existing target keeps
+  its own policy — **including `wait_for_merge`, whose hold covers its whole
+  dependency chain** (coordinated with sibling #261) — and a *new* target
+  defaults to `stop_before_merge` (manual merge).  `z O` forces
+  stop-before-merge and `z A` forces auto-merge.
 * CLI: **`pm autostart fresh PR_ID...`** (and the command-bar form
   `autostart fresh PR_ID...`), reached through the existing SIGUSR2 command
   queue exactly like `pm autostart add/remove`.
 * Explicitly **not** `pm pr start --fresh`; this is a workflow reset, not a
   fresh implementation client.
 
+*(Correction, 2026-10-27: the recorded task and the implementation launch
+prompt explicitly ask for lowercase `z a`; the earlier spec text that
+dismissed it as a mistake was not a recorded user instruction.  `z a` is now
+implemented alongside `z O`/`z A`.)*
+
 ## Requirements
 
 ### R1 — Explicit reset to implementation (CLI + TUI)
 
-`z O` uses the stop-before-merge policy (matching plain `O`); `z A` uses
-the auto-merge policy (matching plain `A`).  Both are always a reset — they
-never toggle a target off.
+`z a` passes no explicit policy (preserve an existing target's policy,
+default a new target to stop-before-merge); `z O` forces the stop-before-merge
+policy (matching plain `O`); `z A` forces the auto-merge policy (matching
+plain `A`).  All three are always a reset — they never toggle a target off.
 
-`pm autostart fresh ID...` / `z O` / `z A` must, for each selected PR:
+`pm autostart fresh ID...` / `z a` / `z O` / `z A` must, for each selected PR:
 
 1. Validate all ids up front (all-or-nothing): unknown ids, terminal
    (`merged`/`closed`) PRs, PRs without a `workdir`, and PRs with a merge in
@@ -256,9 +267,9 @@ update; in-memory retirement and window teardown follow and are best-effort.
   spec is approved).
 * **Multiple PRs in one call**: validate all, reset each, add each target;
   unrelated targets and their policies are untouched.
-* **`z O` / `z A` with no selection**: log "No PR selected" and do nothing;
-  plain `O`/`A` keep their continuation behaviour and plain `a` still opens
-  the runs popup.
+* **`z a` / `z O` / `z A` with no selection**: log "No PR selected" and do
+  nothing; plain `a` still opens the runs popup and plain `O`/`A` keep their
+  continuation behaviour.
 * **Auto-start off**: fresh autostart enables it by adding the target.
 
 ## Files to change
@@ -275,9 +286,11 @@ update; in-memory retirement and window teardown follow and are best-effort.
 * `pm_core/pane_idle.py` — re-arm `idle_notified` on a new `idle_prompt`
   (second-turn detection for the ordinary path).
 * `pm_core/verdict_transcript.py` — `latest_turn_state()` tail reader.
-* `pm_core/tui/app.py` — `z O` in `action_auto_sequence_pr`, `z A` in
-  `action_toggle_auto_start` (policy `stop_before_merge` / `auto_merge`);
-  `_deferred_startup` re-arms pending attempts via
+* `pm_core/tui/app.py` — `z a` in `action_show_auto_runs` (policy `None`:
+  preserve the target's policy, default `stop_before_merge`), `z O` in
+  `action_auto_sequence_pr` (policy `stop_before_merge`), `z A` in
+  `action_toggle_auto_start` (policy `auto_merge`); plain `a` keeps opening
+  the runs popup; `_deferred_startup` re-arms pending attempts via
   `autostart_fresh.resume_pending`.
 * `pm_core/tui/screens.py` — help text.
 * `pm_core/cli/autostart.py` — `fresh` command + output.
@@ -397,3 +410,23 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
 * **R2 clarified** — the pane adoption is the existing lazy registration in
   `_poll_impl_idle` (with a fresh-attempt native-transcript recovery), not a
   separate step in `fresh_start`.
+
+## Review-iteration notes (i5)
+
+* **Lowercase `z a` implemented** — the recorded task and the implementation
+  launch prompt explicitly ask for `z a`, and no recorded user instruction
+  replaces it; the earlier spec text that dismissed it as a mistake was not a
+  user correction.  `a` now consumes the `z` prefix: plain `a` still opens the
+  runs popup, and `z a` calls `fresh_start(policy=None, source="key:za")`.
+  `z O` / `z A` remain as the explicit stop-before-merge / auto-merge
+  variants.  `"a"` was added to `_Z_PREFIX_KEYS` and the prefix hint, help
+  screen, README and CLI/module docstrings now name `z a`.
+* **`z a` is the policy-preserving mapping** — `policy=None` keeps an existing
+  target's own policy, so a `wait_for_merge` target keeps its dependency-wide
+  hold (coordinated with sibling #261) instead of being silently downgraded to
+  a single stop mark; a new target still defaults to `stop_before_merge`
+  (manual merge).  `z O`/`z A` force the policy as before.
+* **Tests** — `z a` key wiring (policy `None`, `source="key:za"`), plain `a`
+  opening the popup, `z a` with no selection, `"a"` in the z-prefix key set,
+  and the policy mapping (new target → stop; existing `wait_for_merge` /
+  `auto_merge` target preserved).

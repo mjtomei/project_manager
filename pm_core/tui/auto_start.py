@@ -1252,9 +1252,9 @@ def handle_command(app, args: list[str]) -> dict:
     ``clear``/``off``, ``all``, ``list``, ``status``; bare ``autostart``
     turns auto-start off when on and prints usage when off (it no longer
     enables the whole backlog).  ``fresh`` is the explicit workflow reset
-    behind ``z O`` / ``z A``: a reviewed PR returns to implementation after feedback,
-    keeps its live session, and waits for its handoff before one fresh
-    review.  Flags: ``--stop-before-merge`` / ``--auto-merge`` /
+    behind ``z a`` / ``z O`` / ``z A``: a reviewed PR returns to implementation
+    after feedback, keeps its live session, and waits for its handoff before
+    one fresh review.  Flags: ``--stop-before-merge`` / ``--auto-merge`` /
     ``--wait-for-merge`` (``add``/``fresh`` only; at most one distinct
     policy — a contradiction rejects the whole command before any change),
     ``--reply ID`` (CLI: write the JSON reply file).  Returns the result.

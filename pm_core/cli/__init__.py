@@ -668,7 +668,7 @@ COMMANDS
   pm meta [task]                Work on pm itself (meta-development session)
   pm watcher                    Run autonomous watcher loop (blocking)
   pm autostart add <id>...      Add auto-start targets in the running TUI
-  pm autostart fresh <id>...    Reviewed PR back to impl after feedback (z O/z A)
+  pm autostart fresh <id>...    Reviewed PR back to impl after feedback (z a)
   pm autostart remove <id>...   Remove auto-start targets (never kills windows)
   pm autostart list|status      Targets / per-run progress (--json)
   pm trust status|list          Workspace trust for unattended Claude sessions

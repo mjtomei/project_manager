@@ -514,7 +514,7 @@ class TestFreshStart:
         assert auto_start.target_policy(app, "pr-a") == POLICY_STOP
         assert "pr-a" in app._stop_before_merge
 
-    def test_existing_target_policy_is_preserved(self, project):
+    def test_explicit_policy_overrides_an_existing_target(self, project):
         app = self._app(project)
         app._auto_start_targets["pr-a"] = st.make_target_record("cli")
         app._auto_start = True
@@ -524,6 +524,45 @@ class TestFreshStart:
              patch("pm_core.tui.review_loop_ui._auto_review_idle_prs"):
             autostart_fresh.fresh_start(
                 app, ["pr-a"], policy=st.POLICY_AUTO)
+        assert auto_start.target_policy(app, "pr-a") == st.POLICY_AUTO
+
+    def test_z_a_defaults_a_new_target_to_stop_before_merge(self, project):
+        # `z a` passes no explicit policy: a new target gets the manual-merge
+        # default (and the marker records it for a restart re-arm).
+        app = self._app(project)
+        with patch.object(autostart_fresh, "handoff_ready",
+                          return_value=False), \
+             patch("pm_core.tui.review_loop_ui._auto_review_idle_prs"):
+            autostart_fresh.fresh_start(
+                app, ["pr-a"], policy=None, source="key:za")
+        assert auto_start.target_policy(app, "pr-a") == POLICY_STOP
+        marker = st.fresh_marker(store.get_pr(store.load(project), "pr-a"))
+        assert marker["policy"] == POLICY_STOP
+
+    def test_z_a_preserves_an_existing_wait_for_merge_target(self, project):
+        # `z a` must not silently downgrade a wait-for-merge target (whose
+        # hold covers its whole dependency chain) to a single stop mark.
+        app = self._app(project)
+        auto_start.add_targets(app, ["pr-a"], policy=st.POLICY_WAIT,
+                               source="test")
+        with patch.object(autostart_fresh, "handoff_ready",
+                          return_value=False), \
+             patch("pm_core.tui.review_loop_ui._auto_review_idle_prs"):
+            autostart_fresh.fresh_start(
+                app, ["pr-a"], policy=None, source="key:za")
+        assert auto_start.target_policy(app, "pr-a") == st.POLICY_WAIT
+        marker = st.fresh_marker(store.get_pr(store.load(project), "pr-a"))
+        assert marker["policy"] == st.POLICY_WAIT
+
+    def test_z_a_preserves_an_existing_auto_merge_target(self, project):
+        app = self._app(project)
+        auto_start.add_targets(app, ["pr-a"], policy=st.POLICY_AUTO,
+                               source="test")
+        with patch.object(autostart_fresh, "handoff_ready",
+                          return_value=False), \
+             patch("pm_core.tui.review_loop_ui._auto_review_idle_prs"):
+            autostart_fresh.fresh_start(
+                app, ["pr-a"], policy=None, source="key:za")
         assert auto_start.target_policy(app, "pr-a") == st.POLICY_AUTO
 
     def test_fresh_leaves_unrelated_targets_alone(self, project):
@@ -575,7 +614,8 @@ class _KeyApp:
 
 
 class TestKeyBindings:
-    """`z O`/`z A` are the fresh variants; plain `O`/`A` keep their meaning."""
+    """`z a`/`z O`/`z A` are the fresh variants; plain `a`/`O`/`A` keep their
+    meaning."""
 
     def _fresh_calls(self, monkeypatch):
         calls = []
@@ -587,17 +627,35 @@ class TestKeyBindings:
         monkeypatch.setattr(autostart_fresh, "fresh_start", fake)
         return calls
 
-    def test_z_a_requests_auto_merge_fresh(self, monkeypatch):
+    def test_z_lower_a_requests_fresh_keeping_the_policy(self, monkeypatch):
+        # `z a` is the generic fresh autostart: policy=None preserves an
+        # existing target's policy (wait_for_merge included) and defaults a
+        # new target to stop-before-merge.
+        from pm_core.tui.app import ProjectManagerApp
+        calls = self._fresh_calls(monkeypatch)
+        ProjectManagerApp.action_show_auto_runs(_KeyApp(z=1, pr_id="pr-a"))
+        assert calls == [(["pr-a"], None, "key:za")]
+
+    def test_z_upper_a_requests_auto_merge_fresh(self, monkeypatch):
         from pm_core.tui.app import ProjectManagerApp
         calls = self._fresh_calls(monkeypatch)
         ProjectManagerApp.action_toggle_auto_start(_KeyApp(z=1, pr_id="pr-a"))
         assert calls == [(["pr-a"], st.POLICY_AUTO, "key:zA")]
 
-    def test_z_o_requests_stop_before_merge_fresh(self, monkeypatch):
+    def test_z_upper_o_requests_stop_before_merge_fresh(self, monkeypatch):
         from pm_core.tui.app import ProjectManagerApp
         calls = self._fresh_calls(monkeypatch)
         ProjectManagerApp.action_auto_sequence_pr(_KeyApp(z=1, pr_id="pr-a"))
         assert calls == [(["pr-a"], st.POLICY_STOP, "key:zO")]
+
+    def test_plain_a_opens_the_runs_popup(self, monkeypatch):
+        from pm_core.tui.app import ProjectManagerApp
+        opened = []
+        monkeypatch.setattr(auto_start, "open_runs_popup",
+                            lambda app: opened.append(app))
+        app = _KeyApp(z=0, pr_id="pr-a")
+        ProjectManagerApp.action_show_auto_runs(app)
+        assert opened == [app]
 
     def test_plain_a_still_toggles(self, monkeypatch):
         from pm_core.tui.app import ProjectManagerApp
@@ -608,7 +666,15 @@ class TestKeyBindings:
         ProjectManagerApp.action_toggle_auto_start(app)
         assert app.workers == [sentinel]
 
-    def test_z_a_without_a_selection_does_nothing(self, monkeypatch):
+    def test_z_lower_a_without_a_selection_does_nothing(self, monkeypatch):
+        from pm_core.tui.app import ProjectManagerApp
+        calls = self._fresh_calls(monkeypatch)
+        app = _KeyApp(z=1, pr_id=None)
+        ProjectManagerApp.action_show_auto_runs(app)
+        assert calls == []
+        assert any("No PR selected" in line for line in app.logs)
+
+    def test_z_upper_a_without_a_selection_does_nothing(self, monkeypatch):
         from pm_core.tui.app import ProjectManagerApp
         calls = self._fresh_calls(monkeypatch)
         app = _KeyApp(z=1, pr_id=None)
@@ -688,7 +754,7 @@ class TestPrefixCancellation:
         # "kill existing before next" behaviour.
         from pm_core.tui.app import ProjectManagerApp
         for key in ("s", "S", "d", "e", "v", "n", "L", "m", "H", "c",
-                    "t", "A", "O"):
+                    "t", "a", "A", "O"):
             app = _PrefixApp(z=1)
             ProjectManagerApp.on_key(app, _KeyEvent(key, key))
             assert app._z_count == 1, key

@@ -251,6 +251,7 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
                 yield Label("  [bold]O[/]  Auto-start target (stop before merge)", classes="help-row")
                 yield Label("  [bold]A[/]  Toggle auto-merge target", classes="help-row")
+                yield Label("  [bold]z a[/]  Fresh autostart after feedback (keep merge policy)", classes="help-row")
                 yield Label("  [bold]z O[/]  Fresh autostart after feedback (stop before merge)", classes="help-row")
                 yield Label("  [bold]z A[/]  Fresh autostart after feedback (auto-merge)", classes="help-row")
                 yield Label("  [bold]a[/]  Auto-start runs popup", classes="help-row")

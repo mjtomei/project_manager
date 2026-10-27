@@ -35,10 +35,11 @@ POLICY_WAIT = "wait_for_merge"
 WAIT_KEY = "wait_for_merge"
 POLICIES = (POLICY_STOP, POLICY_AUTO, POLICY_WAIT)
 
-# PR-level marker for the explicit "fresh autostart" action (z O / z A /
-# ``pm autostart fresh``): a later-stage PR was returned to implementation
-# after human feedback and waits for the current implementation turn before
-# one fresh review starts.  See ``pm_core.tui.autostart_fresh``.
+# PR-level marker for the explicit "fresh autostart" action (z a / z O /
+# z A / ``pm autostart fresh``): a later-stage PR was returned to
+# implementation after human feedback and waits for the current
+# implementation turn before one fresh review starts.
+# See ``pm_core.tui.autostart_fresh``.
 FRESH_KEY = "fresh_autostart"
 # The command-line flag selecting each policy (CLI + command bar).
 POLICY_FLAGS = {POLICY_STOP: "--stop-before-merge",
@@ -355,9 +356,9 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
     if status == "in_progress":
         if pr.get("spec_pending"):
             return phase, "waiting", "spec generation awaiting input"
-        # Explicit fresh autostart (z O / z A / `pm autostart fresh`): the PR was
-        # returned to implementation after feedback and waits for the
-        # current implementation turn before one fresh review starts.
+        # Explicit fresh autostart (z a / z O / z A / `pm autostart fresh`):
+        # the PR was returned to implementation after feedback and waits for
+        # the current implementation turn before one fresh review starts.
         if fresh_awaiting(pr):
             idle = (inp.get("impl_idle") or {}).get(pr_id)
             if not win_live("implementation"):

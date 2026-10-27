@@ -1,4 +1,4 @@
-"""Explicit "fresh autostart" (``z O``/``z A`` / ``pm autostart fresh``).
+"""Explicit "fresh autostart" (``z a``/``z O``/``z A`` / ``pm autostart fresh``).
 
 A PR that reached review may be sent back to implementation by hand: the
 user stops the review loop, resumes the *existing* implementation pane with
@@ -533,7 +533,8 @@ def resume_pending(app) -> list[str]:
 def fresh_start(app, ids: list[str], policy: str | None = None,
                 source: str = "command",
                 default_policy: str | None = POLICY_STOP) -> dict:
-    """``z O``/``z A`` / ``pm autostart fresh ID...``: reset, adopt, wait, review.
+    """``z a``/``z O``/``z A`` / ``pm autostart fresh ID...``: reset, adopt,
+    wait, review.
 
     Validation is all-or-nothing (unknown / terminal / no-workdir /
     not-a-later-stage / merge-in-flight reject the whole command before

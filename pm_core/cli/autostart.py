@@ -253,9 +253,9 @@ def autostart():
     the target (or changing its policy) releases only the holds it caused.
 
     \b
-    Fresh autostart (`pm autostart fresh`, TUI `z O` / `z A`) is the explicit
-    workflow reset for a reviewed PR you sent back to implementation after
-    feedback: it keeps the live session, retires the old review/QA/sign-off
+    Fresh autostart (`pm autostart fresh`, TUI `z a` / `z O` / `z A`) is the
+    explicit workflow reset for a reviewed PR you sent back to implementation
+    after feedback: it keeps the live session, retires the old review/QA/sign-off
     state, and waits for the current implementation turn before one fresh
     review.  Plain `add` never rewinds.
 
@@ -269,9 +269,9 @@ def autostart():
       pm autostart list --json
       pm autostart status --json
 
-    TUI: press `a` for the live runs popup, `z O` / `z A` for fresh autostart; the
-    command bar accepts the same verbs (`autostart add X`, `autostart
-    fresh X`, `autostart status`, ...).
+    TUI: press `a` for the live runs popup, `z a` for fresh autostart
+    (`z O` / `z A` force the merge policy); the command bar accepts the same
+    verbs (`autostart add X`, `autostart fresh X`, `autostart status`, ...).
     """
 
 
@@ -333,7 +333,7 @@ def autostart_add(pr_ids, stop, auto, wait, session, timeout, as_json):
 @_timeout_opt
 @_json_opt
 def autostart_fresh(pr_ids, stop, auto, wait, session, timeout, as_json):
-    """Return reviewed PR_IDS to implementation after feedback (z O / z A).
+    """Return reviewed PR_IDS to implementation after feedback (z a / z O / z A).
 
     Use this when a PR already reached review/QA/sign-off, you stopped the
     loop, resumed its *existing* implementation pane with feedback, and want

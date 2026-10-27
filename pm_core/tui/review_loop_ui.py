@@ -991,9 +991,9 @@ def _poll_impl_idle(app) -> None:
 
         tracker.poll(pr_id)
 
-        # Explicit fresh autostart (z O / z A / `pm autostart fresh`): the PR was
-        # returned to implementation after feedback and waits for the
-        # *current* turn to finish.  Use the dedicated handoff check rather
+        # Explicit fresh autostart (z a / z O / z A / `pm autostart fresh`):
+        # the PR was returned to implementation after feedback and waits for
+        # the *current* turn to finish.  Use the dedicated handoff check rather
         # than the generic one-shot became_idle(), which cannot distinguish a
         # stale idle flag from the user's resumed turn (and must not be
         # advanced by an old hook event).

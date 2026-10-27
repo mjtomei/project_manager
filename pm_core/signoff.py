@@ -258,10 +258,11 @@ def fresh_recorded_verdict(pr: dict, current_sha: str | None) -> str | None:
     sha = record.get("sha")
     if record.get("invalidated") or is_legacy_approval(record):
         return None
-    # A fresh autostart (``z O``/``z A`` / ``pm autostart fresh``) supersedes every
-    # verdict recorded before it: even a record whose sha still matches HEAD
-    # verified the pre-feedback code, not the reworked branch.  The reset
-    # also invalidates the record; this guards a racing/legacy write.
+    # A fresh autostart (``z a``/``z O``/``z A`` / ``pm autostart fresh``)
+    # supersedes every verdict recorded before it: even a record whose sha
+    # still matches HEAD verified the pre-feedback code, not the reworked
+    # branch.  The reset also invalidates the record; this guards a
+    # racing/legacy write.
     from pm_core.autostart_state import fresh_requested_at
     since = fresh_requested_at(pr)
     if since and record.get("ts"):
