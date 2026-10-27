@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-064fe5b
+  active_pr: pr-e102089
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -29479,7 +29479,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-27T00:22:12.367130+00:00'
+  updated_at: '2026-10-27T00:34:34.804007+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29912,6 +29912,29 @@ prs:
       on master).'
     created_at: '2026-10-27T00:22:12Z'
     last_edited: '2026-10-27T00:22:12Z'
+  - id: note-04c8a55
+    text: 'QA S29 (2026-10-27) PASS on 787e87f0, no code change. Story 1: execution-only
+      `pm qa run` (shell in a detached driver window) created qa-pr-95325c4 with the
+      branch main pane (`echo "QA execution"; exec sleep infinity`) + qa_status.py
+      split, qa-planner count 1 in flight, Result: PASS + FINALIZE_DONE, three panes
+      at the end (main/qa-status/qa-finalize, one of each role); the parked client
+      stayed on `main` in all 273 samples and L painted "Launched log pane" registering
+      log %11 under @0. Story 2: killed @5/@6, re-ran -> new @10 with main+status
+      and one qa-planner; registry prune removed @5/@6 but kept PR B @7/@8 with all
+      panes; client on main in all 378 samples. Story 3: over the sticky "Review loop
+      done ... ✓ PASS (1 iteration)", L -> "Focused existing log pane", first v ->
+      "Launched plan pane" (one plan role %28, one less process), second v -> "Focused
+      existing plan pane", plan count still 1. Story 4: tests/test_qa_execution_only_window.py
+      + tests/test_pane_registry.py = 51 passed (incl. both prune guard tests); supplemental
+      tests/test_qa_background_focus.py 19 passed. Harness gotchas: `pm qa run` from
+      a plain shell outside tmux finds no session, so drive it from a tmux pane; `tmux
+      pipe-pane -o` silently keeps an existing pipe, so the story-3 scrollback pipe
+      was not created (cast + pyte frames used instead). Incidental finding filed
+      as pr-e102089: `pm qa run` on a closed PR prints "Result: UNKNOWN" exit 0 and
+      outside a session prints a bare "Result: ERROR" — the skip reason is dropped.
+      Evidence: /pm-captures/scenarios/29/.'
+    created_at: '2026-10-27T00:34:34Z'
+    last_edited: '2026-10-27T00:34:34Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -34585,6 +34608,44 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T16:24:28.617755+00:00'
   updated_at: '2026-10-22T16:24:28.617755+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e102089
+  plan: bugs
+  title: 'Bug: pm qa run reports "Result: UNKNOWN"/"Result: ERROR" with no reason
+    when QA is skipped (closed/merged PR, or no pm session)'
+  branch: pm/pr-e102089-bug-pm-qa-run-reports-result-unknown-result-error-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py run_qa_sync early returns + pm_core/cli/qa.py
+    qa_run.
+
+
+    Repro A (closed PR): in a pm session, mark a PR closed (pm pr edit <pr> --status
+    closed) and run `pm qa run <instruction> --pr <pr>` from a shell inside the session.
+    run_qa_sync logs "QA aborted: <pr> is closed; not running QA against a merged/closed
+    PR" and returns without setting latest_verdict, so the CLI prints "Result: UNKNOWN"
+    and exits 0 — nothing tells the user QA was deliberately skipped, and an automation
+    driver sees success.
+
+
+    Repro B (no session): run `pm qa run <instruction> --pr <pr>` from a shell outside
+    tmux. run_qa_sync sets latest_output="No pm session found" and returns before
+    on_update is ever called, so the CLI prints only "Result: ERROR" with the reason
+    dropped.
+
+
+    Seen during QA scenario 29 on pr-f094946 (execution-only `pm qa run` ownership
+    checks); the scenario itself passed. Suggested fix: surface the early-return reason
+    (CLI echo and/or _notify before returning) and use a non-zero exit code for skipped
+    runs.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T00:34:05.592694+00:00'
+  updated_at: '2026-10-27T00:34:05.592694+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
