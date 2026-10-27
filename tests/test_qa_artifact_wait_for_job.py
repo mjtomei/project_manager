@@ -289,8 +289,7 @@ class TestWaitOutcomes:
         its children, so a plain TERM leaves the whole group alive and the
         trap blocks in ``wait``.  Left to itself that ends only via
         ``timeout``'s own ``--kill-after`` grace (~10s here, and not honoured
-        by every ``timeout`` implementation), and a second Ctrl-C does
-        nothing because the trap is cleared.  The helper must bound the
+        by every ``timeout`` implementation).  The helper must bound the
         interrupt itself.
         """
         art = tmp_path / "recording.mp4"
@@ -320,6 +319,42 @@ class TestWaitOutcomes:
         # Bounded by KILL_GRACE (1s here), not by timeout's own --kill-after
         # grace, which costs ~10s for the same job.
         assert elapsed < 5, f"interrupt took {elapsed:.1f}s"
+        _wait_gone(job_pid)
+
+    def test_second_interrupt_does_not_abandon_cleanup(self, tmp_path):
+        """A repeated signal must not kill the helper mid-cleanup.
+
+        Once the interrupt handler starts it stops the job's group and waits
+        for it, so further TERM/INT/HUP are ignored until that finishes.  If
+        the handler restored the *default* disposition instead, a second
+        Ctrl-C (or a supervisor's repeated kill) would terminate the helper
+        before it reported the interruption, leaving the diagnostic unsaid
+        and the cleanup to the escalator alone.
+        """
+        art = tmp_path / "recording.mp4"
+        pid_file = tmp_path / "job.pid"
+        proc = subprocess.Popen(
+            ["bash", str(HELPER), "--timeout", "120", "--artifact", str(art),
+             "-c", f'trap "" TERM; echo $$ > {shlex.quote(str(pid_file))}; '
+                    'sleep 60'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=dict(os.environ, WAIT_FOR_JOB_KILL_GRACE="2"))
+        try:
+            deadline = time.monotonic() + 10
+            while not pid_file.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert pid_file.exists(), "job never started"
+            job_pid = int(pid_file.read_text().strip())
+            proc.terminate()
+            time.sleep(0.3)          # let the handler start its cleanup
+            proc.terminate()         # and interrupt it again
+            _, err = proc.communicate(timeout=30)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.communicate()
+        assert proc.returncode == 130, (proc.returncode, err)
+        assert "interrupted" in err
         _wait_gone(job_pid)
 
     def test_interrupt_kills_a_term_ignoring_descendant(self, tmp_path):
@@ -771,7 +806,7 @@ class TestRecipeInvocation:
 
     def _run(self, name, tmp_path, *, agg_body=': > "$4"', codec="h264",
              ffmpeg_body='for last; do :; done\nprintf video > "$last"',
-             pre_existing_mp4=False):
+             pre_existing_mp4=False, recipe_dir=None):
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
 
@@ -804,7 +839,7 @@ class TestRecipeInvocation:
         env = dict(
             os.environ,
             PATH=f"{bin_dir}:{os.environ.get('PATH', '')}",
-            RECIPE_DIR=str(ARTIFACTS),
+            RECIPE_DIR=str(ARTIFACTS if recipe_dir is None else recipe_dir),
         )
         r = subprocess.run(["bash", "-c", block], capture_output=True,
                            text=True, env=env, timeout=120)
@@ -828,6 +863,25 @@ class TestRecipeInvocation:
         r, _ = self._run(name, tmp_path, codec="vp9")
         assert r.returncode == 4, r.stderr
         assert "failed validation" in r.stderr
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_missing_helper_fails_with_an_actionable_message(self, name,
+                                                             tmp_path):
+        """A wrong RECIPE_DIR must fail loudly, not skip the render.
+
+        The helper ships beside the recipe in the scenario's
+        ``qa-artifacts/`` directory, so a worker that leaves ``RECIPE_DIR``
+        at its default in a container where the repo root is not the cwd
+        would otherwise get a bare "No such file or directory" — and the
+        render would silently never run.
+        """
+        empty = tmp_path / "nowhere"
+        empty.mkdir()
+        r, mp4 = self._run(name, tmp_path, recipe_dir=str(empty))
+        assert r.returncode == 1, r.stderr
+        assert "wait-for-job.sh missing or not executable" in r.stderr
+        assert "RECIPE_DIR" in r.stderr
+        assert not mp4.exists()
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_unrewritten_artifact_is_stale(self, name, tmp_path):

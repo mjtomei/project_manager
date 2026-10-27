@@ -86,10 +86,10 @@ When a command outlives one shell step (a renderer, a test suite, a build):
   created or rewritten by this run, non-empty, and valid where a validator
   exists (e.g. `ffprobe` for video). A leftover file alone is not evidence.
 
-For renderer jobs, use the shared `wait-for-job.sh` helper (`--timeout`,
-`--artifact`, optional `--validate`): `pm/qa/artifacts/wait-for-job.sh` from
-the repo root, or the copy that ships beside the recipe you are following.
-The recording recipes show it in use.
+For renderer jobs, use the shared `wait-for-job.sh` helper if it is present
+(`--timeout`, `--artifact`, optional `--validate`): the repo's
+`pm/qa/artifacts/wait-for-job.sh`, or the copy that ships beside the recipe
+you are following. The recording recipes show it in use.
 """
 
 

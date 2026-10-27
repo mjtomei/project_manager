@@ -33,7 +33,9 @@
 # after a short grace period (`WAIT_FOR_JOB_KILL_GRACE`, default 5s) — and
 # reports the interruption: a killed wait is never passed off as a job failure,
 # never hangs on a job that ignores SIGTERM, and never leaves a renderer
-# running behind it to race a later run over the artifact.
+# running behind it to race a later run over the artifact. Further signals
+# during that cleanup are ignored, so a second Ctrl-C cannot kill the helper
+# before it has stopped the job and said what happened.
 #
 # Exit status:
 #   0  job exited 0 and the artifact is fresh (and --validate passed)
@@ -105,10 +107,11 @@ job_pid=""
 
 # How long an interrupted job gets to honour SIGTERM before it is killed
 # outright. A job (or a shell it runs under) that ignores TERM keeps the trap
-# blocked in `wait`, and a second Ctrl-C does nothing because the trap has been
-# cleared — so the interrupt path needs its own explicit bound rather than
-# relying on `timeout`'s `--kill-after` (an implementation detail that costs
-# ~10s here and is not available everywhere).
+# blocked in `wait`, so the interrupt path needs its own explicit bound rather
+# than relying on `timeout`'s `--kill-after` (an implementation detail that
+# costs ~10s here and is not available everywhere). The bound is enforced by
+# the escalator subshell below, which still fires if this helper is killed
+# outright.
 KILL_GRACE=${WAIT_FOR_JOB_KILL_GRACE:-5}
 case "$KILL_GRACE" in ''|*[!0-9]*) KILL_GRACE=5 ;; esac
 
@@ -139,13 +142,17 @@ job_group_alive() {
 # — a misleading diagnostic and an orphan that can race a retry over the same
 # artifact.
 on_signal() {
-  trap - TERM INT HUP
+  # *Ignore* further signals rather than restoring the default disposition:
+  # the cleanup below can take up to KILL_GRACE, and a second Ctrl-C (or a
+  # supervisor re-sending TERM) must not kill the helper before it has
+  # stopped the job and reported the interruption.
+  trap '' TERM INT HUP
   if [ -n "$job_pid" ]; then
     signal_job TERM
-    # Escalator: a child of this shell (so it inherits no ignored disposition)
-    # that SIGKILLs the job's group if the grace period runs out; if this
-    # helper is itself killed outright, the escalator still stops the
-    # orphaned renderer.
+    # Escalator: SIGKILLs the job's group if the grace period runs out. It
+    # inherits the ignored dispositions above, so it also survives a
+    # group-wide Ctrl-C — and if this helper is killed outright, it still
+    # stops the orphaned renderer.
     ( sleep "$KILL_GRACE"; signal_job KILL ) &
     escalator=$!
     wait "$job_pid" 2>/dev/null || true
@@ -156,7 +163,10 @@ on_signal() {
     if job_group_alive; then
       wait "$escalator" 2>/dev/null || true
     else
-      kill "$escalator" 2>/dev/null || true
+      # SIGKILL, not TERM: the escalator ignores TERM (it inherited the
+      # ignored dispositions), and waiting out its sleep would delay the
+      # interrupt by the whole grace period for no reason.
+      kill -KILL "$escalator" 2>/dev/null || true
       wait "$escalator" 2>/dev/null || true
     fi
   fi

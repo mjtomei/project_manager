@@ -186,6 +186,17 @@ verifier's FLAGGED rule is asserted there too, not only the prose paragraph.
   ignores SIGTERM is SIGKILLed once `KILL_GRACE` expires, so the interrupt
   path is explicitly bounded instead of depending on `timeout`'s own
   `--kill-after`.
+- A *second* signal during that cleanup does not kill the helper mid-way: the
+  handler sets SIG_IGN (not the default disposition), so the helper always
+  finishes stopping the job's group, prints "interrupted" and exits 130
+  (review loop i10). Asserted by `test_second_interrupt_does_not_abandon_cleanup`.
+  The escalator subshell inherits the ignored dispositions, which is why
+  cancelling it uses SIGKILL rather than TERM.
+- The recipe render block fails with an actionable message when
+  `wait-for-job.sh` is not where `RECIPE_DIR` points (the default only
+  resolves at the repo root), instead of a bare "No such file or directory"
+  with the render silently skipped (review loop i10). Asserted by
+  `TestRecipeInvocation::test_missing_helper_fails_with_an_actionable_message`.
 - A *descendant* of the job that ignores TERM (or is orphaned when its parent
   dies) does not outlive a timeout or an interrupt: reaping the `timeout`
   wrapper does not mean the group is empty, so the helper KILLs the group it

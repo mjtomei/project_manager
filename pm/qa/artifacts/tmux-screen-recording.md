@@ -114,6 +114,13 @@ refuses a stale or invalid artifact:
 # directory holding the recipe you are reading.
 RECIPE_DIR="${RECIPE_DIR:-pm/qa/artifacts}"
 JOB_WAIT="$RECIPE_DIR/wait-for-job.sh"
+# A wrong RECIPE_DIR would otherwise surface as a bare "No such file or
+# directory" and the render would silently never run.
+if [ ! -x "$JOB_WAIT" ]; then
+    echo "wait-for-job.sh missing or not executable at $JOB_WAIT — set" \
+        "RECIPE_DIR to the directory holding this recipe" >&2
+    exit 1
+fi
 
 cast=<capture-dir>/recording.cast
 mp4="${cast%.cast}.mp4"
