@@ -32703,7 +32703,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T01:46:30.339195+00:00'
+  updated_at: '2026-10-27T01:46:41.397928+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33277,6 +33277,28 @@ prs:
       the clean base move. Captures: /pm-captures/scenarios/14/.'
     created_at: '2026-10-27T01:46:30Z'
     last_edited: '2026-10-27T01:46:30Z'
+  - id: note-e2bbe9c
+    text: 'QA scenario 17 (resolver accept/refuse + honest unreconciled reporting)
+      PASS on 481644d5 — no code change. All four stories held live: bookkeeping-only
+      timestamp conflict resolved by record id (delta shows the later updated_at winning,
+      branch note + base status both surviving; workdir HEAD/branch/status/unrelated
+      files untouched, no integration.json); `--no-resolve` refused the same fixture
+      as a plain conflict with nothing written; a real field conflict was labelled
+      `attempted: pm/project.yaml (by record id — NOT resolved)` with the `unresolved:`
+      line on stderr, recorded `status: conflict` with no diff_path and an empty diff,
+      and the `--fresh` launch repeated the failure; `pm pr signoff record` refused
+      the MERGE report over the conflicted check and the second `pm pr auto-sequence`
+      tick coerced it to SIGNOFF_IMPL with the reason recorded in signoff_return.
+      Captures: /pm-captures/scenarios/17/ (story12 + story34, cast+mp4). Harness
+      traps for the next run: (1) `source /tmp/pm-venv/bin/activate` RESETS PATH,
+      so export /usr/bin first AFTER sourcing — otherwise the local-backend fetch
+      goes through the ~/.local/bin/git wrapper and records base_sha: null; (2) do
+      not record/drive pm from a separate `tmux -L <socket>` scaffold — pm resolves
+      the pm session on the default socket, so sign-off/auto-sequence print "tmux
+      session not found" and open no window; record inside a window of the pm session;
+      (3) `pm qa captures-path` must run with the test project as cwd.'
+    created_at: '2026-10-27T01:46:41Z'
+    last_edited: '2026-10-27T01:46:41Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
