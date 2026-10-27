@@ -23,8 +23,8 @@ Safety rules:
     are then counted from runtime stats) or the entry is dequeued.
   - Entries are owned by a process *instance* (pid + start time + a nonce
     regenerated on every exec), so entries from a dead process, a recycled
-    PID, or this process's own pre-restart incarnation are dropped (the
-    latter only once no resumed QA run still expects to adopt them).  Waiting
+    PID, or this process's own pre-restart incarnation are dropped (by
+    this process only once no resumed QA run expects to adopt them).  Waiting
     entries must be kept alive by their owner's retries; an owner that stops
     retrying loses its entries after ``_WAITING_TTL`` seconds.
 """
@@ -252,21 +252,32 @@ def _is_pre_restart(entry: dict) -> bool:
             and entry.get("instance") not in (None, _INSTANCE))
 
 
+def _owner_gone(entry: dict) -> str:
+    """Why *entry*'s owner can no longer renew it, or "" if it still can."""
+    pid = entry.get("pid")
+    if pid is None:
+        return ""
+    if pid == os.getpid():
+        if _is_pre_restart(entry):
+            return "owned by this process's pre-restart instance"
+        return ""
+    if not _is_pid_alive(pid):
+        return f"pid {pid} dead"
+    recorded = entry.get("pid_start")
+    current = _proc_start_time(pid) if recorded else None
+    if recorded and current and recorded != current:
+        return f"pid {pid} recycled"
+    return ""
+
+
 def _stale_reason(entry: dict, now: float) -> str:
     """Why *entry* is stale, or "" when it is still owned."""
-    pid = entry.get("pid")
-    if pid is not None:
-        if pid == os.getpid():
-            if (_is_pre_restart(entry)
-                    and entry.get("qa_run_id") not in _awaiting_adoption):
-                return "owned by this process's pre-restart instance"
-        elif not _is_pid_alive(pid):
-            return f"pid {pid} dead"
-        else:
-            recorded = entry.get("pid_start")
-            current = _proc_start_time(pid) if recorded else None
-            if recorded and current and recorded != current:
-                return f"pid {pid} recycled"
+    gone = _owner_gone(entry)
+    # A run this process resumed keeps its entries until it adopts them,
+    # whether the old owner was this process before a re-exec or a TUI that
+    # crashed and came back under a new PID.
+    if gone and entry.get("qa_run_id") not in _awaiting_adoption:
+        return gone
     status = entry.get("status")
     if status == "waiting":
         beat = entry.get("heartbeat_at") or entry.get("enqueued_at") or 0
@@ -626,10 +637,11 @@ def expect_adoption(qa_run_ids: list[str]) -> None:
     waits on the lock and can time out while another process holds it.
     Until the run adopts (or :func:`dequeue_run` / :func:`cancel_adoption`
     releases it), this process's cleans keep its pre-restart entries
+    (owned by this process before a re-exec, or by a dead TUI it replaced)
     instead of dropping them as stale, so another resumed loop that gets the
     lock first does not cost the run its place in line (QA S52).  The TTLs
-    still apply.  Other processes cannot tell a pre-restart instance from a
-    live one and keep such entries anyway.
+    still apply.  Other processes keep a pre-restart instance's entries
+    anyway (they cannot tell it from a live one), but drop a dead owner's.
     """
     _awaiting_adoption.update(qa_run_ids)
 
@@ -665,7 +677,7 @@ def adopt_run(qa_run_id: str, keys: list[str]) -> dict[str, str]:
         for e in queue["entries"]:
             key = e.get("key")
             if (key not in wanted or e.get("qa_run_id") != qa_run_id
-                    or not (_is_mine(e) or _is_pre_restart(e)
+                    or not (_is_mine(e) or _owner_gone(e)
                             or _stale_reason(e, now))):
                 continue
             if e.get("status") == "acquired":

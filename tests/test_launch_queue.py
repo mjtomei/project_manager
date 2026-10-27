@@ -739,6 +739,27 @@ class TestOwnership:
             assert not awaiting_adoption("b")
         assert b == {"b:s1": before["b:s1"], "b:s2": before["b:s2"]}
 
+    def test_expected_adoption_keeps_a_dead_previous_tuis_entries(
+            self, tmp_path):
+        """A TUI that crashed comes back under a new PID: until its resumed
+        run adopts, this process's cleans keep the dead owner's entries of
+        that run (only), and adoption then takes them over by id."""
+        with _patch_home(tmp_path):
+            enqueue("qa_scenario", qa_run_id="a", keys=["a:s1"])
+            enqueue("qa_scenario", qa_run_id="b", keys=["b:s1"])
+            q = _load_queue()
+            for e in q["entries"]:
+                e["pid"] = 999999999
+            _save_queue(q)
+            a_id = q["entries"][0]["id"]
+            expect_adoption(["a"])
+            enqueue("impl", keys=["pm-x-impl"])
+            assert ([e["key"] for e in _load_queue()["entries"]]
+                    == ["a:s1", "pm-x-impl"])
+            assert adopt_run("a", ["a:s1"]) == {"a:s1": a_id}
+            entry = _load_queue()["entries"][0]
+        assert entry["pid"] == os.getpid() and entry["instance"] == _INSTANCE
+
     @pytest.mark.parametrize("release", ["cancel", "dequeue_run", "adopt"])
     def test_pre_restart_entries_stale_once_no_adoption_expected(
             self, tmp_path, release):

@@ -74,8 +74,9 @@ loop (review 05f6 i4).  Adoption can time out while another process
 holds the lock (QA S52: a 180 s hold).  So the TUI marks the resumed runs as
 expecting adoption (`launch_queue.expect_adoption`) before the adoption
 thread starts.  Until a run adopts, or `dequeue_run` / `cancel_adoption`
-releases it, this process's cleans keep its pre-restart entries; the
-waiting/acquired TTLs still apply, so a hold past ~300 s still costs them.
+releases it, this process's cleans keep its pre-restart entries, both
+a re-exec's (same PID) and those of a crashed TUI it replaced (dead PID;
+review 0149 i4); the waiting/acquired TTLs still apply, so a hold past ~300 s still costs them.
 A resumed loop that still expects adoption retries it for all its queued
 scenarios before its first enqueue (review 0149 i2).  A resumed run with no
 queued scenario has nothing to adopt and stops expecting adoption at once,
