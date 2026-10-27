@@ -168,6 +168,25 @@ class TestMissingOutputRecovery:
         assert rec.last_kind == "no_verdict"
         assert "standalone outcome" in sent[0]
 
+    def test_quoted_provider_error_among_findings_is_not_no_output(
+            self, tmp_path):
+        """Only a turn that *ended on* the error is a transport failure.
+
+        A completed review that quotes a log excerpt is asking for its own
+        outcome, not to resume work it already finished.
+        """
+        rec, sent = _recovery(tmp_path)
+        transcript = _transcript_with_assistant(
+            tmp_path,
+            "The worker crashed with:\n"
+            "API Error: Connection lost\n"
+            "so the retry path never ran. Please handle this case.")
+
+        rec.handle(str(transcript), ev_ts=1.0)
+
+        assert rec.last_kind == "no_verdict"
+        assert "standalone outcome" in sent[0]
+
     def test_retry_prompt_overrides_resume_request(self, tmp_path):
         rec, sent = _recovery(tmp_path, resume_request="ORIGINAL PROMPT")
         transcript = _transcript_without_assistant(tmp_path)

@@ -152,8 +152,11 @@ def _expected_outcomes(verdicts: tuple[str, ...]) -> str:
 # A turn that ended on a provider/transport error (rather than completing
 # the task) must be *resumed*, not asked to re-emit an outcome.  Claude Code
 # surfaces these as a short assistant line such as "API Error: Connection
-# lost" / "Request failed: network error".  Match only line-leading forms so
-# a genuine review discussing network-error handling is not misclassified.
+# lost" / "Request failed: network error".  Match only a line-leading form so
+# a genuine review discussing network-error handling is not misclassified,
+# and only the *final* non-empty line so a completed review that quotes an
+# error line among its findings (e.g. a log excerpt) is not mistaken for a
+# turn that produced no output.
 _PROVIDER_ERROR_RE = re.compile(
     r"(?i)^\W*(?:api error|request failed|connection (?:lost|error|reset|"
     r"refused)|network error|socket hang up|econnreset|etimedout|"
@@ -164,7 +167,16 @@ _PROVIDER_ERROR_RE = re.compile(
 
 
 def _looks_like_provider_error(text: str) -> bool:
-    return any(_PROVIDER_ERROR_RE.match(line) for line in text.splitlines())
+    """True when the turn *ended on* a line-leading provider error.
+
+    Only the last non-empty line counts: the connection-loss turn's final
+    assistant text is the error, whereas a review that merely quotes an
+    error line earlier in its output completed normally.
+    """
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return False
+    return bool(_PROVIDER_ERROR_RE.match(lines[-1]))
 
 
 def build_outcome_request(verdicts: tuple[str, ...]) -> str:

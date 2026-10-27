@@ -87,8 +87,10 @@ turn with `read_latest_assistant_text`:
   completed work or repeat completed tests." If the caller supplies
   `retry_prompt`, send that instead (this is the configurable "re-send the
   original prompt" knob; the callers in this PR use the safe resume message).
-  The provider-error match is line-leading only, so review prose discussing
-  connection handling is not misclassified.
+  The provider-error match is line-leading and applies only to the turn's
+  *final* non-empty line, so review prose discussing connection handling — or
+  a completed review quoting an error line in its findings — is not
+  misclassified.
 * **`no_verdict`** — the turn has text but no standalone outcome (the audited
   `NEEDS_WORK — explanation` shape): send an *outcome* request that asks only
   for the agent's own standalone conclusion, e.g. "Re-emit only your own
@@ -216,6 +218,12 @@ non-blocking `hook_events.read_event` that counts **only** a newer
 `idle_prompt` — matching the blocking `wait_for_event` filter. A newer
 `Stop` / `permission_prompt` write is not a turn boundary and must not defer
 (or close) a no-verdict episode.
+
+`max_deferrals` is bounded by default (`DEFAULT_MAX_DEFERRALS = 10`); passing
+`None` uses that default and passing `<= 0` disables the bound entirely (only
+safe when a caller knows hook refreshes terminate). `retry_prompt` /
+`resume_request` must be a single line: it is delivered through
+`tmux send-keys`, so embedded newlines would submit partial input.
 
 `poll_for_verdict` grows the kwargs in R1 and, after a non-matching idle:
 
@@ -354,6 +362,8 @@ values (e.g. `0.5`) are accepted by `pm set`.
 * `tests/test_loop_recovery.py` (new): shared recovery unit tests —
   no-verdict nudge then success; exhaustion after N; no-output → resume
   message; output → outcome message that names no specific verdict; a
+  provider error is only recognised on the turn's final line (a quoted
+  error line among findings is `no_verdict`); a
   genuine newer turn during settle defers and resets; a hook refresh of the
   same turn defers without resetting and exhausts with `no_progress`
   (including the `poll_for_verdict` and QA-tick-loop integration cases);
