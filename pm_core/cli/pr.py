@@ -3577,6 +3577,26 @@ def _qa_run_started_since(pr_id: str, iso_ts: str | None) -> bool:
     return own_run_started_since(pr_id, since)
 
 
+def _qa_run_starting(pr_id: str, iso_ts: str | None) -> bool:
+    """Whether this pm session started a QA run of *pr_id* less than a
+    launch claim's expiry ago (and at or after the ISO timestamp *iso_ts*
+    when given): a driver still killing the judged run's windows and
+    planning, before its own qa window and status exist.  The TUI's REQA
+    hop holds no launch claim, so its start record is the only sign of it
+    (S91).  A run that died before opening a window stops counting once
+    that expiry passes, like a claim whose launcher died."""
+    import time
+    from pm_core.qa_loop import own_run_started_since
+    from pm_core.signoff import RETURN_LAUNCH_CLAIM_SECONDS, parse_ts
+    since = time.time() - RETURN_LAUNCH_CLAIM_SECONDS
+    if iso_ts:
+        try:
+            since = max(since, parse_ts(iso_ts).timestamp())
+        except (TypeError, ValueError):
+            pass
+    return own_run_started_since(pr_id, since)
+
+
 def _qa_status_for(pr_id: str) -> tuple[str | None, Path | None]:
     """Find the latest QA status.json for *pr_id*; return (overall, path)."""
     import json
@@ -3830,14 +3850,16 @@ def pr_auto_sequence(pr_id: str):
             qa_win = tmux_mod.find_window_by_name(
                 pm_session, f"qa-{display_id}",
             ) if pm_session else None
+            return_ts = (open_return(pr_entry) or {}).get("ts")
             if awaiting == "qa":
-                if qa_win and _qa_run_started_since(
-                        pr_id, (open_return(pr_entry) or {}).get("ts")):
+                if (qa_win and _qa_run_started_since(pr_id, return_ts)) \
+                        or _qa_run_starting(pr_id, return_ts):
                     # The TUI started the re-run while project.yaml was
                     # busy: its clear of ``awaiting`` is still pending (the
                     # poll tick retries it), and a tick queued on the lock
                     # got it first at the release (S87).  That run's window
-                    # is the re-run's, not the judged run's.
+                    # is the re-run's, not the judged run's (or it has
+                    # none yet: it is still replacing the judged run's).
                     click.echo("running: qa")
                     return
                 # Sign-off sent this back to QA and no driver has started
@@ -3857,8 +3879,12 @@ def pr_auto_sequence(pr_id: str):
             else:
                 # The re-run's driver cleared ``awaiting`` and is replacing
                 # the judged run's window: its claim still stands.
+                # A TUI driver holds no claim: its start record stands in
+                # until its window exists (S91: two ticks 2 s apart each
+                # launched qa-run-bg over a TUI REQA re-run in that gap).
                 from pm_core.signoff import return_launch_claimed
-                if return_launch_claimed(pr_entry, "qa"):
+                if return_launch_claimed(pr_entry, "qa") \
+                        or _qa_run_starting(pr_id, return_ts):
                     click.echo("running: qa")
                     return
             _launch_qa_detached(root, pr_id)

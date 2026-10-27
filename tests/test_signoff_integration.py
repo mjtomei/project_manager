@@ -461,6 +461,47 @@ def test_cli_qa_return_whose_rerun_started_is_left_to_it(
         claim.assert_not_called()
 
 
+@pytest.mark.parametrize("awaiting, run_age, after_return, record, launched", [
+    (None, 3, True, {}, False), ("qa", 3, True, {}, False),
+    (None, 3, False, {}, True), ("qa", 3, False, {}, True),
+    (None, 400, True, {}, True), ("qa", 400, True, {}, True),
+    (None, 3, True, {"session_tag": "other-clone"}, True)])
+def test_cli_qa_return_whose_rerun_is_still_starting_is_left_to_it(
+        tmp_path, monkeypatch, awaiting, run_age, after_return, record,
+        launched):
+    """S91: the TUI's REQA hop started the re-run (no launch claim) and, with
+    the lock free, cleared ``awaiting`` at once; for seconds its run kills
+    the judged run's windows and plans before its own qa window exists.  A
+    tick in that gap must not launch qa-run-bg (two ticks 2 s apart each
+    did).  A run record from before the return, older than a claim's
+    expiry, or another clone's still leaves the tick to launch."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    now = time.time()
+    start = now - run_age
+    ret = start + (-1 if after_return else 1)
+    ts = datetime.fromtimestamp(ret, timezone.utc).isoformat()
+    _qa_run_record(tmp_path / "home", start, **record)
+    claim = MagicMock(return_value=True)
+    entry = _returned("qa", "qa", ts=ts)
+    entry["signoff_return"]["awaiting"] = awaiting
+    result, _, _, qa = _seq(
+        tmp_path, entry,
+        **{"pm_core.cli.pr._qa_status_for": {"return_value": (None, None)},
+           "pm_core.cli.pr.tmux_mod.find_window_by_name":
+               {"return_value": None},
+           "pm_core.qa_loop.get_pm_session": {"return_value": "pm-test"},
+           "pm_core.cli.pr._check_qa_launch": {"return_value": None},
+           "pm_core.signoff.claim_return_launch": {"new": claim}})
+    assert result.exit_code == 0, result.output
+    if launched:
+        assert result.output.strip() == "running: qa (launched)"
+        qa.assert_called_once()
+    else:
+        assert result.output.strip() == "running: qa"
+        qa.assert_not_called()
+        claim.assert_not_called()
+
+
 def _review_transcripts(tmp_path, *iters):
     tdir = tmp_path / "transcripts" / "auto-sequence" / PR
     tdir.mkdir(parents=True)
