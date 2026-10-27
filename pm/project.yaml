@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T22:11:09.049317+00:00'
+  updated_at: '2026-10-27T22:19:48.069028+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11086,6 +11086,18 @@ prs:
       Captures /pm-captures/scenarios/62.'
     created_at: '2026-10-27T22:11:08Z'
     last_edited: '2026-10-27T22:11:08Z'
+  - id: note-f2242e4
+    text: 'QA S59 (2026-10-27, b94fb58c, nested rootless podman, fake-claude): all
+      stories PASS live, no code change. Fit-2 admission, waiting_memory reasons,
+      Queue depth 1 (:s3 key only), first retry 18 s then 15-16 s, +16g raise launched
+      s3 in 10 s, dim queued with no key at cap, IR suffix + :s4 key, NW/verified-PASS
+      removal ~12 s then next launch, E1 reason on 5 rows with :s1-:s3 keys, zz t
+      during verify gives INPUT_REQUIRED reason, no crash, clean queue. Calibration:
+      nested podman counts ~2.9G per container, so use target X+35 (not X+40) and
+      reserve 0g on a shared host with <55G free. Filed pr-648ebc9 (misleading "verifier
+      pane disappeared" log on QA stop). Captures /pm-captures/scenarios/59.'
+    created_at: '2026-10-27T22:19:48Z'
+    last_edited: '2026-10-27T22:19:48Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
