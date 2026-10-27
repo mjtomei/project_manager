@@ -207,7 +207,12 @@ if { [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; } && \
   exit 3
 fi
 if [ "$status" -eq 125 ]; then
-  printf 'wait-for-job: timeout could not start the job (status 125)\n' >&2
+  # `timeout` returns 125 when it cannot run the job, but it also passes a
+  # job's own 125 straight through (e.g. `docker run` on a daemon error), and
+  # the two are indistinguishable here. Name both rather than blaming
+  # `timeout` for a job that really did run and fail.
+  printf 'wait-for-job: job exited 125 after %ss — either timeout could not start it or the job itself returned 125\n' \
+      "$elapsed" >&2
   exit 1
 fi
 if [ "$status" -ne 0 ]; then

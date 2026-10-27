@@ -170,6 +170,10 @@ verifier's FLAGGED rule is asserted there too, not only the prose paragraph.
 - Job exits non-zero *after* writing a valid artifact → fail (exit status wins).
 - Job exits 124 on its own (rare) → only classified as timeout when elapsed ≥
   the bound; otherwise reported as job failure 124.
+- Job exits 125 on its own (e.g. `docker run` on a daemon error) → `timeout`
+  passes the status through, so it is indistinguishable from `timeout` failing
+  to start the job; the diagnostic names both possibilities rather than blaming
+  `timeout` alone (review loop i8).
 - Job killed by a signal → reported as failure with status.
 - Helper itself signalled (TERM/INT/HUP) → the job's process group is
   terminated, the helper exits 130 and says "interrupted" — never a bogus job

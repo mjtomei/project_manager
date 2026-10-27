@@ -218,6 +218,24 @@ class TestWaitOutcomes:
         assert r.returncode == 1
         assert "exit status 143" in r.stderr
 
+    def test_exit_125_is_not_blamed_on_timeout_alone(self, tmp_path):
+        """A job's own exit 125 must not be reported as ``timeout`` failing.
+
+        ``timeout`` passes the job's status through, so a command that
+        legitimately exits 125 (``docker run`` on a daemon error) would be
+        misdiagnosed as "timeout could not start the job" — sending the
+        worker after a phantom ``timeout`` problem.  The diagnostic must name
+        both possibilities.
+        """
+        art = tmp_path / "out.txt"
+        r = run_helper([
+            "--timeout", "10", "--artifact", str(art),
+            "-c", f"printf v > {shlex.quote(str(art))}; exit 125",
+        ])
+        assert r.returncode == 1
+        assert "125" in r.stderr
+        assert "job itself returned 125" in r.stderr
+
     def test_interrupted_wait_kills_the_job(self, tmp_path):
         """A signalled helper stops the job and reports the interruption.
 
