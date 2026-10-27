@@ -2834,9 +2834,13 @@ def _poll_tmux_verdicts(
         """Mark a worker that never produced a verdict as INPUT_REQUIRED."""
         _log.warning("Scenario %d: %s", scenario.index, exc)
         state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+        # ``str(exc)`` already names the reason and the attempt/deferral
+        # count, so don't prefix a redundant "after N attempt(s)": a
+        # no-progress exhaustion (a session that only refreshed its hook)
+        # was never nudged, and "after 0 recovery attempt(s)" reads as if
+        # recovery never ran.
         state.scenario_verdict_reasons[scenario.index] = (
-            f"worker produced no verdict ({exc.reason}) after "
-            f"{exc.attempts} recovery attempt(s): {exc}")
+            f"worker produced no verdict ({exc.reason}): {exc}")
         _recoveries.pop(scenario.index, None)
         _no_verdict_since.pop(scenario.index, None)
 
