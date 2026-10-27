@@ -889,7 +889,7 @@ async def _run_command_async(app, cmd: str, parts: list[str], working_message: s
         stderr_text = stderr.decode() if stderr else ""
 
         _log.debug("pm async exit=%d stdout=%r stderr=%r",
-                   proc.returncode, stdout_text[:200], stderr_text[:200])
+                   proc.returncode, stdout_text[:1000], stderr_text[:1000])
 
         if stdout_text.strip():
             app.log_message(stdout_text.strip().split("\n")[-1])

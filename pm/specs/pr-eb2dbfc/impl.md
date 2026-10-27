@@ -152,6 +152,10 @@ readable by `remain-on-exit`).  Plain `s` / `d` (and `pm pr start` /
 `pm pr review` without `--fresh`) treat such a window as gone: they close
 it and relaunch, recreating the container, instead of switching to the
 dead pane (QA S62: `s` on an in_review PR whose impl was stopped on idle).
+The dead window is closed only after the relaunch passes memory
+admission, so a refused relaunch leaves it, and its pane text, in place
+(QA S70).  A window whose dead impl pane sits beside a live companion
+shell is kept: `s` switches to it (review dc3e).
 `zz d` goes through the TUI's in-flight PR action guard, so pressing it
 while `z d`'s fresh review is still launching is refused ("Busy") rather
 than starting a second `pr review --fresh` that shares the container and
