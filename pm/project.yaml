@@ -13768,7 +13768,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-03T16:02:14.081159+00:00'
-  updated_at: '2026-10-27T04:49:04.812012+00:00'
+  updated_at: '2026-10-27T06:00:48.966270+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -13787,6 +13787,17 @@ prs:
       wrapper intercepts local `git fetch`.'
     created_at: '2026-10-27T04:49:04Z'
     last_edited: '2026-10-27T04:49:04Z'
+  - id: note-648c467
+    text: 'Refiner S6 (two-inspector race) harness notes: (1) pm pr start refuses
+      until the PR entry is committed on base_branch — after pm pr add run git add
+      -A && git commit before starting. (2) fake-claude: _all:{} alone routes review
+      through the catch-all default PASS, so the review pane exits and the window
+      closes; set review:{verdicts:[]} to keep the review window open. (3) The sign-off
+      step lock is ~/.pm/workdirs/.signoff-step-<pr_id>.lock; hold it with flock to
+      simulate a driver mid-step. (4) Source the venv first, then export a PATH whose
+      git is the real /usr/bin/git ahead of the QA git wrapper, before pm session.'
+    created_at: '2026-10-27T06:00:48Z'
+    last_edited: '2026-10-27T06:00:48Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
