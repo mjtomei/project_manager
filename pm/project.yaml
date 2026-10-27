@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-27T21:46:34.095403+00:00'
+  updated_at: '2026-10-27T22:13:18.481198+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14749,6 +14749,35 @@ prs:
       markdown on scratch PYTHONPATH). (2026-10-27T22:05:00Z)'
     created_at: '2026-10-27T21:46:34Z'
     last_edited: '2026-10-27T21:46:34Z'
+  - id: note-2bb685d
+    text: 'Review loop 1e74 i3 (2026-10-27): (a) caller-side mid-claim race — `_read_tui_owner`
+      treated an empty pidfile as "unreadable" and `_validate_tui_owner` deleted it,
+      which reopened from the caller side the exact two-TUI race `claim_tui_pidfile`
+      closes on the writing side (A2: a peer creates the file with O_EXCL and writes
+      its descriptor a moment later). An empty file is now `problem="empty pidfile"`
+      → `reason="starting"` ("has not finished starting up; try again in a moment")
+      and is never unlinked. (b) `submit_tui_command` appends the command before signaling
+      (correct — signaling first can drain an empty queue) but left the line in the
+      queue when the signal failed, so a failure reported to the user ("could not
+      signal", "process disappeared") could still be executed by a later drain (any
+      later SIGUSR2, or the next startup inside the 60 s `_STARTUP_QUEUE_MAX_AGE`
+      window). New `_unqueue_line` truncates it under the same flock the appender
+      uses, and only when the file still ends with our exact line, so a line another
+      caller appended after ours is never removed. (c) the no-op SIGUSR2 guard test
+      now runs in a child process: a regression used to kill the whole pytest run
+      (default terminate) instead of failing one test. (d) spec: R5 entry-point list
+      synced to E15 (any `pm_core.*` module, not the enumerated `pm_core.cli`/`pm_core.wrapper`),
+      I3/E3 and tests 19-20 updated. (e) `/pm-captures/impl/post-fix/repro/manifest.md`
+      said a `caps=["sigusr1"]` descriptor is refused as `reason="starting"`; the
+      recording shows `missing_capability` (the "starting" branch is only for `caps:
+      []`). Corrected in place — no re-record needed, the cast was always right. Tests:
+      3875 passed, 1 skipped, 1 failed — the failure is tests/test_hook_events.py::test_installer_writes_standalone_receiver,
+      which also fails on origin/master (pre-existing, unrelated). Note for QA: the
+      picker/autostart failure text for an empty pidfile is now "has not finished
+      starting up; try again in a moment" (reason `starting`), and the spinner will
+      abort on "empty pidfile" after the 3 s grace if a TUI is stuck mid-claim.'
+    created_at: '2026-10-27T22:13:18Z'
+    last_edited: '2026-10-27T22:13:18Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
