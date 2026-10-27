@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T09:10:04.740410+00:00'
+  updated_at: '2026-10-27T15:13:32.733509+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36868,6 +36868,44 @@ prs:
       and bind to the merged head (363ec8b8 plus this metadata note).'
     created_at: '2026-10-27T09:10:04Z'
     last_edited: '2026-10-27T09:10:04Z'
+  - id: note-44bdc7c
+    text: 'QA scenario 31 (resolver policy at the user surface after the base merge)
+      PASS at 91011ee4 — no code change. All six stories held live on a two-sided
+      fixture (/home/pm/s31-fixture): (1) `pm pr signoff integrate --record` resolved
+      a metadata-only conflict while the base also flipped project.skip_qa false->true
+      — `resolved by record (pm/project.yaml; 1 added from PR, 1 from base)`, both
+      record ids named, the delta file shows `-  skip_qa: false` / `+  skip_qa: true`,
+      `base behaviour: project.skip_qa changed (false -> true)` also present in integration.json,
+      branch untouched; (2) `--no-resolve` refused (exit 1) with conflicts/changed-on-both-sides
+      but no resolved/attempted/unresolved/delta line, still printing base behaviour;
+      (3) `--apply` printed the post-apply `up to date with master@...` re-check,
+      applied as a merge whose parents are the pre-apply head + base, and the merge-only
+      approval gate refused without an evidence/checks tag then accepted with pm-signoff-checks;
+      (4a/b/c) all three unsafe divergences refused with the exact unresolved lines
+      (same field changed differently, deleted on base vs edited on branch, same deterministic
+      id added on both sides), nothing merged with or without --apply; (5) the router
+      coerced SIGNOFF_MERGE to SIGNOFF_IMPL (note on stderr, `sign_off: returning
+      to impl` on stdout) and pm pr show showed the Sign-off return + `Resolution
+      attempted (NOT resolved)`; (6) a bookkeeping-only updated_at bump on both sides
+      merged with `merged fields: <PR>` and last-touched-wins, while a real status
+      conflict on the same record still refused. Captures: /pm-captures/scenarios/31/
+      (8 dirs, cast+mp4+manifest). Harness facts for the next run: (a) the setup literal
+      fixture does reproduce the metadata conflict only if both record appends land
+      in the same hunk — the documented ff of the workdir to origin/master first is
+      what makes that true; (b) `pm pr add` prints TWO lines (id line + branch line),
+      so `head -1` before parsing; (c) `tmux -L <socket>` scaffold servers can exit
+      under you mid-recording (seen once) — check the cast exists before trusting
+      a capture, and re-record rather than reusing; (d) `pm pr auto-sequence` needs
+      $TMUX set to the pm session; new windows take the SESSION env, so `tmux set-environment
+      -t <session> PATH/PYTHONPATH/HOME` before driving, and create the driver window
+      with `new-window -d -t <session> -n driver`; (e) the fake signoff pane prints
+      SIGNOFF_MERGE within ~2 s, and tick 2 relaunches the impl window (kills the
+      old one) as part of the bounce; (f) agg aarch64 asset is `agg-aarch64-unknown-linux-gnu`
+      (no version in the name) from the v1.9.0 release; (g) `pm pr show` Integration
+      section labels the unresolved path `Resolution attempted (NOT resolved)` only
+      when an attempt was recorded — a bare --no-resolve leaves no attempt.'
+    created_at: '2026-10-27T15:13:32Z'
+    last_edited: '2026-10-27T15:13:32Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
