@@ -36153,7 +36153,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/261
   gh_pr_number: 261
   created_at: '2026-10-27T04:42:06.128850+00:00'
-  updated_at: '2026-10-27T05:21:53.253880+00:00'
+  updated_at: '2026-10-27T05:26:44.963258+00:00'
   started_at: '2026-10-27T04:42:19.589247+00:00'
   reviewed_at: null
   merged_at: null
@@ -36170,6 +36170,16 @@ prs:
       and merge gate. Do not edit that workdir.'
     created_at: '2026-10-27T05:21:53Z'
     last_edited: '2026-10-27T05:21:53Z'
+  - id: note-678d953
+    text: 'Impl complete and pushed (87275002). Focused suites: 245 passed. Full suite:
+      3722 passed; the only failures are pre-existing environment issues (missing
+      markdown module; test_git_ops/test_hook_events; test_signoff_integration/test_merge_publish
+      also fail on the base commit). Captures: /pm-captures/impl/{pre,post}-fix/stop-before-merge.
+      `pm pr review` could not run in this container: the GitHub backend requires
+      gh (not installed) and there is no TUI/tmux session, so the PR remains in_progress
+      — launch review from the host.'
+    created_at: '2026-10-27T05:26:44Z'
+    last_edited: '2026-10-27T05:26:44Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
