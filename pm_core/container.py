@@ -2056,6 +2056,17 @@ def _create_fresh(
         _discard_failed_attempt(name, labels[LABEL_ATTEMPT])
         raise run_error
     container_id = result.stdout.strip()
+    if not container_id:
+        # A successful run with no id is an unknown identity, not proof that
+        # nothing was created. Falling through would address every probe by the
+        # reusable name and finally remove by name, which can delete a different
+        # allocation a concurrent launcher has attached. Preserve the allocation
+        # and its proxy for a later reconcile instead.
+        raise launch_error(
+            name, "runtime",
+            f"'{runtime} run' reported success without a container id; the "
+            f"allocation was left for 'pm container reap'",
+            stage="start")
 
     try:
         # Setup helpers address the captured id; a launch error must name the

@@ -1404,6 +1404,32 @@ class TestReapCLI:
         assert held == [True]  # restarted under its launch lock
         assert "2041/2048 → 3/2048" in r.output
 
+    def test_restart_reports_missing_host_setup_as_success(self, monkeypatch):
+        """A restart that keeps the filesystem but lacks the completion marker
+        is a success, not a failed recovery.
+
+        Every container created before ``SETUP_COMPLETE_SENTINEL`` existed
+        lacks one, and ``pm container restart`` is the remedy the PID/keyring
+        messages print, so reporting failure here would contradict them.
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        name = "pm-x-review-pr-1"
+        monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
+        monkeypatch.setattr(cm, "current_container_id", lambda n: "cid1")
+        usage = iter([{name: (2041, 2048)}, {name: (3, 2048)}])
+        monkeypatch.setattr(cm, "pids_usage", lambda: next(usage))
+
+        def restart(n, **kw):
+            raise cm.launch_error(n, "incomplete",
+                                  "setup markers missing after restart",
+                                  stage="restart")
+        monkeypatch.setattr(cm, "restart_container", restart)
+        r = CliRunner().invoke(cli, ["container", "restart", name])
+        assert r.exit_code == 0, r.output
+        assert "2041/2048 → 3/2048" in r.output
+        assert "next launch finishes" in r.output
+
     def test_restart_refuses_unverifiable_allocation(self, monkeypatch):
         """An unanswered identity probe must not restart an unchecked name."""
         from click.testing import CliRunner

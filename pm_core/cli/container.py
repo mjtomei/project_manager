@@ -497,6 +497,7 @@ def container_restart(name: str, force: bool):
         click.echo(str(exc), err=True)
         raise SystemExit(1)
     before = (container_mod.pids_usage() or {}).get(name)
+    missing_host_setup = False
     with container_mod.launch_lock(name, timeout=60) as locked:
         if not locked:
             click.echo(f"{name} is being launched right now; try again.", err=True)
@@ -530,6 +531,16 @@ def container_restart(name: str, force: bool):
             raise SystemExit(1)
         try:
             container_mod.restart_container(name, container_id=target_id or None)
+        except container_mod.ContainerLaunchError as e:
+            if e.kind != "incomplete":
+                click.echo(str(e), err=True)
+                raise SystemExit(1)
+            # The restart itself succeeded and kept the filesystem; only the
+            # host-side completion marker is missing. Every container created
+            # before that marker existed lacks one, so reporting a failed
+            # restart here would contradict the very remedy the PID/keyring
+            # messages print. The next launch finishes the idempotent step.
+            missing_host_setup = True
         except container_mod.ContainerError as e:
             click.echo(str(e), err=True)
             raise SystemExit(1)
@@ -538,3 +549,8 @@ def container_restart(name: str, force: bool):
     def fmt(usage):
         return f"{usage[0]}/{usage[1]}" if usage else "?"
     click.echo(f"Restarted {name} (PIDs {fmt(before)} → {fmt(after)}).")
+    if missing_host_setup:
+        click.echo(
+            f"Note: {name} has no host-side setup completion marker "
+            f"({container_mod.SETUP_COMPLETE_SENTINEL}); the next launch finishes "
+            f"that step in place. Its files and mounts are intact.")

@@ -355,7 +355,11 @@ intact to protect concurrent waiters and delayed releases.
   rather than the immutable id the helper inspected.
 - Failed/unknown running-state or ID inspection refuses recreation; it is not proof
   of absence. Only explicit missing-container/object errors establish absence;
-  missing runtime socket paths and empty successful ID output are unknown. Any
+  missing runtime socket paths and empty successful ID output are unknown. A
+  fresh `run` that succeeds without printing an id is therefore an unknown
+  identity too: the launch raises a retryable `runtime` error and preserves the
+  allocation and its proxy, because falling through would probe by the reusable
+  name and finally remove by name. Any
   unanswered lifecycle probe — running-state, setup verification, readiness,
   the completion-sentinel write, a restart or its start-time probe, the startup
   log fetch, or the push-proxy ownership inspect — is a retryable `timeout`
@@ -546,6 +550,11 @@ container cleared it and kept its files.  Running state is not health.
   generation; pane EXIT traps capture that generation before exec and skip container/proxy removal if
   it changed. This protects the restarted filesystem even when an old EXIT trap
   arrives after restart returns. Failure to write the generation refuses restart.
+  A restart that succeeded but whose host-side completion marker is absent (every
+  container created before that marker existed lacks one) is reported as a
+  completed restart with a note that the next launch finishes the idempotent
+  post-setup in place — not as a failed recovery, since this command is the
+  remedy the PID/keyring messages print.
 - Retry scheduling of dead QA workers stays with pr-1ab9075.
 
 ## 2. Implicit requirements

@@ -56,6 +56,27 @@ def test_fresh_setup_and_failure_cleanup_pin_created_id(fresh, monkeypatch, fail
     assert targets == [CID, CID]
 
 
+def test_fresh_run_without_identity_preserves_the_allocation(fresh, monkeypatch):
+    """An empty id from a successful run is unknown, not proof of absence.
+
+    Falling through would probe by the reusable name and finally remove by
+    name, which can delete an allocation a concurrent launcher attached.
+    """
+    monkeypatch.setattr(cm, "_run_runtime", lambda *a, **k:
+                        subprocess.CompletedProcess(a, 0, "", ""))
+    wait, discard = Mock(), Mock()
+    monkeypatch.setattr(cm, "_wait_for_setup", wait)
+    monkeypatch.setattr(cm, "discard_container", discard)
+
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        fresh()
+
+    assert error.value.kind == "runtime"
+    assert "without a container id" in str(error.value)
+    wait.assert_not_called()
+    discard.assert_not_called()
+
+
 @pytest.mark.parametrize("phase", ["finish", "remove", "restart", "shared", "unshared"])
 def test_reuse_pins_setup_recovery_and_mount_inspection(monkeypatch, tmp_path, phase):
     monkeypatch.setattr(cm, "container_is_running", lambda n: True)
