@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from pm_core import git_ops, integration, store
+from pm_core import git_ops, integration, signoff, store
 
 
 @dataclass(frozen=True)
@@ -50,8 +50,6 @@ def approved_candidate(pr_entry: dict) -> tuple[str, dict] | None:
     approval: there is no base revision or candidate tree to compare against,
     so it cannot be verified (and the merge gate never accepts it anyway).
     """
-    from pm_core import signoff
-
     approved = pr_entry.get("signoff") or {}
     bound = approved.get("integration") or {}
     if (approved.get("verdict") == signoff.SIGNOFF_MERGE
@@ -60,7 +58,8 @@ def approved_candidate(pr_entry: dict) -> tuple[str, dict] | None:
     return None
 
 
-def _git_detail(result) -> str:
+def git_detail(result) -> str:
+    """stdout+stderr of a failed git call, for an error message."""
     return ((result.stdout or "").strip() + "\n"
             + (result.stderr or "").strip()).strip()
 
@@ -70,10 +69,10 @@ def verify_github_merge(pr_id: str, workdir: str, target_repo: str,
                         bound: dict) -> MergeVerification:
     """Check GitHub's merge commit of *head* on *base_branch*.
 
-    Mirrors :func:`pm_core.cli.pr._verify_github_merge` (which now delegates
-    here): fetch the base, find the merge commit carrying the approved head,
-    and compare its first parent to *base_sha* and its tree to
-    ``bound["candidate_tree"]``.
+    Fetch the base, find the merge commit carrying the approved head, and
+    compare its first parent to *base_sha* and its tree to
+    ``bound["candidate_tree"]``.  This is the check ``pm pr merge`` runs
+    after publication, shared with every sync path that discovers a merge.
     """
     tip, err = integration.fetch_base(workdir, target_repo, base_branch)
     if err or not tip:
@@ -82,7 +81,7 @@ def verify_github_merge(pr_id: str, workdir: str, target_repo: str,
                           f"{base_sha}..{tip}", cwd=workdir, check=False)
     if log.returncode != 0:
         # The signed-off base is not readable here: unknown, not a mismatch.
-        return MergeVerification(error=_git_detail(log))
+        return MergeVerification(error=git_detail(log))
 
     found = None
     for line in (log.stdout or "").splitlines():
@@ -135,14 +134,21 @@ def verify_detected_merge(root, data: dict, pr_entry: dict, workdir: str,
 
     *workdir* is the directory the sync used to detect the merge (the PR's own
     workdir when it exists, else another workdir / the project repo).
+
+    Never raises: a failed check must not stop merge detection (an unreadable
+    base, a missing workdir or an unexpected error becomes ``error`` — the
+    merge is still finalized, the mismatch is just unproven).
     """
-    candidate = approved_candidate(pr_entry)
-    if candidate is None:
-        return None
-    head, bound = candidate
-    target_repo, _ = integration.target_for(data, pr_entry, root)
-    return verify_github_merge(pr_entry["id"], workdir, target_repo,
-                               base_branch, bound["base_sha"], head, bound)
+    try:
+        candidate = approved_candidate(pr_entry)
+        if candidate is None:
+            return None
+        head, bound = candidate
+        target_repo, _ = integration.target_for(data, pr_entry, root)
+        return verify_github_merge(pr_entry["id"], workdir, target_repo,
+                                   base_branch, bound["base_sha"], head, bound)
+    except Exception as e:  # the merge is still finalized; the check is not
+        return MergeVerification(error=str(e) or type(e).__name__)
 
 
 def apply_to_pr(pr: dict, problem: str, merge_sha: str | None) -> None:

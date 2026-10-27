@@ -14,7 +14,7 @@ from typing import Optional
 
 from pm_core import store, git_ops, graph, gh_ops, merge_integrity
 from pm_core.backend import get_backend
-from pm_core.cli.helpers import _record_status_timestamp
+from pm_core.cli.helpers import _record_status_timestamp, _resolve_repo_dir
 from pm_core.paths import configure_logger
 from pm_core.pr_utils import usable_prs
 
@@ -154,16 +154,12 @@ def _verify_detected_merge(root: Path, data: dict, pr_entry: dict,
     """Verify a sync-detected merge against the PR's bound SIGNOFF_MERGE.
 
     Returns a :class:`merge_integrity.MergeVerification`, or None when the PR
-    holds no bound approval (nothing to compare against).  Never raises: a
-    failed check must not stop merge detection.
+    holds no bound approval (nothing to compare against).  The check itself
+    never raises (:func:`merge_integrity.verify_detected_merge`); this wrapper
+    only records the outcome in the log.
     """
-    try:
-        result = merge_integrity.verify_detected_merge(
-            root, data, pr_entry, workdir, base_branch)
-    except Exception as e:
-        _log.warning("Merge integrity check failed for %s: %s",
-                     pr_entry.get("id"), e)
-        return merge_integrity.MergeVerification(error=str(e))
+    result = merge_integrity.verify_detected_merge(
+        root, data, pr_entry, workdir, base_branch)
     if result is not None and result.problem:
         _log.warning("Merge integrity for %s: %s",
                      pr_entry.get("id"), result.problem)
@@ -395,7 +391,6 @@ def sync_from_github(
                     check_dir = (wd if (wd and Path(wd).exists())
                                  else find_workdir(data))
                     if not check_dir:
-                        from pm_core.cli.helpers import _resolve_repo_dir
                         check_dir = str(_resolve_repo_dir(root, data))
                     verified = _verify_detected_merge(
                         root, data, pr_entry, str(check_dir), base_branch)

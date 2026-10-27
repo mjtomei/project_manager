@@ -23,7 +23,7 @@ from unittest import mock
 import pytest
 from click.testing import CliRunner
 
-from pm_core import integration, pr_sync, signoff, store
+from pm_core import integration, merge_integrity, pr_sync, signoff, store
 from pm_core.cli import pr as pr_mod
 from pm_core.tui import sync as tui_sync
 
@@ -103,6 +103,17 @@ def merge_on_remote(w, *, extra: bool) -> str:
 
 def pr_entry(w) -> dict:
     return store.get_pr(store.load(w.pm_dir), PR)
+
+
+def set_signoff(w, signoff_record: dict | None) -> None:
+    """Replace (or drop) the PR's approval record."""
+    def _apply(d):
+        pr = store.get_pr(d, PR)
+        if signoff_record is None:
+            pr.pop("signoff", None)
+        else:
+            pr["signoff"] = signoff_record
+    store.locked_update(w.pm_dir, _apply)
 
 
 def integrity_notes(w) -> list[str]:
@@ -202,6 +213,45 @@ def test_sync_prs_unverifiable_merge_still_finalizes(sync_github):
     assert pr_entry(sync_github)["status"] == "merged"
 
 
+def test_sync_prs_verification_crash_still_finalizes(sync_github):
+    """An unexpected error in the check must not stop merge detection."""
+    merge_on_remote(sync_github, extra=True)
+    with mock.patch.object(merge_integrity, "verify_github_merge",
+                           side_effect=RuntimeError("boom")):
+        result = pr_sync.sync_prs(sync_github.pm_dir, force=True)
+
+    assert PR in result.merged_prs
+    assert result.merge_integrity[PR].error == "boom"
+    assert "merge_integrity" not in pr_entry(sync_github)
+    assert pr_entry(sync_github)["status"] == "merged"
+
+
+def test_sync_prs_no_approval_records_nothing(sync_github):
+    """A PR merged on GitHub without any sign-off has nothing to verify."""
+    merge_on_remote(sync_github, extra=True)
+    set_signoff(sync_github, None)
+
+    result = pr_sync.sync_prs(sync_github.pm_dir, force=True)
+
+    assert PR in result.merged_prs
+    assert result.merge_integrity == {}
+    assert "merge_integrity" not in pr_entry(sync_github)
+    assert integrity_notes(sync_github) == []
+
+
+def test_sync_prs_legacy_unbound_approval_records_nothing(sync_github):
+    """A HEAD-only SIGNOFF_MERGE has no base/tree to compare against."""
+    merge_on_remote(sync_github, extra=True)
+    set_signoff(sync_github, {"verdict": signoff.SIGNOFF_MERGE,
+                              "sha": sync_github.head})
+
+    result = pr_sync.sync_prs(sync_github.pm_dir, force=True)
+
+    assert PR in result.merged_prs
+    assert result.merge_integrity == {}
+    assert "merge_integrity" not in pr_entry(sync_github)
+
+
 # --- pr_sync.sync_from_github (startup / pm pr sync-github) ----------------
 
 def test_sync_from_github_records_integrity_for_unapproved_merge(sync_github):
@@ -257,3 +307,21 @@ def test_cli_pr_sync_records_integrity(sync_github):
     assert pr["status"] == "merged"
     assert "not the approved head" in pr["merge_integrity"]["problem"]
     assert len(integrity_notes(sync_github)) == 1
+    assert "WARNING:" in result.output
+    assert "not the approved head" in result.output
+
+
+def test_cli_pr_sync_github_reports_integrity(sync_github):
+    """`pm pr sync-github` says so too, not only the PR record + log file."""
+    merge_on_remote(sync_github, extra=True)
+
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=sync_github.pm_dir), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        result = CliRunner().invoke(pr_mod.pr, ["sync-github"])
+
+    assert result.exit_code == 0, result.output
+    assert "not the approved head" in pr_entry(sync_github)[
+        "merge_integrity"]["problem"]
+    assert "WARNING:" in result.output
+    assert "not the approved head" in result.output

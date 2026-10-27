@@ -20,6 +20,20 @@ from pm_core.pr_utils import usable_prs
 _log = configure_logger("pm.tui.sync")
 
 
+def _log_merge_integrity(app, integrity: dict) -> None:
+    """Surface a sync-detected merge-integrity problem on the log line.
+
+    The record on the PR (``merge_integrity`` + note) is authoritative; the
+    held line makes the problem visible without opening the PR.  The hold
+    keeps it readable while the sync-status / auto-start lines that follow
+    arrive (they are deferred until it ends).
+    """
+    for verified in (integrity or {}).values():
+        if verified.problem:
+            app.log_message(f"Merge integrity: {verified.problem}",
+                            force=True, hold=6)
+
+
 def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
     """Tear down all live resources for merged PRs.
 
@@ -183,12 +197,8 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
 
         # A sync-detected merge that published something other than the
         # signed-off candidate is recorded on the PR (merge_integrity + note);
-        # surface it on the log line too.  The hold keeps it readable while
-        # the sync-status / auto-start lines that follow arrive.
-        for verified in (getattr(result, "merge_integrity", None) or {}).values():
-            if verified.problem:
-                app.log_message(f"Merge integrity: {verified.problem}",
-                                force=True, hold=6)
+        # surface it on the log line too.
+        _log_merge_integrity(app, getattr(result, "merge_integrity", None))
 
         # Detect PRs that became merged — either via sync or via CLI
         # (e.g. `pm pr merge` for local/vanilla backends saves status
@@ -306,10 +316,7 @@ async def startup_github_sync(app) -> None:
             if newly_merged:
                 _kill_merged_pr_windows(app, newly_merged)
             app._update_display()
-            for verified in integrity.values():
-                if verified.problem:
-                    app.log_message(f"Merge integrity: {verified.problem}",
-                                    force=True, hold=6)
+            _log_merge_integrity(app, integrity)
             own_seq = app.log_message(
                 f"GitHub sync: {result.updated_count} PR(s) updated")
             # Auto-start ready PRs if enabled; the clear below stays bound

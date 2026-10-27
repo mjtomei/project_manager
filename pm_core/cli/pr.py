@@ -2171,10 +2171,6 @@ def _ref(cwd, ref: str) -> str | None:
     return (r.stdout.strip() or None) if r.returncode == 0 else None
 
 
-def _git_detail(r) -> str:
-    return ((r.stdout or "").strip() + "\n" + (r.stderr or "").strip()).strip()
-
-
 def _after_publish(root: Path, data: dict, pr_entry: dict, transcript) -> None:
     _finalize_merge(root, pr_entry, pr_entry["id"], transcript=transcript)
     # Restart TUI when managing the project_manager repo itself, so it
@@ -2324,7 +2320,7 @@ def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
     git_ops.run_git("update-ref", "-d", ref, cwd=repo_dir, check=False)
     if fetch.returncode != 0 or fetched != merge_sha:
         click.echo(f"PR {pr_id}: could not fetch the merge commit into "
-                   f"{repo_dir}: {_git_detail(fetch)}", err=True)
+                   f"{repo_dir}: {merge_integrity.git_detail(fetch)}", err=True)
         raise SystemExit(1)
     current = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD",
                               cwd=repo_dir, check=False).stdout.strip()
@@ -2337,7 +2333,7 @@ def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
         if upd.returncode != 0:
             _return_to_signoff(root, pr_entry,
                                f"{base_branch} in {repo_dir} moved during "
-                               f"the merge ({_git_detail(upd)})")
+                               f"the merge ({merge_integrity.git_detail(upd)})")
     else:
         repo_path = Path(repo_dir)
         merge_r = git_ops.run_git("merge", "--ff-only", merge_sha,
@@ -2358,7 +2354,8 @@ def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
                                f"the merge")
         if merge_r.returncode != 0:
             click.echo(f"Fast-forward of {base_branch} in {repo_dir} failed:\n"
-                       f"{_git_detail(merge_r)}\nNothing in {repo_dir} was "
+                       f"{merge_integrity.git_detail(merge_r)}\n"
+                       f"Nothing in {repo_dir} was "
                        f"reset or discarded. Fix this there, then re-run "
                        f"'pm pr merge {pr_id}'.", err=True)
             raise SystemExit(1)
@@ -2397,7 +2394,8 @@ def _publish_vanilla(root: Path, pr_entry: dict, workdir: str,
             _return_to_signoff(root, pr_entry,
                                f"{base_branch} moved during the merge "
                                f"({base_sha[:12]} -> {now[:12]})")
-        click.echo(f"Push to {target_repo} failed: {_git_detail(push)}\n"
+        click.echo(f"Push to {target_repo} failed: "
+                   f"{merge_integrity.git_detail(push)}\n"
                    f"Nothing was published; re-run 'pm pr merge {pr_id}'.",
                    err=True)
         raise SystemExit(1)
@@ -2460,7 +2458,7 @@ def _publish_github(root: Path, pr_entry: dict, workdir: str,
                                cwd=workdir, check=False)
         if push.returncode != 0:
             click.echo(f"Could not push the approved head to {branch}: "
-                       f"{_git_detail(push)}", err=True)
+                       f"{merge_integrity.git_detail(push)}", err=True)
             raise SystemExit(1)
         click.echo(f"Pushed approved head {head[:12]} to {branch}.")
         pushed = True
@@ -2594,15 +2592,12 @@ def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
         # A merge done on GitHub (by someone else) is checked against the
         # signed-off candidate like one pm made: a different head or base is
         # recorded on merge_integrity, not accepted silently.
-        from pm_core import signoff as signoff_mod
-        approved = pr_entry.get("signoff") or {}
-        bound = approved.get("integration") or {}
-        if (approved.get("verdict") == signoff_mod.SIGNOFF_MERGE
-                and approved.get("sha") and bound.get("base_sha")):
+        candidate = merge_integrity.approved_candidate(pr_entry)
+        if candidate:
+            head, bound = candidate
             target_repo, _ = integration.target_for(data, pr_entry, root)
             _verify_github_merge(root, pr_entry, cwd, target_repo,
-                                 base_branch, bound["base_sha"],
-                                 approved["sha"], bound)
+                                 base_branch, bound["base_sha"], head, bound)
     _sync_main_repo_and_finalize(data, root, pr_entry, base_branch,
                                  resolve_window=resolve_window,
                                  background=background,
@@ -2857,14 +2852,10 @@ def pr_sync():
             updated += 1
             # A merge pm did not publish is verified against the signed-off
             # candidate before it is finalized (pr-2e06289).  The TUI sync
-            # and `pm pr sync-github` do the same in pm_core.pr_sync.
-            try:
-                verified = merge_integrity.verify_detected_merge(
-                    root, data, pr_entry, str(check_dir), base_branch)
-            except Exception as e:
-                _log.warning("Merge integrity check failed for %s: %s",
-                             pr_entry["id"], e)
-                verified = merge_integrity.MergeVerification(error=str(e))
+            # and `pm pr sync-github` do the same in pm_core.pr_sync; the
+            # check never raises (a failure is an "unknown", not a mismatch).
+            verified = merge_integrity.verify_detected_merge(
+                root, data, pr_entry, str(check_dir), base_branch)
             if verified is not None:
                 if verified.problem:
                     integrity_by_pr[pr_entry["id"]] = verified
@@ -2923,6 +2914,16 @@ def pr_sync_github():
     if result.error:
         click.echo(f"Error: {result.error}", err=True)
         raise SystemExit(1)
+
+    # A discovered merge that published something other than the signed-off
+    # candidate is recorded on the PR (merge_integrity + note); say so here
+    # too, like `pm pr sync` does, rather than only in the log file.
+    for verified in result.merge_integrity.values():
+        if verified.problem:
+            click.echo(f"WARNING: {verified.problem}.", err=True)
+        elif verified.error:
+            click.echo(f"WARNING: could not verify GitHub's merge: "
+                       f"{verified.error}.", err=True)
 
     if result.updated_count > 0:
         click.echo(f"Updated {result.updated_count} PR(s).")
