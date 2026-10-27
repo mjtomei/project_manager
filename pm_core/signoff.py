@@ -1297,6 +1297,12 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
         return ""
     reviewed = rec.get("reviewed_head")
     head = reviewed[:12] if isinstance(reviewed, str) and reviewed else "?"
+    # The provenance line below is a command the agent is told to run, and
+    # ``signoff_return`` is hand-editable project.yaml state: only a git
+    # object name may become its revision (the same rule ``contained_base``
+    # and the other hints follow), so a shell fragment falls back to the
+    # placeholder instead of being interpolated.
+    head_rev = integration._sha_like(reviewed)
     lines = [
         "\n## Previous sign-off return" if for_signoff
         else "\n## Returned from sign-off",
@@ -1530,10 +1536,11 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
             "freshly signed-off candidate.")
     if for_signoff:
         lines.append(
-            f"\nProvenance: `git log {head}..HEAD` shows what changed since "
-            "that sign-off. Decide explicitly whether earlier review/QA "
-            "evidence still covers the current HEAD; code changes cannot be "
-            "approved on stale evidence.")
+            f"\nProvenance: `git log "
+            f"{head_rev[:12] if head_rev else '<old head>'}..HEAD` shows what "
+            "changed since that sign-off. Decide explicitly whether earlier "
+            "review/QA evidence still covers the current HEAD; code changes "
+            "cannot be approved on stale evidence.")
     else:
         lines.append("\nWhen this step completes, the PR goes back through "
                      "the remaining steps and a fresh sign-off.")

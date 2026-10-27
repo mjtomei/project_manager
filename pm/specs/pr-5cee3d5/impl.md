@@ -523,9 +523,10 @@ tests):
    prompt and in `integrate`, and every record revision that becomes a
    command the agent is told to run is a git object name: `contained_base`
    refuses anything else, and the sign-off prompt's base-range / applied-merge
-   lines and the return text's `git diff <rev> HEAD` / `git merge <rev>`
-   hints fall back (`<base>`, `<old head>`, the base branch) instead of
-   interpolating a hand-edited fragment.
+   lines and the return text's `git diff <rev> HEAD` / `git merge <rev>` /
+   `git log <rev>..HEAD` hints (the last is built from the return record's
+   hand-editable `reviewed_head`) fall back (`<base>`, `<old head>`, the base
+   branch) instead of interpolating a hand-edited fragment.
 10. Notes appended to the same PR record on both sides (the merge base has no
     `notes` key) resolve, both notes survive, and the nested ids are named in
     the summary/prompt; the same id with different content is still ambiguous.

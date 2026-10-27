@@ -4738,6 +4738,31 @@ def test_a_hand_edited_applied_merge_is_not_rendered_as_a_revision(w):
     assert "as `?`" in text
 
 
+def test_a_hand_edited_reviewed_head_is_not_a_command_revision():
+    """Only a git object name becomes the provenance command's revision.
+
+    ``signoff_return`` is hand-editable project.yaml state, and the sign-off
+    prompt tells the agent to run ``git log <rev>..HEAD`` built from its
+    ``reviewed_head``.  A value that is not an object name must fall back to
+    the placeholder rather than be interpolated into the command (the same
+    rule the return text's ``git diff``/``git merge`` hints follow).
+    """
+    def _return(reviewed_head):
+        pr = {"id": "pr-1", "signoff_return": {
+            "verdict": SIGNOFF_IMPL, "hop": "impl",
+            "reviewed_head": reviewed_head, "reason": "x", "awaiting": "impl"}}
+        text = signoff.format_signoff_return(pr, for_signoff=True)
+        return next(l for l in text.splitlines() if "Provenance:" in l)
+
+    hostile = _return("$(touch /tmp/pwned)")
+    assert "git log <old head>..HEAD" in hostile
+    assert "$(" not in hostile and "touch" not in hostile
+
+    # A real revision is still named (the command is useful).
+    sha = "a" * 40
+    assert f"git log {sha[:12]}..HEAD" in _return(sha)
+
+
 def test_a_non_string_resolution_path_is_not_reported_as_resolved(w):
     """Hand-edited state: a path that is not a string is no path at all.
 
