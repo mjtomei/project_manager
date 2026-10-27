@@ -7,7 +7,7 @@ alias, breadcrumb/legacy-record migration, and the resulting holds.
 
 import asyncio
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
