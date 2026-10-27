@@ -1176,3 +1176,88 @@ class TestQARecoveryWiring:
         assert sent, "worker was never nudged after its idle turn"
         assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
         assert "no_response" in state.scenario_verdict_reasons[1]
+
+
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def pm_home(tmp_path, monkeypatch):
+    """Isolated HOME so global settings never touch the real ``~/.pm``."""
+    h = tmp_path / "home"
+    h.mkdir()
+    monkeypatch.setenv("HOME", str(h))
+    return h
+
+
+class TestRecoverySettings:
+    def test_defaults_when_unset(self, pm_home):
+        assert (loop_shared.recovery_max_attempts()
+                == loop_shared.DEFAULT_MAX_MISSING)
+        assert (loop_shared.recovery_settle_seconds()
+                == loop_shared.DEFAULT_SETTLE_SECONDS)
+        assert (loop_shared.recovery_response_timeout()
+                == loop_shared.DEFAULT_RESPONSE_TIMEOUT)
+
+    def test_pm_set_accepts_int_and_sub_second_float_values(self, pm_home):
+        """The new keys are settable/listed, and floats accept ``0.5``."""
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        runner = CliRunner()
+        for setting, value in (
+            ("verdict-recovery-max-attempts", "5"),
+            ("verdict-recovery-settle-seconds", "0.5"),
+            ("verdict-recovery-response-timeout", "120"),
+        ):
+            result = runner.invoke(cli, ["set", setting, value])
+            assert result.exit_code == 0, result.output
+
+        assert loop_shared.recovery_max_attempts() == 5
+        assert loop_shared.recovery_settle_seconds() == 0.5
+        assert loop_shared.recovery_response_timeout() == 120.0
+
+        listed = runner.invoke(cli, ["set", "list"]).output
+        for name in ("verdict-recovery-max-attempts",
+                     "verdict-recovery-settle-seconds",
+                     "verdict-recovery-response-timeout"):
+            assert name in listed
+
+    def test_pm_set_rejects_non_numeric_values(self, pm_home):
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+
+        runner = CliRunner()
+        assert runner.invoke(
+            cli, ["set", "verdict-recovery-max-attempts", "3"]).exit_code == 0
+        bad = runner.invoke(
+            cli, ["set", "verdict-recovery-max-attempts", "lots"])
+        assert bad.exit_code != 0
+        assert loop_shared.recovery_max_attempts() == 3
+
+        bad = runner.invoke(
+            cli, ["set", "verdict-recovery-settle-seconds", "soon"])
+        assert bad.exit_code != 0
+        assert (loop_shared.recovery_settle_seconds()
+                == loop_shared.DEFAULT_SETTLE_SECONDS)
+
+    def test_negative_settle_is_clamped_to_zero(self, pm_home):
+        """A negative settle must not make ``handle`` wait a negative time."""
+        from pm_core.paths import set_global_setting_value
+        set_global_setting_value("verdict-recovery-settle-seconds", "-5")
+        assert loop_shared.recovery_settle_seconds() == 0.0
+
+    def test_corrupt_stored_values_fall_back_to_defaults(self, pm_home):
+        """A hand-edited settings file must not crash the pollers."""
+        from pm_core.paths import set_global_setting_value
+        set_global_setting_value("verdict-recovery-max-attempts", "three")
+        set_global_setting_value("verdict-recovery-settle-seconds", "soon")
+        set_global_setting_value("verdict-recovery-response-timeout", "later")
+
+        assert (loop_shared.recovery_max_attempts()
+                == loop_shared.DEFAULT_MAX_MISSING)
+        assert (loop_shared.recovery_settle_seconds()
+                == loop_shared.DEFAULT_SETTLE_SECONDS)
+        assert (loop_shared.recovery_response_timeout()
+                == loop_shared.DEFAULT_RESPONSE_TIMEOUT)

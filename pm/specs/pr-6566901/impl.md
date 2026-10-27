@@ -228,13 +228,17 @@ safe when a caller knows hook refreshes terminate). `retry_prompt` /
 `poll_for_verdict` grows the kwargs in R1 and, after a non-matching idle:
 
 1. if `recovery` is disabled → old behaviour (continue);
-2. `kind = recovery.classify(transcript)`;
-3. settle via `hook_events.wait_for_event(..., timeout=settle, newer_than=ev_ts)`
-   → if a new *turn* (transcript changed): update `hook_baseline`,
-   `recovery.reset()`, continue; if only a hook refresh: count a deferral;
-4. `recovery.handle(...)` → "nudged", continue; exhaustion raises; "stopped"
-   returns `None`;
-5. on `ev is None` (wait timeout) call `recovery.check_response()`.
+2. `recovery.handle(transcript, ev_ts, wait_for_newer=…, stop_check=…,
+   verdict_check=…)` — the settle window and the classification both live
+   *inside* `handle`, which either:
+   * defers on a newer *turn* (transcript changed): the poller updates
+     `hook_baseline` and processes that event next (budget reset);
+   * returns "completed" (the verdict landed during the settle): the poller
+     re-scans and returns it;
+   * returns "stopped" (stop_check fired): the poller returns `None`;
+   * nudges: the poller waits for the next idle;
+   exhaustion raises `VerdictRecoveryExhausted`;
+3. on `ev is None` (wait timeout) call `recovery.check_response()`.
 
 `wait_for_follow_up_verdict` is **not** changed (human wait; see Ambiguities).
 
@@ -249,14 +253,16 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
 ### Review loop (`pm_core/review_loop.py`)
 
 * import `VerdictRecoveryExhausted`, `VERDICT_NO_VERDICT`;
-* `_poll_for_verdict` passes recovery config (settings-driven defaults);
+* `_poll_for_verdict` relies on the settings-driven defaults (it passes no
+  recovery kwargs);
 * `run_review_loop_sync` catches exhaustion around `_run_claude_review` /
   `_adopt_in_flight_review`, appends a `ReviewIteration` with verdict
   `NO_VERDICT`, calls `on_iteration`, breaks.
 
 ### Watcher loop (`pm_core/watcher_base.py`)
 
-* `_poll_for_verdict` passes recovery config;
+* `_poll_for_verdict` relies on the settings-driven defaults (it passes
+  `stop_check` but no recovery kwargs);
 * `run_sync` catches exhaustion, records a `WatcherIteration` with
   `NO_VERDICT`, sets `latest_summary`, breaks.
 
@@ -393,4 +399,8 @@ values (e.g. `0.5`) are accepted by `pm set`.
 * `tests/test_review_loop_terminal_state.py`: `NO_VERDICT` → `failed`.
 * `tests/test_autostart_multi_target.py`: `NO_VERDICT` review loop → phase
   state `failed` in the status builder.
+* `tests/test_loop_recovery.py` (settings): the three keys are settable and
+  listed through `pm set` (including a sub-second float), non-numeric values
+  are rejected, a negative settle clamps to 0, and corrupt stored values fall
+  back to the defaults.
 * Existing suite (4100+ tests) must stay green.
