@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T09:26:07.426165+00:00'
+  updated_at: '2026-10-27T09:54:17.377390+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36382,6 +36382,30 @@ prs:
       requiring idle would strand completed reviews on hosts without hooks). (2026-10-27)'
     created_at: '2026-10-27T09:26:07Z'
     last_edited: '2026-10-27T09:26:07Z'
+  - id: note-a1c0168
+    text: 'Review 385e i10 (fixes applied): a retry could still adopt the review window
+      that was already open when the iteration episode started. Iteration 1 of a fresh
+      loop has no last_session_id and its (new) transcript dir holds no earlier symlink,
+      so nothing identified a pre-existing review window as historical: when attempt
+      1 failed *before* `--fresh` replaced that window (route down, workdir gone,
+      a tmux error on the kill), the retry read the old review verdict (e.g. PASS)
+      for an iteration that never ran, with zero launches. ReviewLoopState.stale_pane_session_id
+      now snapshots the review window session at episode start, _is_historical_session
+      treats it as historical (replace, never adopt), and the field round-trips through
+      the breadcrumb; a session that appears after the episode start (a sign-off route
+      racing the retry) still differs from the snapshot and is adopted, so the iteration-2
+      regression stays fixed. Also review_loop_ui now uses VERDICT_ERROR instead of
+      the literal. Tests: test_retry_never_adopts_the_window_that_was_live_at_episode_start
+      (fails pre-fix: records the old PASS with no launch), test_discovery_replaces_the_window_that_was_live_at_episode_start,
+      test_discovery_still_adopts_a_session_started_after_the_stale_one, plus breadcrumb
+      round-trip assertions. Full suite 3802 passed; the 55 failed + 17 errors are
+      the base tree pre-existing merge/signoff/git + markdown-module + hook-installer
+      env failures (failure sets verified identical on a HEAD worktree). Residual
+      (non-blocking): review_loop.py ~1470 lines; two lease mechanisms coexist; discovery
+      still adopts a transcript verdict without requiring an idle hook event (documented).
+      (2026-10-27)'
+    created_at: '2026-10-27T09:54:17Z'
+    last_edited: '2026-10-27T09:54:17Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
