@@ -1020,3 +1020,46 @@ still leaves its `.lock` beside the kept directory until session teardown;
 a blocking start waits on the directory start lock without a deadline; the
 proxy socket is chmod 0o777 in world-writable `/tmp` (filed as
 pr-e618b9c).
+
+## Review iteration 22 refinements
+
+Twenty-second review pass (consistent with R6; no requirement changed).
+A bookkeeping regression introduced by iteration 5's registry-assisted
+teardown:
+
+- **One hashed proxy is counted once, not twice.** A long session tag
+  forces the hashed socket directory plus the long-name discovery
+  symlink, so `stop_session_proxies` reaches that single proxy through
+  *two* candidate paths — the `{tag}-*` glob (the long symlink) and the
+  in-process registry (the hashed directory).  Both spellings resolve to
+  the same socket, and iteration 5 added the registry candidate on top of
+  the glob.  When the socket directory survives the first stop — the
+  socket directory is bind-mounted *writable*, so a container can leave an
+  entry that makes the per-socket `rmdir` fail — the second spelling was
+  processed too and `_kill_proxy_socket` reported a stop for the
+  already-removed socket (a missing socket file counts as "gone"), so
+  `stop_session_proxies` returned 2 for one proxy.  Candidate sockets are
+  now collapsed by real socket directory before the stop loop, so each
+  proxy is stopped and counted once.
+
+Test: `test_stop_session_counts_a_hashed_proxy_once` (fails at c03c3aae
+with `assert 2 == 1` when the directory is kept alive by a leftover entry,
+and the final sweep then removes both the directory and its link).
+
+Re-verified at HEAD: `/pm-captures/impl/post-fix/verify-proxy-key`
+passes (distinct socket per workdir, impl push lands its own commit, QA
+stop leaves the impl socket dir intact); `test_impl_and_qa_get_distinct_proxies`
+fails at base 74462d76 with `assert 1 == 3` (checked this pass in a base
+worktree).  `tests/test_push_proxy.py` + `tests/test_container.py`: 238
+passed.  Full suite (env -u PM_HOST_HOME, PATH=/usr/bin:/bin,
+PYTHONPATH=/workspace): 3839 passed, 1 skipped.
+
+Residual, unchanged and out of scope: in-process refcounts only
+(cross-process cleanup stays with #241/pr-ac12b47); one daemon per workdir
+(option (3), workdir-per-request, remains the cleaner long-term design);
+`proxy_is_alive` cannot distinguish a busy daemon from a dead one beyond
+the backlog of 16; the daemon serves one request at a time; a shared stop
+still leaves its `.lock` beside the kept directory until session teardown;
+a blocking start waits on the directory start lock without a deadline; the
+proxy socket is chmod 0o777 in world-writable `/tmp` (filed as
+pr-e618b9c).

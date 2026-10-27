@@ -1803,7 +1803,22 @@ def stop_session_proxies(session_tag: str) -> int:
     # Kill sockets matching the session tag.  A directory whose start lock
     # is held is left alone: a container is creating that proxy right now,
     # and the dir sweep below will leave it for the next teardown.
-    count = sum(1 for sock in sorted(socks) if _stop_socket_under_lock(sock))
+    #
+    # A hashed socket directory is reachable through two spellings — the
+    # long-name discovery symlink (the glob) and the hashed path (the
+    # registry) — and both resolve to the same socket.  Collapse them by
+    # real directory first: otherwise a directory that survives the first
+    # stop (a container can leave an entry in the bind mount, so the
+    # per-socket rmdir fails) is stopped — and counted — a second time.
+    seen_dirs: set[str] = set()
+    count = 0
+    for sock in sorted(socks):
+        real_dir = os.path.realpath(os.path.dirname(sock))
+        if real_dir in seen_dirs:
+            continue
+        seen_dirs.add(real_dir)
+        if _stop_socket_under_lock(sock):
+            count += 1
 
     # Remove directories even when their socket was already stopped (shared
     # stops keep the directory for live container mounts).

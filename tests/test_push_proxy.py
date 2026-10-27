@@ -1615,6 +1615,34 @@ class TestWorkdirKeyedProxies:
         assert not os.path.exists(sock_dir)
         assert not os.path.exists(sock_dir + ".lock")
 
+    def test_stop_session_counts_a_hashed_proxy_once(self, tmp_path,
+                                                    live_proxies):
+        """One hashed proxy must be counted (and stopped) once, not twice.
+
+        A long session tag forces the hashed socket directory plus a
+        long-named discovery symlink.  ``stop_session_proxies`` reaches
+        that one proxy through *two* candidate paths — the glob (the long
+        symlink) and the in-process registry (the hashed directory) — so
+        both spellings resolve to the same socket.  A leftover entry in the
+        bind-mounted directory makes the per-socket ``rmdir`` fail, which
+        keeps the directory alive long enough for the second spelling to be
+        processed as well; before the fix that incremented the stop count a
+        second time for the same proxy.
+        """
+        tag = "t" * 80
+        impl = self._workdir(tmp_path, "impl")
+        sock = self._start("impl-once", impl, tag=tag)
+        sock_dir = os.path.dirname(sock)
+
+        # A container can leave an entry in the bind-mounted socket dir, so
+        # the per-socket rmdir fails and the directory survives the first
+        # candidate.  (The final sweep still removes it.)
+        Path(sock_dir, "leftover").write_text("x")
+
+        assert stop_session_proxies(tag) == 1
+        assert not push_proxy_mod.proxy_is_alive(sock)
+        assert not os.path.exists(sock_dir)
+
     def test_stop_session_escapes_glob_metacharacters_in_the_tag(
             self, tmp_path, live_proxies):
         """A tag containing ``[``/``]`` must still find its own proxies.
