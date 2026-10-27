@@ -74,12 +74,15 @@ Rules, in order:
 
 1. `data` must be a mapping; otherwise `error` (defensive; `consume_breadcrumb`
    only calls it after a successful `json.loads`).
-2. `all_mode` present and truthy → reject the **whole** autostart state
-   (`targets={}`, `error="saved auto-start state requested all-mode
-   (whole backlog); all-mode autostart has been removed"`; the consumer
-   appends the remedy so it is not repeated twice in one message).
-   A truthy `all_mode` is an explicit request for wildcard authority and is
-   never narrowed into a partial restore.
+2. `all_mode` present and not exactly `False` → reject the **whole**
+   autostart state (`targets={}`). A truthy value yields
+   `error="saved auto-start state requested all-mode (whole backlog);
+   all-mode autostart has been removed"`; a non-boolean value such as
+   `"no"`/`0`/`null` is rejected too, with its own "non-boolean all_mode
+   flag" diagnostic (the shape must be unambiguous). The consumer appends
+   the remedy so it is not repeated twice in one message. A truthy
+   `all_mode` is an explicit request for wildcard authority and is never
+   narrowed into a partial restore.
 3. `auto_start` present and not a `bool` → reject (wrong type).
 4. `run_id` present and not `str`/`None` → reject.
 5. `targets` **key present**:

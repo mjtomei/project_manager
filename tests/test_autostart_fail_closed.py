@@ -687,15 +687,26 @@ class TestAllModeCommandRejected:
         assert "No such command" in res.output
 
     def test_status_label_never_says_all(self):
+        """A leftover all-mode flag is inert (pre-fix this returned "all").
+
+        The flag is set here even though the attribute no longer exists:
+        that is what makes this a regression test rather than a guard.  If
+        a future change reintroduces a wildcard status suffix, this fails.
+        """
         from types import SimpleNamespace
         from pm_core.tui.app import ProjectManagerApp
-        app = SimpleNamespace(_auto_start=True, _auto_start_targets={})
+        app = SimpleNamespace(_auto_start=True,
+                              _auto_start_targets={"pr-a": {}},
+                              _auto_start_all=True)
         assert ProjectManagerApp._auto_start_label(app) == ""
 
     def test_managed_ids_never_returns_none(self):
+        """A leftover all-mode flag cannot resurrect the ``None`` wildcard
+        sentinel that made every caller read "off" as "everything"."""
         app = FakeApp([_pr("pr-a")], Path("/tmp"))
         app._auto_start = True
         app._auto_start_targets = {}
+        app._auto_start_all = True
         assert auto_start.managed_ids(app) == set()
         assert auto_start.in_scope(app, "pr-a") is False
 
@@ -706,9 +717,12 @@ class TestAllModeCommandRejected:
 
 class TestSchedulerNoTargetlessFallback:
     def test_enabled_with_no_targets_starts_nothing(self, tmp_path):
+        # A leftover all-mode flag must not recreate the targetless
+        # fallback: pre-fix this launched the ready PR.
         app = FakeApp([_pr("pr-a")], tmp_path)
         app._auto_start = True
         app._auto_start_targets = {}
+        app._auto_start_all = True
 
         async def fake_start(a, pr_id, fresh=False):
             a.launched.append(pr_id)
@@ -720,9 +734,12 @@ class TestSchedulerNoTargetlessFallback:
         assert auto_start.managed_ids(app) == set()
 
     def test_reload_with_no_targets_does_not_schedule(self, tmp_path):
+        # Same as above for the reload path: a leftover all-mode flag must
+        # not turn a merged in-scope-looking PR into a scheduler pass.
         app = FakeApp([_pr("pr-a", status="merged")], tmp_path)
         app._auto_start = True
         app._auto_start_targets = {}
+        app._auto_start_all = True
         auto_start.on_state_loaded(app, {"pr-a": "qa"})
         assert app.workers == []
 
