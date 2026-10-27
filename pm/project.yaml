@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T09:42:15.858157+00:00'
+  updated_at: '2026-10-27T16:31:04.966398+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25735,6 +25735,29 @@ prs:
       and 0 disables it.'
     created_at: '2026-10-27T09:42:15Z'
     last_edited: '2026-10-27T09:42:15Z'
+  - id: note-e1eaf6e
+    text: 'Review-loop d476 i1 (910b2178): found and fixed a residual hang of the
+      exact class this PR targets. poll_for_verdict discarded an idle_prompt that
+      arrived inside the grace window (after advancing hook_baseline), so a session
+      whose ONLY idle landed early — a verdict in a few seconds, or an immediate provider
+      connection loss (the audited shape) — left the poller waiting for a turn that
+      never came: no verdict scan, no recovery, no bound. Repro: one idle at t=0 with
+      grace=20 spun forever on the pre-fix commit, returns the verdict now (/pm-captures/review-d476-i1/repro_grace.before.txt
+      vs .after.txt). The grace is still honoured (accept/nudge only post-grace):
+      the poller waits out the remaining grace while checking stop_check, pane death
+      and overall_timeout, then processes that same event. Verdicts come from the
+      transcript latest assistant turn, so an early idle is a real turn boundary,
+      not the pane echoing the prompt (the original grace rationale). Also fixed:
+      the QA tick loop recorded the tick starting event ts as accounted for after
+      a deferral instead of the deferred event ts, so the next comparison could re-count
+      the same refresh (and with a timestamp-less hook event could retire a healthy
+      worker with no_progress instead of nudging it). Tests: test_idle_inside_grace_window_is_processed_not_dropped;
+      test_plan_landing_during_settle_is_accepted_not_renudged (the planner completed
+      branch had no integration coverage — the harness can now write the plan during
+      the settle). Full suite: 3850 passed, 1 skipped (log /pm-captures/review-d476-i1/full-suite.log).
+      Spec updated (grace bullet + tests).'
+    created_at: '2026-10-27T16:31:04Z'
+    last_edited: '2026-10-27T16:31:04Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
