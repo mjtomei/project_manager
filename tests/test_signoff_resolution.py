@@ -1884,6 +1884,120 @@ def test_malformed_resolution_list_members_read_as_absent(w):
     assert again["status"] == integration.UP_TO_DATE, again
 
 
+def test_a_malformed_resolution_path_member_does_not_raise(w):
+    """A ``path`` that is not a string is unhashable, not a path.
+
+    ``unresolved_paths`` builds a set and the CLI / sign-off launch test
+    membership in it, so a hand-edited list/mapping ``path`` inside a
+    well-formed entry raised ``TypeError`` (unhashable) out of
+    ``pm pr signoff integrate`` and the launch — the same hand-editable-state
+    contract the non-list members follow.
+    """
+    _metadata_conflict(w)
+
+    def _malformed(d):
+        res = store.get_pr(d, PR)["integration"]["resolution"]
+        res["paths"][0]["path"] = ["not", "a", "path"]
+        res["unresolved"] = [{"path": {"not": "a path"}, "conflicts": ["c"]}]
+    store.locked_update(w.pm_dir, _malformed)
+
+    pr = store.get_pr(store.load(w.pm_dir), PR)
+    # Only strings are paths: building the set used to raise.
+    assert integration.unresolved_paths(pr["integration"]) == set()
+
+    # Every surface that reads the stored record still renders.
+    pr["signoff_return"] = signoff.build_return_record(
+        pr, SIGNOFF_REVIEW, "review", reviewed_head=pr["integration"]["head"])
+    text = signoff.format_signoff_return(pr)
+    assert "pm could not resolve the metadata conflict" in text
+    assert "{'not': 'a path'}" in text   # the malformed entry still renders
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        assert "Result:" in prompt_gen.generate_signoff_prompt(data, PR)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    # ``--record`` carries the stored resolution forward and prints it.
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr,
+                               ["signoff", "integrate", PR, "--record"])
+    assert r.exit_code == 0, r.output
+    assert "Traceback" not in r.output
+    assert "resolved:" in r.output
+
+
+def test_an_unhashable_behaviour_change_is_carried_not_raised(w):
+    """A nested value in ``base_behavior_changes`` must not crash a check.
+
+    The list is hand-editable project.yaml state and is carried forward with
+    an order-preserving de-duplication; ``dict.fromkeys`` raised ``TypeError``
+    (unhashable) out of every integration check, so the sign-off launch
+    recorded nothing and the merge gate lost the requirement.
+    """
+    _metadata_conflict(w)
+
+    def _malformed(d):
+        store.get_pr(d, PR)["integration"]["base_behavior_changes"] = [
+            {"nested": "change"}, "plain"]
+    store.locked_update(w.pm_dir, _malformed)
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE, again
+    assert {"nested": "change"} in again["base_behavior_changes"]
+    assert "plain" in again["base_behavior_changes"]
+    # The clean-bounce carry path (no resolution to carry) is guarded too.
+    target = {"base_sha": "a" * 40, "merge_base": "a" * 40}
+    integration._carry_base_interaction(
+        target, {"base_sha": "a" * 40, "merge_base": "b" * 40,
+                 "base_behavior_changes": [["nested"]]})
+    assert target["base_behavior_changes"] == [["nested"]]
+    # And the prompt / return text render it (no ``join``/format raise).
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "nested" in text
+
+
+def test_pr_show_renders_the_resolution(w):
+    """``pm pr show`` is the reader the omission markers point at.
+
+    A resolved candidate must not be a dead end there: the reader names the
+    candidate tree, which records pm combined, the applied merge and the
+    delta — and names the ids the yaml copy omits.
+    """
+    rec = _metadata_conflict(w)
+
+    def _record(d):
+        store.get_pr(d, PR)["integration"] = integration.compact(rec)
+    store.locked_update(w.pm_dir, _record)
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert f"Candidate tree: {rec['candidate_tree']}" in r.output
+    assert "Resolved: pm/project.yaml" in r.output
+    assert "added from PR: pr-300, pr-301" in r.output
+    assert "added from base: pr-250, pr-251" in r.output
+    assert ("Applied merge: "
+            f"{rec['resolution']['applied_merge_sha']}") in r.output
+    assert "Resolution digest: " in r.output
+    assert "Resolution delta: integration-resolution.diff" in r.output
+
+    # A truncated id list names the remainder instead of dropping it.
+    def _bounded(d):
+        entry = store.get_pr(d, PR)["integration"]["resolution"]["paths"][0]
+        entry["added_ours"] = [f"pr-{i}" for i in range(20)]
+        entry["added_ours_total"] = 27
+    store.locked_update(w.pm_dir, _bounded)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert ", … 17 more" in r.output
+
+
 def test_a_carried_resolution_with_a_malformed_delta_path_does_not_raise(w):
     """A hand-edited ``diff_path`` must not take the integration check down.
 
@@ -2429,6 +2543,49 @@ def test_a_failed_resolution_is_not_reported_as_resolved(w):
     assert "changed differently on both sides" in prompt
     assert "Metadata conflict resolution (pm, by record id)" not in prompt
     assert "Resolution delta" not in prompt
+
+
+def test_prompt_diff_refs_are_git_object_names_only(w):
+    """A hand-edited revision must not become part of a suggested command.
+
+    The integration record lives in the hand-editable project.yaml and its
+    revisions are interpolated into ``git diff <rev> HEAD`` / ``git merge
+    <rev>`` commands the agent is told to run — the same rule
+    ``contained_base`` follows (it refuses a value that is not an object
+    name).  The base-range, applied-merge and reconcile lines all fall back
+    instead of interpolating a shell fragment.
+    """
+    _metadata_conflict(w)
+    fragment = "abc; touch /tmp/pwned"
+
+    def _malformed(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["base_sha"] = fragment
+        integ["merge_base"] = fragment
+        integ["base_range_from"] = fragment
+        resolution = dict(integ["resolution"])
+        resolution["resolved_from"] = {"head": fragment, "base_sha": fragment,
+                                       "merge_base": fragment}
+        integ["resolution"] = resolution
+        integ["resolved_from"] = resolution["resolved_from"]
+    store.locked_update(w.pm_dir, _malformed)
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    pr = store.get_pr(data, PR)
+    pr["signoff_return"] = signoff.build_return_record(
+        pr, SIGNOFF_REVIEW, "review", reviewed_head=pr["integration"]["head"])
+    ret = signoff.format_signoff_return(pr)
+    for rendered in (text, ret):
+        assert "touch /tmp/pwned" not in rendered
+        assert "git diff abc;" not in rendered
+        assert "git merge abc;" not in rendered
+    # The prompt names the fallbacks instead of the fragment.
+    assert "Fetched base revision: `?`" in text
+    assert "git diff <base>...HEAD" in text
+    assert "<old head>" in text
 
 
 def test_signoff_prompt_survives_a_null_resolved_from_head(w):

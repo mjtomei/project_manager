@@ -1365,6 +1365,10 @@ def _compact_resolution(resolution: dict) -> dict:
     for entry in resolution_entries(resolution, "paths"):
         records = entry.get("records")
         records = dict(records) if isinstance(records, dict) else {}
+        # An action path is a string; a hand-edited non-string key cannot be
+        # one, and ``_resolution_digest``'s ``sort_keys`` raises on a mapping
+        # that mixes key types (int from YAML + the string paths pm writes).
+        records = {k: v for k, v in records.items() if isinstance(k, str)}
         # Bound the per-record counts too (a large conflict can touch every
         # record).  A recorded total is carried through re-compaction so the
         # resolution digest stays stable.
@@ -1509,6 +1513,27 @@ def _write_artifacts(pr_id: str, record: dict) -> None:
             _log.warning("integration.json for %s: %s", pr_id, e)
 
 
+def _dedupe(values: list) -> list:
+    """Order-preserving de-duplication that tolerates malformed members.
+
+    ``base_behavior_changes`` is hand-editable project.yaml state: an
+    unhashable member (a nested mapping or list) must still be carried and
+    reported to the agent, not raise ``TypeError`` out of every integration
+    check (``dict.fromkeys`` requires hashable elements).
+    """
+    out: list = []
+    seen: set = set()
+    for value in values:
+        try:
+            if value in seen:
+                continue
+            seen.add(value)
+        except TypeError:
+            pass          # unhashable: keep it (it is still rendered), no dedupe
+        out.append(value)
+    return out
+
+
 def _carry_behavior_total(record: dict, old: dict, values: list) -> None:
     """Keep the real ``base_behavior_count`` when *values* is a bounded list.
 
@@ -1596,8 +1621,8 @@ def _carry_base_interaction(record: dict, old: dict) -> None:
     old_behavior = _as_list(old.get("base_behavior_changes"))
     if old_behavior:
         own_behavior = _as_list(record.get("base_behavior_changes"))
-        record["base_behavior_changes"] = list(dict.fromkeys(
-            old_behavior + own_behavior))
+        record["base_behavior_changes"] = _dedupe(
+            old_behavior + own_behavior)
         if not own_behavior:
             _carry_behavior_total(record, old, old_behavior)
     if old.get("base_behavior_error") \
@@ -1666,8 +1691,8 @@ def _carry_forward(record: dict, pr_entry: dict) -> dict:
             old_behavior = _as_list(old.get("base_behavior_changes"))
             own_behavior = _as_list(record.get("base_behavior_changes"))
             if old_behavior:
-                record["base_behavior_changes"] = list(dict.fromkeys(
-                    old_behavior + own_behavior))
+                record["base_behavior_changes"] = _dedupe(
+                    old_behavior + own_behavior)
                 if not own_behavior:
                     # The stored list is already bounded; keep the real total
                     # ``compact`` recorded so the prompt does not under-report
@@ -1966,13 +1991,16 @@ def unresolved_paths(record: dict | None) -> set[str]:
     """
     record = _mapping(record)
     resolution = resolution_of(record)
-    paths = {e.get("path") for e in resolution_entries(resolution, "unresolved")
-             if e.get("path")}
+    # Only a string is a path (and a set member): a hand-edited ``path`` that
+    # is a list/mapping is unhashable, and building the set would raise out of
+    # the CLI and the sign-off launch instead of reading as absent.
+    paths = {e["path"] for e in resolution_entries(resolution, "unresolved")
+             if isinstance(e.get("path"), str)}
     if record.get("status") == CONFLICT \
             and not revision_of(resolution.get("applied_merge_sha")):
-        paths |= {p.get("path")
+        paths |= {p["path"]
                   for p in resolution_entries(resolution, "paths")
-                  if p.get("path")}
+                  if isinstance(p.get("path"), str)}
     return paths
 
 

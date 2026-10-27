@@ -874,7 +874,10 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                 for entry in integration.resolution_entries(
                         resolution, "paths"):
                     path = entry.get("path")
-                    if path in unresolved:
+                    # Only a string is a path (and a set member): a
+                    # hand-edited non-string reads as absent rather than
+                    # raising out of the launch.
+                    if isinstance(path, str) and path in unresolved:
                         print(f"  attempted {path} by record id "
                               "— NOT resolved")
                     elif carried:
@@ -1418,12 +1421,12 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 # can carry a *newer* base than the resolution merged (a later
                 # bounce), so name the newest one it contains.
                 if not _mapping(rec.get("applied")).get("merge_sha"):
+                    # Object names only: the revision becomes a
+                    # `git diff <rev> HEAD` command the routed step runs
+                    # (``_contained_base`` already refuses anything else).
                     applied_base = _contained_base(pr) \
-                        or resolved_from.get("base_sha") \
-                        or integ.get("base_sha")
-                    applied_base = applied_base \
-                        if isinstance(applied_base, str) and applied_base \
-                        else None
+                        or integration._sha_like(resolved_from.get("base_sha")) \
+                        or integration._sha_like(integ.get("base_sha"))
                     if applied_base:
                         lines.append(
                             f"The PR's changes on top of that base: `git diff "
@@ -1465,8 +1468,9 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
             f"pm merged the base revision into the PR branch as "
             f"`{applied_merge[:12]}` — review/verify the integrated "
             "result, not only the PR's own diff.")
-        applied_base_rev = applied.get("base_sha")
-        if isinstance(applied_base_rev, str) and applied_base_rev:
+        # Object name only: it becomes a `git diff <rev> HEAD` command.
+        applied_base_rev = integration._sha_like(applied.get("base_sha"))
+        if applied_base_rev:
             # The workdir's own base refs (origin/<base>, <base>) are not
             # updated by pm, so a usual `<base>...HEAD` diff would list the
             # merged base commits as PR changes.
@@ -1489,9 +1493,8 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
             lines.append(f"pm did not merge the base into the branch: "
                          f"{rec['apply_error']}.")
     if not for_signoff and integ.get("status") == "conflict":
-        base_rev = integ.get("base_sha")
-        base_rev = (base_rev[:12]
-                    if isinstance(base_rev, str) and base_rev else "")
+        # Object name only: it becomes a `git merge <rev>` command.
+        base_rev = (integration._sha_like(integ.get("base_sha")) or "")[:12]
         lines.append(
             f"\nReconcile it in this branch: `git fetch` the base and "
             f"`git merge {base_rev or integ.get('base_branch')}` (or a newer "

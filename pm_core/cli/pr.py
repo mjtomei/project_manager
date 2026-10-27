@@ -690,6 +690,58 @@ def pr_show(pr_id: str):
             if val:
                 click.echo(f"{label}: {val}")
         _path_list_lines(integ)
+        # The resolution is the provenance the sign-off decision rests on
+        # (which records pm combined, what it applied, what it could not
+        # reconcile).  Prompt builders point here when the integration lists
+        # are abbreviated, so a resolved candidate must not be a dead end.
+        from pm_core import integration
+        resolution = integration.resolution_of(integ)
+        if resolution:
+            candidate = integration.revision_of(integ.get("candidate_tree"))
+            if candidate:
+                click.echo(f"Candidate tree: {candidate}")
+            unresolved = integration.unresolved_paths(integ)
+            carried = integration.carried_applied_resolution(integ)
+            for entry in integration.resolution_entries(resolution, "paths"):
+                path = entry.get("path")
+                # Only a string is a path (and a set member): a hand-edited
+                # non-string reads as absent rather than raising.
+                if isinstance(path, str) and path in unresolved:
+                    click.echo(f"Resolution attempted (NOT resolved): {path}")
+                elif carried:
+                    click.echo(f"Resolved earlier (already applied): {path}")
+                else:
+                    click.echo(f"Resolved: {path}")
+                for key, label in (("added_ours", "added from PR"),
+                                   ("added_theirs", "added from base"),
+                                   ("merged_fields", "merged records"),
+                                   ("removed", "removed")):
+                    values = entry.get(key)
+                    values = values if isinstance(values, list) else []
+                    if not values:
+                        continue
+                    shown = values[:10]
+                    # The yaml copy keeps a prefix; name the ids it omits.
+                    more = max(0, integration.resolution_id_total(entry, key)
+                               - len(shown))
+                    click.echo(f"  {label}: {', '.join(map(str, shown))}"
+                               + (f", … {more} more" if more else ""))
+            for entry in integration.resolution_entries(resolution,
+                                                        "unresolved"):
+                click.echo(f"Unresolved: {entry.get('path')}: "
+                           f"{entry.get('conflicts')}")
+            applied = integration.revision_of(
+                resolution.get("applied_merge_sha"))
+            click.echo("Applied merge: "
+                       + (applied or "not applied to the PR branch"))
+            digest = integ.get("resolution_digest")
+            if isinstance(digest, str) and digest:
+                click.echo(f"Resolution digest: {digest[:12]}")
+            diff_path = resolution.get("diff_path")
+            if isinstance(diff_path, str) and diff_path:
+                # The basename, not the host path: the record travels between
+                # hosts, and the full record pointer below resolves the dir.
+                click.echo(f"Resolution delta: {Path(diff_path).name}")
         # A runtime-resolved reference, not a host path: sessions following the
         # integration omission marker run inside a container, where the host
         # ~/.pm/sessions/<tag>/captures/ path does not exist (the same
@@ -1890,7 +1942,9 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
     carried = integration.carried_applied_resolution(rec)
     for entry in integration.resolution_entries(resolution, "paths"):
         path = entry.get("path")
-        if path in unresolved:
+        # Only a string is a path (and a set member): a hand-edited
+        # non-string reads as absent rather than raising out of the CLI.
+        if isinstance(path, str) and path in unresolved:
             click.echo(f"  attempted: {path} (by record id — NOT resolved)")
         elif carried:
             click.echo(f"  resolved earlier: {path} (by record id — "

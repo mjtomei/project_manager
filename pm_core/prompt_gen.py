@@ -787,8 +787,12 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         """The 12-character form of a revision/tree, or *default*."""
         return value[:12] if isinstance(value, str) and value else default
 
+    # Revisions from the record are interpolated into commands the agent is
+    # told to run (``git diff <rev> HEAD``).  project.yaml is hand-editable
+    # state, so only a git object name may become part of that command — the
+    # same rule ``integration.contained_base`` follows.
     raw_base = rec.get("base_sha")
-    base_sha = raw_base if isinstance(raw_base, str) else ""
+    base_sha = integ._sha_like(raw_base) or ""
     resolution = integ.resolution_of(rec)
     lines = [
         f"- Target: `{rec.get('base_branch')}` of `{rec.get('target_repo')}`",
@@ -797,8 +801,7 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         f"- Candidate tree: `{_short(rec.get('candidate_tree'))}`",
         f"- Result: **{rec.get('status')}** — {integ.summary(rec)}",
     ]
-    if isinstance(rec.get("merge_base"), str) and rec["merge_base"] \
-            and base_sha:
+    if integ._sha_like(rec.get("merge_base")) and base_sha:
         # An applied resolution (and a clean base merged by a bounce) puts the
         # base inside HEAD, so the recorded merge base equals the base and the
         # range would be empty — say nothing rather than "0 file(s)".  For an
@@ -808,22 +811,21 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         pre = resolution.get("resolved_from")
         pre = pre if isinstance(pre, dict) else {}
         if resolution.get("applied_merge_sha") \
-                and isinstance(pre.get("merge_base"), str) \
-                and pre["merge_base"] and range_base == base_sha:
+                and integ._sha_like(pre.get("merge_base")) \
+                and range_base == base_sha:
             # Only when the base inside HEAD is the one the resolution
             # applied.  If a newer base was merged by a bounce since, the
             # pre-apply merge base would list the commits the resolution
             # already merged as if they were new base changes (and disagree
             # with the recorded base_files_count, which describes the range
             # from the applied base): start at the applied base instead.
-            applied_base = integ.revision_of(pre.get("base_sha"))
+            applied_base = integ._sha_like(pre.get("base_sha"))
             if applied_base == base_sha:
                 range_base = pre["merge_base"]
             elif applied_base:
                 range_base = applied_base
         elif range_base == base_sha \
-                and isinstance(rec.get("base_range_from"), str) \
-                and rec["base_range_from"]:
+                and integ._sha_like(rec.get("base_range_from")):
             # A clean base merged by a bounce has no resolution to name the
             # pre-merge range; the check that saw the base outside the branch
             # recorded it (``integration._carry_base_interaction``).
@@ -907,7 +909,9 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
             lines.append("- " + "; ".join(bits))
         resolved_from = resolution.get("resolved_from")
         resolved_from = resolved_from if isinstance(resolved_from, dict) else {}
-        pre_head = _short(resolved_from.get("head"), None)
+        # Object name only: this revision becomes a `git diff <rev> HEAD`
+        # command below.
+        pre_head = _short(integ._sha_like(resolved_from.get("head")), None)
         if pre_head:
             lines.append(
                 f"- Resolved from PR HEAD `{pre_head}` "

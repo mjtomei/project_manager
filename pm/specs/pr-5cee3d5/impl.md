@@ -456,6 +456,14 @@ invalidates and returns to sign-off.
   which fetched the base and merged the candidate a third time.
 `--record` still records the check the verdict binds to.
 
+`pm pr show <pr>` — the reader `integration_pointer` tells a session to run —
+renders a resolved record: the candidate tree, the per-path resolution (which
+records pm combined, added from each side, merged and removed, with a `… N
+more` marker from the record's real total), the unresolved conflicts, the
+applied merge, the resolution digest the approval binds to and the delta
+file's basename. A resolved candidate must not be a dead end there (the
+prompt's abbreviated lists point at this command).
+
 ### R9. Regression coverage
 Real-git tests (new `tests/test_signoff_resolution.py` plus resolver unit
 tests):
@@ -496,8 +504,12 @@ tests):
    base (not the resolution's pre-apply merge base, which would re-list the
    already-merged commits and disagree with the file count). A resolution
    with more than 10 ids per list names the remainder ("… N more") in the
-   prompt and in `integrate`, and `contained_base` refuses a value that is
-   not a git object name (it becomes a command the agent runs).
+   prompt and in `integrate`, and every record revision that becomes a
+   command the agent is told to run is a git object name: `contained_base`
+   refuses anything else, and the sign-off prompt's base-range / applied-merge
+   lines and the return text's `git diff <rev> HEAD` / `git merge <rev>`
+   hints fall back (`<base>`, `<old head>`, the base branch) instead of
+   interpolating a hand-edited fragment.
 10. Notes appended to the same PR record on both sides (the merge base has no
     `notes` key) resolve, both notes survive, and the nested ids are named in
     the summary/prompt; the same id with different content is still ambiguous.
@@ -589,7 +601,19 @@ tests):
     without details". A malformed member *inside* a well-formed entry (the
     four id lists, `records`, `path`/`resolver`/`blob`) reads as absent in the
     compact record instead of raising (`list(5)`) or splitting a string into
-    characters (`list("abc")`). The
+    characters (`list("abc")`). A `path` member that is not a string is not a
+    path — and not a set member either: `unresolved_paths` collects only
+    strings and the CLI / sign-off launch test membership on strings, so a
+    hand-edited list/mapping `path` no longer raises `TypeError` (unhashable)
+    out of `pm pr signoff integrate` and the launch. An unhashable
+    `base_behavior_changes` member is carried, not dropped: the carry-forward
+    de-duplicates order-preservingly and skips only the de-duplication for a
+    value `dict.fromkeys` would have raised on (which took every integration
+    check down, so the launch recorded nothing and the merge gate lost the
+    evidence requirement). A non-string key inside a resolution's `records`
+    map is not an action path and is dropped from the compact record (a
+    mapping mixing YAML's int keys with pm's string paths made
+    `_resolution_digest`'s `sort_keys` raise). The
     delta pointer is one of those values: a non-string `resolution.diff_path`
     must not make `_carry_forward` call `Path(...)` on it (that raised out of
     every later integration check and the sign-off launch reported only
