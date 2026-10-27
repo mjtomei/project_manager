@@ -24,16 +24,27 @@ from pm_core.tui import pr_view
 
 class TestWindowPanesDead:
     @pytest.mark.parametrize("stdout,expected", [
-        ("1\n", True),
-        ("1\n1\n", True),
-        ("0\n", False),
-        ("1\n0\n", False),   # a live companion pane keeps the window
+        ("%1 1\n", True),
+        ("%1 1\n%2 1\n", True),
+        ("%1 0\n", False),
+        ("%1 1\n%2 0\n", False),   # a live companion pane keeps the window
         ("", False),
     ])
     @patch("pm_core.tmux.subprocess.run")
     def test_flags(self, mock_run, stdout, expected):
         mock_run.return_value = MagicMock(returncode=0, stdout=stdout)
         assert tmux_mod.window_panes_dead("sess", "@1") is expected
+
+    @pytest.mark.parametrize("stdout,expected", [
+        ("%1 1\n%2 0\n", True),    # only the ignored pane is live
+        ("%1 0\n%2 0\n", False),
+        ("%2 0\n", False),          # nothing left to judge by
+    ])
+    @patch("pm_core.tmux.subprocess.run")
+    def test_ignored_panes_do_not_count(self, mock_run, stdout, expected):
+        mock_run.return_value = MagicMock(returncode=0, stdout=stdout)
+        assert tmux_mod.window_panes_dead(
+            "sess", "@1", ignore={"%2"}) is expected
 
     @patch("pm_core.tmux.subprocess.run")
     def test_error_is_not_dead(self, mock_run):
@@ -128,6 +139,41 @@ class TestReviewWindowDead:
         assert not launched
         mock_tmux.select_window.assert_called_once_with("pm-sess", "@2")
         mock_tmux.kill_window.assert_not_called()
+
+
+class TestReviewWindowEnded:
+    """The review diff pane is a host shell that outlives the reviewer, so
+    it must not keep a stopped review's window alive."""
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_live_diff_shell_is_ignored(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0,
+                                          stdout="%5 0\n%6 1\n")
+        registry = {"windows": {"@2": {"panes": [
+            {"id": "%5", "role": "review-diff"},
+            {"id": "%6", "role": "review-claude"}]}}}
+        with patch("pm_core.pane_registry.load_registry",
+                   return_value=registry):
+            assert pr_mod._review_window_ended("pm-sess", "@2") is True
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_live_reviewer_keeps_window(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0,
+                                          stdout="%5 0\n%6 0\n")
+        registry = {"windows": {"@2": {"panes": [
+            {"id": "%5", "role": "review-diff"},
+            {"id": "%6", "role": "review-claude"}]}}}
+        with patch("pm_core.pane_registry.load_registry",
+                   return_value=registry):
+            assert pr_mod._review_window_ended("pm-sess", "@2") is False
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_unregistered_window_counts_every_pane(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0,
+                                          stdout="%5 0\n%6 1\n")
+        with patch("pm_core.pane_registry.load_registry",
+                   return_value={"windows": {}}):
+            assert pr_mod._review_window_ended("pm-sess", "@2") is False
 
 
 # ---------------------------------------------------------------------------

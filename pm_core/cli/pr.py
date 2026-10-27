@@ -1269,6 +1269,26 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
     click.echo("Added companion pane.")
 
 
+def _review_window_ended(pm_session: str, window_id: str) -> bool:
+    """True if the review session in *window_id* has ended.
+
+    The window's diff pane is a host shell that outlives the reviewer, so
+    a review stopped on idle (container removed, Claude pane dead) still
+    has a live pane.  It is ignored here: relaunching recreates it.
+    """
+    from pm_core import pane_registry as _reg
+    try:
+        wdata = _reg.load_registry(pm_session).get("windows", {}).get(
+            window_id, {})
+        diff_panes = {p.get("id") for p in wdata.get("panes", [])
+                      if p.get("role") == "review-diff"}
+    except Exception:
+        _log.debug("review window registry read failed", exc_info=True)
+        diff_panes = set()
+    return tmux_mod.window_panes_dead(pm_session, window_id,
+                                      ignore=diff_panes)
+
+
 def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                           background: bool = False,
                           review_loop: bool = False, review_iteration: int = 0,
@@ -1307,7 +1327,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     # just switch to it — skip expensive prompt generation and container setup.
     existing = tmux_mod.find_window_by_name(pm_session, window_name)
     sessions_on_review: list[str] = []
-    if existing and not fresh and tmux_mod.window_panes_dead(
+    if existing and not fresh and _review_window_ended(
             pm_session, existing["id"]):
         # The review session ended (e.g. stop-on-idle removed the
         # container and kept the dead pane readable): relaunch.

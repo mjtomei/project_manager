@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+from collections.abc import Collection
 
 from pm_core.paths import configure_logger
 
@@ -353,21 +354,26 @@ def get_pane_indices(session: str, window: str = "0") -> list[tuple[str, int]]:
     return pairs
 
 
-def window_panes_dead(session: str, window: str) -> bool:
+def window_panes_dead(session: str, window: str,
+                      ignore: Collection[str] = ()) -> bool:
     """True if *window* has panes and every one of them is dead.
 
     Stop-on-idle keeps a finished session's panes (``remain-on-exit``) so
     their text stays readable.  A window left with only dead panes has
-    no session to switch to; starting it again must relaunch.
+    no session to switch to; starting it again must relaunch.  Panes in
+    *ignore* (pane IDs pm recreates with the window, such as a review's
+    diff shell) don't count either way.
     """
     result = _run(
         _tmux_cmd("list-panes", "-t", f"{session}:{window}",
-                   "-F", "#{pane_dead}"),
+                   "-F", "#{pane_id} #{pane_dead}"),
         text=True,
     )
     if result.returncode != 0:
         return False
-    flags = result.stdout.split()
+    flags = [parts[1] for parts in
+             (line.split() for line in result.stdout.splitlines())
+             if len(parts) == 2 and parts[0] not in ignore]
     return bool(flags) and all(f == "1" for f in flags)
 
 

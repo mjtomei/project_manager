@@ -186,11 +186,12 @@ def review_pr(app, fresh: bool = False) -> None:
             if data:
                 pr_entry = store.get_pr(data, pr_id)
                 if pr_entry:
-                    from pm_core.cli.pr import _pr_display_id
+                    from pm_core.cli.pr import (
+                        _pr_display_id, _review_window_ended)
                     display_id = _pr_display_id(pr_entry)
                     window_name = f"review-{display_id}"
                     existing = tmux_mod.find_window_by_name(session, window_name)
-                    if existing and not tmux_mod.window_panes_dead(
+                    if existing and not _review_window_ended(
                             session, existing["id"]):
                         tmux_mod.select_window(session, existing["id"])
                         app.log_message(f"Switched to review window '{window_name}'")
