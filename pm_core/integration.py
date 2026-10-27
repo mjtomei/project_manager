@@ -313,6 +313,18 @@ def resolve_project_yaml(base_text: str | None, ours_text: str | None,
         theirs = _parse_yaml(theirs_text)
     except (yaml.YAMLError, ValueError) as e:
         return None, {"error": f"cannot parse project.yaml: {e}"}
+    if ours is _MISSING or theirs is _MISSING:
+        # A modify/delete conflict: git stages no blob for the deleted side,
+        # so there is nothing to merge by record id.  Say that — reporting a
+        # YAML problem the surviving file does not have would send the agent
+        # looking for a syntax error instead of the deletion.
+        if ours is _MISSING and theirs is _MISSING:
+            return None, {"conflicts": [
+                "project.yaml: deleted on both sides (nothing to merge)"]}
+        side = "PR branch" if ours is _MISSING else "new base"
+        return None, {"conflicts": [
+            f"project.yaml: deleted on the {side} and changed on the other "
+            "side (deletion vs edit)"]}
     if not isinstance(ours, dict) or not isinstance(theirs, dict):
         return None, {"error": "project.yaml is not a mapping on one side"}
     if base is not _MISSING and not isinstance(base, dict):

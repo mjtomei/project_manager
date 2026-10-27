@@ -705,8 +705,11 @@ def pr_show(pr_id: str):
             for entry in integration.resolution_entries(resolution, "paths"):
                 path = entry.get("path")
                 # Only a string is a path (and a set member): a hand-edited
-                # non-string reads as absent rather than raising.
-                if isinstance(path, str) and path in unresolved:
+                # non-string reads as absent rather than raising, and is not
+                # reported as a resolved path pm cannot name.
+                if not (isinstance(path, str) and path):
+                    continue
+                if path in unresolved:
                     click.echo(f"Resolution attempted (NOT resolved): {path}")
                 elif carried:
                     click.echo(f"Resolved earlier (already applied): {path}")
@@ -1946,7 +1949,9 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
         path = entry.get("path")
         # Only a string is a path (and a set member): a hand-edited
         # non-string reads as absent rather than raising out of the CLI.
-        if isinstance(path, str) and path in unresolved:
+        if not (isinstance(path, str) and path):
+            continue
+        if path in unresolved:
             click.echo(f"  attempted: {path} (by record id — NOT resolved)")
         elif carried:
             click.echo(f"  resolved earlier: {path} (by record id — "

@@ -4635,3 +4635,128 @@ def test_a_malformed_invalidation_record_is_not_a_pointer(w):
         pr["signoff_invalidated"] = {"reason": None, "sha": w.head}
     store.locked_update(w.pm_dir, _set_reason)
     assert POINTER not in _signoff_prompt(w)
+
+
+# --- honesty of the deletion / applied-merge / path surfaces ---------------
+
+def test_modify_delete_of_project_yaml_is_a_deletion_edit_conflict():
+    """A deleted side has no document to merge by record id.
+
+    Git reports this as a modify/delete conflict and stages no blob for the
+    deleted side, so the resolver must say that.  Reporting a YAML problem
+    ("not a mapping on one side") would send the agent looking for a syntax
+    error in a file that is fine, instead of at the deletion.
+    """
+    ours = BASE_YAML + "- id: pr-300\n  title: Feat\n  status: pending\n"
+
+    merged, details = integration.resolve_project_yaml(BASE_YAML, ours, None)
+    assert merged is None
+    assert any("deleted on the new base" in c
+               for c in details["conflicts"]), details
+    assert not any("not a mapping" in c for c in details["conflicts"])
+
+    merged, details = integration.resolve_project_yaml(BASE_YAML, None,
+                                                       BASE_YAML)
+    assert merged is None
+    assert any("deleted on the PR branch" in c
+               for c in details["conflicts"]), details
+    assert not any("not a mapping" in c for c in details["conflicts"])
+
+    # A malformed document (not a deletion) keeps the readable YAML problem.
+    merged, details = integration.resolve_project_yaml(
+        BASE_YAML, "- a\n- b\n", BASE_YAML)
+    assert merged is None
+    assert "not a mapping" in (details.get("error") or ""), details
+
+
+def test_the_return_text_names_the_applied_merge_once(w):
+    """A bounce that applied the resolution must not report the merge twice.
+
+    The resolution block and the ``applied`` block describe the same merge;
+    saying it twice reads as two separate integrations.  The diff hint the
+    routed step needs must survive the de-duplication.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED
+
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, git(w.wd, "rev-parse", "HEAD"),
+                                 rec["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+    ret = pr_entry(w)["signoff_return"]
+    merge_sha = ret["applied"]["merge_sha"]
+    assert ret["integration"]["resolution"]["applied_merge_sha"] == merge_sha
+
+    text = signoff.format_signoff_return(pr_entry(w))
+    assert text.count(merge_sha[:12]) == 1, text
+    assert f"git diff {rec['base_sha'][:12]} HEAD" in text
+
+
+def test_a_hand_edited_applied_merge_is_not_rendered_as_a_revision(w):
+    """Only a git object name is shown as the merge the branch carries.
+
+    ``applied_merge_sha`` is hand-editable project.yaml state and the lines
+    that render it sit beside commands the agent is told to run, so a shell
+    fragment must fall back rather than be interpolated.
+    """
+    rec = _metadata_conflict(w)
+    fragment = "abc; touch /tmp/pwned"
+
+    def _set(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"])
+        resolution["applied_merge_sha"] = fragment
+        integ["resolution"] = resolution
+
+    store.locked_update(w.pm_dir, _set)
+
+    prompt = _signoff_prompt(w)
+    assert "touch /tmp/pwned" not in prompt
+    assert "Applied to the PR branch as `<merge>`" in prompt
+
+    pr = pr_entry(w)
+    pr["signoff_return"] = signoff.build_return_record(
+        pr, SIGNOFF_REVIEW, "review",
+        reviewed_head=pr["integration"]["head"])
+    text = signoff.format_signoff_return(pr)
+    assert "touch /tmp/pwned" not in text
+    assert "as `?`" in text
+
+
+def test_a_non_string_resolution_path_is_not_reported_as_resolved(w):
+    """Hand-edited state: a path that is not a string is no path at all.
+
+    The CLI and ``pm pr show`` must not label it "resolved" — pm cannot name
+    what it resolved — and must not raise on it.
+    """
+    _metadata_conflict(w)
+
+    def _set(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"])
+        resolution["paths"] = [{"path": ["pm/project.yaml"], "records": {}}]
+        integ["resolution"] = resolution
+
+    store.locked_update(w.pm_dir, _set)
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "Resolved: [" not in r.output
+    assert "Resolved: pm/project.yaml" not in r.output
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "trigger_tui_refresh"):
+        r = CliRunner().invoke(pr_mod.pr, ["signoff", "integrate", PR])
+    assert r.exit_code == 0, r.output
+    assert "resolved: [" not in r.output

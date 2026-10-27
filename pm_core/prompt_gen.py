@@ -926,9 +926,12 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
             # newer base's commits as PR changes).
             applied_base = _diff_base(pr) or base_sha
             shown_base = _short(applied_base, "<base>")
+            # Object name only: this revision is shown as the merge the
+            # branch carries and sits beside commands the agent runs.
             lines.append(
                 f"- Applied to the PR branch as "
-                f"`{_short(applied_sha)}`: the branch now "
+                f"`{_short(integ._sha_like(applied_sha), '<merge>')}`: "
+                "the branch now "
                 "includes the base merge, so review/verify the integrated "
                 "result. The PR's own changes remain "
                 f"`git diff {shown_base}...HEAD`; "

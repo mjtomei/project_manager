@@ -876,8 +876,11 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                     path = entry.get("path")
                     # Only a string is a path (and a set member): a
                     # hand-edited non-string reads as absent rather than
-                    # raising out of the launch.
-                    if isinstance(path, str) and path in unresolved:
+                    # raising out of the launch, and is not reported as a
+                    # path pm resolved.
+                    if not (isinstance(path, str) and path):
+                        continue
+                    if path in unresolved:
                         print(f"  attempted {path} by record id "
                               "— NOT resolved")
                     elif carried:
@@ -1307,6 +1310,10 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                      f"routed it to the earliest affected step: "
                      f"{rec.get('coerced_reason')})")
     integ = _mapping(rec.get("integration"))
+    # The merge a resolution applied, when this block already names it: the
+    # ``applied`` block below reports the same merge on a bounce, and saying
+    # it twice reads as two separate integrations.
+    resolution_merge = None
     if integ:
         base_rev = integ.get("base_sha")
         base_rev = (base_rev[:12]
@@ -1409,9 +1416,13 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                     f"against base `{base_rev}`.")
             applied_sha = resolution.get("applied_merge_sha")
             if isinstance(applied_sha, str) and applied_sha:
+                # Object name only: the record is hand-editable state, and
+                # this revision sits beside commands the routed step runs.
+                applied_rev = integration._sha_like(applied_sha)
+                resolution_merge = applied_rev or applied_sha
                 lines.append(
                     f"pm applied that resolution and merged the base into the "
-                    f"branch as `{applied_sha[:12]}` — "
+                    f"branch as `{applied_rev[:12] if applied_rev else '?'}` — "
                     "review/verify the integrated result, not only the PR's "
                     "own diff.")
                 # The launch apply (prepare) leaves no ``applied`` block on
@@ -1464,10 +1475,16 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
     applied = _mapping(rec.get("applied"))
     applied_merge = applied.get("merge_sha")
     if isinstance(applied_merge, str) and applied_merge:
-        lines.append(
-            f"pm merged the base revision into the PR branch as "
-            f"`{applied_merge[:12]}` — review/verify the integrated "
-            "result, not only the PR's own diff.")
+        # On a bounce that applied the resolution, this is the same merge the
+        # resolution block above already named: report it once (the diff hint
+        # below is still needed, because that block only emits it when no
+        # ``applied`` block is present).
+        if applied_merge != resolution_merge:
+            applied_rev = integration._sha_like(applied_merge)
+            lines.append(
+                f"pm merged the base revision into the PR branch as "
+                f"`{applied_rev[:12] if applied_rev else '?'}` — review/verify "
+                "the integrated result, not only the PR's own diff.")
         # Object name only: it becomes a `git diff <rev> HEAD` command.
         applied_base_rev = integration._sha_like(applied.get("base_sha"))
         if applied_base_rev:
