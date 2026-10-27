@@ -25584,11 +25584,25 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-05-23T03:14:54.863296+00:00'
+  updated_at: '2026-10-27T04:59:44.098691+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-e44d642
+    text: 'Implementation (7c0cfdee): shared MissingOutputRecovery in loop_shared
+      bounds idle-without-verdict turns (verdict-recovery-max-attempts, default 3),
+      repairs completed-but-unformatted results by asking only for the agent''s own
+      standalone outcome, resumes the same session after empty/provider-error turns,
+      and defers to newer idle events (native retry/queued input) during a settle
+      window. Exhaustion surfaces NO_VERDICT (review/watcher, TUI failed state) or
+      INPUT_REQUIRED with a reason (QA planner/scenario/refiner/verifier/finalize).
+      INPUT_REQUIRED follow-up waits stay unbounded by design. Retry-original-prompt
+      is available via the retry_prompt kwarg; loops use targeted resume/outcome messages
+      to avoid replaying completed work per the recovery audit. Spec: pm/specs/pr-6566901/impl.md.
+      Full suite 3823 passed, 1 skipped.'
+    created_at: '2026-10-27T04:59:44Z'
+    last_edited: '2026-10-27T04:59:44Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
