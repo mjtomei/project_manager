@@ -29479,7 +29479,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-27T00:21:46.857117+00:00'
+  updated_at: '2026-10-27T00:22:12.367130+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29892,6 +29892,26 @@ prs:
       into interactive control panes. Evidence /pm-captures/scenarios/27/.'
     created_at: '2026-10-27T00:21:46Z'
     last_edited: '2026-10-27T00:21:46Z'
+  - id: note-ed148c7
+    text: 'QA S30 (2026-10-27) PASS on 787e87f0, no code change: all four triples
+      held (63/63 automated Then checks; evidence /pm-captures/scenarios/30/). Five
+      launches at once (autostart A/B/C from pending, CLI auto-sequence tick loop
+      D, user t on E): the only select_window in the debug delta is target=$S:qa-<E>;
+      grouped clients on main in all 2484 samples; A-E each QA PASS + FINALIZE_DONE
+      with runtime qa done/PASS; rows A/B/C/D sign_off, E qa, no manual r. CL/MG guards:
+      ''unknown status: closed'' on stderr/exit 2 (absent when stderr redirected),
+      ''merged''/exit 0, qa-run-bg closed exit 0 + skip line, no qa-CL/qa-MG window,
+      clients on main. H merged mid-run: ''QA aborted after window creation: <H> is
+      merged; tearing down qa window'', qa-H* gone, runtime H has no qa action, runs
+      popup shows no live run. autostart F racing the user''s t on G: only select_window
+      is target=$S:qa-G, 2.3 s after t; S~1 on main throughout; both runs done PASS.
+      Harness notes for future S30: pending auto-start targets do reach QA (impl idle
+      -> in_review -> review PASS -> qa); armed interactive actor panes never create
+      a done file (read the pane scrollback); TUI-owned runs mirror runtime ''running''
+      ~19 s after window creation while CLI qa-run-bg writes it immediately (pre-existing
+      on master).'
+    created_at: '2026-10-27T00:22:12Z'
+    last_edited: '2026-10-27T00:22:12Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
