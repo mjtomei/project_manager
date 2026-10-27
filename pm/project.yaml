@@ -10763,6 +10763,68 @@ prs:
       or a non-nested host for "exactly one per raise" checks. Captures /pm-captures/scenarios/40.'
     created_at: '2026-10-27T17:06:51Z'
     last_edited: '2026-10-27T17:06:51Z'
+  - id: note-4612ce6
+    text: 'S35 refine (2026-10-27): verified live on cdcf6cc3. Traps: `set system-memory-history-size
+      -3` is eaten by click as an option (exit 2), so use `-- -3` to reach the validator.
+      Fail-closed shows only in scope pm, because scope system falls back to `podman
+      ps`. qa-debug admit needs nested_podman: true, a committed repo, an instruction
+      (`pm qa add-instruction smoke`), and image docker.io/library/debian:bookworm-slim
+      (pm-dev is not built). Throwaway HOME needs XDG_DATA_HOME/XDG_CONFIG_HOME=/home/pm/...
+      to keep podman storage.'
+    created_at: '2026-10-27T16:17:11Z'
+    last_edited: '2026-10-27T16:17:11Z'
+  - id: note-d4ad3d8
+    text: 'QA S36 refine: (1) "mem ?/<target> ... unmeasurable" only appears in pm
+      scope — in system scope a podman stats failure falls back to `podman ps` and
+      counts each running pm container at its full projection (impl spec §0), so the
+      bar stays measured. (2) Reuse-a-running-container path: `z s` (fresh) kills
+      the window and its EXIT trap podman rm -f races the relaunch; orphan the container
+      instead (SIGKILL the pane shell + exec client) then press s. (3) Refused launches
+      open no pane; the error is the TUI log line ("Error: Memory governor blocked
+      ...") and `pm container status` Blocked lines. (4) Pre-build pm-dev with `pm
+      container build-base` (~5 min) — the TUI pr-start timeout is 300 s.'
+    created_at: '2026-10-27T16:17:39Z'
+    last_edited: '2026-10-27T16:17:39Z'
+  - id: note-28b6a23
+    text: 'QA S38 (cdcf6cc3, live rootless podman) INPUT_REQUIRED, needs a reviewer
+      decision on 2 Thens; everything else held (NEEDS_WORK/first-PASS removed only
+      after verdict/VERIFIED with dead panes kept, IR kept, exec-attached kept with
+      "1 other exec session(s) open", 2 peak samples, policy off = no removal). (1)
+      Story 2 count: qa_scenario.samples went 2->4 across `z t` because its stale
+      cleanup removed story-1 leftover s3/s2 via remove_container, which samples running
+      containers (impl.md Capture points); no new-loop sample. Decide: should fresh-start/stale
+      cleanup record samples, or should the scenario re-baseline after cleanup? (2)
+      NEEDS_WORK pane printed ~16:24:43 but the loop only polls after all scenarios
+      launch + 30 s grace, so it recorded the verdict at 16:25:48 and removed the
+      container at 16:25:59 (76 s after print, 11 s after record). Decide whether
+      "within 30 s of the verdict" means the loop record. Captures /pm-captures/scenarios/38.
+      Harness: s0 eats a qa_scenario fake slot (pr-cd7c2f7); run `pm pr spec <pr>
+      qa` before t.'
+    created_at: '2026-10-27T16:40:33Z'
+    last_edited: '2026-10-27T16:40:33Z'
+  - id: note-9918de7
+    text: 'QA S41 refine (2026-10-27): `pm container cleanup` is broken on Podman.
+      It lists with --format "{{.Names}}\t{{.Status}}", and Podman tabwriter turns
+      the tab into spaces, so split("\t") yields "pm-x  Up 5s ago" as the name. It
+      prints "Removing: …" and "Removed N" but removes nothing and records no sample
+      (pm_core/cli/container.py container_cleanup). The bug predates this PR, but
+      the spec names cleanup as a capture point. Fix: use a "|" separator, as get_pm_container_memory
+      does. `pm pr cleanup <id> --resources` and `pm session kill` list Names only
+      and work. Also: the admission refusal text ends "default projection.. Free memory"
+      (double period).'
+    created_at: '2026-10-27T16:19:12Z'
+    last_edited: '2026-10-27T16:19:12Z'
+  - id: note-3250b90
+    text: 'QA S41 (2026-10-27): all 4 stories driven live on rootless Podman 3.4.4
+      (nested). Stories 1-3 PASS: SI MB→MiB conversion, pm scope excludes non-pm containers,
+      system scope matches /proc/meminfo, end-of-life memory.peak sample (4422) drives
+      the projection refusal, history trimmed to the newest 3. Story 4: the pm container
+      cleanup tab bug (note-9918de7) is fixed by c6be06e1 from another scenario, and
+      live-verified on the final tree. Pushed c499dd76: refusal text no longer reads
+      "projection.. Free". Known limit: nested pm scope reads the enclosing cgroup
+      per container, which includes the measuring pm process. Captures: /pm-captures/scenarios/41.'
+    created_at: '2026-10-27T16:38:13Z'
+    last_edited: '2026-10-27T16:38:13Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
@@ -36171,6 +36233,57 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T16:49:34.569782+00:00'
   updated_at: '2026-10-27T16:49:34.569782+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-055e3a1
+  plan: bugs
+  title: 'Bug: tech-tree sign_off node animates the running spinner after its sign-off
+    launch was refused'
+  branch: pm/pr-055e3a1-bug-tech-tree-sign-off-node-animates-the-running-s
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/tech_tree.py sign_off branch (~line 610) shows the cyan
+    spinner whenever status==sign_off, a workdir exists and no verdict is recorded,
+    without checking that a sign-off session actually launched. Repro (QA S36 pr-eb2dbfc,
+    2026-10-27): with the memory governor refusing (stats unmeasurable), select an
+    in_review PR with skip-qa on and press i: the PR moves to sign_off, the log shows
+    "Memory governor blocked signoff <pr>: ...", no sign-off window/container exists,
+    yet the node keeps "sign_off ◓" spinning indefinitely. Same for any other sign-off
+    launch failure (container create error). Logic is unchanged from master. Expected:
+    no spinner (or an error/blocked marker) when no sign-off pane/router is live.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T16:39:59.202616+00:00'
+  updated_at: '2026-10-27T16:39:59.202616+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-cd7c2f7
+  plan: bugs
+  title: 'Bug: QA Scenario 0 (interactive) consumes a qa_scenario fake-claude scripted
+    slot'
+  branch: pm/pr-cd7c2f7-bug-qa-scenario-0-interactive-consumes-a-qa-scenar
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py _launch_scenario_0 builds its fake command with
+    session_type="qa_scenario", so build_claude_shell_cmd advances the qa_scenario
+    scripted cursor before any real scenario launches. Repro (QA S38 on pr-eb2dbfc,
+    2026-10-27): fake config qa_scenario verdicts [NEEDS_WORK, PASS, INPUT_REQUIRED,
+    PASS-180] with 4 planned scenarios; press t; the debug log shows "fake-claude
+    --verdict NEEDS_WORK --delay 5" for qa-<pr>-s0, and scenarios 1..4 receive slots
+    1..4 (the last clamped), so every scripted QA config is shifted by one. S0 is
+    never polled for a verdict. Fix: give scenario 0 its own fake session type (e.g.
+    qa_author/qa_interactive) or skip the cursor advance for it. Workaround: prepend
+    a dummy qa_scenario slot.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T16:36:06.306411+00:00'
+  updated_at: '2026-10-27T16:36:06.306411+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
