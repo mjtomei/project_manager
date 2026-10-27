@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T21:58:44.039560+00:00'
+  updated_at: '2026-10-27T21:24:00Z'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36607,6 +36607,23 @@ prs:
       no record), so re-add them after a restart.'
     created_at: '2026-10-27T21:58:43Z'
     last_edited: '2026-10-27T21:58:43Z'
+  - id: note-32cdcad
+    text: 'QA S1 (pr-e040aeb) PASS: both live stories verified with a podman shim
+      — iteration-2 attempt 1 killed the historical window then failed; loop kept
+      iteration 2, logged bounded retries (5 s/10 s), showed "review #2 (launch retry
+      2)" in the runs popup and running=true/attempts=2 in status --json; after disabling
+      container mode during the backoff attempt 3 launched a fresh i2 window that
+      emitted PASS and the PR advanced to QA. Exhaustion run ended ↻ LAUNCH_FAILED
+      (2 iterations) with retryable status + complete launch artifacts and no fabricated
+      verdict; auto-start re-armed after 60 s. Repro test fails on origin/master (assert
+      1 == 2) and passes here; 169 targeted tests pass. Evidence: /pm-captures/scenarios/1/{s1-retry-succeeds,s3-exhaustion}.
+      Cosmetic (non-blocking): pm autostart status prints the artifact path twice
+      (the error string embeds "(artifact: …)" and the status appends "[artifact:
+      …]"); per-attempt launch failures log at ERROR level before the retry warning
+      (loop does not terminate). QA spec text says "failed/in_review"; code emits
+      "failed/review".'
+    created_at: '2026-10-27T21:24:00Z'
+    last_edited: '2026-10-27T21:24:00Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
