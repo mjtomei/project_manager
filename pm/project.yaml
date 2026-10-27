@@ -29479,7 +29479,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-26T17:54:44.527455+00:00'
+  updated_at: '2026-10-27T00:21:46.857117+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29877,6 +29877,21 @@ prs:
       "(N passes required)".'
     created_at: '2026-10-26T16:45:17Z'
     last_edited: '2026-10-26T16:45:17Z'
+  - id: note-862434c
+    text: 'QA S27 (2026-10-27) PASS on 787e87f0, no code change: autostart impl->review->QA
+      (885 samples, 0 off-main, no select_window), L during auto-QA opens the log
+      pane in main (@0, qa-planner stays in qa-<pr>), and the SIGNOFF_REQA bounce
+      makes a replacement qa window (@10 vs @6) with 1444 samples 0 off-main. Reproduction
+      tests 63 passed; old `elif not existing_win:` mutation fails exactly the two
+      background-start tests. Harness notes for next time: (1) qa-<pr>-s0 is created
+      at planning start, so "before any sN" means before s1; (2) qa-status registers
+      in the qa window ~3s after the QA window, not at L time; (3) the first recorded
+      `tmux attach` can die silently right after `pm session` — verify list-clients
+      per session and retry (scripts/s27.py attach_clients does this); (4) panes get
+      a sanitized PATH, so set BASH_ENV at session scope and type the PATH export
+      into interactive control panes. Evidence /pm-captures/scenarios/27/.'
+    created_at: '2026-10-27T00:21:46Z'
+    last_edited: '2026-10-27T00:21:46Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
