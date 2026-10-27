@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-27T21:05:54.749494+00:00'
+  updated_at: '2026-10-27T21:46:34.095403+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14730,6 +14730,25 @@ prs:
       passed, 1 skipped (pytest 8.4.2, PATH=/usr/bin:/bin, markdown on scratch PYTHONPATH).'
     created_at: '2026-10-27T21:05:54Z'
     last_edited: '2026-10-27T21:05:54Z'
+  - id: note-db1aebe
+    text: 'Review loop 1e74 i2 (2026-10-27): (a) `pm autostart` was the remaining
+      production consumer of the bool `trigger_tui_command`, so it swallowed the actionable
+      reason — `_request` now uses `submit_tui_command` and raises `owner_unavailable`
+      with its message (a version-skew TUI now says "predates the command-queue feature;
+      restart the TUI (Ctrl+R)" instead of "could not signal the TUI"); dropped the
+      dead `ValueError` from `_resolve_owner`''s except. (b) helpers gained `_read_tui_owner()`
+      (read+parse+identity, read-only) shared by `_validate_tui_owner` (adds stale
+      cleanup) and `tui_owner_problem` (picker poll), so the two paths cannot drift.
+      (c) `caps=[]` message now also names the restart fix (caps are never published
+      if `loop.add_signal_handler` failed, so "still starting up" could be permanently
+      wrong). (d) `_wait_for_tui_command` docstring documented the 3 s owner-liveness
+      abort ("No timeout" was stale). (e) tests: autostart patches moved to `submit_tui_command`
+      with `TuiIpcResult`, plus new tests for the surfaced message, reload-while-starting,
+      and keeping the pidfile when a live TUI lacks the cap. Spec impl.md I1/A5/tests
+      17-18 updated. Full suite: 3871 passed, 1 skipped (pytest 8.4.2, PATH=/usr/bin:/bin,
+      markdown on scratch PYTHONPATH). (2026-10-27T22:05:00Z)'
+    created_at: '2026-10-27T21:46:34Z'
+    last_edited: '2026-10-27T21:46:34Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
