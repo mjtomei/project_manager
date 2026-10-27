@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T09:04:42.496446+00:00'
+  updated_at: '2026-10-27T09:26:07.426165+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36355,6 +36355,33 @@ prs:
       artifact prompt copy can name the stale session prompt. (2026-10-27T09:05:00Z)'
     created_at: '2026-10-27T09:04:42Z'
     last_edited: '2026-10-27T09:04:42Z'
+  - id: note-0154dbb
+    text: 'Review 385e i9 (fixes applied): (1) `pm autostart status` now names the
+      trust/permission prompt for a HOLD: `autostart_state.review_progress_input`
+      reports `latest_output` instead of a stale `last_launch_error` (iteration 8
+      fixed only the runtime_state mirror; the CLI reads the live loop state). (2)
+      `_lease_keepalive` claims the launch lease on its first check, so the restart-handoff
+      adopt path (`_adopt_in_flight_review`), which polls a live review without `_claim_launch`,
+      owns it immediately instead of after 30 s — closing a window where `pm pr auto-sequence`
+      could launch over the adopted session. (3) The launch artifact no longer attaches
+      a previous run''s prompt: `stale_session_id` is threaded through `_launch_review_window`/`_write_launch_artifact`
+      and the artifact records `prompt: (skipped — ...)` when the symlink still names
+      the pre-episode session (this closes the iteration-7 residual). (4) `_locked_action_mutate`
+      writes nothing when the mutator changed nothing, so a lost claim / non-owner
+      release cannot create a `{updated_at}` stub action entry or rewrite another
+      loop''s entry. Tests: 4 new in test_review_launch_retry.py (71 in the file);
+      targeted review/autostart/runtime-state suites 572 passed. Full suite 3799 passed;
+      the 55 failed + 17 errors are the base tree''s pre-existing markdown-module/hook-installer/signoff/merge/git
+      env failures (test_git_ops::test_keeps_unpushed_merge included, which also fails
+      on origin/master). Residual (non-blocking): review_loop.py ~1400 lines; two
+      lease mechanisms coexist (signoff claim_return_launch vs claim_action_lease);
+      the re-arm `_progress` label can show the previous episode''s attempt count
+      while the resumed loop runs; discovery still adopts a transcript verdict without
+      requiring an idle hook event — documented rationale in the spec (the extractor
+      only matches a bare verdict keyword on its own JSON-string-bounded line, and
+      requiring idle would strand completed reviews on hosts without hooks). (2026-10-27)'
+    created_at: '2026-10-27T09:26:07Z'
+    last_edited: '2026-10-27T09:26:07Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
