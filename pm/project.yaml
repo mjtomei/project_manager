@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T05:25:36.474327+00:00'
+  updated_at: '2026-10-27T05:59:23.169308+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36222,6 +36222,27 @@ prs:
       to pr-1139060.'
     created_at: '2026-10-27T05:25:36Z'
     last_edited: '2026-10-27T05:25:36Z'
+  - id: note-f9fc28c
+    text: 'Review 385e i1 (59c01894): the pre-retry rediscovery adopted any transcript/verdict
+      it found for the iteration, but the transcript dir outlives a loop (manual-<token>
+      lives for the whole TUI session; a sign-off REVIEW return restarts the loop
+      on the same dir), so a fresh loop recorded the previous run''s verdict — including
+      PASS — with zero launches. Discovery now recovers only after this loop has launched
+      the iteration (ReviewLoopState.iteration_attempted, persisted in the breadcrumb;
+      launch_attempts>0 also enables it for older breadcrumbs). Also fixed: the TUI
+      "Review launch retry" notice fired on every loop start (attempts==1) — now needs
+      attempts>1 + a recorded error; WorkspaceTrustBlocked on the adopt path is HOLD
+      not ERROR; _start_loop returns False on bail so auto-start restores the retry
+      episode instead of disarming it, and the cooldown keeps a timer armed; _claim_launch
+      fails open only when no live other loop owns the lease; post-launch failure
+      artifacts record the launch command. Full suite 3837 passed; the one failure
+      (test_hook_events::test_installer_writes_standalone_receiver) also fails on
+      base. Still open/non-blocking: AttemptDiscovery "hold" kind is never produced
+      (three handlers for a state that cannot occur), review_loop.py is ~1200 lines,
+      and two lease mechanisms now coexist (signoff launch_claim in project.yaml vs
+      claim_action_lease in runtime_state).'
+    created_at: '2026-10-27T05:59:23Z'
+    last_edited: '2026-10-27T05:59:23Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
