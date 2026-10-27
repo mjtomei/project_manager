@@ -3565,20 +3565,16 @@ def _older_than(path: Path | None, iso_ts: str | None) -> bool:
 
 
 def _qa_run_started_since(pr_id: str, iso_ts: str | None) -> bool:
-    """Whether a QA run of *pr_id* started at or after the ISO timestamp
-    *iso_ts*, by the start record each run writes in its QA workdir."""
-    from pm_core.paths import workdirs_base
-    from pm_core.qa_loop import read_run_record
+    """Whether this pm session started a QA run of *pr_id* at or after the
+    ISO timestamp *iso_ts*, by the start record each run writes in its QA
+    workdir."""
+    from pm_core.qa_loop import own_run_started_since
     from pm_core.signoff import parse_ts
     try:
         since = parse_ts(iso_ts).timestamp()
     except (TypeError, ValueError):
         return False
-    for qa_wd in (workdirs_base() / "qa").glob(f"{pr_id}-*"):
-        started = (read_run_record(qa_wd) or {}).get("started_at")
-        if isinstance(started, (int, float)) and started >= since:
-            return True
-    return False
+    return own_run_started_since(pr_id, since)
 
 
 def _qa_status_for(pr_id: str) -> tuple[str | None, Path | None]:

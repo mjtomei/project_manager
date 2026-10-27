@@ -415,35 +415,40 @@ def test_cli_qa_status_older_than_an_impl_return_does_not_advance(tmp_path):
     qa.assert_called_once()
 
 
-def _qa_run_record(base, started_at):
+def _qa_run_record(home, started_at, **extra):
     import json
-    qa_wd = base / "qa" / f"{PR}-{int(started_at)}"
+    qa_wd = home / ".pm" / "workdirs" / "qa" / f"{PR}-{int(started_at)}"
     qa_wd.mkdir(parents=True)
     (qa_wd / "qa_run.json").write_text(json.dumps(
-        {"pr_id": PR, "loop_id": "x", "started_at": started_at}))
+        {"pr_id": PR, "loop_id": "x", "started_at": started_at, **extra}))
 
 
-@pytest.mark.parametrize("run_after_return, window, launched", [
-    (True, "@7", False), (False, "@7", True), (True, None, True)])
+@pytest.mark.parametrize("run_after_return, window, record, launched", [
+    (True, "@7", {}, False), (True, "@7", {"session_tag": "test"}, False),
+    (False, "@7", {}, True), (True, None, {}, True),
+    (True, "@7", {"session_tag": "other-clone"}, True),
+    (True, "@7", {"pr_id": f"{PR}x"}, True)])
 def test_cli_qa_return_whose_rerun_started_is_left_to_it(
-        tmp_path, run_after_return, window, launched):
+        tmp_path, monkeypatch, run_after_return, window, record, launched):
     """S87: the TUI started the REQA re-run while project.yaml was busy and
     its clear of ``awaiting`` is still pending.  A tick that got the lock at
     the release must not launch a second QA driver over that run; a qa
     window from a run that started before the return (the judged run) is
     still relaunched over, and so is a newer run record without a window
-    (that run ended or died before opening one)."""
+    (that run ended or died before opening one), or one another clone (or
+    another PR) launched: nothing in this clone drives the re-run."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     ts = "2026-10-27T04:07:14+00:00"
     start = signoff.parse_ts(ts).timestamp() + (15 if run_after_return
                                                  else -120)
-    _qa_run_record(tmp_path / "wd", start)
+    _qa_run_record(tmp_path / "home", start, **record)
     claim = MagicMock(return_value=True)
     result, _, _, qa = _seq(
         tmp_path, _returned("qa", "qa", ts=ts),
         **{"pm_core.cli.pr._qa_status_for": {"return_value": (None, None)},
            "pm_core.cli.pr.tmux_mod.find_window_by_name":
                {"return_value": window},
-           "pm_core.paths.workdirs_base": {"return_value": tmp_path / "wd"},
+           "pm_core.qa_loop.get_pm_session": {"return_value": "pm-test"},
            "pm_core.cli.pr._check_qa_launch": {"return_value": None},
            "pm_core.signoff.claim_return_launch": {"new": claim}})
     assert result.exit_code == 0, result.output

@@ -1260,21 +1260,36 @@ def run_overlaps_own_run(pr_id: str, other_started_at) -> bool:
     """
     if not isinstance(other_started_at, (int, float)):
         return False
-    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
-    for rec_path in qa_root.glob(f"{pr_id}-*/{_RUN_RECORD}"):
-        rec = read_run_record(rec_path.parent)
-        if (not rec or rec.get("pr_id") != pr_id
-                or launched_elsewhere(rec.get("session_tag"))):
-            continue
-        if _resume_file_path(rec_path.parent).exists():
+    for qa_wd, rec in _own_run_records(pr_id):
+        if _resume_file_path(qa_wd).exists():
             return True
         try:
-            ended = (rec_path.parent / "qa_status.json").stat().st_mtime
+            ended = (qa_wd / "qa_status.json").stat().st_mtime
         except OSError:
             ended = rec.get("started_at") or 0
         if ended >= other_started_at:
             return True
     return False
+
+
+def own_run_started_since(pr_id: str, since: float) -> bool:
+    """True when this pm session launched a run of *pr_id* at or after the
+    epoch time *since*.  Another clone's run of it is that clone's, not a
+    driver of this clone's re-run."""
+    return any(isinstance(rec.get("started_at"), (int, float))
+               and rec["started_at"] >= since
+               for _wd, rec in _own_run_records(pr_id))
+
+
+def _own_run_records(pr_id: str):
+    """Yield (QA workdir, start record) for each run of *pr_id* this pm
+    session launched."""
+    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
+    for rec_path in qa_root.glob(f"{pr_id}-*/{_RUN_RECORD}"):
+        rec = read_run_record(rec_path.parent)
+        if (rec and rec.get("pr_id") == pr_id
+                and not launched_elsewhere(rec.get("session_tag"))):
+            yield rec_path.parent, rec
 
 
 def clear_resume_file(qa_workdir: str | Path) -> None:
