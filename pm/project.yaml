@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T20:03:12.692493+00:00'
+  updated_at: '2026-10-27T20:07:36.579501+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14249,6 +14249,24 @@ prs:
       in the shim env. fzf is not installed.'
     created_at: '2026-10-27T19:14:20Z'
     last_edited: '2026-10-27T19:14:20Z'
+  - id: note-1db1e26
+    text: 'QA S45 (9d26eb3a; real rootless podman 3.4.4 + 3 real tmux clients, fake
+      agents, gated podman run): story 1 popups/picker/which/notes/b2 launch/nav/direct
+      which held; story 2 gate ACK -> A session cleanup preview+apply (inventory saw
+      pending b3) -> B2 preview (b3 "launch in progress") -> release held; story 3
+      EOF teardown b2,a1,b3,b1,meta clean, exec+push probes matched origin, source
+      hashes unchanged, final B reap removed only b4. FIXED two bugs: (1) popup `pr
+      start` labelled pm.project_root with the viewed PR workdir clone (cwd walk ignored
+      PM_PROJECT) -> container._active_project_root honours -C/PM_PROJECT; (2) reap/session
+      cleanup stopped removed containers push proxies silently -> push_proxy.stopped_proxy_sink
+      + Outcome.proxies_stopped prints "stopped  push proxy <dir>". Filed pr-20684e6
+      (Esc at prefix+M pm> prompt). Fixture notes: /tmp is overlayfs so private podman
+      storage needs mount_program=fuse-overlayfs; build-base needs Dockerfile beside
+      the project pm_core copy; new PRs need `pm push` + merging the pm/sync branch
+      before pr start; QA-container PID 1 is sleep infinity so proxy daemons stay
+      Z. Evidence /pm-captures/scenarios/45/.'
+    created_at: '2026-10-27T20:07:36Z'
+    last_edited: '2026-10-27T20:07:36Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
