@@ -1453,12 +1453,17 @@ class ProjectManagerApp(App):
                 claim.release()
             except OSError as e:
                 _log.debug("Could not remove TUI pidfile: %s", e)
-            queue = self._command_queue_file()
-            if queue is not None:
-                try:
-                    queue.unlink(missing_ok=True)
-                except OSError as e:
-                    _log.debug("Could not remove TUI queue %s: %s", queue, e)
+            # The queue is shared with a successor TUI; leave it alone if
+            # the pidfile now names one (we only get here owning a claim
+            # that a successor overrode when our descriptor looked stale).
+            if not claim.owned_by_other():
+                queue = self._command_queue_file()
+                if queue is not None:
+                    try:
+                        queue.unlink(missing_ok=True)
+                    except OSError as e:
+                        _log.debug("Could not remove TUI queue %s: %s",
+                                   queue, e)
 
     def action_reload(self) -> None:
         """Reload state from disk without triggering PR sync.

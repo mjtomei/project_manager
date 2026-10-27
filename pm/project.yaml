@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-27T20:25:52.863049+00:00'
+  updated_at: '2026-10-27T21:05:54.749494+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14716,6 +14716,20 @@ prs:
       PATH=/usr/bin:/bin, markdown on PYTHONPATH).'
     created_at: '2026-10-27T20:25:52Z'
     last_edited: '2026-10-27T20:25:52Z'
+  - id: note-0cd27fe
+    text: 'Review loop 1e74 i1 (2026-10-27): (a) on_unmount deleted the shared session
+      command queue whenever this process held a claim, even if a successor TUI had
+      taken the pidfile over; it now checks the new TuiPidfileClaim.owned_by_other()
+      and leaves the queue for the successor. (b) cmdline_is_tui no longer hardcodes
+      the entry-point list: it accepts the pm console script or any pm_core.* module,
+      so the planned wrapper.py -> bootstrap.py rename cannot make callers classify
+      a live TUI as a different program and delete its pidfile (silently disabling
+      IPC). Spec impl.md I2/E14/E15 and tests 15/16 updated. New tests: unmount ownership
+      pair, EPERM keeps the pidfile (signal_error), reload with no pidfile returns
+      False, pm_core.bootstrap accepted / pm_core_other rejected. Full suite: 3869
+      passed, 1 skipped (pytest 8.4.2, PATH=/usr/bin:/bin, markdown on scratch PYTHONPATH).'
+    created_at: '2026-10-27T21:05:54Z'
+    last_edited: '2026-10-27T21:05:54Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

@@ -179,6 +179,10 @@ class TestCmdline:
         ["python3", "-m", "pm_core.wrapper", "_tui"],
         ["python3", "-m", "pm_core", "_tui"],
         ["python3", "-m", "pm_core.cli", "_tui"],
+        # Any pm_core module counts, so a future entry-point rename
+        # (the planned wrapper.py -> bootstrap.py) cannot make callers
+        # treat a live TUI as a foreign process.
+        ["python3", "-m", "pm_core.bootstrap", "_tui"],
     ])
     def test_accepts_pm_tui_shapes(self, argv):
         assert tpf.cmdline_is_tui(argv)
@@ -189,6 +193,8 @@ class TestCmdline:
         ["pm", "pr", "list"],
         ["claude", "--prompt", "run pm _tui please"],
         ["python3", "-m", "pm_core.wrapper", "pr", "list"],
+        # Not a pm_core module: the module match is not a prefix free-for-all.
+        ["python3", "-m", "pm_core_other", "_tui"],
     ])
     def test_rejects_other_processes(self, argv):
         assert not tpf.cmdline_is_tui(argv)
@@ -431,6 +437,23 @@ class TestSubmitCommand:
         res = helpers.trigger_tui_command(SESSION, "review-loop pr-1")
         assert res is False
 
+    def test_permission_denied_keeps_pidfile(self, ipc_paths, start_fake_tui,
+                                             monkeypatch):
+        """EPERM means a live process we don't own: never delete its file."""
+        pidfile, queue = ipc_paths
+        tui = start_fake_tui()
+        _write_json(pidfile, tui.pid, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+        monkeypatch.setattr(helpers, "_signal_tui",
+                            lambda *a, **k: "permission denied")
+
+        res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
+
+        assert res.ok is False
+        assert res.reason == "signal_error"
+        assert "permission denied" in res.message
+        assert pidfile.exists()
+        assert tui.poll() is None
+
 
 # ---------------------------------------------------------------------------
 # Caller side: reload
@@ -463,6 +486,11 @@ class TestReload:
     def test_dead_pid_removes_pidfile(self, ipc_paths):
         pidfile, _queue = ipc_paths
         _write_json(pidfile, DEAD_PID, [tpf.CAP_RELOAD])
+        assert helpers.trigger_tui_reload(SESSION) is False
+        assert not pidfile.exists()
+
+    def test_missing_pidfile_is_false(self, ipc_paths):
+        pidfile, _queue = ipc_paths
         assert helpers.trigger_tui_reload(SESSION) is False
         assert not pidfile.exists()
 
@@ -591,6 +619,46 @@ class TestSignalGuards:
         # We never owned the file, so nothing is published or released.
         assert app._pidfile_claim is None
         assert not pidfile.exists()
+
+    def test_unmount_removes_own_pidfile_and_queue(self, tmp_path,
+                                                   monkeypatch):
+        pidfile = tmp_path / "tui-pm-test.pid"
+        queue = tmp_path / "tui-pm-test.cmd-queue"
+        monkeypatch.setattr(tpf, "pidfile_path", lambda session: pidfile)
+        monkeypatch.setattr(tpf, "command_queue_path", lambda session: queue)
+        claim = tpf.claim_tui_pidfile(pidfile, SESSION)
+        queue.write_text("pending command\n")
+
+        app = ProjectManagerApp.__new__(ProjectManagerApp)
+        app._session_name = SESSION
+        app._pidfile_claim = claim
+        app._write_queue = None
+
+        app.on_unmount()
+
+        assert not pidfile.exists()
+        assert not queue.exists()
+
+    def test_unmount_keeps_successor_queue(self, tmp_path, monkeypatch):
+        """A successor owns the shared queue; do not delete it on exit."""
+        pidfile = tmp_path / "tui-pm-test.pid"
+        queue = tmp_path / "tui-pm-test.cmd-queue"
+        monkeypatch.setattr(tpf, "pidfile_path", lambda session: pidfile)
+        monkeypatch.setattr(tpf, "command_queue_path", lambda session: queue)
+        claim = tpf.claim_tui_pidfile(pidfile, SESSION)
+        queue.write_text("successor command\n")
+        # A successor took the session over (our descriptor looked stale).
+        _write_json(pidfile, DEAD_PID, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+
+        app = ProjectManagerApp.__new__(ProjectManagerApp)
+        app._session_name = SESSION
+        app._pidfile_claim = claim
+        app._write_queue = None
+
+        app.on_unmount()
+
+        assert tpf.read_pidfile(pidfile).pid == DEAD_PID
+        assert queue.read_text() == "successor command\n"
 
     def test_unmount_does_not_delete_unclaimed_pidfile(self, tmp_path,
                                                       monkeypatch):

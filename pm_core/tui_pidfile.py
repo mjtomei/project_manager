@@ -40,12 +40,17 @@ PIDFILE_VERSION = 1
 _CLAIM_EMPTY_RETRIES = 2
 _CLAIM_RETRY_S = 0.05
 
-# argv element that identifies the TUI subcommand, plus the entry-point
-# names that may run it (console script ``pm``; ``python -m
-# pm_core.wrapper`` / ``pm_core`` / ``pm_core.cli``).  Matched as exact
-# argv elements, never as substrings of the whole command line.
+# argv element that identifies the TUI subcommand, plus the entry points
+# that may run it: the console script ``pm``, or any ``pm_core`` module
+# (``python -m pm_core`` / ``pm_core.cli`` / ``pm_core.wrapper``, and
+# renames such as the planned ``pm_core.bootstrap``).  Matching any
+# ``pm_core.*`` module keeps a future entry-point rename from turning a
+# live TUI into "a different program", which would make callers delete
+# its pidfile and silently disable IPC.  Matched as exact argv elements,
+# never as substrings of the whole command line.
 _TUI_ARG = "_tui"
-_ENTRY_NAMES = frozenset({"pm", "pm_core", "pm_core.cli", "pm_core.wrapper"})
+_ENTRY_BASENAME = "pm"
+_ENTRY_MODULE = "pm_core"
 
 
 def pidfile_path(session: str) -> Path:
@@ -204,11 +209,18 @@ def proc_cmdline(pid: int) -> list[str] | None:
             for part in raw.rstrip(b"\0").split(b"\0")]
 
 
+def _is_pm_entry_point(part: str) -> bool:
+    """True when the argv element names the ``pm`` script or a pm_core module."""
+    if Path(part).name == _ENTRY_BASENAME:
+        return True
+    return part == _ENTRY_MODULE or part.startswith(f"{_ENTRY_MODULE}.")
+
+
 def cmdline_is_tui(parts: list[str]) -> bool:
     """True when *parts* is a pm TUI argv (``pm _tui`` and friends)."""
     if _TUI_ARG not in parts:
         return False
-    return any(Path(part).name in _ENTRY_NAMES for part in parts)
+    return any(_is_pm_entry_point(part) for part in parts)
 
 
 def pid_alive(pid: int) -> bool:
@@ -348,6 +360,16 @@ class TuiPidfileClaim:
                 and desc.starttime != self.starttime):
             return
         unlink_if_unchanged(self.path, raw)
+
+    def owned_by_other(self) -> bool:
+        """True when the pidfile now names a different process.
+
+        A successor TUI can only take the file over once this process
+        looks stale, but if it did, the shared command queue belongs to
+        it: shutting down must not delete a file the successor is using.
+        """
+        desc = read_pidfile(self.path)
+        return desc is not None and desc.pid != self.pid
 
 
 def claim_tui_pidfile(path: Path, session: str) -> TuiPidfileClaim:

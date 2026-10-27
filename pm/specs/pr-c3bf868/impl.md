@@ -93,7 +93,9 @@ I1. `pm_core/cli/autostart.py::_resolve_owner` must read the JSON
 
 I2. `on_unmount` must not delete a successor's pidfile: unlink only when
     the file still names our pid **and** our `starttime` (exec restarts and
-    respawns can overlap).
+    respawns can overlap). The command queue is shared with a successor, so
+    it is removed only when the pidfile does not name a different process
+    (`TuiPidfileClaim.owned_by_other`).
 
 I3. The command queue file must exist before caps are published (a caller
     that sees `sigusr2` must not race a missing queue). Order in
@@ -195,12 +197,18 @@ E13. **~/.pm unwritable.** Claim I/O errors (`OSError`) are distinct from
     than refusing to start. `publish` failures are logged and swallowed.
 E14. **Startup refusal must not clean up the sibling's files.** `on_unmount`
     removes the pidfile and queue only when this process holds the claim;
-    a refused second TUI never unlinks files it does not own.
+    a refused second TUI never unlinks files it does not own. If a
+    successor has taken the pidfile over, the queue is left in place for
+    it (it is the shared, session-keyed queue).
 E15. **TUI entry-point names.** The cmdline marker accepts an exact `_tui`
-    argv element plus one of `pm`, `pm_core`, `pm_core.cli`,
-    `pm_core.wrapper` as an argv element — the shapes produced by the
+    argv element plus an entry point: an argv element whose basename is
+    `pm`, or a `pm_core` / `pm_core.*` module — the shapes produced by the
     console script, the container's `pm` shim, and `python -m` fallbacks.
-    Matching is per-element, never a substring of the joined command line.
+    Accepting any `pm_core.*` module (not an enumerated list) means a
+    future entry-point rename (the planned `wrapper.py` -> `bootstrap.py`)
+    cannot make callers classify a live TUI as "a different program" and
+    delete its pidfile. Matching is per-element, never a substring of the
+    joined command line.
 
 ## Tests
 
@@ -247,3 +255,8 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     `_install_reload_signal` conflict path sets `_startup_error`, exits
     with code 2, and never publishes or releases a pidfile it does not
     own.
+15. `on_unmount` with an owned claim removes both the pidfile and the
+    queue; when the pidfile names a successor it removes neither.
+16. `submit_tui_command` when `_signal_tui` reports `permission denied`
+    returns `signal_error` and leaves the pidfile in place (E4); reload
+    with no pidfile returns False.
