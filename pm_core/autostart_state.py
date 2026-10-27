@@ -228,7 +228,7 @@ def valid_pr_id(value) -> bool:
     silently dropped from the hold lookup, so it is malformed saved state,
     not something to coerce.
     """
-    return (isinstance(value, str) and bool(value) and value == value.strip()
+    return (isinstance(value, str) and bool(value)
             and not any(c.isspace() for c in value))
 
 

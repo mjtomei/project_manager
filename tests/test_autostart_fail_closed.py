@@ -665,7 +665,9 @@ class TestAllModeCommandRejected:
 
     def test_usage_does_not_advertise_all(self):
         # ``all`` was the last verb; a bare-token check would miss it.
-        assert " all" not in auto_start.USAGE
+        verbs = [seg.strip() for seg in auto_start.USAGE.split("|")]
+        assert "all" not in verbs
+        assert "all" not in auto_start.USAGE.split()
 
     def test_status_mode_is_never_all(self):
         s = st.build_status({"prs": [_pr("pr-a")], "targets": {},
@@ -783,3 +785,29 @@ class TestWatcherScopeFailClosed:
             prompt = w.generate_prompt(1)
         assert "no PR is managed" in prompt
         assert "Observation and reporting only" in prompt
+
+    def test_rejected_breadcrumb_resumes_watcher_with_no_targets(self, tmp_path):
+        """A rejected restore must not hand the resumed watcher the saved
+        target list.
+
+        ``save_breadcrumb`` records ``auto_start_targets`` on each watcher
+        entry, so a future resume that read it back would resurrect exactly
+        the authority the rejected restore just refused.  The watcher is
+        rebuilt from the (now empty) app scope instead, which its prompt
+        renders as observation-only.
+        """
+        app = FakeApp([_pr("pr-a")], tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "auto_start": True, "all_mode": True,
+            "targets": [{"pr_id": "pr-a"}],
+            "watchers": [{"type": "auto-start",
+                          "auto_start_targets": ["pr-a"]}],
+        })
+        with patch("pm_core.tui.watcher_ui.start_watcher") as start:
+            _consume(app, tmp_path)
+        start.assert_called_once()
+        # Rebuilt from app state (empty), never from the rejected file.
+        assert auto_start.get_targets(app) == []
+        assert app._auto_start_targets == {}
+        assert "auto_start_targets" not in start.call_args.kwargs
+        assert any("all-mode" in m for m in app.logs)
