@@ -36313,3 +36313,29 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-e847a7a
+  plan: bugs
+  title: 'Bug: launch commands interpolate the workdir prompt path and TUI transcript
+    path unquoted (apostrophe/space in workdir or project path breaks the pane command)'
+  branch: pm/pr-e847a7a-bug-launch-commands-interpolate-the-workdir-prompt
+  status: pending
+  depends_on: []
+  description: 'Found during pr-84ebabf QA scenario 6 (pre-existing, unchanged by
+    that PR). pm_core/claude_launcher.py build_claude_shell_cmd appends "$(cat <workdir>/pm/prompts/...)"
+    with the prompt-file path not shell-quoted inside the command substitution (around
+    line 1040). A workdir containing an apostrophe makes the pane command fail (''sh:
+    Syntax error: Unterminated quoted string''); a workdir containing a space yields
+    an empty prompt. Separately, the TUI start/review/merge actions build ''--transcript
+    {tdir}/impl-<id>.jsonl'' unquoted and shlex.split it (pm_core/tui/pr_view.py:155,210;
+    pm_core/tui/review_loop_ui.py:715), so a project path containing a space breaks
+    the TUI launch. Fix: shlex.quote the paths at each interpolation and add tests
+    with a workdir/project path containing a space and an apostrophe.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T23:16:14.111057+00:00'
+  updated_at: '2026-10-27T23:16:14.111057+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
