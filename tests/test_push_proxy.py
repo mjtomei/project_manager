@@ -618,6 +618,34 @@ class TestStartLock:
         finally:
             os.chmod(lock_path, 0o600)
 
+    def test_symlinked_lock_file_is_refused_not_followed(self, tmp_path):
+        """A lock-file symlink must not choose (or create) the file we lock.
+
+        Our own lock files are regular files created with ``O_CREAT``, so a
+        symlink at that name is always planted.  Following it would let
+        another user point the lock at an arbitrary host file — and, if that
+        file did not exist, have our process create it as themselves.
+        """
+        sock_dir = str(tmp_path / "locklink")
+        os.makedirs(sock_dir, exist_ok=True)
+        lock_path = os.path.realpath(sock_dir) + ".lock"
+        victim = tmp_path / "victim"
+        victim.write_text("original\n")
+        os.symlink(victim, lock_path)
+
+        with push_proxy_mod._start_lock(sock_dir, blocking=False) as held:
+            assert held is False
+        with pytest.raises(push_proxy_mod.PushProxyError,
+                           match="could not open push proxy start lock"):
+            with push_proxy_mod._start_lock(sock_dir, blocking=True):
+                pass
+        assert victim.read_text() == "original\n"
+
+        # Teardown clears the planted link itself, never its target.
+        push_proxy_mod._clear_lock_file(lock_path)
+        assert not os.path.lexists(lock_path)
+        assert victim.read_text() == "original\n"
+
     def test_unusable_socket_dir_is_skipped_by_teardown(self, tmp_path):
         """A non-directory squatting on the socket-dir name must not abort.
 
@@ -1293,6 +1321,23 @@ class TestWorkdirKeyedProxies:
             with pytest.raises(PushProxyConflict, match="token collision"):
                 self._start("qa-wd", qa)
 
+    def test_stop_all_proxies_skips_a_busy_directory(self, tmp_path,
+                                                     live_proxies):
+        """The whole-process sweep honours the per-directory start lock too."""
+        impl = self._workdir(tmp_path, "impl")
+        sock = self._start("impl-wd", impl)
+        sock_dir = os.path.dirname(sock)
+
+        # A container start holds this directory's lock right now.
+        with push_proxy_mod._start_lock(sock_dir, blocking=False) as held:
+            assert held is True
+            stop_all_proxies()
+            assert push_proxy_mod.proxy_is_alive(sock), (
+                "sweep killed a proxy whose start was in flight")
+
+        stop_all_proxies()
+        assert not push_proxy_mod.proxy_is_alive(sock)
+
     def test_stop_session_removes_kept_socket_dirs(self, tmp_path,
                                                    live_proxies):
         impl = self._workdir(tmp_path, "impl")
@@ -1427,6 +1472,55 @@ class TestWorkdirKeyedProxies:
             assert not os.path.exists(sock_dir)
         finally:
             shutil.rmtree(sock_dir, ignore_errors=True)
+
+    def test_metadata_write_does_not_follow_a_planted_symlink(self, tmp_path):
+        """The socket dir is bind-mounted *writable* into the container.
+
+        A container can therefore plant a symlink on the daemon's temp-file
+        name.  The metadata write must not follow it (which would clobber a
+        host file with the sidecar) or ``os.replace`` the link itself onto
+        ``proxy.json`` (making it point at that host file).
+        """
+        sock_dir = tmp_path / "sockdir"
+        sock_dir.mkdir()
+        sock = str(sock_dir / "push.sock")
+        victim = tmp_path / "victim"
+        victim.write_text("original\n")
+        planted = sock_dir / (
+            f"{push_proxy_mod._METADATA_NAME}.{os.getpid()}.tmp")
+        planted.symlink_to(victim)
+
+        push_proxy_mod._write_metadata(sock, str(tmp_path), self.BRANCH)
+
+        assert victim.read_text() == "original\n", (
+            "metadata write followed the container's symlink")
+        assert not os.path.islink(os.path.join(str(sock_dir),
+                                               push_proxy_mod._METADATA_NAME))
+        meta = push_proxy_mod._read_metadata(sock)
+        assert meta is not None
+        assert meta["workdir"] == os.path.realpath(str(tmp_path))
+
+    def test_read_metadata_refuses_a_planted_link_or_non_file(self, tmp_path):
+        """Never follow a container-planted sidecar (link, FIFO, directory)."""
+        sock_dir = tmp_path / "sockdir"
+        sock_dir.mkdir()
+        sock = str(sock_dir / "push.sock")
+        meta = sock_dir / push_proxy_mod._METADATA_NAME
+
+        victim = tmp_path / "victim.json"
+        victim.write_text(json.dumps({"workdir": "/host/elsewhere"}))
+        meta.symlink_to(victim)
+        assert push_proxy_mod._read_metadata(sock) is None, (
+            "a planted symlink must not be read (or followed)")
+        meta.unlink()
+
+        # A FIFO would block open()/read() and stall a start under the lock.
+        os.mkfifo(meta)
+        assert push_proxy_mod._read_metadata(sock) is None
+        meta.unlink()
+
+        meta.mkdir()
+        assert push_proxy_mod._read_metadata(sock) is None
 
     def test_start_refuses_a_symlinked_socket_dir(self, tmp_path):
         """A planted /tmp symlink must not redirect the start into its target.

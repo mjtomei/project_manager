@@ -553,3 +553,53 @@ fail at ff17b1b8 for the right reason: the start does not raise and the
 victim's `push.sock` is deleted; a bare `PermissionError` escapes) and
 `test_teardown_lock_still_accepts_a_symlinked_dir`, which pins the
 intentional start/teardown asymmetry.
+
+## Review iteration 10 refinements
+
+Added during the tenth review pass (consistent with R3/R6/R7/R8; no
+requirement changed).  The socket directory is bind-mounted *writable*
+into the container, and the start-lock file lives in world-writable
+`/tmp`, so both are attacker-influenceable surfaces the earlier
+iterations had not fully covered:
+
+- **The start lock never follows a symlink.** `_start_lock` opened
+  `<sock_dir>.lock` with `O_CREAT|O_RDWR`.  Because `/tmp` is
+  world-writable, another user could plant a symlink at that name and
+  have our process flock — and, if the target did not exist, create — a
+  file at an arbitrary host path.  The open now uses `O_NOFOLLOW`:
+  teardown treats the link like any other unusable lock file (skips the
+  directory) and a start raises `PushProxyError`.
+  `_clear_lock_file` removes a planted link itself (never its target) and
+  also opens with `O_NOFOLLOW`.
+- **The metadata sidecar is written and read without following links.**
+  `_write_metadata` used a predictable `<proxy.json>.<pid>.tmp` name, so
+  a container (which can write in the mounted socket dir) could plant a
+  symlink there and have the daemon write the sidecar through it — and
+  then `os.replace` the link itself onto `proxy.json`, leaving the
+  sidecar pointing at a host file.  It now uses `tempfile.mkstemp`
+  (`O_CREAT|O_EXCL`, random name).  `_read_metadata` opens with
+  `O_RDONLY|O_NOFOLLOW|O_NONBLOCK` and only accepts a regular file of
+  bounded size (`_METADATA_MAX_BYTES`), so a planted link (redirect), a
+  FIFO (would block a start while it holds the directory's start lock) or
+  a huge file is refused instead of read.
+- **`stop_all_proxies` uses the guarded kill.** It killed sockets
+  straight from a `/tmp` glob without the per-directory start lock — the
+  residual noted since iteration 3.  Both sweeps now go through the new
+  `_stop_socket_under_lock()`, which takes the lock non-blocking and
+  leaves a directory whose start is in flight for the next teardown.
+- **Simplification.** The legacy per-container start duplicated the
+  directory creation `_start_lock` already performs (and reports as
+  `PushProxyError`); the redundant block is gone.  `sys`/`tempfile` are
+  imported once at module level instead of inside functions.
+
+Tests: `test_symlinked_lock_file_is_refused_not_followed`,
+`test_metadata_write_does_not_follow_a_planted_symlink`,
+`test_read_metadata_refuses_a_planted_link_or_non_file` (all three fail
+at fc5832d7 for the right reason: the lock is taken through the link; the
+victim file is overwritten with the sidecar and `proxy.json` becomes a
+link to it; a planted sidecar link is read and accepted),
+`test_stop_all_proxies_skips_a_busy_directory`, and two
+`tests/test_container.py` reuse-path tests pinning R8's
+`get_proxy_socket_path(..., workdir=...)` lookup and the workdir a proxy
+restart uses (`test_reuse_finds_the_proxy_by_workdir`,
+`test_reuse_restarts_a_dead_proxy_for_the_same_workdir`).

@@ -750,6 +750,52 @@ class TestContainerReuse:
         assert "inspect" in calls
         assert "run" not in calls
 
+    @patch("pm_core.container.container_is_running", return_value=True)
+    @patch("pm_core.push_proxy.get_proxy_socket_path",
+           return_value="/tmp/pm-push-proxy-tag-pr-1-abcd/push.sock")
+    @patch("pm_core.push_proxy.proxy_is_alive", return_value=True)
+    @patch("pm_core.push_proxy.start_push_proxy")
+    @patch("pm_core.container._run_runtime")
+    def test_reuse_finds_the_proxy_by_workdir(self, mock_docker, mock_start,
+                                              mock_alive, mock_sock,
+                                              mock_running, _mock_runtime):
+        """The restart-safe lookup needs workdir/session/pr, not the registry.
+
+        Without them a TUI restart (empty in-process registry) would report
+        "dead/missing" for a perfectly live proxy and respawn it.
+        """
+        mock_docker.return_value = MagicMock(
+            returncode=0, stdout="abc123deadbeef\n")
+
+        create_container(name="pm-test", config=ContainerConfig(),
+                         workdir=Path("/w"), allowed_push_branch="pm/pr-1",
+                         session_tag="tag", pr_id="pr-1")
+
+        mock_sock.assert_called_once_with(
+            "pm-test", session_tag="tag", pr_id="pr-1", workdir="/w")
+        mock_start.assert_not_called()
+
+    @patch("pm_core.container.container_is_running", return_value=True)
+    @patch("pm_core.push_proxy.get_proxy_socket_path",
+           return_value="/tmp/pm-push-proxy-tag-pr-1-abcd/push.sock")
+    @patch("pm_core.push_proxy.proxy_is_alive", return_value=False)
+    @patch("pm_core.push_proxy.start_push_proxy",
+           return_value="/tmp/pm-push-proxy-tag-pr-1-abcd/push.sock")
+    @patch("pm_core.container._run_runtime")
+    def test_reuse_restarts_a_dead_proxy_for_the_same_workdir(
+            self, mock_docker, mock_start, mock_alive, mock_sock,
+            mock_running, _mock_runtime):
+        """A dead proxy is respawned for this container's own workdir."""
+        mock_docker.return_value = MagicMock(
+            returncode=0, stdout="abc123deadbeef\n")
+
+        create_container(name="pm-test", config=ContainerConfig(),
+                         workdir=Path("/w"), allowed_push_branch="pm/pr-1",
+                         session_tag="tag", pr_id="pr-1")
+
+        mock_start.assert_called_once_with(
+            "pm-test", "/w", "pm/pr-1", session_tag="tag", pr_id="pr-1")
+
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.container_is_running", return_value=False)
     @patch("pm_core.container.remove_container")
