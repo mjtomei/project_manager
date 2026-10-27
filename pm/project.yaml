@@ -34032,7 +34032,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T02:22:49.652205+00:00'
+  updated_at: '2026-10-27T02:43:14.398488+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34717,6 +34717,38 @@ prs:
       carry) on the integrated code.'
     created_at: '2026-10-27T02:22:49Z'
     last_edited: '2026-10-27T02:22:49Z'
+  - id: note-44ec257
+    text: 'impl (merge reconciliation) 2026-10-27: merged master@211a6128 (#250, pr-ace66e5
+      prompt bounding) into the branch as 7f603144, spec note 9d014c52, pushed. Five
+      hunks reconciled keeping BOTH behaviours: (1) integration.py keeps resolution_diff_path
+      AND master omitted_path_count + integration_pointer; (2) prompt_gen._signoff_qa_scenarios_parts
+      re-applies the non-dict qa_status.json guard in master tuple form; (3) prompt_gen._signoff_integration_block
+      keeps this PR resolution/candidate/applied/behaviour/evidence rendering AND
+      master bounded_join + omitted_path_count + integration_pointer (conflicts_total/overlap_total),
+      with the isinstance list guards in front, and the base-range line keeps the
+      base_range_from/contained-base logic; (4) signoff.build_return_record carries
+      conflicts_total/overlap_total alongside resolution/base_behavior_changes; (5)
+      signoff.format_signoff_return keeps master bounded lists AND the resolution/applied/contained-base
+      text. project.yaml: both sides appended distinct PR records; all 492 survive,
+      0 preservation problems (checked per-record against the merge base). Tests:
+      full suite 3657 passed, 1 skipped, 1 failed = test_hook_events.py::test_installer_writes_standalone_receiver,
+      which fails identically on an origin/master (211a6128) worktree (pre-existing
+      env failure). Focused 300 pass: test_prompt_bounds + test_signoff_resolution
+      + test_review_window_quoting. Ad-hoc verified that a resolution + a 200-path
+      overlap render together: the omission marker reports the record total ("+180
+      more; read $(pm qa captures-path pr-5cee3d5)/integration.json or run pm pr show
+      pr-5cee3d5") in both the sign-off prompt and the return text. Semantic check
+      from the prior sign-off holds: the sign-off prompt still goes through _assemble/fit_prompt,
+      and the new lists are accumulation-bounded (resolution paths = one entry per
+      auto-resolved file, ids capped at 10 in-prompt; behaviour capped at 20 + "…
+      N more"; evidence a fixed few lines). Test-env trap: run pytest with /usr/bin
+      first on PATH (the ~/.local/bin/git push-proxy wrapper makes the integration
+      fetch fail and every check records status=error); no venv existed, created /tmp/pm-venv
+      with -e ".[test]". Next: review then QA — QA can reuse 13/16/17 and should re-run
+      the prompt-surface stories 11 (decision surface), 14 (launch/review diff) and
+      15 (behaviour carry) on the integrated code.'
+    created_at: '2026-10-27T02:43:14Z'
+    last_edited: '2026-10-27T02:43:14Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
