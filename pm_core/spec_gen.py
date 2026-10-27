@@ -133,7 +133,12 @@ def set_spec(pr: dict, phase: str, spec: str,
 def _build_spec_prompt(data: dict, pr: dict, phase: str) -> str:
     """Build the Claude prompt for generating a phase spec."""
     title = pr.get("title", "")
-    description = pr.get("description", "").strip()
+    # Hand-edited state: a ``description`` that YAML parses as a non-string is
+    # not text (``.strip()`` on it raised ``AttributeError`` out of the spec
+    # prompt, the same crash class the PR readers guard).
+    raw_description = pr.get("description")
+    description = raw_description.strip() if isinstance(raw_description, str) \
+        else ""
     base_branch = data.get("project", {}).get("base_branch", "master")
     workdir = pr.get("workdir", "")
 
@@ -446,11 +451,14 @@ def reject_spec(data: dict, pr_id: str, feedback: str | None = None,
 
     _log.info("spec_gen: rejecting %s spec for %s (feedback=%r)", phase, pr_id, feedback)
 
-    # Temporarily append feedback to description for regeneration context
+    # Temporarily append feedback to description for regeneration context.
+    # Hand-edited state: a non-string ``description`` has no ``rstrip`` (and
+    # the raw value is restored verbatim below, not replaced by its text form).
     original_desc = pr.get("description", "")
+    desc_text = original_desc if isinstance(original_desc, str) else ""
     if feedback:
         pr["description"] = (
-            original_desc.rstrip() + f"\n\n[Spec review feedback]: {feedback}"
+            desc_text.rstrip() + f"\n\n[Spec review feedback]: {feedback}"
         )
         if root:
             def apply_feedback(fresh_data):

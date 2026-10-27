@@ -1509,6 +1509,51 @@ class TestNotesBounding:
 
 
 # ---------------------------------------------------------------------------
+# hand-edited PR text fields
+# ---------------------------------------------------------------------------
+
+class TestHandEditedPrText:
+    """``project.yaml`` is hand-editable state: a non-string PR text field
+    must not crash a prompt builder.
+
+    ``description`` is inlined by every builder (impl / review / sign-off / QA
+    planner) and by the spec prompt.  A value YAML parses as a non-string (an
+    unquoted date, an int) has no ``.strip()``; without the guard the session
+    window could not launch at all — the same crash class ``_note_mappings``
+    closes for a malformed note.  A note whose ``text`` is a non-string
+    likewise crashed the bounded notes renderer once the notes block exceeded
+    its budget.
+    """
+
+    def test_a_non_string_description_does_not_crash_any_prompt(self):
+        data = _data(_pr(description=20260101))
+        for build in (prompt_gen.generate_prompt,
+                      prompt_gen.generate_review_prompt,
+                      prompt_gen.generate_signoff_prompt,
+                      prompt_gen.generate_qa_planner_prompt):
+            assert build(data, "pr-x")
+
+    def test_the_spec_prompt_tolerates_a_non_string_description(self):
+        pr = _pr(description=20260101)
+        prompt = spec_gen._build_spec_prompt(_data(pr), pr, "impl")
+        assert prompt
+
+    def test_a_string_description_is_still_inlined(self):
+        prompt = prompt_gen.generate_prompt(
+            _data(_pr(description="  real description  ")), "pr-x")
+        assert "real description" in prompt
+
+    def test_a_non_string_note_text_does_not_crash_the_bounded_renderer(self):
+        notes = [{"id": "note-a", "text": "x" * 20000,
+                  "created_at": "2026-01-01T00:00:00Z"},
+                 {"id": "note-b", "text": 7,
+                  "created_at": "2026-01-02T00:00:00Z"}]
+        out = prompt_gen._render_pr_notes_bounded(notes, 3000, "pr-x")
+        # Rendered through ``str``, like the full renderer renders it.
+        assert "- 7 " in out
+
+
+# ---------------------------------------------------------------------------
 # launcher guard
 # ---------------------------------------------------------------------------
 

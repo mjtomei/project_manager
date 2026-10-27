@@ -151,6 +151,20 @@ def _note_mappings(value) -> list[dict]:
     return [n for n in value if isinstance(n, dict)]
 
 
+def _pr_text(pr: dict, key: str) -> str:
+    """A PR text field as text (``project.yaml`` is hand-editable state).
+
+    A ``description`` that YAML parses as a non-string (an unquoted date, an
+    int) is not text: ``.strip()`` on it raised ``AttributeError`` out of
+    *every* prompt builder (impl / review / QA / sign-off) and the spec
+    prompt, so the session window could not launch — the same crash class
+    :func:`_note_mappings` closes for a malformed note.  A missing field is
+    the empty string, like ``pr.get(key, "")``.
+    """
+    value = pr.get(key)
+    return value if isinstance(value, str) else ""
+
+
 def _format_pr_notes(pr: dict, workdir: str | None = None) -> str:
     """Format PR notes as a markdown section, or empty string if none.
 
@@ -254,7 +268,12 @@ def _render_pr_notes_bounded(notes: list[dict], budget: int,
     full_line = _pr_note_full_line
 
     def summary_line(n: dict) -> str:
-        text = " ".join((n.get("text") or "").split())
+        # Hand-edited state: a non-string ``text`` is not text (``.split()``
+        # on an int raised ``AttributeError`` out of the bounded renderer, so
+        # one bad note took every prompt builder down once the notes block
+        # exceeded its budget).  Render it through ``str`` like the other
+        # note renderer does.
+        text = " ".join(str(n.get("text") or "").split())
         if len(text) > _PR_NOTE_SUMMARY_CHARS:
             text = text[:_PR_NOTE_SUMMARY_CHARS].rstrip() + "…"
         ts = n.get("created_at", "")
@@ -378,7 +397,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
 
     branch = pr.get("branch", f"pm/{pr_id}")
     title = pr.get("title", "")
-    description = pr.get("description", "").strip()
+    description = _pr_text(pr, "description").strip()
     base_branch = data.get("project", {}).get("base_branch", "master")
 
     backend = get_backend(data)
@@ -490,7 +509,7 @@ def generate_review_prompt(data: dict, pr_id: str, session_name: str | None = No
         raise ValueError(f"PR {pr_id} not found")
 
     title = pr.get("title", "")
-    description = pr.get("description", "").strip()
+    description = _pr_text(pr, "description").strip()
     base_branch = data.get("project", {}).get("base_branch", "master")
 
     # Build plan and sibling PR context for architectural review
@@ -1168,7 +1187,7 @@ def generate_signoff_prompt(data: dict, pr_id: str,
         raise ValueError(f"PR {pr_id} not found")
 
     title = pr.get("title", "")
-    description = pr.get("description", "").strip()
+    description = _pr_text(pr, "description").strip()
     base_branch = data.get("project", {}).get("base_branch", "master")
     backend_name = data.get("project", {}).get("backend", "vanilla")
     if backend_name == "local":
@@ -2572,7 +2591,7 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     pr_path_seg = pr["id"]
 
     title = pr.get("title", "")
-    description = pr.get("description", "").strip()
+    description = _pr_text(pr, "description").strip()
     branch = pr.get("branch", f"pm/{pr_id}")
     workdir = pr.get("workdir", "")
     base_branch = data.get("project", {}).get("base_branch", "master")

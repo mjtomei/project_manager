@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T21:52:17.810814+00:00'
+  updated_at: '2026-10-27T23:34:53.787836+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37236,6 +37236,22 @@ prs:
       No feature-code change: the sign-off/integration review found no new defect.'
     created_at: '2026-10-27T21:52:17Z'
     last_edited: '2026-10-27T21:52:17Z'
+  - id: note-3c092b7
+    text: 'review-loop 3757 i1: closed a residual hand-edited-state gap the contract
+      already claimed. (1) A non-string `description` (an unquoted date or an int)
+      has no `.strip()`, so one bad value raised AttributeError out of EVERY prompt
+      builder (impl/review/sign-off/QA-planner) and `spec_gen._build_spec_prompt`
+      — the session window could not launch, the same crash class i9/i10 fixed for
+      notes/depends_on; `prompt_gen._pr_text` now reads the field (spec R9 item 14
+      updated). (2) A note whose `text` is a non-string crashed `_render_pr_notes_bounded`
+      (`(n.get("text") or "").split()`) once the notes block exceeded its budget;
+      it now renders through `str` like the full renderer. (3) `format_signoff_return`
+      compared `status` to the literal "conflict" instead of `integration.CONFLICT`.
+      Four new tests in test_prompt_bounds.py (three fail on the pre-fix source, verified
+      by reverting it). No feature-code change: the sign-off/integration review found
+      no new defect.'
+    created_at: '2026-10-27T23:34:53Z'
+    last_edited: '2026-10-27T23:34:53Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work

@@ -752,11 +752,17 @@ tests):
     / `description` fields, read *and written*: `prompt_gen._format_pr_notes`
     and `_note_mappings` skip a member that is not a mapping (and a `notes`
     value that is not a list) instead of raising `AttributeError` out of every
-    prompt builder, `graph.deps_of` is the one reader of `depends_on` (a
+    prompt builder (a note whose `text` is a non-string renders through `str`
+    in the bounded renderer too, instead of `.split()` raising once the notes
+    block exceeds its budget), `graph.deps_of` is the one reader of `depends_on` (a
     scalar is absent, a non-string member ignored) for the graph, the TUI
     layout/render and scheduler, the plan and PR prompts and `pm pr edit`'s
     reconciliation (a scalar `description` there has no whitespace to
-    collapse), and the note commands (`pm pr note add` / `edit` /
+    collapse), and `prompt_gen._pr_text` reads the PR text field the prompt
+    builders strip (a non-string `description` has no `.strip()`, so one bad
+    value raised `AttributeError` out of the impl / review / sign-off / QA
+    planner prompts and `spec_gen._build_spec_prompt`, and the window could
+    not launch), while the note commands (`pm pr note add` / `edit` /
     `delete` — the canonical handoff channel) plus `_apply_pr_edit` treat a
     malformed member as "not a note" instead of raising `TypeError` /
     `KeyError` and losing the write: they preserve the malformed member rather

@@ -1406,7 +1406,7 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 # An ``error`` record reports a failed check, not a conflict.
                 current = ("the conflict above is separate and is never "
                            "auto-resolved"
-                           if integ.get("status") == "conflict"
+                           if integ.get("status") == integration.CONFLICT
                            else "the failed check above is separate")
                 lines.append(
                     "pm resolved an *earlier* metadata conflict by record id "
@@ -1524,7 +1524,7 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
         else:
             lines.append(f"pm did not merge the base into the branch: "
                          f"{rec['apply_error']}.")
-    if not for_signoff and integ.get("status") == "conflict":
+    if not for_signoff and integ.get("status") == integration.CONFLICT:
         # Object name only: it becomes a `git merge <rev>` command.
         base_rev = (integration._sha_like(integ.get("base_sha")) or "")[:12]
         lines.append(
