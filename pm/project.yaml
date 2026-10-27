@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T19:44:11.622711+00:00'
+  updated_at: '2026-10-27T19:52:23.369050+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14150,6 +14150,28 @@ prs:
       Evidence /pm-captures/scenarios/40/.'
     created_at: '2026-10-27T19:44:11Z'
     last_edited: '2026-10-27T19:44:11Z'
+  - id: note-4ec0fa9
+    text: 'QA S43 (2026-10-27, isolated real rootless Podman 3.4.4, fake agents; build-base
+      PASSED on this host incl. Chromium smoke). Fixed+pushed 2 bugs: (1) b25c70e8
+      — 8-worker TUI QA with the per-name identity inspect answered after the 10 s
+      timeout aborted ALL workers "could not check whether the container is still
+      owned … Cannot determine allocation identity" (recent_launch pre-create inspect
+      bypassed the S21 bounded retry; now shares _await_container_id); post-fix all
+      8 PASS+verified, nothing left after grace. (2) 76e1443e — fresh-launch PID-exhaustion
+      advice named `pm container restart NAME` for an allocation PM had already removed
+      (ran: "No container named … to restart", exit 1); now says PM removed it, retry
+      the launch (restart advice kept when removal fails). All other Thens held live
+      (exits-image real .gitconfig cause in ~0.7 s, missing image, QA INPUT_REQUIRED
+      no verdict, C1/C2/C3 interrupt recovery, keyring/memory classification, empty-ID
+      reap after grace, rename removed by captured ID — the S27 rename leftover is
+      fixed). Spec conflicts for a human: C2 "config hash matches the fixture" can
+      never hold because PM seeds /workspace trust into the copy (content otherwise
+      identical); story-4c "names pm container restart" contradicts "printed commands
+      must run" for a removed fresh launch. Harness: TUI/panes need /workspace/bin
+      (host fake-claude) and a `claude` on PATH; respawn TUI with `env PATH=shim:…
+      pm _tui` (tmux 3.2a respawn-pane -e PATH is overridden). Evidence /pm-captures/scenarios/43.'
+    created_at: '2026-10-27T19:52:23Z'
+    last_edited: '2026-10-27T19:52:23Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
