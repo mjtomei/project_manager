@@ -42,8 +42,8 @@ def model_show():
 
     if resolvable:
         click.echo("Effective config per session type:")
-        click.echo(f"  {'type':14s}   {'model':40s} {'effort':8s}")
-        click.echo(f"  {'─'*14}   {'─'*40} {'─'*8}")
+        click.echo(f"  {'type':15s}  {'model':40s} {'effort':8s}")
+        click.echo(f"  {'─'*15}  {'─'*40} {'─'*8}")
         for st in SESSION_TYPES:
             res = resolve_model_and_provider(st, project_data=data)
             if res.provider:
@@ -53,7 +53,7 @@ def model_show():
             else:
                 model_str = "(default)"
             effort_str = res.effort or "(default)"
-            click.echo(f"  {st:14s}   {model_str:40s} {effort_str:8s}")
+            click.echo(f"  {st:15s}  {model_str:40s} {effort_str:8s}")
         click.echo()
 
     # Show project-level overrides if any
