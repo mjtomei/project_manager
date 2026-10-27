@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T20:29:57.191680+00:00'
+  updated_at: '2026-10-27T21:18:37.036441+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37196,6 +37196,28 @@ prs:
       suite in the commit message.'
     created_at: '2026-10-27T20:29:57Z'
     last_edited: '2026-10-27T20:29:57Z'
+  - id: note-6d93fdf
+    text: 'review-loop 640d i9 (incidental, outside the feature): hand-edited project.yaml
+      state could crash the prompt builders and the PR readers. (1) prompt_gen._format_pr_notes
+      indexed every note with n.get(), so a notes member that is not a mapping — or
+      a scalar notes — raised AttributeError out of EVERY prompt builder (impl/review/QA/sign-off)
+      and the window could not launch; _note_mappings now reads those as absent (the
+      tolerance a note without id/text already had). (2) format_pr_line — the one
+      formatter behind pm pr list, pm pr show and the home window PR list — raised
+      TypeError on a scalar depends_on, and on a non-string updated_at (fromisoformat
+      raises TypeError, not ValueError, for the datetime.date YAML parses from an
+      unquoted date); the home-window sort key had the same mixed-type problem. (3)
+      pm pr show joined depends_on, .strip()ed description/tests/files, and _note_line
+      assumed a mapping — the reader integration_pointer tells sessions to run crashed
+      on all three. (4) New graph.deps_of() (ready_prs/topological_sort/static graph,
+      _finalize_merge "newly ready" which runs AFTER publishing, and tui/pr_view.start_pr)
+      reads a scalar depends_on as absent and ignores non-string members. 8 new tests,
+      each failing pre-fix; full suite 3988 passed, 1 skipped, 12 env-only (markdown
+      module missing). Still open, NOT fixed here: the pm edit write path (cli/pr.py
+      _apply_pr_edit) iterates depends_on/notes the same unguarded way — a crash there
+      leaves the file untouched, but it should get the same guard.'
+    created_at: '2026-10-27T21:18:36Z'
+    last_edited: '2026-10-27T21:18:36Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
