@@ -44,6 +44,7 @@ import shutil
 import subprocess
 import threading
 import time
+from collections.abc import Callable, Collection
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -374,6 +375,27 @@ def container_is_running(name: str) -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
+def _ensure_push_proxy(name: str, workdir: str,
+                       allowed_push_branch: str | None,
+                       session_tag: str | None = None,
+                       pr_id: str | None = None) -> None:
+    """Ensure the push proxy is running for a container (start/restart if needed)."""
+    if not allowed_push_branch:
+        return
+    from pm_core.push_proxy import (
+        start_push_proxy, get_proxy_socket_path, proxy_is_alive,
+    )
+    sock = get_proxy_socket_path(name, session_tag=session_tag,
+                                 pr_id=pr_id)
+    if not sock or not proxy_is_alive(sock):
+        _log.warning("Push proxy dead/missing for container %s — "
+                     "restarting proxy", name)
+        start_push_proxy(
+            name, workdir, allowed_push_branch,
+            session_tag=session_tag, pr_id=pr_id,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Git push proxy integration
 # ---------------------------------------------------------------------------
@@ -621,24 +643,14 @@ def create_container(
             check=False, timeout=10,
         )
         container_id = result.stdout.strip()
-        _log.info("Reusing existing container %s (id=%s)", name, container_id[:12])
-        # Ensure the push proxy is running (it may have died in a crash)
-        if allowed_push_branch:
-            from pm_core.push_proxy import (
-                start_push_proxy, get_proxy_socket_path, proxy_is_alive,
-            )
-            sock = get_proxy_socket_path(name, session_tag=session_tag,
-                                         pr_id=pr_id)
-            if not sock or not proxy_is_alive(sock):
-                _log.warning("Push proxy dead/missing for container %s — "
-                             "restarting proxy", name)
-                start_push_proxy(
-                    name, str(workdir), allowed_push_branch,
-                    session_tag=session_tag, pr_id=pr_id,
-                )
+        _log.info("Reusing running container %s (id=%s)", name, container_id[:12])
+        _ensure_push_proxy(name, str(workdir), allowed_push_branch,
+                           session_tag=session_tag, pr_id=pr_id)
         return container_id
 
-    remove_container(name)
+    # No existing container or it's in an unexpected state — remove and
+    # recreate.  Nothing is running, so there is no memory to sample.
+    remove_container(name, capture=False)
 
     # Auto-build the pm-dev image if it's the default and not yet built.
     # Use a lock so concurrent create_container calls don't all build at once.
@@ -1030,28 +1042,348 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     return exec_part
 
 
-def remove_container(name: str) -> None:
+def remove_container(name: str, *, capture: bool = True,
+                     container_id: str | None = None) -> None:
     """Force-remove a container and its push proxy, then wait until it is gone.
 
     If another 'docker rm -f' is already in flight (e.g. the previous session's
     EXIT trap), this still blocks until the container has fully disappeared so
     that the caller can safely create a fresh container with the same name.
+
+    Captures a running container's memory stats for the memory governor
+    first, unless *capture* is False (the caller already captured them, or
+    knows the container is not running).  With *container_id*, only that
+    container is removed and waited on, never a newer one created under
+    the same name in the meantime — and that newer container keeps the
+    push proxy registered under the name.
     """
     import time
     from pm_core.push_proxy import stop_push_proxy
     _log.info("remove_container: name=%s", name)
-    stop_push_proxy(name)
-    _run_runtime("rm", "-f", name, check=False, timeout=30)
+    # One inspect instead of the failed exec/stats calls a capture of an
+    # absent or exited container would cost (pre-launch cleanup is usually
+    # of a container that does not exist).
+    if capture and container_is_running(name):
+        _capture_memory_sample(name)
+
+    if not container_id:
+        stop_push_proxy(name)
+    target = container_id or name
+    _run_runtime("rm", "-f", target, check=False, timeout=30)
     # Wait for the container to be fully gone.  When another rm is already in
     # flight the daemon returns "removal already in progress" and our rm returns
     # immediately, but the container still exists for a brief moment.
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        result = _run_runtime("inspect", name, check=False, timeout=5)
+        result = _run_runtime("inspect", target, check=False, timeout=5)
         if result.returncode != 0:
-            return  # container is gone
+            break  # container is gone
         time.sleep(0.1)
-    _log.warning("remove_container: %s still present after 10 s", name)
+    else:
+        _log.warning("remove_container: %s still present after 10 s", name)
+    if container_id:
+        # The proxy is keyed by name: leave it to a container that took
+        # the name since.
+        now = _run_runtime("inspect", "-f", "{{.Id}}", name, check=False,
+                           timeout=5)
+        if now.returncode == 0 and now.stdout.strip() != container_id:
+            _log.info("remove_container: %s was recreated — keeping its "
+                      "push proxy", name)
+        else:
+            stop_push_proxy(name)
+
+
+def _running_container_id(name: str) -> str | None:
+    """ID of the running container named *name*, or None."""
+    result = _run_runtime(
+        "inspect", "-f", "{{.State.Running}} {{.Id}}", name,
+        check=False, timeout=10,
+    )
+    parts = result.stdout.split() if result.returncode == 0 else []
+    if len(parts) == 2 and parts[0] == "true":
+        return parts[1]
+    return None
+
+
+def _capture_memory_sample(name: str, container_id: str | None = None) -> None:
+    """Record *name*'s memory for the governor (best-effort, never raises)."""
+    try:
+        from pm_core.memory_governor import capture_and_record
+        capture_and_record(name, container_id)
+    except Exception:
+        _log.debug("Failed to capture stats for %s before removal", name,
+                   exc_info=True)
+
+
+def _exec_session_count(name: str) -> int | None:
+    """Number of exec sessions the runtime has open in *name*, or None."""
+    result = _run_runtime("inspect", "--format", "{{len .ExecIDs}}", name,
+                          check=False, timeout=10)
+    if result.returncode != 0:
+        return None
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return None
+
+
+def _process_table() -> dict[int, tuple[int, list[str]]] | None:
+    """``pid -> (ppid, argv)`` for every visible process, or None."""
+    table: dict[int, tuple[int, list[str]]] = {}
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            stat = Path(f"/proc/{entry}/stat").read_text()
+            argv = Path(f"/proc/{entry}/cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue  # exited while scanning
+        try:
+            ppid = int(stat.rsplit(")", 1)[1].split()[1])
+        except (IndexError, ValueError):
+            continue
+        table[int(entry)] = (ppid, [a.decode(errors="replace") for a in argv if a])
+    return table
+
+
+def _is_exec_client(argv: list[str], name: str) -> bool:
+    if not argv or Path(argv[0]).name not in ("docker", "podman"):
+        return False
+    return "exec" in argv and name in argv
+
+
+def _owned_exec_clients(name: str, pane_ids: list[str]) -> int | None:
+    """Exec client processes for *name* started under *pane_ids*, or None.
+
+    Podman re-executes itself, so a nested matching child of a matching
+    process is the same session and is not counted twice.
+    """
+    from pm_core import tmux as tmux_mod
+    roots: list[int] = []
+    for pane in pane_ids:
+        result = tmux_mod._run(tmux_mod._tmux_cmd(
+            "display-message", "-p", "-t", pane, "#{pane_pid} #{pane_dead}"),
+            text=True)
+        if result.returncode != 0:
+            continue  # pane gone: owns nothing
+        parts = result.stdout.split()
+        if len(parts) == 2 and parts[1] != "1" and parts[0].isdigit():
+            roots.append(int(parts[0]))
+    if not roots:
+        return 0
+    table = _process_table()
+    if table is None:
+        return None
+    children: dict[int, list[int]] = {}
+    for pid, (ppid, _argv) in table.items():
+        children.setdefault(ppid, []).append(pid)
+    count = 0
+    stack = [(r, False) for r in roots]
+    while stack:
+        pid, under_client = stack.pop()
+        is_client = pid in table and _is_exec_client(table[pid][1], name)
+        if is_client and not under_client:
+            count += 1
+        for child in children.get(pid, ()):
+            stack.append((child, under_client or is_client))
+    return count
+
+
+def foreign_exec_sessions(name: str, pane_ids: list[str]) -> int | None:
+    """Exec sessions in *name* not started from *pane_ids*, or None if unknown.
+
+    A positive count means something else — typically a person who
+    attached a shell — is using the container.
+    """
+    total = _exec_session_count(name)
+    if total is None:
+        return None
+    if total == 0:
+        return 0
+    owned = _owned_exec_clients(name, pane_ids)
+    if owned is None:
+        return None
+    return max(0, total - owned)
+
+
+def stop_container(name: str, pane_ids: list[str] | None = None,
+                   resumed: Callable[[], bool] | None = None) -> bool:
+    """Remove a finished session's container to free memory (stop-on-idle).
+
+    Captures memory stats before removal.  The workdir is bind-mounted
+    from the host, so all project state (packages, venv, source) survives
+    container removal — only ephemeral container-internal state is lost.
+
+    *pane_ids* are the panes that belong to the finished session: they
+    get ``remain-on-exit on`` so their text stays readable, and exec
+    sessions started from them are expected.  The container is kept when
+    any other exec session is open (someone is still using it), when
+    that cannot be determined, or when *resumed* returns True (the
+    session was picked up again).  Ownership and *resumed* are checked
+    again after the stats capture — which takes seconds — immediately
+    before removal.  The stop is pinned to the container running when it
+    starts: one recreated under the same name since (an immediate review
+    restart whose killed window's EXIT trap removed the old one) belongs
+    to the new session and is kept.  Returns True if the container was
+    removed.
+    """
+    pane_ids = list(pane_ids or [])
+
+    container_id = _running_container_id(name)
+    if not container_id:
+        _log.info("Stop-on-idle: %s is not running — nothing to stop", name)
+        return False
+
+    def _keep_reason() -> str:
+        if _running_container_id(name) != container_id:
+            return "no longer running or replaced by a new container"
+        if resumed is not None and resumed():
+            return "session resumed since idle"
+        foreign = foreign_exec_sessions(name, pane_ids)
+        if foreign is None:
+            return "cannot tell who is using it"
+        if foreign:
+            return f"{foreign} other exec session(s) open"
+        return ""
+
+    why = _keep_reason()
+    if why:
+        _log.info("Stop-on-idle: keeping %s — %s", name, why)
+        return False
+    _capture_memory_sample(name, container_id)
+    why = _keep_reason()
+    if why:
+        _log.info("Stop-on-idle: keeping %s — %s", name, why)
+        return False
+
+    # Preserve tmux panes before stopping (the exec processes die when the
+    # container goes away, which would normally close the panes).
+    if pane_ids:
+        from pm_core import tmux as tmux_mod
+        for pid in pane_ids:
+            try:
+                tmux_mod.set_pane_option(pid, "remain-on-exit", "on")
+            except Exception:
+                _log.debug("Failed to set remain-on-exit for pane %s", pid)
+
+    # Stats were captured above; this also removes the push proxy.
+    remove_container(name, capture=False, container_id=container_id)
+    # On podman the rm takes the stop timeout (~10 s), so an immediate
+    # restart may hold the name by now: say which container went.
+    newer = _running_container_id(name)
+    if newer and newer != container_id:
+        _log.info("Stop-on-idle: removed container %s (%s) — the name now "
+                  "belongs to a newer container (%s), which is kept",
+                  name, container_id[:12], newer[:12])
+    else:
+        _log.info("Stop-on-idle: removed container %s (%s)",
+                  name, container_id[:12])
+    return True
+
+
+def stop_idle_in_background(name: str, container_type: str,
+                            pane_ids: list[str] | None = None, *,
+                            transcript_path: str | None = None,
+                            idle_since: float | None = None,
+                            session_matches: Callable[[], bool] | None = None,
+                            ) -> threading.Thread | None:
+    """Stop-on-idle entry point: policy-gated and non-blocking.
+
+    Does nothing unless container mode is on and stop-on-idle is enabled
+    for *container_type*.  Otherwise removes *name* (see
+    :func:`stop_container`) on a daemon thread, so the caller's poll loop
+    or UI thread never waits on the runtime.  When *transcript_path* and
+    *idle_since* are given, the container is kept if the session was
+    resumed after it went idle.  When *session_matches* returns False
+    (checked on the thread), the idle signal came from a different
+    session than the one in the pane, and the container is kept.
+    """
+    if not is_container_mode_enabled():
+        return None
+    from pm_core import memory_governor as mg
+    if not mg.get_stop_idle_policy(container_type):
+        return None
+
+    resumed = (None if idle_since is None else
+               lambda: mg.transcript_touched_since(transcript_path, idle_since))
+
+    def _run() -> None:
+        try:
+            if session_matches is not None and not session_matches():
+                _log.info("Stop-on-idle: keeping %s — its pane runs another "
+                          "session than the one that went idle", name)
+                return
+            stop_container(name, pane_ids=pane_ids, resumed=resumed)
+        except Exception:
+            _log.warning("Stop-on-idle failed for %s", name, exc_info=True)
+
+    t = threading.Thread(target=_run, daemon=True, name=f"pm-stop-idle-{name}")
+    t.start()
+    return t
+
+
+# ---------------------------------------------------------------------------
+# Memory governor admission
+# ---------------------------------------------------------------------------
+
+def acquire_launch_admission(name: str, action: str) -> str | None:
+    """Admit a new container *name* through the memory governor.
+
+    Returns the launch-queue entry id to release with
+    :func:`release_launch_admission` once the container exists, or None
+    when no admission was needed (governor off, or *name* is already
+    running and will be reused).  Raises ContainerError — naming the
+    blocked *action* (e.g. ``"impl pr-123"``) — when the launch does not
+    fit, memory cannot be measured, or the governor lock is busy.  The
+    refusal is also recorded for the TUI status bar.
+    """
+    from pm_core import memory_governor as mg
+    from pm_core import launch_queue as lq
+
+    def _refuse(reason: str) -> ContainerError:
+        mg.record_blocked(action, reason)
+        # A host-headroom refusal is about the reserve; the target is
+        # already met, so raising it would not help.
+        setting, change = (("system-memory-reserve", "lower/unset the reserve")
+                           if reason.startswith(mg.HOST_HEADROOM_REASON)
+                           else ("system-memory-target", "raise/unset the target"))
+        return ContainerError(
+            f"Memory governor blocked {action}: {reason.rstrip('.')}. Free "
+            f"memory by closing finished sessions (their containers then stop), or "
+            f"{change} with 'pm container set {setting}'.")
+
+    try:
+        if not mg.governor_active():
+            return None
+    except mg.GovernorConfigError as e:
+        raise _refuse(str(e))
+    if container_is_running(name):
+        # Reused: its usage and growth are already counted.
+        mg.clear_blocked(action)
+        return None
+    ctype = mg.infer_container_type(name) or "other"
+    fits, reason = mg.check_single_container_fits(ctype)
+    if not fits:
+        raise _refuse(reason)
+    entry_id, acquired, reason = lq.enqueue_and_try_acquire(
+        ctype, key=name, container_name=name)
+    if not acquired:
+        if entry_id:
+            lq.dequeue(entry_id)
+        raise _refuse(reason or "not admitted")
+    mg.clear_blocked(action)
+    return entry_id
+
+
+def release_launch_admission(entry_id: str | None) -> None:
+    """Drop a launch-queue entry from :func:`acquire_launch_admission`."""
+    if entry_id:
+        from pm_core.launch_queue import dequeue
+        dequeue(entry_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1099,6 +1431,10 @@ def wrap_claude_cmd(
         label, workdir, cname, session_tag, pr_id,
     )
 
+    # Memory governor admission (QA scenarios are admitted by qa_loop).
+    _queue_entry_id = acquire_launch_admission(
+        cname, action=label.replace("-", " ", 1))
+
     try:
         create_container(
             name=cname,
@@ -1111,10 +1447,12 @@ def wrap_claude_cmd(
             pr_id=pr_id,
         )
     except ContainerError:
+        release_launch_admission(_queue_entry_id)
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
                    cname, exc_info=True)
         raise
     except Exception as exc:
+        release_launch_admission(_queue_entry_id)
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
                    cname, exc_info=True)
         runtime = _get_runtime()
@@ -1123,6 +1461,9 @@ def wrap_claude_cmd(
             f"Is {runtime} running? Disable container mode with 'pm container disable' "
             f"to run without containers."
         ) from exc
+
+    # Container created — its stats now carry the reservation.
+    release_launch_admission(_queue_entry_id)
 
     # Rewrite any prompt-file reference that used the host workdir path.
     # build_claude_shell_cmd writes the file to the host and embeds
@@ -1322,11 +1663,40 @@ def cleanup_orphaned_qa_containers(session: str, pr_id: str,
     return count
 
 
-def cleanup_session_containers(session_tag: str) -> int:
+def sample_session_containers(session_tag: str) -> set[str]:
+    """Record a memory sample for every running container of a session.
+
+    ``pm session kill`` calls this before killing tmux: that fires each
+    pane's exec EXIT trap (``rm -f``), which removes pm-launched containers
+    without a sample before :func:`cleanup_session_containers` reaches
+    them.  Returns the names sampled, so the cleanup does not sample them
+    twice.  Best-effort: a failed listing samples nothing.
+    """
+    prefix = f"{CONTAINER_PREFIX}{session_tag}-"
+    result = _run_runtime(
+        "ps", "--filter", f"name={prefix}",
+        "--format", "{{.Names}}",
+        check=False, timeout=30,
+    )
+    if result.returncode != 0:
+        return set()
+    sampled = set()
+    for line in result.stdout.strip().splitlines():
+        cname = line.strip()
+        if cname.startswith(prefix):
+            _capture_memory_sample(cname)
+            sampled.add(cname)
+    return sampled
+
+
+def cleanup_session_containers(session_tag: str,
+                               sampled: Collection[str] = ()) -> int:
     """Remove all containers belonging to a session.
 
     Filters by ``pm-{session_tag}-`` which matches every container whose
-    name was generated with this session tag embedded.
+    name was generated with this session tag embedded.  Containers in
+    *sampled* already have their memory sample
+    (:func:`sample_session_containers`) and are removed without another.
 
     Returns the number of containers removed.
     """
@@ -1343,7 +1713,10 @@ def cleanup_session_containers(session_tag: str) -> int:
     for line in result.stdout.strip().splitlines():
         cname = line.strip()
         if cname:
-            remove_container(cname)
+            if cname in sampled:
+                remove_container(cname, capture=False)
+            else:
+                remove_container(cname)
             count += 1
 
     if count:

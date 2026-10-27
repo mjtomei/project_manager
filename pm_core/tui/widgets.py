@@ -27,7 +27,8 @@ class StatusBar(Static):
                        show_assist: bool = False,
                        auto_start: bool = False,
                        watcher_status: str = "",
-                       auto_label: str = "") -> None:
+                       auto_label: str = "",
+                       memory_status: str = "") -> None:
         sync_icons = {
             "synced": "[green]synced[/green]",
             "pulling": "[yellow]pulling...[/yellow]",
@@ -50,9 +51,11 @@ class StatusBar(Static):
             watcher_display = "    [bold cyan]WCH[/bold cyan]"
         else:
             watcher_display = ""
+        memory_display = (f"    [bold cyan]{escape(memory_status)}[/bold cyan]"
+                          if memory_status else "")
         # The bar is one row and clips on narrow terminals: running-automation
-        # indicators (AUTO ×N, WCH) go first, the long repo path last.
-        self.update(f" Project: [bold]{project_name}[/bold]{auto_display}{watcher_display}    {pr_info}{filter_display}{sort_display}    {sync_display}{assist_display}    repo: [cyan]{safe_repo}[/cyan]")
+        # indicators (AUTO ×N, WCH, memory) go first, the long repo path last.
+        self.update(f" Project: [bold]{project_name}[/bold]{auto_display}{watcher_display}{memory_display}    {pr_info}{filter_display}{sort_display}    {sync_display}{assist_display}    repo: [cyan]{safe_repo}[/cyan]")
 
 
 class SessionBar(Static):

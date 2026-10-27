@@ -909,6 +909,52 @@ class TestLaunchFailureReason:
         assert state.scenarios[0].window_name is None
 
 
+class TestLaunchStatusKeepsQueued:
+    def test_launch_status_write_carries_extra(self, tmp_path):
+        """Regression (QA S51): the launch-time status write dropped the
+        queued scenarios, so a queued row vanished until the first verdict."""
+        class Written(Exception):
+            pass
+
+        state = QALoopState(pr_id="pr-001")
+        state.qa_workdir = str(tmp_path / "qa")
+        everything = parse_qa_plan(FULL_PLAN)
+        state.scenarios = everything[:1]
+        writes = []
+
+        def write(*args, **kwargs):
+            writes.append((args, kwargs))
+            raise Written
+
+        (tmp_path / "c").mkdir()
+        (tmp_path / "s").mkdir()
+        with patch("pm_core.qa_loop._resolve_qa_model"), \
+             patch("pm_core.qa_loop.create_scenario_workdir",
+                   return_value=(tmp_path / "c", tmp_path / "s")), \
+             patch("pm_core.qa_loop._build_concretize_cmd",
+                   return_value="cmd"), \
+             patch("pm_core.tmux.new_window_get_pane", return_value="%1"), \
+             patch("pm_core.qa_loop._write_status_file", side_effect=write):
+            with pytest.raises(Written):
+                qa_loop._launch_scenarios_in_tmux(
+                    state, {}, {"id": "pr-001", "branch": "b"}, "pm-test",
+                    None, str(tmp_path), _status_scenarios=everything,
+                    _status_extra={"queued_scenarios": {2},
+                                   "verdict_reasons": {2: "why"}})
+        args, kwargs = writes[0]
+        assert args[2] is everything
+        assert kwargs["queued_scenarios"] == {2}
+        assert kwargs["verdict_reasons"] == {2: "why"}
+
+    def test_launch_status_keeps_launch_failure_reasons(self):
+        state = QALoopState(pr_id="pr-001")
+        state.scenario_verdict_reasons[1] = "workdir setup failed: x"
+        kwargs = qa_loop._launch_status_kwargs(
+            state, {"verdict_reasons": {2: "waiting for memory: y"}})
+        assert kwargs["verdict_reasons"] == {
+            1: "workdir setup failed: x", 2: "waiting for memory: y"}
+
+
 class TestPlannerCodeChangesForceReview:
     def _finalize(self, state, tmp_path):
         with patch("pm_core.qa_loop._poll_tmux_verdicts"), \

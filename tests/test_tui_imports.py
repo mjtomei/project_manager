@@ -61,6 +61,7 @@ class TestWidgetImports:
         assert "project_name" in params
         assert "repo" in params
         assert "sync_state" in params
+        assert "memory_status" in params
 
     def test_log_line(self):
         from pm_core.tui.widgets import LogLine
@@ -237,3 +238,104 @@ class TestShellImports:
         from pm_core.tui._shell import _run_shell as shell_ver
         from pm_core.tui.app import _run_shell as app_ver
         assert shell_ver is app_ver
+
+
+# ---------------------------------------------------------------------------
+# StatusBar.update_status memory_status markup integration
+# ---------------------------------------------------------------------------
+
+class TestStatusBarMemoryMarkup:
+    def test_memory_status_renders_bold_cyan(self):
+        from unittest.mock import patch, MagicMock
+        from pm_core.tui.widgets import StatusBar
+        bar = StatusBar()
+        with patch.object(bar, "update") as mock_update:
+            bar.update_status("proj", "repo", "synced", pr_count=3,
+                              memory_status="mem 34G/48G (pm)")
+            args = mock_update.call_args
+            markup = args[0][0] if args[0] else args[1].get("content", "")
+            assert "[bold cyan]mem 34G/48G (pm)[/bold cyan]" in markup
+            # Shown with the automation indicators, before anything the
+            # one-row bar clips first on narrow terminals.
+            assert markup.index("mem 34G") < markup.index("PRs")
+
+    def test_memory_status_markup_is_escaped(self):
+        from unittest.mock import patch
+        from pm_core.tui.widgets import StatusBar
+        bar = StatusBar()
+        with patch.object(bar, "update") as mock_update:
+            bar.update_status("proj", "repo", "synced",
+                              memory_status="mem 1G/2G [blocked]")
+            markup = mock_update.call_args[0][0]
+            assert "\\[blocked]" in markup
+
+    def test_empty_memory_status_no_bold_cyan(self):
+        from unittest.mock import patch
+        from pm_core.tui.widgets import StatusBar
+        bar = StatusBar()
+        with patch.object(bar, "update") as mock_update:
+            bar.update_status("proj", "repo", "synced", memory_status="")
+            args = mock_update.call_args
+            markup = args[0][0] if args[0] else args[1].get("content", "")
+            assert "[bold cyan]" not in markup
+
+
+# ---------------------------------------------------------------------------
+# app.py _update_status_bar memory_status integration
+# ---------------------------------------------------------------------------
+
+class TestAppMemoryStatusIntegration:
+    def _app(self):
+        from unittest.mock import MagicMock
+        from pm_core.tui.app import ProjectManagerApp
+
+        app = ProjectManagerApp.__new__(ProjectManagerApp)
+        app._data = {"project": {"name": "test", "repo": "r"}, "prs": []}
+        app._auto_start = False
+        app._auto_start_label = lambda: ""
+        app._qa_visible = False
+        app._plans_visible = False
+        tree = MagicMock(_status_filter="", _hide_merged=False,
+                         _hide_closed=False, _sort_field="")
+        bar = MagicMock()
+        watcher = MagicMock()
+        watcher.is_any_running.return_value = False
+        app._watcher_manager = watcher
+        widgets = {"#tech-tree": tree, "#status-bar": bar,
+                   "#session-bar": MagicMock()}
+        app.query_one = lambda selector, cls=None: widgets[selector]
+        return app, bar
+
+    def test_cached_status_passed_without_measuring(self):
+        """The UI thread only reads the cached text (max_age=inf)."""
+        from unittest.mock import patch
+        app, bar = self._app()
+        with patch("pm_core.memory_governor.format_memory_status",
+                   return_value="mem 34G/48G (pm)") as fmt, \
+             patch("pm_core.memory_governor.compute_memory_status") as compute, \
+             patch("pm_core.paths.get_global_setting", return_value=False):
+            app._update_status_bar()
+        fmt.assert_called_once_with(max_age=float("inf"))
+        compute.assert_not_called()
+        assert bar.update_status.call_args[1]["memory_status"] == "mem 34G/48G (pm)"
+
+    def test_format_memory_status_exception_fallback(self):
+        from unittest.mock import patch
+        app, bar = self._app()
+        with patch("pm_core.memory_governor.format_memory_status",
+                   side_effect=Exception("boom")), \
+             patch("pm_core.paths.get_global_setting", return_value=False):
+            app._update_status_bar()
+        assert bar.update_status.call_args[1]["memory_status"] == ""
+
+    def test_refresh_pushes_changes_to_status_bar(self):
+        import asyncio
+        from unittest.mock import patch, MagicMock
+        app, _bar = self._app()
+        app._update_status_bar = MagicMock()
+        with patch("pm_core.memory_governor.compute_memory_status",
+                   return_value="mem 1G/48G (pm)"):
+            asyncio.run(app._refresh_memory_status())
+            assert app._update_status_bar.call_count == 1
+            asyncio.run(app._refresh_memory_status())  # unchanged
+            assert app._update_status_bar.call_count == 1

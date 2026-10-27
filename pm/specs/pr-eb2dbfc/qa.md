@@ -2,201 +2,153 @@
 
 PR: pr-eb2dbfc — "Container memory governor: dynamic memory limits with per-type stop policy and QA queuing"
 
+Revised 2026-10-27 after the OOM host restart: the governor now fails
+closed, measures through the configured runtime (docker or podman),
+projects from peaks, counts growth and in-flight reservations, keeps a
+host reserve, and never removes a container someone is still using.  See
+`pm/specs/pr-eb2dbfc/impl.md` §0.  Earlier QA runs (April) ended
+INPUT_REQUIRED and do not approve this revision.
+
 ## 1. Requirements
 
-### R1: CLI settings for memory governor
+### R1: CLI settings
 
-**Expected behavior:** `pm container set` accepts all new keys and validates inputs:
-- `system-memory-target <value>` — parsed as memory value (e.g. "48g"), stored in global settings
-- `system-memory-scope pm|system` — only accepts "pm" or "system"
-- `system-memory-default-projection <value>` — parsed as memory value
-- `system-memory-history-size <N>` — positive integer only
-- `stop-idle-impl on|off`, `stop-idle-review on|off`, `stop-idle-qa on|off` — only "on" or "off"
-- `pm container status` displays all governor settings and current memory usage
+`pm container set` accepts and validates:
+- `system-memory-target <size>` (e.g. `48g`); `off`/`none`/`unset` clears it (governor inactive).  Sizes need a unit: a bare `48` is refused (it would be 48 bytes)
+- `system-memory-scope pm|system`
+- `system-memory-reserve <size>|<pct>%` (default 10% of host RAM)
+- `system-memory-default-projection <size>`, `system-memory-history-size <N>` (N ≥ 1)
+- `system-memory-queue-policy fifo|priority-drain|priority-round-robin`
+- `stop-idle-impl|stop-idle-review|stop-idle-qa on|off`
+- `runtime docker|podman` (master's key, unchanged)
 
-**Code paths:** `pm_core/cli/container.py:container_set()` (line 98), `container_status()` (line 37)
+`pm container status` shows the settings, committed usage (`used + expected growth / target`), host free/reserve, the reason when memory is unmeasurable, recently blocked launches, queue depth (excluding entries of dead/expired owners) and stop-on-idle policy.  Malformed `launch-queue.json` / `governor-blocked.json` entries are dropped, never a crash.
 
-### R2: Memory projection and gate check
+Code: `pm_core/cli/container.py:container_set()`, `container_status()`.
 
-**Expected behavior:** Before launching a container, the governor checks `current_used + projected_new <= target`. If the check fails, the launch is blocked with a descriptive error.
-- Projection uses rolling average of historical peak memory samples per container type
-- Fallback cascade: historical samples > default-projection setting > per-container memory-limit
-- When no target is configured, all launches are allowed (governor inactive)
-- When memory measurement fails, launches are allowed (graceful degradation)
-- Concurrent launch attempts are serialized via lock
+### R2: Admission (fail closed)
 
-**Code paths:** `pm_core/memory_governor.py:check_launch()` (line 480), `project_memory()` (line 432), `pm_core/container.py:wrap_claude_cmd()` (line 768)
+With a target set, a container launch is admitted only if
+`committed usage + in-flight reservations + projection ≤ target` and
+host `MemAvailable − growth − in-flight − projection ≥ reserve`.
+- Committed usage: pm scope = Σ running pm container usage + growth to each one's projection; system scope = host used + the same growth.
+- Projection: p90 of recorded samples (snapshot samples ×1.5), else default projection, else `memory-limit`.
+- **Measurement failure refuses**: runtime stats failing, a pm container without a usage figure, unreadable `/proc/meminfo`, invalid target/scope/reserve, or a busy governor lock.  impl/review/signoff/qa-debug fail with a `ContainerError` naming the action and reason; QA scenarios show `waiting_memory` with the reason and retry.
+- No target configured → governor inactive, no queue entries, launches unchanged.
+- Reusing an already-running container needs no admission.
+- The QA planner, verifier and finalizer run on the host and the refiner execs into the already-admitted scenario container, so they create no containers and need no admission.
 
-### R3: Stop-on-idle per container type
+Code: `pm_core/memory_governor.py:take_snapshot()`, `admit()`, `project_memory()`; `pm_core/launch_queue.py:try_acquire_detailed()`, `enqueue_and_try_acquire()`; `pm_core/container.py:acquire_launch_admission()` (called by `wrap_claude_cmd()` and `pm qa debug`).
 
-**Expected behavior:** When stop-on-idle is enabled for a container type:
-- QA scenarios (default: on): container removed after PASS-verified or NEEDS_WORK verdict, NOT on INPUT_REQUIRED
-- Impl (default: off): container removed after idle detection fires and no interactive prompt detected
-- Review (default: off): container removed after review loop completes (not on INPUT_REQUIRED), or after standalone review goes idle
+### R3: Runtime abstraction
 
-**Code paths:**
-- QA: `pm_core/qa_loop.py:_poll_tmux_verdicts()` lines 1681, 1703, 1882
-- Impl: `pm_core/tui/review_loop_ui.py:_poll_impl_idle()` line 708
-- Review loop: `pm_core/review_loop.py:run_review_loop_sync()` line 427
-- Review standalone: `pm_core/tui/review_loop_ui.py:_poll_impl_idle()` line 725
+Measurement uses `container._get_runtime()`.  Docker (`1.5GiB`) and Podman (`1.06GB`, SI) units both parse.  Stats use `--format '{{.Name}}|{{.MemUsage}}'` (Podman pads tabs).  Container age parses Docker and Podman StartedAt formats.  End-of-life samples read the cgroup `memory.peak` through `<runtime> exec` (kind `peak`), falling back to a stats snapshot (kind `snapshot`).
 
-### R4: Memory stats tracking
+### R4: QA admission and waiting
 
-**Expected behavior:** Memory usage is captured at container end-of-life (before `docker rm -f`):
-- Stats recorded to `~/.pm/container-stats.json` with memory_mb, age_minutes, recorded_at
-- Rolling window trimmed to history-size (default 20) per type
-- Container type inferred from name (`pm-*-impl`, `pm-*-review-*`, `pm-*-qa-*-s{N}`, `pm-*-qa-planner`)
-- Stats capture failure does not block container removal
+- Initial batch: as many as fit launch; the rest wait at the head of the queue (`waiting_memory` + "waiting for memory: <reason>").
+- Scenarios held only by the concurrency cap show `queued` and get **no** queue entry.
+- Queued admission retries at most every 15 s while waiting; launches once memory frees.
+- Target changes mid-run take effect at the next attempt.
+- All of a run's queue entries are released when the loop exits (completion, stop, crash).
+- A resumed run (TUI restart) re-joins the queue under the same key and keeps its place.
+- The QA status pane counts `waiting_memory` as not complete and shows "N waiting for memory".
 
-**Code paths:** `pm_core/memory_governor.py:capture_and_record()` (line 530), `pm_core/container.py:remove_container()` (line 654)
+Code: `pm_core/qa_loop.py:_admit_initial_batch()`, `_poll_tmux_verdicts()` (`_launch_next_queued`, `_admit_queued_head`), `pm_core/qa_status.py`.
 
-### R5: QA launch gating with queuing
+### R5: Stop-on-idle
 
-**Expected behavior:** QA planner computes how many scenarios fit in memory and queues the rest:
-- `concurrency_cap` is further constrained by available memory headroom
-- When zero scenarios fit, all are queued and retried in the poll loop
-- `_launch_next_queued()` checks the memory gate before launching each queued scenario
-- Queued scenarios waiting for memory show `waiting_memory` status (magenta) in QA status pane
+Removes (not `docker stop`) the exact container of this session, on a background thread, capturing stats first and setting `remain-on-exit` on the session's panes:
+- QA (default on): after NEEDS_WORK, after verified PASS, after verification exhausts retries.  Never on INPUT_REQUIRED or while verification is in flight.
+- impl (default off): when the impl session goes idle.
+- review (default off): when a review loop ends with PASS, NEEDS_WORK or KILLED (pane gone), or a standalone review has a final verdict (PASS/LGTM/NEEDS_WORK) and goes idle.  Not on INPUT_REQUIRED or ERROR, and not when the loop was stopped or superseded.
+- `z d`/`zz d` and closing a review window are master lifecycle, not stop-on-idle: killing the window runs the exec EXIT trap (`rm -f`), which removes `review-<pr>` whatever the policy, and each fresh review (`pm pr review --fresh`, so every loop iteration) recreates it — the container ID changes.  The stale stop thread pins the container ID it first saw, so it never removes the replacement container under the same name (impl.md §0, review 3f45 i1/i2).
+- Kept also when the pane that went idle now runs a different Claude session than the one whose verdict/idle triggered the stop (window reused).
+- Kept when: another exec session is open in the container (someone attached), ownership can't be determined, or the transcript changed since the idle/verdict point.
+- Timing (QA): counted from the verdict the loop *records* in `qa_status.json`, not from when the pane prints it — the poll loop starts verdict polling only after every scenario launched plus the 30 s grace, then needs two stable polls.
+- Samples: every removal of a *running* pm container records an end-of-life sample — stop-on-idle, `pm container cleanup`, `pm pr cleanup --resources`, and the stale cleanup at the start of a fresh QA run (`z t`).  No re-baseline; expect one sample per running container removed.
 
-**Code paths:** `pm_core/qa_loop.py:run_qa_sync()` line 2524, `_poll_tmux_verdicts()` line 1601
+Code: `pm_core/container.py:stop_idle_in_background()`, `stop_container()`, `foreign_exec_sessions()`; callers in `qa_loop.py`, `review_loop.py`, `tui/review_loop_ui.py`.
 
-### R6: TUI status bar memory display
+### R6: TUI status bar
 
-**Expected behavior:** Status bar shows `34G/48G (pm)` or `52G/56G (sys)` when a target is configured. Empty when no target set.
+`mem 34G/48G (pm)` / `(sys)`, next to the AUTO/WCH indicators; `mem ?/48G (pm) unmeasurable` on failure; `blocked: <action> [+N]` for launches refused in the last 10 min.  Computed off the UI thread every 15 s — the status bar never runs `docker/podman stats` inline.
 
-**Code paths:** `pm_core/memory_governor.py:format_memory_status()` (line 560), `pm_core/tui/widgets.py:StatusBar.update_status()`, `pm_core/tui/app.py` line 562
-
-### R7: Tmux pane preservation on stop-on-idle
-
-**Expected behavior:** When stop-on-idle stops a container, `remain-on-exit` is set on all affected tmux panes before the container is removed. This preserves the session scrollback text in the pane even after the `docker exec` process dies.
-- QA scenario panes (concretizer, worker, verification) remain visible after stop
-- Impl pane stays visible after idle detection
-- Review pane stays visible after review completion
-
-**Code paths:** `pm_core/container.py:stop_container()` (line 680), `pm_core/tmux.py:set_pane_option()` (line 449)
+Code: `pm_core/memory_governor.py:compute_memory_status()`, `format_memory_status()`, `pm_core/tui/app.py:_refresh_memory_status()`, `pm_core/tui/widgets.py`.
 
 ## 2. Setup
 
-### Environment requirements
-- Docker available and running
-- tmux available
-- pm installed (`pip install -e .` from project_manager clone)
-- A test project initialized with `pm init`
-
-### Configuration steps
-1. Enable container mode: `pm container enable`
-2. Set memory target: `pm container set system-memory-target 48g`
-3. Configure stop-on-idle as needed for the test: `pm container set stop-idle-qa on`
-4. Optionally seed stats file: write sample data to `~/.pm/container-stats.json`
-
-### For manual TUI testing
-- Follow the TUI Manual Testing instruction to create a throwaway project
-- Start a pm session: `pm session`
-- Use `pm tui view` to inspect TUI state
+- Container runtime: rootless Podman is the primary target (verify `podman info --format '{{.Host.Security.Rootless}}'` is `true`); Docker where available.
+- tmux; pm from this branch (`PYTHONPATH=<checkout>` — `/opt/pm-src` shadows the checkout in pm containers).
+- Use a throwaway `~/.pm` settings dir or restore settings afterwards; `pm container set system-memory-target off` disables the governor.
+- Nested rootless Podman without cgroup delegation (pm dev containers) reports the enclosing cgroup for every inner container — usage sums overcount; prefer `system-memory-scope system` there, and note it in results.
+- To force a stats failure: run a pm-named container with `--cgroups=disabled` (`podman stats` then fails for all containers, rc=125).
+- Keep fixture pressure bounded: a few small containers (e.g. `alpine sleep`) and a low target are enough; do not launch large worker fan-outs.
+- Fail-closed display shows only in pm scope: in system scope a stats failure falls back to `<runtime> ps` and counts each running pm container at its full projection, so the bar stays measured.
+- Under nested podman every inner container reports the outer cgroup, so per-container growth shrinks for all N containers as outer usage rises; use generous margins for "exactly one launch per raise" checks.
+- Lock-busy refusals are not written to `governor-blocked.json` (recording needs the same lock); they show only in the error/log.
+- `pm qa debug` admission needs `nested_podman: true`, a committed repo, an instruction, and an image that exists locally (e.g. `docker.io/library/debian:bookworm-slim`); pre-build pm-dev with `pm container build-base` before TUI launches (300 s start timeout).
+- `pm container set system-memory-history-size -3` is parsed by click as an option; use `-- -3` to reach the validator.
+- fake-claude can't hold a review loop at INPUT_REQUIRED (pr-3c90e34); a standalone review or a QA scenario can.
 
 ## 3. Edge Cases
 
-### E1: Single container projection exceeds target
-When the projected memory for a single container exceeds the target (e.g. projection=16G, target=12G), `check_single_container_fits()` should return a clear error rather than entering an infinite wait loop.
-
-### E2: All QA scenarios memory-blocked
-When zero scenarios fit in memory at QA launch time, all should be queued with `waiting_memory` status. The poll loop should retry periodically and launch them as memory becomes available.
-
-### E3: INPUT_REQUIRED prevents memory reclamation
-Scenarios stuck on INPUT_REQUIRED hold their containers alive, potentially starving queued scenarios of memory. The system should not deadlock — the user must manually resolve INPUT_REQUIRED.
-
-### E4: Race between concurrent launches
-Multiple QA scenarios launching simultaneously should be serialized by `_gate_lock` so they don't all pass the gate check at once.
-
-### E5: Stats file corruption
-Corrupt `container-stats.json` (invalid JSON) should be handled gracefully — log a warning, return empty stats, don't crash.
-
-### E6: Docker stats unavailable
-If `docker stats` fails (timeout, Docker down), the gate check should allow the launch rather than blocking it.
-
-### E7: Memory target changed mid-QA-run
-Changing the target while QA is running should take effect on the next gate check cycle without requiring restart.
-
-### E8: Container type inference for unusual names
-Names that don't match known patterns should return `None` from `infer_container_type()` — no crash, no stats recorded.
-
-### E9: History trimming
-When samples exceed `history-size`, only the newest N samples should be kept.
-
-### E10: Pane preservation with multiple panes per container
-QA scenario containers have up to 3 panes (concretizer, worker, verification). All must get `remain-on-exit` set before the container is removed.
+- E1: Projection > target → impl/review/signoff/qa-debug get the `check_single_container_fits` error, no wait loop; QA scenarios wait with that message as the reason (raising the target mid-run lets them launch).
+- E2: All initial QA scenarios blocked → all `waiting_memory` with reason; launch as memory frees.
+- E3: INPUT_REQUIRED containers hold memory → waiting reason names how many are held; no deadlock beyond needing the user.
+- E4: Concurrent admission across two pm processes/sessions → one walk at a time under `~/.pm/governor.lock`; grants never overlap headroom.
+- E5: Stats file / queue file corruption → reset, no crash.
+- E6: Runtime stats fail → launches refused / QA waits, reason visible in CLI, status bar and QA pane (**not** allowed).
+- E7: Governor lock held by another process past 30 s → refused with "lock busy", no unlocked admission.
+- E8: Target changed mid-QA-run → next attempt uses it.
+- E9: Unknown container names → no stats recorded, no crash.
+- E10: History trimming keeps newest N samples.
+- E11: Someone attached (`podman exec -it <name> bash`) to a finished scenario container → stop-on-idle keeps it.
+- E12: Crashed/restarted pm process → its waiting entries expire or are adopted by the resumed run; its acquired reservations end when the container runs or after 30 min.  A crashed QA thread in a live TUI releases its run's entries at once.
 
 ## 4. Pass/Fail Criteria
 
 ### Pass
-- All unit tests in `tests/test_memory_governor.py` pass
-- CLI settings are validated correctly (rejects invalid values)
-- Gate check blocks launches when budget is exceeded
-- Gate check allows launches when budget permits
-- QA scenarios are correctly queued when memory is insufficient
-- Queued scenarios show `waiting_memory` status in QA status pane
-- Stop-on-idle correctly removes containers after session completion per type
-- Stop-on-idle does NOT remove containers during INPUT_REQUIRED
-- Stop-on-idle does NOT remove containers during active verification
-- Memory stats are recorded before container removal
-- Stats file is written atomically (temp + rename)
-- Governor is inactive when no target is configured
-- Graceful degradation when Docker stats unavailable
-- TUI status bar displays memory usage when target is set
-- Tmux panes remain visible (with scrollback) after stop-on-idle
+- Unit tests: `tests/test_memory_governor.py`, `tests/test_launch_queue.py`, `tests/test_qa_memory_governor.py`, `tests/test_container.py`, `tests/test_cli_container.py`, `tests/test_tui_imports.py`.
+- Live on rootless Podman: usage/peak/age measured; a stats failure refuses admission with the reason; attached container kept, unattached one removed with a `peak` sample recorded.
+- QA scenarios queue/wait/launch per R4; waiting reason shown.
+- Stop-on-idle per R5, never on INPUT_REQUIRED or during verification, never with a foreign exec session.
+- Status bar per R6 with no UI stall.
 
 ### Fail
-- Any unit test failure
-- Launch blocked when no memory target is configured
-- Launch blocked when Docker stats fails (should allow)
-- Container stopped while INPUT_REQUIRED verdict is active
-- Container stopped while verification is in progress
-- Stats file corruption on concurrent writes
-- QA scenarios permanently stuck in waiting_memory (no retry)
-- CLI accepts invalid values for settings (e.g. stop-idle-impl=maybe)
-- TUI crash when importing memory_governor
+- Any launch admitted while memory is unmeasurable, the lock is busy, or the target is invalid.
+- A failed measurement displayed or counted as 0.
+- Scenarios held by the concurrency cap reserving memory (queue entries).
+- Queue entries left behind after a QA loop exits.
+- A container removed while someone has an exec session open in it, during INPUT_REQUIRED, or during verification.
+- Another session's container removed by stop-on-idle.
+- The TUI blocking on `<runtime> stats`.
 
 ## 5. Ambiguities
 
-### A1: "Stop" vs "Remove" semantics
-**Ambiguity:** The PR description says "docker stopped (not removed)" but the implementation uses `remove_container()` (docker rm -f) instead of `docker stop`.
-**Resolution:** The implementation chose removal over stopping because the workdir is bind-mounted from the host — all project state survives removal. Container-internal ephemeral state (like running processes) is lost either way with `docker stop`. Removal is cleaner because it doesn't leave stopped containers cluttering `docker ps -a`, and avoids the complexity of `docker start` reuse (push proxy restart, setup sentinel, tmpfs clearing). QA tests should verify that containers are REMOVED (not just stopped) and that workdir state is preserved.
+### A1: "Stop" vs "remove"
+Removal (`rm -f`) after capturing stats; the bind-mounted workdir keeps project state.  Unchanged from the April implementation.
 
-### A2: Scope of "waiting_memory" detection in poll loop
-**Ambiguity:** Should `waiting_memory` be displayed only when the memory governor is the blocking factor, or also when concurrency cap limits launches?
-**Resolution:** `waiting_memory` is only shown when the memory gate check fails. Scenarios waiting for a concurrency slot show plain `queued`. The code distinguishes these by running `check_launch("qa_scenario")` and marking the queue as memory-waiting only when it returns False.
+### A2: `waiting_memory` vs `queued`
+`waiting_memory` only when the governor refused the head of the queue; scenarios waiting for a concurrency slot show `queued`.
 
-### A3: Retry timing for memory-waiting scenarios
-**Ambiguity:** How frequently should memory-waiting scenarios be retried?
-**Resolution:** They are retried on each `_poll_tmux_verdicts` cycle (every ~2 seconds). When a scenario finishes and frees memory (via stop-on-idle), `_launch_next_queued()` is called immediately in the same cycle. There is also a periodic retry for the case where all pending scenarios are done but queue items remain.
+### A3: Retry timing
+At most every 15 s while waiting (each attempt measures runtime stats); immediately after a scenario finishes if no attempt is pending.
 
-### A4: Review stop-on-idle for standalone reviews
-**Ambiguity:** Standalone reviews (plain `d` key) have no explicit completion detection — only idle detection.
-**Resolution:** The implementation hooks into `_poll_impl_idle()` which also tracks `in_review` PR panes. When a standalone review pane goes idle (30s no output, no interactive prompt), stop-on-idle fires. This is tracked under a separate key (`review:{pr_id}`) from the impl pane.
+### A4: Standalone review stop-on-idle
+Master's hook-driven review pass mirrors the review verdict (PASS — what the review prompt asks for — LGTM, NEEDS_WORK, INPUT_REQUIRED; master only matched LGTM, fixed here); stop-on-idle fires on the first idle with a final verdict that isn't INPUT_REQUIRED.
 
 ## 6. Mocks
 
-### MOCK: docker-stats
-**Dependency:** Docker daemon (`docker stats`, `docker inspect`, `docker ps`)
-**Contract:** Simulates Docker CLI responses for memory measurement:
-- `docker stats --no-stream --format '{{.Name}}\t{{.MemUsage}}'` → returns tab-separated name and memory for each running pm container (e.g. `pm-impl\t4.1GiB / 8GiB`)
-- `docker stats --no-stream --format '{{.MemUsage}}' <name>` → returns memory for a single container (e.g. `5.2GiB / 8GiB`)
-- `docker inspect --format '{{.State.StartedAt}}' <name>` → returns ISO timestamp (e.g. `2026-04-07T14:30:00.123456789Z`)
-- `docker ps --filter name=pm- --format '{{.Names}}'` → returns names of running pm containers
-**Scripted responses:** Vary per scenario to test different memory states (under budget, over budget, zero containers, etc.)
-**What remains unmocked:** The memory governor's internal logic (projection, gate check, stats persistence) runs with real code against mocked Docker output.
+### MOCK: container-runtime
+**Dependency:** `docker`/`podman` CLI (`stats`, `ps`, `inspect`, `exec cat /sys/fs/cgroup/memory.peak`).
+**Contract:** unit tests patch `subprocess.run` in `pm_core.memory_governor` or the snapshot functions; live QA uses the real runtime.
+**What remains unmocked:** parsing, projection, admission, queue walk.
 
-### MOCK: container-stats-file
-**Dependency:** `~/.pm/container-stats.json` filesystem
-**Contract:** Uses `tmp_path` fixture to redirect stats persistence to a temporary directory. Allows testing stats read/write/trim without touching the real stats file.
-**What remains unmocked:** JSON serialization, atomic write (temp + rename), rolling window logic.
-
-### MOCK: global-settings
-**Dependency:** `~/.pm/settings/` files (via `get_global_setting_value` / `set_global_setting_value`)
-**Contract:** Patches `get_global_setting_value` to return test-controlled values for memory target, scope, projection defaults, stop-idle policies.
-**What remains unmocked:** Setting validation in CLI (`container_set`), memory unit parsing.
+### MOCK: governor-state
+**Dependency:** `~/.pm` (settings, `launch-queue.json`, `container-stats.json`, `governor-blocked.json`, `governor.lock`).
+**Contract:** `tests/conftest.py:_isolated_memory_governor` redirects all of it to a temp dir for every test.
 
 ### MOCK: tmux-panes
-**Dependency:** tmux server (pane listing, option setting)
-**Contract:** Mocks `tmux.set_pane_option()`, `tmux.find_window_by_name()`, `tmux.get_pane_indices()` for testing pane preservation without a running tmux server.
-**What remains unmocked:** The `stop_container()` logic that calls these functions.
+**Dependency:** tmux (`display-message`, `set-option`, `find_window_by_name`, `get_pane_indices`).
+**Contract:** unit tests mock them; live QA uses a real tmux server (own socket).

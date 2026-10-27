@@ -1,6 +1,6 @@
 """Tests for pm_core.review_loop and pm_core.prompt_gen review loop prompt."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import ANY, patch, MagicMock
 
 import pytest
 
@@ -316,6 +316,78 @@ class TestRunReviewLoopSync:
         mock_review.assert_called_once()
 
 
+class TestStopOnIdle:
+    """At loop exit the review container is removed (policy permitting)
+    only when the session finished — never after a launch/poll ERROR."""
+
+    def _run(self, review_effect, pane="%7", state=None):
+        state = state or ReviewLoopState(pr_id="pr-001")
+        with patch("pm_core.review_loop._run_claude_review",
+                   side_effect=review_effect), \
+             patch("pm_core.review_loop._get_pm_session",
+                   return_value="pm-repo-abc"), \
+             patch("pm_core.review_loop._find_claude_pane", return_value=pane), \
+             patch("pm_core.container.stop_idle_in_background") as stop, \
+             patch("time.time", return_value=1000.0):
+            run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/t")
+        return stop
+
+    def test_pass_stops_exact_container(self):
+        stop = self._run(["All good.\n\n**PASS**"])
+        stop.assert_called_once_with(
+            "pm-repo-abc-review-pr-001", "review", pane_ids=["%7"],
+            transcript_path="/t/review-pr-001-i1.jsonl", idle_since=1000.0,
+            session_matches=ANY)
+
+    def test_session_check_uses_last_iteration_transcript(self):
+        """The window can be replaced (``pm pr review --fresh``) by the
+        time the loop ends: a pane running another session is kept."""
+        stop = self._run(["x\n\n**NEEDS_WORK**", "x\n\n**PASS**"])
+        session_matches = stop.call_args.kwargs["session_matches"]
+        with patch("pm_core.claude_launcher.session_id_from_transcript",
+                   return_value="11111111-1111-1111-1111-111111111111"
+                   ) as from_transcript, \
+             patch("pm_core.tmux.pane_start_command",
+                   return_value="claude --session-id "
+                   "22222222-2222-2222-2222-222222222222") as start_cmd:
+            assert session_matches() is False
+        from_transcript.assert_called_once_with("/t/review-pr-001-i2.jsonl")
+        start_cmd.assert_called_once_with("%7")
+
+    def test_pane_killed_stops(self):
+        stop = self._run(PaneKilledError("gone"), pane=None)
+        stop.assert_called_once()
+        assert stop.call_args.kwargs["pane_ids"] is None
+        assert stop.call_args.kwargs["session_matches"] is None
+
+    def test_superseded_loop_keeps_container(self):
+        """``z d`` / ``zz d`` set stop_requested and kill the window; the
+        fresh review they start reuses this container."""
+        state = ReviewLoopState(pr_id="pr-001")
+
+        def superseded(*a, **k):
+            state.stop_requested = True
+            raise PaneKilledError("gone")
+
+        stop = self._run(superseded, state=state)
+        stop.assert_not_called()
+
+    def test_stop_between_iterations_keeps_container(self):
+        state = ReviewLoopState(pr_id="pr-001")
+
+        def needs_work_then_stop(*a, **k):
+            state.stop_requested = True
+            return "x\n\n**NEEDS_WORK**"
+
+        stop = self._run(needs_work_then_stop, state=state)
+        stop.assert_not_called()
+
+    def test_error_keeps_container(self):
+        """A failed launch/poll may leave the reviewer starting or running."""
+        stop = self._run(RuntimeError("Review window not found after launch"))
+        stop.assert_not_called()
+
+
 class TestResumeInFlightIteration:
     """A breadcrumb-resumed loop adopts the iteration still running in its
     review window instead of relaunching (which killed the window)."""
@@ -600,3 +672,144 @@ class TestGenerateReviewPromptInputRequired:
         assert "INPUT_REQUIRED" in prompt
         # Should explain that it's reserved for genuine ambiguities
         assert "needs the user's attention" in prompt
+
+
+class TestTuiStopOnIdle:
+    """TUI stop-on-idle hooks: impl idle and standalone (non-loop) reviews."""
+
+    def _tracker(self, idle_keys=()):
+        tracker = MagicMock()
+        tracker.is_tracked.return_value = True
+        tracker.is_gone.return_value = False
+        tracker.tracked_keys.return_value = []
+        tracker.get_pane_id.side_effect = lambda key: "%5"
+        tracker.get_transcript_path.side_effect = (
+            lambda key: f"/t/{key}.jsonl" if key.startswith("review:") else None)
+        tracker.became_idle.side_effect = lambda key: key in idle_keys
+        return tracker
+
+    def test_forwards_exact_container_pane_and_transcript(self):
+        from types import SimpleNamespace
+        from pm_core.tui import review_loop_ui
+        app = SimpleNamespace(_session_name="pm-repo-abc",
+                              _pane_idle_tracker=self._tracker())
+        with patch("pm_core.container.stop_idle_in_background") as stop, \
+             patch("time.time", return_value=1000.0):
+            review_loop_ui._try_stop_idle_container(app, "pr-001", "impl", "pr-001")
+        stop.assert_called_once_with(
+            "pm-repo-abc-impl-pr-001", "impl", pane_ids=["%5"],
+            transcript_path=None, idle_since=1000.0, session_matches=ANY)
+
+    def test_session_check_compares_pane_and_transcript_session(self):
+        """A pane re-registered against an older session's transcript
+        (e.g. a standalone review symlink after a review-loop or
+        auto-sequence iteration reused the window) must not be stopped."""
+        from types import SimpleNamespace
+        from pm_core.tui import review_loop_ui
+        sid_old = "11111111-1111-1111-1111-111111111111"
+        sid_new = "22222222-2222-2222-2222-222222222222"
+        app = SimpleNamespace(_session_name="pm-repo-abc",
+                              _pane_idle_tracker=self._tracker())
+        with patch("pm_core.container.stop_idle_in_background") as stop:
+            review_loop_ui._try_stop_idle_container(
+                app, "pr-001", "review", "review:pr-001")
+        session_matches = stop.call_args.kwargs["session_matches"]
+        with patch("pm_core.claude_launcher.session_id_from_transcript",
+                   return_value=sid_old) as from_transcript, \
+             patch("pm_core.tmux.pane_start_command",
+                   return_value=f"podman exec -it pm-x claude --session-id {sid_new}"
+                   ) as start_cmd:
+            assert session_matches() is False
+        from_transcript.assert_called_once_with("/t/review:pr-001.jsonl")
+        start_cmd.assert_called_once_with("%5")
+        with patch("pm_core.claude_launcher.session_id_from_transcript",
+                   return_value=sid_new), \
+             patch("pm_core.tmux.pane_start_command",
+                   return_value=f"claude --resume {sid_new}"):
+            assert session_matches() is True
+
+    def test_session_check_fails_closed_without_pane_or_transcript(self):
+        from pm_core.claude_launcher import pane_runs_session
+        with patch("pm_core.tmux.pane_start_command") as start_cmd:
+            assert pane_runs_session(None, "/t/x.jsonl") is False
+            assert pane_runs_session("%5", None) is False
+        start_cmd.assert_not_called()
+        with patch("pm_core.claude_launcher.session_id_from_transcript",
+                   return_value="22222222-2222-2222-2222-222222222222"), \
+             patch("pm_core.tmux.pane_start_command", return_value="bash"):
+            assert pane_runs_session("%5", "/t/x.jsonl") is False
+
+    def _poll_review(self, verdict, idle=True):
+        from types import SimpleNamespace
+        from pm_core.tui import review_loop_ui
+        tracker = self._tracker({"review:pr-001"} if idle else ())
+        app = SimpleNamespace(
+            _session_name="pm-repo-abc", _pane_idle_tracker=tracker,
+            _data={"prs": [{"id": "pr-001", "status": "in_review",
+                            "workdir": "/w"}]},
+            _review_loops={}, _pending_merge_prs=set(),
+            log_message=lambda *a, **k: None)
+        with patch("pm_core.tui.auto_start.is_enabled", return_value=False), \
+             patch("pm_core.verdict_transcript.extract_verdict_from_transcript",
+                   side_effect=lambda path, verdicts: (
+                       verdict if path and path.startswith("/t/review:")
+                       and verdict in verdicts else None)), \
+             patch("pm_core.runtime_state.get_action_state", return_value={}), \
+             patch("pm_core.runtime_state.set_action_state"), \
+             patch("pm_core.container.stop_idle_in_background") as stop:
+            review_loop_ui._poll_impl_idle(app)
+        return stop, tracker
+
+    def _poll_impl(self, status):
+        from types import SimpleNamespace
+        from pm_core.tui import review_loop_ui
+        tracker = self._tracker({"pr-001"})
+        app = SimpleNamespace(
+            _session_name="pm-repo-abc", _pane_idle_tracker=tracker,
+            _data={"prs": [{"id": "pr-001", "status": status,
+                            "workdir": "/w"}]},
+            _review_loops={}, _pending_merge_prs=set(),
+            log_message=lambda *a, **k: None)
+        with patch("pm_core.tui.auto_start.is_enabled", return_value=True), \
+             patch("pm_core.signoff.return_awaiting", return_value=None), \
+             patch("pm_core.runtime_state.get_action_state", return_value={}), \
+             patch("pm_core.runtime_state.set_action_state"), \
+             patch.object(review_loop_ui, "_auto_review_idle_prs") as auto, \
+             patch("pm_core.container.stop_idle_in_background") as stop:
+            review_loop_ui._poll_impl_idle(app)
+        return stop, auto
+
+    def test_idle_impl_stops_for_in_progress_pr_and_auto_reviews(self):
+        stop, auto = self._poll_impl("in_progress")
+        stop.assert_called_once()
+        assert stop.call_args[0][:2] == ("pm-repo-abc-impl-pr-001", "impl")
+        auto.assert_called_once()
+
+    def test_idle_impl_relaunched_on_in_review_pr_stops(self):
+        """``s`` on an in_review PR reopens the impl session without
+        changing the status; its idle must still stop the container
+        (QA S54), but must not start another auto-review."""
+        stop, auto = self._poll_impl("in_review")
+        stop.assert_called_once()
+        assert stop.call_args[0][:2] == ("pm-repo-abc-impl-pr-001", "impl")
+        auto.assert_not_called()
+
+    def test_standalone_pass_review_stops_when_idle(self):
+        """The review prompt asks for PASS — it must count as final."""
+        stop, _ = self._poll_review("PASS")
+        stop.assert_called_once()
+        assert stop.call_args[0][:2] == ("pm-repo-abc-review-pr-001", "review")
+
+    def test_standalone_needs_work_review_stops_when_idle(self):
+        stop, _ = self._poll_review("NEEDS_WORK")
+        stop.assert_called_once()
+
+    def test_standalone_input_required_keeps_container(self):
+        stop, _ = self._poll_review("INPUT_REQUIRED")
+        stop.assert_not_called()
+
+    def test_no_verdict_does_not_consume_idle_edge(self):
+        stop, tracker = self._poll_review(None)
+        stop.assert_not_called()
+        assert all(c.args != ("review:pr-001",)
+                   for c in tracker.became_idle.call_args_list)

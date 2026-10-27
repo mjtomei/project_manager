@@ -24,6 +24,36 @@ from pm_core.review_loop import (
 
 _log = configure_logger("pm.tui.review_loop_ui")
 
+
+def _try_stop_idle_container(app, pr_id: str, container_type: str,
+                             key: str) -> None:
+    """Stop this session's *container_type* container for *pr_id* if idle.
+
+    Policy-gated and non-blocking (see ``stop_idle_in_background``).  The
+    container is named exactly — this TUI session's tag — so another pm
+    session's container for the same PR is never touched.  *key* is the
+    idle-tracker key whose pane and transcript belong to the session.
+    """
+    session = app._session_name
+    if not session:
+        return
+    from pm_core.claude_launcher import pane_runs_session
+    from pm_core.container import _make_container_name, stop_idle_in_background
+    tracker = app._pane_idle_tracker
+    pane_id = tracker.get_pane_id(key)
+    transcript_path = tracker.get_transcript_path(key)
+    import time as _time
+    stop_idle_in_background(
+        _make_container_name(f"{container_type}-{pr_id}",
+                             session_tag=session.removeprefix("pm-")),
+        container_type,
+        pane_ids=[pane_id] if pane_id else None,
+        transcript_path=transcript_path,
+        idle_since=_time.time(),
+        session_matches=lambda: pane_runs_session(pane_id, transcript_path),
+    )
+
+
 # Icons for review verdicts (used in log line)
 VERDICT_ICONS = {
     VERDICT_PASS: "[green bold]✓ PASS[/]",
@@ -972,8 +1002,10 @@ def _poll_impl_idle(app) -> None:
 
         tracker.poll(pr_id)
 
-        # Detect newly-idle in_progress PRs for auto-review
-        if status == "in_progress" and tracker.became_idle(pr_id):
+        # Detect newly-idle impl panes: stop-on-idle applies to any impl
+        # session (an impl relaunched with ``s`` on an in_review PR too);
+        # auto-review only for in_progress PRs.
+        if tracker.became_idle(pr_id):
             from pm_core.signoff import return_awaiting
             if return_awaiting(pr) == "impl":
                 # Sign-off sent it back but the rework session has not
@@ -987,7 +1019,10 @@ def _poll_impl_idle(app) -> None:
                 _log.info("impl_idle: %s idle but spec_pending, resetting", pr_id)
                 tracker.mark_active(pr_id)
             else:
-                newly_idle.append((pr_id, pr))
+                # Stop-on-idle: stop impl container if policy enabled
+                _try_stop_idle_container(app, pr_id, "impl", pr_id)
+                if status == "in_progress":
+                    newly_idle.append((pr_id, pr))
 
     # --- Second pass: post-publish repo-update (merge) windows ---
     # Discover merge windows for ALL in_review / sign_off PRs, not just
@@ -1114,9 +1149,10 @@ def _poll_impl_idle(app) -> None:
         review_transcript_path = tracker.get_transcript_path(review_key)
         if review_transcript_path:
             from pm_core.verdict_transcript import extract_verdict_from_transcript
+            # The review prompt asks for PASS; LGTM is accepted too.
             verdict = extract_verdict_from_transcript(
                 review_transcript_path,
-                ("LGTM", "NEEDS_WORK", "INPUT_REQUIRED"),
+                ("PASS", "LGTM", "NEEDS_WORK", "INPUT_REQUIRED"),
             )
             if verdict:
                 from pm_core import runtime_state as _rs
@@ -1128,6 +1164,13 @@ def _poll_impl_idle(app) -> None:
                     except Exception:
                         _log.debug("runtime_state review verdict mirror failed",
                                    exc_info=True)
+            # Stop-on-idle for standalone reviews (review loops stop their
+            # container in run_review_loop_sync).  Only a finished review
+            # with a final verdict qualifies — INPUT_REQUIRED keeps the
+            # container for the user.
+            if (verdict and verdict != "INPUT_REQUIRED"
+                    and tracker.became_idle(review_key)):
+                _try_stop_idle_container(app, pr_id, "review", review_key)
 
     # Unregister stale merge keys and clean up verdict stability state
     for key in tracker.tracked_keys():

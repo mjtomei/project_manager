@@ -9,6 +9,8 @@ Keybinding variants (set up by app.action_start_qa_on_pr):
   zz t   — start/stop QA loop
 """
 
+import threading
+
 from rich.markup import escape
 
 from pm_core.paths import configure_logger, get_global_setting_value
@@ -448,6 +450,7 @@ def _resume_incomplete_qa(app) -> None:
     # Defer the (relatively expensive) project load until a candidate is
     # actually found — this runs on the ~1s poll tick.
     project_data = None
+    to_resume = []
 
     for resume_file in qa_root.glob("*/qa_resume.json"):
         try:
@@ -512,7 +515,62 @@ def _resume_incomplete_qa(app) -> None:
         app._qa_loops[pr_id] = state
         app.log_message(f"Resuming QA for {pr_id} after restart...")
         _log.info("Resuming incomplete QA from disk: %s", pr_id)
-        qa_loop.resume_qa_background(state, app._root, pr, _on_update)
+        to_resume.append((state, pr, _on_update))
+
+    if to_resume:
+        # Publish the runs as running before the thread starts, like
+        # start_qa_background: adoption can wait seconds on the lock, and
+        # a run that looks idle meanwhile would let t / zz t start a
+        # second loop on the same PR and stop_qa report "No QA running".
+        for state, _pr, _cb in to_resume:
+            state.running = True
+        # Until each run adopts its entries, no clean in this process may
+        # drop them, even if another run's loop gets the lock first.
+        from pm_core import launch_queue
+        run_ids = [qa_loop._qa_run_key(state) for state, _p, _c in to_resume]
+        launch_queue.expect_adoption(run_ids)
+        # Adoption takes the governor lock, which another pm process may
+        # hold for seconds while it measures runtime stats: not on the UI
+        # thread.
+        try:
+            threading.Thread(target=_adopt_and_resume, args=(app, to_resume),
+                             daemon=True, name="qa-resume-adopt").start()
+        except Exception:
+            # Otherwise the runs would stay "running" with no loop behind
+            # them, blocking t / zz t until the next TUI restart.  Nothing
+            # was adopted yet: give the pre-restart entries up to the next
+            # clean rather than release them (no lock on this thread).
+            _log.exception("Could not start QA resume thread")
+            launch_queue.cancel_adoption(run_ids)
+            for state, _pr, _cb in to_resume:
+                state.running = False
+                state.latest_verdict = "ERROR"
+                state.latest_output = "QA resume could not start"
+                _on_qa_update(app, state)
+
+
+def _adopt_and_resume(app, to_resume: list) -> None:
+    """Adopt every resumed run's launch-queue entries, then resume the runs.
+
+    Adoption comes before any resumed loop runs: a loop's first queue
+    access cleans entries still owned by the pre-restart instance, which
+    would drop the other runs' entries.
+    """
+    from pm_core import qa_loop
+
+    for state, _pr, _cb in to_resume:
+        try:
+            qa_loop.adopt_queue_entries(state)
+        except Exception:
+            _log.warning("Launch-queue adoption failed for %s", state.pr_id,
+                         exc_info=True)
+    for state, pr, cb in to_resume:
+        try:
+            qa_loop.resume_qa_background(state, app._root, pr, cb)
+        except Exception:
+            _log.exception("Could not resume QA for %s", state.pr_id)
+            qa_loop.abort_resume(state, "QA resume could not start")
+            cb(state)
 
 
 # ---------------------------------------------------------------------------

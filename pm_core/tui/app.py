@@ -549,6 +549,10 @@ class ProjectManagerApp(App):
             self.run_worker(self._write_queue.run(), exclusive=False)
         # Background sync interval: 5 minutes for automatic PR sync
         self._sync_timer = self.set_interval(300, self._background_sync)
+        # Memory governor usage/target: measured off the UI thread (runtime
+        # stats take seconds) and pushed to the status bar when it changes.
+        self.set_interval(15, self._refresh_memory_status)
+        self.run_worker(self._refresh_memory_status(), exclusive=False)
         # Run heavier startup tasks (heal_registry, tmux bindings) in a
         # background thread so they don't block input processing.
         self.run_worker(self._deferred_startup(), exclusive=False)
@@ -793,6 +797,13 @@ class ProjectManagerApp(App):
         watcher_status = ""
         if self._watcher_manager.is_any_running():
             watcher_status = "input_required" if self._watcher_manager.any_input_required() else "running"
+        # Memory governor status: cached text only — never measure here.
+        memory_status = ""
+        try:
+            from pm_core.memory_governor import format_memory_status
+            memory_status = format_memory_status(max_age=float("inf"))
+        except Exception:
+            pass
         status_bar.update_status(
             project.get("name", "???"),
             project.get("repo", "???"),
@@ -804,6 +815,7 @@ class ProjectManagerApp(App):
             auto_start=self._auto_start,
             auto_label=self._auto_start_label(),
             watcher_status=watcher_status,
+            memory_status=memory_status,
         )
         self.query_one("#session-bar", SessionBar).refresh_session_info()
 
@@ -986,6 +998,19 @@ class ProjectManagerApp(App):
             pass
 
     # --- Sync delegates (see tui/sync.py) ---
+
+    async def _refresh_memory_status(self) -> None:
+        import asyncio
+        from pm_core import memory_governor
+        before = memory_governor.format_memory_status(max_age=float("inf"))
+        try:
+            after = await asyncio.get_event_loop().run_in_executor(
+                None, memory_governor.refresh_memory_status)
+        except Exception:
+            _log.debug("memory status refresh failed", exc_info=True)
+            return
+        if after != before:
+            self._update_status_bar()
 
     async def _background_sync(self) -> None:
         try:

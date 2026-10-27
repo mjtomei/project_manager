@@ -1,5 +1,8 @@
 """Tests for the QA loop orchestration."""
 
+import itertools
+import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -464,6 +467,22 @@ class TestQAWorkdirs:
         assert scratch.exists()
         assert scratch.name == "scratch"
         assert scratch.parent.name == "s-1"
+
+    def test_create_scenario_workdir_clone_works_across_filesystems(self, tmp_path):
+        """No explicit --local: git then copies objects when hardlinking
+        fails (repo and ~/.pm on different filesystems)."""
+        qa_workdir = tmp_path / "qa"
+        qa_workdir.mkdir()
+        calls = []
+        with patch("pm_core.git_ops.run_git",
+                   side_effect=lambda *a, **k: calls.append(a) or MagicMock(returncode=0)), \
+             patch("pm_core.push_proxy.resolve_real_origin", return_value=None):
+            create_scenario_workdir(qa_workdir, 1, repo_root=tmp_path / "repo",
+                                    branch="master")
+        clone = calls[0]
+        assert clone[0] == "clone"
+        assert "--local" not in clone
+        assert clone[-2:] == ("--branch", "master")
 
 
 class TestQALoopState:
@@ -1822,6 +1841,75 @@ class TestScenarioRetryLogic:
         # Should have attempted relaunch twice (once failed, once succeeded)
         assert mock_relaunch.call_count == 2
         assert state.scenario_verdicts[1] == VERDICT_PASS
+
+    def _run_flagged_followup(self, tmp_path, send_keys, sleep=None):
+        """Drive one PASS whose verification comes back FLAGGED."""
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        scenario.session_id = "sid-flagged-1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+        import time as _time
+        fake_event = {"event_type": "idle_prompt",
+                      "timestamp": _time.time() + 1000,
+                      "session_id": scenario.session_id}
+        flagged = threading.Event()
+
+        def verify(*a, **kw):
+            flagged.set()
+            return False, "verifier pane disappeared", None
+
+        def sleep_effect(secs):
+            if sleep:
+                sleep(state, flagged)
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%42"), \
+             patch("pm_core.qa_loop.time.sleep", side_effect=sleep_effect), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript", return_value="PASS"), \
+             patch("pm_core.tmux.capture_pane", return_value="PASS"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys", side_effect=send_keys) as mock_send, \
+             patch("pm_core.qa_loop._verify_single_scenario", side_effect=verify), \
+             patch("pm_core.qa_loop._get_verification_max_retries", return_value=3), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=True):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", tmp_path / "status.json",
+                lambda *a: None,
+            )
+        return state, mock_send
+
+    def test_followup_to_dead_pane_does_not_crash(self, tmp_path):
+        """A FLAGGED verification whose scenario pane dies before the
+        re-evaluation request is sent (``zz t`` killing the windows) used to
+        raise CalledProcessError out of the loop and crash the QA thread."""
+        def send_keys(pane, keys):
+            raise subprocess.CalledProcessError(1, ["tmux", "send-keys"])
+
+        state, mock_send = self._run_flagged_followup(tmp_path, send_keys)
+
+        assert mock_send.called
+        assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+
+    def test_no_followup_after_stop(self, tmp_path):
+        """A verification result processed after a stop was requested does
+        not ask the scenario (being torn down) to re-evaluate."""
+        def sleep(state, flagged):
+            if flagged.is_set():
+                threading.Event().wait(0.2)  # let the result land
+                state.stop_requested = True
+
+        state, mock_send = self._run_flagged_followup(
+            tmp_path, lambda pane, keys: None, sleep=sleep)
+
+        mock_send.assert_not_called()
+        assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+        assert state.scenario_verdict_reasons[1].startswith("QA stopped")
 
     def test_backoff_formula(self):
         """Verify exponential backoff: 5 * 2^retries = 5, 10, 20, 40..."""

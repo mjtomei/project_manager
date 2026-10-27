@@ -8,6 +8,7 @@ from click.testing import CliRunner
 
 from pm_core.cli.container import (
     container_build,
+    container_group,
     _build_container_build_prompt,
 )
 
@@ -217,3 +218,198 @@ class TestContainerBuildCommand:
         mock_launch.assert_called_once()
         call_kwargs = mock_launch.call_args
         assert call_kwargs[1]["session_key"] == "container:build"
+
+
+class TestContainerSetValidation:
+    """Tests for pm container set — validates governor keys."""
+
+    def _invoke(self, key, value):
+        runner = CliRunner()
+        return runner.invoke(container_group, ["set", key, value])
+
+    # --- Valid inputs ---
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_system_memory_target(self, mock_set):
+        result = self._invoke("system-memory-target", "48g")
+        assert result.exit_code == 0
+        assert "Set system-memory-target = 48g" in result.output
+        mock_set.assert_called_once_with("container-system-memory-target", "48g")
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_system_memory_scope_pm(self, mock_set):
+        result = self._invoke("system-memory-scope", "pm")
+        assert result.exit_code == 0
+        assert "Set system-memory-scope = pm" in result.output
+        mock_set.assert_called_once_with("container-system-memory-scope", "pm")
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_system_memory_scope_system(self, mock_set):
+        result = self._invoke("system-memory-scope", "system")
+        assert result.exit_code == 0
+        assert "Set system-memory-scope = system" in result.output
+        mock_set.assert_called_once_with("container-system-memory-scope", "system")
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_system_memory_default_projection(self, mock_set):
+        result = self._invoke("system-memory-default-projection", "6g")
+        assert result.exit_code == 0
+        assert "Set system-memory-default-projection = 6g" in result.output
+        mock_set.assert_called_once_with("container-system-memory-default-projection", "6g")
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_system_memory_history_size(self, mock_set):
+        result = self._invoke("system-memory-history-size", "10")
+        assert result.exit_code == 0
+        assert "Set system-memory-history-size = 10" in result.output
+        mock_set.assert_called_once_with("container-system-memory-history-size", "10")
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_stop_idle_impl_on(self, mock_set):
+        result = self._invoke("stop-idle-impl", "on")
+        assert result.exit_code == 0
+        assert "Set stop-idle-impl = on" in result.output
+        mock_set.assert_called_once_with("container-stop-idle-impl", "on")
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_valid_stop_idle_qa_off(self, mock_set):
+        result = self._invoke("stop-idle-qa", "off")
+        assert result.exit_code == 0
+        assert "Set stop-idle-qa = off" in result.output
+        mock_set.assert_called_once_with("container-stop-idle-qa", "off")
+
+    # --- Invalid inputs ---
+
+    def test_invalid_system_memory_scope_both(self):
+        result = self._invoke("system-memory-scope", "both")
+        assert result.exit_code == 1
+        assert "system-memory-scope must be 'pm' or 'system'" in result.stderr
+
+    def test_invalid_stop_idle_impl_maybe(self):
+        result = self._invoke("stop-idle-impl", "maybe")
+        assert result.exit_code == 1
+        assert "stop-idle value must be 'on' or 'off'" in result.stderr
+
+    def test_invalid_system_memory_history_size_zero(self):
+        result = self._invoke("system-memory-history-size", "0")
+        assert result.exit_code == 1
+        assert "system-memory-history-size must be a positive integer" in result.stderr
+
+    def test_invalid_system_memory_history_size_abc(self):
+        result = self._invoke("system-memory-history-size", "abc")
+        assert result.exit_code == 1
+        assert "system-memory-history-size must be a positive integer" in result.stderr
+
+    def test_invalid_system_memory_target_notmem(self):
+        result = self._invoke("system-memory-target", "notmem")
+        assert result.exit_code == 1
+        assert "cannot parse memory value: 'notmem'" in result.stderr
+
+    @pytest.mark.parametrize("key", ["system-memory-target",
+                                     "system-memory-default-projection",
+                                     "system-memory-reserve"])
+    def test_size_without_unit_rejected(self, key):
+        """A bare number is bytes: "48" would be a 1 MiB target."""
+        with patch("pm_core.paths.set_global_setting_value") as mock_set:
+            result = self._invoke(key, "48")
+        assert result.exit_code == 1
+        assert "needs a unit, e.g. 48g" in result.stderr
+        mock_set.assert_not_called()
+
+    # --- Fractional memory value ---
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_fractional_memory_target(self, mock_set):
+        result = self._invoke("system-memory-target", "1.5g")
+        assert result.exit_code == 0
+        assert "Set system-memory-target = 1.5g" in result.output
+
+    # --- Invalid key (Click-level rejection) ---
+
+    def test_invalid_key_rejected_by_click(self):
+        result = self._invoke("bad-key", "whatever")
+        assert result.exit_code == 2
+
+
+class TestGovernorSettingsAndStatus:
+    def _invoke(self, *args):
+        return CliRunner().invoke(container_group, list(args))
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_reserve_size_and_percent(self, mock_set):
+        assert self._invoke("set", "system-memory-reserve", "8g").exit_code == 0
+        assert self._invoke("set", "system-memory-reserve", "10%").exit_code == 0
+        assert mock_set.call_args_list[-1][0] == (
+            "container-system-memory-reserve", "10%")
+
+    def test_reserve_invalid(self):
+        result = self._invoke("set", "system-memory-reserve", "lots")
+        assert result.exit_code == 1
+        assert "system-memory-reserve must be" in result.stderr
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_target_off_unsets(self, mock_set):
+        result = self._invoke("set", "system-memory-target", "off")
+        assert result.exit_code == 0
+        assert "(unset)" in result.output
+        mock_set.assert_called_once_with("container-system-memory-target", "")
+
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_reserve_and_default_projection_off_unset(self, mock_set):
+        for key in ("system-memory-reserve", "system-memory-default-projection"):
+            result = self._invoke("set", key, "off")
+            assert result.exit_code == 0, result.output
+            assert "(unset)" in result.output
+            assert mock_set.call_args[0] == (f"container-{key}", "")
+
+    def test_status_reports_unmeasurable_memory(self):
+        from pm_core import memory_governor as mg
+        snap = mg.MemorySnapshot(target_mb=48 * 1024,
+                                 error="container stats unavailable: rc=125")
+        with patch("pm_core.container.is_container_mode_enabled", return_value=True), \
+             patch("pm_core.container._runtime_available", return_value=True), \
+             patch("pm_core.memory_governor.take_snapshot", return_value=snap):
+            result = self._invoke("status")
+        assert result.exit_code == 0, result.output
+        assert "unmeasurable — launches are refused" in result.output
+        assert "rc=125" in result.output
+
+    def test_status_reports_usage_growth_and_host(self):
+        from pm_core import memory_governor as mg
+        snap = mg.MemorySnapshot(target_mb=48 * 1024, used_mb=34 * 1024,
+                                 measured_mb=30 * 1024, growth_mb=4 * 1024,
+                                 host=mg.HostMemory(64 * 1024, 20 * 1024),
+                                 reserve_mb=6 * 1024)
+        mg.record_blocked("impl pr-9", "30G used + 8G projected > 36G target")
+        with patch("pm_core.container.is_container_mode_enabled", return_value=False), \
+             patch("pm_core.container._runtime_available", return_value=True), \
+             patch("pm_core.memory_governor.take_snapshot", return_value=snap):
+            result = self._invoke("status")
+        assert "30G used + 4G expected growth / 48G target" in result.output
+        assert "20G of 64G (reserve 6G)" in result.output
+        assert "Blocked:       impl pr-9" in result.output
+
+
+class TestContainerCleanupCommand:
+    """`pm container cleanup` parses the runtime's name/status listing."""
+
+    def test_removes_podman_tab_padded_names(self):
+        # podman's tabwriter pads the tab separator with spaces.
+        listing = MagicMock(returncode=0, stdout=(
+            "pm-s-impl-pr-1  Up 3 minutes ago\n"
+            "pm-s-qa-pr-2-s1  stopping\n"))
+        with patch("pm_core.container._run_runtime", return_value=listing), \
+             patch("pm_core.container.remove_container") as mock_rm:
+            result = CliRunner().invoke(container_group, ["cleanup"])
+        assert result.exit_code == 0, result.output
+        assert [c.args[0] for c in mock_rm.call_args_list] == [
+            "pm-s-impl-pr-1", "pm-s-qa-pr-2-s1"]
+        assert "Removing: pm-s-impl-pr-1 (Up 3 minutes ago)" in result.output
+
+    def test_removes_docker_tab_separated_names(self):
+        listing = MagicMock(returncode=0, stdout="pm-s-review-pr-3\tExited (0)\n")
+        with patch("pm_core.container._run_runtime", return_value=listing), \
+             patch("pm_core.container.remove_container") as mock_rm:
+            result = CliRunner().invoke(container_group, ["cleanup", "--pr", "pr-3"])
+        assert result.exit_code == 0, result.output
+        mock_rm.assert_called_once_with("pm-s-review-pr-3")

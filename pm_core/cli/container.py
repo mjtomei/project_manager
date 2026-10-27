@@ -35,6 +35,58 @@ def container_status():
     click.echo(f"Memory limit:    {cfg.memory_limit}")
     click.echo(f"CPU limit:       {cfg.cpu_limit}")
 
+    # Memory governor settings
+    from pm_core.paths import get_global_setting_value
+    from pm_core import memory_governor as mg
+    target_raw = get_global_setting_value("container-system-memory-target", "")
+    scope = get_global_setting_value("container-system-memory-scope", "pm")
+    reserve_raw = get_global_setting_value("container-system-memory-reserve", "")
+    default_proj = get_global_setting_value(
+        "container-system-memory-default-projection", "")
+    history_size = get_global_setting_value(
+        "container-system-memory-history-size", "20")
+
+    click.echo("")
+    click.echo("Memory governor:")
+    click.echo(f"  Target:        {target_raw or '(not set — governor inactive)'}")
+    click.echo(f"  Scope:         {scope}")
+    click.echo(f"  Host reserve:  {reserve_raw or mg._DEFAULT_RESERVE + ' (default)'}")
+    click.echo(f"  Default proj:  {default_proj or '(not set — uses memory-limit)'}")
+    click.echo(f"  History size:  {history_size}")
+
+    snap = mg.take_snapshot()
+    if snap.error:
+        click.echo(f"  Current:       unmeasurable — launches are refused: {snap.error}")
+    elif snap.active:
+        click.echo(f"  Current:       {mg._fmt_mb(snap.measured_mb or 0)} used"
+                   f" + {mg._fmt_mb(snap.growth_mb)} expected growth"
+                   f" / {mg._fmt_mb(snap.target_mb)} target")
+        if snap.host is not None and snap.reserve_mb is not None:
+            click.echo(f"  Host free:     {mg._fmt_mb(snap.host.available_mb)}"
+                       f" of {mg._fmt_mb(snap.host.total_mb)}"
+                       f" (reserve {mg._fmt_mb(snap.reserve_mb)})")
+    for action, reason in mg.recent_blocked():
+        click.echo(f"  Blocked:       {action} — {reason}")
+
+    # Queue policy
+    from pm_core.launch_queue import get_queue_policy, get_queue_status
+    queue_policy = get_queue_policy()
+    click.echo(f"  Queue policy:  {queue_policy}")
+
+    queue = get_queue_status()
+    waiting = [e for e in queue.get("entries", [])
+               if e.get("status") == "waiting"]
+    acquired = [e for e in queue.get("entries", [])
+                if e.get("status") == "acquired"]
+    if waiting or acquired:
+        click.echo(f"  Queue depth:   {len(waiting)} waiting, {len(acquired)} acquired")
+
+    click.echo("")
+    click.echo("Stop-on-idle:")
+    click.echo(f"  impl:          {'on' if mg.get_stop_idle_policy('impl') else 'off'}")
+    click.echo(f"  review:        {'on' if mg.get_stop_idle_policy('review') else 'off'}")
+    click.echo(f"  qa:            {'on' if mg.get_stop_idle_policy('qa_scenario') else 'off'}")
+
     if enabled and not runtime_ok:
         click.echo(
             f"\nWarning: Container mode is enabled but {cfg.runtime} is not available.",
@@ -68,23 +120,85 @@ def container_disable():
 
 
 @container_group.command("set")
-@click.argument("key", type=click.Choice(["image", "memory-limit", "cpu-limit", "runtime"]))
+@click.argument("key", type=click.Choice([
+    "image", "memory-limit", "cpu-limit", "runtime",
+    "system-memory-target", "system-memory-scope", "system-memory-reserve",
+    "system-memory-default-projection", "system-memory-history-size",
+    "system-memory-queue-policy",
+    "stop-idle-impl", "stop-idle-review", "stop-idle-qa",
+]))
 @click.argument("value")
 def container_set(key: str, value: str):
     """Set a container configuration value.
 
-    Keys: image, memory-limit, cpu-limit, runtime
+    Keys: image, memory-limit, cpu-limit, runtime,
+          system-memory-target, system-memory-scope, system-memory-reserve,
+          system-memory-default-projection, system-memory-history-size,
+          system-memory-queue-policy,
+          stop-idle-impl, stop-idle-review, stop-idle-qa
     """
     from pm_core.paths import set_global_setting_value
 
+    # Validate specific keys
     if key == "runtime" and value not in ("docker", "podman"):
         click.echo(f"Error: runtime must be 'docker' or 'podman', got '{value}'",
                     err=True)
         raise SystemExit(1)
+    if key == "system-memory-scope" and value not in ("pm", "system"):
+        click.echo("Error: system-memory-scope must be 'pm' or 'system'", err=True)
+        raise SystemExit(1)
+    if key == "system-memory-queue-policy":
+        from pm_core.launch_queue import VALID_POLICIES
+        if value not in VALID_POLICIES:
+            click.echo(
+                f"Error: system-memory-queue-policy must be one of: "
+                f"{', '.join(VALID_POLICIES)}", err=True)
+            raise SystemExit(1)
+    if key.startswith("stop-idle-") and value not in ("on", "off"):
+        click.echo("Error: stop-idle value must be 'on' or 'off'", err=True)
+        raise SystemExit(1)
+    if key == "system-memory-history-size":
+        try:
+            n = int(value)
+            if n < 1:
+                raise ValueError
+        except ValueError:
+            click.echo("Error: system-memory-history-size must be a positive integer",
+                        err=True)
+            raise SystemExit(1)
+    size_keys = ("system-memory-target", "system-memory-default-projection",
+                 "system-memory-reserve")
+    if key in size_keys and value.lower() in ("off", "none", "unset"):
+        # Unset: target off makes the governor inactive; the others fall
+        # back to their defaults (memory-limit projection, 10% reserve).
+        value = ""
+    # Sizes need a unit: a bare number is bytes (the runtimes' --memory
+    # convention), so "48" would be a 1 MiB target that refuses everything.
+    elif (key in size_keys
+            and not value.strip().endswith("%")
+            and not value.strip()[-1:].isalpha()):
+        click.echo(f"Error: {key} needs a unit, e.g. {value.strip()}g",
+                   err=True)
+        raise SystemExit(1)
+    if key == "system-memory-reserve" and value:
+        from pm_core.memory_governor import parse_reserve
+        try:
+            parse_reserve(value, 1024)
+        except ValueError:
+            click.echo(f"Error: system-memory-reserve must be a size (8g) or "
+                       f"a percentage (10%), got {value!r}", err=True)
+            raise SystemExit(1)
+    if key in ("system-memory-target", "system-memory-default-projection") and value:
+        from pm_core.memory_governor import parse_memory
+        try:
+            parse_memory(value)
+        except ValueError:
+            click.echo(f"Error: cannot parse memory value: {value!r}", err=True)
+            raise SystemExit(1)
 
     setting_name = f"container-{key}"
     set_global_setting_value(setting_name, value)
-    click.echo(f"Set {key} = {value}")
+    click.echo(f"Set {key} = {value or '(unset)'}")
 
 
 @container_group.command("build-base")
@@ -288,7 +402,9 @@ def container_cleanup(pr_id: str | None):
 
     removed = 0
     for line in lines:
-        parts = line.split("\t", 1)
+        # Split on any whitespace: podman's tabwriter pads the tab with
+        # spaces, and names never contain whitespace.
+        parts = line.split(None, 1)
         name = parts[0].strip()
         status = parts[1].strip() if len(parts) > 1 else ""
         if pr_id and pr_id not in name:

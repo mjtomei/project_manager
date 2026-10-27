@@ -20,6 +20,7 @@ Covers:
 """
 
 import json
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -38,6 +39,24 @@ from pm_core.qa_loop import (
 )
 from pm_core import store
 from pm_core.tui import qa_loop_ui
+
+
+class _InlineThread:
+    """Runs the adopt-and-resume thread inline so tests can assert on it."""
+
+    def __init__(self, target, args=(), **_kw):
+        self._target, self._args = target, args
+
+    def start(self):
+        self._target(*self._args)
+
+
+@pytest.fixture(autouse=True)
+def _inline_adopt_thread():
+    # Only qa_loop_ui's reference: the real threading module stays intact.
+    with patch.object(qa_loop_ui, "threading",
+                      SimpleNamespace(Thread=_InlineThread)):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -526,3 +545,262 @@ def test_resumed_pass_skips_reverification(tmp_path):
     assert "verifying" not in state.latest_output
     assert state.scenario_verdicts[1] == VERDICT_PASS
     assert 1 in state.verified_scenarios
+
+
+def test_resume_adopts_every_queued_entry_of_every_run(tmp_path):
+    """A TUI restart (same PID, new launch-queue instance) must keep each
+    resumed run's waiting entries -- all of them, with their ids and place
+    in line -- even when two runs resume in the same TUI.  Adoption happens
+    before any resumed loop starts, since a loop's first queue access cleans
+    the pre-restart entries (QA S44, note-5eab8c7)."""
+    from pm_core import launch_queue as lq
+
+    app = _make_app(tmp_path)
+    pm_dir = app._root
+    data = store.load(pm_dir)
+    data["prs"].append(dict(data["prs"][0], id="pr-002"))
+    store.save(data, pm_dir)
+    runs = {}
+    for pr_id in ("pr-001", "pr-002"):
+        qa_dir = _seed_run(tmp_path, pr_id=pr_id)
+        state = build_resume_state(_load_resume_file(qa_dir))
+        _write_resume_file(state, use_containers=True, concurrency_cap=4,
+                           queued_indices={1, 2})
+        runs[pr_id] = qa_loop._qa_run_key(state)
+
+    lq_home = tmp_path / "lqhome"
+    lq_home.mkdir()
+    with patch("pm_core.launch_queue.pm_home", return_value=lq_home):
+        for pr_id in ("pr-001", "pr-002"):
+            run = runs[pr_id]
+            lq.enqueue("qa_scenario", qa_run_id=run,
+                       keys=[f"{run}:s1", f"{run}:s2"])
+        q = lq._load_queue()
+        for e in q["entries"]:
+            e["instance"] = "pre-restart"
+        lq._save_queue(q)
+        before = {e["key"]: (e["id"], e["enqueued_at"]) for e in q["entries"]}
+
+        started = []
+
+        def _resume_bg(state, *a, **k):
+            # A resumed loop's first queue access cleans stale entries.
+            entry_map, _ = qa_loop.adopt_queue_entries(state)
+            lq.keepalive(list(entry_map.values()))
+            started.append(entry_map)
+
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch.object(qa_loop, "resume_qa_background",
+                          side_effect=_resume_bg):
+            qa_loop_ui._resume_incomplete_qa(app)
+        after = {e["key"]: (e["id"], e["enqueued_at"])
+                 for e in lq._load_queue()["entries"]}
+
+    assert len(started) == 2
+    assert after == before
+    assert all(sorted(m) == [1, 2] for m in started)
+
+
+def test_resume_adoption_runs_off_the_ui_thread(tmp_path):
+    """Adoption waits on the governor lock, which another pm process may
+    hold for seconds while it measures runtime stats; the poll tick that
+    finds the run must not wait with it."""
+    import threading
+
+    app = _make_app(tmp_path)
+    qa_dir = _seed_run(tmp_path)
+    state = build_resume_state(_load_resume_file(qa_dir))
+    _write_resume_file(state, use_containers=True, concurrency_cap=4,
+                       queued_indices={1})
+    lock_free = threading.Event()
+    resumed = threading.Event()
+
+    def _adopt(state, *a):
+        assert lock_free.wait(5)
+        return {}, set()
+
+    with patch.object(qa_loop_ui, "threading", threading), \
+         patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "adopt_queue_entries", side_effect=_adopt), \
+         patch.object(qa_loop, "resume_qa_background",
+                      side_effect=lambda *a: resumed.set()):
+        qa_loop_ui._resume_incomplete_qa(app)
+        assert "pr-001" in app._qa_loops
+        assert not resumed.is_set()
+        # While adoption waits, the run already counts as running, so a
+        # user's t / zz t sees it instead of starting a second loop.
+        assert app._qa_loops["pr-001"].running
+        qa_loop_ui.stop_qa(app, "pr-001")
+        assert app._qa_loops["pr-001"].stop_requested
+        lock_free.set()
+        assert resumed.wait(5)
+
+
+def test_resume_that_cannot_start_reports_error(tmp_path):
+    app = _make_app(tmp_path)
+    _seed_run(tmp_path)
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "adopt_queue_entries",
+                      return_value=({}, set())), \
+         patch.object(qa_loop, "resume_qa_background",
+                      side_effect=RuntimeError("can't start new thread")):
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    state = app._qa_loops["pr-001"]
+    assert not state.running
+    assert state.latest_verdict == "ERROR"
+    app.call_from_thread.assert_called()
+
+
+def test_resume_whose_adopt_thread_cannot_start_reports_error(tmp_path):
+    """The runs are published as running before the adoption thread starts;
+    if it cannot start they must not stay running with no loop behind them
+    (t / zz t would be blocked until the next TUI restart)."""
+    app = _make_app(tmp_path)
+    _seed_run(tmp_path)
+
+    def _no_thread(*a, **k):
+        raise RuntimeError("can't start new thread")
+
+    with patch.object(qa_loop_ui, "threading", SimpleNamespace(Thread=_no_thread)), \
+         patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    state = app._qa_loops["pr-001"]
+    assert not state.running
+    assert state.latest_verdict == "ERROR"
+    resume_bg.assert_not_called()
+    # Not resuming: its pre-restart entries go to the next clean.
+    from pm_core import launch_queue as lq
+    assert not lq.awaiting_adoption(qa_loop._qa_run_key(state))
+
+
+def test_resume_whose_adoption_times_out_keeps_expecting_it(tmp_path):
+    """QA S52: adoption met a held lock.  The run keeps expecting adoption
+    when its loop starts, so no clean drops its pre-restart entries before
+    the loop retries."""
+    from pm_core import launch_queue as lq
+
+    app = _make_app(tmp_path)
+    _seed_run(tmp_path)
+    expecting = []
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "adopt_queue_entries",
+                      return_value=({}, set())), \
+         patch.object(qa_loop, "resume_qa_background",
+                      side_effect=lambda state, *a: expecting.append(
+                          lq.awaiting_adoption(qa_loop._qa_run_key(state)))):
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    assert expecting == [True]
+
+
+@pytest.mark.parametrize("queued", [set(), {1}])
+def test_resume_with_nothing_queued_stops_expecting_adoption(tmp_path, queued):
+    """A resumed run with no queued scenario adopts nothing.  It must stop
+    expecting adoption, or this process keeps its other pre-restart entries
+    (an interrupted launch's acquired entry, which reserves its projection
+    again once its container is gone) until the loop ends or the 30 min
+    TTL, instead of dropping them at the next clean."""
+    from pm_core import launch_queue as lq
+
+    qa_dir = _seed_run(tmp_path)
+    state = build_resume_state(_load_resume_file(qa_dir))
+    _write_resume_file(state, use_containers=True, concurrency_cap=4,
+                       queued_indices=queued)
+    run = qa_loop._qa_run_key(state)
+    lq_home = tmp_path / "lqhome"
+    lq_home.mkdir()
+    with patch("pm_core.launch_queue.pm_home", return_value=lq_home):
+        lq.enqueue("qa_scenario", qa_run_id=run, keys=[f"{run}:s1"],
+                   container_names=["pm-x-qa-s1"])
+        q = lq._load_queue()
+        q["entries"][0]["instance"] = "pre-restart"
+        q["entries"][0]["status"] = "acquired"
+        lq._save_queue(q)
+        lq.expect_adoption([run])
+
+        qa_loop.adopt_queue_entries(state, queued or None)
+
+        assert not lq.awaiting_adoption(run)
+        lq.enqueue("qa_scenario", qa_run_id="other", keys=["other:s1"])
+        keys = [e["key"] for e in lq._load_queue()["entries"]
+                if e["qa_run_id"] == run]
+        assert keys == ([f"{run}:s1"] if queued else [])
+
+
+@pytest.mark.parametrize("failure", ["no_session", "thread_crash"])
+def test_resume_that_aborts_releases_adopted_entries(tmp_path, failure):
+    """The TUI adopts a resumed run's queue entries before resuming it.  A
+    resume that fails before its poll loop (no pm session, crash) has no
+    loop to renew or release them, so it must drop them itself rather than
+    leave them holding other launches' headroom until the TTL."""
+    from pm_core import launch_queue as lq
+
+    app = _make_app(tmp_path)
+    qa_dir = _seed_run(tmp_path)
+    state = build_resume_state(_load_resume_file(qa_dir))
+    _write_resume_file(state, use_containers=True, concurrency_cap=4,
+                       queued_indices={1, 2})
+    run = qa_loop._qa_run_key(state)
+    lq_home = tmp_path / "lqhome"
+    lq_home.mkdir()
+    with patch("pm_core.launch_queue.pm_home", return_value=lq_home):
+        lq.enqueue("qa_scenario", qa_run_id=run,
+                   keys=[f"{run}:s1", f"{run}:s2"])
+        lq.enqueue("impl", keys=["pm-other-impl"])
+        q = lq._load_queue()
+        for e in q["entries"]:
+            if e.get("qa_run_id") == run:
+                e["instance"] = "pre-restart"
+        lq._save_queue(q)
+
+        def _resume_bg(state, root, pr, cb):
+            # Inline stand-in for resume_qa_background's thread body.
+            if failure == "no_session":
+                with patch.object(qa_loop, "get_pm_session",
+                                  return_value=None):
+                    qa_loop.resume_qa_sync(state, root, pr, cb)
+            else:
+                with patch.object(qa_loop, "resume_qa_sync",
+                                  side_effect=RuntimeError("boom")), \
+                     patch.object(qa_loop.threading, "Thread") as thread:
+                    real_resume_bg(state, root, pr, cb)
+                    thread.call_args.kwargs["target"]()
+
+        real_resume_bg = qa_loop.resume_qa_background
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch.object(qa_loop, "resume_qa_background",
+                          side_effect=_resume_bg):
+            qa_loop_ui._resume_incomplete_qa(app)
+        keys = [e["key"] for e in lq._load_queue()["entries"]]
+
+    resumed = app._qa_loops["pr-001"]
+    assert not resumed.running
+    assert resumed.latest_verdict == "ERROR"
+    assert keys == ["pm-other-impl"]
+
+
+@pytest.mark.parametrize("failure", ["no_session", "workdir_missing"])
+def test_resume_that_aborts_tells_the_tui_why(tmp_path, failure):
+    """The poll tick's completion line only says "QA finished: ERROR", so an
+    aborted resume must push its reason through on_update for the TUI log."""
+    qa_dir = _seed_run(tmp_path)
+    state = build_resume_state(_load_resume_file(qa_dir))
+    updates = []
+    pr = {"id": "pr-001", "workdir": str(tmp_path / "gone")}
+    with patch.object(qa_loop, "get_pm_session",
+                      return_value=None if failure == "no_session" else "pm-x"), \
+         patch.object(store, "load", return_value={"prs": [pr]}), \
+         patch.object(qa_loop, "_compute_qa_window_name", return_value="qa-pr-001"):
+        qa_loop.resume_qa_sync(state, tmp_path, pr,
+                               lambda s: updates.append(s.latest_output))
+
+    assert not state.running
+    assert state.latest_verdict == "ERROR"
+    expected = ("No pm session found" if failure == "no_session"
+                else "Workdir for pr-001 missing — cannot resume QA")
+    assert updates == [expected]
