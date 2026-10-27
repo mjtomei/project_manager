@@ -1,5 +1,6 @@
 """Tests for the host-side git push proxy."""
 
+import glob
 import json
 import os
 import shutil
@@ -23,6 +24,37 @@ from pm_core.push_proxy import (
     container_socket_path,
     _CONTAINER_SOCKET_PATH,
 )
+
+
+@pytest.fixture(autouse=True)
+def _sweep_proxy_state():
+    """Reset in-memory bookkeeping and remove /tmp dirs this test created.
+
+    Shared proxies deliberately keep their socket directory after
+    ``stop_push_proxy`` (a container may still bind-mount it), so a test
+    that only stops the proxy would otherwise leave
+    ``/tmp/pm-push-proxy-*`` directories and lock files behind.
+    """
+    before = set(glob.glob("/tmp/pm-push-proxy-*"))
+    yield
+    with push_proxy_mod._proxy_lock:
+        push_proxy_mod._active_proxies.clear()
+        push_proxy_mod._proxy_refs.clear()
+        push_proxy_mod._container_to_proxy_key.clear()
+    for path in set(glob.glob("/tmp/pm-push-proxy-*")) - before:
+        real = os.path.realpath(path)
+        if os.path.islink(path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        if os.path.isdir(real):
+            shutil.rmtree(real, ignore_errors=True)
+        else:
+            try:
+                os.unlink(real)
+            except OSError:
+                pass
 
 
 @pytest.fixture
@@ -251,6 +283,15 @@ class TestPushProxyProtocol:
         assert resp["exit_code"] == 1
         assert "list of strings" in resp["stderr"]
 
+    def test_rejects_non_string_workdir(self, proxy, sock_path):
+        resp = _send_request(sock_path, {
+            "cmd": "push",
+            "args": ["origin", "pm/pr-123-feature"],
+            "workdir": {"nested": True},
+        })
+        assert resp["exit_code"] == 1
+        assert "must be a string" in resp["stderr"]
+
     def test_invalid_json(self, proxy, sock_path):
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.connect(sock_path)
@@ -350,6 +391,16 @@ class TestPushProxyLifecycle:
             assert mode & 0o777 == 0o777
         finally:
             proxy.stop()
+
+    def test_stop_leaves_a_socket_it_no_longer_owns(self, sock_path):
+        """A daemon whose path was rebound must not unlink the new socket."""
+        proxy = PushProxy(sock_path, "/w", "branch")
+        proxy.start()
+        # Another daemon replaces the socket at the same path.
+        os.unlink(sock_path)
+        Path(sock_path).write_text("replacement")
+        proxy.stop()
+        assert Path(sock_path).read_text() == "replacement"
 
 
 class TestSharedProxy:
@@ -875,6 +926,21 @@ class TestWorkdirKeyedProxies:
 
         stop_session_proxies(self.TAG)
         assert not os.path.exists(sock_dir)
+
+    def test_sweep_refuses_to_delete_a_foreign_symlink_target(self, tmp_path):
+        """Teardown must not rmtree whatever a /tmp symlink happens to point at."""
+        target = tmp_path / "not-a-proxy-dir"
+        target.mkdir()
+        (target / "keep.txt").write_text("keep\n")
+        link = "/tmp/pm-push-proxy-sweepguard-evil"
+        os.symlink(str(target), link)
+        try:
+            push_proxy_mod._remove_proxy_dirs("/tmp/pm-push-proxy-sweepguard-*")
+            assert (target / "keep.txt").exists()
+            assert not os.path.lexists(link)
+        finally:
+            if os.path.lexists(link):
+                os.unlink(link)
 
     def test_start_raises_when_daemon_not_ready(self, tmp_path):
         from pm_core.push_proxy import PushProxyError

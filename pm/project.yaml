@@ -6849,7 +6849,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/143
   gh_pr_number: 143
   created_at: '2026-03-10T00:41:37.907137+00:00'
-  updated_at: '2026-04-07T22:44:24.695069+00:00'
+  updated_at: '2026-10-27T05:14:34.622134+00:00'
   started_at: '2026-03-14T04:37:49.204416+00:00'
   reviewed_at: '2026-04-07T22:44:24.695069+00:00'
   merged_at: null
@@ -6858,6 +6858,22 @@ prs:
     text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-ac12b47-79d4f9af4b607a9b)'
     created_at: '2026-04-07T14:13:07Z'
     last_edited: '2026-04-07T14:13:07Z'
+  - id: note-01f101a
+    text: 'Heads-up from pr-748e708 (workdir-keyed push proxies, merged-to-be): shared
+      proxy socket dirs are now named /tmp/pm-push-proxy-{session_tag}-{pr_id}-{workdir_token}
+      (hash of the host workdir realpath), and the hashed fallback still gets a long-named
+      symlink, so a `/tmp/pm-push-proxy-{session_tag}-*` glob still matches every
+      case. Two adjustments for cleanup_stale_proxy_dirs/restart_dead_proxies: (1)
+      when stopping a shared proxy dir, call `_kill_proxy_socket(sock, remove_dir=False)`
+      — removing the dir breaks a container that still bind-mounts it (the S18 failure);
+      remove dirs only at full session teardown, where `stop_session_proxies` now
+      does it. (2) `start_push_proxy` now takes the workdir and keys on it, so restart_dead_proxies
+      must pass the workdir it already reads from the /workspace bind mount, else
+      it will create a proxy for the wrong key. Also: `_remove_proxy_dirs` refuses
+      to rmtree a path that does not resolve to a proxy dir directly under /tmp —
+      keep that guard if you re-implement sweeping. (2026-10-27)'
+    created_at: '2026-10-27T05:14:34Z'
+    last_edited: '2026-10-27T05:14:34Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac12b47-session-cleanup-for-stale-containers-ab512a43
 - id: pr-53e47a1
   plan: tui-ux
@@ -13449,11 +13465,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-02T22:38:22.256223+00:00'
-  updated_at: '2026-05-02T22:38:22.256223+00:00'
+  updated_at: '2026-10-27T05:14:51.676556+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-1f6cf82
+    text: 'Heads-up from pr-748e708 review: the code path this bug describes no longer
+      exists. `pm_core/push_proxy.py` no longer runs `git -C <target> fetch --update-head-ok
+      <source> <branch>:<branch>` (grep for `update-head-ok`/`denyCurrentBranch` returns
+      nothing on master). `_execute_push` now rejects any push whose origin resolves
+      to a local path, fail-closed, with a message telling scenario clones to rewrite
+      origin to the real upstream. So the "staged revert / desynced index" symptom
+      should be gone; the remaining risk is the explicit rejection (pr-d82e0f1 covers
+      PR workdirs whose origin fetch URL is still local). Please confirm against master
+      before implementing — this PR may be closable. (2026-10-27)'
+    created_at: '2026-10-27T05:14:51Z'
+    last_edited: '2026-10-27T05:14:51Z'
 - id: pr-6bf587b
   plan: bugs
   title: 'Bug: sync kills merge propagation window (variants 1/2) when PR detected
@@ -14463,7 +14491,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T05:04:04.358926+00:00'
+  updated_at: '2026-10-27T05:20:33.014824+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14487,6 +14515,41 @@ prs:
       stays with pr-1139060 (#241); no duplication here.'
     created_at: '2026-10-27T04:54:58Z'
     last_edited: '2026-10-27T05:04:04Z'
+  - id: note-0185a95
+    text: 'Review-loop 7d11 i1 (2026-10-27): reviewed 3de978b5. Design is sound and
+      matches the spec (workdir-keyed key/dir, metadata refusal, per-dir flock, readiness
+      raise, dir retention, foreign/missing-workdir rejection); captures are convincing
+      — pre-fix shows impl+QA on one socket with the impl push force-updating to the
+      QA commit and the dir being removed, post-fix shows distinct sockets and the
+      impl dir surviving QA cleanup. I also confirmed test_impl_and_qa_get_distinct_proxies
+      fails on 74462d76 for the right reason (assert 1 == 3, all three containers
+      on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock). Four fixes applied on top: (1)
+      PushProxy.stop() now checks the socket inode before unlinking (_owns_socket_path)
+      — R3 required "stop() must not unlink a socket it does not own" and only the
+      start()-returned-False case was guarded, so a daemon whose path was rebound
+      would delete the replacement socket + metadata; (2) _remove_proxy_dirs no longer
+      rmtree"s a path that resolves outside a /tmp/pm-push-proxy-* dir (_is_proxy_dir)
+      — /tmp is world-writable, so a planted /tmp/pm-push-proxy-<tag>-* symlink would
+      have made session teardown delete an arbitrary directory; the link is still
+      unlinked, its target is not; (3) a non-string "workdir" in a request is rejected
+      explicitly instead of raising TypeError and dropping the connection with no
+      response; (4) corrected the stale create_container comment claiming the proxy
+      handles local-path origins (it has been fail-closed since before this PR). Tests:
+      added the inode-ownership, foreign-symlink and non-string-workdir cases plus
+      an autouse fixture that sweeps the /tmp dirs/locks the tests now leave behind
+      (shared stops keep dirs by design) — 66 push-proxy tests pass. Full suite: 3695
+      passed, 55 failed, 17 errors; every failure is a pre-existing environment failure
+      (test_merge_publish, test_signoff_integration, test_markdown_render missing
+      markdown module, test_git_ops pull-rebase, test_hook_events) and reproduces
+      identically at 3de978b5 without these edits. Residual, explicitly out of scope
+      per spec R8: refcounts are in-process only, so a same-workdir container owned
+      by another process can still lose its daemon when this process drops its last
+      ref (now recoverable — the dir survives and create_container/reuse or restart_dead_proxies
+      respawns). Left notes on pr-ac12b47 (socket-dir naming, remove_dir=False, pass
+      workdir to start_push_proxy) and pr-e43e4b0 (the fetch --update-head-ok path
+      it targets no longer exists). (2026-10-27)'
+    created_at: '2026-10-27T05:20:32Z'
+    last_edited: '2026-10-27T05:20:32Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

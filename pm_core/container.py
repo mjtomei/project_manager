@@ -798,9 +798,10 @@ def create_container(
     # --- Git push proxy ---
     # If an allowed push branch is set, start a host-side push proxy.
     # The proxy socket is mounted into the container; credentials stay
-    # on the host.  The proxy handles all origin types: real remotes
-    # (HTTP/SSH), local-path origins (from git clone --local), and
-    # repos with no remote (push fails cleanly).
+    # on the host.  The proxy serves one host workdir and only real
+    # remotes (HTTP/SSH): a local-path origin (from git clone --local) is
+    # rejected fail-closed rather than fetched into the target, and a repo
+    # with no remote fails cleanly.
     has_push_proxy = False
     if allowed_push_branch:
         from pm_core.push_proxy import (

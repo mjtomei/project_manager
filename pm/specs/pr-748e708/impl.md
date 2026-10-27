@@ -211,3 +211,31 @@ where call signatures change) covering:
   rejection (R4).
 - Daemon orphaned after its socket path is replaced → inode check makes
   it exit.
+
+## Review iteration 1 refinements
+
+Added during code review (all consistent with R1–R9; no requirement
+changed):
+
+- **R3 completed on the daemon side.** `PushProxy.stop()` now checks the
+  socket inode before unlinking: a daemon whose path was rebound by
+  another daemon leaves the replacement's socket and metadata alone
+  (`_owns_socket_path`).  Previously only the "start() returned False"
+  case was guarded.
+- **Teardown cannot delete a foreign directory.** `/tmp` is
+  world-writable, so `_remove_proxy_dirs` now refuses to `rmtree` a path
+  that does not resolve to a proxy socket directory directly under the
+  glob's parent (`_is_proxy_dir`).  A planted
+  `/tmp/pm-push-proxy-…` symlink is unlinked while its target is left
+  intact.
+- **R4 input validation.** A non-string `workdir` in a request is
+  rejected with an explicit message instead of raising `TypeError` and
+  dropping the connection without a response.
+- **Test hygiene.** An autouse fixture sweeps `/tmp/pm-push-proxy-*`
+  entries a test creates and resets the in-memory registries, since R6
+  makes shared stops leave their directories behind.
+
+Known, explicitly out of scope (unchanged by this PR): refcounts are
+in-process only, so a same-workdir container owned by another process can
+still have its proxy stopped when this process drops its last reference.
+Cross-process cleanup/restart stays with #241 / pr-ac12b47.

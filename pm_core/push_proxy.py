@@ -234,6 +234,23 @@ class PushProxy:
                   self.socket_path, self.workdir, self.allowed_branch)
         return True
 
+    def _owns_socket_path(self) -> bool:
+        """True while the socket file at our path is still the one we bound.
+
+        A daemon that lost its path to another daemon must not unlink the
+        replacement's socket or metadata.
+        """
+        if self._sock_ino is None:
+            # We could not stat our own socket at bind time; nothing better
+            # to compare against, so keep the historical cleanup behaviour.
+            return True
+        try:
+            return os.stat(self.socket_path).st_ino == self._sock_ino
+        except FileNotFoundError:
+            return True  # already gone — the unlink below is a no-op
+        except OSError:
+            return False
+
     def stop(self) -> None:
         """Stop the proxy and clean up the socket."""
         if self._server_socket is None:
@@ -247,6 +264,10 @@ class PushProxy:
                 pass
         if self._thread:
             self._thread.join(timeout=5)
+        if not self._owns_socket_path():
+            _log.info("Push proxy socket replaced by another daemon; "
+                      "leaving it in place: %s", self.socket_path)
+            return
         try:
             os.unlink(self.socket_path)
         except FileNotFoundError:
@@ -330,6 +351,12 @@ class PushProxy:
         # this proxy's own workdir.  Anything else is rejected explicitly:
         # a failed push must never silently run against another clone.
         caller_workdir: str | None = request.get("workdir") or None
+        if caller_workdir is not None and not isinstance(caller_workdir, str):
+            conn.sendall((json.dumps(
+                {"exit_code": 1, "stdout": "",
+                 "stderr": "git-proxy: 'workdir' must be a string\n"}) + "\n"
+            ).encode())
+            return
         if caller_workdir is not None:
             try:
                 matches = (os.path.realpath(caller_workdir)
@@ -961,10 +988,26 @@ def stop_push_proxy(container_name: str) -> None:
         _kill_proxy_socket(sock_path, remove_dir=True)
 
 
+def _is_proxy_dir(path: str, parent: str) -> bool:
+    """True when *path* is a proxy socket directory directly under *parent*.
+
+    Guards the recursive delete in :func:`_remove_proxy_dirs`: ``/tmp`` is
+    world-writable, so a planted ``/tmp/pm-push-proxy-…`` symlink must never
+    make teardown delete an unrelated directory.
+    """
+    return (os.path.dirname(path) == parent
+            and os.path.basename(path).startswith(_SOCKET_DIR_PREFIX))
+
+
 def _remove_proxy_dirs(glob_pattern: str) -> None:
-    """Remove socket directories (and symlinks/locks) matching *glob_pattern*."""
+    """Remove socket directories (and symlinks/locks) matching *glob_pattern*.
+
+    Only paths that resolve to a proxy socket directory are removed; a
+    symlink pointing anywhere else is unlinked but its target is left alone.
+    """
     import glob as _glob
     import shutil
+    parent = os.path.dirname(glob_pattern)
     for path in _glob.glob(glob_pattern):
         if path.endswith(".lock"):
             continue
@@ -974,6 +1017,10 @@ def _remove_proxy_dirs(glob_pattern: str) -> None:
                 os.unlink(path)
             except OSError:
                 pass
+        if not _is_proxy_dir(real, parent):
+            _log.warning("Refusing to remove non-proxy directory %s -> %s",
+                         path, real)
+            continue
         if os.path.isdir(real):
             shutil.rmtree(real, ignore_errors=True)
         try:
