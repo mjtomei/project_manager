@@ -610,6 +610,26 @@ def _scenario_window_name(pr_data: dict, scenario_index: int) -> str:
 # Alias for backward compat with tests; prefer find_claude_pane directly.
 _get_scenario_pane = find_claude_pane
 
+
+def _live_worker_pane(session: str, scenario: "QAScenario",
+                      worker_died: bool = False) -> str | None:
+    """The scenario's live worker pane, or None.
+
+    Once its recorded worker died, a scenario never falls back to the window
+    lookup: a scenario window's first pane is its concretizer (the verifier
+    shares the window too), so the lookup adopted a pane that never reports
+    the worker's verdict. Retries stopped and the run waited on it forever,
+    or a flag follow-up went to it.
+    """
+    from pm_core import tmux as tmux_mod
+    pane_id = scenario.pane_id
+    if not pane_id and not worker_died:
+        pane_id = _get_scenario_pane(session, scenario.window_name)
+    if pane_id and not tmux_mod.pane_exists(pane_id):
+        return None
+    return pane_id
+
+
 def _cleanup_stale_scenario_windows(session: str, pr_data: dict,
                                     include_main: bool = True) -> None:
     """Kill stale scenario windows and optionally the main QA window.
@@ -2904,6 +2924,8 @@ def _poll_tmux_verdicts(
 
     released_indices: set[int] = set()
     release_retry_at = 0.0
+    # Scenarios whose recorded worker pane died this run (see _live_worker_pane).
+    dead_workers: set[int] = set()
 
     def _launch_next_queued() -> bool:
         """Release settled allocations, then launch one queued scenario.
@@ -3082,11 +3104,8 @@ def _poll_tmux_verdicts(
                     # Send the scenario a follow-up message and put back in pending.
                     # Use the stored pane_id to target the original scenario
                     # pane, not the verification pane that may now be pane 0.
-                    pane_id = scenario.pane_id
-                    if pane_id and not tmux_mod.pane_exists(pane_id):
-                        pane_id = None
-                    if pane_id is None:
-                        pane_id = _get_scenario_pane(session, scenario.window_name)
+                    pane_id = _live_worker_pane(
+                        session, scenario, scenario_idx in dead_workers)
                     if pane_id:
                         followup_msg = (
                             f"Your verdict was reviewed and flagged: {reason} — "
@@ -3161,11 +3180,13 @@ def _poll_tmux_verdicts(
                 _launch_next_queued()
                 continue
 
-            pane_id = scenario.pane_id or _get_scenario_pane(session, scenario.window_name)
-            if pane_id and not tmux_mod.pane_exists(pane_id):
-                pane_id = None
-                scenario.pane_id = None
+            pane_id = _live_worker_pane(session, scenario,
+                                        scenario.index in dead_workers)
             if pane_id is None:
+                scenario.pane_id = None
+                # Keep retrying this worker rather than adopting another pane
+                # in its window once the relaunch fails.
+                dead_workers.add(scenario.index)
                 retries = retry_counts.get(scenario.index, 0)
                 if retries < _SCENARIO_MAX_RETRIES:
                     backoff = _SCENARIO_RETRY_BASE * (2 ** retries)

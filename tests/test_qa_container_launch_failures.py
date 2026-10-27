@@ -316,3 +316,54 @@ def test_unverified_pass_downgraded_when_worker_cannot_be_recovered(
     assert state.scenario_verdicts[1] == qa_loop.VERDICT_INPUT_REQUIRED
     # The real cause is preserved for the operator.
     assert state.scenario_verdict_reasons[1].startswith("launch failed:")
+
+
+def test_failed_relaunch_does_not_adopt_the_concretizer_as_the_worker(
+        scenario_state, monkeypatch):
+    """After the recorded worker died, keep retrying it to exhaustion.
+
+    A scenario window's first pane is its concretizer, which outlives the worker.
+    The poll's window lookup used to return it once a relaunch failed, so the
+    scenario looked alive: no further relaunch was attempted and the run waited
+    forever for a verdict that pane would never report (QA S35 story 3).
+    """
+    state, scenario = scenario_state
+    state.scenario_verdicts[1] = qa_loop.VERDICT_PASS
+    scenario.pane_id = "%13"
+    scenario.session_id = "sid-1"
+    attempts = []
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        assert ticks < 40, "the dead worker must keep being retried, not adopted"
+
+    def relaunch(*args, **kwargs):
+        attempts.append(1)
+        qa_loop._record_launch_failure(state, scenario, "QA-FAULT: no worker pane")
+        return False
+
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: True)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop, "_SCENARIO_MAX_RETRIES", 3)
+    monkeypatch.setattr(qa_loop, "_SCENARIO_RETRY_BASE", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_viewed_window_ids", lambda *a: set())
+    # Only the concretizer (the window's first pane) is still alive.
+    monkeypatch.setattr(tmux, "pane_exists", lambda pane: pane == "%12")
+    monkeypatch.setattr(qa_loop, "_get_scenario_pane", lambda *a: "%12")
+    monkeypatch.setattr(tmux, "pane_window_id", lambda *a: None)
+    monkeypatch.setattr(container, "discard_unowned_container", MagicMock())
+    monkeypatch.setattr(qa_loop, "_relaunch_scenario_window", relaunch)
+
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {"id": state.pr_id}, "pm-t", str(state.qa_workdir),
+        Path(state.qa_workdir) / "status.json", lambda: None,
+        use_containers=True)
+
+    assert len(attempts) == 3
+    assert state.scenario_verdicts[1] == qa_loop.VERDICT_INPUT_REQUIRED
+    assert state.scenario_verdict_reasons[1].startswith("launch failed:")

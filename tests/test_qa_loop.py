@@ -1667,14 +1667,12 @@ class TestScenarioRetryLogic:
         state.scenarios = [scenario]
         state.scenario_verdicts = {}
 
-        call_count = 0
+        # The first relaunched pane dies too; the second one stays alive.
+        relaunched = iter(["%41", "%42"])
 
-        def pane_side_effect(session, win_name):
-            nonlocal call_count
-            call_count += 1
-            if call_count <= 2:
-                return None  # Window dead for first 2 polls
-            return "%42"  # Window alive after relaunch
+        def relaunch_side_effect(sc, *args, **kwargs):
+            sc.pane_id = next(relaunched)
+            return True
 
         status_path = tmp_path / "status.json"
 
@@ -1686,8 +1684,9 @@ class TestScenarioRetryLogic:
                       "timestamp": _time.time() + 1000,
                       "session_id": scenario.session_id}
 
-        with patch("pm_core.qa_loop._get_scenario_pane", side_effect=pane_side_effect), \
-             patch("pm_core.qa_loop._relaunch_scenario_window", return_value=True) as mock_relaunch, \
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window",
+                   side_effect=relaunch_side_effect) as mock_relaunch, \
              patch("pm_core.qa_loop.time.sleep"), \
              patch("pm_core.qa_loop.time.monotonic", side_effect=[
                  0,    # grace_start
@@ -1700,7 +1699,7 @@ class TestScenarioRetryLogic:
              patch("pm_core.hook_events.read_event", return_value=fake_event), \
              patch("pm_core.qa_loop.extract_verdict_from_transcript", return_value="PASS"), \
              patch("pm_core.tmux.capture_pane", return_value="PASS"), \
-             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.pane_exists", side_effect=lambda pane: pane == "%42"), \
              patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
 
             _poll_tmux_verdicts(
@@ -1786,8 +1785,13 @@ class TestScenarioRetryLogic:
 
         status_path = tmp_path / "status.json"
 
-        relaunch_results = [False, True]  # Fail first, succeed second
-        pane_results = [None, None, "%42"]  # Dead, dead, alive
+        relaunch_results = iter([False, True])  # Fail first, succeed second
+
+        def relaunch_side_effect(sc, *args, **kwargs):
+            ok = next(relaunch_results)
+            if ok:
+                sc.pane_id = "%42"  # the relaunched worker's pane
+            return ok
 
         # monotonic calls: grace_start, then per-poll in_grace check,
         # plus grace_start reset on successful relaunch
@@ -1805,8 +1809,9 @@ class TestScenarioRetryLogic:
                       "timestamp": _time.time() + 1000,
                       "session_id": scenario.session_id}
 
-        with patch("pm_core.qa_loop._get_scenario_pane", side_effect=pane_results), \
-             patch("pm_core.qa_loop._relaunch_scenario_window", side_effect=relaunch_results) as mock_relaunch, \
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window",
+                   side_effect=relaunch_side_effect) as mock_relaunch, \
              patch("pm_core.qa_loop.time.sleep"), \
              patch("pm_core.qa_loop.time.monotonic", side_effect=monotonic_vals), \
              patch("pm_core.hook_events.read_event", return_value=fake_event), \
