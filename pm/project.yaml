@@ -36153,7 +36153,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/261
   gh_pr_number: 261
   created_at: '2026-10-27T04:42:06.128850+00:00'
-  updated_at: '2026-10-27T11:23:16.800278+00:00'
+  updated_at: '2026-10-27T15:30:36.121436+00:00'
   started_at: '2026-10-27T04:42:19.589247+00:00'
   reviewed_at: null
   merged_at: null
@@ -36344,6 +36344,30 @@ prs:
       Both manifests now state the real encoding chain.'
     created_at: '2026-10-27T11:23:16Z'
     last_edited: '2026-10-27T11:23:16Z'
+  - id: note-74d564b
+    text: 'QA scenario 9 (legacy saved-state migration) PASS on aa41c612. All four
+      stories verified live in a throwaway local-backend project (/scratch/pm-test-1793114422,
+      18 fixture PRs, fake-claude no-verdict config): (1) legacy policy fields — policy=stop_before_merge,
+      merge_policy=wait_for_merge, policy="", policy=something_new, stop_before_merge=true
+      — plus wait_for_merge:false and policy=auto_merge all land in file order; the
+      five ambiguous ones become wait_for_merge and hold the shared prerequisite,
+      the two explicit auto records stay auto_merge; migrated_legacy=True and "(migrated
+      legacy breadcrumb)". (2) stop_before_merge as a mapping + bare-string + empty-string
+      target entries: exactly four targets [BARE, TARGET2, ALPHA, ZETA], stop-only
+      ids appended in ascending pr-id order, ALPHA/ZETA source=legacy-stop, BARE source=legacy-breadcrumb,
+      merged/closed ids dropped, no phantom row. (3) stop_before_merge as a bare string
+      naming a non-target: OTHER stays auto_merge/held_by=[], NONTARGET3 becomes a
+      standalone wait target blocking BASE3. (4) pm tui restart --breadcrumb: migrated_legacy=False,
+      no migration note, before/after JSON identical (ids, order, policy, effective_policy,
+      held_by, run window ids), window list unchanged. Focused tests tests/test_autostart_single_manual_policy.py
+      + tests/test_autostart_multi_target.py: 150 passed. Captures: /pm-captures/scenarios/9/story{1-migration,2-idless-and-stop-map,3-bare-string-stop,4-idempotent-restart}
+      (cast+mp4+manifests). Harness note: observed log tag is `[tui] log:` not `[tui.app]
+      log:`; `L` in the TUI launches a separate log pane (kill the pane to restore
+      full width); tmux send-keys to a freshly created drive window works, but capture-pane
+      on it shows content at the TOP of a 50-row pane, so grep for non-blank lines
+      instead of `tail`.'
+    created_at: '2026-10-27T15:30:36Z'
+    last_edited: '2026-10-27T15:30:36Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
