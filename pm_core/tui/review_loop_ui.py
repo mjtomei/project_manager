@@ -542,8 +542,15 @@ def _poll_loop_state_inner(app) -> None:
             msg += f"\n  See log: {command_log_file()}"
             if state.latest_verdict == VERDICT_LAUNCH_FAILED:
                 if getattr(state, "launch_retryable", False):
-                    msg += ("\n  Will retry automatically; a manual "
-                            "'review-loop start' also retries.")
+                    if _retry_rearm_applies(app, state):
+                        msg += ("\n  Will retry automatically; a manual "
+                                "'review-loop start' also retries.")
+                    else:
+                        # Auto-start is not managing this PR (manual loop,
+                        # out of scope, disabled, or the episode cap): nothing
+                        # will re-arm it, so do not promise an automatic retry.
+                        msg += ("\n  Run 'review-loop start' to retry "
+                                "(auto-start is not retrying this PR).")
                 else:
                     msg += "\n  Needs attention before it can be retried."
         app.log_message(msg, sticky=10)
@@ -573,6 +580,24 @@ def _poll_loop_state_inner(app) -> None:
             app._review_loop_timer = None
 
 
+def _retry_rearm_applies(app, state: ReviewLoopState) -> bool:
+    """Whether auto-start will re-arm this loop after its cooldown.
+
+    Only auto-start targets re-arm, and only while the episode cap allows
+    another one; a manual loop (or one outside the target set) keeps its
+    explicit retryable failure for the user.
+    """
+    from pm_core.tui import auto_start as _auto_start
+    try:
+        if not _auto_start.is_enabled(app) \
+                or not _auto_start.in_scope(app, state.pr_id):
+            return False
+    except Exception:
+        return False
+    episodes = int(getattr(state, "retry_episodes", 0) or 0)
+    return episodes < _auto_start.MAX_REVIEW_LAUNCH_RETRY_EPISODES
+
+
 def _schedule_retry_rearm(app, state: ReviewLoopState) -> None:
     """Run one auto-start pass when a retryable launch failure may re-arm.
 
@@ -581,13 +606,9 @@ def _schedule_retry_rearm(app, state: ReviewLoopState) -> None:
     unrelated event (the original bug).  Only auto-start targets re-arm;
     manual loops keep the explicit failure for the user.
     """
-    from pm_core.tui import auto_start as _auto_start
-    try:
-        if not _auto_start.is_enabled(app) \
-                or not _auto_start.in_scope(app, state.pr_id):
-            return
-    except Exception:
+    if not _retry_rearm_applies(app, state):
         return
+    from pm_core.tui import auto_start as _auto_start
     set_timer = getattr(app, "set_timer", None)
     if set_timer is None or getattr(app, "_review_retry_timer", None) is not None:
         return

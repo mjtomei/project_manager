@@ -218,7 +218,6 @@ def save_breadcrumb(app) -> None:
             "launch_retryable": rstate.launch_retryable,
             "retry_episodes": rstate.retry_episodes,
             "retry_ready_at": rstate.retry_ready_at,
-            "last_pane_id": rstate.last_pane_id,
             "last_session_id": rstate.last_session_id,
             "iteration_attempted": rstate.iteration_attempted,
             "stale_session_id": rstate.stale_session_id,
@@ -328,7 +327,6 @@ async def consume_breadcrumb(app) -> None:
                 launch_retryable=bool(loop_data.get("launch_retryable", False)),
                 retry_episodes=loop_data.get("retry_episodes", 0) or 0,
                 retry_ready_at=loop_data.get("retry_ready_at", 0.0) or 0.0,
-                last_pane_id=loop_data.get("last_pane_id", "") or "",
                 last_session_id=loop_data.get("last_session_id", "") or "",
                 iteration_attempted=bool(
                     loop_data.get("iteration_attempted", False)),

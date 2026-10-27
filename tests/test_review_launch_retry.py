@@ -245,7 +245,28 @@ def test_new_owner_pane_is_adopted(tmp_path, monkeypatch):
         result = _run(state, tmp_path)
     run.assert_not_called()
     assert result.latest_verdict == VERDICT_PASS
-    assert result.last_pane_id == "%9"
+
+
+def test_retry_adopt_polls_without_the_startup_grace(tmp_path, monkeypatch):
+    """An adopted session was launched before the poll, so the
+    startup-false-positive grace must not be applied: an idle event inside
+    it is discarded and an idle session never emits a second one, so the
+    loop would hang until the pane died."""
+    state = ReviewLoopState(pr_id=PR)
+    monkeypatch.setattr(review_loop, "_discover_iteration", lambda *a, **k:
+                        AttemptDiscovery("adopt", pane_id="%9",
+                                         transcript=str(tmp_path / "other.jsonl"),
+                                         session_id="sid-other"))
+    seen = {}
+
+    def fake_poll(pane_id, transcript, **kw):
+        seen.update(kw)
+        return "Other driver.\n\n**PASS**"
+
+    monkeypatch.setattr(review_loop, "_poll_for_verdict", fake_poll)
+    result = _run(state, tmp_path)
+    assert "grace_period" not in seen
+    assert result.latest_verdict == VERDICT_PASS
 
 
 def test_retry_adopt_reads_a_verdict_that_landed_before_the_poll(
@@ -1011,7 +1032,7 @@ def test_breadcrumb_round_trips_retry_episode(tmp_path):
         next_retry_at=time.time() + 30, last_launch_error="boom",
         last_launch_artifact="/tmp/a.log", launch_retryable=True,
         retry_episodes=1, retry_ready_at=time.time() + 60,
-        last_pane_id="%9", last_session_id="sid-1",
+        last_session_id="sid-1",
         iteration_attempted=True,
         _transcript_dir=str(tmp_path),
     )
@@ -1197,6 +1218,70 @@ def test_retry_notice_is_announced_again_in_a_later_iteration(tmp_path):
         review_loop_ui._poll_loop_state_inner(app)
     assert app.log_message.call_count == 2
     assert "second" in app.log_message.call_args[0][0]
+
+
+def test_launch_failure_notice_does_not_promise_a_retry_outside_auto_start(
+        tmp_path):
+    """A manual loop (or a PR auto-start does not manage) keeps its failure
+    for the user: nothing re-arms it, so the notice must not claim it will
+    retry automatically."""
+    from pm_core.tui import review_loop_ui
+    app = MagicMock()
+    app._auto_start = False
+    app._auto_start_targets = {}
+    app._auto_start_all = False
+    state = ReviewLoopState(
+        pr_id=PR, running=False, iteration=1,
+        latest_verdict=VERDICT_LAUNCH_FAILED, launch_retryable=True,
+        launch_attempts=3,
+        latest_output="Review window launch failed (rc=1): boom",
+        retry_ready_at=time.time() + 60)
+    app._review_loops = {PR: state}
+    app._impl_poll_counter = 0
+    app._qa_loops = {}
+    app._data = {"prs": [{"id": PR, "status": "in_review",
+                          "workdir": str(tmp_path)}]}
+    app._watcher_manager.is_any_running.return_value = False
+    app._review_loop_timer = None
+    with patch.object(review_loop_ui, "_refresh_tech_tree"), \
+            patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
+            patch("pm_core.tui.qa_loop_ui.poll_qa_state"):
+        review_loop_ui._poll_loop_state_inner(app)
+    msg = app.log_message.call_args[0][0]
+    assert "review-loop start" in msg
+    assert "Will retry automatically" not in msg
+    # ... and nothing was scheduled to re-arm it.
+    app.set_timer.assert_not_called()
+
+
+def test_launch_failure_notice_promises_the_retry_for_an_auto_start_target(
+        tmp_path):
+    from pm_core.tui import review_loop_ui
+    app = MagicMock()
+    app._auto_start = True
+    app._auto_start_targets = {PR: {}}
+    app._auto_start_all = False
+    app._review_retry_timer = None
+    state = ReviewLoopState(
+        pr_id=PR, running=False, iteration=1,
+        latest_verdict=VERDICT_LAUNCH_FAILED, launch_retryable=True,
+        launch_attempts=3,
+        latest_output="Review window launch failed (rc=1): boom",
+        retry_ready_at=time.time() + 60)
+    app._review_loops = {PR: state}
+    app._impl_poll_counter = 0
+    app._qa_loops = {}
+    app._data = {"prs": [{"id": PR, "status": "in_review",
+                          "workdir": str(tmp_path)}]}
+    app._watcher_manager.is_any_running.return_value = False
+    app._review_loop_timer = None
+    with patch.object(review_loop_ui, "_refresh_tech_tree"), \
+            patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
+            patch("pm_core.tui.qa_loop_ui.poll_qa_state"):
+        review_loop_ui._poll_loop_state_inner(app)
+    msg = app.log_message.call_args[0][0]
+    assert "Will retry automatically" in msg
+    app.set_timer.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

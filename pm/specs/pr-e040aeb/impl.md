@@ -170,9 +170,10 @@ fabricated agent verdict) when retries are exhausted.
    non-retryable; a transient route/container failure is retryable.  The exact
    low-level teardown exception is unknown (the launch log was truncated), so
    classification is by symptom, not by a single exception type.
-5. **Historical window identification** — use the last adopted pane/session id
-   plus lower-numbered iteration transcripts; unknown panes fall back to today's
-   `--fresh` replacement semantics.
+5. **Historical window identification** — use the last adopted session id
+   (`ReviewLoopState.last_session_id` / `stale_session_id`) plus lower-numbered
+   iteration transcripts; unknown panes fall back to today's `--fresh`
+   replacement semantics.
 
 No [UNRESOLVED] ambiguities.
 
@@ -444,3 +445,38 @@ Not changed (documented residuals): `review_loop.py` is ~1360 lines; two
 lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
 `runtime_state.claim_action_lease`); the retry re-arm's `_progress` label can
 show the previous episode's attempt count while the resumed loop runs.
+
+## Review iteration 7 (385e) — refinements
+
+Findings from the seventh review pass, applied on top of iteration 6:
+
+1. **An adopted pane is polled without the startup grace (hang fix).** The
+   retry's adopt path passed `grace_period=_VERDICT_GRACE_PERIOD` (20 s), but
+   the adopted session was launched *before* the poll: the startup
+   false-positive window the grace protects against has already passed.
+   `poll_for_verdict` discards an idle event that arrives inside the grace and
+   then waits for a *second* event, which an idle session never emits — so a
+   review finishing shortly after adoption hung until its pane died.  The
+   adopt path now uses the default (0), matching `_adopt_in_flight_review` and
+   the `_landed_verdict` pre-check.  Covered by
+   `test_retry_adopt_polls_without_the_startup_grace`.
+2. **The terminal notice only promises a retry that will happen.** The
+   LAUNCH_FAILED announcement said "Will retry automatically" for every
+   retryable failure, including a manual loop, a PR outside the auto-start
+   target set, auto-start disabled, and the episode cap — none of which
+   re-arm.  `_retry_rearm_applies()` now backs both `_schedule_retry_rearm`
+   and the message, which points at `review-loop start` when nothing will
+   retry.  Covered by
+   `test_launch_failure_notice_does_not_promise_a_retry_outside_auto_start`
+   and `test_launch_failure_notice_promises_the_retry_for_an_auto_start_target`.
+3. **Dead `last_pane_id` removed.** The field was written, persisted in the
+   breadcrumb and never read: discovery identifies the historical window by
+   *session* id (`last_session_id` / `stale_session_id`) and lower-numbered
+   transcripts, never by pane id.
+
+Not changed (documented residuals): `review_loop.py` is ~1390 lines; two
+lease mechanisms coexist; the retry re-arm's `_progress` label can show the
+previous episode's attempt count while the resumed loop runs; the launch
+artifact's prompt copy can name the stale session's prompt when the failed
+attempt died before rewriting the transcript symlink (the artifact records
+that session id, so the mismatch is visible).

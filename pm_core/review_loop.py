@@ -155,9 +155,8 @@ class ReviewLoopState:
     launch_retryable: bool = False
     retry_episodes: int = 0
     retry_ready_at: float = 0.0
-    # Last iteration's pane/session, so a retry can tell the historical
-    # window from a live attempt.
-    last_pane_id: str = ""
+    # Last iteration's session, so a retry can tell the historical window
+    # from a live attempt.
     last_session_id: str = ""
     # True once *this* loop has launched the current iteration.  Only then
     # may pre-retry rediscovery adopt a transcript/verdict it finds: before
@@ -865,7 +864,6 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
     _log.info("review_loop: adopting in-flight iteration %d for %s "
               "(pane %s, transcript=%s)", state.iteration, state.pr_id,
               discovery.pane_id, discovery.transcript)
-    state.last_pane_id = discovery.pane_id
     session_id = session_id_from_transcript(discovery.transcript)
     if not session_id:
         # The poller needs the session id; without one, relaunch the
@@ -1060,8 +1058,6 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
             return discovery.output
         if discovery.kind == "adopt":
             from pm_core.claude_launcher import WorkspaceTrustBlocked
-            if discovery.pane_id:
-                state.last_pane_id = discovery.pane_id
             # Discovery ran a moment ago; the adopted pane may have landed
             # its verdict since.  The poller only wakes on idle events newer
             # than its own start, so re-read it here rather than wait for an
@@ -1070,10 +1066,16 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
             if output:
                 _reset_launch_retry(state)
                 return output
+            # No grace period: the adopted session was launched before this
+            # poll, so the startup-false-positive window the grace protects
+            # against has already passed (``_adopt_in_flight_review`` makes
+            # the same call).  With a grace, an idle event arriving inside
+            # it is discarded and the poll waits for a *second* event that
+            # an idle session never emits — the loop would hang until the
+            # pane died.
             try:
                 content = _poll_for_verdict(
                     discovery.pane_id, discovery.transcript,
-                    grace_period=_VERDICT_GRACE_PERIOD,
                     workdir=pr_data.get("workdir"),
                     stop_check=_lease_keepalive(state))
             except WorkspaceTrustBlocked as e:
@@ -1146,7 +1148,6 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
             _interruptible_sleep(delay, state, pm_root)
             continue
 
-        state.last_pane_id = info.get("pane_id") or state.last_pane_id
         state.last_session_id = info.get("session_id") or state.last_session_id
         _reset_launch_retry(state)
         return output
