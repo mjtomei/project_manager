@@ -21429,7 +21429,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-13T14:15:50.184464+00:00'
-  updated_at: '2026-10-27T06:57:19.544643+00:00'
+  updated_at: '2026-10-27T07:28:29.359181+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -21520,6 +21520,25 @@ prs:
       55 failed + 17 errors identical to the master baseline. Log: /pm-captures/review-8efa789-5e61-i1/full-suite.log'
     created_at: '2026-10-27T06:57:19Z'
     last_edited: '2026-10-27T06:57:19Z'
+  - id: note-d836a9f
+    text: 'Review i2 (5e61): wait_for_follow_up_verdict now scans the transcript once
+      before entering the hook-event loop. The i4 baseline made an answer that landed
+      during qa_loop''s send/settle window acceptable but not observable: that answer''s
+      own idle_prompt fires before the waiter sets hook_baseline, and hook_events.wait_for_event
+      only returns events with timestamp > newer_than, so the waiter was never woken
+      by it and blocked until stop_check/pane death. The pre-wait scan uses the same
+      line_index > baseline_line guard, so it is a no-op for the human-answer callers
+      (review/watcher), whose baseline is the newest verdict at call time. test_follow_up_verdict_honors_a_pre_prompt_baseline
+      now writes no hook event at all (the real caller''s state) and fails without
+      the fix. Also documented _DEFAULT_REASON_VERDICTS (mirrors ALL_VERDICTS, kept
+      local to avoid the qa_loop import cycle) and recorded the behavior in spec section
+      6. Captures re-checked: /pm-captures/impl/{pre,post}-fix/scenario44-replay still
+      replay as documented (scenario 44 -> INPUT_REQUIRED, S71 -> PASS, control ->
+      PASS). Full suite 3709 passed, 1 skipped; the 55 failures + 17 errors are the
+      same env baseline as i4 (signoff_integration, merge_publish, git_ops, 12 test_markdown_render
+      missing markdown dep, 1 test_hook_events standalone receiver). Log: /pm-captures/review-8efa789-5e61-i2/full-suite-final.log'
+    created_at: '2026-10-27T07:28:29Z'
+    last_edited: '2026-10-27T07:28:29Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
