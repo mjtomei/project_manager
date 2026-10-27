@@ -3365,18 +3365,22 @@ def adopt_queue_entries(state: "QALoopState",
     (not just its head) in its pre-restart place.  *queued_indices*
     defaults to the run's ``qa_resume.json`` snapshot.
     """
+    from pm_core.launch_queue import adopt_run, cancel_adoption
+    run_id = _qa_run_key(state)
     if queued_indices is None:
         rdata = (_load_resume_file(state.qa_workdir)
                  if state.qa_workdir else None) or {}
-        if not rdata.get("use_containers"):
-            return {}, set()  # no governor queue without containers
-        queued_indices = set(rdata.get("queued_indices") or [])
+        # No governor queue without containers.
+        queued_indices = (set(rdata.get("queued_indices") or [])
+                          if rdata.get("use_containers") else set())
     if not queued_indices:
+        # Nothing to adopt.  Its other pre-restart entries (an interrupted
+        # launch's acquired entry would reserve memory again once its
+        # container is gone) must go to the next clean, as after adopt_run.
+        cancel_adoption([run_id])
         return {}, set()
-    run_id = _qa_run_key(state)
     keys = {f"{run_id}:s{i}": i for i in queued_indices}
     try:
-        from pm_core.launch_queue import adopt_run
         adopted = adopt_run(run_id, list(keys))
     except Exception:
         _log.info("Could not adopt launch-queue entries of %s", run_id,

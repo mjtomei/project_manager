@@ -698,6 +698,40 @@ def test_resume_whose_adoption_times_out_keeps_expecting_it(tmp_path):
     assert expecting == [True]
 
 
+@pytest.mark.parametrize("queued", [set(), {1}])
+def test_resume_with_nothing_queued_stops_expecting_adoption(tmp_path, queued):
+    """A resumed run with no queued scenario adopts nothing.  It must stop
+    expecting adoption, or this process keeps its other pre-restart entries
+    (an interrupted launch's acquired entry, which reserves its projection
+    again once its container is gone) until the loop ends or the 30 min
+    TTL, instead of dropping them at the next clean."""
+    from pm_core import launch_queue as lq
+
+    qa_dir = _seed_run(tmp_path)
+    state = build_resume_state(_load_resume_file(qa_dir))
+    _write_resume_file(state, use_containers=True, concurrency_cap=4,
+                       queued_indices=queued)
+    run = qa_loop._qa_run_key(state)
+    lq_home = tmp_path / "lqhome"
+    lq_home.mkdir()
+    with patch("pm_core.launch_queue.pm_home", return_value=lq_home):
+        lq.enqueue("qa_scenario", qa_run_id=run, keys=[f"{run}:s1"],
+                   container_names=["pm-x-qa-s1"])
+        q = lq._load_queue()
+        q["entries"][0]["instance"] = "pre-restart"
+        q["entries"][0]["status"] = "acquired"
+        lq._save_queue(q)
+        lq.expect_adoption([run])
+
+        qa_loop.adopt_queue_entries(state, queued or None)
+
+        assert not lq.awaiting_adoption(run)
+        lq.enqueue("qa_scenario", qa_run_id="other", keys=["other:s1"])
+        keys = [e["key"] for e in lq._load_queue()["entries"]
+                if e["qa_run_id"] == run]
+        assert keys == ([f"{run}:s1"] if queued else [])
+
+
 @pytest.mark.parametrize("failure", ["no_session", "thread_crash"])
 def test_resume_that_aborts_releases_adopted_entries(tmp_path, failure):
     """The TUI adopts a resumed run's queue entries before resuming it.  A

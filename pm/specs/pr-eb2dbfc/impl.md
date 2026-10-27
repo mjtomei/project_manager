@@ -77,7 +77,11 @@ thread starts.  Until a run adopts, or `dequeue_run` / `cancel_adoption`
 releases it, this process's cleans keep its pre-restart entries; the
 waiting/acquired TTLs still apply, so a hold past ~300 s still costs them.
 A resumed loop that still expects adoption retries it for all its queued
-scenarios before its first enqueue (review 0149 i2).  An admission attempt
+scenarios before its first enqueue (review 0149 i2).  A resumed run with no
+queued scenario has nothing to adopt and stops expecting adoption at once,
+so its other pre-restart entries (an interrupted launch's acquired entry,
+which reserves again once its container is gone) go to the next clean
+(review 0149 i3).  An admission attempt
 also counts as the waiting entries' keepalive, so a busy lock costs a QA
 cycle one 30 s wait, not two (QA S55).  impl/review/signoff/QA all walk the
 same queue under the same lock (`enqueue_and_try_acquire` uses the full
