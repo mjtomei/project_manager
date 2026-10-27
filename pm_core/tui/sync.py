@@ -19,19 +19,23 @@ from pm_core.pr_utils import usable_prs
 
 _log = configure_logger("pm.tui.sync")
 
+# A merge-integrity warning is important enough to outlive the sync-status
+# and auto-start lines that follow it in the same tick (they are deferred
+# until the hold ends); auto_start.CONFIRM_HOLD_SECONDS is too short to read
+# the problem text.
+_INTEGRITY_HOLD_SECONDS = 6.0
+
 
 def _log_merge_integrity(app, integrity: dict) -> None:
     """Surface a sync-detected merge-integrity problem on the log line.
 
     The record on the PR (``merge_integrity`` + note) is authoritative; the
-    held line makes the problem visible without opening the PR.  The hold
-    keeps it readable while the sync-status / auto-start lines that follow
-    arrive (they are deferred until it ends).
+    held line makes the problem visible without opening the PR.
     """
     for verified in (integrity or {}).values():
         if verified.problem:
             app.log_message(f"Merge integrity: {verified.problem}",
-                            force=True, hold=6)
+                            force=True, hold=_INTEGRITY_HOLD_SECONDS)
 
 
 def _kill_merged_pr_windows(app, merged_pr_ids: set[str]) -> None:
@@ -165,10 +169,7 @@ async def do_normal_sync(app, is_manual: bool = False) -> None:
                         # SIGNOFF_MERGE in the worker thread; the evidence is
                         # applied here, in the main thread's lock, with the
                         # status it belongs to (pr-2e06289).
-                        verified = integrity.get(pr["id"])
-                        if verified is not None and verified.problem:
-                            merge_integrity.apply_to_pr(
-                                pr, verified.problem, verified.merge_sha)
+                        merge_integrity.apply_to_pr(pr, integrity.get(pr["id"]))
 
             try:
                 app._data = store.locked_update(app._root, apply_merged)
@@ -302,10 +303,7 @@ async def startup_github_sync(app) -> None:
                             newly_merged.add(pr["id"])
                         pr["status"] = new_status
                         _record_status_timestamp(pr, new_status)
-                        verified = integrity.get(pr["id"])
-                        if verified is not None and verified.problem:
-                            merge_integrity.apply_to_pr(
-                                pr, verified.problem, verified.merge_sha)
+                        merge_integrity.apply_to_pr(pr, integrity.get(pr["id"]))
 
             try:
                 app._data = store.locked_update(app._root, apply_github)

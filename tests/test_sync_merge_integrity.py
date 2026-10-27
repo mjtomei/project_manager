@@ -15,6 +15,7 @@ bound SIGNOFF_MERGE).
 from __future__ import annotations
 
 import asyncio
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -162,6 +163,9 @@ def test_sync_prs_records_integrity_for_unapproved_merge(sync_github):
     assert sync_github.head[:12] in v.problem
     assert "not the approved head" in v.problem
     assert v.merge_sha == tip
+    # save_state=False (the TUI worker thread): the check returns the
+    # evidence, it does not write project.yaml.
+    assert "merge_integrity" not in pr_entry(sync_github)
 
 
 def test_sync_prs_persists_integrity_and_note(sync_github):
@@ -266,6 +270,28 @@ def test_sync_from_github_records_integrity_for_unapproved_merge(sync_github):
     assert pr_entry(sync_github)["merge_integrity"]["merge_sha"] == tip
 
 
+def test_sync_from_github_workdir_gone_falls_back_to_project_repo(sync_github):
+    """A merge is still verified when the PR's workdir no longer exists.
+
+    The check falls back to the project repo, exactly as `pm pr merge`'s
+    recovery path does — losing the workdir must not turn a mismatch into a
+    silent finalize.  The project repo has no PR branch, so the check cannot
+    name the merge that published it (``is_ancestor`` needs the head object)
+    and reports the general "did not publish the signed-off candidate".
+    """
+    merge_on_remote(sync_github, extra=True)
+    shutil.rmtree(sync_github.wd)
+
+    result = pr_sync.sync_from_github(sync_github.pm_dir)
+
+    assert PR in result.merged_prs
+    v = result.merge_integrity.get(PR)
+    assert v is not None and v.problem
+    assert "did not publish the signed-off candidate" in v.problem
+    assert sync_github.head[:12] in v.problem
+    assert "merge_integrity" in pr_entry(sync_github)
+
+
 # --- TUI sync entry points -------------------------------------------------
 
 def test_tui_normal_sync_applies_integrity(sync_github):
@@ -309,6 +335,23 @@ def test_cli_pr_sync_records_integrity(sync_github):
     assert len(integrity_notes(sync_github)) == 1
     assert "WARNING:" in result.output
     assert "not the approved head" in result.output
+
+
+def test_cli_pr_sync_unverifiable_merge_warns_and_records_nothing(sync_github):
+    """`pm pr sync` says it could not verify; it does not invent a problem."""
+    merge_on_remote(sync_github, extra=True)
+    with mock.patch.object(integration, "fetch_base",
+                           return_value=(None, "boom")), \
+         mock.patch.object(pr_mod, "state_root",
+                           return_value=sync_github.pm_dir), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        result = CliRunner().invoke(pr_mod.pr, ["sync"])
+
+    assert result.exit_code == 0, result.output
+    assert pr_entry(sync_github)["status"] == "merged"
+    assert "merge_integrity" not in pr_entry(sync_github)
+    assert "could not verify" in result.output
+    assert "boom" in result.output
 
 
 def test_cli_pr_sync_github_reports_integrity(sync_github):

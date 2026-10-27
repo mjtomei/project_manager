@@ -53,10 +53,13 @@ applies the merged status.
   - `verify_detected_merge(root, data, pr_entry, workdir, base_branch)` →
     `MergeVerification | None` (None = no bound approval): resolves
     `target_repo` via `integration.target_for` and calls the above.
-  - `apply_to_pr(pr, problem, merge_sha)` sets
+  - `apply_to_pr(pr, verification)` takes the `MergeVerification` and is a
+    no-op for `None` (no bound approval), `ok`, or `error` (could not verify);
+    a definite problem sets
     `pr["merge_integrity"] = {"problem": problem, "merge_sha": merge_sha}` and
     appends the `Merge integrity: <problem>.` note once (same text/id scheme
-    as today).
+    as today). Taking the verification keeps every call site to one line and
+    in one place decides what counts as evidence.
 - `cli/pr.py::_verify_github_merge` becomes a thin wrapper: call the shared
   verifier, then record via `store.locked_update` + `apply_to_pr` and print
   the existing `WARNING:` lines (byte-identical messages for the existing
@@ -126,6 +129,29 @@ applies the merged status.
    (`merge_integrity` + note) is authoritative; additionally show a held log
    line so the user sees it without opening the PR. "Could not verify" stays
    log-file-only to avoid noise on transient network failures.
+
+## 6. Review refinements (c703 i1/i2)
+
+These changed details of R2/R3 after the implementation landed; the
+requirements above still hold.
+
+- `merge_integrity.verify_detected_merge` never raises (single guard inside
+  the shared module, not at each call site); `pr_sync` + `pm pr sync` call it
+  directly.
+- `cli/pr.py::_recover_completed_merge` reuses `approved_candidate`.
+- `pm pr sync-github` prints the same `WARNING:` lines as `pm pr sync` (the
+  record + note are authoritative either way).
+- `git_detail` lives in `pm_core/git_ops.py` (it formats any failed git call,
+  not only an integrity check) and is used by the publish path and the
+  verifier.
+- The "no merge commit of the approved head" problem text names the PR: the
+  sync paths log it without `pm pr merge`'s "GitHub PR #N merged." context.
+- The TUI sync worker thread now runs `integration.fetch_base` once per
+  detected merge of a bound-approved PR (git fetch into the sync workdir,
+  serialized by `<git-common-dir>/pm-integration.lock`, bounded at 300 s).
+  PRs without a bound approval never fetch. Left for QA to exercise: a merge
+  detected while another integration check holds that lock delays the
+  background sync (status bar stays "pulling"); it does not block the UI.
 
 No **[UNRESOLVED]** ambiguities.
 

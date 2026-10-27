@@ -58,12 +58,6 @@ def approved_candidate(pr_entry: dict) -> tuple[str, dict] | None:
     return None
 
 
-def git_detail(result) -> str:
-    """stdout+stderr of a failed git call, for an error message."""
-    return ((result.stdout or "").strip() + "\n"
-            + (result.stderr or "").strip()).strip()
-
-
 def verify_github_merge(pr_id: str, workdir: str, target_repo: str,
                         base_branch: str, base_sha: str, head: str,
                         bound: dict) -> MergeVerification:
@@ -81,7 +75,7 @@ def verify_github_merge(pr_id: str, workdir: str, target_repo: str,
                           f"{base_sha}..{tip}", cwd=workdir, check=False)
     if log.returncode != 0:
         # The signed-off base is not readable here: unknown, not a mismatch.
-        return MergeVerification(error=git_detail(log))
+        return MergeVerification(error=git_ops.git_detail(log))
 
     found = None
     for line in (log.stdout or "").splitlines():
@@ -107,9 +101,11 @@ def verify_github_merge(pr_id: str, workdir: str, target_repo: str,
                        f"commits that were not signed off); merge "
                        f"{merge_sha[:12]} on {base_branch}")
         else:
-            problem = (f"no merge commit of the approved head {head[:12]} on "
-                       f"{base_branch} {tip[:12]}; GitHub did not publish the "
-                       f"signed-off candidate")
+            # Names the PR: the sync paths log this line without the
+            # "GitHub PR #N merged" context `pm pr merge` prints.
+            problem = (f"no merge commit of the approved head {head[:12]} for "
+                       f"{pr_id} on {base_branch} {tip[:12]}; GitHub did not "
+                       f"publish the signed-off candidate")
     else:
         merge_sha, first_parent, tree = found[0], found[1], found[-1]
         if first_parent == base_sha and tree == bound.get("candidate_tree"):
@@ -151,13 +147,19 @@ def verify_detected_merge(root, data: dict, pr_entry: dict, workdir: str,
         return MergeVerification(error=str(e) or type(e).__name__)
 
 
-def apply_to_pr(pr: dict, problem: str, merge_sha: str | None) -> None:
-    """Record *problem* on *pr* and note it once (mutates *pr*).
+def apply_to_pr(pr: dict, verification: MergeVerification | None) -> None:
+    """Record a mismatch on *pr* and note it once (mutates *pr*).
 
+    A ``None`` verification (no bound approval) or a non-mismatch (ok /
+    could-not-verify) records nothing: only a definite problem is evidence.
     Called inside the caller's ``store.locked_update`` — the publisher's or
     the TUI main thread's — never from a sync worker thread.
     """
-    pr["merge_integrity"] = {"problem": problem, "merge_sha": merge_sha}
+    if verification is None or not verification.problem:
+        return
+    problem = verification.problem
+    pr["merge_integrity"] = {"problem": problem,
+                             "merge_sha": verification.merge_sha}
     text = f"Merge integrity: {problem}."
     notes = pr.get("notes")
     if not isinstance(notes, list):

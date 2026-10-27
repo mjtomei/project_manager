@@ -259,10 +259,8 @@ def sync_prs(
                 if pr["id"] in merged_set:
                     pr["status"] = "merged"
                     _record_status_timestamp(pr, "merged")
-                    verified = integrity_by_pr.get(pr["id"])
-                    if verified is not None and verified.problem:
-                        merge_integrity.apply_to_pr(
-                            pr, verified.problem, verified.merge_sha)
+                    merge_integrity.apply_to_pr(
+                        pr, integrity_by_pr.get(pr["id"]))
             set_last_sync_timestamp(fresh_data, datetime.now(timezone.utc))
 
         store.locked_update(root, apply)
@@ -411,10 +409,8 @@ def sync_from_github(
                 if new_status and pr.get("status") != new_status:
                     pr["status"] = new_status
                     _record_status_timestamp(pr, new_status)
-                    verified = integrity_by_pr.get(pr["id"])
-                    if verified is not None and verified.problem:
-                        merge_integrity.apply_to_pr(
-                            pr, verified.problem, verified.merge_sha)
+                    merge_integrity.apply_to_pr(
+                        pr, integrity_by_pr.get(pr["id"]))
             set_last_sync_timestamp(fresh_data, datetime.now(timezone.utc))
 
         store.locked_update(root, apply)

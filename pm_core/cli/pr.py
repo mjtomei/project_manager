@@ -2320,7 +2320,7 @@ def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
     git_ops.run_git("update-ref", "-d", ref, cwd=repo_dir, check=False)
     if fetch.returncode != 0 or fetched != merge_sha:
         click.echo(f"PR {pr_id}: could not fetch the merge commit into "
-                   f"{repo_dir}: {merge_integrity.git_detail(fetch)}", err=True)
+                   f"{repo_dir}: {git_ops.git_detail(fetch)}", err=True)
         raise SystemExit(1)
     current = git_ops.run_git("rev-parse", "--abbrev-ref", "HEAD",
                               cwd=repo_dir, check=False).stdout.strip()
@@ -2333,7 +2333,7 @@ def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
         if upd.returncode != 0:
             _return_to_signoff(root, pr_entry,
                                f"{base_branch} in {repo_dir} moved during "
-                               f"the merge ({merge_integrity.git_detail(upd)})")
+                               f"the merge ({git_ops.git_detail(upd)})")
     else:
         repo_path = Path(repo_dir)
         merge_r = git_ops.run_git("merge", "--ff-only", merge_sha,
@@ -2354,7 +2354,7 @@ def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
                                f"the merge")
         if merge_r.returncode != 0:
             click.echo(f"Fast-forward of {base_branch} in {repo_dir} failed:\n"
-                       f"{merge_integrity.git_detail(merge_r)}\n"
+                       f"{git_ops.git_detail(merge_r)}\n"
                        f"Nothing in {repo_dir} was "
                        f"reset or discarded. Fix this there, then re-run "
                        f"'pm pr merge {pr_id}'.", err=True)
@@ -2395,7 +2395,7 @@ def _publish_vanilla(root: Path, pr_entry: dict, workdir: str,
                                f"{base_branch} moved during the merge "
                                f"({base_sha[:12]} -> {now[:12]})")
         click.echo(f"Push to {target_repo} failed: "
-                   f"{merge_integrity.git_detail(push)}\n"
+                   f"{git_ops.git_detail(push)}\n"
                    f"Nothing was published; re-run 'pm pr merge {pr_id}'.",
                    err=True)
         raise SystemExit(1)
@@ -2458,7 +2458,7 @@ def _publish_github(root: Path, pr_entry: dict, workdir: str,
                                cwd=workdir, check=False)
         if push.returncode != 0:
             click.echo(f"Could not push the approved head to {branch}: "
-                       f"{merge_integrity.git_detail(push)}", err=True)
+                       f"{git_ops.git_detail(push)}", err=True)
             raise SystemExit(1)
         click.echo(f"Pushed approved head {head[:12]} to {branch}.")
         pushed = True
@@ -2540,7 +2540,7 @@ def _verify_github_merge(root: Path, pr_entry: dict, workdir: str,
     def _apply(d):
         p = store.get_pr(d, pr_id)
         if p is not None:
-            merge_integrity.apply_to_pr(p, result.problem, result.merge_sha)
+            merge_integrity.apply_to_pr(p, result)
 
     store.locked_update(root, _apply)
     click.echo(f"WARNING: {result.problem}.", err=True)
@@ -2856,14 +2856,14 @@ def pr_sync():
             # check never raises (a failure is an "unknown", not a mismatch).
             verified = merge_integrity.verify_detected_merge(
                 root, data, pr_entry, str(check_dir), base_branch)
-            if verified is not None:
-                if verified.problem:
-                    integrity_by_pr[pr_entry["id"]] = verified
-                    click.echo(f"WARNING: {verified.problem}.", err=True)
-                elif verified.error:
-                    integrity_by_pr[pr_entry["id"]] = verified
-                    click.echo(f"WARNING: could not verify GitHub's merge of "
-                               f"{pr_entry['id']}: {verified.error}.", err=True)
+            if verified is not None and verified.problem:
+                # Only a mismatch is recorded below; a could-not-verify is
+                # reported here and nothing is written.
+                integrity_by_pr[pr_entry["id"]] = verified
+                click.echo(f"WARNING: {verified.problem}.", err=True)
+            elif verified is not None and verified.error:
+                click.echo(f"WARNING: could not verify GitHub's merge of "
+                           f"{pr_entry['id']}: {verified.error}.", err=True)
 
     if updated:
         def apply(data):
@@ -2871,10 +2871,8 @@ def pr_sync():
                 if pr["id"] in merged_ids:
                     pr["status"] = "merged"
                     _record_status_timestamp(pr, "merged")
-                    verified = integrity_by_pr.get(pr["id"])
-                    if verified is not None and verified.problem:
-                        merge_integrity.apply_to_pr(
-                            pr, verified.problem, verified.merge_sha)
+                    merge_integrity.apply_to_pr(
+                        pr, integrity_by_pr.get(pr["id"]))
 
         data = store.locked_update(root, apply)
         trigger_tui_refresh()
