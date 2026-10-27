@@ -36153,7 +36153,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/261
   gh_pr_number: 261
   created_at: '2026-10-27T04:42:06.128850+00:00'
-  updated_at: '2026-10-27T15:30:36.121436+00:00'
+  updated_at: '2026-10-27T15:42:45.898622+00:00'
   started_at: '2026-10-27T04:42:19.589247+00:00'
   reviewed_at: null
   merged_at: null
@@ -36368,6 +36368,24 @@ prs:
       instead of `tail`.'
     created_at: '2026-10-27T15:30:36Z'
     last_edited: '2026-10-27T15:30:36Z'
+  - id: note-ca9035c
+    text: 'QA S8 PASS on aa41c612 (native, local backend, fake review/QA/sign-off).
+      Live evidence: O on target F arms wait-for-merge (never auto-merge); dependency
+      A holds at fresh sign-off ("✓ … waiting for manual merge (wait-for-merge: F)");
+      g merges A once and starts F exactly once (U untouched); F own sign-off waits
+      for manual merge with no re-arming; g on F merges once and logs "all targets
+      complete — auto-start OFF" with full window cleanup; a HEAD move on held A is
+      refused ("recorded sign-off verdict SIGNOFF_MERGE is stale (HEAD moved since)"),
+      the row shows "SIGNOFF_MERGE stale (HEAD moved); sign-off relaunches against
+      current HEAD", and A returns to the hold only after a fresh re-sign. Focused
+      suite tests/test_autostart_single_manual_policy.py: 48 passed. Captures: /pm-captures/scenarios/8/{story1-arming-and-hold,story2-merge-a-starts-f,story3-f-waits,story4-merge-f-complete,story5-stale-signoff-gate}.
+      Harness caveat: the fake qa_planning session never writes the Step-0 QA spec,
+      so fake-driven QA pauses INPUT_REQUIRED until `pm pr spec <id> qa` + `z t` re-run;
+      pre-generate the spec as soon as the impl workdir appears. Also `pm pr select
+      <id>` updates active_pr but does not move the TUI cursor — navigate with h/l
+      and confirm the double border.'
+    created_at: '2026-10-27T15:42:45Z'
+    last_edited: '2026-10-27T15:42:45Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
