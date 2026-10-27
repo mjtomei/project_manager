@@ -1789,6 +1789,97 @@ class TestWorkdirKeyedProxies:
         finally:
             shutil.rmtree(sock_dir, ignore_errors=True)
 
+    def test_kill_proxy_socket_reports_an_unremovable_socket(self, monkeypatch):
+        """An unremovable socket is a refusal, not an exception.
+
+        The socket directory is bind-mounted *writable* into the container,
+        so a container can leave an entry the host user cannot unlink (a
+        root-owned socket in a sticky directory, an immutable file).  A
+        bare ``OSError`` here aborted a whole session teardown sweep and
+        made every other proxy survive; reporting False leaves the entry
+        for the next attempt instead.
+        """
+        sock_dir = "/tmp/pm-push-proxy-unlinkguard-impl"
+        os.makedirs(sock_dir, exist_ok=True)
+        sock = os.path.join(sock_dir, "push.sock")
+        Path(sock).write_text("unremovable\n")
+        real_unlink = os.unlink
+
+        def _refuse(path, *args, **kwargs):
+            if os.path.abspath(path) == os.path.abspath(sock):
+                raise PermissionError(13, "Operation not permitted", path)
+            return real_unlink(path, *args, **kwargs)
+
+        try:
+            monkeypatch.setattr(push_proxy_mod.os, "unlink", _refuse)
+            assert push_proxy_mod._kill_proxy_socket(sock) is False
+            assert os.path.exists(sock)
+        finally:
+            monkeypatch.undo()
+            shutil.rmtree(sock_dir, ignore_errors=True)
+
+    def test_stop_session_survives_an_unremovable_socket(self, tmp_path,
+                                                         live_proxies,
+                                                         monkeypatch):
+        """One refused socket must not abort the rest of the session sweep."""
+        impl = self._workdir(tmp_path, "impl")
+        qa = self._workdir(tmp_path, "s-1")
+        s_impl = self._start("impl-wd", impl)
+        s_qa = self._start("qa-wd", qa)
+        real_unlink = os.unlink
+
+        def _refuse(path, *args, **kwargs):
+            if os.path.abspath(path) == os.path.abspath(s_impl):
+                raise PermissionError(13, "Operation not permitted", path)
+            return real_unlink(path, *args, **kwargs)
+
+        try:
+            monkeypatch.setattr(push_proxy_mod.os, "unlink", _refuse)
+            # The refused socket is not counted; the other one is still
+            # stopped (previously the sweep raised and stopped nothing).
+            assert stop_session_proxies(self.TAG) == 1
+            assert push_proxy_mod.proxy_is_alive(s_impl)
+            assert not push_proxy_mod.proxy_is_alive(s_qa)
+        finally:
+            monkeypatch.undo()
+
+    def test_start_reports_an_unremovable_socket_as_proxy_error(
+            self, tmp_path, monkeypatch):
+        """A stale socket that cannot be removed must fail as a proxy error.
+
+        Otherwise the bare ``OSError`` escaped ``start_push_proxy`` and
+        ``wrap_claude_cmd`` reported it as "Is docker running?", hiding the
+        real cause (R5's fail-loudly contract).
+        """
+        from pm_core.push_proxy import PushProxyError
+
+        impl = self._workdir(tmp_path, "impl")
+        token = push_proxy_mod._workdir_token(str(impl))
+        sock_dir = push_proxy_mod._shared_sock_dir_path(self.TAG, self.PR,
+                                                        token)
+        os.makedirs(sock_dir, exist_ok=True)
+        sock = os.path.join(sock_dir, "push.sock")
+        Path(sock).write_text("stale\n")
+        real_unlink = os.unlink
+
+        def _refuse(path, *args, **kwargs):
+            if os.path.abspath(path) == os.path.abspath(sock):
+                raise PermissionError(13, "Operation not permitted", path)
+            return real_unlink(path, *args, **kwargs)
+
+        try:
+            monkeypatch.setattr(push_proxy_mod.os, "unlink", _refuse)
+            with pytest.raises(PushProxyError,
+                               match="could not remove stale push proxy"):
+                self._start("impl-wd", impl)
+        finally:
+            monkeypatch.undo()
+            shutil.rmtree(sock_dir, ignore_errors=True)
+            try:
+                os.unlink(sock_dir + ".lock")
+            except OSError:
+                pass
+
     def test_metadata_write_does_not_follow_a_planted_symlink(self, tmp_path):
         """The socket dir is bind-mounted *writable* into the container.
 

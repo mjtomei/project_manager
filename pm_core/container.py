@@ -460,8 +460,10 @@ def _build_git_setup_script(
             "REAL_GIT=/usr/bin/git\n"
             f'SOCKET="{_CONTAINER_SOCKET_PATH}"\n'
             # HOST_WORKDIR is the host-side clone path for this container,
-            # baked in at creation time so the proxy can use the correct
-            # source/target when multiple scenario containers share a proxy.
+            # baked in at creation time so every request proves it names
+            # this container's own workdir.  Each workdir gets its own
+            # proxy, and a request naming another clone is rejected rather
+            # than served from it.
             + (f'HOST_WORKDIR="{_escaped_host_workdir}"\n'
                if _escaped_host_workdir else "")
             + '# Commands that interact with remotes and need proxy forwarding\n'
@@ -604,10 +606,11 @@ def create_container(
         extra_rw_mounts: Additional read-write mounts {host_path: container_path}.
         allowed_push_branch: If set, restrict git push to this branch only.
         session_tag: Session tag for shared push proxies.  When provided
-            together with *pr_id*, multiple containers on the same branch
-            share a single proxy (socket at a deterministic path).
-        pr_id: PR identifier — combined with *session_tag* to key shared
-            push proxies.
+            together with *pr_id*, containers on the same host workdir share
+            a single proxy (socket at a deterministic path); a container on
+            a different workdir — e.g. a QA scenario clone — gets its own.
+        pr_id: PR identifier — combined with *session_tag* and the workdir
+            to key shared push proxies.
 
     Returns:
         Container ID.

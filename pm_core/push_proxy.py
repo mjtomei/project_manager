@@ -204,20 +204,36 @@ def _read_metadata(sock_path: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def _unlink_socket_file(path: str) -> None:
+def _unlink_socket_file(path: str) -> bool:
     """Remove the socket file at *path*, tolerating what docker leaves behind.
 
     Docker creates a *directory* where a bind-mounted socket file should be
     (older pm versions mounted the socket itself), so a plain ``os.unlink``
     would raise ``IsADirectoryError`` and abort the caller.  A missing path
     is not an error.
+
+    Returns True when the path is gone afterwards.  The socket directory is
+    bind-mounted *writable* into the container, so a container can make the
+    entry unremovable (a root-owned socket in a sticky directory, an
+    immutable file, a chmod'd directory).  A bare ``OSError`` here used to
+    escape both callers: a start surfaced it as "Is docker running?" and a
+    teardown sweep aborted, leaving every other proxy of the session behind.
+    The refusal is now reported instead — the start raises a
+    :class:`PushProxyError` naming the path, and teardown leaves the entry
+    for the next attempt.
     """
     try:
         os.unlink(path)
+        return True
     except IsADirectoryError:
         shutil.rmtree(path, ignore_errors=True)
+        return not os.path.lexists(path)
     except FileNotFoundError:
-        pass
+        return True
+    except OSError as exc:
+        _log.warning("Push proxy: could not remove socket file %s: %s",
+                     path, exc)
+        return False
 
 
 class PushProxy:
@@ -1301,7 +1317,15 @@ def start_push_proxy(container_name: str, workdir: str,
                         f"stale push proxy metadata at {sock_path} records "
                         f"workdir '{stale_workdir}', not requested "
                         f"'{workdir}' (workdir token collision)")
-            _unlink_socket_file(sock_path)
+            if not _unlink_socket_file(sock_path):
+                # The stale entry cannot be removed, so the daemon could not
+                # bind over it.  Fail as a proxy error naming the path
+                # instead of letting the readiness wait time out (and
+                # instead of leaking a bare OSError that wrap_claude_cmd
+                # would blame on the container runtime).
+                raise PushProxyError(
+                    f"could not remove stale push proxy socket at {sock_path} "
+                    f"(workdir={workdir})")
 
             if not _start_proxy_subprocess(sock_path, workdir, allowed_branch):
                 raise PushProxyError(
@@ -1326,7 +1350,10 @@ def start_push_proxy(container_name: str, workdir: str,
     with _start_lock(sock_dir):
         # Remove stale socket before spawning (see above for why we handle
         # the directory-at-the-socket-path case).
-        _unlink_socket_file(sock_path)
+        if not _unlink_socket_file(sock_path):
+            raise PushProxyError(
+                f"could not remove stale push proxy socket at {sock_path} "
+                f"(workdir={workdir})")
 
         if not _start_proxy_subprocess(sock_path, workdir, allowed_branch):
             raise PushProxyError(
@@ -1350,8 +1377,9 @@ def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
     """Stop a subprocess proxy by removing its socket (triggers exit).
 
     Returns True when the socket was stopped, False when the path was
-    refused (a non-proxy directory, a foreign-owned directory, or a
-    discovery link that points elsewhere).
+    refused (a non-proxy directory, a foreign-owned directory, a discovery
+    link that points elsewhere, or a socket file that cannot be removed —
+    the daemon keeps serving it, so reporting a stop would be wrong).
 
     When *remove_dir* is False the socket directory is kept.  Shared
     proxies use that mode: a container may still bind-mount the
@@ -1397,15 +1425,19 @@ def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
     except OSError:
         pass  # already gone — the unlinks below are no-ops
     # Docker creates a *directory* at a bind-mounted socket path that did
-    # not exist (older pm versions mounted the socket file itself).
-    _unlink_socket_file(sock_path)
-    # Metadata describes the daemon we just stopped.
-    try:
-        os.unlink(os.path.join(real_dir, _METADATA_NAME))
-    except OSError:
-        pass
+    # not exist (older pm versions mounted the socket file itself).  A
+    # container can also make the entry unremovable; the helper reports
+    # that instead of raising, so one bad directory cannot abort a sweep.
+    stopped = _unlink_socket_file(sock_path)
+    # Metadata describes the daemon we just stopped.  If the socket could
+    # not be removed the daemon is still serving it, so leave its sidecar.
+    if stopped:
+        try:
+            os.unlink(os.path.join(real_dir, _METADATA_NAME))
+        except OSError:
+            pass
     if not remove_dir:
-        return True
+        return stopped
     # Clean up the symlink if sock_dir is one
     if os.path.islink(sock_dir):
         try:
@@ -1427,7 +1459,7 @@ def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
             pass
     else:
         _clear_lock_file(real_dir + ".lock")
-    return True
+    return stopped
 
 
 def _stop_shared_proxy_socket(key: str, sock_dir: str,

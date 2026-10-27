@@ -777,3 +777,38 @@ is False; the file survives the sweep), and
 missing from the trap).  `test_shared_sock_dir_keeps_a_foreign_squatted_file`
 pins the ownership half.  `tests/test_push_proxy.py` +
 `tests/test_container.py`: 224 passed.  Full suite: 3825 passed, 1 skipped.
+
+## Review iteration 15 refinements
+
+Fifteenth review pass (consistent with R5/R6/R7; no requirement changed).
+The socket directory is bind-mounted *writable* into the container, so a
+container can leave an entry the host user cannot unlink (a root-owned
+socket in a sticky directory, an immutable file, a chmod'd directory):
+
+- **An unremovable socket file no longer escapes as a bare `OSError`.**
+  `_unlink_socket_file` raised `PermissionError`/`EPERM` straight out of
+  both callers.  On a start, `wrap_claude_cmd` reported it as
+  "Is docker running?" — the same misdiagnosis iterations 5-8 removed for
+  a squatted directory, an unusable lock file and a spawn failure.  In
+  teardown it aborted the whole sweep: `stop_session_proxies` raised, so
+  `pm session kill` left every *other* proxy of the session running.  The
+  helper now reports whether the path is gone (logging the refusal), the
+  two `start_push_proxy` paths raise `PushProxyError` naming the stale
+  socket and workdir (R5's fail-loudly contract), and
+  `_kill_proxy_socket` returns False for a socket it could not stop
+  (leaving the daemon's sidecar in place, since the daemon still serves
+  it) so the sweep continues and the stop count stays accurate.
+- **Documentation that still described the old sharing.**  The
+  `create_container` docstring said containers "on the same branch share a
+  single proxy", and the container git-wrapper comment said the baked-in
+  `HOST_WORKDIR` was needed "when multiple scenario containers share a
+  proxy".  Both are exactly the assumption this PR removes: sharing is per
+  *workdir*, and the wrapper's path now only proves a request names its own
+  clone.
+
+Tests: `test_kill_proxy_socket_reports_an_unremovable_socket`,
+`test_stop_session_survives_an_unremovable_socket` and
+`test_start_reports_an_unremovable_socket_as_proxy_error` all fail at
+286b0e5a for the right reason (a bare `PermissionError` escapes
+`_kill_proxy_socket`, `stop_session_proxies` and `start_push_proxy`).
+`tests/test_push_proxy.py` + `tests/test_container.py`: 227 passed.
