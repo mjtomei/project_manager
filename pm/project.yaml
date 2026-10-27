@@ -31517,6 +31517,20 @@ prs:
       no-op.'
     created_at: '2026-10-27T18:19:44Z'
     last_edited: '2026-10-27T18:19:57Z'
+  - id: note-13b2fc2
+    text: 'S4 refiner (2026-10-27, 1790ebc7): nested-podman path verified live, all
+      3 stories held. pm container build-base from the nested_podman:true project
+      took ~3 min (no Chromium failure). `pm pr start` in a pane of a fresh-TMUX_TMPDIR
+      session (fake-claude {"_all":{}}) makes container pm-<tag>-impl-<pr> + daemon
+      `<pm venv python> -m pm_core.push_proxy /tmp/pm-push-proxy-<tag>-<pr>/push.sock
+      ...` with PYTHONPATH=/workspace. The daemon PATH puts /home/pm/.local/bin FIRST,
+      so the outer wrapper must stay moved aside the whole run, or proxied pushes
+      would go to the real host proxy. Clone push URL fans out to the test project
+      dir + file:// origin. Evidence: proxy lines in ~/.pm/debug/<tag>.log. Image
+      git is 2.34: `--branches` is an unknown option (rc 129); scratch `pull --rebase`
+      needs `push -u` first.'
+    created_at: '2026-10-27T18:24:59Z'
+    last_edited: '2026-10-27T18:24:59Z'
   model: provider:claude-work
   session_models:
     impl: provider:claude-work
