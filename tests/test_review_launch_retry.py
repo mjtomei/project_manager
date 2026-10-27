@@ -22,8 +22,6 @@ import pytest
 from pm_core import review_loop
 from pm_core.review_loop import (
     AttemptDiscovery,
-    PaneKilledError,
-    ReviewClosedError,
     ReviewHoldError,
     ReviewIteration,
     ReviewLaunchError,
@@ -32,6 +30,7 @@ from pm_core.review_loop import (
     VERDICT_HOLD,
     VERDICT_KILLED,
     VERDICT_LAUNCH_FAILED,
+    VERDICT_NEEDS_WORK,
     VERDICT_PASS,
     run_review_loop_sync,
 )
@@ -40,6 +39,7 @@ PR = "pr-001"
 
 # Captured before the autouse fixture replaces it for the retry tests.
 _ORIG_DISCOVER = review_loop._discover_iteration
+_ORIG_CLAIM = review_loop._claim_launch
 
 
 def _pr(tmp_path) -> dict:
@@ -565,6 +565,67 @@ def test_discovery_reports_a_landed_verdict(tmp_path, monkeypatch):
     assert "PASS" in (disc.output or "")
 
 
+def test_discovery_ignores_a_transcript_this_loop_never_launched(tmp_path,
+                                                                 monkeypatch):
+    """The transcript dir outlives a loop, so a symlink can be a previous
+    run's iteration N.  Before this loop launches iteration N, that verdict
+    is not ours to adopt."""
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    sid = str(uuid.uuid4())
+    _make_symlink(tmp_path, "review-pr-001-i1.jsonl", sid)
+    (tmp_path / f"{sid}.jsonl").write_text(json.dumps({
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "**PASS**"}]},
+    }) + "\n")
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
+    state = ReviewLoopState(pr_id=PR)
+    disc = review_loop._discover_iteration(state, _pr(tmp_path),
+                                           str(tmp_path), 1,
+                                           allow_recovery=False)
+    assert disc.kind == "launch"
+
+
+def test_fresh_loop_never_adopts_a_previous_runs_verdict(tmp_path, monkeypatch):
+    """A new loop on the same PR (shared ``manual-<token>`` transcript dir)
+    must run its own review, not inherit the last run's PASS."""
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    sid = str(uuid.uuid4())
+    _make_symlink(tmp_path, "review-pr-001-i1.jsonl", sid)
+    (tmp_path / f"{sid}.jsonl").write_text(json.dumps({
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "old\n\n**PASS**"}]},
+    }) + "\n")
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
+    state = ReviewLoopState(pr_id=PR)
+    with patch.object(review_loop, "_run_claude_review",
+                      return_value="fresh\n\n**NEEDS_WORK**") as run:
+        result = _run(state, tmp_path, max_iterations=1)
+    assert run.call_count == 1
+    assert result.latest_verdict == VERDICT_NEEDS_WORK
+    assert [(h.iteration, h.verdict) for h in result.history] == [
+        (1, "NEEDS_WORK")]
+
+
+def test_retry_adopts_a_verdict_that_landed_after_the_failure(tmp_path,
+                                                              monkeypatch):
+    """After our own failed attempt, a recovered transcript IS adopted."""
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    sid = str(uuid.uuid4())
+    _make_symlink(tmp_path, "review-pr-001-i1.jsonl", sid)
+    (tmp_path / f"{sid}.jsonl").write_text(json.dumps({
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "recovered\n\n**PASS**"}]},
+    }) + "\n")
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
+    state = ReviewLoopState(pr_id=PR)
+    err = ReviewLaunchError("boom", retryable=True)
+    with patch.object(review_loop, "_run_claude_review", side_effect=err) as run:
+        result = _run(state, tmp_path)
+    assert run.call_count == 1
+    assert result.latest_verdict == VERDICT_PASS
+    assert [h.iteration for h in result.history] == [1]
+
+
 # ---------------------------------------------------------------------------
 # Serialized launch lease (runtime_state)
 # ---------------------------------------------------------------------------
@@ -593,6 +654,45 @@ def test_review_loop_owns_launch_only_for_loop_leases():
     assert review_loop.review_loop_owns_launch("pr-loop") == "loop:ab12"
 
 
+def test_claim_launch_fails_open_only_without_a_live_loop_owner(monkeypatch):
+    """A lease file that cannot be written must not strand the launch; a
+    live *other loop* must still win."""
+    state = ReviewLoopState(pr_id=PR)
+    monkeypatch.setattr(review_loop, "_claim_launch", _ORIG_CLAIM)
+    monkeypatch.setattr(review_loop, "_other_loop_owner", lambda _s: "")
+    with patch("pm_core.runtime_state.claim_action_lease",
+               return_value=False):
+        assert review_loop._claim_launch(state, 1, 1) is True
+    monkeypatch.setattr(review_loop, "_other_loop_owner",
+                        lambda _s: "loop:other")
+    with patch("pm_core.runtime_state.claim_action_lease",
+               return_value=False):
+        assert review_loop._claim_launch(state, 1, 1) is False
+
+
+def test_autostart_status_shows_the_retryable_launch_failure():
+    """`pm autostart status` must name the failure and its artifact, not
+    report the PR as merely stopped."""
+    from pm_core import autostart_state as st
+    state = ReviewLoopState(
+        pr_id=PR, running=False, iteration=2,
+        latest_verdict=VERDICT_LAUNCH_FAILED, launch_retryable=True,
+        launch_attempts=3, last_launch_error="container setup failed",
+        last_launch_artifact="/tmp/a.log")
+    status = st.build_status({
+        "prs": [{"id": PR, "title": "T", "status": "in_review",
+                 "workdir": "/tmp/wd"}],
+        "targets": {PR: {}},
+        "enabled": True,
+        "review_loops": {PR: st.review_progress_input(state)},
+    })
+    run = next(r for r in status["runs"] if r["pr_id"] == PR)
+    assert run["state"] == "failed"
+    assert "review launch failed (retryable)" in run["reason"]
+    assert "container setup failed" in run["reason"]
+    assert "/tmp/a.log" in run["reason"]
+
+
 # ---------------------------------------------------------------------------
 # Breadcrumb persistence of the retry episode
 # ---------------------------------------------------------------------------
@@ -606,6 +706,7 @@ def test_breadcrumb_round_trips_retry_episode(tmp_path):
         last_launch_artifact="/tmp/a.log", launch_retryable=True,
         retry_episodes=1, retry_ready_at=time.time() + 60,
         last_pane_id="%9", last_session_id="sid-1",
+        iteration_attempted=True,
         _transcript_dir=str(tmp_path),
     )
     app = MagicMock()
@@ -632,6 +733,7 @@ def test_breadcrumb_round_trips_retry_episode(tmp_path):
     assert loop["launch_retryable"] is True
     assert loop["last_launch_artifact"] == "/tmp/a.log"
     assert loop["last_session_id"] == "sid-1"
+    assert loop["iteration_attempted"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -652,6 +754,7 @@ def _auto_app(tmp_path, state):
                  "project": {}}
     app._stop_before_merge = set()
     app._session_name = "pm-test"
+    app._review_retry_timer = None
     return app
 
 
@@ -685,9 +788,13 @@ def test_auto_start_does_not_rearm_killed_or_cooldown(tmp_path):
         pr_id=PR, running=False, latest_verdict=VERDICT_LAUNCH_FAILED,
         launch_retryable=True, retry_ready_at=time.time() + 60)
     app = _auto_app(tmp_path, cooling)
-    with patch("pm_core.tui.review_loop_ui._start_loop") as start:
+    with patch("pm_core.tui.review_loop_ui._start_loop") as start, \
+            patch("pm_core.tmux.in_tmux", return_value=True):
         auto_start._auto_start_review_loops(app, app._data["prs"])
     start.assert_not_called()
+    # The cooldown keeps a timer armed so the re-arm does not depend on an
+    # unrelated TUI event landing after it expires.
+    app.set_timer.assert_called_once()
 
 
 def test_auto_start_stops_after_episode_cap(tmp_path):
@@ -700,6 +807,60 @@ def test_auto_start_stops_after_episode_cap(tmp_path):
     with patch("pm_core.tui.review_loop_ui._start_loop") as start:
         auto_start._auto_start_review_loops(app, app._data["prs"])
     start.assert_not_called()
+
+
+def test_auto_start_keeps_the_failure_retryable_when_rearm_cannot_start(
+        tmp_path):
+    """If the resumed loop cannot start (e.g. unusable transcript dir), the
+    failure must stay retryable rather than be silently disarmed."""
+    from pm_core.tui import auto_start
+    state = ReviewLoopState(pr_id=PR, running=False,
+                            latest_verdict=VERDICT_LAUNCH_FAILED,
+                            launch_retryable=True, retry_ready_at=0,
+                            retry_episodes=2, iteration=1,
+                            _transcript_dir=str(tmp_path))
+    app = _auto_app(tmp_path, state)
+    with patch("pm_core.tui.review_loop_ui._start_loop",
+               return_value=False), \
+            patch("pm_core.tmux.in_tmux", return_value=True):
+        auto_start._auto_start_review_loops(app, app._data["prs"])
+    assert state.retry_episodes == 2
+    assert state.launch_retryable is True
+
+
+# ---------------------------------------------------------------------------
+# TUI retry notice
+# ---------------------------------------------------------------------------
+
+def test_retry_notice_is_only_for_a_real_retry(tmp_path):
+    from pm_core.tui import review_loop_ui
+    app = MagicMock()
+    state = ReviewLoopState(pr_id=PR, running=True, iteration=1,
+                            launch_attempts=1)
+    app._review_loops = {PR: state}
+    app._impl_poll_counter = 0
+    app._qa_loops = {}
+    app._data = {"prs": []}
+    app._watcher_manager.is_any_running.return_value = False
+    app._review_loop_timer = None
+    with patch.object(review_loop_ui, "_refresh_tech_tree"), \
+            patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
+            patch("pm_core.tui.qa_loop_ui.poll_qa_state"):
+        # A normal first attempt is not a retry.
+        review_loop_ui._poll_loop_state_inner(app)
+        app.log_message.assert_not_called()
+        # Attempt 2 after a recorded failure is announced exactly once.
+        state.launch_attempts = 2
+        state.last_launch_error = "container setup failed"
+        state.last_launch_artifact = str(tmp_path / "a.log")
+        review_loop_ui._poll_loop_state_inner(app)
+        review_loop_ui._poll_loop_state_inner(app)
+    assert app.log_message.call_count == 1
+    msg = app.log_message.call_args[0][0]
+    assert "Review launch retry" in msg
+    assert "attempt 2" in msg
+    assert "container setup failed" in msg
+    assert str(tmp_path / "a.log") in msg
 
 
 # ---------------------------------------------------------------------------

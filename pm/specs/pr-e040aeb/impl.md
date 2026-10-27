@@ -186,3 +186,47 @@ No [UNRESOLVED] ambiguities.
 - Auto-start target is re-armed after the cooldown (not stranded), up to the
   episode cap; manual loops and `KILLED`/`HOLD` are not re-armed.
 - `pm pr auto-sequence` does not launch over a live native-loop lease.
+
+## Review iteration 1 (385e) — refinements
+
+Findings from the first review pass, applied on top of the implementation:
+
+1. **Stale transcript adoption (correctness fix).** Requirement 3's "recover
+   this iteration's transcript symlink and session id" was unconditional, but
+   the transcript dir outlives a loop (`manual-<token>` lives for the whole TUI
+   session, and an auto-start run dir is reused across re-arms).  A *new* loop
+   on the same PR therefore rediscovered the previous run's
+   `review-<pr>-i<N>.jsonl` and adopted its verdict — a `PASS` from a run that
+   had already finished — launching no review at all.  `_discover_iteration`
+   now takes `allow_recovery`, and `_run_iteration_with_retry` passes it False
+   until *this* loop has launched the iteration (`ReviewLoopState.iteration_attempted`,
+   persisted in the breadcrumb; `launch_attempts > 0` also enables it for
+   pre-existing breadcrumbs).  Recovery/adoption is unchanged after a genuine
+   failed attempt, including across a re-arm.
+2. **Retry notice gated on a real retry.** `launch_attempts` is 1 for a normal
+   first launch, so the poll tick announced "Review launch retry … (attempt 1)"
+   on every loop start (and again after each iteration whose attempt count had
+   climbed).  The notice now requires `attempts > 1` *and* a recorded
+   `last_launch_error`.
+3. **Trust hold on the adopt path.** The adopt branch polls the pane directly,
+   so a `WorkspaceTrustBlocked` there surfaced as `ERROR`; it is now converted
+   to `ReviewHoldError` → `HOLD`, matching `_run_claude_review`.
+4. **Re-arm cannot silently disarm.** `_start_loop` returns False when it bails
+   (missing PR/workdir, no tmux, unusable transcript dir).  Auto-start clears
+   the retry episode *before* starting the thread (it must not resume the spent
+   budget), so it now restores the saved episode fields when the start does not
+   happen, keeping the failure retryable instead of stranding the target.
+5. **Cooldown timer is self-healing.** `_schedule_retry_rearm` was armed once;
+   if that single timer fired before `retry_ready_at` (or the pass found the
+   PR still cooling), nothing re-armed it and the target waited for an
+   unrelated TUI event.  `_auto_start_review_loops` now keeps a timer armed for
+   as long as the cooldown is running (never at the episode cap).
+6. **Claim "fail open" is real.** `claim_action_lease` returns False both for
+   "another loop owns it" and for "the runtime file could not be written"; the
+   loop stood down for either, stranding the target on an unwritable state
+   dir.  `_claim_launch` now stands down only when another live loop actually
+   owns the lease.
+7. **Failure artifacts carry the command.** The post-launch failures ("window
+   not found", "no transcript session id") wrote `cmd: []`; they now record
+   the launch command `_launch_review_window` returned, and `returncode: None`
+   since no child exited non-zero.

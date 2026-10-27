@@ -189,7 +189,7 @@ def start_or_stop_loop(app) -> None:
 def _start_loop(app, pr_id: str, pr: dict | None,
                 transcript_dir: str,
                 resume_state: ReviewLoopState | None = None,
-                superseded: bool = False) -> None:
+                superseded: bool = False) -> bool:
     """Start a review loop for the given PR.
 
     ``transcript_dir`` is required — hook-driven verdict polling needs a
@@ -206,21 +206,25 @@ def _start_loop(app, pr_id: str, pr: dict | None,
     PR was killed to make room for this one — only changes the
     user-visible status message so it's clear this is a fresh restart
     rather than a brand-new launch.
+
+    Returns False when the loop was not started (missing PR/workdir, no
+    tmux, unusable transcript dir) so callers that pre-cleared retry state
+    can restore it instead of stranding the target.
     """
     from pm_core import tmux as tmux_mod
 
     if not pr:
         app.log_message(f"PR {pr_id} not found")
-        return
+        return False
 
     if not tmux_mod.in_tmux():
         app.log_message("Review loop requires tmux. Use 'pm session' to start.")
-        return
+        return False
 
     workdir = pr.get("workdir")
     if not workdir:
         app.log_message(f"No workdir for {pr_id}. Start the PR first.")
-        return
+        return False
 
     # Ensure the transcript directory exists on disk.  Fail fast here
     # (before launching a podman container + review pane) if creation
@@ -233,7 +237,7 @@ def _start_loop(app, pr_id: str, pr: dict | None,
             f"[red]Cannot create transcript dir[/] {transcript_dir}: {e}"
         )
         _log.warning("_start_loop: mkdir %s failed: %s", transcript_dir, e)
-        return
+        return False
 
     # Get pm_root for launching the review window
     pm_root = str(store.find_project_root())
@@ -283,6 +287,7 @@ def _start_loop(app, pr_id: str, pr: dict | None,
         on_complete=lambda s: _on_complete_from_thread(app, s),
         transcript_dir=transcript_dir,
     )
+    return True
 
 
 def _stop_loop(app, pr_id: str) -> None:
@@ -463,17 +468,17 @@ def _poll_loop_state_inner(app) -> None:
                     sticky=30,
                 )
             # A failed launch that is being retried: surface each new
-            # attempt (bounded, so this cannot spam forever).
+            # attempt (bounded, so this cannot spam forever).  Gated on a
+            # recorded error so a normal first attempt (which also has
+            # launch_attempts == 1) is never announced as a retry.
             attempts = int(getattr(state, "launch_attempts", 0) or 0)
-            if attempts and attempts != state._ui_notified_retry \
+            err = (getattr(state, "last_launch_error", "") or "").strip()
+            if attempts > 1 and err \
+                    and attempts != state._ui_notified_retry \
                     and state.latest_verdict != VERDICT_PASS:
                 state._ui_notified_retry = attempts
-                err = (getattr(state, "last_launch_error", "")
-                       or state.latest_output or "").strip()
                 msg = (f"[yellow]Review launch retry[/] for {state.pr_id} "
-                       f"(attempt {attempts})")
-                if err:
-                    msg += f": {err[:200]}"
+                       f"(attempt {attempts}): {err[:200]}")
                 artifact = getattr(state, "last_launch_artifact", None)
                 if artifact:
                     msg += f"\n  Artifact: {artifact}"

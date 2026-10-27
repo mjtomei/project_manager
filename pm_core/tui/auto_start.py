@@ -220,6 +220,7 @@ def save_breadcrumb(app) -> None:
             "retry_ready_at": rstate.retry_ready_at,
             "last_pane_id": rstate.last_pane_id,
             "last_session_id": rstate.last_session_id,
+            "iteration_attempted": rstate.iteration_attempted,
             "history": [
                 {
                     "iteration": h.iteration,
@@ -328,6 +329,8 @@ async def consume_breadcrumb(app) -> None:
                 retry_ready_at=loop_data.get("retry_ready_at", 0.0) or 0.0,
                 last_pane_id=loop_data.get("last_pane_id", "") or "",
                 last_session_id=loop_data.get("last_session_id", "") or "",
+                iteration_attempted=bool(
+                    loop_data.get("iteration_attempted", False)),
             )
             for h in loop_data.get("history", []):
                 rstate.history.append(ReviewIteration(
@@ -946,6 +949,7 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
     if prs is None:
         prs = app._data.get("prs") or []
 
+    from pm_core.tui.review_loop_ui import _schedule_retry_rearm, _start_loop
     for pr in prs:
         if pr.get("status") != "in_review":
             continue
@@ -970,19 +974,35 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
             if not _tmux.in_tmux():
                 continue
             if _retry_rearm_blocked(app, loop):
+                # Still cooling down: keep a timer armed so the re-arm does
+                # not depend on an unrelated TUI event landing after the
+                # cooldown (the episode cap schedules nothing — it is final).
+                ready_at = float(getattr(loop, "retry_ready_at", 0.0) or 0.0)
+                if ready_at > time.time():
+                    _schedule_retry_rearm(app, loop)
                 continue
             _log.info("auto_start: re-arming retryable review launch for %s "
                       "(episode %d)", pr_id, getattr(loop, "retry_episodes", 0) + 1)
             app.log_message(f"Auto-start: retrying review launch for {pr_id}")
+            # Cleared before the thread starts (it must not resume the
+            # spent budget), restored if _start_loop bails so the failure
+            # stays retryable instead of being silently disarmed.
+            saved = (loop.retry_episodes, loop.launch_attempts,
+                     loop.next_retry_at, loop.launch_retryable,
+                     loop.retry_ready_at)
             loop.retry_episodes = getattr(loop, "retry_episodes", 0) + 1
             loop.launch_attempts = 0
             loop.next_retry_at = 0.0
             loop.launch_retryable = False
             loop.retry_ready_at = 0.0
             tdir = loop._transcript_dir or str(get_transcript_dir(app))
-            from pm_core.tui.review_loop_ui import _start_loop
-            _start_loop(app, pr_id, pr, transcript_dir=str(tdir),
-                        resume_state=loop)
+            if not _start_loop(app, pr_id, pr, transcript_dir=str(tdir),
+                               resume_state=loop):
+                (loop.retry_episodes, loop.launch_attempts,
+                 loop.next_retry_at, loop.launch_retryable,
+                 loop.retry_ready_at) = saved
+                _log.warning("auto_start: re-arm for %s did not start; "
+                             "keeping the retryable failure", pr_id)
             continue
         # Skip if no workdir (shouldn't happen for in_review, but guard)
         if not pr.get("workdir"):
@@ -1000,7 +1020,6 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
                 continue
         _log.info("auto_start: starting review loop for %s", pr_id)
         app.log_message(f"Auto-start: review loop for {pr_id}")
-        from pm_core.tui.review_loop_ui import _start_loop
         tdir = get_transcript_dir(app)
         _start_loop(app, pr_id, pr, transcript_dir=str(tdir))
 
