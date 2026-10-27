@@ -31078,7 +31078,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-27T19:39:47.699956+00:00'
+  updated_at: '2026-10-27T19:41:54.693867+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31292,6 +31292,21 @@ prs:
       sse.log) were verified.
     created_at: '2026-10-27T19:39:47Z'
     last_edited: '2026-10-27T19:39:47Z'
+  - id: note-f0db0fc
+    text: 'QA S18 refinement (verified live 2026-10-27): the current pm-dev image
+      has tmux/asciinema/ffmpeg but NO agg; install agg v1.9.0 (agg-aarch64-unknown-linux-gnu
+      or agg-x86_64-unknown-linux-gnu from github.com/asciinema/agg/releases) before
+      the recipe render, or wait-for-job fails with "command not found". The full
+      tmux recipe was driven end-to-end: separate pm-recorder tmux session running
+      asciinema wrapping `tmux attach -t $TARGET`, `pm tui send q`/`q` navigation,
+      detach via `tmux send-keys -t pm-recorder C-b d`, helper render to H.264. Bounded
+      waits observed at their stated deadlines: pm-session readiness 60 s, recorder
+      readiness/stop 30 s. For the "pm session never appears" case, point the real
+      pm at a different server with PM_TMUX_SOCKET while the recipe plain `tmux ls`
+      polls an isolated TMUX_TMPDIR server (verified: exact message, exit 1 at 60
+      s).'
+    created_at: '2026-10-27T19:41:54Z'
+    last_edited: '2026-10-27T19:41:54Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
