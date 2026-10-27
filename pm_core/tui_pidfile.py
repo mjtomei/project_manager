@@ -437,7 +437,8 @@ def claim_tui_pidfile(path: Path, session: str) -> TuiPidfileClaim:
                 raise TuiPidfileConflict(
                     f"another TUI (pid {existing.pid}) already owns "
                     f"session {session!r} ({path}); refusing to start a "
-                    f"second TUI"
+                    f"second TUI — stop pid {existing.pid} if it is not "
+                    f"visible"
                 )
             unlink_if_unchanged(path, raw)
             continue

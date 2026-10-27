@@ -733,10 +733,10 @@ def _unqueue_line(queue: Path, line: str) -> None:
     command was *not* applied, so it must not sit in the queue waiting
     for some later drain to execute it.  Safe against concurrent
     appenders — under the same ``flock`` the appender uses, we only
-    truncate when the file still ends with our exact line, so a
-    *different* line another caller appended after ours is never the one
-    removed.  Two callers submitting the identical command are
-    indistinguishable by content: at most one copy is rolled back and
+    truncate when the file still ends with our exact line at a line
+    boundary, so a *different* line another caller appended after ours is
+    never the one removed.  Two callers submitting the identical command
+    are indistinguishable by content: at most one copy is rolled back and
     the other stays queued for its own caller.
     """
     import fcntl
@@ -749,8 +749,15 @@ def _unqueue_line(queue: Path, line: str) -> None:
                 content = f.read()
                 if not content.endswith(payload):
                     return
+                boundary = len(content) - len(payload)
+                if boundary > 0 and content[boundary - 1:boundary] != b"\n":
+                    # Our payload is merely a suffix of a longer line a
+                    # later caller appended (``pm qa pr-1`` ends with
+                    # ``qa pr-1``): truncating here would corrupt their
+                    # command, so leave the queue alone.
+                    return
                 f.seek(0)
-                f.truncate(len(content) - len(payload))
+                f.truncate(boundary)
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     except OSError as e:
@@ -790,7 +797,8 @@ def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
     problem = _signal_tui(desc.pid, signal.SIGUSR2, desc.starttime)
     if problem is not None:
         # The command is already queued but nothing will drain it now (or
-        # not soon); take it back so the failure we report is the truth.
+        # not soon); take it back (best effort) so the failure we report
+        # is the truth.
         _unqueue_line(queue, line)
         if problem in _STALE_SIGNAL_REASONS:
             _log.debug("TUI pid %d gone, removing stale pidfile", desc.pid)

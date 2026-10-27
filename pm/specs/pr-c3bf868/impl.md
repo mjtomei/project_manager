@@ -298,7 +298,9 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     (`_unqueue_line`), so a reported failure is not applied by a later
     drain; a *different* line another caller appended after ours is never
     truncated (two identical submissions are indistinguishable, so at
-    most one copy is rolled back).
+    most one copy is rolled back). Rollback matches only at a line
+    boundary: a later command that merely *ends* with ours (`pm qa pr-1`
+    ends with `qa pr-1`) is left intact.
 21. a target that becomes a zombie between validation and the signal:
     `_signal_tui` returns `"process is a zombie"` without sending, and
     `submit_tui_command` reports `stale_pidfile`, removes the pidfile and
@@ -308,10 +310,16 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     callers are not told "has not finished starting up" for the whole
     life of the TUI; `_write_all` retries a short `os.write` instead of
     leaving a truncated descriptor. The conflict message names the
-    pidfile path (the only way out when procfs is unavailable and a
-    recycled PID refuses startup).
+    pidfile path and pid (the only way out when procfs is unavailable and
+    a recycled PID refuses startup, or when the owning process has no
+    visible pane).
 23. an unwritable command queue (E9) returns `queue_error`, keeps the
     pidfile, and never signals the TUI.
+24. `pm _tui` launcher wiring (A3): a claim conflict is printed on stdout
+    and exits 2 before the app is constructed; a successful claim is
+    handed to `ProjectManagerApp(pidfile_claim=...)`; an `OSError` claim
+    failure still starts the app without IPC; a conflict raised inside
+    `on_mount` (`_startup_error`) is re-printed on stdout and exits 2.
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;

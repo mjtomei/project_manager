@@ -589,6 +589,19 @@ class TestUnqueue:
         helpers._unqueue_line(queue, "ours\n")
         assert queue.read_text() == "ours\ntheirs\n"
 
+    def test_leaves_a_later_line_that_ends_with_ours(self, tmp_path):
+        """A suffix match is not our line: truncating would corrupt it.
+
+        Command lines are arbitrary text, so a later caller's command can
+        end with ours (``pm qa pr-1`` ends with ``qa pr-1``).  Without the
+        line-boundary check the rollback would slice the tail off that
+        line and leave a mangled command in the queue.
+        """
+        queue = tmp_path / "q"
+        queue.write_text("ours\npm ours\n")
+        helpers._unqueue_line(queue, "ours\n")
+        assert queue.read_text() == "ours\npm ours\n"
+
     def test_missing_queue_is_swallowed(self, tmp_path):
         helpers._unqueue_line(tmp_path / "nope", "ours\n")  # no exception
 
@@ -985,3 +998,120 @@ class TestPicker:
         out = capsys.readouterr().out
         assert "no longer running" in out
         assert "may not have been applied" in out
+
+
+# ---------------------------------------------------------------------------
+# ``pm _tui`` launcher wiring
+
+
+class TestTuiLauncher:
+    """``pm _tui`` claims the pidfile before the app starts (R4/A3).
+
+    The claim lives in the launcher (not in ``on_mount``) so a refused
+    second TUI prints its message on the pane — ``pm _tui`` redirects
+    stderr to ``tui-stderr.log``, where nobody would see it.
+    """
+
+    @pytest.fixture
+    def launcher(self, tmp_path, monkeypatch):
+        import logging
+        import threading
+
+        from pm_core.cli import tui as tui_mod
+
+        monkeypatch.setattr(tui_mod, "debug_dir", lambda: tmp_path)
+        monkeypatch.setattr("pm_core.paths.configure_logger",
+                            lambda name: logging.getLogger(name))
+        monkeypatch.setattr(tpf, "install_signal_guards", lambda: None)
+        monkeypatch.setattr("pm_core.hook_install.ensure_hooks_installed",
+                            lambda: None)
+        monkeypatch.setattr("pm_core.tui.app.current_session_name",
+                            lambda: SESSION)
+        monkeypatch.setattr(tpf, "pidfile_path",
+                            lambda session: tmp_path / "tui-pm-test.pid")
+
+        apps: list = []
+
+        class FakeApp:
+            startup_error = None
+
+            def __init__(self, pidfile_claim=None):
+                self._pidfile_claim = pidfile_claim
+                self._startup_error = type(self).startup_error
+                self.ran = False
+                apps.append(self)
+
+            def run(self):
+                self.ran = True
+
+        monkeypatch.setattr("pm_core.tui.app.ProjectManagerApp", FakeApp)
+
+        # ``tui_cmd`` rebinds sys.stderr to a file (and then to
+        # sys.__stderr__) and permanently replaces threading.excepthook;
+        # restore both so pytest's capture keeps working.
+        orig_hook = threading.excepthook
+        orig_stderr = sys.stderr
+        yield tui_mod, apps, FakeApp
+        threading.excepthook = orig_hook
+        sys.stderr = orig_stderr
+
+    def test_conflict_is_printed_and_exits_2(self, launcher, monkeypatch,
+                                             capsys):
+        tui_mod, apps, _ = launcher
+
+        def conflict(path, session):
+            raise tpf.TuiPidfileConflict(
+                "another TUI (pid 7) already owns session 'pm-test' "
+                "(/home/pm/.pm/tui-pm-test.pid); refusing to start a "
+                "second TUI")
+
+        monkeypatch.setattr(tpf, "claim_tui_pidfile", conflict)
+
+        with pytest.raises(SystemExit) as exc:
+            tui_mod.tui_cmd.callback()
+
+        assert exc.value.code == 2
+        assert apps == []  # never even constructed
+        assert "already owns" in capsys.readouterr().out
+
+    def test_claim_is_handed_to_the_app(self, launcher, monkeypatch):
+        tui_mod, apps, _ = launcher
+        claim = object()
+        monkeypatch.setattr(tpf, "claim_tui_pidfile",
+                            lambda path, session: claim)
+
+        tui_mod.tui_cmd.callback()
+
+        assert len(apps) == 1
+        assert apps[0]._pidfile_claim is claim
+        assert apps[0].ran
+
+    def test_claim_io_error_still_starts_the_app(self, launcher, monkeypatch):
+        tui_mod, apps, _ = launcher
+
+        def boom(path, session):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(tpf, "claim_tui_pidfile", boom)
+
+        tui_mod.tui_cmd.callback()
+
+        assert len(apps) == 1
+        assert apps[0]._pidfile_claim is None
+        assert apps[0].ran
+
+    def test_startup_error_is_reprinted_and_exits_2(self, launcher, monkeypatch,
+                                                    capsys):
+        """A conflict detected inside on_mount is surfaced on the pane."""
+        tui_mod, apps, FakeApp = launcher
+        monkeypatch.setattr(FakeApp, "startup_error",
+                            "another TUI (pid 7) already owns session")
+        monkeypatch.setattr(tpf, "claim_tui_pidfile",
+                            lambda path, session: object())
+
+        with pytest.raises(SystemExit) as exc:
+            tui_mod.tui_cmd.callback()
+
+        assert exc.value.code == 2
+        assert "already owns" in capsys.readouterr().out
+
