@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-27T18:34:39.634492+00:00'
+  updated_at: '2026-10-27T18:40:19.004094+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -10905,6 +10905,23 @@ prs:
       Captures /pm-captures/scenarios/44.'
     created_at: '2026-10-27T18:34:39Z'
     last_edited: '2026-10-27T18:34:39Z'
+  - id: note-2599c27
+    text: 'QA S47 (2026-10-27, e19a0bf5+fix, nested rootless podman, two sessions
+      sharing ~/.pm): all 4 stories PASS live. 3 rotated impl/review/signoff races
+      gave 1 winner each (review always, being the shortest path); losers refused
+      with own action and used+growth+reserved <= T. fifo/drain/rr gave orders A3,B1,B2,B3
+      (impl refused +8G reserved) / impl,A3,B1,B2,B3 / impl,B1,A3,B2,B3. Lock busy:
+      pm pr start refused after 35.8 s, nothing launched. Zombie TUI (Zs) entries
+      dropped at once. Incidental fix 71e75b86 (pre-existing on master): zz t during
+      PASS verification crashed the QA thread (send-keys follow-up to a pane the stop
+      had killed raised CalledProcessError) -> now no follow-up after stop, dead pane
+      = window gone. Harness traps: settarget 20 margin is ~4G under nested accounting;
+      host drift admitted the 3rd A scenario early, so pin with settarget 4 after
+      the first two run. Recorder grouped sessions must be named <session>~N, else
+      get_pm_session() returns None and t ends "No pm session found". Filed pr-ee7bd75
+      (pm pr signoff exits 0 on refusal). Captures /pm-captures/scenarios/47.'
+    created_at: '2026-10-27T18:40:18Z'
+    last_edited: '2026-10-27T18:40:18Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
