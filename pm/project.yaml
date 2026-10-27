@@ -31530,7 +31530,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:03.724695+00:00'
-  updated_at: '2026-10-12T21:42:00.057612+00:00'
+  updated_at: '2026-10-27T20:17:01.336870+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31557,6 +31557,28 @@ prs:
       evidence-integrity issue based on that guard alone.'
     created_at: '2026-10-12T22:43:42Z'
     last_edited: '2026-10-12T22:43:42Z'
+  - id: note-b97259d
+    text: 'Implemented persisted evidence provenance (14c1ab65). New pm_core/captures.py:
+      scenario.json stamped with schema/pr_id/run_id/captured_at; each QA run publishes
+      $CAP/qa_manifest.json (authoritative membership) plus a per-run copy at $CAP/qa_runs/<run_id>.json
+      so a nested fixture clobbering the root pointer cannot destroy the PR membership;
+      audit() classifies scenarios/<n>/ as current/prior-run/foreign/unowned and flags
+      orphans, manifest-vs-status run disagreement, and manifest members whose evidence
+      dir is gone; quarantine_foreign() moves only records naming another pr_id to
+      scenarios/_foreign/<run_id>-<n>/ (bytes preserved, nothing deleted). qa_loop
+      syncs (quarantine+manifest) before scenario launch and again at completion (the
+      fixture writes during the run); qa_status.json now carries run_id; captures_dir(create=False)
+      for readers. Readers: sign-off prompt names the run + requires pm-signoff-qa-run
+      meta and says membership is the manifest (not arbitrary dirs); dashboard flags
+      a report bound to a superseded run; merge gate refuses one; new `pm qa evidence
+      <pr>` prints membership+anomalies. paths.captures_dir mount condition untouched
+      (that half stays with #264/pr-1e9c117). Tests: tests/test_captures_provenance.py
+      (31). Evidence: $CAP/impl/pre-fix/nested-fixture-overwrites-scenario-evidence
+      and $CAP/impl/post-fix/nested-fixture-detected-and-quarantined (cast+mp4+manifest+observed.txt).
+      Full suite: 43F+17E, the documented environmental baseline (test_git_ops/test_merge_publish/test_signoff_integration/test_hook_events),
+      identical on the pre-fix tree. (2026-10-27)'
+    created_at: '2026-10-27T20:17:01Z'
+    last_edited: '2026-10-27T20:17:01Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
