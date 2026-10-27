@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T09:21:27.117897+00:00'
+  updated_at: '2026-10-27T09:42:15.858157+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25707,6 +25707,34 @@ prs:
       2.34.1 / hook-install env; test_git_ops::test_keeps_unpushed_merge included).'
     created_at: '2026-10-27T09:21:27Z'
     last_edited: '2026-10-27T09:21:27Z'
+  - id: note-38c3283
+    text: 'Review-loop 0bb3 i4 (55aa5f41): no other functional defects found in the
+      recovery machinery — handle()/deferral bounds, the completed-verdict guard,
+      QA tick-loop episode bookkeeping (_no_verdict_since/_recovery_ev_ts), planner
+      stop ordering and the pr-8efa789 merge coordination all hold under adversarial
+      tracing. Fixed one bound-defeating hole: MissingOutputRecovery.handle() decided
+      "did the transcript advance?" against the text of its PREVIOUS decision. The
+      poller calls handle() once per idle turn, so when it was already deciding about
+      a newer turn (the normal case) that comparison was True, and a same-turn hook
+      refresh landing during the settle took the native-recovery branch: reset() zeroed
+      BOTH the nudge budget and the deferral count. Both bounds defeated at once,
+      so a session that answers with a new verdictless turn and refreshes its hook
+      could defer forever without ever nudging or exhausting. It now re-reads after
+      the settle and resets only when the text changed during the wait; otherwise
+      the event counts against max_deferrals. The unused _seen_text bookkeeping is
+      gone and the docstring states the rule. Tests: test_refresh_after_a_new_turn_does_not_reset_the_budget
+      fails on the previous code (attempts 0 vs 1); test_retry_prompt_is_sent_instead_of_the_resume_request
+      covers the poll_for_verdict(retry_prompt=...) wiring for the "original prompt
+      is retried" acceptance criterion (only the tracker-level override was tested).
+      Spec updated (deferral rule, finalize bullet now says settings-driven defaults,
+      new tests recorded). Full suite in a clean venv: 3847 passed, 1 skipped, 1 failed
+      — the only failure is the pre-existing env failure tests/test_hook_events.py::test_installer_writes_standalone_receiver
+      (fails standalone; touches no code this PR changed). Known residual unchanged:
+      verdict-recovery-response-timeout (1 h default) can retire a worker that is
+      silently busy (e.g. a >1 h test run) as no_response; it is documented, configurable,
+      and 0 disables it.'
+    created_at: '2026-10-27T09:42:15Z'
+    last_edited: '2026-10-27T09:42:15Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
