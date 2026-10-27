@@ -895,6 +895,42 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
     the TUI `t` run never launches a verifier. (c) Two concurrent ticks
     after the fix may each spawn a driver (pre-existing check-then-spawn;
     S67 confirmed it at the same rate on the pre-fix control, pr-7a83b6d).
+- **RQ47** (QA S93 ad5eed13; review 0639 i1 86c0da90) The runtime mirror
+  read by the popup picker, auto-start's `recorded_qa_verdict` and the
+  spinner is per pm session: `~/.pm/runtime/pm-<tag>/<pr>.json`. This
+  supersedes the `~/.pm/runtime/<pr>.json` path named in RQ36 and the
+  thirty-fifth pass. The session is resolved once per process: the
+  pane's or popup client's pm session inside tmux, with the grouped
+  `~N` suffix stripped, otherwise the session named after the cwd's git
+  root. Only a host without tmux uses the shared path. Given two clones,
+  When one clone's run writes running, done or a verdict, Then the
+  other clone's picker, auto-start and mount sweep never see it (S93).
+  Given records written at the shared path by an older pm, When a
+  session's directory is first created, Then it starts with those
+  records' `done`/`failed` entries only: no in-flight entries and no
+  `suppress_switch`, with `updated_at` kept. So a recorded hold verdict,
+  such as INPUT_REQUIRED, still stops auto-start from relaunching QA
+  after the upgrade, and the picker shows the old verdict and no
+  phantom `[working]` row. The seed happens once per directory. It is
+  built aside and renamed into place, so concurrent first starts within
+  one session yield one complete directory, with no partial reads, no
+  errors and no leftover `.pm-<tag>.<pid>.seed` directories. Later
+  writes to the shared path by an older pm do not leak in. A directory
+  that already exists, for example after a session restart, a `pm tui
+  restart` or a PR cleanup that removed the PR's file, is never
+  re-seeded, so a cleaned-up verdict does not come back.
+  - Accepted trade-off, not a failure: a clone whose session directory
+    is first created after the upgrade inherits whatever the shared
+    file holds at that moment, even if another clone wrote it. Before
+    the upgrade the records had no clone attribution.
+  - Open points (the thirty-sixth pass decides them): (a) a pm process
+    run outside tmux with its cwd in a PR workdir, rather than the
+    clone root, resolves a different tag (that workdir's git root), so
+    its records may land where no TUI reads them. (b) The TUI mount
+    sweep clears in-flight entries in its own session directory,
+    including the `running` entry of a `qa-run-bg` driver still alive in
+    that session. After a `pm tui restart` the picker and auto-start
+    must neither lose that run nor start a second driver.
 
 ## 2. Setup
 
@@ -1808,6 +1844,44 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
       malformed project.yaml and an id-less PR entry during a QA
       completion: the unavailable hint, then recovery. A NEEDS_WORK
       completion keeps the user's navigation.
+    Done: S92 (NEEDS_WORK, fix 207545e6: the picker spinner's
+    stale-terminal guard covers every action), S93 (NEEDS_WORK, fix
+    ad5eed13: per-session runtime directory), S94 (NEEDS_WORK, fix
+    8416c20f: id-less entries skipped, a stopped run is relaunched by a
+    tick, TUI resume tracked per QA workdir; filed pr-97fe1e3 and
+    pr-f0dc81c). Each fix held live post-fix in its own scenario. Harness
+    lessons from S92: remove auto-start from R only after `Starting QA`.
+    A U clause after a terminal U sign-off is vacuous. Keep refined_kb at
+    0, and start the stubs after allprs exists.
+  - Thirty-sixth pass (S95+), delta-only, planner 2026-10-27. Product
+    changes since the S92–S94 run: 207545e6, ad5eed13 and 8416c20f (each
+    has run live only in its own scenario, never together, and none in
+    the others' modes; ad5eed13 and 8416c20f have never run in container
+    mode). Also review 0639 i1 86c0da90 (RQ47 upgrade seed), which has
+    never run live. Controls: 2a424a0d (the pre-ad5eed13 layout, standing
+    in for "older pm") and ad5eed13 (unseeded per-session layout).
+    - S95: the upgrade from an older pm, host, fake-claude, two clones.
+      Records come from 2a424a0d (P INPUT_REQUIRED, Q failed, R with a
+      stale `running` entry plus `suppress_switch`), then HEAD starts.
+      Covers the seed contents, the auto-start and picker effects, a
+      first-start race inside one session (TUI, a popup picker on a
+      second client, and ticks, repeated over rounds), an older pm in
+      the other clone still writing at the shared path, and no re-seed
+      after cleanup or a session restart. Compare with ad5eed13.
+    - S96: integration in container mode with real claude against the
+      work/ router and main stubs. An upgraded session with a routed PR
+      R and an unrouted U. A seeded hold verdict on R blocks auto-start.
+      A picker `qa` start on R with q/Esc keeps focus (207545e6), and the
+      run routes as before. A routed run stopped by a provider setup
+      error in container mode is relaunched once by a tick after the
+      fix, with no containers left from the stopped run (8416c20f), and
+      a TUI restart in between adopts only the live run.
+    - S97: where the runtime records land, depending on how the user runs
+      pm, host, fake-claude. TUI pane, second grouped client, popup, a
+      shell outside tmux in the clone root, a non-pm tmux session in the
+      clone, and a shell outside tmux in the PR's workdir (open point a).
+      `pm tui restart` while a `qa-run-bg` driver is alive in the
+      session (open point b).
 
 ## 3. Edge cases
 
