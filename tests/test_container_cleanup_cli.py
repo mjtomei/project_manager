@@ -14,7 +14,7 @@ def test_status_reports_pending_cleanup_when_runtime_unavailable():
          patch.object(container_reaper, "last_state", return_value=state), \
          patch.object(container_reaper, "pending_failures", return_value={
              "pm-review-pr-001": {"error": "runtime connection failed"}}), \
-         patch.object(container_reaper, "retained_names", return_value=[]):
+         patch.object(container_reaper, "local_retained_names", return_value=[]):
         result = CliRunner().invoke(cli, ["container", "status"])
     assert result.exit_code == 0, result.output
     assert "Runtime available: no" in result.output
@@ -35,7 +35,7 @@ def test_status_keeps_scoped_failures_visible_during_runtime_outage(monkeypatch)
         container_reaper._record_release(name, daemon + "-id", "generation", "test")
     files = {path: path.read_bytes() for path in container.container_state_dir().rglob("*.json")}
     monkeypatch.setattr(container, "_runtime_available", lambda: False)
-    monkeypatch.setattr(container_reaper, "retained_names", lambda: [])
+    monkeypatch.setattr(container_reaper, "local_retained_names", lambda: [])
 
     # A known domain still displays only its own outcomes.
     result = CliRunner().invoke(cli, ["container", "status"])
@@ -157,7 +157,7 @@ def test_status_inventories_containers_once(monkeypatch):
     monkeypatch.setattr(container_reaper, "list_containers", _list)
     monkeypatch.setattr(container, "keyring_summary", lambda: "")
     monkeypatch.setattr(container, "pids_pressure", _pressure)
-    monkeypatch.setattr(container_reaper, "retained_names", lambda: [])
+    monkeypatch.setattr(container_reaper, "local_retained_names", lambda: [])
 
     result = CliRunner().invoke(cli, ["container", "status"])
     assert result.exit_code == 0, result.output

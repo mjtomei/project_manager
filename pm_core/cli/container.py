@@ -117,7 +117,7 @@ def _echo_reaper_state() -> None:
                        "then retry with 'pm container reap':")
             for source, name, error in diagnostics:
                 click.echo(f"  [{source}] {name}: {error}")
-        retained = container_reaper.retained_names()
+        retained = container_reaper.local_retained_names()
         if retained:
             click.echo(f"Retained:        {', '.join(retained)}")
 

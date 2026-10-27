@@ -237,6 +237,24 @@ def retained_names() -> list[str]:
                    if isinstance(rec.get("name"), str) and rec["name"]})
 
 
+def local_retained_names() -> list[str]:
+    """Retained names that belong to the current runtime, for display.
+
+    Markers live in the shared state dir and record the runtime domain they
+    were set in. Another store's marker names a container this runtime does
+    not have, so ``pm container status`` must not list it as retained here;
+    while the identity is unknown, domain-stamped markers are shown with the
+    saved diagnostics instead. Display only: cleanup still honours every
+    marker through :func:`is_retained`.
+    """
+    records = [rec for _, rec in _retention_records()
+               if isinstance(rec.get("name"), str) and rec["name"]]
+    domain = (_runtime_domain()
+              if any(rec.get("runtime_domain") is not None for rec in records) else None)
+    return sorted({rec["name"] for rec in records
+                   if rec.get("runtime_domain") in (None, domain)})
+
+
 def _prune_retain_markers(inventory: dict[str, str], since: float) -> None:
     """Drop retention markers whose container is gone or was replaced.
 
@@ -1570,6 +1588,10 @@ def unavailable_runtime_diagnostics() -> list[tuple[str, str, str]]:
             source = json.dumps(rec["runtime_domain"], sort_keys=True)
             rows.append((source, rec["name"],
                          f"owner release pending for allocation {rec['id']}"))
+    for _, rec in _retention_records():
+        if rec.get("runtime_domain") is not None and isinstance(rec.get("name"), str) and rec["name"]:
+            source = json.dumps(rec["runtime_domain"], sort_keys=True)
+            rows.append((source, rec["name"], "retained (kept out of cleanup)"))
     return rows
 
 
