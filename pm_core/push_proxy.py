@@ -848,17 +848,18 @@ def _shared_sock_dir(session_tag: str, pr_id: str,
     """Build a socket directory path and create it on disk.
 
     Like :func:`_shared_sock_dir_path` but also creates the directory
-    and a long-named symlink for discoverability/cleanup.  Use this
-    when starting a proxy; use ``_shared_sock_dir_path`` for read-only
-    lookups.  A link found at the long name that does not resolve to this
-    name's hashed directory is replaced (the link only, never its target),
-    so a later registry-less teardown can still find the directory.  A
-    non-directory entry squatting that name is removed when it is ours, for
-    the same reason.
+    and a long-named symlink for discoverability/cleanup.  Call this under
+    the socket directory's start lock (a start does), so a sweep cannot
+    remove the link again between its creation and the proxy start; use
+    ``_shared_sock_dir_path`` for read-only lookups.  A link found at the
+    long name that does not resolve to this name's hashed directory is
+    replaced (the link only, never its target), so a later registry-less
+    teardown can still find the directory.  A non-directory entry squatting
+    that name is removed when it is ours, for the same reason.
 
     Directory creation is best-effort here: ``_start_lock`` creates it
-    for real (and reports an unusable name as a ``PushProxyError``), and
-    the discovery symlink is optional.
+    for real (and reports an unusable name as a ``PushProxyError``) before
+    this is called, and the discovery symlink is optional.
     """
     long_name = f"{session_tag}-{pr_id}-{workdir_token}"
     long_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{long_name}"
@@ -1073,47 +1074,56 @@ def _start_lock(sock_dir: str, blocking: bool = True):
 
     With ``blocking=True`` (a start) a directory that cannot safely hold a
     proxy — a symlink, or one owned by another user or unwritable — raises
-    :class:`PushProxyError` (see :func:`_sock_dir_start_problem`).
+    :class:`PushProxyError` (see :func:`_sock_dir_start_problem`).  With
+    ``blocking=False`` (teardown) nothing is created: a directory that is
+    already gone yields ``False`` instead of being resurrected.
     """
-    # Create the directory and (for a start) verify it can host a proxy.
-    # A concurrent teardown can rmtree the directory between the two steps —
-    # ``_remove_proxy_dirs`` only takes the start lock we have not taken yet
-    # — so recreate it and check again rather than fail a start that the
-    # race, not the caller, broke.  An entry that still *exists* is a real
-    # problem (planted symlink, foreign owner, unwritable) and is refused.
-    problem: str | None = None
-    for _attempt in range(_START_DIR_ATTEMPTS):
-        try:
-            os.makedirs(sock_dir, exist_ok=True)
-        except OSError as exc:
-            # /tmp is world-writable: a regular file (or an unreadable
-            # directory) squatting on the socket-directory name makes
-            # makedirs fail.  A teardown must skip that directory rather
-            # than abort the sweep, and a start must fail as a proxy error
-            # instead of leaking a bare OSError (which wrap_claude_cmd would
-            # blame on the runtime) — the same treatment as an unusable lock
-            # file below.
-            if blocking:
+    if not blocking:
+        # Teardown must never *create* what it is sweeping.  Every teardown
+        # caller checks ``isdir`` first, so reaching this branch with a
+        # missing directory means a sweep removed it in the window since.
+        # ``makedirs`` here would resurrect an empty proxy directory (plus a
+        # lock file) that nothing removes again until the next teardown — a
+        # shared stop deliberately keeps its directory, so the stop would
+        # leak state it never found.
+        if not os.path.isdir(sock_dir):
+            _log.info("Push proxy directory %s is gone or unusable; skipping",
+                      sock_dir)
+            yield False
+            return
+    else:
+        # Create the directory and verify it can host a proxy.  A concurrent
+        # teardown can rmtree the directory between the two steps —
+        # ``_remove_proxy_dirs`` only takes the start lock we have not taken
+        # yet — so recreate it and check again rather than fail a start that
+        # the race, not the caller, broke.  An entry that still *exists* is a
+        # real problem (planted symlink, foreign owner, unwritable) and is
+        # refused.
+        problem: str | None = None
+        for _attempt in range(_START_DIR_ATTEMPTS):
+            try:
+                os.makedirs(sock_dir, exist_ok=True)
+            except OSError as exc:
+                # /tmp is world-writable: a regular file (or an unreadable
+                # directory) squatting on the socket-directory name makes
+                # makedirs fail.  A start must fail as a proxy error instead
+                # of leaking a bare OSError (which wrap_claude_cmd would
+                # blame on the runtime) — the same treatment as an unusable
+                # lock file below.
                 raise PushProxyError(
                     f"could not create push proxy directory {sock_dir}: "
                     f"{exc}") from exc
-            _log.warning("Push proxy directory %s is unusable (%s); skipping",
-                         sock_dir, exc)
-            yield False
-            return
-        if not blocking:
-            break
-        problem = _sock_dir_start_problem(sock_dir)
-        if problem is None or os.path.lexists(sock_dir):
-            break
-        _log.info("Push proxy directory %s vanished during start; "
-                  "recreating", sock_dir)
-    if blocking and problem is not None:
-        # A symlink (or a foreign/unwritable directory) on the socket
-        # directory name would send the unlink/bind/metadata write into its
-        # target.  Refuse it as a proxy error, not a bare OSError.
-        raise PushProxyError(
-            f"push proxy directory {sock_dir} {problem}")
+            problem = _sock_dir_start_problem(sock_dir)
+            if problem is None or os.path.lexists(sock_dir):
+                break
+            _log.info("Push proxy directory %s vanished during start; "
+                      "recreating", sock_dir)
+        if problem is not None:
+            # A symlink (or a foreign/unwritable directory) on the socket
+            # directory name would send the unlink/bind/metadata write into
+            # its target.  Refuse it as a proxy error, not a bare OSError.
+            raise PushProxyError(
+                f"push proxy directory {sock_dir} {problem}")
     lock_path = os.path.realpath(sock_dir) + ".lock"
     flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
     for _attempt in range(_LOCK_ATTEMPTS):
@@ -1294,12 +1304,21 @@ def start_push_proxy(container_name: str, workdir: str,
     if shared:
         token = _workdir_token(workdir)
         key = _shared_proxy_key(session_tag, pr_id, token)
-        sock_dir = _shared_sock_dir(session_tag, pr_id, token)
+        # Pure path computation — nothing is created before the start lock.
+        sock_dir = _shared_sock_dir_path(session_tag, pr_id, token)
         sock_path = os.path.join(sock_dir, "push.sock")
 
         # Serialise check-and-spawn across processes: two containers on the
         # same workdir must not race unlink→bind and kill each other.
         with _start_lock(sock_dir):
+            # (Re)create the directory and its long-name discovery symlink
+            # under the lock.  ``_start_lock`` made the directory; a sweep
+            # that ran between the path computation above and this lock can
+            # have removed both, and that link is the only way a *later*
+            # process (empty in-process registry) finds a hashed directory
+            # to sweep — losing it would leak a live proxy past teardown.
+            sock_dir = _shared_sock_dir(session_tag, pr_id, token)
+            sock_path = os.path.join(sock_dir, "push.sock")
             # Reuse if an existing proxy is alive on this socket
             if os.path.exists(sock_path) and proxy_is_alive(sock_path):
                 meta = _read_metadata(sock_path)

@@ -966,3 +966,57 @@ Re-verified at HEAD: `/pm-captures/impl/post-fix/verify-proxy-key`
 passes with real subprocess daemons (distinct socket per workdir, the
 restarted impl proxy lands the new impl commit, QA stop leaves the impl
 socket directory intact).
+
+## Review iteration 21 refinements
+
+Twenty-first review pass (consistent with R6/R7; no requirement changed).
+Both fixes are the same class the earlier iterations kept closing: state a
+teardown creates or destroys around the start lock.
+
+- **A start recreates the discovery symlink under the lock.** `R2`'s
+  long-name symlink is the only way a *later* process (empty in-process
+  registry, i.e. after a TUI restart) finds a hashed socket directory to
+  sweep.  `start_push_proxy` created it in `_shared_sock_dir` *before*
+  taking `_start_lock`, so a `stop_session_proxies` sweep that removed the
+  hashed directory and its link in that window left a live proxy with no
+  link — the proxy then survived session teardown (the leak class
+  iterations 5, 12, 13, 14 and 20 fixed through other doors).  The start
+  now computes the path with the side-effect-free
+  `_shared_sock_dir_path` and calls `_shared_sock_dir` (which creates the
+  directory and the link) *inside* the start lock, so the sweep and the
+  start can no longer interleave there.  It also means a failed start no
+  longer leaves a link pointing at a directory the start refused.
+- **Teardown never creates the directory it is sweeping.** `_start_lock`
+  called `os.makedirs(sock_dir, exist_ok=True)` in *both* modes.  Every
+  teardown caller checks `isdir` first, so a sweep that removed the
+  directory between that check and the lock made the teardown recreate an
+  empty directory plus a lock file.  For a *shared* stop
+  (`remove_dir=False`, R6 keeps the directory for a container mount)
+  nothing removed them again until the next teardown, so the stop leaked
+  state it never found.  `blocking=False` now yields `False` when the
+  directory is gone instead of creating it; starts (`blocking=True`)
+  are unchanged.
+
+Tests: `test_start_restores_a_discovery_link_a_sweep_removed` (fails at
+621e4881: `os.path.islink(long_dir)` is False while the proxy is alive)
+and `test_shared_stop_does_not_resurrect_a_removed_dir` (fails at
+621e4881: the empty directory the sweep removed is recreated).
+`test_unusable_socket_dir_is_skipped_by_teardown`'s docstring was updated:
+teardown no longer calls `makedirs`, so a squatted name is simply "not a
+directory".
+
+Re-verified at HEAD: `/pm-captures/impl/post-fix/verify-proxy-key`
+passes (distinct socket per workdir, impl push lands its own commit, QA
+stop leaves the impl socket dir intact).  `tests/test_push_proxy.py` +
+`tests/test_container.py`: 237 passed.  Full suite: 3838 passed, 1
+skipped.
+
+Residual, unchanged and out of scope: in-process refcounts only
+(cross-process cleanup stays with #241/pr-ac12b47); one daemon per workdir
+(option (3), workdir-per-request, remains the cleaner long-term design);
+`proxy_is_alive` cannot distinguish a busy daemon from a dead one beyond
+the backlog of 16; the daemon serves one request at a time; a shared stop
+still leaves its `.lock` beside the kept directory until session teardown;
+a blocking start waits on the directory start lock without a deadline; the
+proxy socket is chmod 0o777 in world-writable `/tmp` (filed as
+pr-e618b9c).

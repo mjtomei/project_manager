@@ -769,9 +769,10 @@ class TestStartLock:
         """A non-directory squatting on the socket-dir name must not abort.
 
         ``/tmp`` is world-writable, so a planted regular file can occupy a
-        proxy directory name.  ``makedirs`` then fails; teardown must treat
-        that like "busy" and a start must report a PushProxyError, matching
-        the unusable-lock-file handling.
+        proxy directory name.  Teardown must treat that like "busy" (it
+        creates nothing, so the entry is simply not a directory) and a start
+        must report a PushProxyError, matching the unusable-lock-file
+        handling.
         """
         sock_dir = str(tmp_path / "squat-dir")
         Path(sock_dir).write_text("squatter\n")
@@ -1327,6 +1328,44 @@ class TestWorkdirKeyedProxies:
             push_proxy_mod._stop_shared_proxy_socket(key, sock_dir, sock)
             assert push_proxy_mod.proxy_is_alive(sock)
 
+    def test_shared_stop_does_not_resurrect_a_removed_dir(self, tmp_path):
+        """Teardown must not create the directory (and lock) it is sweeping.
+
+        ``_stop_shared_proxy_socket`` checks ``isdir`` and then takes the
+        start lock; ``_start_lock`` used to ``makedirs`` unconditionally, so
+        a sweep that removed the directory in that window made the stop
+        recreate an empty directory plus a lock file — state the stop did
+        not find, and which nothing removes again until the next teardown
+        (a shared stop deliberately keeps its directory).
+        """
+        sock_dir = str(tmp_path / "gone-dir")
+        os.makedirs(sock_dir)
+        real_lock = push_proxy_mod._start_lock
+
+        @contextlib.contextmanager
+        def sweep_before_lock(path, blocking=True):
+            # The caller's isdir check saw the directory; a sweep removes it
+            # just before the lock is taken.
+            shutil.rmtree(path, ignore_errors=True)
+            with real_lock(path, blocking=blocking) as locked:
+                yield locked
+
+        try:
+            with patch("pm_core.push_proxy._start_lock", sweep_before_lock):
+                push_proxy_mod._stop_shared_proxy_socket(
+                    "tag\0pr\0tok", sock_dir,
+                    os.path.join(sock_dir, "push.sock"))
+            assert not os.path.exists(sock_dir), (
+                "teardown recreated a proxy directory a sweep had removed")
+            assert not os.path.exists(os.path.realpath(sock_dir) + ".lock"), (
+                "teardown created a start lock for a directory it did not find")
+        finally:
+            shutil.rmtree(sock_dir, ignore_errors=True)
+            try:
+                os.unlink(os.path.realpath(sock_dir) + ".lock")
+            except OSError:
+                pass
+
     def test_shared_stop_does_not_follow_a_planted_symlinked_dir(
             self, tmp_path):
         """A symlink planted at the socket-dir name must not be followed.
@@ -1746,6 +1785,47 @@ class TestWorkdirKeyedProxies:
             assert not os.path.lexists(long_dir)
         finally:
             stop_push_proxy("our-c")
+
+    def test_start_restores_a_discovery_link_a_sweep_removed(
+            self, tmp_path, live_proxies):
+        """A sweep between the path lookup and the start lock must not win.
+
+        ``start_push_proxy`` used to create the long-name discovery symlink
+        *before* taking the start lock, so a ``stop_session_proxies`` sweep
+        that removed the hashed directory and its link in that window left a
+        live proxy with no link.  A later process with an empty in-process
+        registry finds a hashed directory only through that link, so the
+        proxy would survive session teardown.  Both are (re)created under
+        the lock now.
+        """
+        tag = "t" * 80
+        impl = self._workdir(tmp_path, "impl")
+        long_dir = self._long_link(tag, impl)
+        real_lock = push_proxy_mod._start_lock
+
+        @contextlib.contextmanager
+        def sweep_before_lock(sock_dir, blocking=True):
+            # Emulate a session sweep that ran after the path lookup and
+            # before the lock: the directory and its discovery link are gone.
+            shutil.rmtree(sock_dir, ignore_errors=True)
+            try:
+                os.unlink(long_dir)
+            except OSError:
+                pass
+            with real_lock(sock_dir, blocking=blocking) as locked:
+                yield locked
+
+        try:
+            with patch("pm_core.push_proxy._start_lock", sweep_before_lock):
+                sock = self._start("impl-wd", impl, tag=tag)
+            assert push_proxy_mod.proxy_is_alive(sock)
+            assert os.path.islink(long_dir), (
+                "live hashed proxy left with no discovery link; a "
+                "registry-less teardown can no longer find it")
+            assert (os.path.realpath(long_dir)
+                    == os.path.realpath(os.path.dirname(sock)))
+        finally:
+            stop_session_proxies(tag)
 
     def test_shared_sock_dir_keeps_a_foreign_squatted_file(self, tmp_path,
                                                            monkeypatch):
