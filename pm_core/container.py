@@ -2481,30 +2481,37 @@ def run_interactive_exec(name: str, cid: str, generation: str,
     They still need the same stale-allocation check before attaching.
     """
     os.environ["PM_CONTAINER_STATE_DIR"] = state_dir
+    # This helper normally runs in its own short-lived interpreter, but an
+    # in-process caller (tests, embedders) must not inherit the pinned runtime
+    # for the rest of the process.
     global _get_runtime
+    previous_runtime = _get_runtime
     _get_runtime = lambda: runtime
-    # Serialize attachment with cleanup; an old shell must not attach to a
-    # replacement. The child inherits the lock so killing this helper alone
-    # cannot make a still-running exec appear abandoned.
-    with contextlib.ExitStack() as stack:
-        activities = []
-        with launch_lock(name) as locked:
-            if not locked or not cid or current_container_id(name) != cid:
-                raise ContainerError(f"Container '{name}' changed before interactive attachment")
-            if cleanup_generation(name) != generation:
-                raise ContainerError(f"Container '{name}' was recovered before interactive attachment")
-            _conclude_launch_lease(name, cid)
-            if hold_activity != "0":
-                # Keep the legacy name lock for older readers, and an ID/domain
-                # lock so a runtime rename cannot hide an active foreground exec.
-                for key in (f"active-{name}", _activity_identity_key(cid)):
-                    path = _lock_path(key)
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    activity = stack.enter_context(path.open("a"))
-                    fcntl.flock(activity, fcntl.LOCK_SH)
-                    activities.append(activity)
-        inherited = tuple(activity.fileno() for activity in activities)
-        return subprocess.call(["bash", "-c", command], pass_fds=inherited)
+    try:
+        # Serialize attachment with cleanup; an old shell must not attach to a
+        # replacement. The child inherits the lock so killing this helper alone
+        # cannot make a still-running exec appear abandoned.
+        with contextlib.ExitStack() as stack:
+            activities = []
+            with launch_lock(name) as locked:
+                if not locked or not cid or current_container_id(name) != cid:
+                    raise ContainerError(f"Container '{name}' changed before interactive attachment")
+                if cleanup_generation(name) != generation:
+                    raise ContainerError(f"Container '{name}' was recovered before interactive attachment")
+                _conclude_launch_lease(name, cid)
+                if hold_activity != "0":
+                    # Keep the legacy name lock for older readers, and an ID/domain
+                    # lock so a runtime rename cannot hide an active foreground exec.
+                    for key in (f"active-{name}", _activity_identity_key(cid)):
+                        path = _lock_path(key)
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        activity = stack.enter_context(path.open("a"))
+                        fcntl.flock(activity, fcntl.LOCK_SH)
+                        activities.append(activity)
+            inherited = tuple(activity.fileno() for activity in activities)
+            return subprocess.call(["bash", "-c", command], pass_fds=inherited)
+    finally:
+        _get_runtime = previous_runtime
 
 
 def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
@@ -2573,12 +2580,17 @@ def release_on_exit(name: str, cid: str, generation: str, runtime: str,
     from pm_core import container_reaper
     os.environ["PM_CONTAINER_STATE_DIR"] = state_dir
     # This helper runs in its own short-lived interpreter; keep the runtime
-    # selected by the launcher even if global settings changed meanwhile.
+    # selected by the launcher even if global settings changed meanwhile, and
+    # restore it so an in-process caller does not keep the override.
     global _get_runtime
+    previous_runtime = _get_runtime
     _get_runtime = lambda: runtime
-    outcome = container_reaper.release_containers(
-        [name], owner_release=True, expected_ids={name: cid},
-        expected_generations={name: generation}, reason="pane-exit")
+    try:
+        outcome = container_reaper.release_containers(
+            [name], owner_release=True, expected_ids={name: cid},
+            expected_generations={name: generation}, reason="pane-exit")
+    finally:
+        _get_runtime = previous_runtime
     if outcome.error or outcome.failures or outcome.release_refused:
         _log.warning("Pane cleanup deferred for %s: %s %s", name,
                      outcome.summary(), outcome.release_refused)

@@ -663,6 +663,9 @@ COMMANDS
   pm container set <key> <val>   Configure container image, memory, cpu
   pm container build             Launch Claude to build project-specific image
   pm container cleanup           Remove stale pm containers
+  pm container reap [--dry-run]  Remove containers nothing owns any more
+  pm container retain <name>     Keep a container out of automatic cleanup
+  pm container restart <name>    Restart in place to clear PID/memory pressure
 
   pm bench models               List models on local inference backend
   pm bench exercises            List available benchmark exercises

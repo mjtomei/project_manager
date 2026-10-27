@@ -464,7 +464,9 @@ never authorize removal, so status lists it as a diagnostic, not as a
 retryable cleanup failure that `pm container reap` could clear.
 Reap prints its outcome/count summary even when no
 containers remain in scope. Explicit PR resource cleanup (`cleanup_pr_containers`,
-used by `pm pr cleanup --resources`) covers every kind for the PR; when the
+used by `pm pr cleanup --resources`) covers every kind for the PR — except
+`qa-debug`, whose foreground interactive session is left for the reaper to
+retire once its owner ends (R3: preserve a human's live session); when the
 caller has no pm session (the command run from a plain terminal) it matches
 every session tag rather than only untagged legacy names, so the PR's running
 containers are not left behind while the command reports success. Existing

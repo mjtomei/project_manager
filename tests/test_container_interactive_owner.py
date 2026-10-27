@@ -41,6 +41,38 @@ def test_interactive_exec_refuses_changed_allocation(monkeypatch, cid, generatio
     execute.assert_not_called()
 
 
+def test_helpers_restore_runtime_selection(monkeypatch):
+    """In-process callers must not keep the helper's pinned runtime.
+
+    Both helpers normally run in their own short-lived interpreter, but tests
+    and embedders call them in-process.  Leaving the module global overridden
+    would silently pin every later runtime probe in that process.
+    """
+    original = cm._get_runtime
+    monkeypatch.setattr(cm, "current_container_id", lambda _: "cid")
+    monkeypatch.setattr(cm, "cleanup_generation", lambda _: "generation")
+    monkeypatch.setattr(cm.subprocess, "call", lambda *a, **k: 0)
+    cm.run_interactive_exec("pm-debug", "cid", "generation",
+                            str(cm.container_state_dir()), "worker", "podman")
+    assert cm._get_runtime is original
+
+    monkeypatch.setattr(reaper, "release_containers",
+                        lambda *a, **k: reaper.Outcome())
+    cm.release_on_exit("pm-debug", "cid", "generation", "docker",
+                       str(cm.container_state_dir()))
+    assert cm._get_runtime is original
+
+
+def test_failed_interactive_exec_restores_runtime_selection(monkeypatch):
+    original = cm._get_runtime
+    monkeypatch.setattr(cm, "current_container_id", lambda _: "replacement")
+    monkeypatch.setattr(cm.subprocess, "call", Mock())
+    with pytest.raises(cm.ContainerError):
+        cm.run_interactive_exec("pm-debug", "cid", "generation",
+                                str(cm.container_state_dir()), "worker", "podman")
+    assert cm._get_runtime is original
+
+
 def test_failed_attachment_does_not_discard_reused_generation(monkeypatch):
     monkeypatch.setattr(cm, "current_container_id", lambda _: "cid")
     monkeypatch.setattr(cm, "cleanup_generation", lambda _: "new")
