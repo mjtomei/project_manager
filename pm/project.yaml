@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T21:26:49.094348+00:00'
+  updated_at: '2026-10-27T21:58:44.039560+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36572,6 +36572,41 @@ prs:
       the stuck failed entry and the loop produced PASS on its own. Captures: /pm-captures/scenarios/2/{story1-launch-retry,story4-manual-loop}.'
     created_at: '2026-10-27T21:26:49Z'
     last_edited: '2026-10-27T21:26:49Z'
+  - id: note-86585e6
+    text: 'QA scenario 3 refined (cancel during backoff): story 3 reshaped from "another
+      loop holds the launch lease" to the user cancel path `z d`, because a live other-loop
+      lease cannot be produced from one TUI (only native review loops claim review-loop;
+      a second TUI on the same session is refused; starting a second TUI sweeps the
+      lease). The claim-wait branch is covered by tests/test_review_launch_retry.py::test_cancellation_while_waiting_for_the_lease_is_killed
+      and remains the documented residual (other_owner stand-down -> non-retryable
+      LAUNCH_FAILED). Refined setup notes: local-backend scaffold needs `pm push`
+      + `git merge pm/sync-*` before `pm pr start` (else "not committed on master
+      yet"); the fake-claude stand-in and the broken podman/docker shim must be on
+      the TUI PATH at `pm session` time; backoff windows are 5 s then 10 s, so the
+      cancel must land in the 10 s window (poll `pm log grep "retrying in 10s"`).'
+    created_at: '2026-10-27T21:05:35Z'
+    last_edited: '2026-10-27T21:05:35Z'
+  - id: note-7436948
+    text: 'QA scenario 3 (cancel/supersede during the retry backoff) found and fixed
+      one issue: a loop the user cancelled during the backoff (z d, KILLED) kept its
+      earlier attempts'' retry evidence in the live status input, so `pm autostart
+      status --json` reported `review.verdict: "KILLED"` with `retryable: true`, `attempts:
+      2`, and a non-empty `error`/`artifact`. KILLED is never re-armed, so `retryable:
+      true` is wrong (the runtime_state mirror already drops these fields for every
+      non-LAUNCH_FAILED completion; `review_progress_input` special-cased only HOLD).
+      autostart_state.review_progress_input now drops the retry evidence once the
+      loop has stopped with a non-LAUNCH_FAILED outcome, while a loop still running
+      its retry episode (no verdict yet, or a re-armed LAUNCH_FAILED loop) keeps reporting
+      it, so the GIVEN backoff state is unchanged. Tests: test_autostart_status_does_not_report_a_cancelled_loop_as_retryable
+      + test_autostart_status_keeps_the_retry_evidence_while_the_retry_runs. Runtime
+      evidence: /pm-captures/scenarios/3/{story1-2,pre-fix,post-fix}. Note for future
+      runs: `z d` + `pm container disable` in one line races — the fresh review can
+      read the still-enabled container setting and fail; run the disable first (inside
+      the same backoff) if the fresh window matters. Also, auto-start targets are
+      TUI-process state and are lost when the TUI/session restarts (project.yaml keeps
+      no record), so re-add them after a restart.'
+    created_at: '2026-10-27T21:58:43Z'
+    last_edited: '2026-10-27T21:58:43Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

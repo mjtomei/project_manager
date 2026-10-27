@@ -728,18 +728,33 @@ def review_progress_input(state) -> dict:
     # matching the runtime_state mirror (`_on_complete_from_thread`).  The
     # artifact belongs to that failed attempt too, so a hold does not carry
     # one.
+    running = bool(getattr(state, "running", False))
     error = getattr(state, "last_launch_error", "") or ""
     artifact = getattr(state, "last_launch_artifact", "") or ""
+    retryable = bool(getattr(state, "launch_retryable", False))
     if verdict == "HOLD":
         error = getattr(state, "latest_output", "") or error
         artifact = ""
+        retryable = False
+    elif not running and verdict != "LAUNCH_FAILED":
+        # Only an exhausted launch retry (LAUNCH_FAILED) is retryable and
+        # re-armed by auto-start.  Once the loop has stopped with any other
+        # outcome — a user stop (KILLED), a verdict, an error — it must not
+        # keep the earlier attempts' retry evidence, or `pm autostart status`
+        # would report a cancelled loop as retryable.  A loop still running
+        # its retry episode (verdict not decided yet) keeps the evidence so
+        # the backoff is visible.  Matches the runtime_state mirror, which
+        # drops these fields for every non-LAUNCH_FAILED completion.
+        retryable = False
+        artifact = ""
+        error = ""
     return {
-        "running": bool(getattr(state, "running", False)),
+        "running": running,
         "iteration": getattr(state, "iteration", 0) or 0,
         "verdict": verdict,
         "input_required": bool(getattr(state, "input_required", False)),
         # Failed-launch retry evidence (LAUNCH_FAILED / HOLD outcomes).
-        "retryable": bool(getattr(state, "launch_retryable", False)),
+        "retryable": retryable,
         "attempts": int(getattr(state, "launch_attempts", 0) or 0),
         "error": error,
         "artifact": artifact,

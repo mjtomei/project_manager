@@ -1419,6 +1419,50 @@ def test_autostart_status_reports_the_hold_prompt_not_a_stale_launch_error():
     assert run["review"]["artifact"] == ""
 
 
+def test_autostart_status_keeps_the_retry_evidence_while_the_retry_runs():
+    """A loop sleeping out the backoff has no verdict yet; the retry episode
+    must stay visible in the status input (this is the stranding state the
+    retry exists to surface)."""
+    from pm_core import autostart_state as st
+    state = ReviewLoopState(
+        pr_id=PR, running=True, iteration=1, latest_verdict="",
+        launch_retryable=True, launch_attempts=2,
+        last_launch_error="container setup failed",
+        last_launch_artifact="/tmp/attempt2.log")
+    entry = st.review_progress_input(state)
+    assert entry["running"] is True
+    assert entry["retryable"] is True
+    assert entry["attempts"] == 2
+    assert entry["error"] == "container setup failed"
+    assert entry["artifact"] == "/tmp/attempt2.log"
+
+
+def test_autostart_status_does_not_report_a_cancelled_loop_as_retryable():
+    """A user stop during the retry backoff ends KILLED; auto-start never
+    re-arms it, so `pm autostart status` must not keep the earlier attempts'
+    retry evidence (a cancelled loop is not "retryable")."""
+    from pm_core import autostart_state as st
+    state = ReviewLoopState(
+        pr_id=PR, running=False, iteration=1,
+        latest_verdict=VERDICT_KILLED, launch_retryable=True,
+        launch_attempts=2, last_launch_error="container setup failed",
+        last_launch_artifact="/tmp/stale-attempt.log")
+    status = st.build_status({
+        "prs": [{"id": PR, "title": "T", "status": "in_review",
+                 "workdir": "/tmp/wd"}],
+        "targets": {PR: {}},
+        "enabled": True,
+        "review_loops": {PR: st.review_progress_input(state)},
+    })
+    run = next(r for r in status["runs"] if r["pr_id"] == PR)
+    assert run["state"] == "failed"
+    assert "review loop ended KILLED" in run["reason"]
+    assert run["review"]["verdict"] == VERDICT_KILLED
+    assert run["review"]["retryable"] is False
+    assert run["review"]["artifact"] == ""
+    assert run["review"]["error"] == ""
+
+
 # ---------------------------------------------------------------------------
 # Breadcrumb persistence of the retry episode
 # ---------------------------------------------------------------------------
