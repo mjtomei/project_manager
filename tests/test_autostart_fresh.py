@@ -452,6 +452,21 @@ class TestFreshStart:
         out = autostart_fresh.fresh_start(app, ["pr-a"])
         assert not out["ok"] and out["error"] == "not_later_stage"
 
+    def test_one_invalid_id_changes_nothing(self, project):
+        # Validation is all-or-nothing: a bad id in the set must not reset
+        # (or add a target for) the valid one.
+        data = store.load(project)
+        data["prs"].append(_pr("pr-b", status="merged",
+                               workdir=str(project.parent / "wd-b")))
+        store.save(data, project)
+        app = FakeApp(store.load(project)["prs"], project)
+        app._pane_idle_tracker = MagicMock()
+
+        out = autostart_fresh.fresh_start(app, ["pr-a", "pr-b"])
+        assert not out["ok"] and out["error"] == "terminal_pr"
+        assert store.get_pr(store.load(project), "pr-a")["status"] == "in_review"
+        assert not auto_start.get_targets(app)
+
     def test_new_target_policies_match_the_z_keys(self, project):
         app = self._app(project)
         with patch.object(autostart_fresh, "handoff_ready",
@@ -580,6 +595,7 @@ class _PrefixApp:
 
     def __init__(self, z):
         self._z_count = z
+        self._z_cancel_timer = None
         self._w_mode = False
         self._y_mode = False
         self._command_pending = False
@@ -592,6 +608,16 @@ class _PrefixApp:
 
     def _clear_prefix_hint(self):
         self.cleared += 1
+
+    def _stop_z_timer(self):
+        if self._z_cancel_timer:
+            self._z_cancel_timer.stop()
+            self._z_cancel_timer = None
+
+    def _cancel_z_mode(self):
+        if self._z_count:
+            self._z_count = 0
+            self._clear_prefix_hint()
 
     def log_message(self, *_a, **_k):
         return 0
@@ -628,6 +654,47 @@ class TestPrefixCancellation:
         ProjectManagerApp.on_key(app, _KeyEvent("A", "A"))
         assert app._z_count == 1
         assert app.cleared == 0
+
+    def test_every_z_consuming_key_keeps_the_prefix(self):
+        # Every binding whose action calls ``_consume_z()`` must keep the
+        # prefix.  Otherwise ``z e``/``z v``/``z c`` ... silently lose their
+        # "kill existing before next" behaviour.
+        from pm_core.tui.app import ProjectManagerApp
+        for key in ("s", "S", "d", "e", "v", "n", "L", "m", "H", "c",
+                    "t", "A", "O"):
+            app = _PrefixApp(z=1)
+            ProjectManagerApp.on_key(app, _KeyEvent(key, key))
+            assert app._z_count == 1, key
+            assert app.cleared == 0, key
+
+    def test_non_z_action_key_cancels_the_prefix(self):
+        # ``i`` (sign-off), ``Y`` (cleanup), ``g`` (merge) and ``p`` (plans)
+        # never consume z; they must not leave a stale prefix armed for a
+        # later destructive fresh-autostart key.
+        from pm_core.tui.app import ProjectManagerApp
+        for key in ("i", "Y", "g", "p"):
+            app = _PrefixApp(z=1)
+            ProjectManagerApp.on_key(app, _KeyEvent(key, key))
+            assert app._z_count == 0, key
+
+    def test_prefix_expires_after_the_chord_window(self):
+        # Navigation keys (j/k/arrows) are stopped by the focused widget
+        # before ``on_key`` sees them, so the key-set cancellation above
+        # cannot fire for them.  The prefix must expire on its own.
+        from pm_core.tui.app import ProjectManagerApp
+        app = _PrefixApp(z=1)
+        ProjectManagerApp._cancel_z_mode(app)
+        assert app._z_count == 0
+        assert app.cleared == 1
+
+    def test_pressing_z_arms_and_consuming_stops_the_timer(self):
+        from pm_core.tui.app import ProjectManagerApp
+        app = _PrefixApp(z=0)
+        ProjectManagerApp.on_key(app, _KeyEvent("z", "z"))
+        assert app._z_count == 1
+        assert app._z_cancel_timer is not None
+        assert ProjectManagerApp._consume_z(app) == 1
+        assert app._z_cancel_timer is None
 
 
 # ---------------------------------------------------------------------------

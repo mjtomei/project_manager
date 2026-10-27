@@ -62,10 +62,23 @@ def _record_log_message(app, msg: str, suppressed: bool) -> None:
     _log.info("log: %s%s", plain, " (hidden by sticky message)" if suppressed else "")
 
 
-# Keys that interpret the ``z`` prefix (``z d``/``z t``/``z s``/``z O``/``z A``).
-# Any other key press cancels a pending ``z`` so a stale prefix cannot turn a
-# later plain ``A``/``O`` into its destructive fresh-autostart variant.
-_Z_PREFIX_KEYS = frozenset({"d", "t", "s", "O", "A"})
+# Keys whose action consumes the ``z`` prefix — the "kill existing before
+# next" modifier (``z s``/``S`` start, ``z d`` review, ``z e``/``v`` plan
+# panes, ``z n``/``L``/``m``/``H``/``c`` views, ``z t`` QA, ``z O``/``z A``
+# auto-start).  Any other key press cancels a pending ``z`` so a stale
+# prefix cannot turn a later plain ``A``/``O`` into its destructive
+# fresh-autostart variant (or silently re-interpret another action).  The
+# set must stay in sync with the ``_consume_z()`` callers.
+_Z_PREFIX_KEYS = frozenset({
+    "s", "S", "d", "e", "v", "n", "L", "m", "H", "c", "t", "A", "O",
+})
+
+# A pending ``z`` only applies to the next chord key.  Navigation keys are
+# swallowed by the focused widget (the tech tree) before ``on_key`` sees
+# them, so the set above cannot cancel the prefix for ``z`` + j/k/arrows.
+# Expire it after a short window (the same 2 s the ``w``/``y`` prefixes use)
+# so a forgotten prefix cannot arm a later destructive key.
+_Z_PREFIX_TIMEOUT = 2.0
 
 
 class ProjectManagerApp(App):
@@ -210,13 +223,16 @@ class ProjectManagerApp(App):
         if len(self.screen_stack) > 1:
             return
         # A pending ``z`` prefix only applies to the *next* key when that key
-        # is one of the z-actions.  Without this, pressing ``z`` then
-        # navigating (``j``) leaves the count armed, so a later plain ``A``
-        # would run the destructive fresh autostart on the newly selected PR.
+        # is one of the z-actions.  Without this, pressing ``z`` then a
+        # non-z key leaves the count armed, so a later plain ``A`` would run
+        # the destructive fresh autostart on the newly selected PR.  (Keys
+        # the focused widget swallows — j/k/arrows — never reach here; the
+        # chord-window timer covers those.)
         key = event.character or event.key
         if (self._z_count and key != "z"
                 and key not in _Z_PREFIX_KEYS):
             self._z_count = 0
+            self._stop_z_timer()
             self._clear_prefix_hint()
         # Buffer keystrokes between / press and command bar gaining focus
         if self._command_pending:
@@ -293,6 +309,7 @@ class ProjectManagerApp(App):
                 # zzz → cancel (toggle off).  Only z and zz are valid prefixes;
                 # a third z resets.
                 self._z_count = 0
+                self._stop_z_timer()
                 self._clear_prefix_hint()
             else:
                 self._z_count += 1
@@ -302,10 +319,14 @@ class ProjectManagerApp(App):
                             "O=fresh-stop A=fresh-auto)[/]")
                 self._prefix_hint_seq = self.log_message(
                     f"[bold]{'z' * self._z_count} …[/]{hint}")
+                self._stop_z_timer()
+                self._z_cancel_timer = self.set_timer(
+                    _Z_PREFIX_TIMEOUT, self._cancel_z_mode)
             event.prevent_default()
             event.stop()
         elif event.key == "escape" and (self._z_count > 0 or self._w_mode or self._y_mode):
             self._z_count = 0
+            self._stop_z_timer()
             if self._w_mode:
                 self._w_mode = False
                 if self._w_cancel_timer:
@@ -383,6 +404,7 @@ class ProjectManagerApp(App):
         self._log_shown_seq: int = 0  # arrival number of the one on the line
         # z modifier key state (vim-style prefix, supports z/zz)
         self._z_count: int = 0
+        self._z_cancel_timer: Timer | None = None
         # Review loop state: dict of pr_id -> ReviewLoopState (supports multiple)
         self._review_loops: dict = {}
         self._review_loop_timer: Timer | None = None
@@ -449,7 +471,20 @@ class ProjectManagerApp(App):
         """
         count = self._z_count
         self._z_count = 0
+        self._stop_z_timer()
         return count
+
+    def _stop_z_timer(self) -> None:
+        """Cancel the z prefix's chord-window timer, if one is armed."""
+        if self._z_cancel_timer:
+            self._z_cancel_timer.stop()
+            self._z_cancel_timer = None
+
+    def _cancel_z_mode(self) -> None:
+        """Auto-cancel a pending z prefix after its chord window."""
+        if self._z_count:
+            self._z_count = 0
+            self._clear_prefix_hint()
 
     # --- Frame capture forwarder (called from ~15 sites) ---
 

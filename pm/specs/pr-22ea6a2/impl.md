@@ -338,6 +338,21 @@ Implemented as specified, with these refinements from the first review pass:
   Previously `z`, then navigation, then `A` would have run the fresh reset on
   the newly selected PR instead of a plain auto-merge toggle.
 
+## Review-iteration notes (i3)
+
+* **The z-prefix cancellation covers every z action, and expires on its
+  own** — the i2 set (`d`/`t`/`s`/`O`/`A`) omitted the other keys whose
+  handlers call `_consume_z()` (`S` start-with-companion, `e`/`v` plan
+  panes, `n`/`L`/`m`/`H`/`c` views).  `App.on_key` runs before a binding
+  action, so `z e`/`z v`/`z c` ... silently lost their "kill existing before
+  next" behaviour.  The set now matches the `_consume_z()` callers (and the
+  `check_action` shortcut list).  Navigation keys (`j`/`k`/arrows) are
+  stopped by the focused tech tree before `App.on_key` sees them, so the set
+  could never cancel a `z` followed by navigation; the prefix now also
+  expires after the same 2 s chord window the `w`/`y` prefixes use, which
+  closes that gap (a `z`, navigate, `A` chord typed inside 2 s still arms
+  the fresh variant — the same window `w`/`y` already accept).
+
 Known limitation (documented, not changed): removing the auto-start target
 while an attempt is still waiting does not clear the marker, so
 `resume_pending` re-adds the target after a plain TUI restart.  Re-remove it
