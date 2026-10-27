@@ -1705,6 +1705,36 @@ class TestPollLoopRouteGating:
         assert list(deferred) == [4]
         remove.assert_called_once_with(sc.container_name)
 
+    def test_stopped_refiner_route_wait_removes_its_container(self, tmp_path):
+        """QA stopped during an initial refiner launch's route wait (S101):
+        the container created for the gate's in-container check never ran
+        anything and the scenario has no window, so it is removed."""
+        from pm_core import qa_loop
+        sc = qa_loop.QAScenario(index=2, title="t", focus="f")
+        state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
+        state.scenarios = [sc]
+        created = []
+        with patch("pm_core.qa_loop._route_checker",
+                   return_value=lambda: _status(False)), \
+             patch("pm_core.qa_loop._route_mounts", return_value={}), \
+             patch("pm_core.container.load_container_config"), \
+             patch("pm_core.container.create_qa_container",
+                   side_effect=lambda **k: created.append(k["name"])), \
+             patch("pm_core.container.remove_container") as remove, \
+             patch("pm_core.qa_loop.create_scenario_workdir",
+                   return_value=(tmp_path / "repo", tmp_path / "scratch")), \
+             patch("pm_core.qa_loop._await_route", return_value=False), \
+             patch("pm_core.tmux.new_window_get_pane") as new_window:
+            qa_loop._launch_scenarios_in_containers(
+                state, {}, {"id": "pr-1"}, "sess", None, str(tmp_path))
+        new_window.assert_not_called()
+        assert len(created) == 1
+        remove.assert_called_once_with(created[0])
+        assert sc.container_name is None
+        assert (state.scenario_verdict_reasons[2]
+                == "stopped while waiting for the route")
+        assert 2 not in state.scenario_verdicts
+
     @pytest.mark.parametrize("mode", ["container", "tmux"])
     def test_worker_split_after_window_closed_is_not_a_launch(
             self, tmp_path, caplog, mode):

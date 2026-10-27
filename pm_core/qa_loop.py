@@ -3009,8 +3009,21 @@ def _launch_scenarios_in_containers(
 
         if not _route_gate(state, pr_data, data, scenario, "qa_concretize",
                            container_name=cname, deferred=_route_deferred):
-            _drop_deferred_launch(session, scenario, None, _route_deferred,
-                                  container_name=cname)
+            if _route_deferred is not None and scenario.index in _route_deferred:
+                _drop_deferred_launch(session, scenario, None, _route_deferred,
+                                      container_name=cname)
+            else:
+                # QA stopped during the initial launch's route wait: the
+                # container was created only for the gate's in-container
+                # check and nothing ever ran in it.  The scenario has no
+                # window either, so the stopped run must not leave it
+                # behind (S101).
+                try:
+                    container_mod.remove_container(cname)
+                except Exception:
+                    _log.warning("could not remove unused container %s",
+                                 cname, exc_info=True)
+                scenario.container_name = None
             return
 
         import uuid as _uuid
