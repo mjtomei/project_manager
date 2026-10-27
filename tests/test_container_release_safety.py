@@ -556,3 +556,28 @@ class TestReleaseMarkers:
         assert out.removed == []
         assert reaper.pending_releases() == {}
         assert list(d.iterdir())  # preserve corrupt evidence; never authorize deletion
+
+
+def test_legacy_container_pr_status_comes_from_its_session_project(tmp_path, monkeypatch):
+    """An unlabeled container's PR is looked up in its own session's project.
+
+    QA S37: ``pm session cleanup`` from a grouped session whose pane sat in
+    another project resolved the legacy container's PR against that cwd
+    project, so a merged PR's leftover was reported as "attempt ended".
+    """
+    from pm_core import paths
+    monkeypatch.setattr(paths.Path, "home", lambda: tmp_path / "home")
+    own = tmp_path / "own" / "pm"
+    other = tmp_path / "other" / "pm"
+    for root, status in ((own, "merged"), (other, "in_progress")):
+        root.mkdir(parents=True)
+        (root / "project.yaml").write_text(
+            f"project: {{name: x}}\nprs:\n- id: pr-1\n  status: {status}\n")
+    paths.set_session_pm_root("tagA", own)
+    monkeypatch.setattr(cm, "_current_project_root", lambda: str(other))
+    info = reaper._info_from("pm-tagA-signoff-pr-1", "cid", True, "running", {})
+    assert info.session_tag == "tagA" and info.pr_id == "pr-1"
+    assert reaper._PrStatus().status(info) == "merged"
+    # Without a recorded session root, the caller's project still applies.
+    info = reaper._info_from("pm-tagB-signoff-pr-1", "cid", True, "running", {})
+    assert reaper._PrStatus().status(info) == "in_progress"

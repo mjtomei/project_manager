@@ -54,7 +54,7 @@ def container_status():
                            f"'pm container restart {name}' clears it")
     # Persisted failures and pending releases remain useful even when the
     # runtime executable is unavailable. They must not disappear with metrics.
-    _echo_reaper_state()
+    _echo_reaper_state(runtime_ok)
 
     if enabled and not runtime_ok:
         click.echo(
@@ -63,14 +63,15 @@ def container_status():
         )
 
 
-def _echo_reaper_state() -> None:
+def _echo_reaper_state(runtime_ok: bool = True) -> None:
     from pm_core import container_reaper
     # Each helper below resolves the runtime identity with its own `info`
     # probe. One status invocation used to run that probe 4-5 times; reuse a
-    # single successful answer for the whole report. An unknown identity is
-    # not cached (``runtime_domain_scope`` only keeps successful probes), so a
-    # transient outage is still retried rather than reported as final.
-    with container_reaper.runtime_domain_scope():
+    # single successful answer for the whole report. When the availability
+    # probe already failed, report the identity as unknown without probing
+    # again: against a hung runtime every helper otherwise waited out its own
+    # timeout (about 50 s for one status).
+    with container_reaper.runtime_domain_scope(runtime_unavailable=not runtime_ok):
         state = container_reaper.last_state()
         if state.get("last_run"):
             import time as _time

@@ -86,17 +86,26 @@ def _retention_path(name: str, container_id: str = "") -> Path:
 
 # An immutable ContextVar value keeps nested calls in one lifecycle operation
 # cheap without sharing mutable caches across threads or retaining stale daemon
-# identities between operations. Unknown identities are deliberately not cached.
+# identities between operations. Unknown identities are deliberately not cached,
+# except in a scope opened after the runtime already failed (see below).
 _domain_cache = contextvars.ContextVar("container_runtime_domain", default=None)
+_UNKNOWN_DOMAIN = "runtime-unavailable"
 
 
 @contextlib.contextmanager
-def runtime_domain_scope():
-    """Reuse successful runtime identity probes only within this operation."""
+def runtime_domain_scope(*, runtime_unavailable: bool = False):
+    """Reuse successful runtime identity probes only within this operation.
+
+    *runtime_unavailable* is for read-only reports whose own availability
+    probe just failed: the identity is unknown for the whole operation, so the
+    helpers must not each wait out another probe timeout against a hung
+    runtime.  Never use it for an operation that may delete anything.
+    """
     if _domain_cache.get() is not None:
         yield
         return
-    token = _domain_cache.set((None, None))
+    token = _domain_cache.set(
+        (_UNKNOWN_DOMAIN, None) if runtime_unavailable else (None, None))
     try:
         yield
     finally:
@@ -108,6 +117,8 @@ def _runtime_domain() -> dict | None:
     cached = _domain_cache.get()
     if cached is None:
         return runtime_domain()
+    if cached[0] == _UNKNOWN_DOMAIN:
+        return None
     # Runtime selection and config/connection environment may change even in
     # a nested operation. Do not reuse another store's identity in that case.
     key = (container_mod._get_runtime(), os.getcwd(), tuple(sorted(os.environ.items())))
@@ -868,7 +879,22 @@ def _session_alive(tag: str, cache: _PaneCache) -> bool | None:
 class _PrStatus:
     def __init__(self) -> None:
         self._by_root: dict[str, dict[str, str]] = {}
+        self._by_session: dict[str, str] = {}
         self._current_root: str | None = None
+
+    def _session_root(self, tag: str) -> str:
+        """Project root recorded for session *tag* by `pm session`, or ""."""
+        if tag not in self._by_session:
+            root = ""
+            try:
+                from pm_core.paths import sessions_dir
+                recorded = (sessions_dir() / tag / "pm_root").read_text().strip()
+                if recorded and Path(recorded).exists():
+                    root = recorded
+            except (OSError, ValueError):
+                pass
+            self._by_session[tag] = root
+        return self._by_session[tag]
 
     def _load(self, root: str) -> dict[str, str]:
         if root not in self._by_root:
@@ -888,6 +914,11 @@ class _PrStatus:
         if not info.pr_id:
             return None
         root = info.project_root
+        if not root and info.session_tag:
+            # Unlabeled (legacy) containers name their session; its project,
+            # not the caller's cwd, records the PR (e.g. `pm session cleanup`
+            # from a grouped session whose pane sits in another project).
+            root = self._session_root(info.session_tag)
         if not root:
             if self._current_root is None:
                 self._current_root = container_mod._current_project_root()

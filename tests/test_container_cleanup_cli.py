@@ -165,3 +165,38 @@ def test_status_inventories_containers_once(monkeypatch):
     assert f"{name} at 1700/2048" in result.output
     assert len(listed) == 1, f"status listed containers {len(listed)} times"
     assert seen == [inventory]
+
+
+def test_status_does_not_reprobe_identity_after_runtime_failed(monkeypatch):
+    """A hung runtime costs status one availability timeout, not one per helper.
+
+    QA S37: with every runtime call hanging, ``pm container status`` took
+    about 50 s — the ``info`` availability probe plus four identity probes,
+    each waiting out its own 10 s timeout.  Once availability failed, the
+    saved diagnostics must be shown without probing the identity again.
+    """
+    from pm_core import push_proxy
+    monkeypatch.setattr(container_reaper, "_runtime_domain", _real_domain)
+    monkeypatch.setattr(container, "_get_runtime", lambda: "podman")
+    domain = {"runtime": "podman", "id": "status"}
+    monkeypatch.setattr(push_proxy, "runtime_domain", lambda: domain)
+    container_reaper._record(
+        container_reaper.Outcome(failures={"pm-tag-review-pr-001": "boom"}),
+        container_reaper.Scope(), "test")
+    container_reaper._record_release(
+        "pm-tag-review-pr-001", "cid-1", "gen-1", "test")
+    calls = []
+
+    def hung():
+        calls.append(1)
+        return None  # what a probe that timed out reports
+
+    monkeypatch.setattr(push_proxy, "runtime_domain", hung)
+    monkeypatch.setattr(container, "_runtime_available", lambda: False)
+
+    result = CliRunner().invoke(cli, ["container", "status"])
+    assert result.exit_code == 0, result.output
+    assert "Runtime available: no" in result.output
+    assert "runtime identity unavailable" in result.output
+    assert "boom" in result.output, "saved diagnostics must stay visible"
+    assert calls == [], f"status re-probed a failed runtime {len(calls)} times"
