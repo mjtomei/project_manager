@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T08:55:47.708284+00:00'
+  updated_at: '2026-10-27T09:10:04.740410+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36846,6 +36846,28 @@ prs:
       and bind to the merged HEAD. Report: $CAP/report.html, evidence in $CAP/signoff-i2/.'
     created_at: '2026-10-27T08:55:47Z'
     last_edited: '2026-10-27T08:55:47Z'
+  - id: note-5fa6ed2
+    text: 'impl 2026-10-27 #3: merged master@450a6362 into the branch as 363ec8b8
+      — NO code change. With this PR''s own code the metadata conflict resolves (pm/project.yaml
+      only, by record id): 1 record added from the PR (pr-a49bb25) + 7 from the base;
+      498 base + 1 branch = 499 PR records, none lost, no duplicate ids, every note
+      preserved (checked per-record against both parents); active_pr takes the base
+      value (pr-e102089). Recorded candidate tree fc4fbc2fbb39b28caa70a1dc82210f3372e90d24;
+      the merge commit''s tree is identical (git write-tree == candidate before commit).
+      pm pr signoff integrate --apply could not apply from this container (''no PR
+      workdir'': the state''s workdir is a host path), so the merge was done with
+      git and verified against the recorded candidate. The branch now contains master
+      (HEAD..origin/master == 0). Overlap pm_core/cli/pr.py auto-merged: the base''s
+      31 lines are the pr_start current_or_base_session message and the pr_qa_run_bg
+      runtime-state mirror, disjoint from this PR''s integration/sign-off code; both
+      behaviours verified present. Tests on the merged tree: 3973 passed, 1 skipped,
+      1 deselected (known hook-installer env failure) — evidence /pm-captures/impl-363ec8b8/.
+      EVIDENCE REUSE: review c70c (code cdb01c19) and QA 18-23 PASS at 25fb1918 still
+      cover this code — only pm/project.yaml and the QA spec changed since cdb01c19
+      — so no re-review/re-QA is warranted; the next sign-off only needs to refresh
+      and bind to the merged head (363ec8b8 plus this metadata note).'
+    created_at: '2026-10-27T09:10:04Z'
+    last_edited: '2026-10-27T09:10:04Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
