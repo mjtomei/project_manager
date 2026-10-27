@@ -481,6 +481,22 @@ class TestGetQueueStatus:
             status = get_queue_status()
             assert status["entries"] == []
 
+    def test_omits_entries_of_dead_owner(self, tmp_path):
+        """A SIGKILLed process's entries don't count as queue depth."""
+        with _patch_home(tmp_path):
+            enqueue("impl")
+            data = _load_queue()
+            data["entries"].append({
+                "id": "dead", "pid": 999999999, "container_type": "qa_scenario",
+                "status": "waiting", "enqueued_at": time.time(),
+                "heartbeat_at": time.time(),
+            })
+            _save_queue(data)
+            status = get_queue_status()
+            assert [e["container_type"] for e in status["entries"]] == ["impl"]
+            # Display only: the file is pruned by the next locked walk.
+            assert len(_load_queue()["entries"]) == 2
+
 
 # ---------------------------------------------------------------------------
 # Queue policy setting

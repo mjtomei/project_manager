@@ -656,5 +656,12 @@ def keepalive_during(entry_ids: set[str],
 
 
 def get_queue_status() -> dict:
-    """Read-only snapshot of the queue for status display (no lock)."""
-    return _load_queue()
+    """Read-only snapshot of the queue for status display (no lock).
+
+    Stale entries (dead owner, expired) are left out so a crashed
+    process's entries don't show as queue depth until some other pm
+    process takes the lock and prunes the file.
+    """
+    data = _load_queue()
+    data["entries"] = _clean_stale(data["entries"])
+    return data

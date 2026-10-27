@@ -22,7 +22,7 @@ INPUT_REQUIRED and do not approve this revision.
 - `stop-idle-impl|stop-idle-review|stop-idle-qa on|off`
 - `runtime docker|podman` (master's key, unchanged)
 
-`pm container status` shows the settings, committed usage (`used + expected growth / target`), host free/reserve, the reason when memory is unmeasurable, recently blocked launches, queue depth and stop-on-idle policy.
+`pm container status` shows the settings, committed usage (`used + expected growth / target`), host free/reserve, the reason when memory is unmeasurable, recently blocked launches, queue depth (excluding entries of dead/expired owners) and stop-on-idle policy.  Malformed `launch-queue.json` / `governor-blocked.json` entries are dropped, never a crash.
 
 Code: `pm_core/cli/container.py:container_set()`, `container_status()`.
 
@@ -36,6 +36,7 @@ host `MemAvailable − growth − in-flight − projection ≥ reserve`.
 - **Measurement failure refuses**: runtime stats failing, a pm container without a usage figure, unreadable `/proc/meminfo`, invalid target/scope/reserve, or a busy governor lock.  impl/review/signoff/qa-debug fail with a `ContainerError` naming the action and reason; QA scenarios show `waiting_memory` with the reason and retry.
 - No target configured → governor inactive, no queue entries, launches unchanged.
 - Reusing an already-running container needs no admission.
+- The QA planner, verifier and finalizer run on the host and the refiner execs into the already-admitted scenario container, so they create no containers and need no admission.
 
 Code: `pm_core/memory_governor.py:take_snapshot()`, `admit()`, `project_memory()`; `pm_core/launch_queue.py:try_acquire_detailed()`, `enqueue_and_try_acquire()`; `pm_core/container.py:acquire_launch_admission()` (called by `wrap_claude_cmd()` and `pm qa debug`).
 
@@ -60,8 +61,12 @@ Code: `pm_core/qa_loop.py:_admit_initial_batch()`, `_poll_tmux_verdicts()` (`_la
 Removes (not `docker stop`) the exact container of this session, on a background thread, capturing stats first and setting `remain-on-exit` on the session's panes:
 - QA (default on): after NEEDS_WORK, after verified PASS, after verification exhausts retries.  Never on INPUT_REQUIRED or while verification is in flight.
 - impl (default off): when the impl session goes idle.
-- review (default off): when a review loop ends with a non-INPUT_REQUIRED verdict, or a standalone review has a final verdict and goes idle.
+- review (default off): when a review loop ends with PASS, NEEDS_WORK or KILLED (pane gone), or a standalone review has a final verdict (PASS/LGTM/NEEDS_WORK) and goes idle.  Not on INPUT_REQUIRED or ERROR, and not when the loop was stopped or superseded.
+- `z d`/`zz d` and closing a review window are master lifecycle, not stop-on-idle: killing the window runs the exec EXIT trap (`rm -f`), which removes `review-<pr>` whatever the policy, and each fresh review (`pm pr review --fresh`, so every loop iteration) recreates it — the container ID changes.  The stale stop thread pins the container ID it first saw, so it never removes the replacement container under the same name (impl.md §0, review 3f45 i1/i2).
+- Kept also when the pane that went idle now runs a different Claude session than the one whose verdict/idle triggered the stop (window reused).
 - Kept when: another exec session is open in the container (someone attached), ownership can't be determined, or the transcript changed since the idle/verdict point.
+- Timing (QA): counted from the verdict the loop *records* in `qa_status.json`, not from when the pane prints it — the poll loop starts verdict polling only after every scenario launched plus the 30 s grace, then needs two stable polls.
+- Samples: every removal of a *running* pm container records an end-of-life sample — stop-on-idle, `pm container cleanup`, `pm pr cleanup --resources`, and the stale cleanup at the start of a fresh QA run (`z t`).  No re-baseline; expect one sample per running container removed.
 
 Code: `pm_core/container.py:stop_idle_in_background()`, `stop_container()`, `foreign_exec_sessions()`; callers in `qa_loop.py`, `review_loop.py`, `tui/review_loop_ui.py`.
 
@@ -79,6 +84,12 @@ Code: `pm_core/memory_governor.py:compute_memory_status()`, `format_memory_statu
 - Nested rootless Podman without cgroup delegation (pm dev containers) reports the enclosing cgroup for every inner container — usage sums overcount; prefer `system-memory-scope system` there, and note it in results.
 - To force a stats failure: run a pm-named container with `--cgroups=disabled` (`podman stats` then fails for all containers, rc=125).
 - Keep fixture pressure bounded: a few small containers (e.g. `alpine sleep`) and a low target are enough; do not launch large worker fan-outs.
+- Fail-closed display shows only in pm scope: in system scope a stats failure falls back to `<runtime> ps` and counts each running pm container at its full projection, so the bar stays measured.
+- Under nested podman every inner container reports the outer cgroup, so per-container growth shrinks for all N containers as outer usage rises; use generous margins for "exactly one launch per raise" checks.
+- Lock-busy refusals are not written to `governor-blocked.json` (recording needs the same lock); they show only in the error/log.
+- `pm qa debug` admission needs `nested_podman: true`, a committed repo, an instruction, and an image that exists locally (e.g. `docker.io/library/debian:bookworm-slim`); pre-build pm-dev with `pm container build-base` before TUI launches (300 s start timeout).
+- `pm container set system-memory-history-size -3` is parsed by click as an option; use `-- -3` to reach the validator.
+- fake-claude can't hold a review loop at INPUT_REQUIRED (pr-3c90e34); a standalone review or a QA scenario can.
 
 ## 3. Edge Cases
 
