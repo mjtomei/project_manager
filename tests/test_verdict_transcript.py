@@ -342,6 +342,21 @@ def test_turn_state_ignores_meta_user_records(tmp_path: Path) -> None:
     assert latest_turn_state(p) == "complete"
 
 
+def test_turn_state_ignores_bang_shell_records(tmp_path: Path) -> None:
+    # ``!`` shell commands are recorded as non-meta user records (input, then
+    # stdout/stderr).  The agent owes no reply, so a ``!ls`` left at the end of
+    # the transcript must not read as a pending turn (which would stall the
+    # fresh-autostart handoff until the user sends a real prompt).
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("done"),
+        _local_command_line("<bash-input>git status</bash-input>"),
+        _local_command_line("<bash-stdout>clean</bash-stdout>"
+                            "<bash-stderr></bash-stderr>"),
+    ])
+    assert latest_turn_state(p) == "complete"
+
+
 def test_turn_state_tool_use_block_is_in_progress(tmp_path: Path) -> None:
     p = _write(tmp_path, [_user_line("do it"), _assistant_tool_line()])
     assert latest_turn_state(p) == "in_progress"

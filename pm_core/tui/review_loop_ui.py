@@ -298,10 +298,22 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
     _log.info("review_loop_ui: loop complete for %s — verdict=%s iterations=%d",
               state.pr_id, state.latest_verdict, state.iteration)
 
+    from pm_core import runtime_state as _rs
+    if not _is_active_loop(state):
+        # We were superseded by a fresh loop; don't overwrite its 'running'
+        # entry with our terminal (often KILLED) verdict.  Do not finalize
+        # the transcripts either: the successor shares this run dir and
+        # reuses the ``review-<pr>-i<n>.jsonl`` names, so finalizing now
+        # could freeze the *new* loop's live transcript (replacing its
+        # symlink with a snapshot the verdict poller would never see
+        # updated).  The successor's own completion finalizes the whole
+        # run dir; the old JSONLs are untouched in the meantime.
+        _log.debug("review_loop_ui: skipping completion mirror for "
+                   "superseded loop_id=%s verdict=%s",
+                   state.loop_id, state.latest_verdict)
+        return
+
     # Finalize review transcript symlinks for this loop's iterations.
-    # Done before the supersede check because the transcripts are this
-    # loop's own work — they need finalizing whether or not we still
-    # own the runtime_state entry.
     tdir = getattr(state, '_transcript_dir', None)
     if tdir:
         from pathlib import Path
@@ -313,14 +325,6 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
                         and p.name.startswith(f"review-{state.pr_id}-")):
                     finalize_transcript(p)
 
-    from pm_core import runtime_state as _rs
-    if not _is_active_loop(state):
-        # We were superseded by a fresh loop; don't overwrite its
-        # 'running' entry with our terminal (often KILLED) verdict.
-        _log.debug("review_loop_ui: skipping completion mirror for "
-                   "superseded loop_id=%s verdict=%s",
-                   state.loop_id, state.latest_verdict)
-        return
     # ERROR/KILLED are runtime failures, not clean completions; record
     # them as state="failed" so the popup spinner can distinguish a
     # successful loop end from a failure and surface the verdict to the

@@ -706,10 +706,18 @@ def fresh_start(app, ids: list[str], policy: str | None = None,
             parts.append(f"{pr_id}: already waiting for its implementation "
                          f"turn")
     message = "Auto-start fresh: " + "; ".join(parts) if parts else confirm
+    # Partial failures (a PR that changed underneath the all-or-nothing
+    # validation) are not part of ``message`` — the CLI prints them as
+    # ``failed:`` lines, but the TUI key path only shows the log line, so
+    # name them here too.
+    log_message = message
+    if failed:
+        log_message += " — failed: " + ", ".join(
+            f"{f.get('pr_id')} ({f.get('error')})" for f in failed)
     try:
-        app.log_message(message, force=True, hold=CONFIRM_HOLD_SECONDS)
+        app.log_message(log_message, force=True, hold=CONFIRM_HOLD_SECONDS)
     except TypeError:
-        app.log_message(message)
+        app.log_message(log_message)
 
     result = {"ok": True, "changes": changes, "handoff": handoffs,
               "message": message}

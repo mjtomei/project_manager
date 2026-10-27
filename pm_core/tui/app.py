@@ -1149,6 +1149,32 @@ class ProjectManagerApp(App):
     def action_show_connect(self) -> None:
         pane_ops.show_connect(self)
 
+    def _fresh_autostart_from_key(self, policy: str | None, source: str,
+                                  no_selection: str) -> None:
+        """Run the ``z a``/``z O``/``z A`` fresh-autostart on the selection.
+
+        *policy* is None for ``z a`` (preserve an existing target's policy,
+        default a new target to stop-before-merge); ``z O``/``z A`` pass an
+        explicit policy.  Errors are logged, never raised into the key
+        handler.
+        """
+        from pm_core.tui import autostart_fresh
+        tree = self.query_one("#tech-tree", TechTree)
+        pr_id = tree.selected_pr_id
+        if not pr_id:
+            self.log_message(no_selection)
+            return
+        try:
+            result = autostart_fresh.fresh_start(
+                self, [pr_id], policy=policy, source=source)
+        except Exception as e:  # never let a key handler traceback
+            _log.exception("%s fresh autostart failed for %s", source, pr_id)
+            self.log_message(f"Auto-start fresh failed: {e}", force=True)
+            return
+        if not result.get("ok"):
+            self.log_message(
+                f"Auto-start: {result.get('message')}", force=True)
+
     def action_toggle_auto_start(self) -> None:
         # ``A`` toggles an auto-merge target (continuation from the current
         # phase); ``z A`` is the explicit fresh-autostart variant: a
@@ -1156,28 +1182,15 @@ class ProjectManagerApp(App):
         # live session, and waits for the current implementation turn before
         # one fresh review.
         z = self._consume_z()
-        tree = self.query_one("#tech-tree", TechTree)
-        pr_id = tree.selected_pr_id
         if z:
-            from pm_core.tui import autostart_fresh
             from pm_core.autostart_state import POLICY_AUTO
-            if not pr_id:
-                self.log_message(
-                    "No PR selected (z A = fresh autostart, auto-merge)")
-                return
-            try:
-                result = autostart_fresh.fresh_start(
-                    self, [pr_id], policy=POLICY_AUTO, source="key:zA")
-            except Exception as e:  # never let a key handler traceback
-                _log.exception("z A fresh autostart failed for %s", pr_id)
-                self.log_message(f"Auto-start fresh failed: {e}", force=True)
-                return
-            if not result.get("ok"):
-                self.log_message(
-                    f"Auto-start: {result.get('message')}", force=True)
+            self._fresh_autostart_from_key(
+                POLICY_AUTO, "key:zA",
+                "No PR selected (z A = fresh autostart, auto-merge)")
             return
+        tree = self.query_one("#tech-tree", TechTree)
         from pm_core.tui.auto_start import toggle
-        self.run_worker(toggle(self, selected_pr_id=pr_id))
+        self.run_worker(toggle(self, selected_pr_id=tree.selected_pr_id))
 
     def _auto_start_label(self) -> str:
         """Status-bar suffix: ``×N`` for several targets, ``all`` for backlog."""
@@ -1203,51 +1216,25 @@ class ProjectManagerApp(App):
             from pm_core.tui import auto_start as _auto_start
             _auto_start.open_runs_popup(self)
             return
-        tree = self.query_one("#tech-tree", TechTree)
-        pr_id = tree.selected_pr_id
-        if not pr_id:
-            self.log_message(
-                "No PR selected (z a = fresh autostart after feedback)")
-            return
-        from pm_core.tui import autostart_fresh
-        try:
-            result = autostart_fresh.fresh_start(
-                self, [pr_id], policy=None, source="key:za")
-        except Exception as e:  # never let a key handler traceback
-            _log.exception("z a fresh autostart failed for %s", pr_id)
-            self.log_message(f"Auto-start fresh failed: {e}", force=True)
-            return
-        if not result.get("ok"):
-            self.log_message(
-                f"Auto-start: {result.get('message')}", force=True)
+        self._fresh_autostart_from_key(
+            None, "key:za",
+            "No PR selected (z a = fresh autostart after feedback)")
 
     def action_auto_sequence_pr(self) -> None:
         # ``O`` arms a stop-before-merge auto-sequence target (continuation
         # from the current phase); ``z O`` is the explicit fresh-autostart
         # variant with the same stop-before-merge policy.
         z = self._consume_z()
+        if z:
+            from pm_core.autostart_state import POLICY_STOP
+            self._fresh_autostart_from_key(
+                POLICY_STOP, "key:zO",
+                "No PR selected (z O = fresh autostart, stop before merge)")
+            return
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
         if not pr_id:
-            if z:
-                self.log_message(
-                    "No PR selected (z O = fresh autostart, stop before merge)")
-            else:
-                self.log_message("No PR selected")
-            return
-        if z:
-            from pm_core.tui import autostart_fresh
-            from pm_core.autostart_state import POLICY_STOP
-            try:
-                result = autostart_fresh.fresh_start(
-                    self, [pr_id], policy=POLICY_STOP, source="key:zO")
-            except Exception as e:  # never let a key handler traceback
-                _log.exception("z O fresh autostart failed for %s", pr_id)
-                self.log_message(f"Auto-start fresh failed: {e}", force=True)
-                return
-            if not result.get("ok"):
-                self.log_message(
-                    f"Auto-start: {result.get('message')}", force=True)
+            self.log_message("No PR selected")
             return
         from pm_core.tui.auto_start import auto_sequence_for_pr
         self.run_worker(auto_sequence_for_pr(self, pr_id))

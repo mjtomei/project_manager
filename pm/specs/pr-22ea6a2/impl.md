@@ -465,3 +465,35 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   session id is how the event is found).  With no resolvable path nothing can
   advance; the scheduler's in-progress relaunch / the poll's pane re-adoption
   has to restore one first.  Docstring only; no behavior change.
+
+## Review-iteration notes (2aac i1)
+
+* **`!` shell-command records are not a pending turn** — Claude Code records
+  ``!`` commands as non-meta `type: "user"` string records
+  (`<bash-input>`, `<bash-stdout>`, `<bash-stderr>`, verified against real
+  transcripts).  `latest_turn_state` treated them as a submitted prompt, so a
+  `!git status` left at the end of the implementation transcript read as
+  `in_progress` and stalled the fresh handoff until the user sent a real
+  prompt.  Added to `_NON_PROMPT_USER_PREFIXES` with a direct test.
+* **A late old-loop completion can no longer freeze the new loop's
+  transcript** — `_on_complete_from_thread` finalized every
+  `review-<pr>-i<n>.jsonl` symlink in the (shared) run dir *before* the
+  supersede check.  A superseded loop can finish up to its 15 s verdict-poll
+  timeout after the reset, i.e. after the fresh loop has created its own
+  `review-<pr>-i1.jsonl` symlink — finalizing that would replace the live
+  symlink with a snapshot the new loop's verdict poller never sees updated,
+  so the fresh review could hang.  Finalization now happens only when the
+  loop still owns its `runtime_state` entry; superseded loops leave their
+  symlinks in place (the successor's completion and `_disable`'s
+  `_finalize_all_transcripts` still finalize them, and the JSONLs are never
+  deleted).  Pinned by two tests (superseded → no finalize; active →
+  finalize).
+* **Partial reset failures are visible in the TUI** — the CLI prints
+  `failed:` lines from the reply payload, but the key path only shows the
+  log line, which omitted them.  `fresh_start` now appends
+  `— failed: <id> (<error>)` to the logged message (the returned `message`
+  is unchanged, so the CLI output does not duplicate it).
+* **One key handler for the three fresh chords** — `z a`/`z O`/`z A` were
+  three near-identical 20-line blocks in `app.py`; they now call
+  `_fresh_autostart_from_key(policy, source, no_selection)`.  No behavior
+  change (the existing key-wiring tests still pin policy/source).

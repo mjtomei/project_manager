@@ -160,14 +160,15 @@ def latest_turn_state(transcript_path: str | Path | None) -> str:
     return "unknown"
 
 
-# Claude Code records slash commands, injected context and background-task
-# notifications as ``type: "user"`` entries.  They are not a submitted prompt
-# (the agent owes no reply), so they must not read as a pending turn —
-# otherwise a ``/model`` or a task notification left at the end of the
-# transcript would stall the handoff forever.
+# Claude Code records slash commands, ``!`` shell commands, injected context
+# and background-task notifications as ``type: "user"`` entries.  They are not
+# a submitted prompt (the agent owes no reply), so they must not read as a
+# pending turn — otherwise a ``/model``, a ``!ls`` or a task notification left
+# at the end of the transcript would stall the handoff forever.
 _NON_PROMPT_USER_PREFIXES = ("<local-command-", "<command-name>",
                              "<command-args>", "<command-message>",
-                             "<task-notification>")
+                             "<task-notification>", "<bash-input>",
+                             "<bash-stdout>", "<bash-stderr>")
 
 
 def _is_non_prompt_user_record(rec: dict) -> bool:

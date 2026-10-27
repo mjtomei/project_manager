@@ -576,6 +576,9 @@ class TestFreshStart:
         assert out["failed"][0]["error"] == "terminal_pr"
         assert store.get_pr(store.load(project), "pr-a")["status"] == "in_progress"
         assert auto_start.get_targets(app) == ["pr-a"]
+        # The TUI key path only shows the log line: the failure must be in it
+        # (the CLI additionally prints ``failed:`` lines from the payload).
+        assert any("failed: pr-b (terminal_pr)" in line for line in app.logs)
 
     def test_new_target_policies_match_the_z_keys(self, project):
         app = self._app(project)
@@ -682,6 +685,13 @@ class _KeyApp:
 
     def _consume_z(self):
         return self._z
+
+    def _fresh_autostart_from_key(self, *args, **kwargs):
+        # The bound action methods call this helper on ``self``; bind the real
+        # implementation to this duck-typed app.
+        from pm_core.tui.app import ProjectManagerApp
+        return ProjectManagerApp._fresh_autostart_from_key(
+            self, *args, **kwargs)
 
     def query_one(self, *_a, **_k):
         from types import SimpleNamespace
