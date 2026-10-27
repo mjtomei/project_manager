@@ -358,13 +358,17 @@ class PushProxy:
         # Each proxy serves exactly one workdir, so a request may only name
         # this proxy's own workdir.  Anything else is rejected explicitly:
         # a failed push must never silently run against another clone.
-        caller_workdir: str | None = request.get("workdir") or None
-        if caller_workdir is not None and not isinstance(caller_workdir, str):
+        # A non-string is always an error, including falsy ones like ``[]``
+        # or ``0`` — those must not slip through as "field absent".
+        raw_workdir = request.get("workdir")
+        if raw_workdir is not None and not isinstance(raw_workdir, str):
             conn.sendall((json.dumps(
                 {"exit_code": 1, "stdout": "",
                  "stderr": "git-proxy: 'workdir' must be a string\n"}) + "\n"
             ).encode())
             return
+        # An empty string is treated the same as an omitted field.
+        caller_workdir: str | None = raw_workdir or None
         if caller_workdir is not None:
             try:
                 matches = (os.path.realpath(caller_workdir)
@@ -667,6 +671,27 @@ _proxy_refs: dict[str, set[str]] = {}
 _container_to_proxy_key: dict[str, str] = {}
 
 
+def _add_proxy_ref(container_name: str, key: str) -> None:
+    """Record that *container_name* uses the proxy for *key*.
+
+    Caller must hold ``_proxy_lock``.  The ref set is *added to*, never
+    replaced: a respawned daemon must keep the other containers that share
+    the same workdir.  A container references only one proxy at a time, so
+    a previous reference under a different key is dropped rather than
+    pinned forever (the old daemon itself is left for session teardown,
+    like any other unreferenced proxy).
+    """
+    old = _container_to_proxy_key.get(container_name)
+    if old is not None and old != key:
+        old_refs = _proxy_refs.get(old)
+        if old_refs is not None:
+            old_refs.discard(container_name)
+            if not old_refs:
+                del _proxy_refs[old]
+    _proxy_refs.setdefault(key, set()).add(container_name)
+    _container_to_proxy_key[container_name] = key
+
+
 def _workdir_token(workdir: str) -> str:
     """Stable short token identifying a host workdir (symlinks normalised)."""
     real = os.path.realpath(workdir)
@@ -887,8 +912,7 @@ def start_push_proxy(container_name: str, workdir: str,
                             f"'{meta_branch}', not requested "
                             f"'{allowed_branch}'")
                 with _proxy_lock:
-                    _proxy_refs.setdefault(key, set()).add(container_name)
-                    _container_to_proxy_key[container_name] = key
+                    _add_proxy_ref(container_name, key)
                 _log.info("Reusing live shared push proxy for %s "
                           "(container %s)", key, container_name)
                 return sock_path
@@ -911,8 +935,9 @@ def start_push_proxy(container_name: str, workdir: str,
                     f"(workdir={workdir}, branch={allowed_branch})")
 
             with _proxy_lock:
-                _proxy_refs[key] = {container_name}
-                _container_to_proxy_key[container_name] = key
+                # Add, don't replace: other containers on this workdir keep
+                # their reference to the proxy we just respawned.
+                _add_proxy_ref(container_name, key)
 
             return sock_path
 
@@ -958,18 +983,50 @@ def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
 
     *lock_held* says the caller holds the directory's start lock, which
     makes clearing that lock file safe even though it is flocked.
+
+    Callers reach this with paths built from a key (safe) and from a glob
+    over ``/tmp`` (not safe): a planted ``/tmp/pm-push-proxy-…`` symlink
+    would otherwise make teardown unlink ``push.sock``/``proxy.json``
+    inside whatever directory it points at.  Only paths that resolve to a
+    proxy socket directory directly under the glob's parent are touched;
+    a foreign link is unlinked, its target is left alone.
     """
     sock_dir = str(Path(sock_path).parent)
+    parent = os.path.realpath(os.path.dirname(sock_dir))
     # Resolve the real directory if sock_dir is a symlink
     real_dir = os.path.realpath(sock_dir)
+    if not _is_proxy_dir(real_dir, parent):
+        _log.warning("Refusing to stop proxy through non-proxy directory "
+                     "%s -> %s", sock_dir, real_dir)
+        if os.path.islink(sock_dir):
+            try:
+                os.unlink(sock_dir)
+            except OSError:
+                pass
+        return
+    try:
+        if os.stat(real_dir).st_uid != os.getuid():
+            # /tmp is world-writable: anyone can plant a directory with a
+            # proxy-shaped name.  Leave it alone (its unlink would fail
+            # with EPERM and abort the whole teardown sweep).
+            _log.warning("Refusing to stop proxy in a directory owned by "
+                         "another user: %s", real_dir)
+            return
+    except OSError:
+        pass  # already gone — the unlinks below are no-ops
     try:
         os.unlink(sock_path)
     except FileNotFoundError:
         pass
+    except IsADirectoryError:
+        # Docker creates a *directory* at a bind-mounted socket path that
+        # did not exist (older pm versions mounted the socket file itself).
+        import shutil
+        shutil.rmtree(sock_path, ignore_errors=True)
     # Metadata describes the daemon we just stopped.
     try:
         os.unlink(os.path.join(real_dir, _METADATA_NAME))
-    except FileNotFoundError:
+    except OSError:
         pass
     if not remove_dir:
         return

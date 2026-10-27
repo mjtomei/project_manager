@@ -1100,6 +1100,8 @@ def wrap_claude_cmd(
         label, workdir, cname, session_tag, pr_id,
     )
 
+    from pm_core.push_proxy import PushProxyError
+
     try:
         create_container(
             name=cname,
@@ -1115,6 +1117,15 @@ def wrap_claude_cmd(
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
                    cname, exc_info=True)
         raise
+    except PushProxyError as exc:
+        # The proxy is what makes pushes work from inside the container;
+        # report the real reason instead of blaming the container runtime.
+        _log.error("Push proxy unavailable for container %s — aborting",
+                   cname, exc_info=True)
+        raise ContainerError(
+            f"Failed to create container '{cname}': push proxy unavailable "
+            f"— {exc}"
+        ) from exc
     except Exception as exc:
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
                    cname, exc_info=True)

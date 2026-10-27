@@ -294,6 +294,17 @@ class TestPushProxyProtocol:
         assert resp["exit_code"] == 1
         assert "must be a string" in resp["stderr"]
 
+    @pytest.mark.parametrize("bad", [[], 0, False])
+    def test_rejects_falsy_non_string_workdir(self, proxy, sock_path, bad):
+        """A falsy non-string must be rejected, not treated as 'absent'."""
+        resp = _send_request(sock_path, {
+            "cmd": "push",
+            "args": ["origin", "pm/pr-123-feature"],
+            "workdir": bad,
+        })
+        assert resp["exit_code"] == 1
+        assert "must be a string" in resp["stderr"]
+
     def test_invalid_json(self, proxy, sock_path):
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.connect(sock_path)
@@ -879,6 +890,38 @@ class TestWorkdirKeyedProxies:
         assert push_proxy_mod.proxy_is_alive(s_impl)
         assert push_proxy_mod.proxy_is_alive(s_qa2)
 
+    def test_respawn_keeps_other_containers_references(self, tmp_path,
+                                                       live_proxies):
+        """Respawning must not drop a sibling container's refcount.
+
+        Two containers share one workdir; the socket dies; the first one to
+        restart respawns the daemon.  Stopping *it* must not kill the proxy
+        the other container still uses.
+        """
+        impl = self._workdir(tmp_path, "impl")
+        sock = self._start("impl-a", impl)
+        assert self._start("impl-b", impl) == sock  # reuse, refs {a, b}
+
+        os.unlink(sock)  # daemon died
+        time.sleep(0.1)
+        assert self._start("impl-a", impl) == sock  # respawn
+
+        stop_push_proxy("impl-a")
+        assert push_proxy_mod.proxy_is_alive(sock), (
+            "impl-b still references this proxy")
+
+    def test_container_moving_workdir_drops_its_old_reference(
+            self, tmp_path, live_proxies):
+        """A container only ever pins one proxy key."""
+        first = self._workdir(tmp_path, "first")
+        second = self._workdir(tmp_path, "second")
+        self._start("mover", first)
+        self._start("mover", second)
+
+        old_key = push_proxy_mod._shared_proxy_key(
+            self.TAG, self.PR, push_proxy_mod._workdir_token(str(first)))
+        assert "mover" not in push_proxy_mod._proxy_refs.get(old_key, set())
+
     def test_restart_after_socket_death_does_not_disturb_other_workdir(
             self, tmp_path, live_proxies):
         impl = self._workdir(tmp_path, "impl")
@@ -1004,6 +1047,53 @@ class TestWorkdirKeyedProxies:
             assert Path(other, "keep.txt").exists()
         finally:
             shutil.rmtree(other, ignore_errors=True)
+
+    def test_kill_proxy_socket_refuses_a_foreign_symlink_target(self, tmp_path):
+        """stop_all/stop_session must not unlink inside a planted link target.
+
+        Those sweeps build their paths from a /tmp glob, so a symlink named
+        like a proxy dir must never make the teardown delete files inside
+        whatever directory it points at.
+        """
+        target = tmp_path / "victim"
+        target.mkdir()
+        (target / "push.sock").write_text("do not delete\n")
+        (target / "proxy.json").write_text("{}\n")
+        link = "/tmp/pm-push-proxy-killguard-evil"
+        os.symlink(str(target), link)
+        try:
+            push_proxy_mod._kill_proxy_socket(f"{link}/push.sock")
+            assert (target / "push.sock").exists()
+            assert (target / "proxy.json").exists()
+            assert not os.path.lexists(link)
+        finally:
+            if os.path.lexists(link):
+                os.unlink(link)
+
+    def test_kill_proxy_socket_refuses_a_dir_owned_by_another_user(
+            self, monkeypatch):
+        """Another user's proxy-shaped dir must not abort or be deleted."""
+        other = "/tmp/pm-push-proxy-killuid-evil"
+        os.makedirs(other, exist_ok=True)
+        Path(other, "push.sock").write_text("keep\n")
+        real_uid = os.getuid()  # capture before patching the module's os
+        monkeypatch.setattr("pm_core.push_proxy.os.getuid",
+                            lambda: real_uid + 1)
+        try:
+            push_proxy_mod._kill_proxy_socket(f"{other}/push.sock")
+            assert Path(other, "push.sock").exists()
+        finally:
+            shutil.rmtree(other, ignore_errors=True)
+
+    def test_kill_proxy_socket_removes_a_directory_at_the_socket_path(self):
+        """Docker leaves a directory where a bind-mounted socket should be."""
+        sock_dir = "/tmp/pm-push-proxy-dirguard-impl"
+        os.makedirs(os.path.join(sock_dir, "push.sock"), exist_ok=True)
+        try:
+            push_proxy_mod._kill_proxy_socket(f"{sock_dir}/push.sock")
+            assert not os.path.exists(sock_dir)
+        finally:
+            shutil.rmtree(sock_dir, ignore_errors=True)
 
     def test_start_raises_when_daemon_not_ready(self, tmp_path):
         from pm_core.push_proxy import PushProxyError

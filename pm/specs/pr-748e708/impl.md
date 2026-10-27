@@ -287,3 +287,38 @@ changed):
   exactly one spawn; with `_start_lock` stubbed out it observes three
   spawns (one of them failing to bind), so the assertion would catch a
   regression.
+
+## Review iteration 4 refinements
+
+Added during the fourth review pass (consistent with R3/R4/R6/R7; no
+requirement changed):
+
+- **Refcounts survive a respawn.** `start_push_proxy`'s spawn path used
+  `_proxy_refs[key] = {container_name}`, which *replaced* the set. If two
+  containers shared a workdir and the socket died, the first one to
+  restart dropped the other's reference, so stopping it later killed a
+  proxy the sibling container still used. Both paths now go through
+  `_add_proxy_ref()`, which adds to the set (and drops a stale reference
+  if the same container name is re-registered under a different key).
+- **R4 covers falsy non-strings.** `request.get("workdir") or None` turned
+  `[]`, `0` and `false` into "field absent" before the type check, so
+  they silently fell back to `self.workdir`. The type check now runs on
+  the raw value; only the empty string is still treated as absent.
+- **`_kill_proxy_socket` gets the teardown guards `_remove_proxy_dirs`
+  already had.** Its callers include `stop_all_proxies` /
+  `stop_session_proxies`, which build paths from a `/tmp` glob, so a
+  planted `/tmp/pm-push-proxy-…` symlink could make teardown unlink
+  `push.sock`/`proxy.json` inside an arbitrary directory. It now requires
+  the path to resolve to a proxy directory directly under the glob's
+  parent, and skips a directory owned by another user (whose unlink would
+  raise `EPERM` and abort the whole sweep).
+- **A proxy failure names the proxy.** `wrap_claude_cmd` caught
+  `PushProxyError` in its generic handler and re-raised
+  `ContainerError("… Is docker running?")`, hiding the real cause (R5's
+  "fail loudly"). It now reports `push proxy unavailable — <reason>`.
+- **Teardown survives a directory at the socket path.** `_kill_proxy_socket`
+  only caught `FileNotFoundError`, but docker creates a *directory* where a
+  bind-mounted socket file should be (older pm versions mounted the file
+  itself), which the start path already handled. A leftover of that shape
+  would have raised `IsADirectoryError` out of `stop_push_proxy` /
+  `stop_session_proxies` / `stop_all_proxies`; it is now removed instead.
