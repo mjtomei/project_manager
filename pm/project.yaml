@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-27T22:13:18.481198+00:00'
+  updated_at: '2026-10-27T22:39:46.500861+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14778,6 +14778,23 @@ prs:
       abort on "empty pidfile" after the 3 s grace if a TUI is stuck mid-claim.'
     created_at: '2026-10-27T22:13:18Z'
     last_edited: '2026-10-27T22:13:18Z'
+  - id: note-3044e1d
+    text: 'Review loop 1e74 i4 (2026-10-27): (a) _signal_tui now re-checks is_zombie
+      immediately before sending. A TUI that exits between validation and the signal
+      stays unreaped for a moment, and both os.kill and pidfd_send_signal "succeed"
+      against a zombie then discard the signal, so the previous code returned ok=True
+      for a delivery nothing could handle; "process is a zombie" is now a _STALE_SIGNAL_REASONS
+      entry, so submit_tui_command/trigger_tui_reload remove the pidfile and a queued
+      line is rolled back instead of being reported as sent. (b) _unqueue_line docstring
+      corrected: a *different* later line is never truncated, but two identical submissions
+      are indistinguishable by content (at most one copy is rolled back). Spec impl.md
+      E2 + tests 20/21 updated; two new tests (real zombie target via _signal_tui;
+      zombie-after-validation through submit_tui_command). Tests: 3864 passed, 1 skipped,
+      1 failed — tests/test_hook_events.py::test_installer_writes_standalone_receiver,
+      which also fails on origin/master (pre-existing, unrelated). No user-visible
+      message changes, so the QA expectations from i3 still hold.'
+    created_at: '2026-10-27T22:39:46Z'
+    last_edited: '2026-10-27T22:39:46Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
