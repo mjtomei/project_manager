@@ -988,7 +988,6 @@ class TestSafeDiscard:
 
     def test_removes_exact_id_under_name_lock(self, monkeypatch):
         import contextlib
-        from pm_core import push_proxy
         name = "pm-repo-ab12-review-pr-aaaa"
         held = []
         @contextlib.contextmanager
@@ -1003,16 +1002,16 @@ class TestSafeDiscard:
             assert held == [name]
             return []
         monkeypatch.setattr(reaper, "live_owner_panes", owners)
-        removed = []
-        def remove(identifier):
+        remove = MagicMock()
+        def _remove(*args, **kwargs):
             assert held == [name]
-            removed.append(identifier)
-        monkeypatch.setattr(cm, "remove_container", remove)
-        stopped = MagicMock()
-        monkeypatch.setattr(push_proxy, "stop_push_proxy", stopped)
+            remove(*args, **kwargs)
+        monkeypatch.setattr(cm, "remove_container", _remove)
         assert cm.discard_unowned_container(name)
-        assert removed == ["cid"]
-        stopped.assert_called_once_with(name)
+        # Removal pins the runtime operation to the captured id but keeps the
+        # real name as the push-proxy bookkeeping key; remove_container releases
+        # the shared proxy itself, so no second name-based stop is issued.
+        remove.assert_called_once_with(name, container_id="cid")
 
     def test_remove_failure_is_best_effort_and_keeps_proxy(self, monkeypatch):
         from pm_core import push_proxy
@@ -1331,6 +1330,7 @@ class TestReapCLI:
     def test_restart_refuses_live_owner(self, monkeypatch):
         from click.testing import CliRunner
         from pm_core.cli import cli
+        monkeypatch.setattr(cm, "current_container_id", lambda n: "cid1")
         monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: ["%4"])
         monkeypatch.setattr(cm, "pids_usage", lambda: {})
         restarted = []
@@ -1444,6 +1444,18 @@ class TestReapCLI:
         assert r.exit_code == 1 and "retry" in r.output
         assert restarted == []
 
+    def test_restart_reports_a_missing_container(self, monkeypatch):
+        """A confirmed-absent name is reported, not restarted by name."""
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        monkeypatch.setattr(cm, "current_container_id", lambda n: "")
+        monkeypatch.setattr(cm, "pids_usage", lambda: {})
+        restarted = []
+        monkeypatch.setattr(cm, "restart_container", lambda n, **kw: restarted.append(n))
+        r = CliRunner().invoke(cli, ["container", "restart", "pm-x-review-pr-1"])
+        assert r.exit_code == 1 and "No container named" in r.output
+        assert restarted == []
+
     def test_session_cleanup_scopes_to_current_tag(self, fake_env, monkeypatch):
         from click.testing import CliRunner
         from pm_core.cli import cli
@@ -1504,6 +1516,24 @@ class TestReapCLI:
         r = CliRunner().invoke(cli, ["container", "cleanup"])
         assert r.exit_code == 0, r.output
         assert removed == ["pm-a-impl-pr-1"]
+
+    def test_cleanup_pr_filter_matches_the_exact_id_token(self, monkeypatch):
+        """``--pr pr-ab`` must not remove ``pr-abc``'s containers.
+
+        The runtime's name filter is a substring match and names embed the PR
+        id, so a bare ``pr_id in name`` would also match a longer id that
+        merely starts with it.
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import cli
+        monkeypatch.setattr(cm, "_run_runtime", lambda *a, **k: _cp(
+            out="pm-a-impl-pr-ab\tUp\npm-a-impl-pr-abc\tUp\n"
+                "pm-a-qa-pr-ab-loop1-s1\tUp\npm-a-qa-pr-abc-loop1-s1\tUp\n"))
+        removed = []
+        monkeypatch.setattr(cm, "remove_container", lambda name, **kw: removed.append(name))
+        r = CliRunner().invoke(cli, ["container", "cleanup", "--pr", "pr-ab"])
+        assert r.exit_code == 0, r.output
+        assert sorted(removed) == ["pm-a-impl-pr-ab", "pm-a-qa-pr-ab-loop1-s1"]
 
 
 class TestListNamesPrefixGuard:
@@ -1589,3 +1619,37 @@ class TestLockFilePrune:
         assert paths["gone-new"].exists()  # a launch may still be starting
         assert paths["alive-old"].exists()
         assert held.exists()  # in use right now
+
+
+def test_list_names_returns_none_when_runtime_times_out(monkeypatch):
+    """``_list_names`` must report a failed runtime as None, not raise."""
+    def boom(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args, kwargs.get("timeout"))
+
+    monkeypatch.setattr(cm, "_run_runtime", boom)
+    assert cm._list_names("pm-") is None
+
+
+def test_file_lock_reopen_failure_fails_closed(monkeypatch, tmp_path):
+    """A lock file that vanishes/unwritable between flock and reopen must yield
+    False (do not proceed unlocked) instead of escaping as a raw OSError."""
+    monkeypatch.setenv("PM_CONTAINER_STATE_DIR", str(tmp_path))
+    calls = {"n": 0}
+    real_open = cm.os.open
+
+    def open_patch(path, flags, mode=0o777):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            fd = real_open(path, flags, mode)
+            # Simulate the reaper unlinking this stale lock file while we hold
+            # it, so the inode recheck reopens the recreated path.
+            try:
+                cm.os.unlink(path)
+            except OSError:
+                pass
+            return fd
+        raise OSError("ENOENT: lock dir removed")
+
+    monkeypatch.setattr(cm.os, "open", open_patch)
+    with cm._file_lock("reopen-race") as acquired:
+        assert acquired is False

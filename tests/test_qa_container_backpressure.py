@@ -214,7 +214,14 @@ def test_reclamp_grows_a_reduced_batch_back_to_the_desired_size(monkeypatch):
 
 def test_poll_reclamps_from_the_desired_batch_not_the_clamped_one(
         tmp_path, monkeypatch):
-    """The poll passes the run's original batch to the headroom clamp."""
+    """The poll re-clamps the total batch from the run's original size.
+
+    The run starts with ``concurrency_cap=1`` (an unreadable inventory clamps
+    to one) and ``desired_cap=3``. With one worker running the fresh headroom
+    is ``limit - running = 3`` more, so the total batch is the desired 3 and a
+    queued scenario launches. Re-clamping the already-clamped ``1`` could only
+    keep or lower it, so the run would stay serialized.
+    """
     from pm_core import container as container_mod
     state = qa_loop.QALoopState(pr_id="pr-aaaa")
     state.scenarios = [
@@ -232,11 +239,6 @@ def test_poll_reclamps_from_the_desired_batch_not_the_clamped_one(
         scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
 
     launch(state.scenarios[0])
-    seen = []
-
-    def reclamp(cap):
-        seen.append(cap)
-        return cap
 
     class ImmediateThread:
         def __init__(self, target, args, **kwargs):
@@ -246,7 +248,19 @@ def test_poll_reclamps_from_the_desired_batch_not_the_clamped_one(
             self.target(*self.args)
 
     monkeypatch.setattr(container_mod, "max_running_containers", lambda: 4)
-    monkeypatch.setattr(qa_loop, "_clamp_to_container_headroom", reclamp)
+    # The one running container is this run's active worker.
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 1)
+    # Spy on the re-clamp: the batch reaching the cap check must be recomputed
+    # from the desired size, not left at the start-time clamped value.
+    real_cap = qa_loop._container_headroom_cap
+    reclamps: list[tuple[int | None, int, int]] = []
+
+    def _spy(cap, desired=None, active=0):
+        result = real_cap(cap, desired=desired, active=active)
+        reclamps.append((desired, active, result))
+        return result
+
+    monkeypatch.setattr(qa_loop, "_container_headroom_cap", _spy)
     monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
     monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
     ticks = 0
@@ -276,9 +290,33 @@ def test_poll_reclamps_from_the_desired_batch_not_the_clamped_one(
         lambda: None, queued_scenarios=state.scenarios[1:],
         concurrency_cap=1, desired_cap=3, use_containers=True)
 
-    assert seen, "the poll must re-clamp with a fresh running count"
-    assert seen[0] == 3, "re-clamp must start from the desired batch, not the clamped one"
+    # concurrency_cap started at 1 (unreadable inventory), but the fresh
+    # headroom (limit 4, 1 running) makes the total batch 3, so the queued
+    # scenario launches instead of the run staying serialized.
     assert launched == [1, 2]
+    assert reclamps, "the poll must re-clamp with a fresh running count"
+    assert reclamps[0][0] == 3, "the re-clamp starts from the desired batch"
+    assert reclamps[0][2] == 3, "one active worker + 3 headroom = the desired batch"
+
+
+def test_reclamp_counts_this_runs_active_workers_as_headroom(monkeypatch):
+    """``container-max-running`` counts this run's workers, so the batch is
+    ``active + remaining headroom`` — not the headroom compared to ``active``.
+
+    Comparing ``active`` directly to the headroom would stall a capped run at
+    roughly half the configured concurrency.
+    """
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 4)
+    # Three running containers, all this run's active workers: one slot left.
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 3)
+    assert qa_loop._container_headroom_cap(1, desired=4, active=3) == 4
+    # A momentarily full runtime leaves no room to launch.
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 4)
+    assert qa_loop._container_headroom_cap(1, desired=4, active=2) == 2
+    # Unknown inventory still launches one at a time.
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: None)
+    assert qa_loop._container_headroom_cap(4, desired=4, active=2) == 1
 
 
 @pytest.mark.parametrize("verdict", ["PASS", "NEEDS_WORK", "INPUT_REQUIRED"])

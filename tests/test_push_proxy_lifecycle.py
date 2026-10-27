@@ -292,3 +292,98 @@ def test_capture_unshared_proxy_defers_an_unreadable_socket(monkeypatch, tmp_pat
                         lambda name: ("pm-x", path, "pm-x"))
     with pytest.raises(ContainerError, match="Cannot capture the mounted push proxy"):
         push_proxy.capture_unshared_proxy("pm-x")
+
+
+def test_unshared_proxy_in_use_treats_null_mounts_as_empty(monkeypatch):
+    """Podman renders a container with no mounts as ``null``, not ``[]``.
+
+    Failing on it would make every unshared-proxy cleanup retry fail forever
+    while such a (non-pm) container exists.
+    """
+    from pm_core import container as cm
+
+    def runtime(*args, **kwargs):
+        if args[0] == "ps":
+            return subprocess.CompletedProcess(args, 0, "abc123\n", "")
+        return subprocess.CompletedProcess(args, 0, "null\n", "")
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    assert push_proxy.unshared_proxy_in_use(
+        "/tmp/pm-push-proxy-x/push.sock") is False
+
+
+def test_release_captured_proxy_socket_error_is_a_container_error(monkeypatch):
+    """A socket/owner-file OSError after rm must be classified, not raw.
+
+    The container is already removed; the caller must report a retryable
+    cleanup failure (preserving the durable release record), not a failed
+    removal of a container that is gone.
+    """
+    from pm_core.container import ContainerError
+
+    monkeypatch.setattr(push_proxy, "_owner_domain_matches", lambda path: True)
+    monkeypatch.setattr(push_proxy, "unshared_proxy_in_use", lambda path: False)
+
+    def boom(*args, **kwargs):
+        raise OSError("EACCES")
+
+    monkeypatch.setattr(push_proxy, "_kill_proxy_socket", boom)
+    captured = ("pm-x", "/tmp/pm-push-proxy-pm-x/push.sock", (1, 2, 3), "pm-x")
+    with pytest.raises(ContainerError, match="Cannot release push proxy socket"):
+        push_proxy.release_captured_unshared_proxy(captured)
+
+
+def test_malformed_release_record_identity_is_ignored(monkeypatch, tmp_path):
+    """A non-integer captured identity is not consumed as a successful release.
+
+    The record is preserved (it names no allocation we could release) and no
+    retryable failure is recorded that no pass could ever clear.  The runtime
+    domain matches, so the identity check — not the domain gate — is what
+    rejects it.
+    """
+    from pm_core import container as cm, container_reaper
+
+    releases = tmp_path / "proxy-releases"
+    releases.mkdir()
+    record = releases / "identity.json"
+    record.write_text('{"proxy": ["pm-x", "/tmp/x/push.sock", '
+                      '["a", "b", "c"], "pm-x"], '
+                      '"runtime_domain": {"runtime": "podman"}}')
+    monkeypatch.setattr(cm, "container_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(container_reaper, "_runtime_domain",
+                        lambda: {"runtime": "podman"})
+
+    failures: dict[str, str] = {}
+    assert push_proxy.retry_unshared_releases(
+        container_reaper.Scope(), failures) == []
+    assert failures == {}
+    assert record.exists(), "an unparseable identity must not be dropped"
+
+
+def test_serve_loop_retires_socket_on_fatal_accept_error(tmp_path):
+    """A dead acceptor unlinks its socket so probes fail and a launch repairs it.
+
+    Leaving the bound socket in place would make ``proxy_is_alive`` keep
+    reporting a healthy proxy while every client hangs.
+    """
+    import errno
+    import os
+    import socket as _socket
+
+    sock_path = str(tmp_path / "push.sock")
+    proxy = push_proxy.PushProxy(sock_path, str(tmp_path), "branch")
+    server = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+    server.bind(sock_path)
+    try:
+        stat = os.stat(sock_path)
+        proxy._socket_identity = (stat.st_dev, stat.st_ino, stat.st_ctime_ns)
+
+        class Fatal:
+            def accept(self):
+                raise OSError(errno.EMFILE, "Too many open files")
+
+        proxy._server_socket = Fatal()
+        proxy._serve_loop()
+        assert not os.path.exists(sock_path)
+    finally:
+        server.close()

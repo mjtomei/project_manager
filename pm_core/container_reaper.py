@@ -391,6 +391,16 @@ def _prune_releases(out: "Outcome", scope: "Scope", since: float) -> None:
         # A filtered decision list cannot establish absence: the allocation
         # may have been renamed outside this scope. Use the unfiltered snapshot.
         absent = info is None and (out.inventory is not None or scope == Scope())
+        if absent:
+            # The label-first inventory cannot see an unlabeled allocation
+            # renamed to a non-pm name; confirm the captured ID is really gone
+            # before pruning its release. Unknown state preserves the record.
+            try:
+                remaining = container_mod.current_container_id(rec["id"])
+            except Exception:
+                remaining = None
+            if remaining != "":
+                continue
         stale = info is not None and (
             info.id != rec["id"] or
             allocation_generation(rec["name"], info.id) not in (None, rec["generation"]))

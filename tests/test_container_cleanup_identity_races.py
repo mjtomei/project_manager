@@ -68,3 +68,24 @@ def test_bulk_cleanup_checks_id_when_captured_name_disappears(monkeypatch, ident
         monkeypatch.setattr(cm, "current_container_id", lambda target: cid)
         assert cm.remove_containers([renamed]) == ([renamed], {})
         remove.assert_called_once_with(renamed, container_id=cid)
+
+
+def test_prune_preserves_release_for_renamed_unlabeled_allocation(monkeypatch):
+    """An unlabeled allocation renamed to a non-pm name is invisible to the
+    label-first inventory, but its captured ID still exists.
+
+    The pass must preserve the release (R2) rather than treat the vanished
+    name as proof of removal, and prune it only once the ID is really gone.
+    """
+    name, cid = "pm-impl-pr-abcdef0", "captured-id"
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: {"runtime": "podman"})
+    reaper._record_release(name, cid, "epoch", "test")
+
+    outcome = reaper.Outcome(inventory=[])  # full inventory: nothing visible
+    monkeypatch.setattr(cm, "current_container_id", lambda target: cid)
+    reaper._prune_releases(outcome, reaper.Scope(), float("inf"))
+    assert len(reaper._release_records()) == 1
+
+    monkeypatch.setattr(cm, "current_container_id", lambda target: "")
+    reaper._prune_releases(outcome, reaper.Scope(), float("inf"))
+    assert not reaper._release_records()

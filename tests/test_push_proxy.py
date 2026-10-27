@@ -303,6 +303,10 @@ class TestPushProxyLifecycle:
              patch("pm_core.push_proxy.proxy_is_alive", return_value=True), \
              patch("pm_core.push_proxy.os.path.exists", return_value=True):
             mock_popen.return_value = MagicMock(pid=12345)
+            # A live child: the readiness loop checks the child before the
+            # socket, so an unset poll() (a truthy MagicMock) would look like
+            # an exited child.
+            mock_popen.return_value.poll.return_value = None
             _start_proxy_subprocess(sock, "/workdir", "pm/pr-x")
 
         assert mock_popen.called

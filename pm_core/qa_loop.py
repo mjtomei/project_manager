@@ -2887,8 +2887,14 @@ def _poll_tmux_verdicts(
 
     released_indices: set[int] = set()
 
-    def _launch_next_queued():
-        """Release settled allocations before giving their slots to queued work."""
+    def _launch_next_queued() -> bool:
+        """Release settled allocations, then launch one queued scenario.
+
+        Returns True when a scenario was dequeued (a launch was attempted),
+        False when there was nothing to launch or the batch was full. The
+        fill loops stop on False so a full batch does not re-inventory once
+        per queued scenario.
+        """
         nonlocal concurrency_cap
         if use_containers:
             settled = [s for s in state.scenarios
@@ -2900,21 +2906,24 @@ def _poll_tmux_verdicts(
                     _notify()
                 released_indices.update(s.index for s in settled)
         if not _launch_queue or state.stop_requested:
-            return
+            return False
         # Count currently active (pending + verifying)
         active = len(pending) + len(verifying)
-        if concurrency_cap > 0 and active >= concurrency_cap:
-            return
         if use_containers:
-            # The batch was clamped at run start, when the running-container
-            # count may have been unreadable (an unknown inventory clamps to
-            # one). Re-clamp with a fresh count — from the run's desired batch,
-            # not the clamped value, which could only stay the same or shrink —
-            # so a degraded cap cannot serialize the rest of the run. The
+            # Re-clamp the *total* batch from the run's desired size with a
+            # fresh running count, before the cap check. The batch was clamped
+            # at run start, when the running-container count may have been
+            # unreadable (an unknown inventory clamps to one). Re-clamping the
+            # already-clamped value could only keep or lower it, so a degraded
+            # batch would serialize the rest of the run. ``active`` must be
+            # passed because ``container-max-running`` counts every running pm
+            # container — including this run's own workers — so the remaining
+            # headroom is *additional* capacity, not the total batch. The
             # default (unlimited) path performs no inventory.
-            concurrency_cap = _container_headroom_cap(concurrency_cap, desired_cap)
-            if concurrency_cap > 0 and active >= concurrency_cap:
-                return
+            concurrency_cap = _container_headroom_cap(
+                concurrency_cap, desired_cap, active=active)
+        if concurrency_cap > 0 and active >= concurrency_cap:
+            return False
         scenario = _launch_queue.pop(0)
         _queued_indices.discard(scenario.index)
         _log.info("Launching queued scenario %d (%s), %d remain in queue",
@@ -2935,11 +2944,19 @@ def _poll_tmux_verdicts(
                 )
         finally:
             state.scenarios = orig
+            # Persist the attempt immediately (even if the launch raises): the
+            # snapshot written at the top of the poll still lists this scenario
+            # as queued, so a crash between the dequeue and the next snapshot
+            # would relaunch an already-running worker on resume (and its live
+            # pane would make reuse fail, losing its verdict). The snapshot must
+            # contain only unattempted queued work.
+            _write_resume_file(state, use_containers, concurrency_cap,
+                               _queued_indices, desired_cap=desired_cap)
         if state.stop_requested:
             # Preparation can observe cancellation after dequeue. It created no
             # worker verdict; finalization must release any captured allocation
             # rather than keep it as a synthetic human-waiting session.
-            return
+            return False
         if scenario.window_name:
             pending.add(scenario.index)
         elif _is_launch_failure(state, scenario.index):
@@ -2957,13 +2974,15 @@ def _poll_tmux_verdicts(
                 scenario.index,
                 "worker window creation failed on dequeue; no verdict",
             )
+        return True
 
     # Fill any open slots that were freed by initial workdir failures.
     # Scenarios that fail workdir creation are marked INPUT_REQUIRED without
     # entering ``pending``, so their slots would otherwise stay empty until
     # a later verdict triggers ``_launch_next_queued``.
     for _ in range(len(_launch_queue)):
-        _launch_next_queued()  # returns immediately once cap is reached
+        if not _launch_next_queued():
+            break  # batch full or queue drained: stop before re-inventorying
 
     while (pending or verifying or _launch_queue) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
@@ -3288,7 +3307,8 @@ def _poll_tmux_verdicts(
         # Fill every free slot, including when a dequeued launch failed.
         # A failed launch has no pending worker to trigger the next dequeue.
         for _ in range(max(1, len(_launch_queue))):
-            _launch_next_queued()
+            if not _launch_next_queued():
+                break  # batch full or queue drained: stop before re-inventorying
 
         if verdicts_changed or completed_verifications:
             with verification_lock:
@@ -4364,8 +4384,9 @@ def _clamp_to_container_headroom(cap: int) -> int:
     return cap
 
 
-def _container_headroom_cap(cap: int, desired: int | None = None) -> int:
-    """Re-clamp the launch batch against a fresh running count.
+def _container_headroom_cap(cap: int, desired: int | None = None,
+                            active: int = 0) -> int:
+    """Re-clamp the run's *total* launch batch against a fresh running count.
 
     ``container-max-running`` is opt-in (0 = unlimited), so the default path
     performs no runtime inventory.  The verdict poll re-clamps before each
@@ -4374,11 +4395,34 @@ def _container_headroom_cap(cap: int, desired: int | None = None) -> int:
     *already clamped* value could only keep or lower it — the run would stay
     serialized long after the runtime recovered.  ``desired`` is therefore the
     run's original batch size; the clamp is recomputed from it each time.
+
+    The limit counts every running pm container, *including this run's own
+    ``active`` workers*.  The headroom is therefore additional capacity, so
+    the batch this run may run is ``active + headroom`` (capped by ``desired``)
+    — comparing ``active`` directly to the headroom would stall a capped run at
+    roughly half the configured concurrency.
     """
     from pm_core import container as container_mod
-    if container_mod.max_running_containers() <= 0:
-        return cap
-    return _clamp_to_container_headroom(cap if desired is None else desired)
+    limit = container_mod.max_running_containers()
+    if limit <= 0:
+        # No inventory: fall back to the run's desired batch (or the legacy
+        # already-clamped value when the caller predates ``desired``).
+        return cap if desired is None else (desired if desired > 0 else 0)
+    if desired is None:
+        # Legacy callers keep the old clamp semantics.
+        return _clamp_to_container_headroom(cap)
+    running = container_mod.running_container_count()
+    if running is None:
+        # An unreadable inventory is unknown, not zero running containers:
+        # launch one at a time and re-clamp on the next poll.
+        return 1
+    # ``active + headroom`` is additional capacity on top of this run's own
+    # workers. Keep it at least one: zero would encode "unlimited" and launch
+    # past a momentarily full runtime instead of waiting for a slot.
+    total = max(1, active + max(0, limit - running))
+    if desired > 0:
+        total = min(total, desired)
+    return total
 
 
 def _execute_and_finalize(
@@ -4460,6 +4504,17 @@ def _finalize_scenarios(
                         pm_root=pm_root)
 
     # --- Aggregate verdicts ---
+    # A stopped run can leave a PASS whose verification never finished (the
+    # poll exits on stop_requested even with verification threads in flight).
+    # Keeping PASS would report coverage the run never verified — the same
+    # false-PASS class the exhausted-relaunch branch rejects. Downgrade only
+    # when verification is enabled; otherwise a PASS is final.
+    if state.stop_requested and _is_verification_enabled():
+        for idx, verdict in list(state.scenario_verdicts.items()):
+            if verdict == VERDICT_PASS and idx not in state.verified_scenarios:
+                state.scenario_verdicts[idx] = VERDICT_INPUT_REQUIRED
+                state.scenario_verdict_reasons.setdefault(
+                    idx, "PASS was not verified before the run was stopped")
     verdicts = list(state.scenario_verdicts.values())
     # A stopped run can leave scenarios without a verdict; never call
     # that coverage PASS.
@@ -4502,6 +4557,10 @@ def _finalize_scenarios(
         # it blocked at the same trust prompt as the planner).
         _log.warning("QA finalize: skipped for %s — no scenarios ran",
                      state.pr_id)
+    elif state.stop_requested:
+        # Its poll aborts on the first stop check, so splitting the pane would
+        # only leave an abandoned Claude session behind.
+        _log.info("QA finalize: skipped for %s — run was stopped", state.pr_id)
     else:
         try:
             state.finalize_verdict = _run_qa_finalize_pane(

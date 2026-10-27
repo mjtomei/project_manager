@@ -48,7 +48,9 @@ def test_fresh_relaunch_discards_attached_predecessor(launched, monkeypatch):
     remove = Mock(return_value=True)
     monkeypatch.setattr(cm, "remove_container", remove)
     assert cm.discard_unowned_container(NAME)
-    remove.assert_called_once_with(CID)
+    # The runtime operation is pinned to the captured id, but the real name is
+    # kept as the push-proxy bookkeeping key (an id cannot derive a shared key).
+    remove.assert_called_once_with(NAME, container_id=CID)
 
 
 def test_fresh_relaunch_creates_after_attached_predecessor(launched, monkeypatch):

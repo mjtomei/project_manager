@@ -28,6 +28,7 @@ Legacy requests without ``cmd`` are treated as push (backward compat).
 """
 
 import contextlib
+import errno
 import hashlib
 import json
 import os
@@ -200,6 +201,30 @@ class PushProxy:
                     pass
         _log.info("Push proxy stopped: %s", self.socket_path)
 
+    def _retire_socket(self) -> None:
+        """Unlink this daemon's published socket so a repair can replace it.
+
+        Used when the acceptor can no longer serve (e.g. ``EMFILE``): leaving
+        the bound socket in place would make ``proxy_is_alive`` keep reporting
+        a healthy proxy while every client hangs on ``recv``.  Best effort —
+        this runs on the daemon thread, so an unavailable lifecycle lock must
+        not escape and kill it with a traceback.
+        """
+        try:
+            with _socket_lifecycle_lock(self.socket_path):
+                if not self.owns_socket():
+                    return  # a replacement already published its own socket
+                try:
+                    os.unlink(self.socket_path)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    _log.warning("Push proxy could not retire %s",
+                                 self.socket_path, exc_info=True)
+        except Exception:
+            _log.warning("Push proxy could not retire %s: lifecycle lock "
+                         "unavailable", self.socket_path, exc_info=True)
+
     def _serve_loop(self) -> None:
         """Accept connections and handle push requests."""
         while not self._stop.is_set():
@@ -213,7 +238,19 @@ class PushProxy:
                 conn, _ = self._server_socket.accept()
             except socket.timeout:
                 continue
-            except OSError:
+            except OSError as exc:
+                if self._stop.is_set():
+                    break
+                if exc.errno == errno.ECONNABORTED:
+                    # A client aborted between poll and accept: recoverable.
+                    continue
+                # The acceptor can no longer serve (EMFILE/ENFILE/EBADF/...).
+                # Retire the socket so readiness probes fail and the next
+                # launch repairs it, instead of leaving a bound-but-dead
+                # socket that reports healthy and hangs every client.
+                _log.warning("Push proxy acceptor failed at %s: %s; retiring",
+                             self.socket_path, exc)
+                self._retire_socket()
                 break
 
             try:
@@ -620,13 +657,16 @@ def _start_proxy_subprocess(sock_path: str, workdir: str,
         # exited cannot publish anything, so fail immediately with its status.
         deadline = time.monotonic() + 3.0
         while time.monotonic() < deadline:
-            if os.path.exists(sock_path) and proxy_is_alive(sock_path):
-                break
+            # Check the child before the socket: a stale socket at the path
+            # (repair path) could still answer while the freshly spawned child
+            # already exited without publishing.
             if proc.poll() is not None:
                 from pm_core.container import ContainerError
                 raise ContainerError(
                     f"Push proxy subprocess (pid={proc.pid}) exited "
                     f"(rc={proc.returncode}) before publishing {sock_path}")
+            if os.path.exists(sock_path) and proxy_is_alive(sock_path):
+                break
             time.sleep(0.1)
         else:
             from pm_core.container import ContainerError
@@ -1199,7 +1239,9 @@ def retry_unshared_releases(scope, failures: dict[str, str]) -> list[str]:
         original, path, identity, current = proxy
         if not (isinstance(original, str) and isinstance(path, str)
                 and isinstance(current, str)
-                and isinstance(identity, (list, tuple)) and len(identity) == 3):
+                and isinstance(identity, (list, tuple)) and len(identity) == 3
+                and all(isinstance(part, int) and not isinstance(part, bool)
+                        for part in identity)):
             _log.warning("ignoring malformed push-proxy release record %s", record)
             continue
         try:
@@ -1271,6 +1313,12 @@ def unshared_proxy_in_use(path: str) -> bool:
     try:
         for row in rows:
             mounts = json.loads(row)
+            if mounts is None:
+                # Go renders a container with no explicit mounts as ``null``
+                # (Podman), not ``[]``. Treat it as empty rather than failing
+                # the whole inventory — one such container would otherwise make
+                # every unshared-proxy cleanup retry fail permanently.
+                continue
             if not isinstance(mounts, list):
                 raise ValueError("invalid mounts")
             if any(os.path.realpath(mount.get("Source", "")) == directory
@@ -1288,12 +1336,24 @@ def release_captured_unshared_proxy(
     original_name, path, identity, current_name = proxy
     if not _owner_domain_matches(str(Path(path).parent)):
         return False
+
+    def _kill() -> None:
+        # The container was already removed, so a socket/owner-file failure
+        # must stay a classified, retryable cleanup error (the durable release
+        # record is preserved) rather than escape as a raw OSError that the
+        # caller would report as a failed removal of a container that is gone.
+        try:
+            _kill_proxy_socket(path, expected_identity=identity)
+        except OSError as exc:
+            raise cm.ContainerError(
+                f"Cannot release push proxy socket at {path}: {exc}") from exc
+
     if original_name == current_name:
         # The caller already holds this allocation's launch lock. Its socket
         # may nevertheless remain mounted by a previously renamed allocation.
         if unshared_proxy_in_use(path):
             return False
-        _kill_proxy_socket(path, expected_identity=identity)
+        _kill()
         return True
     # Rename gives the old pathname a second potential owner. Serialize with
     # launch of the original name, and do not trust a socket captured after a
@@ -1311,7 +1371,7 @@ def release_captured_unshared_proxy(
         # directory still has users, including any original-name replacement.
         if unshared_proxy_in_use(path):
             return False
-        _kill_proxy_socket(path, expected_identity=identity)
+        _kill()
         return True
 
 

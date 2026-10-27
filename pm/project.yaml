@@ -13965,6 +13965,24 @@ prs:
       skipped.'
     created_at: '2026-10-27T09:25:54Z'
     last_edited: '2026-10-27T09:26:24Z'
+  - id: note-post-oom-resume-20261027
+    text: 'User explicitly authorized resuming #241 after an out-of-memory host restart
+      and cleanup of old containers. The existing workdir has eleven modified source/test
+      files and untracked verify-s22-followup.md from interrupted reviewer75b8i8 (SIDa5c45a9e-4aaf-41fd-985a-e2af8eb4b5bc).
+      They are unfinished review work, not arbitrary dirt: preserve, inspect, finish
+      and validate them before committing/pushing. Full original reviewer transcript
+      and pre-resume diff are available under /pm-captures/post-oom-restart-20261027/.
+      Latest committed head66c93baf; do not discard local edits or repeat completed
+      fixes blindly. Historical QA d42809cf ended NEEDS_WORK/FINALIZE_DONE; genuine
+      INPUT_REQUIRED prerequisites remain unwaived. A7 rename scope was answered by
+      user already; no re-asking. Keep real lifecycle/live-owner/PID1-zombie/rename-permission
+      retry/retained fixture requirements. #161 memory governor now runs separately
+      as the prerequisite before broad work resumes; coordinate shared cleanup/admission
+      ownership and avoid undoing it. DeepSeek1017/high all development/review/QA/helpers;
+      work Opus5.5/high signoff. Manual wait_for_merge, spec-reviewOFF. No unrelated
+      PRs or broad host pressure tests.'
+    created_at: '2026-10-27T14:23:00.488199+00:00'
+    last_edited: '2026-10-27T14:23:00.488199+00:00'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

@@ -369,7 +369,10 @@ def container_cleanup(pr_id: str | None):
         # The name filter matches substrings — never touch e.g. "npm-cache".
         if not name.startswith(CONTAINER_PREFIX):
             continue
-        if pr_id and pr_id not in name:
+        # Match the exact PR-id token, not a substring: ``--pr pr-ab`` must not
+        # remove ``pr-abc``'s containers. Names embed ``-<pr_id>-`` or end with
+        # ``-<pr_id>``.
+        if pr_id and not (f"-{pr_id}-" in name or name.endswith(f"-{pr_id}")):
             continue
         click.echo(f"  Removing: {name} ({status})")
         names.append(name)
@@ -502,10 +505,27 @@ def container_restart(name: str, force: bool):
         if not locked:
             click.echo(f"{name} is being launched right now; try again.", err=True)
             raise SystemExit(1)
+        # Pin the allocation the ownership check inspects: an external runtime
+        # client can replace/rename the name without taking PM's launch lock,
+        # and restart must not act on a container it never ownership-checked.
+        try:
+            target_id = container_mod.current_container_id(name)
+        except OSError as e:
+            click.echo(f"Cannot verify {name} before restart: {e}", err=True)
+            raise SystemExit(1)
+        if target_id is None:
+            click.echo(f"Cannot verify {name} before restart; retry once the "
+                       f"runtime is responsive.", err=True)
+            raise SystemExit(1)
+        if not target_id:
+            click.echo(f"No container named {name} to restart.", err=True)
+            raise SystemExit(1)
         # A launch may have attached its pane while we waited for the lock.
         try:
-            owners = [] if force else container_reaper.live_owner_panes(name)
-            if not force and container_mod.recent_launch(name, container_reaper.LAUNCH_GRACE):
+            owners = ([] if force
+                      else container_reaper.live_owner_panes(name, target_id))
+            if not force and container_mod.recent_launch(
+                    name, container_reaper.LAUNCH_GRACE, target_id):
                 click.echo(f"{name} is awaiting attachment; retry after its launch lease "
                            "expires, or use --force only when it is safe to end the session.", err=True)
                 raise SystemExit(1)
@@ -518,19 +538,8 @@ def container_restart(name: str, force: bool):
                        f"restarting would end that session. Re-run with --force "
                        f"once it is safe.", err=True)
             raise SystemExit(1)
-        # Pin the allocation the ownership check just saw: an external runtime
-        # client can replace the name without taking PM's launch lock.
         try:
-            target_id = container_mod.current_container_id(name)
-        except OSError as e:
-            click.echo(f"Cannot verify {name} before restart: {e}", err=True)
-            raise SystemExit(1)
-        if target_id is None:
-            click.echo(f"Cannot verify {name} before restart; retry once the "
-                       f"runtime is responsive.", err=True)
-            raise SystemExit(1)
-        try:
-            container_mod.restart_container(name, container_id=target_id or None)
+            container_mod.restart_container(name, container_id=target_id)
         except container_mod.ContainerLaunchError as e:
             if e.kind != "incomplete":
                 click.echo(str(e), err=True)

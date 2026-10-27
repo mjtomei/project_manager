@@ -15,7 +15,8 @@ def test_restart_respects_pending_attachment(monkeypatch, force):
     name = "pm-review-pr-1234"
     cm._renew_launch(name)
     monkeypatch.setattr(cm, "pids_usage", lambda: {})
-    monkeypatch.setattr(reaper, "live_owner_panes", lambda _: [])
+    monkeypatch.setattr(cm, "current_container_id", lambda _: "cid1")
+    monkeypatch.setattr(reaper, "live_owner_panes", lambda *a, **kw: [])
     restart = Mock()
     monkeypatch.setattr(cm, "restart_container", restart)
     result = CliRunner().invoke(cli, ["container", "restart", name] + (["--force"] if force else []))

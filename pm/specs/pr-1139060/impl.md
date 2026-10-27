@@ -446,7 +446,12 @@ scenario that already carries a verdict — a PASS still awaiting verification
 after a resume — does **not** keep it when its worker is gone and every
 relaunch failed: its verification never ran, so it becomes INPUT_REQUIRED with
 the launch-failure reason preserved (master downgraded this case
-unconditionally; reporting PASS would fabricate coverage).
+unconditionally; reporting PASS would fabricate coverage). The same applies to
+a run that is stopped while verification is still in flight: its recorded PASS
+was never verified, so finalization downgrades it to INPUT_REQUIRED rather than
+reporting coverage the run never established. A stopped run skips the finalize
+pane (its poll aborts on the first stop check, so splitting the pane would only
+leave an abandoned session behind).
 Deeper verdict presentation stays with pr-7ab0a99. Timeout diagnostics must not
 claim successful removal: reuse/restart preserves existing files, and fresh
 allocation cleanup can fail or defer. The recovery command remains available.
@@ -544,7 +549,12 @@ crashing `pm container status`.
   names through the shared inventory — an inventory that cannot be read is
   unknown, not zero running containers, so the batch clamps to one and each
   later queued launch re-clamps with a fresh count before it starts (the
-  unlimited default performs no inventory). The re-clamp is computed from the
+  unlimited default performs no inventory). Because the limit counts this run's
+  own workers too, the re-clamp is the run's *total* batch —
+  `active workers + remaining headroom`, capped by the desired size — not the
+  raw headroom compared against `active`; comparing them directly would stall a
+  capped run at roughly half the configured concurrency. The re-clamp is
+  computed from the
   run's original batch size, never from the already-clamped value — clamping a
   batch that a start-time unreadable inventory (or a momentarily full runtime)
   reduced to one could only keep or lower it, so the rest of the run would stay

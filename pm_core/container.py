@@ -513,8 +513,22 @@ def _file_lock(key: str, *, timeout: float | None = None):
                     current = os.stat(path).st_ino
                 except FileNotFoundError:
                     current = None
+                except OSError:
+                    # Cannot verify the locked inode; treat the lock as
+                    # unavailable instead of proceeding without the exclusion.
+                    _log.warning("lock %s unavailable; operation skipped", path,
+                                 exc_info=True)
+                    break
                 if current != os.fstat(fd).st_ino:
-                    new_fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
+                    try:
+                        new_fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
+                    except OSError:
+                        # The lock file vanished or became unwritable between
+                        # the flock and the reopen; fail closed (do not proceed
+                        # unlocked) rather than escape as a raw OSError.
+                        _log.warning("lock %s unavailable; operation skipped",
+                                     path, exc_info=True)
+                        break
                     fcntl.flock(fd, fcntl.LOCK_UN)
                     os.close(fd)
                     fd = new_fd
@@ -2385,7 +2399,6 @@ def discard_unowned_container(name: str, *, container_id: str | None = None,
     if not name:
         return False
     from pm_core import container_reaper
-    from pm_core.push_proxy import stop_push_proxy
     try:
         with launch_lock(name, timeout=0) as locked:
             if not locked:
@@ -2425,11 +2438,11 @@ def discard_unowned_container(name: str, *, container_id: str | None = None,
                 release_generation = cleanup_generation(name)
                 container_reaper._record_release(
                     name, current, release_generation, "failed-worker-attachment")
-            unshared_released = remove_container(current)
-            # Removal by ID cannot derive a shared key. A captured unshared
-            # mount, however, must never be followed by name-based cleanup.
-            if not unshared_released:
-                stop_push_proxy(name)
+            # ``remove_container`` keys its proxy bookkeeping by the container
+            # name and pins the runtime operations to the captured id, so a
+            # shared proxy is released here under the real name (a captured
+            # unshared mount is released through its own socket generation).
+            remove_container(name, container_id=current)
             return True
     except Exception:
         _log.warning("Could not safely discard container %s", name, exc_info=True)
@@ -2860,11 +2873,14 @@ def _list_names(prefix: str, *, running_only: bool = False) -> list[str] | None:
     The runtime's ``name=`` filter matches substrings (``npm-cache`` matches
     ``pm-``), so the prefix is re-checked here.
     """
-    result = _run_runtime(
-        "ps", *(() if running_only else ("-a",)), "--filter", f"name={prefix}",
-        "--format", "{{.Names}}",
-        check=False, timeout=30,
-    )
+    try:
+        result = _run_runtime(
+            "ps", *(() if running_only else ("-a",)), "--filter", f"name={prefix}",
+            "--format", "{{.Names}}",
+            check=False, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
     if result.returncode != 0:
         return None
     return [ln.strip() for ln in (result.stdout or "").splitlines()

@@ -94,7 +94,11 @@ def test_post_removal_unshared_cleanup_is_retried(monkeypatch, tmp_path, blocked
                 raise PermissionError("injected socket unlink failure")
             return real_unlink(path, *args, **kwargs)
         monkeypatch.setattr(push_proxy.os, "unlink", denied)
-        with pytest.raises(PermissionError):
+        # The container is already gone, so a socket-release failure is a
+        # classified, retryable cleanup error — not a raw OSError escaping
+        # remove_container, whose callers expect ContainerError.
+        with pytest.raises(cm.ContainerError,
+                           match="Cannot release push proxy socket"):
             cm.remove_container(renamed)
         monkeypatch.setattr(push_proxy.os, "unlink", real_unlink)
     else:

@@ -115,6 +115,89 @@ def test_finalization_errors_still_release_allocations(finalize_context, monkeyp
     release.assert_called_once_with(state, "pm-t")
 
 
+def _finalize_stopped(state, tmp_path, monkeypatch):
+    monkeypatch.setattr(qa_loop, "_poll_tmux_verdicts", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_persist_scenario_verdicts", MagicMock())
+    monkeypatch.setattr(qa_loop, "_run_qa_finalize_pane", MagicMock())
+    return qa_loop._finalize_scenarios(
+        state, tmp_path, {"branch": "b"}, {}, "pm-t", "qa-w",
+        str(tmp_path), tmp_path / "status.json", None,
+        False, 1, [], lambda: None)
+
+
+def test_stopped_run_downgrades_an_unverified_pass(tmp_path, monkeypatch):
+    """A PASS whose verification never ran must not survive a stop as PASS.
+
+    The verdict poll exits on stop_requested even with verification threads in
+    flight, so the recorded PASS was never verified. Keeping it would report
+    coverage the run never established (the false-PASS class the exhausted
+    relaunch branch already rejects).
+    """
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [qa_loop.QAScenario(index=1, title="s1", focus="",
+                                          window_name="qa-s1", pane_id="%1")]
+    state.scenario_verdicts[1] = qa_loop.VERDICT_PASS
+    state.stop_requested = True
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: True)
+    result = _finalize_stopped(state, tmp_path, monkeypatch)
+    assert result.scenario_verdicts[1] == qa_loop.VERDICT_INPUT_REQUIRED
+    assert "not verified" in result.scenario_verdict_reasons[1]
+    assert result.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
+
+
+def test_verified_pass_survives_a_stop(tmp_path, monkeypatch):
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [qa_loop.QAScenario(index=1, title="s1", focus="",
+                                          window_name="qa-s1", pane_id="%1")]
+    state.scenario_verdicts[1] = qa_loop.VERDICT_PASS
+    state.verified_scenarios.add(1)
+    state.stop_requested = True
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: True)
+    result = _finalize_stopped(state, tmp_path, monkeypatch)
+    assert result.scenario_verdicts[1] == qa_loop.VERDICT_PASS
+
+
+def test_queued_launch_is_persisted_before_it_returns(tmp_path, monkeypatch):
+    """A crash during a queued launch must not leave it listed as unattempted.
+
+    The resume snapshot written at the top of the poll still lists the scenario
+    as queued; a crash before the next write would relaunch an already-running
+    worker on resume.
+    """
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [
+        qa_loop.QAScenario(index=1, title="s1", focus="", window_name="qa-s1",
+                           pane_id="%1", session_id="sid-1",
+                           transcript_path=str(tmp_path / "s1.jsonl")),
+        qa_loop.QAScenario(index=2, title="s2", focus=""),
+    ]
+    snapshots = []
+    monkeypatch.setattr(
+        qa_loop, "_write_resume_file",
+        lambda st, c, cap, queued, **kw: snapshots.append(set(queued)))
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers",
+                        lambda st, session, *, scenarios=None: False)
+
+    class Crash(RuntimeError):
+        pass
+
+    def launch(st, *args, **kwargs):
+        raise Crash("process died mid-launch")
+
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_tmux", launch)
+    with pytest.raises(Crash):
+        qa_loop._poll_tmux_verdicts(
+            state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+            lambda: None, queued_scenarios=[state.scenarios[1]],
+            concurrency_cap=0, use_containers=False)
+    assert snapshots, "the attempt must be persisted even when the launch raises"
+    assert 2 not in snapshots[-1]
+
+
 @pytest.mark.parametrize("stage", ["launch-status", "notify", "interrupt"])
 @pytest.mark.parametrize("cleanup_fails", [False, True])
 def test_initial_launch_errors_restore_scenarios_and_release(
