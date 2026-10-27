@@ -29479,7 +29479,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:39:47.961724+00:00'
-  updated_at: '2026-10-27T00:34:34.804007+00:00'
+  updated_at: '2026-10-27T01:11:58.082018+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29935,6 +29935,22 @@ prs:
       Evidence: /pm-captures/scenarios/29/.'
     created_at: '2026-10-27T00:34:34Z'
     last_edited: '2026-10-27T00:34:34Z'
+  - id: note-502ac45
+    text: 'QA S31 (2026-10-27) PASS on 787e87f0, no code change. For future runs:
+      at the 3 s hold expiry the line shows the NEWEST deferred message. With the
+      fast fake planner, "Starting QA for <P>..." is almost always superseded by "QA
+      [P]: Plan: 1 scenario(s)" (both logged "(hidden by sticky message)") — that
+      is log_message documented newest-deferred-wins behaviour, not a missing follow-on.
+      The clean case is a NEEDS_WORK bounce, where "Review loop started for <P> loop=..."
+      is the newest deferred message and does paint at expiry. Harness notes: per-story
+      HOME/TMUX_TMPDIR under /scratch with one asciinema client; move the client back
+      to main only AFTER the user start focus select (~2 s after the key), else it
+      is pulled back to qa-<P>; story C needs qa_finalize delay ~70 s (a helper review
+      takes ~23 s here) so the verdict lands inside a helper review-done sticky; with
+      two PRs the tree sorts them side by side, so arrow to the other PR may be Left.
+      Captures: /pm-captures/scenarios/31/.'
+    created_at: '2026-10-27T01:11:58Z'
+    last_edited: '2026-10-27T01:11:58Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
