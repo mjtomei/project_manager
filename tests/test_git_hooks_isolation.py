@@ -8,11 +8,18 @@ sandbox escape the push proxy blocks for container-initiated git.  pm's own
 operations pass ``no_hooks=True`` (``-c core.hooksPath=/dev/null``).
 
 The merge and push stories are real-git tests: the planted hook writes a
-marker, so a regression makes the marker appear.
+marker, so a regression makes the marker appear.  They only ever talk to
+local repositories under ``tmp_path`` (pushes target an absolute bare-repo
+path, never a named or network remote) and run the real ``git`` binary with
+an isolated environment: inside a pm container the ``git`` on PATH is the
+push-proxy wrapper, which would forward the test's pushes to the live host
+proxy.
 """
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 from pathlib import Path
 from unittest import mock
@@ -45,8 +52,31 @@ def plant_hook(repo: Path, name: str, marker: Path) -> None:
     hook.chmod(0o755)
 
 
+_REAL_GIT_DIRS = ("/usr/bin", "/bin", "/usr/local/bin")
+
+
+def _is_real_git(path: str) -> bool:
+    """False for pm's in-container push-proxy wrapper (a shell script)."""
+    try:
+        with open(path, "rb") as stream:
+            return b"git wrapper" not in stream.read(256)
+    except OSError:
+        return False
+
+
 @pytest.fixture(autouse=True)
 def _env(tmp_path, monkeypatch):
+    real = next((d for d in _REAL_GIT_DIRS
+                 if _is_real_git(os.path.join(d, "git"))), None)
+    if real is None:
+        pytest.skip("no real git binary; refusing to use a proxy wrapper")
+    monkeypatch.setenv("PATH", f"{real}:/usr/bin:/bin")
+    assert _is_real_git(shutil.which("git") or "")
+    # Never inherit a repository binding or the user's git configuration.
+    for key in [k for k in os.environ if k.startswith("GIT_")]:
+        monkeypatch.delenv(key)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     for k, v in {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
                  "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}.items():
@@ -145,17 +175,18 @@ class TestWorkdirHooksDoNotRun:
 
     def test_publish_vanilla_push_skips_workdir_hooks(self, tmp_path):
         remote = tmp_path / "target.git"
-        subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+        git(tmp_path, "init", "-q", "--bare", str(remote))
         wd = _repo(tmp_path / "wd")
         base_sha = commit(wd, "a.txt", "a", "base")
-        git(wd, "remote", "add", "target", str(remote))
-        git(wd, "push", "-q", "target", "master:refs/heads/master")
+        # An absolute local path: never a named remote the git on PATH could
+        # resolve elsewhere.
+        git(wd, "push", "-q", str(remote), "master:refs/heads/master")
         merge_sha = commit(wd, "b.txt", "b", "merged work")
 
         marker = tmp_path / "hook-ran"
         plant_hook(wd, "pre-push", marker)
 
-        pr_mod._publish_vanilla(tmp_path, {"id": PR}, str(wd), "target",
+        pr_mod._publish_vanilla(tmp_path, {"id": PR}, str(wd), str(remote),
                                 "master", base_sha, merge_sha)
 
         assert git(remote, "rev-parse", "refs/heads/master") == merge_sha
