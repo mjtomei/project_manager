@@ -402,17 +402,31 @@ def _resume_incomplete_qa(app) -> None:
     # actually found — this runs on the ~1s poll tick.
     project_data = None
 
+    snapshots: dict[str, list[tuple[Path, dict]]] = {}
     for resume_file in qa_root.glob("*/qa_resume.json"):
         try:
             rdata = json.loads(resume_file.read_text())
         except (json.JSONDecodeError, OSError):
             continue
-
         pr_id = rdata.get("pr_id", "")
         if not pr_id:
             continue
         if pr_id in app._qa_loops or pr_id in app._resumed_qa_pr_ids:
             continue
+        snapshots.setdefault(pr_id, []).append((resume_file, rdata))
+
+    for pr_id, runs in snapshots.items():
+        # A fresh start (z t) leaves the superseded run's snapshot behind: its
+        # state left ``_qa_loops`` before it finished, so nothing cleared it.
+        # Only the newest run of a PR is live; resuming or "recovering" an
+        # older one would shadow it and orphan its workers.
+        runs.sort(key=lambda r: qa_loop.resume_order(r[1]))
+        resume_file, rdata = runs[-1]
+        for old_file, old_data in runs[:-1]:
+            if not qa_loop.resume_owned_elsewhere(old_data):
+                _log.info("Discarding superseded QA snapshot for %s: %s",
+                          pr_id, old_file.parent.name)
+                qa_loop.clear_resume_file(old_file.parent)
         # Not orphaned: another live process (a `pm pr auto-sequence` QA
         # child) is driving it.  Re-checked each scan, so the run is still
         # recovered if that process dies before finishing.

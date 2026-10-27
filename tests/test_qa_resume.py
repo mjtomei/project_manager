@@ -164,12 +164,19 @@ def _make_app(tmp_path, *, pr_status="qa"):
     return app
 
 
-def _seed_run(home, *, overall="", pr_id="pr-001"):
+def _seed_run(home, *, overall="", pr_id="pr-001", loop="loop1",
+              started_at=None, first_index=None):
     """Create a qa workdir under <home>/.pm/workdirs/qa with resume+status."""
-    qa_dir = home / ".pm" / "workdirs" / "qa" / f"{pr_id}-loop1"
+    qa_dir = home / ".pm" / "workdirs" / "qa" / f"{pr_id}-{loop}"
     qa_dir.mkdir(parents=True, exist_ok=True)
     state = _make_state(qa_dir)
     state.pr_id = pr_id
+    state.loop_id = loop
+    if started_at is not None:
+        state.started_at = started_at
+    if first_index is not None:
+        for i, sc in enumerate(state.scenarios):
+            sc.index = first_index + i
     # Incomplete by default: clear verdicts so it has pending work.
     state.scenario_verdicts = {}
     state.verified_scenarios = set()
@@ -220,6 +227,51 @@ def test_resume_completed_processes_and_clears(tmp_path):
     assert "pr-001" not in app._qa_loops
     assert "pr-001" in app._resumed_qa_pr_ids
     assert not _resume_file_path(qa_dir).exists()
+
+
+@pytest.mark.parametrize("old_loop,new_loop", [("aaaa", "zzzz"), ("zzzz", "aaaa")])
+def test_superseded_snapshot_does_not_shadow_the_newest_run(tmp_path, old_loop, new_loop):
+    # A fresh start (z t) stopped the old run after popping it from
+    # _qa_loops, so its snapshot (overall INPUT_REQUIRED) was never cleared.
+    # On restart the newest run must be resumed, whatever the glob order.
+    app = _make_app(tmp_path)
+    old = _seed_run(tmp_path, loop=old_loop, overall="INPUT_REQUIRED",
+                    started_at=1000.0, first_index=11)
+    new = _seed_run(tmp_path, loop=new_loop, overall="", started_at=2000.0,
+                    first_index=21)
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    on_complete.assert_not_called()
+    resume_bg.assert_called_once()
+    assert resume_bg.call_args[0][0].loop_id == new_loop
+    assert app._qa_loops["pr-001"].loop_id == new_loop
+    assert not _resume_file_path(old).exists()
+    assert _resume_file_path(new).is_file()
+
+
+def test_legacy_snapshots_order_by_scenario_numbering(tmp_path):
+    # Snapshots without started_at: later runs continue scenario numbering.
+    app = _make_app(tmp_path)
+    old = _seed_run(tmp_path, loop="zzzz", overall="INPUT_REQUIRED", first_index=11)
+    new = _seed_run(tmp_path, loop="aaaa", overall="", first_index=21)
+    for d in (old, new):
+        f = _resume_file_path(d)
+        data = json.loads(f.read_text())
+        data.pop("started_at")
+        f.write_text(json.dumps(data))
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    on_complete.assert_not_called()
+    assert resume_bg.call_args[0][0].loop_id == "aaaa"
+    assert not _resume_file_path(old).exists()
 
 
 def test_resume_skips_non_qa_pr(tmp_path):

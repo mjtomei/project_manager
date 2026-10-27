@@ -185,6 +185,9 @@ class QALoopState:
     running: bool = False
     stop_requested: bool = False
     loop_id: str = field(default_factory=lambda: secrets.token_hex(8))
+    # Wall-clock start of this run; when a PR has several resume snapshots
+    # (a fresh start superseded a run) only the newest is resumed.
+    started_at: float = field(default_factory=time.time)
     iteration: int = 0
     planning_phase: bool = True
     plan_output: str = ""
@@ -930,6 +933,7 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
     data = {
         "pr_id": state.pr_id,
         "loop_id": state.loop_id,
+        "started_at": state.started_at,
         # The process running this orchestration loop: a TUI must not adopt
         # a run another live driver (e.g. a `pm pr auto-sequence` QA child)
         # is still collecting verdicts for (see resume_owned_elsewhere).
@@ -1035,6 +1039,22 @@ def clear_resume_file(qa_workdir: str | Path) -> None:
                    exc_info=True)
 
 
+def resume_order(resume_data: dict) -> tuple[float, int]:
+    """Sort key placing the newest run of a PR last among its snapshots.
+
+    ``started_at`` decides; snapshots written before it existed fall back to
+    the highest scenario index, which later runs always exceed because
+    numbering continues across runs (:func:`_next_scenario_offset`).
+    """
+    try:
+        started = float(resume_data.get("started_at") or 0.0)
+    except (TypeError, ValueError):
+        started = 0.0
+    indices = [d.get("index", 0) for d in resume_data.get("scenarios") or []
+               if isinstance(d, dict) and isinstance(d.get("index"), int)]
+    return started, max(indices, default=0)
+
+
 def build_resume_state(resume_data: dict) -> QALoopState:
     """Reconstruct a QALoopState from a qa_resume.json snapshot.
 
@@ -1043,6 +1063,7 @@ def build_resume_state(resume_data: dict) -> QALoopState:
     """
     state = QALoopState(pr_id=resume_data["pr_id"])
     state.loop_id = resume_data.get("loop_id", state.loop_id)
+    state.started_at = resume_order(resume_data)[0]
     state.qa_workdir = resume_data.get("qa_workdir")
     state.session_tag = resume_data.get("session_tag")
     state.planning_phase = False
