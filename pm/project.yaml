@@ -14267,6 +14267,27 @@ prs:
       Z. Evidence /pm-captures/scenarios/45/.'
     created_at: '2026-10-27T20:07:36Z'
     last_edited: '2026-10-27T20:07:36Z'
+  - id: note-6ea8a73
+    text: 'QA S44 (2026-10-27, work/claude-opus-5-5; real isolated rootless Podman
+      3.4.4 overlay+fuse-overlayfs, unmodified build-base passed incl. Chromium smoke;
+      captures /pm-captures/scenarios/44). FIXED 868a4654: (1) settled QA workers
+      whose release was deferred by an unreadable inventory were marked released and
+      never retried in-run, so their still-running containers counted against container-max-running
+      and the re-clamp kept the queue serialized after recovery (pre-fix s5..s8 ran
+      one at a time for ~8 min); failed releases now retry once per poll. (2) launch-time
+      status writes dropped queued scenarios (initial batch showed 0/4, no s5-s8)
+      or their ''queued'' label (dequeue); now carry full list + queued set. Story
+      2 (s5 run fault), story 3 (dead-worker retry with gated run; stop during gated
+      retry: no late worker, s2 ''PASS was not verified before the run was stopped'',
+      no finalize, replacement removed 2 s after gate release) and story 4 (second
+      PM process, scoped reap, peak L+1 = floor launch) all held. SPEC CONFLICT for
+      planner: S44 story 1 wants both ''s5 starts during the outage'' and ''peak <=
+      L, A share <= 4'', but deferred releases + the impl-spec at-least-one floor
+      make the outage peak L+1/A=5 by design. Pre-existing serial dequeue (one queued
+      launch per blocking prep, +26/+44 s for s7/s8) filed as pr-ab66887. Podman 3.4.4
+      rm has no -t: use kill + rm -f in fixtures.'
+    created_at: '2026-10-27T20:18:36Z'
+    last_edited: '2026-10-27T20:18:36Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -34303,6 +34324,35 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T20:03:01.265742+00:00'
   updated_at: '2026-10-27T20:03:01.265742+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ab66887
+  plan: bugs
+  title: 'Bug: QA dequeues queued scenarios one at a time and blocks the verdict poll
+    on each launch''s preparation'
+  branch: pm/pr-ab66887-bug-qa-dequeues-queued-scenarios-one-at-a-time-and
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py _poll_tmux_verdicts/_launch_next_queued pops ONE
+    queued scenario per call and runs _launch_scenarios_in_containers/_in_tmux synchronously
+    on the poll thread, which blocks until that scenario''s clone, container setup
+    and concretizer finish. When several slots free at once (e.g. after an inventory
+    outage clears, or several workers settle together) the queue refills serially:
+    S44 (pr-1139060 QA, fake concretizer ~19 s) saw the 6th/7th/8th scenarios start
+    at +7 s, +26 s, +44 s after headroom returned. With a real concretizer (minutes)
+    each refill blocks verdict polling and verification hand-off for minutes per queued
+    scenario. The initial batch already prepares scenarios in parallel threads. Repro:
+    qa-max-scenarios 4, 8-scenario plan, let 4 settle together; watch "Launching queued
+    scenario" timestamps in the debug log. Fix idea: pop all free slots and launch
+    them in one launcher call (creation is already bounded by container-launch-concurrency),
+    or move dequeued preparation off the poll thread. Pre-existing on master.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T19:39:38.777080+00:00'
+  updated_at: '2026-10-27T19:39:38.777080+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
