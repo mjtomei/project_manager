@@ -1098,8 +1098,10 @@ def wrap_claude_cmd(
         allowed_push_branch: If set, restrict git push to this branch inside the container.
         session_tag: Session tag — embedded in the container name and used
             for shared push proxies (with *pr_id*).
-        pr_id: PR identifier — combined with *session_tag* to share push
-            proxies across containers on the same branch.
+        pr_id: PR identifier — combined with *session_tag* and the host
+            workdir to key shared push proxies: containers on the same
+            workdir share one, a container on a different workdir (e.g. a
+            QA scenario clone) gets its own.
 
     Returns:
         (wrapped_cmd, container_name).  container_name is "" if not containerised.

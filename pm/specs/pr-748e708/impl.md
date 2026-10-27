@@ -896,3 +896,39 @@ Tests: `test_owns_socket_path_is_false_once_removed` (returns True at
 Simplification (no behaviour change): `glob` is imported once at module
 level instead of as `_glob` inside `_remove_proxy_dirs`,
 `stop_all_proxies` and `stop_session_proxies`.
+
+## Review iteration 19 refinements
+
+Nineteenth review pass (consistent with R5/R7; no requirement changed).
+Iteration 9's `_sock_dir_start_problem()` introduced a failure window that
+the previous code did not have:
+
+- **A start recreates a socket directory a teardown removed under it.**
+  `_start_lock` created the directory and then checked it was usable, but
+  `_remove_proxy_dirs` can only skip a directory whose start lock is held
+  — and the start has not taken that lock yet at the makedirs/check point.
+  A session sweep racing a container start therefore made the start raise
+  `PushProxyError: push proxy directory … is unusable ([Errno 2] No such
+  file or directory)`, aborting container creation for a race the caller
+  did not cause.  Before iteration 9 the daemon's own
+  `Path(sock).parent.mkdir(parents=True, exist_ok=True)` recreated the
+  directory, so the start succeeded.  The makedirs + usability check now
+  retry (bounded by `_START_DIR_ATTEMPTS`) when the entry has vanished;
+  an entry that still *exists* is still refused, so a planted symlink or
+  foreign directory is unchanged.
+
+Test: `test_start_recreates_a_dir_a_teardown_removed` fails at 045e2571
+with exactly that `PushProxyError`.
+
+Documentation: `wrap_claude_cmd`'s `pr_id` docstring still said shared
+proxies are keyed so that containers "on the same branch" share one — the
+assumption this PR removes (iteration 15 fixed the same wording in
+`create_container` and the git-wrapper comment).  It now names the
+workdir, matching `create_container`.
+
+Incidental, filed as pr-e618b9c (not changed here): the proxy socket is
+chmod 0o777 in a 0755 directory under world-writable `/tmp`, so any local
+user can connect and have the daemon run `git push`/`pull` as the host
+user.  R4 narrows it to the proxy's own workdir (previously any host
+path); closing it needs a private socket root and a decision on the
+container-uid assumption.

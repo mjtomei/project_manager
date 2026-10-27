@@ -1003,6 +1003,11 @@ def _drop_foreign_discovery_link(sock_dir: str) -> bool:
 # or two attempts; the cap only bounds a pathological (or hostile) loop.
 _LOCK_ATTEMPTS = 100
 
+# How many times a start recreates a socket directory that a concurrent
+# teardown removed between the makedirs and the usability check.  One retry
+# covers the race; the cap only bounds a pathological (or hostile) loop.
+_START_DIR_ATTEMPTS = 3
+
 
 def _fd_is_path_file(fd: int, path: str) -> bool:
     """True when *path* still names the same file *fd* is open on.
@@ -1070,31 +1075,45 @@ def _start_lock(sock_dir: str, blocking: bool = True):
     proxy — a symlink, or one owned by another user or unwritable — raises
     :class:`PushProxyError` (see :func:`_sock_dir_start_problem`).
     """
-    try:
-        os.makedirs(sock_dir, exist_ok=True)
-    except OSError as exc:
-        # /tmp is world-writable: a regular file (or an unreadable directory)
-        # squatting on the socket-directory name makes makedirs fail.  A
-        # teardown must skip that directory rather than abort the sweep, and
-        # a start must fail as a proxy error instead of leaking a bare
-        # OSError (which wrap_claude_cmd would blame on the runtime) — the
-        # same treatment as an unusable lock file below.
-        if blocking:
-            raise PushProxyError(
-                f"could not create push proxy directory {sock_dir}: "
-                f"{exc}") from exc
-        _log.warning("Push proxy directory %s is unusable (%s); skipping",
-                     sock_dir, exc)
-        yield False
-        return
-    if blocking:
+    # Create the directory and (for a start) verify it can host a proxy.
+    # A concurrent teardown can rmtree the directory between the two steps —
+    # ``_remove_proxy_dirs`` only takes the start lock we have not taken yet
+    # — so recreate it and check again rather than fail a start that the
+    # race, not the caller, broke.  An entry that still *exists* is a real
+    # problem (planted symlink, foreign owner, unwritable) and is refused.
+    problem: str | None = None
+    for _attempt in range(_START_DIR_ATTEMPTS):
+        try:
+            os.makedirs(sock_dir, exist_ok=True)
+        except OSError as exc:
+            # /tmp is world-writable: a regular file (or an unreadable
+            # directory) squatting on the socket-directory name makes
+            # makedirs fail.  A teardown must skip that directory rather
+            # than abort the sweep, and a start must fail as a proxy error
+            # instead of leaking a bare OSError (which wrap_claude_cmd would
+            # blame on the runtime) — the same treatment as an unusable lock
+            # file below.
+            if blocking:
+                raise PushProxyError(
+                    f"could not create push proxy directory {sock_dir}: "
+                    f"{exc}") from exc
+            _log.warning("Push proxy directory %s is unusable (%s); skipping",
+                         sock_dir, exc)
+            yield False
+            return
+        if not blocking:
+            break
         problem = _sock_dir_start_problem(sock_dir)
-        if problem is not None:
-            # A symlink (or a foreign/unwritable directory) on the socket
-            # directory name would send the unlink/bind/metadata write into
-            # its target.  Refuse it as a proxy error, not a bare OSError.
-            raise PushProxyError(
-                f"push proxy directory {sock_dir} {problem}")
+        if problem is None or os.path.lexists(sock_dir):
+            break
+        _log.info("Push proxy directory %s vanished during start; "
+                  "recreating", sock_dir)
+    if blocking and problem is not None:
+        # A symlink (or a foreign/unwritable directory) on the socket
+        # directory name would send the unlink/bind/metadata write into its
+        # target.  Refuse it as a proxy error, not a bare OSError.
+        raise PushProxyError(
+            f"push proxy directory {sock_dir} {problem}")
     lock_path = os.path.realpath(sock_dir) + ".lock"
     flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
     for _attempt in range(_LOCK_ATTEMPTS):

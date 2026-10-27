@@ -734,6 +734,37 @@ class TestStartLock:
         assert not os.path.lexists(lock_path)
         assert victim.read_text() == "original\n"
 
+    def test_start_recreates_a_dir_a_teardown_removed(self, tmp_path):
+        """A start must not fail because a sweep removed the dir under it.
+
+        ``_remove_proxy_dirs`` can only skip a directory whose start lock is
+        held, and the start has not taken it yet when it creates the
+        directory.  The vanished directory is therefore recreated and
+        re-checked instead of aborting container creation with a confusing
+        "is unusable (No such file or directory)".
+        """
+        impl = tmp_path / "impl"
+        impl.mkdir()
+        real_problem = push_proxy_mod._sock_dir_start_problem
+        calls = []
+
+        def racy_problem(sock_dir):
+            calls.append(sock_dir)
+            if len(calls) == 1:
+                shutil.rmtree(sock_dir, ignore_errors=True)
+            return real_problem(sock_dir)
+
+        with patch("pm_core.push_proxy._sock_dir_start_problem",
+                   side_effect=racy_problem), \
+             patch("pm_core.push_proxy._start_proxy_subprocess",
+                   return_value=True):
+            sock = start_push_proxy("impl-c", str(impl), "pm/pr-x",
+                                    session_tag="tag", pr_id="pr-x")
+
+        assert len(calls) >= 2, "the start did not retry after the race"
+        assert os.path.isdir(os.path.dirname(sock)), (
+            "the socket directory was not recreated")
+
     def test_unusable_socket_dir_is_skipped_by_teardown(self, tmp_path):
         """A non-directory squatting on the socket-dir name must not abort.
 
