@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-27T03:01:32.203712+00:00'
+  updated_at: '2026-10-27T03:15:41.274595+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -17120,6 +17120,33 @@ prs:
       with manifest.md, recording.cast/mp4 and numbered pane snapshots, plus pm-debug-evidence.log).'
     created_at: '2026-10-27T03:01:32Z'
     last_edited: '2026-10-27T03:01:32Z'
+  - id: note-e0b023a
+    text: 'QA S38 (2026-10-27, HEAD 89bc976e) PASS — all 8 triples of the action-prefixed
+      / unreadable-id anchoring scenario held live on the real 80-col popup (fzf 0.56.3,
+      tmux 3.2a), no code change. Verified: open from review-pr-a_b gives "PR Actions
+      — pr-a_b  (2/2)" + A''s rows + "● review"; l -> pr-b1 (1/2) and 0 -> back, merged
+      M never in the cycle; s dispatches pr start pr-a_b route=direct once (no pr-b1,
+      no new window); all five action windows anchor to pr-a_b with ● on their own
+      row; qa-pr-a-s1 -> pr-a (single entry, no counter/hint) in 5a and pr-a-s1 (2/2)
+      with l -> pr-a (1/2) in 5b; no-fzf numbered menu waits and 1+Enter dispatches
+      pr start pr-a_b; review-pr-zz -> "PR Actions — pr-zz  (1/3)" + "Could not load
+      actions for pr-zz." with the popup-picker no-actions warning, l -> pr-b1 (2/3),
+      s -> pr start pr-b1. Fixture note for the next run: pm pr add generates random
+      ids, so the scenario''s literal B window name "pr-b1" only counts as B''s open
+      window when B''s display id is pr-b1 (the picker looks for a window named exactly
+      for the display id); the shared fixture therefore gave B the id pr-b1 with the
+      same bootstrap-only YAML edit used for A''s pr-a_b. Before that edit the picker
+      correctly showed no (i/n) because B was not a nav entry. Harness: container
+      ships no fzf/agg (installed fzf 0.56.3 arm64 and agg 1.4.3); tmux 3.2a capture-pane
+      on a fixture pane returns blank even while a client displays it, so capture
+      the recorder client''s pane (also the only view showing the popup); key-triggered
+      run-shell uses the session environment, so set PATH/PYTHONPATH with tmux set-environment
+      on both the base and ~1 sessions; move fzf aside with sudo mv for the no-fzf
+      story (the popup inherits the server PATH); end casts with tmux detach-client
+      -s "=<session>". Captures /pm-captures/scenarios/38 (REPORT.md + story1-7 with
+      cast/mp4/pane captures/manifests).'
+    created_at: '2026-10-27T03:15:41Z'
+    last_edited: '2026-10-27T03:15:41Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
