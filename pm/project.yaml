@@ -17015,6 +17015,22 @@ prs:
       (REPORT.md + 7 story dirs with cast/mp4/transcript/pane-text).'
     created_at: '2026-10-27T01:02:56Z'
     last_edited: '2026-10-27T01:02:56Z'
+  - id: note-b5e6d20
+    text: 'Scenario 32 refinement (2026-10-27): observe "not launchable/ready work"
+      only in the TUI tree and the prefix+P picker. Do NOT use pm pr list or pm pr
+      ready as the check: both still raise KeyError: ''id'' on an id-less PR entry
+      (pr.py:527 sort key p["id"]; graph.ready_prs at graph.py:45) — a pre-existing
+      CLI leniency gap outside this TUI scenario. For the sync to really run, create
+      a workdir with `pm pr start <id> --background` after committing project.yaml
+      on the base branch (pr start refuses uncommitted PRs). TUI syncs call sync_prs(save_state=False),
+      so the TUI never advances last_pr_sync: backdate it (e.g. 2020) in the externally
+      written snapshot so the manual (60 s) and background (300 s) syncs cannot be
+      skipped. Real prefix+P id-less error: "Could not load PR actions: Picker PR
+      entry requires a non-empty, command-safe string id: entry #N (status=...)" then
+      "Press q/Esc/Enter to close..."; the popup failure handler then shows "pm popup
+      failed (exit 1)." and needs one more key — two dismissals, expected.'
+    created_at: '2026-10-27T00:35:38Z'
+    last_edited: '2026-10-27T00:35:38Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
