@@ -971,7 +971,14 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
         # Skip if a review loop is already running or completed for this PR
         loop = app._review_loops.get(pr_id)
         if loop:
-            continue
+            if loop.running or not _awaiting_on_disk(app, pr_id, "review"):
+                continue
+            # A sign-off REVIEW return written behind this TUI (`pm edit`,
+            # another clone's sign-off) owes the PR a fresh review that this
+            # finished loop never ran; the TUI's own REVIEW hop drops the
+            # loop the same way.  Kept, it left the return waiting for good
+            # (S83).
+            app._review_loops.pop(pr_id, None)
         # Skip if no workdir (shouldn't happen for in_review, but guard)
         if not pr.get("workdir"):
             continue

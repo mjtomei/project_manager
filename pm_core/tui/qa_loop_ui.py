@@ -316,6 +316,15 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
 
     # Start a new QA loop
     state = QALoopState(pr_id=pr_id)
+    # Like start_qa, this run re-verifies a sign-off REQA return.  A run it
+    # replaces takes its pending clear along (S83: after a zz t over a run
+    # started inside a busy project.yaml, ``awaiting: qa`` outlived the
+    # hold and the next auto-start pass re-ran QA).  Never wait for the
+    # lock here: a busy file leaves the clear to the poll tick.
+    from pm_core.signoff import clear_return_awaiting
+    if clear_return_awaiting(app._root, pr_id, "qa",
+                             timeout=store.NO_WAIT) is False:
+        state._ui_return_clear = (pr.get("signoff_return") or {}).get("ts")
 
     def on_update(s: QALoopState):
         app.call_from_thread(_on_qa_update, app, s)

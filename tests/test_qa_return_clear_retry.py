@@ -153,3 +153,45 @@ def test_return_awaiting_on_disk_still_starts_its_run(tmp_path):
         auto_start._auto_start_qa_loops(app, [tree])
     ss.assert_not_called()
     sq.assert_called_once()
+
+
+def test_zz_t_restart_over_a_pending_clear_still_clears_it(tmp_path):
+    """S83 story 5 round H: the re-run started inside the hold (clear
+    pending), ``zz t`` stopped it and a second ``zz t`` started the loop,
+    replacing the run and its pending clear.  ``awaiting: qa`` outlived the
+    hold, and after the loop's run ended INPUT_REQUIRED the next auto-start
+    pass re-ran QA.  The loop start now clears the return itself, never
+    waiting for the lock."""
+    from pm_core.tui import qa_loop_ui
+    app = _make_app(tmp_path)
+    _seed(app)
+    old = QALoopState(pr_id="pr-001")
+    old._ui_return_clear = TS
+    app._qa_loops["pr-001"] = old
+    with _held(app._root):
+        t0 = time.monotonic()
+        with patch.object(qa_loop_ui, "start_qa_background") as bg, \
+                patch.object(qa_loop_ui, "_get_qa_pass_count",
+                             return_value=1):
+            qa_loop_ui.start_or_stop_qa_loop(app, "pr-001")
+        assert time.monotonic() - t0 < 0.5
+        bg.assert_called_once()
+        state = app._qa_loops["pr-001"]
+        assert state is not old and state._ui_return_clear == TS
+        state.running = True
+        _poll(app, 1)
+        assert _pr(app._root)["signoff_return"]["awaiting"] == "qa"
+    _poll(app, 1)
+    assert _pr(app._root)["signoff_return"]["awaiting"] is None
+    assert state._ui_return_clear is None
+
+
+def test_zz_t_restart_clears_a_waiting_return_when_free(tmp_path):
+    from pm_core.tui import qa_loop_ui
+    app = _make_app(tmp_path)
+    _seed(app)
+    with patch.object(qa_loop_ui, "start_qa_background"), \
+            patch.object(qa_loop_ui, "_get_qa_pass_count", return_value=1):
+        qa_loop_ui.start_or_stop_qa_loop(app, "pr-001")
+    assert app._qa_loops["pr-001"]._ui_return_clear is None
+    assert _pr(app._root)["signoff_return"]["awaiting"] is None
