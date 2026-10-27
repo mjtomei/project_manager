@@ -68,3 +68,31 @@ def test_unknown_proxy_inventory_is_a_visible_retryable_failure(monkeypatch):
     assert result.exit_code == 1, result.output
     assert "proxy" in result.output and "inventory" in result.output
     assert reaper.pending_failures()
+
+
+def test_in_use_proxy_resolves_an_earlier_transient_failure(monkeypatch, tmp_path):
+    """A proxy proven still in use has no pending work left to retry.
+
+    Its socket directory still exists, so the "gone for good" prune cannot
+    clear the record — a later successful pass that finds it in use must.
+    """
+    domain = reaper._runtime_domain()
+    sock_dir = tmp_path / "proxy"
+    sock_dir.mkdir()
+    monkeypatch.setattr(reaper, "list_containers", lambda: [])
+    monkeypatch.setattr(cm, "running_container_count", lambda: 0)
+    monkeypatch.setattr(cm, "keyring_summary", lambda: "")
+    monkeypatch.setattr(push_proxy, "runtime_domain", lambda: domain)
+    monkeypatch.setattr(push_proxy, "_shared_sock_dir_path", lambda *a: str(sock_dir))
+    monkeypatch.setattr(push_proxy, "list_shared_proxies", lambda: [
+        {"session_tag": "tag", "pr_id": "pr-aaaa", "runtime_domain": domain}])
+    monkeypatch.setattr(push_proxy, "release_proxy_if_unused", lambda *a: None)
+    result = CliRunner().invoke(cli, ["container", "reap"])
+    assert result.exit_code == 1, result.output
+    assert reaper.pending_failures()
+
+    # Inventory is reachable again and the proxy is legitimately in use.
+    monkeypatch.setattr(push_proxy, "release_proxy_if_unused", lambda *a: False)
+    result = CliRunner().invoke(cli, ["container", "reap"])
+    assert result.exit_code == 0, result.output
+    assert not reaper.pending_failures()

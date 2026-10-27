@@ -2173,7 +2173,7 @@ def _post_setup(name: str, workdir: Path, is_podman: bool) -> None:
         raise launch_error(name, "timeout", "creating ~/.pm or repairing its ownership timed out",
                            stage="repair ~/.pm ownership") from exc
     except OSError as exc:
-        raise launch_error(name, "runtime", str(exc),
+        raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
                            stage="repair ~/.pm ownership") from exc
     if ownership.returncode != 0:
         stderr = (ownership.stderr or "").strip()

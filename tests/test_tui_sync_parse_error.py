@@ -70,7 +70,7 @@ class TestKillMergedPrWindows:
         with patch("pm_core.tmux.session_exists", return_value=True), \
              patch("pm_core.pr_cleanup.cleanup_pr_resources",
                    return_value={"windows": ["x"], "containers": ["c1", "c2"],
-                                 "registry_windows": [], "sockets": [],
+                                 "registry_windows": [],
                                  "runtime_state": True}) as mock_cleanup:
             sync_mod._kill_merged_pr_windows(app, {"pr-abc"})
 

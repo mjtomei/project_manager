@@ -871,6 +871,9 @@ class Outcome:
     # Failed removals of containers their run released (retried as released).
     released_failures: set[str] = field(default_factory=set)
     proxies_released: list[str] = field(default_factory=list)
+    # Proxies this pass reached a definitive answer for (released, or proven
+    # still in use). A failure recorded for one of them earlier is resolved.
+    proxies_checked: list[str] = field(default_factory=list)
     # Kept containers near their PID limit: (name, pids, limit, reason kept).
     pid_pressure: list[tuple[str, int, int, str]] = field(default_factory=list)
     running_before: int | None = None
@@ -1120,7 +1123,15 @@ def _proxy_failure_actionable(key: str) -> bool:
         return True
 
 
-def _release_unused_proxies(scope: Scope, failures: dict[str, str]) -> list[str]:
+def _release_unused_proxies(scope: Scope, failures: dict[str, str],
+                            checked: list[str] | None = None) -> list[str]:
+    """Release unused proxies; append definitively-evaluated keys to *checked*.
+
+    A shared proxy that is still in use (``False``) is *checked*, not failed:
+    nothing is pending for it, so an earlier transient failure must not be
+    carried forward forever.  Only an unanswered inventory (``None``) or an
+    exception stays a retryable failure.
+    """
     from pm_core import push_proxy
     released = push_proxy.retry_unshared_releases(scope, failures)
     domain = push_proxy.runtime_domain()
@@ -1140,6 +1151,8 @@ def _release_unused_proxies(scope: Scope, failures: dict[str, str]) -> list[str]
                 released.append(key)
             elif result is None:
                 failures[f"push proxy {key}"] = "runtime inventory unavailable; proxy preserved"
+            elif checked is not None:
+                checked.append(key)
         except Exception as exc:
             failures[f"push proxy {key}"] = str(exc)
             _log.warning("proxy release for %s failed", prox, exc_info=True)
@@ -1220,7 +1233,8 @@ def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
                 else:
                     d.action, d.reason = "keep", msg
         try:
-            out.proxies_released = _release_unused_proxies(scope, out.failures)
+            out.proxies_released = _release_unused_proxies(
+                scope, out.failures, out.proxies_checked)
         except Exception as exc:
             out.failures["push proxy sweep"] = str(exc)
             _log.warning("proxy sweep failed", exc_info=True)
@@ -1442,6 +1456,16 @@ def _record_locked(out: Outcome, scope: Scope, reason: str,
                     or _proxy_failure_actionable(k)}
     for proxy in out.proxies_released:
         failures.pop(f"push proxy {proxy}", None)
+    # A proxy this pass reached a definitive answer for — released, or proven
+    # still in use — has no pending work, so an earlier transient failure for
+    # it is resolved. A newer concurrent failure is preserved.
+    for proxy in out.proxies_checked:
+        key = f"push proxy {proxy}"
+        previous = failures.get(key)
+        if (previous and observed_at is not None
+                and previous.get("at", 0) >= observed_at):
+            continue
+        failures.pop(key, None)
     if reason != "explicit-cleanup" and "push proxy sweep" not in out.failures:
         failures.pop("push proxy sweep", None)
     for d in out.decisions:

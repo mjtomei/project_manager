@@ -151,12 +151,12 @@ class TestCleanupPrResources:
 
     def test_format_summary_empty(self):
         empty = {"windows": [], "containers": [], "registry_windows": [],
-                 "sockets": [], "runtime_state": False}
+                 "runtime_state": False}
         assert pr_cleanup.format_summary(empty) == "nothing to clean"
 
     def test_format_summary_partial(self):
         s = {"windows": ["a", "b"], "containers": [], "registry_windows": ["c"],
-             "sockets": [], "runtime_state": False}
+             "runtime_state": False}
         out = pr_cleanup.format_summary(s)
         assert "2 window" in out
         assert "1 registry" in out

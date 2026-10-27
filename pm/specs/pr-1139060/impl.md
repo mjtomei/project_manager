@@ -181,7 +181,11 @@ operations do not take PM's launch lock.
   reconcile; process-local references cannot prove other processes have no users.
   A failed removal does not release its proxy or exclude the surviving container
   from the runtime user inventory. Inspect errors other than explicit absence
-  leave cleanup failed and retryable, not falsely successful.
+  leave cleanup failed and retryable, not falsely successful. A shared proxy a
+  later pass reaches a definitive answer for — released, or proven still in use
+  by a live container — has no pending work, so an earlier transient failure for
+  it is cleared instead of being reported (and failing ``pm container reap``)
+  forever.
   A per-container (unshared: qa-debug, untagged) proxy is stopped whenever
   its container is removed, by whichever process removes it. Proxy daemons
   track the published socket identity, retire when replaced (not only when
