@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T23:42:36.702333+00:00'
+  updated_at: '2026-10-27T23:56:00.895973+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14512,6 +14512,34 @@ prs:
       and discard a trial if Last cleanup shows startup or periodic.'
     created_at: '2026-10-27T23:24:48Z'
     last_edited: '2026-10-27T23:24:48Z'
+  - id: note-99c04dd
+    text: 'S50 refine (76081338+): suspected gap for story 2: _relaunch_scenario_window
+      calls tmux.new_window_get_pane with the same name (qa-<id>-sN) as the concretizer''s
+      still-live window; new_window_get_pane resolves via find_window_by_name (first
+      match in index order) and returns panes[0] — likely the concretizer pane, so
+      a SUCCESSFUL relaunch (only failed relaunches were exercised in S35) may adopt
+      the concretizer as the worker. Kill only the worker pane (concretizer held alive),
+      one-shot tmux new-window fault, then compare the recorded pane_id/verdict source
+      against the concretizer pane id.'
+    created_at: '2026-10-27T23:26:41Z'
+    last_edited: '2026-10-27T23:26:41Z'
+  - id: note-6fac9db
+    text: 'QA S50 (2026-10-27, work/claude-opus-5-5; real rootless Podman 3.4.4 +
+      tmux TUI, fake agents; evidence /pm-captures/scenarios/50/manifest.md). NEEDS_WORK,
+      fixed e2aabd97 (confirms note-99c04dd): a SUCCESSFUL dead-worker relaunch adopted
+      the concretizer. tmux.new_window_get_pane resolved its new window by name; the
+      concretizer window qa-<id>-sN survives with that name, so pane %12 (C) was registered
+      role=qa-scenario-s1 and the verifier split into C window while the real worker
+      %15 sat in a new window. Now taken from new-window -P -F. Same commit: Failed
+      to relaunch logs tmux stderr (injected fault text was absent from the log);
+      run end logs "released containers: none (kept sN INPUT_REQUIRED)" when it keeps
+      everything. Story 1 (stop during PASS verification) and story 3 (stop while
+      retry held in podman run; replacement removed 2.0 s after release, s1 ?, no
+      late worker) held. Full suite 4265 passed. Fixture trap: shared Podman store
+      + private tmux servers means one fixture reap removes another fixture containers
+      (tmux session gone); run fixtures sequentially.'
+    created_at: '2026-10-27T23:56:00Z'
+    last_edited: '2026-10-27T23:56:00Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
