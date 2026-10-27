@@ -36153,7 +36153,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/261
   gh_pr_number: 261
   created_at: '2026-10-27T04:42:06.128850+00:00'
-  updated_at: '2026-10-27T15:42:45.898622+00:00'
+  updated_at: '2026-10-27T15:48:29.788461+00:00'
   started_at: '2026-10-27T04:42:19.589247+00:00'
   reviewed_at: null
   merged_at: null
@@ -36386,6 +36386,32 @@ prs:
       and confirm the double border.'
     created_at: '2026-10-27T15:42:45Z'
     last_edited: '2026-10-27T15:42:45Z'
+  - id: note-7a28d9a
+    text: 'QA scenario 0 (interactive, resumed after host restart) — fresh native
+      run on aa41c612; no code change. Covered the policy surface the worker scenarios
+      don''t: plain `pm autostart add` → wait-for-merge (status `wait-for-merge ←
+      target`); re-add keeps auto; `--wait-for-merge` flips; `--stop-before-merge`
+      maps to wait alone and when combined with `--wait-for-merge`; either + `--auto-merge`
+      → conflicting_flags, target set unchanged; `autostart --help`, `add --help`,
+      `pm tui keys`, `?` help and the runs popup present one manual policy with `--stop-before-merge`
+      only as a deprecated alias. Shared holds/removal/dep edits: two targets hold
+      one prerequisite (`wait-for-merge ← F, G`); removing one prints only its own
+      released ids; removing a target that is another target''s prerequisite keeps
+      the other hold; dep add/remove moves the hold. Auto paths: an auto target merges
+      itself and is removed; a wait hold overrides an auto target sharing the prerequisite
+      and flipping that target to auto releases it so it merges once. Diamond F←C,D;
+      C←A; D←A,B completed end-to-end — merging A started only C, merging B only D,
+      C+D started F exactly once, F waited for manual merge then merged, auto-start
+      OFF. TUI `g` merge path verified; unknown ids rejected; removing the last target
+      turns auto-start off without killing windows. Harness facts for the next run:
+      run `pm session` and CLI with TMUX unset (else they adopt the orchestrator''s
+      session and its target set); fixtures under ~/.pm/workdirs need a local `origin`
+      remote or sign-off integration fails (''no target repository'') and every SIGNOFF_MERGE
+      is coerced to SIGNOFF_BLOCKED; `pm push` + merge the pm/sync-* branch before
+      `pm pr start`. The QA-loop ''Could not find planner pane'' seen here is environmental
+      (this PR''s qa_loop_ui change is comment-only).'
+    created_at: '2026-10-27T15:48:29Z'
+    last_edited: '2026-10-27T15:48:29Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
