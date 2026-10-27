@@ -15888,7 +15888,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T15:33:47.848571+00:00'
-  updated_at: '2026-10-27T01:04:56.246495+00:00'
+  updated_at: '2026-10-27T01:30:45.243514+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -17069,6 +17069,23 @@ prs:
       manifests, recordings, pane captures, tick-transcript.log, pm-debug-evidence.txt).'
     created_at: '2026-10-27T01:04:56Z'
     last_edited: '2026-10-27T01:04:56Z'
+  - id: note-982cc28
+    text: 'Review 1905 i1 (HEAD bf7c26f3, base master 211a6128 already merged; merge-base
+      == master): fresh full-diff review of the picker, tmux, pr_sync/pr_utils and
+      TUI-sync changes. One defect found and fixed: a per-action window whose PR id
+      the window-name grammar cannot read (e.g. review-pr-a_b for a legacy dotted/underscored
+      local id) did not anchor home, so the picker opened on the first live PR instead
+      of the invoking one. The raw-window snapshot match now also tries the action-prefix-stripped
+      name; a -s<N> suffix is never stripped, so qa-pr-a-s1 still resolves to the
+      PR whose id is literally pr-a-s1 (two new end-to-end picker tests + unit cases).
+      Also committed the uncommitted QA-spec refinement in pm/specs/pr-49ce773/qa.md
+      (LC_ALL=C indicator check + B1 second-worktree note). Filed pr-77c4f91 for the
+      remaining pre-existing id-less-entry KeyError in pm pr list/ready, guide.detect_state
+      and auto_start (documented out of scope here), which also notes the cosmetic
+      status-bar pr_count mismatch. Full suite after edits: see the commit message.
+      No architectural blocker.'
+    created_at: '2026-10-27T01:30:45Z'
+    last_edited: '2026-10-27T01:30:45Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -35371,6 +35388,47 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
   updated_at: '2026-10-25T21:27:23.093198+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-77c4f91
+  plan: bugs
+  title: 'Bug: pm pr list/ready and auto-start crash with KeyError on a PR entry that
+    has no usable id'
+  branch: pm/pr-77c4f91-bug-pm-pr-list-ready-and-auto-start-crash-with-key
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py:527 (`pr_list` sort key `p["id"]`), pm_core/graph.py:45/58/73
+    (`ready_prs`/`blocked_prs`/`topological_order` index `pr["id"]`), pm_core/guide.py:105
+    (`detect_state` -> `graph.ready_prs`), pm_core/tui/auto_start.py:509/527/607/722
+    (id indexing in `on_state_loaded`/`check_and_start`).
+
+
+    Repro: put a PR mapping with no `id` (or a non-string/empty id) in pm/project.yaml,
+    e.g. `- title: no id` / `status: merged`, then run `pm pr list` or `pm pr ready`.
+    Both exit 1 with `KeyError: id`; the TUI logs a traceback from `_load_state` ->
+    `auto_start.on_state_loaded` when auto-start is enabled.
+
+
+    Context: pr-49ce773 added `pm_core.pr_utils.usable_prs` (non-empty string `id`
+    only) and applied it to `pr_sync.sync_prs`/`sync_from_github`, `tui/sync.do_normal_sync`/`startup_github_sync`
+    and `tui/tech_tree.TechTree`. The popup picker rejects such a snapshot with a
+    readable, entry-naming error. These remaining callers still index ids directly
+    and were explicitly left out of that PR (see pm/specs/pr-49ce773/impl.md, "Out
+    of scope (pre-existing)"). Use `usable_prs` in the same way (or report the offending
+    entry, as the picker does) so a partial/externally written project.yaml never
+    crashes the CLI or the TUI.
+
+
+    Related cosmetic item observed by QA S32: pm_core/tui/app.py:800 passes `pr_count=len(prs)`
+    to the status bar, so it counts id-less entries the tech tree drops ("4 PRs" while
+    2 boxes are drawn).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T01:30:16.482567+00:00'
+  updated_at: '2026-10-27T01:30:16.482567+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
