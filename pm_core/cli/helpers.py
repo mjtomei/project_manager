@@ -613,6 +613,7 @@ def _missing_cap_result(
 # so the file should be removed.
 _STALE_SIGNAL_REASONS = frozenset({
     "process is not running",
+    "process is a zombie",
     "pid was reused by another process",
 })
 
@@ -627,6 +628,11 @@ def _signal_tui(pid: int, sig: int, starttime: int | None = None) -> str | None:
     exact process, and sending to it fails with ``ESRCH`` once that
     process is gone.  *starttime* is re-checked after the pidfd is opened
     to close the same window on kernels without pidfd support.
+
+    A target that exited but has not been reaped (a zombie) is reported
+    as dead: both ``os.kill`` and ``pidfd_send_signal`` "succeed" against
+    a zombie and then discard the signal, so returning ``None`` there
+    would claim a delivery that can never be handled.
     """
     pidfd = None
     try:
@@ -638,6 +644,8 @@ def _signal_tui(pid: int, sig: int, starttime: int | None = None) -> str | None:
             live_starttime = tui_pidfile.proc_starttime(pid)
             if live_starttime is not None and live_starttime != starttime:
                 return "pid was reused by another process"
+        if tui_pidfile.is_zombie(pid):
+            return "process is a zombie"
         sender = getattr(signal, "pidfd_send_signal", None)
         if pidfd is not None and sender is not None:
             sender(pidfd, sig)
@@ -725,8 +733,11 @@ def _unqueue_line(queue: Path, line: str) -> None:
     command was *not* applied, so it must not sit in the queue waiting
     for some later drain to execute it.  Safe against concurrent
     appenders — under the same ``flock`` the appender uses, we only
-    truncate when the file still ends with our exact line, so a line
-    another caller appended after ours is never the one removed.
+    truncate when the file still ends with our exact line, so a
+    *different* line another caller appended after ours is never the one
+    removed.  Two callers submitting the identical command are
+    indistinguishable by content: at most one copy is rolled back and
+    the other stays queued for its own caller.
     """
     import fcntl
 

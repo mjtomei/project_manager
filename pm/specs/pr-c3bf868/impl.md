@@ -180,7 +180,14 @@ E1. **PID is ours on exec restart.** `claim` must short-circuit on
     `desc.pid == os.getpid()` before the cmdline check (the pre-exec
     descriptor's `starttime` is identical, since exec keeps the process).
 E2. **Zombie pidfile owner.** `kill(pid,0)` succeeds for a zombie; treat as
-    dead (existing `_is_zombie` logic moves into the shared module).
+    dead (existing `_is_zombie` logic moves into the shared module). The
+    same applies to a target that becomes a zombie *after* validation:
+    both `os.kill` and `pidfd_send_signal` "succeed" against an unreaped
+    process and then discard the signal, so `_signal_tui` re-checks
+    `is_zombie` immediately before sending and reports
+    `"process is a zombie"` (a stale-signal reason: the pidfile is
+    removed and, for a queued command, the line is rolled back) rather
+    than claiming a delivery nothing can handle.
 E3. **Unreadable/empty pidfile.** Treated as "no TUI"; unlink only if the
     content is unchanged since the read (do not delete a just-created file).
     Undecodable bytes (`UnicodeDecodeError`) count as unreadable rather
@@ -286,7 +293,13 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     `tui_owner_problem` reports `empty pidfile` (mirrors A2/E3).
 20. a failed signal after the queue append takes the line back
     (`_unqueue_line`), so a reported failure is not applied by a later
-    drain; a line another caller appended after ours is never truncated.
+    drain; a *different* line another caller appended after ours is never
+    truncated (two identical submissions are indistinguishable, so at
+    most one copy is rolled back).
+21. a target that becomes a zombie between validation and the signal:
+    `_signal_tui` returns `"process is a zombie"` without sending, and
+    `submit_tui_command` reports `stale_pidfile`, removes the pidfile and
+    rolls the queued line back (E2).
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;

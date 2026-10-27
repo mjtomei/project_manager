@@ -479,6 +479,27 @@ class TestSubmitCommand:
         assert res.ok is False
         assert queue.read_text() == "earlier command\n"
 
+    def test_zombie_after_validation_is_stale(self, ipc_paths, start_fake_tui,
+                                              monkeypatch):
+        """A TUI that dies between validation and the signal is a zombie.
+
+        Both os.kill and pidfd_send_signal "succeed" against an unreaped
+        process and discard the signal, so the delivery must not be
+        reported as ok — the pidfile is stale and the line is rolled back.
+        """
+        pidfile, queue = ipc_paths
+        tui = start_fake_tui()
+        _write_json(pidfile, tui.pid, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+        monkeypatch.setattr(helpers, "_signal_tui",
+                            lambda *a, **k: "process is a zombie")
+
+        res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
+
+        assert res.ok is False
+        assert res.reason == "stale_pidfile"
+        assert not pidfile.exists()
+        assert queue.read_text() == ""
+
     def test_empty_pidfile_is_starting_not_stale(self, ipc_paths):
         """A peer mid-claim must keep its file: deleting it reopens the race.
 
@@ -821,6 +842,20 @@ class TestSignalDelivery:
         assert helpers._signal_tui(1234, signal.SIGUSR2, 777) == (
             "pid was reused by another process")
         assert calls == []
+
+    def test_zombie_target_is_not_signaled(self, monkeypatch):
+        """An unreaped process can't handle the signal; report it as dead."""
+        proc = subprocess.Popen(["true"])
+        try:
+            assert _wait_for(lambda: tpf.is_zombie(proc.pid))
+            monkeypatch.setattr(os, "kill",
+                                lambda *a: pytest.fail("os.kill used"))
+            monkeypatch.setattr(signal, "pidfd_send_signal",
+                                lambda *a: pytest.fail("signal sent to zombie"))
+            assert helpers._signal_tui(proc.pid, signal.SIGUSR2) == (
+                "process is a zombie")
+        finally:
+            proc.wait(timeout=5)
 
     def test_falls_back_to_kill_without_pidfd(self, monkeypatch):
         killed = []
