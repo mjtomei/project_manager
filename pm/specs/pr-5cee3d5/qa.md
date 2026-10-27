@@ -42,10 +42,18 @@ Reproduction traps (from the prior QA runs — avoid rediscovering them):
   fails with "does not appear to be a git repository" and the record gets
   `base_sha: null`.
 - Building the #250 shape: `pm pr add` on both sides leaves `project.active_pr`
-  different, which the resolver correctly reports as a real conflict. Run
-  `pm pr select <target-pr>` on each side before committing. Also sync the PR
-  branch with master before committing the branch-side record, because
-  `pm pr start` records the workdir state after cloning.
+  different — that is pm's own TUI cursor, and the resolver now merges it to
+  the **new base's** value instead of refusing (see R6). A branch that never
+  ran pm (a hand-built fixture with no `active_pr` anywhere) therefore no
+  longer reproduces the real shape; use pm on both sides, or set different
+  cursors by hand. Also sync the PR branch with master before committing the
+  branch-side record, because `pm pr start` records the workdir state after
+  cloning.
+- The branch now contains `master@211a6128` (merged as 7f603144) and the
+  "behind master" warning in older notes no longer applies. Scenarios 13-17
+  PASSed at 481644d5; since then the re-run pointer, the `pm pr show`
+  resolution rendering and the `active_pr` merge landed, so those are the new
+  surfaces to exercise (plus the prompt-bounding merge from #250).
 - Use `--record` when the scenario needs `integration.json` and the resolution
   delta on the PR/captures; a plain check after `--apply` prints only
   "up to date". The read-only check still writes the delta its output names.
@@ -133,6 +141,15 @@ resolved` (never `resolved`), and a resolution carried forward from an
 earlier, already-applied merge is labelled as earlier/already applied — the
 conflict the record now reports is a separate, current problem.
 
+The one field-level exemption is pm's own UI state: `project.active_pr` is the
+TUI's selected PR, rewritten by pm on every cursor move, so any branch where
+someone used pm differs from the base there. Both sides changing it merges to
+the new base's value (deterministically, and the branch value is not counted
+as a lost change), the same class as the bookkeeping timestamps. That
+exemption covers only that one path: a real `project` field changed on both
+sides (e.g. `hide_merged`, `skip_qa`), a deleted-vs-edited `active_pr`, and
+every real record field conflict still refuse.
+
 ### R7. A clean merge with behavioural base changes is not an exemption
 GIVEN a base that merges cleanly but changed behaviour-relevant configuration
 (`project.model_config`, `skip_qa`, PR `status`/`depends_on`/`model`, plan
@@ -169,6 +186,38 @@ the PR diff include merged base commits. The review window's diff pane (and
 the prompts that name the PR diff) use the exact base the branch contains —
 the newest one when the branch carries more than one — so the pane's change
 summary and full diff show only the PR's own changes, not the base merge.
+
+### R10. A re-run after a refused merge says why it is running again
+GIVEN a PR whose recorded SIGNOFF_MERGE approval the merge gate invalidated
+because the base moved (the driver retires the record and relaunches
+sign-off).
+WHEN sign-off is launched again.
+THEN the instructions pm hands the sign-off agent name the refusal reason, the
+previous verdict and the revision it approved, and point at the previous
+`$CAP/report.html` as readable and reusable — and that report is still on
+disk, unchanged. The block is emitted only while the PR's own changes are
+unchanged since that approval: pm may have merged the base into the branch
+without that being PR work, so "unchanged" means the check head equals the
+approved revision or the applied resolution's pre-apply head (with the applied
+merge still the checked revision). Real PR work after the refusal, and an open
+sign-off return (a bounce, which writes `signoff_return` and overwrites the
+report), never emit it. A new recorded verdict clears the marker.
+
+### R11. `pm pr show` is a complete reader for the resolution
+GIVEN a PR with a recorded integration check — resolved and applied,
+resolved but unapplied, attempted-and-unresolved, or a carried earlier
+resolution.
+WHEN the user runs `pm pr show <pr>` (the reader every abbreviated prompt
+points at).
+THEN the integration section names the candidate tree, per-path resolution
+lines with the ids added from each side (saying how many the record omits),
+the unresolved conflicts, the applied merge (or "not applied to the PR
+branch"), the resolution digest, the delta file's basename, and a full-record
+pointer that resolves to `integration.json`. The delta and the full record are
+readable, the per-path labels match the outcome (`Resolved`,
+`Resolution attempted (NOT resolved)`, `Resolved earlier (already applied)`),
+and a hand-edited record (non-list overlap, non-mapping integration) reads as
+absent instead of crashing the command.
 
 ## Edge cases (Given / When / Then)
 
@@ -208,6 +257,24 @@ summary and full diff show only the PR's own changes, not the base merge.
   the user runs `pm pr signoff integrate --record`. THEN the recorded
   `integration.json` does not point at a delta file that was never written,
   and the output names the unresolved conflicts.
+- GIVEN both branches used pm, so `project.active_pr` differs on each side.
+  WHEN the user resolves the integration. THEN the candidate carries the base's
+  cursor value and the branch's value is not reported as a lost change.
+- GIVEN a hand-edited `project.yaml` (the file people resolve by hand): a
+  non-JSON value such as an unquoted date or a `!!set` in a carried list, a
+  non-string path in a resolution entry, a numeric mapping key, or a duplicate
+  id inside a nested list. WHEN the user checks, records, shows and merges.
+  THEN each reads as absent or refuses readably — never a traceback, and never
+  an integration check that silently records nothing (the evidence statement
+  must still be required).
+- GIVEN the recorded resolution delta file is unreadable (binary, or a path
+  with a null byte). WHEN a later integration check or sign-off launch runs.
+  THEN the provenance is still carried, the delta reads as absent, and the
+  launch does not fail with a bare "Integration check failed".
+- GIVEN an approval invalidated by the merge gate and a fresh sign-off run.
+  WHEN the user reads the relaunched sign-off instructions, then adds a real
+  PR commit and relaunches. THEN the first names the previous verdict/revision
+  and the preserved report; the second no longer claims the PR is unchanged.
 
 ## Pass / Fail criteria
 
@@ -236,3 +303,9 @@ summary and full diff show only the PR's own changes, not the base merge.
 - Whether a metadata-only resolution should be applied by the merge step:
   no — it is applied at sign-off; the merge step recomputes without
   resolution and refuses a different candidate.
+- Whether the "why sign-off is running again" pointer is assertable: it is
+  prompt text, so capture the generated sign-off prompt artifact (a stub
+  `claude` ahead on PATH that records its argv, as scenario 12 documented),
+  and cross-check the user-visible consequences: the preserved
+  `$CAP/report.html`, the invalidated/stale reason in `pm pr show` and the
+  TUI, and the merge refusal.
