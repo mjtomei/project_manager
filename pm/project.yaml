@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-33b88a7
+  active_pr: pr-5887f3b
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -33257,7 +33257,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T00:58:54.050316+00:00'
+  updated_at: '2026-10-27T02:29:46.498877+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36174,6 +36174,32 @@ prs:
       HEAD), merged tree 4055 passed.'
     created_at: '2026-10-27T00:58:53Z'
     last_edited: '2026-10-27T00:58:53Z'
+  - id: note-f2c4767
+    text: 'QA S84 (2026-10-27, container mode podman 3, real claude vs work/ router
+      + main stubs, HEAD 0eeb8719 vs control 5b78ba40; captures /pm-captures/scenarios/84,
+      REPORT.md). CODE CHANGE bbaafe6d needs normal re-review: a review-loop launch
+      that exits non-zero (route down) raised RuntimeError caught by _log.exception,
+      so each failed launch wrote a Traceback to the pm debug log (5 in S84). It is
+      now ReviewLaunchError, logged as one ERROR line; the verdict and TUI text are
+      unchanged; the new test fails without the fix; suite 4056 passed. 19c68f43 held
+      live in every story: a sign-off return plus a restart on the relauncher line
+      adopted the late window (after 2.0s, 11.0s under load), with one relauncher,
+      one routed session, and awaiting cleared. The control opened two windows in
+      one container, and both sessions stuck at the claude theme picker (in-container
+      .claude.json clobbered), so 0 routed requests. B z z d rounds adopted (outcome
+      b; symlink 68 ms after relauncher). Router down: restored loop waits on the
+      dangling symlink, ERROR line 121.4-121.5 s after the restart. Window killed
+      plus immediate restart: the killed container claude wrote its transcript 0.8
+      s later, so the rerun came after about 1 s, not 120 s; with a 1 s gap the rerun
+      came at 120.4 s. Two PRs: restored 2, each adopted on its own window; TUI answered
+      keys. Ticks during the wait: 177x running: review, 0 forbidden. Filed pr-9aa36f5
+      (double z z d while a launch is in flight opens two windows in one container)
+      and pr-5887f3b (pm pr review workdir not reloaded into TUI, so autostart add
+      starts nothing). Residual, not reproduced: a later loop in the same transcript
+      dir starts with the previous loop symlink (target exists) until the child rewrites
+      it (68-119 ms); a slower child would make a restored loop relaunch at once.'
+    created_at: '2026-10-27T02:29:46Z'
+    last_edited: '2026-10-27T02:29:46Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -38420,6 +38446,69 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T00:08:04.042590+00:00'
   updated_at: '2026-10-27T00:08:04.042590+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9aa36f5
+  plan: bugs
+  title: 'Bug: z z d pressed again while the first review-loop launch is still in
+    flight opens two review windows in one container'
+  branch: pm/pr-9aa36f5-bug-z-z-d-pressed-again-while-the-first-review-loo
+  status: pending
+  depends_on: []
+  description: 'Found in QA S84 (pr-592e4bd, container mode, podman 3, captures /pm-captures/scenarios/84/incidental-supersede/supersede-evidence.txt).
+    Repro: select a PR in the TUI, press z z d, and press z z d again on the same
+    PR within ~0.5 s, before the first launch has opened its review-<pr> window (container
+    creation ~1-12 s). Observed (01:53:35-37): review_loop_ui "superseding running
+    loop for pr-ea3495d with a fresh one"; two `pm pr review --fresh --review-loop`
+    relaunchers (loop 4429 at :35.647, loop 7d7d at :36.174). The second --fresh found
+    no window to kill, because the first window did not exist yet. The second launch
+    logged "Reusing existing container ... (id=6ee486f3c19c)", and two windows review-pr-ea3495d
+    (@19, @20) both podman exec into that one container. Two routed review sessions
+    ran (router sids 7e76d242, b3c9cb57). Both loops polled pane %31 (window @19);
+    @20 session orphaned. /exit of either pane runs the EXIT trap `podman rm -f` and
+    kills the other window session too. Location: pm_core/tui/review_loop_ui.py supersede
+    path (does not stop/await the superseded loop in-flight `pm pr review` child)
+    and pm_core/cli/pr.py _launch_review_window (--fresh kills only an existing window).
+    Same class as S82 (fixed for TUI restarts by 19c68f43 _wait_for_launching_window).
+    A fix could make the supersede wait for (or kill) the in-flight launch, or have
+    the --fresh child serialize on a per-PR launch lock.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T02:27:25.587563+00:00'
+  updated_at: '2026-10-27T02:27:25.587563+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5887f3b
+  plan: bugs
+  title: 'Bug: a workdir created by `pm pr review` on an in_review PR never reaches
+    the running TUI, so `pm autostart add` silently starts no review loop'
+  branch: pm/pr-5887f3b-bug-a-workdir-created-by-pm-pr-review-on-an-in-rev
+  status: pending
+  depends_on: []
+  description: 'Found in QA S84 (pr-592e4bd; captures /pm-captures/scenarios/84/story1/events.log,
+    monitors/pmlog-ts.log 01:28:22-01:29:19). Repro: pm session (TUI up); `pm pr review
+    <pr>` on an in_review PR without a workdir ("PR is already in_review." / "Workdir
+    missing — cloning" / "Workdir created at ..."); /exit the review; then `pm autostart
+    add <pr> --stop-before-merge`. The add is confirmed ("added: <pr>", TUI "Auto-start:
+    targets += ..."), but no review loop starts: _auto_start_review_loops skips the
+    PR because the TUI in-memory PR has no workdir. Pressing r only reloads state
+    (action_refresh does not run check_and_start); a second `pm autostart add` (unchanged)
+    then starts the loop at once. Cause: pm_core/cli/pr.py pr_review already-in_review
+    path calls _launch_review_window without trigger_tui_refresh(), and pm_core/cli/helpers.py
+    _clone_workdir persists pr["workdir"] without notifying the TUI (the not-in_review
+    path refreshes after its locked_update). Fix idea: trigger_tui_refresh() after
+    the workdir is persisted (or in the in_review path), checking that a TUI-originated
+    call does not loop.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T02:28:17.100013+00:00'
+  updated_at: '2026-10-27T02:28:17.100013+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
