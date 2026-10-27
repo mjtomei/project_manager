@@ -352,9 +352,14 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
     return cmd
 
 
+# Auth/trust failures are not retryable.  Deliberately excludes generic
+# filesystem/socket errors like "permission denied": a container teardown or
+# mount that fails that way is exactly the transient launch failure this
+# retry exists to recover, and treating it as an auth hold would strand the
+# target again.
 _AUTH_FAILURE_RE = re.compile(
     r"unauthori[sz]ed|not logged in|authentication failed|invalid api key|"
-    r"\b401\b|\b403\b|permission denied|workspace trust|trust prompt",
+    r"\b401\b|\b403\b|workspace trust|trust prompt",
     re.IGNORECASE)
 
 
@@ -639,6 +644,15 @@ def _discover_iteration(state: ReviewLoopState, pr_data: dict,
             return AttemptDiscovery("verdict", output=output)
         return AttemptDiscovery("adopt", pane_id=pane_id,
                                 transcript=pane_transcript)
+    if allow_recovery and not pane_sid:
+        # A live pane that has not exposed a session id yet may be a
+        # just-started recovery or another driver's launch; give it the
+        # same bounded grace the "our attempt" path uses instead of killing
+        # it with a second ``--fresh``.  The caller replaces it if the
+        # session never appears.
+        return AttemptDiscovery("pending", pane_id=pane_id,
+                                transcript=pane_transcript,
+                                reason="pane has no session id yet")
     # Unknown pane (e.g. a user-opened review window) on the first attempt
     # of an iteration this loop has not launched: keep the loop's existing
     # --fresh replacement semantics.
@@ -910,6 +924,7 @@ def _reset_launch_retry(state: ReviewLoopState) -> None:
     state.last_launch_artifact = None
     state.launch_retryable = False
     state.retry_episodes = 0
+    state.retry_ready_at = 0.0
     # The TUI announces each retry attempt once, keyed on the attempt
     # number; without this a *later* iteration's attempt 2 would look
     # already-announced and be silently swallowed.
@@ -961,6 +976,9 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
         next_attempt = state.launch_attempts + 1
         if not _claim_launch(state, iteration, next_attempt):
             if not _wait_for_claim(state, pm_root):
+                if _pr_is_terminal(pr_id, pm_root):
+                    raise ReviewClosedError(
+                        f"PR {pr_id} merged/closed during review launch")
                 _log.info("review_loop: %s launch is owned by another loop; "
                           "standing down", pr_id)
                 raise ReviewLaunchError(

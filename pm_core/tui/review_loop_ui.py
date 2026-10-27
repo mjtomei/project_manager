@@ -278,7 +278,12 @@ def _start_loop(app, pr_id: str, pr: dict | None,
                          iteration=state.iteration,
                          loop_id=state.loop_id)
 
-    # Start the background loop
+    # Start the background loop.  Mark it running *synchronously* before the
+    # thread is created: the 1 s poll (and a second starter, e.g. the
+    # breadcrumb resume after `check_and_start` re-armed the same loop) would
+    # otherwise see a non-running loop for a tick, re-announce a stale
+    # terminal verdict, or start a duplicate loop thread.
+    state.running = True
     start_review_loop_background(
         state=state,
         pm_root=pm_root,
@@ -388,6 +393,12 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
             error=getattr(state, "last_launch_error", "") or
                   state.latest_output,
         )
+    else:
+        # A clean (or non-launch-failure) completion must not leave a prior
+        # episode's retry evidence in runtime_state, or `pm autostart
+        # status` / the runs popup would keep reporting a stale artifact.
+        extras.update(retryable=None, attempts=None, error=None,
+                      artifact=None, retry_ready_at=None)
     _rs.set_action_state(state.pr_id, "review-loop", final_state, **extras)
 
 

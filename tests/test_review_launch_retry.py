@@ -1037,3 +1037,158 @@ def test_auto_sequence_does_not_launch_over_a_loop_lease(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "owned by loop:ab12" in result.output
     launch.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Review 385e i4: classification, discovery grace, restart double-start
+# ---------------------------------------------------------------------------
+
+def test_container_permission_error_is_retryable_not_auth(tmp_path):
+    """A container teardown/mount failure that says "permission denied" is
+    the transient launch failure this fix recovers, not an auth hold.
+
+    Classifying it as auth made the loop stop after one attempt and left the
+    auto-start target stranded — the very bug this PR fixes."""
+    with patch.object(review_loop.subprocess, "run",
+                      return_value=MagicMock(
+                          returncode=1, stdout="",
+                          stderr="Error: removing container: permission denied")):
+        with pytest.raises(ReviewLaunchError) as ei:
+            review_loop._launch_review_window(
+                PR, str(tmp_path), iteration=1,
+                transcript=str(tmp_path / "t.jsonl"))
+    assert ei.value.retryable is True
+    assert ei.value.reason == "launch"
+
+
+def test_discovery_waits_for_a_starting_pane_after_our_attempt(tmp_path,
+                                                               monkeypatch):
+    """After our own attempt failed, a live pane that has not exposed its
+    session id yet may be a just-started recovery or another driver's
+    launch: give it the bounded grace instead of a ``--fresh`` that kills
+    it.  On the first attempt (nothing of ours yet) it is still replaced."""
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: "%9")
+    monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
+                        lambda *_a, **_k: None)
+    monkeypatch.setattr(review_loop, "_other_loop_owner", lambda _s: "")
+
+    state = ReviewLoopState(pr_id=PR, iteration=2,
+                            iteration_attempted=True, launch_attempts=1)
+    disc = review_loop._discover_iteration(state, _pr(tmp_path),
+                                           str(tmp_path), 2,
+                                           allow_recovery=True)
+    assert disc.kind == "pending"
+
+    state = ReviewLoopState(pr_id=PR, iteration=2)
+    disc = review_loop._discover_iteration(state, _pr(tmp_path),
+                                           str(tmp_path), 2,
+                                           allow_recovery=False)
+    assert disc.kind == "launch"
+
+
+def test_start_loop_marks_running_before_the_thread_starts(tmp_path,
+                                                           monkeypatch):
+    """A second starter (the breadcrumb resume after `check_and_start`
+    re-armed the same loop) and the 1 s poll must not see a non-running
+    loop between `_start_loop` and the thread body."""
+    from pm_core import runtime_state as rs
+    from pm_core import tmux as tmux_mod
+    from pm_core.tui import review_loop_ui
+
+    monkeypatch.setattr(rs, "_runtime_dir", lambda: tmp_path)
+    app = MagicMock()
+    app._review_loops = {}
+    app._review_loop_timer = None
+    pr = {"id": PR, "workdir": str(tmp_path), "status": "in_review"}
+    state = ReviewLoopState(pr_id=PR, iteration=3,
+                            latest_verdict=VERDICT_LAUNCH_FAILED,
+                            launch_retryable=True)
+    seen: dict = {}
+
+    def fake_bg(**kw):
+        seen["running"] = kw["state"].running
+
+    with patch.object(tmux_mod, "in_tmux", return_value=True), \
+            patch("pm_core.tui.review_loop_ui.store") as store_mock, \
+            patch("pm_core.tui.review_loop_ui.start_review_loop_background",
+                  side_effect=fake_bg), \
+            patch("pm_core.tui.review_loop_ui._ensure_poll_timer"):
+        store_mock.find_project_root.return_value = Path("/tmp/pm")
+        assert review_loop_ui._start_loop(
+            app, PR, pr, transcript_dir=str(tmp_path), resume_state=state)
+    assert seen["running"] is True
+    assert state.running is True
+
+
+def test_completion_drops_a_previous_episodes_retry_evidence(tmp_path,
+                                                             monkeypatch):
+    """A loop that eventually succeeds after a re-armed retryable failure
+    must not keep the old artifact/error in runtime_state."""
+    from pm_core import runtime_state as rs
+    from pm_core.tui import review_loop_ui
+
+    monkeypatch.setattr(rs, "_runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(review_loop_ui, "_is_active_loop", lambda _s: True)
+    rs.set_action_state(PR, "review-loop", "failed",
+                        verdict=VERDICT_LAUNCH_FAILED, retryable=True,
+                        attempts=3, error="boom", artifact="/tmp/a.log",
+                        retry_ready_at=time.time() + 60)
+
+    state = ReviewLoopState(pr_id=PR, iteration=2,
+                            latest_verdict=VERDICT_PASS)
+    review_loop_ui._on_complete_from_thread(MagicMock(), state)
+
+    entry = rs.get_action_state(PR, "review-loop")
+    assert entry["state"] == "done"
+    assert entry["verdict"] == VERDICT_PASS
+    for stale in ("retryable", "attempts", "error", "artifact",
+                  "retry_ready_at"):
+        assert stale not in entry
+
+
+def test_reset_launch_retry_clears_the_rearm_deadline():
+    state = ReviewLoopState(pr_id=PR, launch_attempts=2,
+                            retry_ready_at=time.time() + 60,
+                            launch_retryable=True, retry_episodes=1)
+    review_loop._reset_launch_retry(state)
+    assert state.launch_attempts == 0
+    assert state.launch_retryable is False
+    assert state.retry_episodes == 0
+    assert state.retry_ready_at == 0.0
+
+
+def test_closed_pr_while_waiting_for_another_loops_lease_is_closed(
+        tmp_path, monkeypatch):
+    """A PR that merges while this loop is waiting for another loop's lease
+    is CLOSED, not a non-retryable LAUNCH_FAILED."""
+    state = ReviewLoopState(pr_id=PR)
+    monkeypatch.setattr(review_loop, "_claim_launch", lambda *a, **k: False)
+    monkeypatch.setattr(review_loop, "_wait_for_claim", lambda *a, **k: False)
+    checks = iter([False, True])  # loop top: live; after the wait: terminal
+    monkeypatch.setattr(review_loop, "_pr_is_terminal",
+                        lambda *a, **k: next(checks, True))
+    with patch.object(review_loop, "_run_claude_review") as run:
+        result = _run(state, tmp_path)
+    run.assert_not_called()
+    assert result.latest_verdict == VERDICT_CLOSED
+
+
+def test_auto_start_keeps_the_failure_retryable_when_rearm_raises(tmp_path):
+    """A starter that raises must restore the retry episode too, not leave
+    the target disarmed."""
+    from pm_core.tui import auto_start
+    state = ReviewLoopState(pr_id=PR, running=False,
+                            latest_verdict=VERDICT_LAUNCH_FAILED,
+                            launch_retryable=True, retry_ready_at=0,
+                            retry_episodes=2, iteration=1,
+                            _transcript_dir=str(tmp_path))
+    app = _auto_app(tmp_path, state)
+    with patch("pm_core.tui.review_loop_ui._start_loop",
+               side_effect=RuntimeError("no project root")), \
+            patch("pm_core.tmux.in_tmux", return_value=True):
+        auto_start._auto_start_review_loops(app, app._data["prs"])
+    assert state.retry_episodes == 2
+    assert state.launch_retryable is True

@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T06:43:19.537132+00:00'
+  updated_at: '2026-10-27T07:07:37.771952+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36275,6 +36275,27 @@ prs:
       + hook receiver installer). (2026-10-27T06:55:00Z)'
     created_at: '2026-10-27T06:43:19Z'
     last_edited: '2026-10-27T06:43:19Z'
+  - id: note-08f35aa
+    text: 'Review 385e i4 (fixes applied): _AUTH_FAILURE_RE no longer treats a container
+      "permission denied" teardown/mount error as an auth hold (that was non-retryable
+      and re-stranded the target — the bug this PR fixes); _discover_iteration returns
+      pending for a live pane with no session id yet once recovery is allowed, so
+      a racing recovery/route start is not killed by --fresh; _start_loop marks the
+      loop running synchronously so the 1 s poll / a second starter (breadcrumb resume
+      after check_and_start re-armed the same loop) cannot re-announce a stale verdict
+      or start a duplicate thread; the completion mirror drops stale retry evidence
+      (retryable/attempts/error/artifact/retry_ready_at) from runtime_state; a PR
+      that merges while the loop waits out another loop''s lease is CLOSED, not LAUNCH_FAILED;
+      _reset_launch_retry clears retry_ready_at; a raising re-arm starter restores
+      the retry episode instead of disarming it. 7 new tests (52 in the retry file).
+      Full suite 3779 passed; 55 failed + 17 errors are the base tree''s pre-existing
+      env failures (markdown module, hook installer, merge/signoff/git), including
+      test_git_ops::test_keeps_unpushed_merge which also fails on origin/master in
+      isolation. Spec updated with iteration 4. Residual (non-blocking): review_loop.py
+      ~1300 lines; two lease mechanisms coexist (signoff claim_return_launch vs claim_action_lease);
+      _retry_rearm_blocked logs once per scheduler pass at the episode cap. (2026-10-27)'
+    created_at: '2026-10-27T07:07:37Z'
+    last_edited: '2026-10-27T07:07:37Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

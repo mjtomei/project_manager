@@ -998,8 +998,16 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
             loop.launch_retryable = False
             loop.retry_ready_at = 0.0
             tdir = loop._transcript_dir or str(get_transcript_dir(app))
-            if not _start_loop(app, pr_id, pr, transcript_dir=str(tdir),
-                               resume_state=loop):
+            try:
+                started = _start_loop(app, pr_id, pr,
+                                      transcript_dir=str(tdir),
+                                      resume_state=loop)
+            except Exception:
+                # A raising starter must not silently disarm the failure
+                # either; restore the episode exactly as for a False return.
+                _log.exception("auto_start: re-arm for %s raised", pr_id)
+                started = False
+            if not started:
                 (loop.retry_episodes, loop.launch_attempts,
                  loop.next_retry_at, loop.launch_retryable,
                  loop.retry_ready_at) = saved

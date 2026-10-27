@@ -306,3 +306,43 @@ Note (not changed): a child auth failure (`_looks_like_auth_failure`) is a
 non-retryable `LAUNCH_FAILED`, not `HOLD`.  `HOLD` stays reserved for a
 pane sitting at a workspace-trust/permission prompt (the launch succeeded);
 an auth-rejected child never launched a session.
+
+## Review iteration 4 (385e) — refinements
+
+Findings from the fourth review pass, applied on top of iteration 3:
+
+1. **A container "permission denied" is a retryable launch failure, not an
+   auth hold.** `_AUTH_FAILURE_RE` matched `permission denied`, so a
+   teardown/mount failure that reports it (a realistic podman/docker
+   symptom) was classified non-retryable: the loop stopped after one attempt
+   and auto-start did not re-arm — re-creating the stranded target this PR
+   exists to fix.  The pattern now covers only real auth/trust symptoms
+   (`unauthorized`, `not logged in`, `authentication failed`, `invalid api
+   key`, `401`, `403`, `workspace trust`, `trust prompt`).
+2. **A starting pane is not killed by a retry.** In the no-own-transcript
+   branch, discovery only handled a pane that had already exposed a session
+   id; a live pane with no session id yet (a just-started recovery or
+   another driver's launch racing the retry) fell through to `launch` and
+   was replaced by `--fresh`.  When `allow_recovery` is set it now returns
+   `pending`, so the bounded grace applies here too; the first attempt of an
+   iteration this loop has not launched still replaces the window.
+3. **`_start_loop` marks the loop running synchronously.** The 1 s poll (and
+   a second starter — the breadcrumb resume running right after
+   `check_and_start` re-armed the same loop) could observe a non-running
+   loop between `_start_loop` and the thread body, re-announcing a stale
+   terminal verdict or starting a duplicate loop thread.  `state.running` is
+   set before `start_review_loop_background`.
+4. **Stale retry evidence is cleared on completion.** A loop that succeeded
+   after a re-armed failure left the previous episode's `retryable` /
+   `error` / `artifact` / `attempts` / `retry_ready_at` in `runtime_state`;
+   the completion mirror now drops them for non-failure outcomes.
+5. **CLOSED while waiting for another loop's lease.** If the PR merged while
+   the loop waited out another loop's lease, it reported a non-retryable
+   `LAUNCH_FAILED`; it now re-checks terminal status and reports `CLOSED`.
+6. **`_reset_launch_retry` clears `retry_ready_at`** so a spent re-arm
+   deadline cannot leak into the next episode (or the breadcrumb).
+7. **A raising re-arm starter also restores the episode.** `_start_loop`
+   returns False for its own bail-outs, but a raise (e.g. a missing project
+   root) escaped with the retry episode already cleared, silently disarming
+   the failure.  `_auto_start_review_loops` now treats a raise like a False
+   return and restores the saved episode fields.
