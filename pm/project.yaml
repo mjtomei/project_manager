@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-a6e74e3
+  active_pr: pr-5115af5
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T20:07:36.579501+00:00'
+  updated_at: '2026-10-27T20:21:10.389314+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14288,6 +14288,29 @@ prs:
       rm has no -t: use kill + rm -f in fixtures.'
     created_at: '2026-10-27T20:18:36Z'
     last_edited: '2026-10-27T20:18:36Z'
+  - id: note-97d528c
+    text: 'QA S37 (2026-10-27; stories on a44a70dc/8c5fad86; fixes fdf4a1d5): real
+      rootless Podman 3.4.4 private overlay store, unmodified build-base PASSED incl.
+      Chromium smoke; labeled podman shim; 3 projects. Held: grouped-session scope,
+      keep/remove reasons, scoped dry-run no-op (IDs/StartedAt/proxies/hashes), serialized
+      concurrent reap+session cleanup, partial failure exit 1 + retryable status,
+      retry clears, include-retained vs live owner, retained refusal, outage status,
+      slow status 1 identity probe, pm help, PPID ps fault proxy failure, pr cleanup
+      --resources, session kill/legacy cleanup partial counts, reuse after failure
+      without force authority. FIXED+pushed fdf4a1d5: (1) hung-runtime status 50 s
+      (1 info + 4 identity probes) -> 10 s/1 probe (status scope treats identity unknown
+      once availability failed); (2) legacy unlabeled container PR status resolved
+      from caller cwd project (grouped pane in project B printed merged-PR leftover
+      as "attempt ended") -> uses ~/.pm/sessions/<tag>/pm_root. Restart lease refusing
+      relaunch reproduced (step 3) and verified fixed by S38 3d291aeb on rebased tree.
+      Not defects: pr cleanup kills the window so a pane-exit pass resolves the stale
+      C proxy failure before step 4; a real podman ps/rm race recorded a transient
+      fail-closed A/R proxy failure, cleared by the next full reap; session-kill reuse
+      keep reason reads "skipped: container restarted since owner release". Filed
+      pr-5115af5 (pm session inside a pm pane attaches nested client to current session,
+      ignoring cwd). Evidence /pm-captures/scenarios/37/README.md.'
+    created_at: '2026-10-27T20:21:10Z'
+    last_edited: '2026-10-27T20:21:10Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -34353,6 +34376,31 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T19:39:38.777080+00:00'
   updated_at: '2026-10-27T19:39:38.777080+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5115af5
+  plan: bugs
+  title: 'Bug: pm session run in a pm tmux pane after cd to another project attaches
+    a nested client to the current session'
+  branch: pm/pr-5115af5-bug-pm-session-run-in-a-pm-tmux-pane-after-cd-to-a
+  status: pending
+  depends_on: []
+  description: 'Found in pr-1139060 QA S37 (2026-10-27, 8c5fad86). Repro: two pm projects
+    A and B; session A running, session B killed. In a pane of session A: `cd <B dir>
+    && pm session`. Expected: start (or attach) project B session, or refuse because
+    already inside tmux. Actual: prints "Attaching to session pm-<A>~1..." and runs
+    `tmux attach` to the A grouped session NESTED inside the pane (state_root() prefers
+    the current tmux session project over cwd; pm_core/cli/session.py _session_start),
+    so B is never started and the pane is wedged until the nested client is detached
+    (tmux detach-client). Evidence: /pm-captures/scenarios/37/story4/step3a.txt and
+    story4/control-A-pane.cast.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T20:20:59.054521+00:00'
+  updated_at: '2026-10-27T20:20:59.054521+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
