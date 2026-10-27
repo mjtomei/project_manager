@@ -63,7 +63,10 @@ entries and keeps its place in line.  On a TUI restart every resumed run
 adopts all its queued scenarios' entries (`launch_queue.adopt_run`, which
 cleans nothing) before any resumed loop starts, because a loop's first
 queue access cleans pre-restart entries and would drop the other runs'
-(and its own non-head) entries (QA S44).  impl/review/signoff/QA all walk the
+(and its own non-head) entries (QA S44).  Adoption runs on a daemon
+thread (it can wait on the lock), and the resumed runs count as running
+from the moment they are found, so `t` / `zz t` cannot start a second loop
+meanwhile (review 05f6 i1, i2).  impl/review/signoff/QA all walk the
 same queue under the same lock (`enqueue_and_try_acquire` uses the full
 policy walk).
 

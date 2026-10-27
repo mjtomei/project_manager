@@ -627,5 +627,27 @@ def test_resume_adoption_runs_off_the_ui_thread(tmp_path):
         qa_loop_ui._resume_incomplete_qa(app)
         assert "pr-001" in app._qa_loops
         assert not resumed.is_set()
+        # While adoption waits, the run already counts as running, so a
+        # user's t / zz t sees it instead of starting a second loop.
+        assert app._qa_loops["pr-001"].running
+        qa_loop_ui.stop_qa(app, "pr-001")
+        assert app._qa_loops["pr-001"].stop_requested
         lock_free.set()
         assert resumed.wait(5)
+
+
+def test_resume_that_cannot_start_reports_error(tmp_path):
+    app = _make_app(tmp_path)
+    _seed_run(tmp_path)
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "adopt_queue_entries",
+                      return_value=({}, set())), \
+         patch.object(qa_loop, "resume_qa_background",
+                      side_effect=RuntimeError("can't start new thread")):
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    state = app._qa_loops["pr-001"]
+    assert not state.running
+    assert state.latest_verdict == "ERROR"
+    app.call_from_thread.assert_called()

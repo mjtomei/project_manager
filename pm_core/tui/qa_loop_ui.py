@@ -518,6 +518,12 @@ def _resume_incomplete_qa(app) -> None:
         to_resume.append((state, pr, _on_update))
 
     if to_resume:
+        # Publish the runs as running before the thread starts, like
+        # start_qa_background: adoption can wait seconds on the lock, and
+        # a run that looks idle meanwhile would let t / zz t start a
+        # second loop on the same PR and stop_qa report "No QA running".
+        for state, _pr, _cb in to_resume:
+            state.running = True
         # Adoption takes the governor lock, which another pm process may
         # hold for seconds while it measures runtime stats: not on the UI
         # thread.
@@ -541,7 +547,14 @@ def _adopt_and_resume(app, to_resume: list) -> None:
             _log.warning("Launch-queue adoption failed for %s", state.pr_id,
                          exc_info=True)
     for state, pr, cb in to_resume:
-        qa_loop.resume_qa_background(state, app._root, pr, cb)
+        try:
+            qa_loop.resume_qa_background(state, app._root, pr, cb)
+        except Exception:
+            _log.exception("Could not resume QA for %s", state.pr_id)
+            state.running = False
+            state.latest_verdict = "ERROR"
+            state.latest_output = "QA resume could not start"
+            cb(state)
 
 
 # ---------------------------------------------------------------------------
