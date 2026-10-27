@@ -31446,7 +31446,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T06:17:29.491425+00:00'
-  updated_at: '2026-10-27T00:58:55.101618+00:00'
+  updated_at: '2026-10-27T07:14:34.607418+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31513,6 +31513,16 @@ prs:
       post-fix/story4.'
     created_at: '2026-10-27T00:58:55Z'
     last_edited: '2026-10-27T00:58:55Z'
+  - id: note-137eda9
+    text: 'Variant seen in pr-592e4bd QA S91 (2026-10-27): a pm pr auto-sequence tick
+      advanced a TUI-driven QA PASS to sign_off (pr-f1d825b) and opened the router
+      under pm/transcripts/auto-sequence/<pr>/signoff-<pr>.jsonl. Once the ticker
+      stopped, the TUI never adopted it: _adopt_orphaned_run globs transcripts/*/signoff-<pr>.head
+      (one level), not auto-sequence/<pr>/. The signoff step stayed action=running
+      for 7+ min while the pane showed SIGNOFF_REQA; closing the window made the TUI
+      relaunch its own router. /pm-captures/scenarios/91/story2/screens/stuck-signoff-*.txt'
+    created_at: '2026-10-27T07:14:34Z'
+    last_edited: '2026-10-27T07:14:34Z'
 - id: pr-328cfd0
   plan: bugs
   title: 'Bug: zz t on an in_review PR runs QA without moving it to qa; arming auto-start
@@ -33257,7 +33267,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T06:51:26.310003+00:00'
+  updated_at: '2026-10-27T07:14:36.812234+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36398,6 +36408,29 @@ prs:
       3/4.'
     created_at: '2026-10-27T06:51:26Z'
     last_edited: '2026-10-27T06:51:26Z'
+  - id: note-7e3a96e
+    text: 'QA S91 (2026-10-27, container mode podman 3, real claude 2.1.311 vs work/
+      router + main stubs, R routed QA roles / U claude-opus-5-5; captures /pm-captures/scenarios/91,
+      REPORT.md): INPUT_REQUIRED. CODE CHANGE be90863c needs normal re-review. Pre-fix
+      (e7486ce0): a TUI REQA hop with a free lock cleared awaiting at once, and its
+      re-run had a start record but no qa window for 3.4 s; two ticks 2 s apart each
+      printed running: qa (launched) (3 drivers, R containers of 5 loop ids). Fix:
+      the tick treats an own run record started at or after the return ts and less
+      than 180 s ago as the driver (both qa branches); test added, full suite 4075
+      passed. Post-fix held live on a fresh project (before S89 3e0a32d8 / S90 af0d5519).
+      Story 1: hops, clear failures and starts inside each 60 s hold, clears after
+      release, 228 ticks running: qa, 0 launched, 0 qa-run-bg, one loop per re-run.
+      Story 2: refiner-waiting line in TUI + log, recovery 14 s after router restart,
+      one finish, U on main only, leak scan 0, no containers after session kill, 0
+      tracebacks. DECISION NEEDED (F1, note on pr-1071c5a): claude 2.1.311 prefers
+      the account GrowthBook classifier (modelByMainModel) over CLAUDE_CODE_AUTO_MODE_MODEL,
+      so routed refiner/worker classifier calls go out as bare claude-sonnet-5 (router
+      400 x12 per run here; the main account on a real router) and their Agent calls
+      are refused. Also seen: pr-f1d825b (tick advances during the finalizer), a pr-5410ae4
+      variant (the TUI never adopts a tick-launched sign-off), and filed pr-74159fd
+      (qa-run-bg outlives pm session kill and recreates containers).'
+    created_at: '2026-10-27T07:14:36Z'
+    last_edited: '2026-10-27T07:14:36Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -37126,7 +37159,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:58:32.257836+00:00'
-  updated_at: '2026-10-25T22:00:22.767142+00:00'
+  updated_at: '2026-10-27T07:14:32.438086+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37155,6 +37188,25 @@ prs:
       this PR can be closed once that lands.'
     created_at: '2026-10-25T22:00:22Z'
     last_edited: '2026-10-25T22:00:22Z'
+  - id: note-ccbf1dc
+    text: 'QA S91 of pr-592e4bd (2026-10-27, container mode, real claude 2.1.311,
+      work/-only router stub; /pm-captures/scenarios/91/REPORT.md F1): the env pin
+      no longer holds. pm sets CLAUDE_CODE_AUTO_MODE_MODEL=work/claude-sonnet-5 in
+      the routed worker (container /proc environ checked), but claude 2.1.311 picks
+      the classifier from the account GrowthBook config first (tengu_auto_mode_config.modelByMainModel,
+      cached in ~/.claude.json: claude-opus-5-5 -> claude-sonnet-5[1m]; the binary
+      logs "ignoring CLAUDE_CODE_AUTO_MODE_MODEL=... because a server-configured classifier
+      model (...) takes priority"). It canonicalises the main model work/claude-opus-5-5
+      to claude-opus-5-5 for that lookup, so every routed refiner/worker classifier
+      call went out as bare claude-sonnet-5 (12 per QA run, 400 from the stub; a real
+      claude-mixed router would send it to the main account). Effect: all 3 Agent
+      calls of each routed worker were refused ("claude-sonnet-5[1m] is temporarily
+      unavailable, so auto mode cannot determine the safety of Agent"). S62/S63 on
+      2.1.310 still honoured the env var. Needs a decision: launch routed sessions
+      outside auto mode, or have the router map an unprefixed classifier model for
+      routed sessions.'
+    created_at: '2026-10-27T07:14:32Z'
+    last_edited: '2026-10-27T07:14:32Z'
 - id: pr-05543f0
   plan: bugs
   title: 'Bug: auto-sequence QA runs (pm pr qa-run-bg) never record a QA result note
@@ -37248,7 +37300,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-26T04:56:17.963363+00:00'
-  updated_at: '2026-10-26T07:50:14.158810+00:00'
+  updated_at: '2026-10-27T07:14:35.705819+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37263,6 +37315,16 @@ prs:
       (pm log 07:16-07:25).'
     created_at: '2026-10-26T07:50:14Z'
     last_edited: '2026-10-26T07:50:14Z'
+  - id: note-4b475c9
+    text: 'Seen again in pr-592e4bd QA S91 (2026-10-27, container mode): ticks advanced
+      TUI-driven re-runs to sign_off 28-30 s before the TUI QA complete (R 06:49:06
+      vs 06:49:35, 07:06:06 vs 07:06:36). With a 20 s fake SIGNOFF_REQA, the tick
+      then hopped re-qa and its qa-run-bg killed the TUI run finalize pane (finalize=None),
+      and the TUI moved the PR qa->sign_off over the live driver (pre-fix capture
+      /pm-captures/scenarios/91/pre-fix). With longer sign-offs, the sign-off is tick-owned
+      and stalls once ticks stop (pr-5410ae4 note).'
+    created_at: '2026-10-27T07:14:35Z'
+    last_edited: '2026-10-27T07:14:35Z'
 - id: pr-ad4af06
   plan: bugs
   title: 'Bug: QA runs driven by pm pr auto-sequence (qa-run-bg) record no QA note
@@ -37448,11 +37510,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-26T10:23:52.016273+00:00'
-  updated_at: '2026-10-26T10:23:52.016273+00:00'
+  updated_at: '2026-10-27T07:14:33.509731+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-d107862
+    text: 'QA S91 of pr-592e4bd (2026-10-27): case (1) reproduced live in container
+      mode. The TUI REQA hop with a free lock cleared awaiting at once; its re-run
+      had a start record but no qa-<pr> window for 3.4 s, and two ticks 2 s apart
+      each printed running: qa (launched) (qa-run-bg at 06:17:20 and 06:17:22: three
+      drivers, containers of 5 loop ids). Tick side fixed in pr-592e4bd be90863c:
+      a QA run record of this session started at or after the return ts and less than
+      RETURN_LAUNCH_CLAIM_SECONDS ago counts as the driver (running: qa). The TUI
+      still takes no claim, and case (2) (tick hop over a finalizing TUI run, pr-f1d825b)
+      remains.'
+    created_at: '2026-10-27T07:14:33Z'
+    last_edited: '2026-10-27T07:14:33Z'
 - id: pr-f779829
   plan: bugs
   title: 'Bug: z t over a QA loop stuck in planning logs an ERROR Traceback "Failed
@@ -38737,6 +38811,34 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T04:31:41.412066+00:00'
   updated_at: '2026-10-27T04:31:41.412066+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-74159fd
+  plan: bugs
+  title: 'Bug: a detached QA driver (pm pr qa-run-bg) keeps running after pm session
+    kill and recreates the killed scenario containers'
+  branch: pm/pr-74159fd-bug-a-detached-qa-driver-pm-pr-qa-run-bg-keeps-run
+  status: pending
+  depends_on: []
+  description: 'Found in pr-592e4bd QA S91 (/pm-captures/scenarios/91/REPORT.md F5,
+    pre-fix/pm-debug-final.log). Location: pm_core/qa_loop.py dead-worker relaunch
+    path ("Scenario N container ... was gone — recreated it") in a qa-run-bg driver;
+    pm session kill removes the session containers but does not stop detached qa-run-bg
+    drivers of that session. Repro (container mode): start a QA run with pm pr auto-sequence
+    <pr> (the tick launches qa-run-bg), then pm session kill while scenarios run.
+    Live 2026-10-27: qa-run-bg pid 163916 (started 06:21:06, project pm-test-1793080573)
+    outlived the 06:33 session kill; at 06:36:17 it logged "Scenario 9 container pm-...-qa-pr-3f52c33-b73287f4eb8844c2-s9
+    was gone — recreated it", relaunched workers until 06:48 against the dead session,
+    and left 2 Up containers that needed a manual podman rm -f. Expected: session
+    kill stops every detached driver of that session (or the driver exits when its
+    session is gone), and nothing recreates containers for a killed session.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T07:14:13.057570+00:00'
+  updated_at: '2026-10-27T07:14:13.057570+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
